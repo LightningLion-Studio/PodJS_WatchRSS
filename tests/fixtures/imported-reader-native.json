@@ -1,0 +1,667 @@
+{
+  "sources": {
+    "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt": "2b3657c4df261378f7c499a2612d883ea688a6c828e516b62603a9a1ebefabc5",
+    "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailBehaviorSupport.kt": "43c7dde2315c406fa5e4683e427d575f5e96c171c116ae4560340ded81379fe3"
+  },
+  "texts": [
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        0
+      ],
+      "text": "",
+      "charsFromMinusOne": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        1,
+        4,
+        8,
+        8,
+        9,
+        9
+      ],
+      "text": "A汉😀B",
+      "charsFromMinusOne": [
+        0,
+        0,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        4,
+        5,
+        5
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        1,
+        2,
+        3,
+        4,
+        4
+      ],
+      "text": "a\r\nb",
+      "charsFromMinusOne": [
+        0,
+        0,
+        1,
+        2,
+        3,
+        4,
+        4
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        3,
+        6,
+        9,
+        12,
+        15,
+        18,
+        21,
+        24,
+        27,
+        30,
+        33,
+        36,
+        36
+      ],
+      "text": "中中中中中中中中中中中中",
+      "charsFromMinusOne": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        3,
+        3,
+        3,
+        4,
+        4,
+        4,
+        5,
+        5,
+        5,
+        6,
+        6,
+        6,
+        7,
+        7,
+        7,
+        8,
+        8,
+        8,
+        9,
+        9,
+        9,
+        10,
+        10,
+        10,
+        11,
+        11,
+        11,
+        12,
+        12
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        3,
+        5,
+        7,
+        10,
+        10
+      ],
+      "text": "﻿ é终",
+      "charsFromMinusOne": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        2,
+        2,
+        3,
+        3,
+        3,
+        4,
+        4
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        4,
+        4,
+        8,
+        8,
+        12,
+        12,
+        12
+      ],
+      "text": "😀😀😀",
+      "charsFromMinusOne": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        2,
+        2,
+        4,
+        4,
+        4,
+        4,
+        6,
+        6
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        1,
+        3,
+        3
+      ],
+      "text": "é",
+      "charsFromMinusOne": [
+        0,
+        0,
+        1,
+        1,
+        2,
+        2
+      ]
+    },
+    {
+      "bytesFromMinusOne": [
+        0,
+        0,
+        4,
+        4,
+        7,
+        10,
+        10
+      ],
+      "text": "𝄞末尾",
+      "charsFromMinusOne": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        2,
+        3,
+        3,
+        3,
+        4,
+        4
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 0
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 1e-05
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 0.2
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 0.5
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 0.9999999
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": -0.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 0,
+        "progress": 1.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 0
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 1e-05
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 0.2
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 0.5
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 0.9999999
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": -0.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 1,
+        "progress": 1.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 0
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 1e-05
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 0.2
+      },
+      "byteOffset": 2,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 0.5
+      },
+      "byteOffset": 5,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 0.9999999
+      },
+      "byteOffset": 9,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 1
+      },
+      "byteOffset": 9,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": -0.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 10,
+        "progress": 1.1
+      },
+      "byteOffset": 9,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 0
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 1e-05
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 0.2
+      },
+      "byteOffset": 3277,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 0.5
+      },
+      "byteOffset": 8192,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 0.9999999
+      },
+      "byteOffset": 16383,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 1
+      },
+      "byteOffset": 16383,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": -0.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 1,
+        "byteLength": 16384,
+        "progress": 1.1
+      },
+      "byteOffset": 16383,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 0
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 1e-05
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 0.2
+      },
+      "byteOffset": 10000,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 0.5
+      },
+      "byteOffset": 8616,
+      "chunkIndex": 1
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 0.9999999
+      },
+      "byteOffset": 847,
+      "chunkIndex": 3
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 1
+      },
+      "byteOffset": 847,
+      "chunkIndex": 3
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": -0.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 4,
+        "byteLength": 50000,
+        "progress": 1.1
+      },
+      "byteOffset": 847,
+      "chunkIndex": 3
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 0
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 1e-05
+      },
+      "byteOffset": 336,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 0.2
+      },
+      "byteOffset": 9832,
+      "chunkIndex": 409
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 0.5
+      },
+      "byteOffset": 3,
+      "chunkIndex": 1024
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 0.9999999
+      },
+      "byteOffset": 1,
+      "chunkIndex": 2048
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 1
+      },
+      "byteOffset": 4,
+      "chunkIndex": 2048
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": -0.1
+      },
+      "byteOffset": 0,
+      "chunkIndex": 0
+    },
+    {
+      "input": {
+        "chunkCount": 2049,
+        "byteLength": 33554437,
+        "progress": 1.1
+      },
+      "byteOffset": 4,
+      "chunkIndex": 2048
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+[
+ {"name":"applied","ack":[{"action":"ack","success":true,"phase":"applied","applied":true}]},
+ {"name":"received-then-applied","ack":[{"action":"ack","success":true,"phase":"received","applied":false},{"action":"ack","success":true,"phase":"applied","applied":true}]},
+ {"name":"received-then-rejected","ack":[{"action":"ack","success":true,"phase":"received","applied":false},{"action":"ack","success":false,"phase":"applied","applied":false}]},
+ {"name":"received-then-eof","ack":[{"action":"ack","success":true,"phase":"received","applied":false}]},
+ {"name":"legacy-success-ack","ack":[{"action":"ack","success":true}]},
+ {"name":"failed-applied-ack","ack":[{"action":"ack","success":false,"phase":"applied","applied":true}]},
+ {"name":"wrong-ack-action","ack":[{"action":"probe","success":true,"applied":true}]},
+ {"name":"missing-ack","ack":[]},
+ {"name":"persistent-cursor","persistent":true,"cursor":true,"ack":[{"action":"ack","success":true,"phase":"applied","applied":true}]},
+ {"name":"fatal-invalid-article-phase","persistent":true,"badArticlePhase":true,"ack":[]},
+ {"name":"fatal-truncated-article-batches","truncatedArticles":true,"ack":[]},
+ {"name":"outgoing-saved-article","seedArticle":true,"ack":[{"action":"ack","success":true,"phase":"received","applied":false},{"action":"ack","success":true,"phase":"applied","applied":true}]},
+ {"name":"watch-source-nonempty-phone-article","libraryMode":"watchToPhoneReplace","incomingArticle":true,"ack":[{"action":"ack","success":true,"phase":"applied","applied":true}]}
+]

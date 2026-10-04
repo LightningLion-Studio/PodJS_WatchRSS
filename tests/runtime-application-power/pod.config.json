@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.syncstate","name":"Application Sync Power Verification","versionName":"0.1.0","versionCode":1,"capabilities":["data.sqlite","data.kv","data.files.chunks","data.uri","crypto.basic","net.rfcomm","net.stream","display.power","media.audio","host.lifecycle","runtime.timer"]}

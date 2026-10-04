@@ -1,0 +1,8 @@
+{
+  "entry": "main.tsx",
+  "appId": "dev.podjs.tests.largeimagesampled",
+  "name": "Large Sampled Image Verification",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "capabilities": ["data.images", "data.files.chunks", "data.kv", "runtime.timer", "host.lifecycle", "input.touch"]
+}

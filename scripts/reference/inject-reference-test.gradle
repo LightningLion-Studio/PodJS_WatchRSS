@@ -1,0 +1,32 @@
+gradle.beforeProject { project ->
+    project.afterEvaluate {
+        if (project.name == 'app' && project.hasProperty('podTestSourceDir')) {
+            project.android.defaultConfig.applicationId = 'com.lightningstudio.watchrss.reference'
+            project.android.defaultConfig.testApplicationId = 'com.lightningstudio.watchrss.reference.test'
+            project.android.defaultConfig.testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
+            def harness = new File(project.property('podTestSourceDir').toString())
+            // The player Activity must live in the target APK.  Declaring it only
+            // in androidTest makes startActivitySync try to cross the test process,
+            // which Android rejects for an Activity class loaded from the test APK.
+            def targetJava = new File(harness, 'target/java')
+            def targetKotlin = new File(harness, 'target/kotlin')
+            def targetManifest = new File(harness, 'target/AndroidManifest.xml')
+            def buildType = project.findProperty('podReferenceBuildType')?.toString() ?: 'debug'
+            project.android.testBuildType = buildType
+            def targetSources = project.android.sourceSets.getByName(buildType)
+            targetSources.java.srcDir(targetJava)
+            targetSources.kotlin.srcDir(targetKotlin)
+            if (targetManifest.isFile()) targetSources.manifest.srcFile(targetManifest)
+            if (buildType == 'release') {
+                // Capture actual production branches (BuildConfig.DEBUG=false)
+                // with the existing reference signature; never install the user's app id.
+                project.android.buildTypes.release.signingConfig = project.android.buildTypes.debug.signingConfig
+                project.android.buildTypes.release.minifyEnabled = false
+                project.android.buildTypes.release.shrinkResources = false
+            }
+            project.android.sourceSets.androidTest.assets.srcDir(new File(harness, 'assets'))
+            project.android.sourceSets.androidTest.java.srcDir(harness)
+            project.android.sourceSets.androidTest.kotlin.srcDir(harness)
+        }
+    }
+}

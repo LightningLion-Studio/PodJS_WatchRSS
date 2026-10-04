@@ -1,0 +1,3243 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/reader/WatchReaderThemeSchedule.kt",
+  "sha256": "f4218b3d6d22c215972908bec60b7db30dfda71eb5a90c345f471d8e680c153c",
+  "cases": [
+    {
+      "date": "2024-01-01",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 456,
+        "sunset": 1019
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 440,
+        "sunset": 999
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 486,
+        "sunset": 962
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 347,
+        "sunset": 1209
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 414,
+        "sunset": 1039
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 376,
+        "sunset": 1023
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 352,
+        "sunset": 1276
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 392,
+        "sunset": 1114
+      }
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-01-01",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 453,
+        "sunset": 1036
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 436,
+        "sunset": 1016
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 477,
+        "sunset": 985
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 362,
+        "sunset": 1208
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 415,
+        "sunset": 1052
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 378,
+        "sunset": 1035
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 371,
+        "sunset": 1271
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 399,
+        "sunset": 1121
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 657,
+        "sunset": 776
+      }
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-01-18",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 440,
+        "sunset": 1056
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 423,
+        "sunset": 1037
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 454,
+        "sunset": 1015
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 379,
+        "sunset": 1198
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 409,
+        "sunset": 1066
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 374,
+        "sunset": 1046
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 395,
+        "sunset": 1254
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 402,
+        "sunset": 1125
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 551,
+        "sunset": 887
+      }
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-02-04",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 420,
+        "sunset": 1076
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 402,
+        "sunset": 1057
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 423,
+        "sunset": 1045
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 395,
+        "sunset": 1181
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 396,
+        "sunset": 1078
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 364,
+        "sunset": 1056
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 419,
+        "sunset": 1229
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 401,
+        "sunset": 1125
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 468,
+        "sunset": 969
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 193,
+        "sunset": 49
+      }
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-02-21",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 395,
+        "sunset": 1095
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 376,
+        "sunset": 1077
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 386,
+        "sunset": 1075
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 409,
+        "sunset": 1160
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 379,
+        "sunset": 1089
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 350,
+        "sunset": 1063
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 441,
+        "sunset": 1200
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 397,
+        "sunset": 1122
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 391,
+        "sunset": 1040
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 382,
+        "sunset": 1300
+      }
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-03-09",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 367,
+        "sunset": 1112
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 408,
+        "sunset": 1155
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 348,
+        "sunset": 1104
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 423,
+        "sunset": 1138
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 360,
+        "sunset": 1098
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 334,
+        "sunset": 1069
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 462,
+        "sunset": 1170
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 391,
+        "sunset": 1118
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 313,
+        "sunset": 1108
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 506,
+        "sunset": 1168
+      }
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-03-26",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 340,
+        "sunset": 1129
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 380,
+        "sunset": 1173
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 370,
+        "sunset": 1193
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 375,
+        "sunset": 1055
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 341,
+        "sunset": 1107
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 318,
+        "sunset": 1076
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 422,
+        "sunset": 1080
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 385,
+        "sunset": 1114
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 293,
+        "sunset": 1238
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 575,
+        "sunset": 968
+      }
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-04-12",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 316,
+        "sunset": 1147
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 356,
+        "sunset": 1190
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 334,
+        "sunset": 1221
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 388,
+        "sunset": 1036
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 325,
+        "sunset": 1116
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 305,
+        "sunset": 1082
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 442,
+        "sunset": 1053
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 381,
+        "sunset": 1112
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 207,
+        "sunset": 1318
+      }
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-04-29",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 298,
+        "sunset": 1163
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 337,
+        "sunset": 1207
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 306,
+        "sunset": 1248
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 401,
+        "sunset": 1021
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 313,
+        "sunset": 1126
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 295,
+        "sunset": 1090
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 461,
+        "sunset": 1033
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 379,
+        "sunset": 1112
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 79,
+        "sunset": 11
+      }
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-05-16",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 287,
+        "sunset": 1177
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 326,
+        "sunset": 1222
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 287,
+        "sunset": 1269
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 412,
+        "sunset": 1013
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 307,
+        "sunset": 1135
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 291,
+        "sunset": 1097
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 477,
+        "sunset": 1021
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 381,
+        "sunset": 1114
+      }
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-06-02",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 285,
+        "sunset": 1185
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 324,
+        "sunset": 1230
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 282,
+        "sunset": 1281
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 419,
+        "sunset": 1013
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 308,
+        "sunset": 1142
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 292,
+        "sunset": 1103
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 486,
+        "sunset": 1019
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 384,
+        "sunset": 1118
+      }
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-06-19",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 292,
+        "sunset": 1185
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 331,
+        "sunset": 1229
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 292,
+        "sunset": 1278
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 420,
+        "sunset": 1019
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 313,
+        "sunset": 1143
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 297,
+        "sunset": 1105
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 485,
+        "sunset": 1027
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 387,
+        "sunset": 1121
+      }
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-07-06",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 305,
+        "sunset": 1176
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 344,
+        "sunset": 1219
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 311,
+        "sunset": 1261
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 413,
+        "sunset": 1029
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 322,
+        "sunset": 1138
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 304,
+        "sunset": 1101
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 473,
+        "sunset": 1042
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 389,
+        "sunset": 1122
+      }
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-07-23",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 320,
+        "sunset": 1158
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 361,
+        "sunset": 1201
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 337,
+        "sunset": 1233
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 400,
+        "sunset": 1041
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 331,
+        "sunset": 1126
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 311,
+        "sunset": 1092
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 453,
+        "sunset": 1059
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 389,
+        "sunset": 1120
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 197,
+        "sunset": 1339
+      }
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-08-09",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 336,
+        "sunset": 1134
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 377,
+        "sunset": 1176
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 364,
+        "sunset": 1198
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 380,
+        "sunset": 1053
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 339,
+        "sunset": 1110
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 317,
+        "sunset": 1078
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 427,
+        "sunset": 1078
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 386,
+        "sunset": 1115
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 278,
+        "sunset": 1250
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 618,
+        "sunset": 936
+      }
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-08-26",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 352,
+        "sunset": 1107
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 394,
+        "sunset": 1148
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 391,
+        "sunset": 1160
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 358,
+        "sunset": 1064
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 347,
+        "sunset": 1091
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 322,
+        "sunset": 1062
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 396,
+        "sunset": 1097
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 381,
+        "sunset": 1109
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 347,
+        "sunset": 1170
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 470,
+        "sunset": 1072
+      }
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-09-12",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 368,
+        "sunset": 1079
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 411,
+        "sunset": 1120
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 418,
+        "sunset": 1121
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 334,
+        "sunset": 1076
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 355,
+        "sunset": 1071
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 327,
+        "sunset": 1045
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 425,
+        "sunset": 1177
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 376,
+        "sunset": 1102
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 413,
+        "sunset": 1092
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 400,
+        "sunset": 1250
+      }
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-09-29",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 386,
+        "sunset": 1053
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 429,
+        "sunset": 1093
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 447,
+        "sunset": 1083
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 372,
+        "sunset": 1149
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 364,
+        "sunset": 1053
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 333,
+        "sunset": 1030
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 395,
+        "sunset": 1198
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 372,
+        "sunset": 1097
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 481,
+        "sunset": 1015
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 245,
+        "sunset": 1398
+      }
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-10-16",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 404,
+        "sunset": 1030
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 448,
+        "sunset": 1070
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 416,
+        "sunset": 990
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 353,
+        "sunset": 1164
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 375,
+        "sunset": 1038
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 341,
+        "sunset": 1018
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 369,
+        "sunset": 1220
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 371,
+        "sunset": 1094
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 498,
+        "sunset": 874
+      }
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-11-02",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 424,
+        "sunset": 1015
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 408,
+        "sunset": 994
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 446,
+        "sunset": 965
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 341,
+        "sunset": 1180
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 388,
+        "sunset": 1030
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 352,
+        "sunset": 1011
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 350,
+        "sunset": 1243
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 374,
+        "sunset": 1096
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 595,
+        "sunset": 780
+      }
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-11-19",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 441,
+        "sunset": 1009
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 426,
+        "sunset": 988
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 471,
+        "sunset": 952
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 337,
+        "sunset": 1195
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 401,
+        "sunset": 1028
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 363,
+        "sunset": 1012
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 342,
+        "sunset": 1263
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 380,
+        "sunset": 1101
+      }
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-12-06",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 453,
+        "sunset": 1013
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 437,
+        "sunset": 993
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 485,
+        "sunset": 955
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 342,
+        "sunset": 1206
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 411,
+        "sunset": 1034
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 373,
+        "sunset": 1018
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 346,
+        "sunset": 1275
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 388,
+        "sunset": 1109
+      }
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": null
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-12-23",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 408,
+        "sunset": 1085
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 390,
+        "sunset": 1067
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 406,
+        "sunset": 1060
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 402,
+        "sunset": 1172
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 388,
+        "sunset": 1083
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 358,
+        "sunset": 1059
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 429,
+        "sunset": 1216
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 399,
+        "sunset": 1124
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 432,
+        "sunset": 1003
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 304,
+        "sunset": 1382
+      }
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2024-02-29",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 398,
+        "sunset": 1093
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 439,
+        "sunset": 1134
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 391,
+        "sunset": 1072
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 408,
+        "sunset": 1163
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 381,
+        "sunset": 1088
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 352,
+        "sunset": 1062
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 438,
+        "sunset": 1204
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 397,
+        "sunset": 1123
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 400,
+        "sunset": 1032
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 367,
+        "sunset": 1317
+      }
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-03-08",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 364,
+        "sunset": 1114
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 405,
+        "sunset": 1157
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 403,
+        "sunset": 1168
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 424,
+        "sunset": 1135
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 358,
+        "sunset": 1099
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 332,
+        "sunset": 1070
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 464,
+        "sunset": 1166
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 390,
+        "sunset": 1118
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 364,
+        "sunset": 1176
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 520,
+        "sunset": 1152
+      }
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-03-29",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 353,
+        "sunset": 1121
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 393,
+        "sunset": 1164
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 387,
+        "sunset": 1179
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 369,
+        "sunset": 1065
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 350,
+        "sunset": 1103
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 326,
+        "sunset": 1073
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 413,
+        "sunset": 1093
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 388,
+        "sunset": 1116
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 331,
+        "sunset": 1204
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 510,
+        "sunset": 1037
+      }
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-04-05",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 372,
+        "sunset": 1073
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 415,
+        "sunset": 1113
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 425,
+        "sunset": 1112
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 389,
+        "sunset": 1139
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 357,
+        "sunset": 1067
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 328,
+        "sunset": 1041
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 418,
+        "sunset": 1182
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 375,
+        "sunset": 1101
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 429,
+        "sunset": 1074
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": {
+        "sunrise": 368,
+        "sunset": 1279
+      }
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-10-04",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 394,
+        "sunset": 1041
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 438,
+        "sunset": 1081
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 401,
+        "sunset": 1007
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 362,
+        "sunset": 1156
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 369,
+        "sunset": 1045
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 337,
+        "sunset": 1023
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 382,
+        "sunset": 1208
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 372,
+        "sunset": 1095
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 456,
+        "sunset": 918
+      }
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-10-25",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "zone": "Asia/Shanghai",
+      "times": {
+        "sunrise": 402,
+        "sunset": 1033
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "zone": "America/New_York",
+      "times": {
+        "sunrise": 386,
+        "sunset": 1012
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "zone": "Europe/London",
+      "times": {
+        "sunrise": 413,
+        "sunset": 994
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "zone": "Australia/Sydney",
+      "times": {
+        "sunrise": 355,
+        "sunset": 1162
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 27.7172,
+      "longitude": 85.324,
+      "zone": "Asia/Kathmandu",
+      "times": {
+        "sunrise": 374,
+        "sunset": 1040
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "zone": "Asia/Kolkata",
+      "times": {
+        "sunrise": 340,
+        "sunset": 1019
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": -43.95,
+      "longitude": -176.55,
+      "zone": "Pacific/Chatham",
+      "times": {
+        "sunrise": 372,
+        "sunset": 1218
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 1.8721,
+      "longitude": -157.4278,
+      "zone": "Pacific/Kiritimati",
+      "times": {
+        "sunrise": 371,
+        "sunset": 1094
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 69.6492,
+      "longitude": 18.9553,
+      "zone": "Europe/Oslo",
+      "times": {
+        "sunrise": 488,
+        "sunset": 884
+      }
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": -77.8419,
+      "longitude": 166.6863,
+      "zone": "Antarctica/McMurdo",
+      "times": null
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": 90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    },
+    {
+      "date": "2026-11-01",
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "zone": "UTC",
+      "times": null
+    }
+  ]
+}

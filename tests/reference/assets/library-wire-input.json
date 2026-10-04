@@ -1,0 +1,11 @@
+[
+ {"name":"empty","length":0,"copies":0,"mode":"full","batches":true},
+ {"name":"small","length":4,"copies":1,"mode":"full","batches":true},
+ {"name":"metadata-only","length":4,"copies":1,"mode":"metadata","batches":true},
+ {"name":"stale-metadata-fallback","length":4,"copies":1,"mode":"stale","batches":true},
+ {"name":"two-articles","length":16,"copies":2,"mode":"full","batches":true},
+ {"name":"large-full","length":450000,"copies":1,"mode":"full","batches":true},
+ {"name":"large-subset","length":450000,"copies":1,"mode":"subset","batches":true},
+ {"name":"large-unbatched","length":450000,"copies":1,"mode":"full","batches":false},
+ {"name":"invalid-chunk-index","length":4,"copies":1,"mode":"invalid","batches":true}
+]

@@ -1,0 +1,373 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/note/WatchNoteRepository.kt",
+  "sourceSha256": "8a67d578b051266644e014ed77e8e3621f41d84cb306a7d9dc74b955782ecf4b",
+  "functionsSha256": "3fd3e7ebd41127001eee640c871d23c5ee514afa470265f0e4837ef3858a5191",
+  "runtime": "Desktop JVM; verbatim native functions, Jsoup 1.17.2; no Android UI validation.",
+  "cases": [
+    {
+      "input": "",
+      "plainText": "",
+      "title": "\u672a\u547d\u540d\u7b14\u8bb0"
+    },
+    {
+      "input": "# \u6807\u9898\r\n**\u7c97\u4f53**\n> \u5f15\u7528\n1. \u5217\u8868",
+      "plainText": "\u6807\u9898\n\u7c97\u4f53\n\u5f15\u7528\n\u5217\u8868",
+      "title": "\u6807\u9898"
+    },
+    {
+      "input": "<p>\u7b2c\u4e00\u6bb5<br>\u7b2c\u4e8c\u884c</p><div><b>\u7c97\u4f53</b></div>",
+      "plainText": "\u7b2c\u4e00\u6bb5\n\u7b2c\u4e8c\u884c\n\u7c97\u4f53",
+      "title": "\u7b2c\u4e00\u6bb5"
+    },
+    {
+      "input": "<IMG SRC=\"a\" ALT=\"\u56fe &amp; \u5b57\"> <img src=\"b\">",
+      "plainText": "[\u56fe\u7247\uff1a\u56fe & \u5b57] [\u56fe\u7247]",
+      "title": "[\u56fe\u7247\uff1a\u56fe & \u5b57] [\u56fe\u7247]"
+    },
+    {
+      "input": "<ul><li>\u4e00</li><li data-id=\"x\">\u4e8c</li></ul>",
+      "plainText": "\u4e00\n\u4e8c",
+      "title": "\u4e00"
+    },
+    {
+      "input": "<table><tr><th>\u5934</th><td>\u503c</td></tr></table>",
+      "plainText": "\u5934\u503c",
+      "title": "\u5934\u503c"
+    },
+    {
+      "input": "<script>alert(1)</script><custom>x</custom>",
+      "plainText": "<script>alert(1)</script><custom>x</custom>",
+      "title": "<script>alert(1)</script><custom>x</custom>"
+    },
+    {
+      "input": "&amp; &lt; &gt; &quot; &apos; &nbsp;",
+      "plainText": "& < > \" '",
+      "title": "& < > \" '"
+    },
+    {
+      "input": "&copy; &NotEqualTilde; &Afr; &CounterClockwiseContourIntegral;",
+      "plainText": "\u00a9 \u2242\u0338 \ud835\udd04 \u2233",
+      "title": "\u00a9 \u2242\u0338 \ud835\udd04 \u2233"
+    },
+    {
+      "input": "&copy without; &notit; &amp=foo; &AMP;",
+      "plainText": "\u00a9 without; &notit; &=foo; &",
+      "title": "\u00a9 without; &notit; &=foo; &"
+    },
+    {
+      "input": "&#0; &#x80; &#xD800; &#x110000; &#-1; &#13;",
+      "plainText": "\u0000 \u20ac \ud800 \ufffd &#-1;",
+      "title": "\u0000 \u20ac \ud800 \ufffd &#-1;"
+    },
+    {
+      "input": "![](x) ![\u56fe\u7247](x) [\u94fe\u63a5](https://x)",
+      "plainText": "[\u56fe\u7247\uff1a] [\u56fe\u7247\uff1a\u56fe\u7247] \u94fe\u63a5",
+      "title": "[\u56fe\u7247\uff1a] [\u56fe\u7247\uff1a\u56fe\u7247] \u94fe\u63a5"
+    },
+    {
+      "input": "<img alt=unquoted><img alt=\"A\nB\" src=\"x\">",
+      "plainText": "[\u56fe\u7247][\u56fe\u7247\uff1aA\nB]",
+      "title": "[\u56fe\u7247][\u56fe\u7247\uff1aA"
+    },
+    {
+      "input": "\u00a0#\u00a0\u6807\u9898\u00a0\n\u2007a\u2007\n\u0085b\u0085",
+      "plainText": "#\u00a0\u6807\u9898\n\u2007a\n\u0085b\u0085",
+      "title": "#\u00a0\u6807\u9898"
+    },
+    {
+      "input": "\u001c\u001d\u001e\u001f x \u001c",
+      "plainText": "x",
+      "title": "x"
+    },
+    {
+      "input": "# \u6807\u9898\r\u4e0b\u4e00\u884c",
+      "plainText": "\u6807\u9898\n\u4e0b\u4e00\u884c",
+      "title": "\u6807\u9898"
+    },
+    {
+      "input": "##\u00a0\u4e0d\u662fASCII\u7a7a\u683c",
+      "plainText": "##\u00a0\u4e0d\u662fASCII\u7a7a\u683c",
+      "title": "##\u00a0\u4e0d\u662fASCII\u7a7a\u683c"
+    },
+    {
+      "input": "foo\n\n \t\nbar",
+      "plainText": "foo\nbar",
+      "title": "foo"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00\u5c3e",
+      "plainText": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00\u5c3e",
+      "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d"
+    },
+    {
+      "input": "<p class=\"x\">&eacute;</p><hr><pre>x</pre>",
+      "plainText": "\u00e9\n<hr><pre>x</pre>",
+      "title": "\u00e9"
+    },
+    {
+      "input": "<img alt=\"a>b\" src=\"x\">",
+      "plainText": "[\u56fe\u7247\uff1aa>b]",
+      "title": "[\u56fe\u7247\uff1aa>b]"
+    },
+    {
+      "input": "&not;",
+      "plainText": "\u00ac",
+      "title": "\u00ac"
+    },
+    {
+      "input": "&not",
+      "plainText": "\u00ac",
+      "title": "\u00ac"
+    },
+    {
+      "input": "&not=z",
+      "plainText": "\u00ac=z",
+      "title": "\u00ac=z"
+    },
+    {
+      "input": "&not x",
+      "plainText": "\u00ac x",
+      "title": "\u00ac x"
+    },
+    {
+      "input": "&notin;",
+      "plainText": "\u2209",
+      "title": "\u2209"
+    },
+    {
+      "input": "&notin",
+      "plainText": "&notin",
+      "title": "&notin"
+    },
+    {
+      "input": "&notin=z",
+      "plainText": "&notin=z",
+      "title": "&notin=z"
+    },
+    {
+      "input": "&notin x",
+      "plainText": "&notin x",
+      "title": "&notin x"
+    },
+    {
+      "input": "&notit;",
+      "plainText": "&notit;",
+      "title": "&notit;"
+    },
+    {
+      "input": "&notit",
+      "plainText": "&notit",
+      "title": "&notit"
+    },
+    {
+      "input": "&notit=z",
+      "plainText": "&notit=z",
+      "title": "&notit=z"
+    },
+    {
+      "input": "&notit x",
+      "plainText": "&notit x",
+      "title": "&notit x"
+    },
+    {
+      "input": "&frac12;",
+      "plainText": "\u00bd",
+      "title": "\u00bd"
+    },
+    {
+      "input": "&frac12",
+      "plainText": "\u00bd",
+      "title": "\u00bd"
+    },
+    {
+      "input": "&frac12=z",
+      "plainText": "\u00bd=z",
+      "title": "\u00bd=z"
+    },
+    {
+      "input": "&frac12 x",
+      "plainText": "\u00bd x",
+      "title": "\u00bd x"
+    },
+    {
+      "input": "&frac12foo;",
+      "plainText": "\u00bdfoo;",
+      "title": "\u00bdfoo;"
+    },
+    {
+      "input": "&frac12foo",
+      "plainText": "\u00bdfoo",
+      "title": "\u00bdfoo"
+    },
+    {
+      "input": "&frac12foo=z",
+      "plainText": "\u00bdfoo=z",
+      "title": "\u00bdfoo=z"
+    },
+    {
+      "input": "&frac12foo x",
+      "plainText": "\u00bdfoo x",
+      "title": "\u00bdfoo x"
+    },
+    {
+      "input": "&copy;",
+      "plainText": "\u00a9",
+      "title": "\u00a9"
+    },
+    {
+      "input": "&copy",
+      "plainText": "\u00a9",
+      "title": "\u00a9"
+    },
+    {
+      "input": "&copy=z",
+      "plainText": "\u00a9=z",
+      "title": "\u00a9=z"
+    },
+    {
+      "input": "&copy x",
+      "plainText": "\u00a9 x",
+      "title": "\u00a9 x"
+    },
+    {
+      "input": "&COPY;",
+      "plainText": "\u00a9",
+      "title": "\u00a9"
+    },
+    {
+      "input": "&COPY",
+      "plainText": "\u00a9",
+      "title": "\u00a9"
+    },
+    {
+      "input": "&COPY=z",
+      "plainText": "\u00a9=z",
+      "title": "\u00a9=z"
+    },
+    {
+      "input": "&COPY x",
+      "plainText": "\u00a9 x",
+      "title": "\u00a9 x"
+    },
+    {
+      "input": "&eacute;",
+      "plainText": "\u00e9",
+      "title": "\u00e9"
+    },
+    {
+      "input": "&eacute",
+      "plainText": "\u00e9",
+      "title": "\u00e9"
+    },
+    {
+      "input": "&eacute=z",
+      "plainText": "\u00e9=z",
+      "title": "\u00e9=z"
+    },
+    {
+      "input": "&eacute x",
+      "plainText": "\u00e9 x",
+      "title": "\u00e9 x"
+    },
+    {
+      "input": "&CounterClockwiseContourIntegral;",
+      "plainText": "\u2233",
+      "title": "\u2233"
+    },
+    {
+      "input": "&CounterClockwiseContourIntegral",
+      "plainText": "&CounterClockwiseContourIntegral",
+      "title": "&CounterClockwiseContourIntegral"
+    },
+    {
+      "input": "&CounterClockwiseContourIntegral=z",
+      "plainText": "&CounterClockwiseContourIntegral=z",
+      "title": "&CounterClockwiseContourIntegral=z"
+    },
+    {
+      "input": "&CounterClockwiseContourIntegral x",
+      "plainText": "&CounterClockwiseContourIntegral x",
+      "title": "&CounterClockwiseContourIntegral x"
+    },
+    {
+      "input": "&amp;",
+      "plainText": "&",
+      "title": "&"
+    },
+    {
+      "input": "&amp",
+      "plainText": "&",
+      "title": "&"
+    },
+    {
+      "input": "&amp=z",
+      "plainText": "&=z",
+      "title": "&=z"
+    },
+    {
+      "input": "&amp x",
+      "plainText": "& x",
+      "title": "& x"
+    },
+    {
+      "input": "&lt;",
+      "plainText": "<",
+      "title": "<"
+    },
+    {
+      "input": "&lt",
+      "plainText": "<",
+      "title": "<"
+    },
+    {
+      "input": "&lt=z",
+      "plainText": "<=z",
+      "title": "<=z"
+    },
+    {
+      "input": "&lt x",
+      "plainText": "< x",
+      "title": "< x"
+    },
+    {
+      "input": "&a1b2;",
+      "plainText": "&a1b2;",
+      "title": "&a1b2;"
+    },
+    {
+      "input": "&a1b2",
+      "plainText": "&a1b2",
+      "title": "&a1b2"
+    },
+    {
+      "input": "&a1b2=z",
+      "plainText": "&a1b2=z",
+      "title": "&a1b2=z"
+    },
+    {
+      "input": "&a1b2 x",
+      "plainText": "&a1b2 x",
+      "title": "&a1b2 x"
+    },
+    {
+      "input": "&apos;",
+      "plainText": "'",
+      "title": "'"
+    },
+    {
+      "input": "&apos",
+      "plainText": "&apos",
+      "title": "&apos"
+    },
+    {
+      "input": "&apos=z",
+      "plainText": "&apos=z",
+      "title": "&apos=z"
+    },
+    {
+      "input": "&apos x",
+      "plainText": "&apos x",
+      "title": "&apos x"
+    }
+  ]
+}

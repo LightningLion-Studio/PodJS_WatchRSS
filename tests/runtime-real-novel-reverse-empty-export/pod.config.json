@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.realnovelreverse","name":"WatchRSS Real Novel Reverse","versionName":"0.1.1","versionCode":2,"capabilities":["data.sqlite","data.kv","data.files.chunks","data.uri","data.images","crypto.basic","net.rfcomm","net.stream","host.lifecycle","runtime.timer"]}

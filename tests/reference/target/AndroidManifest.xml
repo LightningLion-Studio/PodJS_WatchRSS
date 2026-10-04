@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="dev.podjs.androidwatch.reference.ReferencePlayerActivity" android:exported="false" />
+        <activity android:name="dev.podjs.androidwatch.reference.ReferenceRssActivity" android:exported="false" />
+    </application>
+</manifest>

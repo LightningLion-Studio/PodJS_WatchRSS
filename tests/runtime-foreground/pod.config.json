@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.syncstate","name":"Foreground Service Verification","versionName":"0.1.0","versionCode":1,"capabilities":["host.lifecycle","net.rfcomm","net.stream","data.sqlite","data.kv","runtime.timer"]}

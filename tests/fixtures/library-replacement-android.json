@@ -1,0 +1,288 @@
+{
+  "cases": [
+    {
+      "input": {
+        "name": "retain-all",
+        "articles": [
+          "keep-id",
+          "rss-guid",
+          "feed-id",
+          "other-id",
+          "obsolete"
+        ],
+        "sources": [
+          "watchrss://phone-imports",
+          "https://feed.example/rss",
+          "https://other.example/rss"
+        ]
+      },
+      "items": [
+        {
+          "id": 1,
+          "channelId": 1,
+          "dedupKey": "keep-id"
+        },
+        {
+          "id": 2,
+          "channelId": 1,
+          "dedupKey": "rss-guid"
+        },
+        {
+          "id": 3,
+          "channelId": 2,
+          "dedupKey": "feed-id"
+        },
+        {
+          "id": 4,
+          "channelId": 3,
+          "dedupKey": "other-id"
+        }
+      ],
+      "channels": [
+        {
+          "id": 1,
+          "url": "watchrss://phone-imports"
+        },
+        {
+          "id": 2,
+          "url": "https://feed.example/rss"
+        },
+        {
+          "id": 3,
+          "url": "https://other.example/rss"
+        }
+      ],
+      "entries": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "states": [
+        {
+          "articleId": "feed-id",
+          "type": "FAVORITE",
+          "itemId": 3
+        },
+        {
+          "articleId": "keep-id",
+          "type": "FAVORITE",
+          "itemId": 1
+        },
+        {
+          "articleId": "obsolete",
+          "type": "ARTICLE_DELETE",
+          "itemId": null
+        },
+        {
+          "articleId": "other-id",
+          "type": "FAVORITE",
+          "itemId": 4
+        },
+        {
+          "articleId": "rss-guid",
+          "type": "FAVORITE",
+          "itemId": 2
+        }
+      ],
+      "sourceStates": [
+        "https://feed.example/rss",
+        "https://other.example/rss"
+      ],
+      "logMax": 0,
+      "peerExists": false
+    },
+    {
+      "input": {
+        "name": "canonical-only",
+        "articles": [
+          "keep-id"
+        ],
+        "sources": [
+          "watchrss://phone-imports"
+        ]
+      },
+      "items": [
+        {
+          "id": 1,
+          "channelId": 1,
+          "dedupKey": "keep-id"
+        }
+      ],
+      "channels": [
+        {
+          "id": 1,
+          "url": "watchrss://phone-imports"
+        }
+      ],
+      "entries": [
+        1
+      ],
+      "states": [
+        {
+          "articleId": "keep-id",
+          "type": "FAVORITE",
+          "itemId": 1
+        }
+      ],
+      "sourceStates": [],
+      "logMax": 0,
+      "peerExists": false
+    },
+    {
+      "input": {
+        "name": "empty-replacement",
+        "articles": [],
+        "sources": []
+      },
+      "items": [],
+      "channels": [],
+      "entries": [],
+      "states": [],
+      "sourceStates": [],
+      "logMax": 0,
+      "peerExists": false
+    },
+    {
+      "input": {
+        "name": "omitted-channel-overrides-retained-item",
+        "articles": [
+          "keep-id",
+          "feed-id"
+        ],
+        "sources": [
+          "watchrss://phone-imports"
+        ]
+      },
+      "items": [
+        {
+          "id": 1,
+          "channelId": 1,
+          "dedupKey": "keep-id"
+        }
+      ],
+      "channels": [
+        {
+          "id": 1,
+          "url": "watchrss://phone-imports"
+        }
+      ],
+      "entries": [
+        1
+      ],
+      "states": [
+        {
+          "articleId": "feed-id",
+          "type": "FAVORITE",
+          "itemId": 3
+        },
+        {
+          "articleId": "keep-id",
+          "type": "FAVORITE",
+          "itemId": 1
+        }
+      ],
+      "sourceStates": [],
+      "logMax": 0,
+      "peerExists": false
+    },
+    {
+      "input": {
+        "name": "guid-retention-is-literal",
+        "articles": [
+          "rss-guid"
+        ],
+        "sources": [
+          "watchrss://phone-imports"
+        ]
+      },
+      "items": [
+        {
+          "id": 2,
+          "channelId": 1,
+          "dedupKey": "rss-guid"
+        }
+      ],
+      "channels": [
+        {
+          "id": 1,
+          "url": "watchrss://phone-imports"
+        }
+      ],
+      "entries": [
+        2
+      ],
+      "states": [
+        {
+          "articleId": "rss-guid",
+          "type": "FAVORITE",
+          "itemId": 2
+        }
+      ],
+      "sourceStates": [],
+      "logMax": 0,
+      "peerExists": false
+    },
+    {
+      "input": {
+        "name": "source-normalization",
+        "articles": [
+          "feed-id",
+          "other-id"
+        ],
+        "sources": [
+          "  https://feed.example/rss  ",
+          "https://other.example/rss"
+        ]
+      },
+      "items": [
+        {
+          "id": 3,
+          "channelId": 2,
+          "dedupKey": "feed-id"
+        },
+        {
+          "id": 4,
+          "channelId": 3,
+          "dedupKey": "other-id"
+        }
+      ],
+      "channels": [
+        {
+          "id": 2,
+          "url": "https://feed.example/rss"
+        },
+        {
+          "id": 3,
+          "url": "https://other.example/rss"
+        }
+      ],
+      "entries": [
+        3,
+        4
+      ],
+      "states": [
+        {
+          "articleId": "feed-id",
+          "type": "FAVORITE",
+          "itemId": 3
+        },
+        {
+          "articleId": "other-id",
+          "type": "FAVORITE",
+          "itemId": 4
+        }
+      ],
+      "sourceStates": [
+        "https://feed.example/rss",
+        "https://other.example/rss"
+      ],
+      "logMax": 0,
+      "peerExists": false
+    }
+  ],
+  "sources": {
+    "data/rss/DefaultRssRepository.kt": "5bd64d095da9f7c8642935dcbc2ae428fa289f25401a41b64198ad32eef36218"
+  },
+  "scope": "Actual native finalizeAuthoritativeLibrarySnapshot with isolated in-memory Room rows; real native offline/cache services belong only to the reference app. Captures successful SQL outcomes, not physical media acceptance."
+}

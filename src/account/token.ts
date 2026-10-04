@@ -1,0 +1,12 @@
+import { WatchAccountStore } from "./store";
+import type { WatchAccountState, AccountClientOptions } from "./types";
+import { utf8Encode, utf8Decode } from "../cloud/types";
+
+export class WatchTokenManager {
+  private refreshPromise: Promise<WatchAccountState> | null = null;
+  constructor(private readonly store: WatchAccountStore, private readonly options: AccountClientOptions, private readonly now: () => number = () => Date.now()) {}
+  async freshAccessToken(forceRefresh = false): Promise<string> { return (await this.freshAccount(forceRefresh)).watchDeviceToken; }
+  async freshAccount(forceRefresh = false): Promise<WatchAccountState> { const state = await this.store.read(); if (!state) throw new Error("手表尚未绑定腕上RSS账号"); if (!forceRefresh && state.tokenExpiresAtMillis > this.now() + 60000) return state; if (!state.watchRefreshToken || (state.refreshTokenExpiresAtMillis > 0 && state.refreshTokenExpiresAtMillis <= this.now())) throw new Error("登录已过期，请用手机重新同步账号"); if (!this.refreshPromise) this.refreshPromise = this.refresh(state).finally(() => { this.refreshPromise = null; }); return this.refreshPromise; }
+  async logout(): Promise<void> { await this.store.clear(); }
+  private async refresh(state: WatchAccountState): Promise<WatchAccountState> { const r = await this.options.transport.request({ method: "POST", url: this.options.backendBaseUrl.replace(/\/$/, "") + "/functions/v1/account/watch-token/refresh", headers: { accept: "application/json", "content-type": "application/json; charset=utf-8", ...(this.options.appVersion ? { "X-WatchRSS-App-Version": this.options.appVersion } : {}) }, body: utf8Encode(JSON.stringify({ refreshToken: state.watchRefreshToken })) }); const raw = utf8Decode(r.body); if (r.status < 200 || r.status >= 300) { if (r.status === 401 && (await this.store.read())?.watchRefreshToken === state.watchRefreshToken) await this.store.clear(); throw new Error(`手表令牌刷新失败：HTTP ${r.status}`); } const j = JSON.parse(raw); const updated = { ...state, watchDeviceToken: String(j.watchAccessToken), tokenExpiresAtMillis: Number(j.accessTokenExpiresAt), watchRefreshToken: String(j.watchRefreshToken), refreshTokenExpiresAtMillis: Number(j.refreshTokenExpiresAt), entitlement: { plan: j.entitlement?.plan || "free", active: j.entitlement?.active === true, expiresAtMillis: Number(j.entitlement?.expiresAt || 0), features: Array.isArray(j.entitlement?.features) ? j.entitlement.features.map(String) : [] }, updatedAtMillis: this.now() }; await this.store.save(updated); return updated; }
+}

@@ -1,0 +1,484 @@
+{
+  "sources": [
+    {
+      "name": "new-source",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "newer-source",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": true,
+      "authoritative": false
+    },
+    {
+      "name": "older-source",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 90,
+        "sortOrder": 80,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": true,
+      "authoritative": false
+    },
+    {
+      "name": "equal-peer-wins",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 100,
+        "sortOrder": 80,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": true,
+      "authoritative": false
+    },
+    {
+      "name": "equal-peer-loses",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 100,
+        "sortOrder": 80,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "a",
+      "existing": true,
+      "authoritative": false
+    },
+    {
+      "name": "authoritative-older",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 1,
+        "sortOrder": 2,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": true,
+      "authoritative": true
+    },
+    {
+      "name": "older-delete",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 1,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": true,
+        "deletedAt": 2
+      },
+      "peer": "z",
+      "existing": true,
+      "authoritative": false
+    },
+    {
+      "name": "missing-delete",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": true,
+        "deletedAt": 121
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "new-clock-fallback",
+      "source": {
+        "url": "https://feed.example/rss",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 0,
+        "updatedAt": 0,
+        "sortOrder": 0,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "unicode-host",
+      "source": {
+        "url": "例子.测试/rss",
+        "sourceDeviceId": "origin",
+        "title": "",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "uppercase-host-label",
+      "source": {
+        "url": "HTTPS://EXAMPLE.COM/rss",
+        "sourceDeviceId": "origin",
+        "title": "",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "localhost",
+      "source": {
+        "url": "localhost:8080/feed",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "invalid-host",
+      "source": {
+        "url": "single-host/feed",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "embedded-space",
+      "source": {
+        "url": "https://example.com/a b",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "excluded-text-root",
+      "source": {
+        "url": "https://watchrss.local/import-content",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    },
+    {
+      "name": "epub-source-allowed",
+      "source": {
+        "url": "https://watchrss.local/import-epub/book",
+        "sourceDeviceId": "origin",
+        "title": "Remote Feed",
+        "description": "Remote description",
+        "siteUrl": "https://site.example",
+        "imageUrl": null,
+        "createdAt": 11,
+        "updatedAt": 120,
+        "sortOrder": 150,
+        "isPinned": true,
+        "deleted": false,
+        "deletedAt": 0
+      },
+      "peer": "z",
+      "existing": false,
+      "authoritative": false
+    }
+  ],
+  "deletions": [
+    {
+      "name": "delete-original-rss",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false
+    },
+    {
+      "name": "older-delete-rejected",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false,
+      "currentDeleteAt": 500,
+      "currentDeletePeer": "z"
+    },
+    {
+      "name": "older-delete-newer-tombstone",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 601,
+      "laterAt": 0,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false,
+      "currentDeleteAt": 500,
+      "currentDeletePeer": "z"
+    },
+    {
+      "name": "equal-delete-peer-wins",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false,
+      "currentDeleteAt": 200,
+      "currentDeletePeer": "a"
+    },
+    {
+      "name": "equal-delete-peer-loses",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 0,
+      "laterAt": 0,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false,
+      "currentDeleteAt": 200,
+      "currentDeletePeer": "zz"
+    },
+    {
+      "name": "delete-zero-noop",
+      "peer": "z",
+      "deletedAt": 0,
+      "favoriteAt": 0,
+      "laterAt": 0,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false
+    },
+    {
+      "name": "authoritative-zero",
+      "peer": "z",
+      "deletedAt": 0,
+      "favoriteAt": 0,
+      "laterAt": 0,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": true,
+      "currentDeleteAt": 500,
+      "currentDeletePeer": "zz"
+    },
+    {
+      "name": "missing-item",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false,
+      "missingItem": true
+    },
+    {
+      "name": "bad-body-hash",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false,
+      "badHash": true
+    },
+    {
+      "name": "metadata-only-valid",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": true,
+      "authoritative": false,
+      "keepBody": true
+    },
+    {
+      "name": "metadata-only-wrong-body",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": true,
+      "authoritative": false
+    },
+    {
+      "name": "description-only-metadata",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": false,
+      "laterSaved": false,
+      "metadataOnly": true,
+      "authoritative": false,
+      "keepBody": true,
+      "noStoredBody": true
+    },
+    {
+      "name": "delete-with-saved-flag",
+      "peer": "z",
+      "deletedAt": 200,
+      "favoriteAt": 201,
+      "laterAt": 202,
+      "favoriteSaved": true,
+      "laterSaved": false,
+      "metadataOnly": false,
+      "authoritative": false
+    }
+  ]
+}

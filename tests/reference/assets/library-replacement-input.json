@@ -1,0 +1,8 @@
+[
+ {"name":"retain-all","articles":["keep-id","rss-guid","feed-id","other-id","obsolete"],"sources":["watchrss://phone-imports","https://feed.example/rss","https://other.example/rss"]},
+ {"name":"canonical-only","articles":["keep-id"],"sources":["watchrss://phone-imports"]},
+ {"name":"empty-replacement","articles":[],"sources":[]},
+ {"name":"omitted-channel-overrides-retained-item","articles":["keep-id","feed-id"],"sources":["watchrss://phone-imports"]},
+ {"name":"guid-retention-is-literal","articles":["rss-guid"],"sources":["watchrss://phone-imports"]},
+ {"name":"source-normalization","articles":["feed-id","other-id"],"sources":["  https://feed.example/rss  ","https://other.example/rss"]}
+]

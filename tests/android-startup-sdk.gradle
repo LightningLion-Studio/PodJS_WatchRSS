@@ -1,0 +1,54 @@
+// Add only the shared SDK regressions relevant to this isolated application.
+gradle.beforeProject { project ->
+    project.afterEvaluate {
+        if (project.name == 'androidApp') {
+            def sdk = new File('/home/wilf/data/PodJS/podjs-watch/platforms/android/runtime/src/androidTest')
+            def selectedFiles = [
+                'dev/podjs/runtime/PodFontServicesTest.java',
+                'dev/podjs/runtime/PodMediaSurfaceStyleTest.java',
+                'dev/podjs/runtime/PodMediaSurfaceTimingTest.java',
+                'dev/podjs/runtime/PodRendererTimingTest.java',
+                'dev/podjs/runtime/PodRuntimeForegroundServicesTest.java',
+                'dev/podjs/runtime/PodTextEnvironmentServicesTest.java',
+                'dev/podjs/runtime/PodAtomicWriteTest.java'
+            ]
+            def selectedDirectory = project.layout.buildDirectory.dir('generated/startupSdkRegressionSources').get().asFile
+            def selected = project.tasks.register('copyStartupSdkRegressionSources', Sync) {
+                from(new File(sdk, 'java')) {
+                    include selectedFiles
+                }
+                into selectedDirectory
+            }
+            // AGP resolves source directories without preserving the producer
+            // task's dependency when a Sync TaskProvider is passed to srcDir.
+            // Register the actual directory and order every test Java compile
+            // after the copy, including a build where it does not yet exist.
+            project.android.sourceSets.androidTest.java.srcDir(selectedDirectory)
+            project.tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach { compileTask ->
+                if (compileTask.name.endsWith('AndroidTestJavaWithJavac')) {
+                    compileTask.dependsOn(selected)
+                    compileTask.doFirst {
+                        def actualSources = compileTask.source.files
+                        selectedFiles.each { relativePath ->
+                            def source = new File(selectedDirectory, relativePath)
+                            if (!source.isFile() || !actualSources.contains(source)) {
+                                throw new GradleException("Required SDK regression source is missing from ${compileTask.path}: ${source}")
+                            }
+                        }
+                    }
+                }
+            }
+            project.android.sourceSets.androidTest.assets.srcDir(new File(sdk, 'assets'))
+            // This fixture must describe the same native revision/capabilities
+            // as the linked host, including a freshly rebuilt runtime.
+            def runtimeProject = project.rootProject.project(':runtime')
+            project.android.sourceSets.androidTest.assets.srcDir(
+                runtimeProject.layout.buildDirectory.dir('generated/semanticTestAssets'))
+            project.tasks.matching {
+                it.name.startsWith('merge') && it.name.endsWith('AndroidTestAssets')
+            }.configureEach {
+                dependsOn(':runtime:generateSemanticTestAssets')
+            }
+        }
+    }
+}

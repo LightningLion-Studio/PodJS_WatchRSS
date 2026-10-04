@@ -1,0 +1,811 @@
+{
+  "articles": [
+    {
+      "name": "canonical",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "skip-invalid-records",
+      "frames": [
+        "{\"articles\":[null,3,{},{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "bodyByteCount-1.0",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1.0,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.bodyByteCount=1.0"
+    },
+    {
+      "name": "bodyByteCount-'1'",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":\"1\",\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.bodyByteCount=1"
+    },
+    {
+      "name": "bodyByteCount-None",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":null,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.bodyByteCount=null"
+    },
+    {
+      "name": "chunkSize-1.0",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1.0,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkSize=1.0"
+    },
+    {
+      "name": "chunkSize-2147483648",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":2147483648,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkSize=2147483648"
+    },
+    {
+      "name": "chunkHashes-[' ']",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5305\u542b\u7a7a\u5206\u5757\u54c8\u5e0c\uff1aa.chunkHashes[0]"
+    },
+    {
+      "name": "chunkHashes-[1]",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[1],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkHashes[0]"
+    },
+    {
+      "name": "equal-unpadded",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA\"}]}}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "conflict-bytes",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AQ\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u91cd\u590d\u5206\u5757\u51b2\u7a81\uff1aa#0"
+    },
+    {
+      "name": "conflict-size",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":2,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5206\u5757\u5143\u6570\u636e\u51b2\u7a81\uff1aa"
+    },
+    {
+      "name": "latest-title",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\"Changed\",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Changed",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "fields-13",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"sourceDeviceId\":\"   \",\"deviceId\":\"fallback\",\"readingProgress\":0.4,\"readingPositionBytes\":-5}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "fallback",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0.4000000059604645,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "fields-14",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"favoriteSaved\":\"TRUE\",\"watchLaterSaved\":\"false\",\"readingProgress\":\"NaN\"}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": false,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": true,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "fields-15",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"imageUrl\":null,\"rssSourceTitle\":null}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": "null",
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": "null",
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "fields-16",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{}}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "",
+            "bodyByteCount": -1,
+            "chunkSize": -1,
+            "chunkHashes": [],
+            "chunks": [],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "fields-17",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"readingProgress\":true}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "fields-18",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"readingProgress\":\"1.5\",\"isRead\":\"true\"}]}"
+      ],
+      "ok": true,
+      "parsed": [
+        {
+          "article": {
+            "articleId": "a",
+            "url": "https://example/a",
+            "sourceDeviceId": "",
+            "title": "Title",
+            "siteName": "",
+            "excerpt": "",
+            "imageUrl": null,
+            "contentHash": "",
+            "importedAt": 0,
+            "updatedAt": 0,
+            "independentSaved": true,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": null,
+            "rssSourceTitle": null,
+            "favoriteSaved": false,
+            "favoriteChangedAt": 0,
+            "favoriteSortOrder": 0,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 1,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": true
+          },
+          "body": {
+            "articleId": "a",
+            "bodyHash": "hash",
+            "bodyByteCount": 1,
+            "chunkSize": 1,
+            "chunkHashes": [
+              "chunk"
+            ],
+            "chunks": [
+              {
+                "index": 0,
+                "hash": "chunk",
+                "data": "AA=="
+              }
+            ],
+            "metadataOnly": false
+          }
+        }
+      ]
+    }
+  ],
+  "batches": [
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\"}",
+      "index": 0,
+      "count": null,
+      "result": 1,
+      "ok": true
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\"}",
+      "index": 1,
+      "count": 1,
+      "ok": false,
+      "error": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u6279\u6b21\u5b57\u6bb5\u4e0d\u5b8c\u6574\uff1aframe=1 batchIndexPresent=false batchCountPresent=false"
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0}",
+      "index": 0,
+      "count": null,
+      "ok": false,
+      "error": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u6279\u6b21\u5b57\u6bb5\u4e0d\u5b8c\u6574\uff1aframe=0 batchIndexPresent=true batchCountPresent=false"
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0, \"batchCount\": 2}",
+      "index": 0,
+      "count": null,
+      "result": 2,
+      "ok": true
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 1, \"batchCount\": 2}",
+      "index": 1,
+      "count": 2,
+      "result": 2,
+      "ok": true
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 1, \"batchCount\": 3}",
+      "index": 1,
+      "count": 2,
+      "ok": false,
+      "error": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u6279\u6b21\u6570\u4e0d\u4e00\u81f4\uff1aframe=1 expectedBatchCount=2 actual=3"
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0, \"batchCount\": 257}",
+      "index": 0,
+      "count": null,
+      "ok": false,
+      "error": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u6279\u6b21\u6570\u5f02\u5e38\uff1abatchCount=257 max=256"
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0.9, \"batchCount\": 1.9}",
+      "index": 0,
+      "count": null,
+      "result": 1,
+      "ok": true
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": \"0\", \"batchCount\": \"1\"}",
+      "index": 0,
+      "count": null,
+      "result": 1,
+      "ok": true
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"complete\"}",
+      "index": 0,
+      "count": null,
+      "ok": false,
+      "error": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u5e27 phase \u5f02\u5e38\uff1aframe=0 expected=articles actual=complete"
+    }
+  ],
+  "base64": [
+    {
+      "input": "",
+      "encoded": "",
+      "ok": true
+    },
+    {
+      "input": "AA==",
+      "encoded": "AA==",
+      "ok": true
+    },
+    {
+      "input": "AA",
+      "encoded": "AA==",
+      "ok": true
+    },
+    {
+      "input": "AAA=",
+      "encoded": "AAA=",
+      "ok": true
+    },
+    {
+      "input": "AAA",
+      "encoded": "AAA=",
+      "ok": true
+    },
+    {
+      "input": "AAAA",
+      "encoded": "AAAA",
+      "ok": true
+    },
+    {
+      "input": "AB==",
+      "encoded": "AA==",
+      "ok": true
+    },
+    {
+      "input": "AAB=",
+      "encoded": "AAA=",
+      "ok": true
+    },
+    {
+      "input": "A",
+      "ok": false
+    },
+    {
+      "input": "AA=",
+      "ok": false
+    },
+    {
+      "input": "AAAA=",
+      "ok": false
+    },
+    {
+      "input": "AA===",
+      "ok": false
+    },
+    {
+      "input": " A A ==",
+      "ok": false
+    },
+    {
+      "input": "AA\n",
+      "ok": false
+    },
+    {
+      "input": "-_==",
+      "ok": false
+    },
+    {
+      "input": "====",
+      "ok": false
+    },
+    {
+      "input": "\u6c49",
+      "ok": false
+    }
+  ],
+  "sdk": 30,
+  "device": "OWW242",
+  "sources": {
+    "phoneconnection/bluetooth/LibrarySyncPayload.kt": "7ab6a6bc59aa95ffa920c22df7f8a8be79421b517c5c2f38d03fea5820d26c2f",
+    "phoneconnection/bluetooth/BluetoothSyncProtocol.kt": "6e58d7d89907dec82431f566121772d5826f8447e1dfb4b41c27f88a43de59d8",
+    "data/rss/ArticleSyncBody.kt": "d2d89140ad0548e7146e2589759c695bb7a710adb846a5c125bfe04b82b132aa",
+    "data/rss/SyncedSavedArticle.kt": "fbdd00c7ed143db59afee8b5599957465bb64d38f6b7fc620918f27a951a3a7f"
+  },
+  "scope": "Actual Android production LibrarySyncPayload and ArticleSyncBody parsing, captured by isolated reference instrumentation."
+}

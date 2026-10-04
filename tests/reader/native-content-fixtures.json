@@ -1,0 +1,106 @@
+[
+  {
+    "raw": "<p>Hello</p><img src=\"img.png\" alt=\"A\"/><video src=\"vid.mp4\" poster=\"poster.jpg\"></video>",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Hello",
+        "style": "body"
+      },
+      {
+        "type": "image",
+        "url": "img.png",
+        "alt": "A",
+        "width": null,
+        "height": null
+      },
+      {
+        "type": "video",
+        "url": "vid.mp4",
+        "poster": "poster.jpg"
+      }
+    ]
+  },
+  {
+    "raw": "<h1>Title</h1><p>Hello <b>world</b><img src=\"a>b.png\" width=\"20\" style=\"height: 10.5px\" alt=\"A &amp; B\">after</p><ol><li>First<li>Second</ol><blockquote><ul><li>Quoted</li></ul></blockquote><pre>code</pre><video poster=\"p\"><source src=\"movie.mp4\"></video>",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Title",
+        "style": "title"
+      },
+      {
+        "type": "text",
+        "text": "Hello world",
+        "style": "body"
+      },
+      {
+        "type": "image",
+        "url": "a>b.png",
+        "alt": "A & B",
+        "width": 20,
+        "height": 11
+      },
+      {
+        "type": "text",
+        "text": "after\n1. First\n2. Second",
+        "style": "body"
+      },
+      {
+        "type": "text",
+        "text": "- Quoted",
+        "style": "quote"
+      },
+      {
+        "type": "text",
+        "text": "code",
+        "style": "code"
+      },
+      {
+        "type": "video",
+        "url": "movie.mp4",
+        "poster": "p"
+      }
+    ]
+  },
+  {
+    "raw": "<pre>a\n  b</pre>",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "a\n  b",
+        "style": "code"
+      }
+    ]
+  },
+  {
+    "raw": "<blockquote><p>first</p><p>second</p></blockquote>",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "first second",
+        "style": "quote"
+      }
+    ]
+  },
+  {
+    "raw": "<p>a<span>b</span> c</p>",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "ab c",
+        "style": "body"
+      }
+    ]
+  },
+  {
+    "raw": "<div>outside</div><article>fallback</article><div class=\"entry-content\"><p>body</p><aside>ad</aside><p>end</p></div>",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "body\nend",
+        "style": "body"
+      }
+    ]
+  }
+]

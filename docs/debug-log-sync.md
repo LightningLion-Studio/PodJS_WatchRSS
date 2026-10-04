@@ -1,0 +1,11 @@
+# Phone pull of PodJS watch sync diagnostics, 2026-09-25
+
+The native watch supports the phone's `pullDebugLog` action. PodJS previously returned `unsupported_action`; the production action handler now returns `success`, `action`, `log`, `truncated`, and `totalChars`, with `maxChars` clamped to 1–700,000 UTF-16 characters. The log is a persistent, bounded sync timeline in watch KV. It records Bluetooth/IP state, allow-listed action names, success flags, and failure occurrence. Request payloads, URLs, peer IDs, account tokens, and raw exception messages are never written to this timeline.
+
+The phone's production `PhoneBluetoothSyncManager.collectWatchDebugLog()` was exercised against the paired production PodJS watch over RFCOMM. An isolated Android instrumentation test checked the watch address and database identity before the read-only pull. It passed (`OK (1 test)`), received 683 characters, and reported `truncated=false`. A subsequent watch KV snapshot included `action=pullDebugLog success=true`. The test used no synthetic touch input or library replacement.
+
+Application tests: 722 passed, 0 failed; TypeScript checking passed. The first clean Android build failed at `compressDebugAssets` with the default 2 GiB Gradle heap. Re-running the same generated source with a 6 GiB build heap and two workers succeeded. The final APK ZIP passed `testzip` with a maximum local-entry gap of 9,135 bytes. [Archived APK](../artifacts/watchrss-podjs-debug-log.apk) and installed OWW242 `base.apk` share SHA-256 `6ec4e29759f790f848fc2c0d065a58ba29fd5293d3199162f132ef67a308969a`.
+
+The production watch's 33 SQLite tables had identical row counts and content digests before and after installation and the phone pull; both snapshots passed `quick_check` and foreign-key checks. The phone's post-test database snapshot also passed both checks. Its pre-test database was not captured, so a row-for-row phone comparison is unavailable.
+
+This closes the phone's Bluetooth debug-log request path for sync diagnostics. The timeline is narrower than the native `AppLogger` file: it does not capture every app subsystem, stack trace, or earlier history. Full native diagnostic-content parity and the phone's visible export flow remain unverified; the watch display is still covered by `SysUI.Charging`.

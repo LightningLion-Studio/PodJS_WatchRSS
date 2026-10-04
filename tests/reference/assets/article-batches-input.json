@@ -1,0 +1,193 @@
+{
+  "articles": [
+    {
+      "name": "canonical",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "skip-invalid-records",
+      "frames": [
+        "{\"articles\":[null,3,{},{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "bodyByteCount-1.0",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1.0,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "bodyByteCount-'1'",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":\"1\",\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "bodyByteCount-None",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":null,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "chunkSize-1.0",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1.0,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "chunkSize-2147483648",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":2147483648,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "chunkHashes-[' ']",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "chunkHashes-[1]",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[1],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "equal-unpadded",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA\"}]}}]}"
+      ]
+    },
+    {
+      "name": "conflict-bytes",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AQ\"}]}}]}"
+      ]
+    },
+    {
+      "name": "conflict-size",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":2,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "latest-title",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}",
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\"Changed\",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]}}]}"
+      ]
+    },
+    {
+      "name": "fields-13",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"sourceDeviceId\":\"   \",\"deviceId\":\"fallback\",\"readingProgress\":0.4,\"readingPositionBytes\":-5}]}"
+      ]
+    },
+    {
+      "name": "fields-14",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"favoriteSaved\":\"TRUE\",\"watchLaterSaved\":\"false\",\"readingProgress\":\"NaN\"}]}"
+      ]
+    },
+    {
+      "name": "fields-15",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"imageUrl\":null,\"rssSourceTitle\":null}]}"
+      ]
+    },
+    {
+      "name": "fields-16",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{}}]}"
+      ]
+    },
+    {
+      "name": "fields-17",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"readingProgress\":true}]}"
+      ]
+    },
+    {
+      "name": "fields-18",
+      "frames": [
+        "{\"articles\":[{\"articleId\":\" a \",\"url\":\" https://example/a \",\"title\":\" Title \",\"body\":{\"bodyHash\":\" hash \",\"bodyByteCount\":1,\"chunkSize\":1,\"chunkHashes\":[\" chunk \"],\"chunks\":[{\"index\":0,\"hash\":\" chunk \",\"data\":\"AA==\"}]},\"readingProgress\":\"1.5\",\"isRead\":\"true\"}]}"
+      ]
+    }
+  ],
+  "batches": [
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\"}",
+      "index": 0,
+      "count": null
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\"}",
+      "index": 1,
+      "count": 1
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0}",
+      "index": 0,
+      "count": null
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0, \"batchCount\": 2}",
+      "index": 0,
+      "count": null
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 1, \"batchCount\": 2}",
+      "index": 1,
+      "count": 2
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 1, \"batchCount\": 3}",
+      "index": 1,
+      "count": 2
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0, \"batchCount\": 257}",
+      "index": 0,
+      "count": null
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": 0.9, \"batchCount\": 1.9}",
+      "index": 0,
+      "count": null
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"articles\", \"batchIndex\": \"0\", \"batchCount\": \"1\"}",
+      "index": 0,
+      "count": null
+    },
+    {
+      "frame": "{\"action\": \"syncLibrary\", \"phase\": \"complete\"}",
+      "index": 0,
+      "count": null
+    }
+  ],
+  "base64": [
+    "",
+    "AA==",
+    "AA",
+    "AAA=",
+    "AAA",
+    "AAAA",
+    "AB==",
+    "AAB=",
+    "A",
+    "AA=",
+    "AAAA=",
+    "AA===",
+    " A A ==",
+    "AA\n",
+    "-_==",
+    "====",
+    "\u6c49"
+  ]
+}

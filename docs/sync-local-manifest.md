@@ -1,0 +1,25 @@
+# Local article manifests and outgoing bodies
+
+`LocalArticleManifestStore.snapshot()` now reads actual SQLite article, original-content, reading, saved-state and deletion-journal rows. It follows the native export selection: saved entries grouped by canonical URL identity, then independent/imported articles, then saved-state and deletion tombstones. The saved representative and the body resolved through a saved-state binding can differ; metadata repair follows the native resolver. No normal unsaved RSS article is added to the outbound library merely because it exists in the database.
+
+`stableArticleId` retains the native normalization and hash rules, including case-sensitive scheme-prefix handling, port/fragment omission and raw path/query preservation. Generic framework `uri.parse` returns Android `java.net.URI` components and distinguishes invalid syntax from a service failure. A failed host operation propagates; it must not silently create another article identity.
+
+Actual original content takes precedence over regular content and description. HTML detection and text projection prepare the native body pair. The framework's generic `file.htmlText` uses the same Jsoup 1.17.2 text extraction as the reference application, with file-root confinement, 32 MiB input/output bounds and temporary-file cleanup. Missing content files make the manifest unavailable with empty body metadata. A verified body is encoded and hashed again; cached header values do not establish availability or byte equality.
+
+`article-export.ts` implements Android JSONObject metadata hashing: field order, omitted null values, slash/control escaping, integer serialization and Java UTF-8 replacement. Body hashes use 128 KiB chunks. Requested response chunks are sorted and deduplicated; stale hashes or empty ordinary requests return a full body, matching native fallback rules. A matching metadata-only request returns no body chunks. The caller must prepare a fresh snapshot when answering a later peer request if the library may have changed.
+
+Snapshots recheck all source queries after asynchronous body work and reject a changed library. Metadata cache publication then checks the original content rows in SQL so it cannot overwrite a concurrently replaced body. It does not alter saved or reading state. Content-addressed files created before a later failure may remain unreferenced for future garbage collection. Snapshot memory usage for very large libraries is not yet qualified.
+
+## Native evidence
+
+`LocalManifestReferenceTest` runs actual `DefaultRssRepository` against an in-memory Room database and an isolated native file store. It uses the production repository dependencies but no network fetch or media operation. Its fixture has 10 article rows, duplicate URLs across feeds, HTML/original content, a file-backed text, a genuinely missing file, saved-state clocks, cancellation of a save and a deletion. It captures nine manifests on two consecutive exports, eight metadata hashes, eight requested body encodings and sixteen canonical URL identities. The collector preserves raw output and removes only Compose's static `$stable` reflection marker from the comparison fixture.
+
+One native detail is preserved explicitly: an unsaved-state tombstone can retain `deleted=false` in its outgoing article while the repaired manifest derives `deleted=true` from `deletedAt`. Metadata cache repair can also change a later export's `contentHash`; repeated-export comparison covers that behavior.
+
+The QuickJS harness uses the real framework URI, Jsoup, gzip/hash, SQLite and file services. Both manifest generations and all sixteen/eight/eight identity/hash/body comparisons pass. A selected metadata-only update commits through `ArticleBatchReceiver` and `SyncArticleReceiver` into a nonempty database. This receive case deliberately represents an already synchronized canonical article; it does not establish ordinary RSS alias remapping. The missing-body test deletes a real published file before snapshot generation. Concurrent snapshot edits are rejected, and all fixture rows/files are removed after the test.
+
+## Remaining integration
+
+The production phone entry/session is still absent. Ordinary RSS identity binding and multiple local items for one canonical article need further integration with the existing receiver's immutable binding model. Full incoming deletion, source synchronization, cursor/change-log handling, fresh outgoing session responses and final ACKs remain unfinished. These functions are not yet exposed as a completed phone-sync feature, and the main application APK is unchanged by this isolated test deployment.
+
+Follow-up: the ordinary-RSS alias limitation above was subsequently addressed and verified against 14 native Room cases in `sync-alias-receive.md`. The main app was also rebuilt and installed with URI/HTML host services and local save identity journaling; see `artifacts/alias-receipt.json`. The earlier receipt remains a historical record of this harness-only stage. Full phone session and wire completion remain pending.

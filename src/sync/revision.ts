@@ -1,0 +1,3 @@
+import type {SqlDatabase,SqlParams} from '../core/types.ts';
+export async function libraryRevision(db:SqlDatabase):Promise<number>{const row=(await db.query('SELECT revision FROM sync_library_revision WHERE id=1'))[0];if(!row||!Number.isSafeInteger(Number(row.revision)))throw new Error('Missing or invalid library revision');return Number(row.revision);}
+export function revisionGuard(expected:number):{sql:string;params:SqlParams}{if(!Number.isSafeInteger(expected))throw new Error('Invalid expected library revision');return {sql:'UPDATE sync_library_revision SET revision=CASE WHEN revision=? THEN revision ELSE NULL END WHERE id=1',params:[expected]};}

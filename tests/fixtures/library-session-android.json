@@ -1,0 +1,3326 @@
+{
+  "cases": [
+    {
+      "input": {
+        "name": "applied",
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "applied",
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310427469,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310427860,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310427789,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310427860,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": {
+        "localSeq": 0,
+        "remoteSeq": 71,
+        "protocol": 14,
+        "fullSync": true
+      },
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "received-then-applied",
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "received",
+            "applied": false
+          },
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "applied",
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "received",
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310428127,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310428410,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310428337,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310428410,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": {
+        "localSeq": 0,
+        "remoteSeq": 71,
+        "protocol": 14,
+        "fullSync": true
+      },
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "received-then-rejected",
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "received",
+            "applied": false
+          },
+          {
+            "action": "ack",
+            "success": false,
+            "phase": "applied",
+            "applied": false
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "received",
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "success": false,
+          "phase": "applied",
+          "applied": false
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310428643,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310428981,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310428885,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310428981,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "received-then-eof",
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "received",
+            "applied": false
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "received",
+          "applied": false
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310429220,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310429509,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310429457,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310429509,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "legacy-success-ack",
+        "ack": [
+          {
+            "action": "ack",
+            "success": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310429737,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310430054,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310429997,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310430054,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": {
+        "localSeq": 0,
+        "remoteSeq": 71,
+        "protocol": 14,
+        "fullSync": true
+      },
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "failed-applied-ack",
+        "ack": [
+          {
+            "action": "ack",
+            "success": false,
+            "phase": "applied",
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": false,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310430316,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310430649,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310430552,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310430649,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "wrong-ack-action",
+        "ack": [
+          {
+            "action": "probe",
+            "success": true,
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "probe",
+          "success": true,
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310430890,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310431162,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310431093,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310431162,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "missing-ack",
+        "ack": []
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310431415,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310431683,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310431618,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310431683,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "persistent-cursor",
+        "persistent": true,
+        "cursor": true,
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "applied",
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "probe",
+          "requestPersistentSession": true,
+          "supportsPersistentSession": true
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "cursor",
+          "deviceId": "phone-test"
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        },
+        {
+          "version": 14,
+          "action": "syncSession",
+          "phase": "complete"
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310431929,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "version": 14,
+        "action": "syncSession",
+        "phase": "complete",
+        "success": true,
+        "supportsPersistentSession": true,
+        "persistentSessionAccepted": true
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "probe",
+          "supportsManifestBatches": true,
+          "supportsReaderPresets": true,
+          "supportsReaderAssets": true,
+          "supportsResourceChunkAck": true,
+          "supportsReaderPresetPreview": true,
+          "supportsPersistentSession": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310432362,
+          "watchCapabilities": {
+            "widthPx": 466,
+            "heightPx": 466,
+            "refreshRateHz": 60.000003814697266,
+            "availableBytes": 21720346624,
+            "videoDecoders": [
+              {
+                "name": "c2.qti.avc.decoder",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.avc",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.avc.decoder.low_latency",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.avc.low_latency",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.hevc.decoder",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.hevc",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.hevc.decoder.low_latency",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.hevc.low_latency",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.vp9.decoder",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 512
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 60
+              },
+              {
+                "name": "OMX.qcom.video.decoder.vp9",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 512
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 60
+              },
+              {
+                "name": "c2.android.avc.decoder",
+                "mime": "video/avc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 65536,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 1,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 2,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 8,
+                    "level": 65536
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 546.1333333333333
+              },
+              {
+                "name": "OMX.google.h264.decoder",
+                "mime": "video/avc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 65536,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 1,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 2,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 8,
+                    "level": 65536
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 546.1333333333333
+              },
+              {
+                "name": "c2.android.h263.decoder",
+                "mime": "video/3gpp",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16
+                  },
+                  {
+                    "profile": 1,
+                    "level": 8
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16
+                  },
+                  {
+                    "profile": 8,
+                    "level": 8
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "OMX.google.h263.decoder",
+                "mime": "video/3gpp",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16
+                  },
+                  {
+                    "profile": 1,
+                    "level": 8
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16
+                  },
+                  {
+                    "profile": 8,
+                    "level": 8
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "c2.android.hevc.decoder",
+                "mime": "video/hevc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 524288
+                  },
+                  {
+                    "profile": 4,
+                    "level": 524288
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 141.20080436656133
+              },
+              {
+                "name": "OMX.google.hevc.decoder",
+                "mime": "video/hevc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 524288
+                  },
+                  {
+                    "profile": 4,
+                    "level": 524288
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 141.20080436656133
+              },
+              {
+                "name": "c2.android.mpeg4.decoder",
+                "mime": "video/mp4v-es",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "OMX.google.mpeg4.decoder",
+                "mime": "video/mp4v-es",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "c2.android.vp8.decoder",
+                "mime": "video/x-vnd.on2.vp8",
+                "hardwareAccelerated": false,
+                "profiles": [],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 960
+              },
+              {
+                "name": "OMX.google.vp8.decoder",
+                "mime": "video/x-vnd.on2.vp8",
+                "hardwareAccelerated": false,
+                "profiles": [],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 960
+              },
+              {
+                "name": "c2.android.vp9.decoder",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4096,
+                    "level": 256
+                  },
+                  {
+                    "profile": 16384,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 1280,
+                "maxHeight": 1280,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.google.vp9.decoder",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4096,
+                    "level": 256
+                  },
+                  {
+                    "profile": 16384,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 1280,
+                "maxHeight": 1280,
+                "maxFrameRate": 120
+              }
+            ]
+          },
+          "ipUpgradeAccepted": false,
+          "persistentSessionAccepted": true
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "cursor",
+          "supportsManifestBatches": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310432531,
+          "syncCursor": {
+            "localMaxSeq": 0,
+            "lastRemoteSeqApplied": 0,
+            "lastLocalSeqAckedByPeer": 0
+          },
+          "success": true,
+          "supportsAuthoritativeLibraryReplace": true
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310432683,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310432737,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        },
+        {
+          "version": 14,
+          "action": "syncSession",
+          "phase": "complete",
+          "success": true,
+          "supportsPersistentSession": true,
+          "persistentSessionAccepted": true
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 2,
+      "peer": {
+        "localSeq": 0,
+        "remoteSeq": 71,
+        "protocol": 14,
+        "fullSync": true
+      },
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "fatal-invalid-article-phase",
+        "persistent": true,
+        "badArticlePhase": true,
+        "ack": []
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "probe",
+          "requestPersistentSession": true,
+          "supportsPersistentSession": true
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "probe",
+          "articles": [],
+          "bodyRequests": []
+        },
+        {
+          "version": 14,
+          "action": "syncSession",
+          "phase": "complete"
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310433011,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": false,
+        "action": "syncLibrary",
+        "version": 14,
+        "message": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u5e27 phase \u5f02\u5e38\uff1aframe=0 expected=articles actual=probe",
+        "errorCode": "library_exchange_failed",
+        "fatalSession": true
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "probe",
+          "supportsManifestBatches": true,
+          "supportsReaderPresets": true,
+          "supportsReaderAssets": true,
+          "supportsResourceChunkAck": true,
+          "supportsReaderPresetPreview": true,
+          "supportsPersistentSession": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310433138,
+          "watchCapabilities": {
+            "widthPx": 466,
+            "heightPx": 466,
+            "refreshRateHz": 60.000003814697266,
+            "availableBytes": 21720322048,
+            "videoDecoders": [
+              {
+                "name": "c2.qti.avc.decoder",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.avc",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.avc.decoder.low_latency",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.avc.low_latency",
+                "mime": "video/avc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 65536,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 2,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16384
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 16384
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.hevc.decoder",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.hevc",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.hevc.decoder.low_latency",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.qcom.video.decoder.hevc.low_latency",
+                "mime": "video/hevc",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 32768
+                  },
+                  {
+                    "profile": 4,
+                    "level": 32768
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "c2.qti.vp9.decoder",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 512
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 60
+              },
+              {
+                "name": "OMX.qcom.video.decoder.vp9",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": true,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 512
+                  }
+                ],
+                "maxWidth": 1920,
+                "maxHeight": 1088,
+                "maxFrameRate": 60
+              },
+              {
+                "name": "c2.android.avc.decoder",
+                "mime": "video/avc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 65536,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 1,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 2,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 8,
+                    "level": 65536
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 546.1333333333333
+              },
+              {
+                "name": "OMX.google.h264.decoder",
+                "mime": "video/avc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 65536,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 1,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 2,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 524288,
+                    "level": 65536
+                  },
+                  {
+                    "profile": 8,
+                    "level": 65536
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 546.1333333333333
+              },
+              {
+                "name": "c2.android.h263.decoder",
+                "mime": "video/3gpp",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16
+                  },
+                  {
+                    "profile": 1,
+                    "level": 8
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16
+                  },
+                  {
+                    "profile": 8,
+                    "level": 8
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "OMX.google.h263.decoder",
+                "mime": "video/3gpp",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 16
+                  },
+                  {
+                    "profile": 1,
+                    "level": 8
+                  },
+                  {
+                    "profile": 8,
+                    "level": 16
+                  },
+                  {
+                    "profile": 8,
+                    "level": 8
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "c2.android.hevc.decoder",
+                "mime": "video/hevc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 524288
+                  },
+                  {
+                    "profile": 4,
+                    "level": 524288
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 141.20080436656133
+              },
+              {
+                "name": "OMX.google.hevc.decoder",
+                "mime": "video/hevc",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 524288
+                  },
+                  {
+                    "profile": 4,
+                    "level": 524288
+                  }
+                ],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 141.20080436656133
+              },
+              {
+                "name": "c2.android.mpeg4.decoder",
+                "mime": "video/mp4v-es",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "OMX.google.mpeg4.decoder",
+                "mime": "video/mp4v-es",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 352,
+                "maxHeight": 288,
+                "maxFrameRate": 60.000003814697266
+              },
+              {
+                "name": "c2.android.vp8.decoder",
+                "mime": "video/x-vnd.on2.vp8",
+                "hardwareAccelerated": false,
+                "profiles": [],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 960
+              },
+              {
+                "name": "OMX.google.vp8.decoder",
+                "mime": "video/x-vnd.on2.vp8",
+                "hardwareAccelerated": false,
+                "profiles": [],
+                "maxWidth": 2048,
+                "maxHeight": 2048,
+                "maxFrameRate": 960
+              },
+              {
+                "name": "c2.android.vp9.decoder",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4096,
+                    "level": 256
+                  },
+                  {
+                    "profile": 16384,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 1280,
+                "maxHeight": 1280,
+                "maxFrameRate": 120
+              },
+              {
+                "name": "OMX.google.vp9.decoder",
+                "mime": "video/x-vnd.on2.vp9",
+                "hardwareAccelerated": false,
+                "profiles": [
+                  {
+                    "profile": 1,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4,
+                    "level": 256
+                  },
+                  {
+                    "profile": 4096,
+                    "level": 256
+                  },
+                  {
+                    "profile": 16384,
+                    "level": 256
+                  }
+                ],
+                "maxWidth": 1280,
+                "maxHeight": 1280,
+                "maxFrameRate": 120
+              }
+            ]
+          },
+          "ipUpgradeAccepted": false,
+          "persistentSessionAccepted": true
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310433329,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": false,
+          "action": "syncLibrary",
+          "version": 14,
+          "message": "\u8d44\u6599\u5e93\u6587\u7ae0\u8bf7\u6c42\u5e27 phase \u5f02\u5e38\uff1aframe=0 expected=articles actual=probe",
+          "errorCode": "library_exchange_failed",
+          "fatalSession": true
+        }
+      ],
+      "closedByServer": true,
+      "unreadInputBytes": 128,
+      "completedActions": 1,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "fatal-truncated-article-batches",
+        "truncatedArticles": true,
+        "ack": []
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": [],
+          "batchIndex": 0,
+          "batchCount": 2
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310433536,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": false,
+        "action": "syncLibrary",
+        "version": 14,
+        "message": "",
+        "errorCode": "library_exchange_failed",
+        "fatalSession": true
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310433639,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": false,
+          "action": "syncLibrary",
+          "version": 14,
+          "message": "",
+          "errorCode": "library_exchange_failed",
+          "fatalSession": true
+        }
+      ],
+      "closedByServer": true,
+      "unreadInputBytes": 0,
+      "completedActions": 0,
+      "peer": null,
+      "itemCount": 0
+    },
+    {
+      "input": {
+        "name": "outgoing-saved-article",
+        "seedArticle": true,
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "received",
+            "applied": false
+          },
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "applied",
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": []
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [],
+          "bodyRequests": [
+            {
+              "articleId": "20d8310c3c10fcfb25f1b799b43e7c5d066c71370cac05ebd89b8e8a598c0b24",
+              "bodyHash": "",
+              "chunkIndexes": [],
+              "metadataOnly": false
+            }
+          ]
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "received",
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310433981,
+        "articleManifest": [
+          {
+            "articleId": "20d8310c3c10fcfb25f1b799b43e7c5d066c71370cac05ebd89b8e8a598c0b24",
+            "sourceDeviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+            "contentHash": "230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5",
+            "updatedAt": 100,
+            "independentChangedAt": 0,
+            "favoriteChangedAt": 100,
+            "watchLaterChangedAt": 0,
+            "deletedAt": 0,
+            "deleted": false,
+            "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+            "bodyByteCount": 42,
+            "chunkSize": 131072,
+            "chunkHashes": [
+              "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+            ],
+            "metadataHash": "19cd4b8892e47810ddacaa32f94b64db6bf9b4b17801c2019583c0fd3f092be3",
+            "bodyAvailable": true,
+            "bodySyncMode": "saved",
+            "readingProgress": 0.2,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false
+          }
+        ],
+        "bodyRequests": [],
+        "rssSources": [
+          {
+            "url": "https://feed.example/rss",
+            "sourceDeviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+            "title": "Feed",
+            "description": "",
+            "createdAt": 1,
+            "updatedAt": 1,
+            "sortOrder": 1,
+            "isPinned": false,
+            "deleted": false,
+            "deletedAt": 0
+          }
+        ],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 1
+        },
+        "stats": {
+          "sourcesSent": 1,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [
+        {
+          "wireArticle": {
+            "articleId": "20d8310c3c10fcfb25f1b799b43e7c5d066c71370cac05ebd89b8e8a598c0b24",
+            "sourceDeviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+            "url": "https://example.com/session",
+            "title": "Saved",
+            "siteName": "Feed",
+            "excerpt": "body",
+            "contentHash": "230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5",
+            "importedAt": 100,
+            "updatedAt": 100,
+            "independentSaved": false,
+            "independentChangedAt": 0,
+            "independentSortOrder": 0,
+            "rssSourceUrl": "https://feed.example/rss",
+            "rssSourceTitle": "Feed",
+            "favoriteSaved": true,
+            "favoriteChangedAt": 100,
+            "favoriteSortOrder": 100,
+            "watchLaterSaved": false,
+            "watchLaterChangedAt": 0,
+            "watchLaterSortOrder": 0,
+            "deleted": false,
+            "deletedAt": 0,
+            "readingProgress": 0.2,
+            "readingPositionBytes": 0,
+            "readingPositionContentHash": "",
+            "readingPositionChangedAt": 0,
+            "isRead": false,
+            "body": {
+              "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+              "bodyByteCount": 42,
+              "chunkSize": 131072,
+              "chunkHashes": [
+                "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+              ],
+              "metadataOnly": false,
+              "chunks": [
+                {
+                  "index": 0,
+                  "hash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+                  "data": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA"
+                }
+              ]
+            }
+          },
+          "contentHtml": null,
+          "contentText": "body",
+          "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA"
+        }
+      ],
+      "beforeCursor": {
+        "localMaxSeq": 1,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310434540,
+        "batchCount": 1,
+        "totalArticles": 1,
+        "stats": {
+          "sent": 1,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310434359,
+          "articleManifest": [
+            {
+              "articleId": "20d8310c3c10fcfb25f1b799b43e7c5d066c71370cac05ebd89b8e8a598c0b24",
+              "sourceDeviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+              "contentHash": "230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5",
+              "updatedAt": 100,
+              "independentChangedAt": 0,
+              "favoriteChangedAt": 100,
+              "watchLaterChangedAt": 0,
+              "deletedAt": 0,
+              "deleted": false,
+              "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+              "bodyByteCount": 42,
+              "chunkSize": 131072,
+              "chunkHashes": [
+                "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+              ],
+              "metadataHash": "19cd4b8892e47810ddacaa32f94b64db6bf9b4b17801c2019583c0fd3f092be3",
+              "bodyAvailable": true,
+              "bodySyncMode": "saved",
+              "readingProgress": 0.2,
+              "readingPositionBytes": 0,
+              "readingPositionContentHash": "",
+              "readingPositionChangedAt": 0,
+              "isRead": false
+            }
+          ],
+          "bodyRequests": [],
+          "rssSources": [
+            {
+              "url": "https://feed.example/rss",
+              "sourceDeviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+              "title": "Feed",
+              "description": "",
+              "createdAt": 1,
+              "updatedAt": 1,
+              "sortOrder": 1,
+              "isPinned": false,
+              "deleted": false,
+              "deletedAt": 0
+            }
+          ],
+          "fullSnapshot": true,
+          "fallbackReason": "newPeer",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 1
+          },
+          "stats": {
+            "sourcesSent": 1,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310434540,
+          "articles": [
+            {
+              "articleId": "20d8310c3c10fcfb25f1b799b43e7c5d066c71370cac05ebd89b8e8a598c0b24",
+              "sourceDeviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+              "url": "https://example.com/session",
+              "title": "Saved",
+              "siteName": "Feed",
+              "excerpt": "body",
+              "contentHash": "230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5",
+              "importedAt": 100,
+              "updatedAt": 100,
+              "independentSaved": false,
+              "independentChangedAt": 0,
+              "independentSortOrder": 0,
+              "rssSourceUrl": "https://feed.example/rss",
+              "rssSourceTitle": "Feed",
+              "favoriteSaved": true,
+              "favoriteChangedAt": 100,
+              "favoriteSortOrder": 100,
+              "watchLaterSaved": false,
+              "watchLaterChangedAt": 0,
+              "watchLaterSortOrder": 0,
+              "deleted": false,
+              "deletedAt": 0,
+              "readingProgress": 0.2,
+              "readingPositionBytes": 0,
+              "readingPositionContentHash": "",
+              "readingPositionChangedAt": 0,
+              "isRead": false,
+              "body": {
+                "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+                "bodyByteCount": 42,
+                "chunkSize": 131072,
+                "chunkHashes": [
+                  "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+                ],
+                "metadataOnly": false,
+                "chunks": [
+                  {
+                    "index": 0,
+                    "hash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+                    "data": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA"
+                  }
+                ]
+              }
+            }
+          ],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 1,
+          "stats": {
+            "sent": 1,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 3383,
+          "batchTotalWireBytes": 3383
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": {
+        "localSeq": 1,
+        "remoteSeq": 71,
+        "protocol": 14,
+        "fullSync": true
+      },
+      "itemCount": 1
+    },
+    {
+      "input": {
+        "name": "watch-source-nonempty-phone-article",
+        "libraryMode": "watchToPhoneReplace",
+        "incomingArticle": true,
+        "ack": [
+          {
+            "action": "ack",
+            "success": true,
+            "phase": "applied",
+            "applied": true
+          }
+        ]
+      },
+      "inbound": [
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "deviceId": "phone-test",
+          "supportsChunkedBodies": true,
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsChangeSequences": true,
+          "fullSnapshot": true,
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 71
+          },
+          "articleManifest": [],
+          "rssSources": [],
+          "libraryMode": "watchToPhoneReplace"
+        },
+        {
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "articles",
+          "articles": [
+            {
+              "articleId": "remote-only",
+              "url": "https://phone.example/post",
+              "title": "Phone article",
+              "body": {
+                "bodyHash": "hash",
+                "bodyByteCount": 1,
+                "chunkSize": 1,
+                "chunkHashes": [
+                  "chunk"
+                ],
+                "chunks": [
+                  {
+                    "index": 0,
+                    "hash": "chunk",
+                    "data": "AA=="
+                  }
+                ]
+              }
+            }
+          ],
+          "bodyRequests": []
+        },
+        {
+          "action": "ack",
+          "success": true,
+          "phase": "applied",
+          "applied": true
+        }
+      ],
+      "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+      "preparedWindow": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "manifest",
+        "supportsArticleBatches": true,
+        "supportsManifestBatches": true,
+        "supportsChunkedBodies": true,
+        "supportsChangeSequences": true,
+        "supportsMetadataOnlyArticles": true,
+        "supportsReceivedAck": true,
+        "supportsTransferByteProgress": true,
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310434731,
+        "articleManifest": [],
+        "bodyRequests": [],
+        "rssSources": [],
+        "fullSnapshot": true,
+        "fallbackReason": "newPeer",
+        "changeSeqRange": {
+          "fromExclusive": 0,
+          "toInclusive": 0
+        },
+        "stats": {
+          "sourcesSent": 0,
+          "sourcesApplied": 0,
+          "bodyRequests": 0,
+          "metadataOnlyRequests": 0,
+          "bodyRequestChunks": 0
+        }
+      },
+      "preparedArticles": [],
+      "beforeCursor": {
+        "localMaxSeq": 0,
+        "lastRemoteSeqApplied": 0,
+        "lastLocalSeqAckedByPeer": 0
+      },
+      "returned": true,
+      "response": {
+        "success": true,
+        "version": 14,
+        "action": "syncLibrary",
+        "phase": "complete",
+        "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+        "sentAt": 1790310434992,
+        "batchCount": 1,
+        "totalArticles": 0,
+        "stats": {
+          "sent": 0,
+          "applied": 0,
+          "sourcesSent": 0,
+          "sourcesApplied": 0
+        }
+      },
+      "outbound": [
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "manifest",
+          "supportsArticleBatches": true,
+          "supportsManifestBatches": true,
+          "supportsChunkedBodies": true,
+          "supportsChangeSequences": true,
+          "supportsMetadataOnlyArticles": true,
+          "supportsReceivedAck": true,
+          "supportsTransferByteProgress": true,
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310434958,
+          "articleManifest": [],
+          "bodyRequests": [],
+          "rssSources": [],
+          "fullSnapshot": true,
+          "fallbackReason": "peerProtocol",
+          "changeSeqRange": {
+            "fromExclusive": 0,
+            "toInclusive": 0
+          },
+          "stats": {
+            "sourcesSent": 0,
+            "sourcesApplied": 0,
+            "bodyRequests": 0,
+            "metadataOnlyRequests": 0,
+            "bodyRequestChunks": 0
+          }
+        },
+        {
+          "success": true,
+          "version": 14,
+          "action": "syncLibrary",
+          "phase": "complete",
+          "deviceId": "871f6505-f8f4-4fd4-b50b-fb17b74a0114",
+          "sentAt": 1790310434992,
+          "articles": [],
+          "batchIndex": 0,
+          "batchCount": 1,
+          "totalArticles": 0,
+          "stats": {
+            "sent": 0,
+            "applied": 0,
+            "sourcesSent": 0,
+            "sourcesApplied": 0
+          },
+          "batchWireBytes": 436,
+          "batchTotalWireBytes": 436
+        }
+      ],
+      "closedByServer": false,
+      "unreadInputBytes": 0,
+      "completedActions": 1,
+      "peer": {
+        "localSeq": 0,
+        "remoteSeq": 0,
+        "protocol": 14,
+        "fullSync": true
+      },
+      "itemCount": 0
+    }
+  ],
+  "sdk": 30,
+  "device": "OWW242",
+  "sources": {
+    "phoneconnection/bluetooth/WatchBluetoothSyncServer.kt": "65c35f4c26e84a5b728c5dde2998b248fd3c7666418d735f172799e67710724f",
+    "phoneconnection/bluetooth/LibrarySyncPayload.kt": "7ab6a6bc59aa95ffa920c22df7f8a8be79421b517c5c2f38d03fea5820d26c2f",
+    "phoneconnection/bluetooth/BluetoothSyncProtocol.kt": "6e58d7d89907dec82431f566121772d5826f8447e1dfb4b41c27f88a43de59d8",
+    "data/rss/DefaultRssRepository.kt": "5bd64d095da9f7c8642935dcbc2ae428fa289f25401a41b64198ad32eef36218"
+  },
+  "scope": "Actual native WatchBluetoothSyncServer.serveStreams with in-memory Room repository injected only into the isolated reference application; no Bluetooth or IP radio connection. Native response frames and persisted peer state captured, including an outgoing saved article."
+}

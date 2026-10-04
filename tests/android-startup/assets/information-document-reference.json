@@ -1,0 +1,48 @@
+{
+  "title": "原生协议恢复对照",
+  "staticBody": "STATIC 第01段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第02段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第03段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第04段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第05段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第06段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第07段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第08段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第09段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第10段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第11段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第12段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第13段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第14段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第15段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第16段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第17段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第18段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第19段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第20段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第21段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第22段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第23段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第24段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第25段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第26段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第27段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第28段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第29段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第30段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第31段。此内容仅用于隔离协议页面的生命周期与滚动验证。\n\nSTATIC 第32段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+  "rolesTitle": "协议阅读角色对照",
+  "rolesBody": "普通正文角色。\n\nhttps://example.org/watchrss/reference\n\n• 引用角色段落。",
+  "staticBodySha256": "011cfc1fb8e7060f7b5374e5da4190ccc91dd1f6f8aed8f078f376d548b6a518",
+  "nativeReference": {
+    "source": "artifacts/native-info-static-proof.json",
+    "pngSha256": "ce0ad9cbe8aebf7c3e13dcee485c256e8d68f24115a3a302384b911c6a3dc02f",
+    "semanticScrollAxis": 6037,
+    "semanticScrollAxisMax": 6137,
+    "anchor": {
+      "paragraph": 10,
+      "topPx": 100
+    },
+    "runtimePresetVerified": false,
+    "visibleParagraphs": [
+      {
+        "number": 9,
+        "left": 28,
+        "top": 0,
+        "right": 438,
+        "bottom": 88
+      },
+      {
+        "number": 10,
+        "left": 28,
+        "top": 100,
+        "right": 438,
+        "bottom": 213
+      },
+      {
+        "number": 11,
+        "left": 28,
+        "top": 225,
+        "right": 438,
+        "bottom": 338
+      },
+      {
+        "number": 12,
+        "left": 28,
+        "top": 350,
+        "right": 438,
+        "bottom": 463
+      }
+    ]
+  }
+}

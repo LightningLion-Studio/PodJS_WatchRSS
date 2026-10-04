@@ -1,0 +1,824 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/rss/DefaultRssRepository.kt",
+  "sourceSha256": "5bd64d095da9f7c8642935dcbc2ae428fa289f25401a41b64198ad32eef36218",
+  "methodSha256": "89b2c093712a542fcab0b6112df6496aaec03b6a3bf943e4187bc4b46202a29a",
+  "scope": "Verbatim native upsert method, native data classes with Room annotation removed; DAO, externalization, metadata calculation and size helpers doubled. Entity merge decisions only.",
+  "cases": [
+    {
+      "authoritative": false,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.10000000149011612,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": false,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": true,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 99,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 99,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "old body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": true,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "old body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": false,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.10000000149011612,
+        "changedAt": 100,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 100,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.10000000149011612,
+        "changedAt": 100,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 100,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.10000000149011612,
+        "changedAt": 101,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 101,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.10000000149011612,
+        "changedAt": 0,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": false,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 0,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": true,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 99,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 99,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 100,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 100,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 101,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 101,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 0,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.1,
+      "body": "changed body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": true,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "new",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 0,
+        "content": "changed body",
+        "originalContent": "changed body"
+      },
+      "progress": 0.7,
+      "body": "changed body",
+      "oldTime": 0
+    },
+    {
+      "authoritative": false,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.10000000149011612,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": false,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 4,
+        "positionHash": "old-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.5,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 0
+    },
+    {
+      "authoritative": false,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": true,
+        "progress": 0.699999988079071,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 0
+    },
+    {
+      "authoritative": true,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 99,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 99,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 99,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 100,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 100,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 101,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 101,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 100
+    },
+    {
+      "authoritative": true,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.10000000149011612,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.1,
+      "body": "",
+      "oldTime": 0
+    },
+    {
+      "authoritative": true,
+      "newTime": 0,
+      "expected": {
+        "positionBytes": 9,
+        "positionHash": "incoming-position-hash",
+        "bodyHash": "old",
+        "isRead": false,
+        "progress": 0.699999988079071,
+        "changedAt": 0,
+        "content": "old body",
+        "originalContent": "old body"
+      },
+      "progress": 0.7,
+      "body": "",
+      "oldTime": 0
+    }
+  ]
+}

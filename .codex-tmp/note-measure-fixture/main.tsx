@@ -1,0 +1,14 @@
+import {mount} from '@pocketjs/framework/solid';
+import {getDisplayMetrics} from '@podjs/framework/watch';
+import {Text,View} from '@pocketjs/framework/components';
+import {onFrame} from '@pocketjs/framework/lifecycle';
+import {createSignal} from 'solid-js';
+import {NoteDetailScreen} from '../../src/ui/NotesScreen.tsx';
+import type {Scroller} from '@pocketjs/framework/kinetics';
+import type {MemoRepository} from '../../src/notes/repository.ts';
+import type {MemoNote} from '../../src/notes/types.ts';
+const metrics=getDisplayMetrics();
+const body=Array.from({length:220},(_,i)=>`第${i+1}段：WWW iii mixed English words with narrow and wide glyphs; 你好世界，宽度必须按字库测量。`).join('\n');
+const note:MemoNote={noteId:'fixture-note',folderId:null,title:'正文测量',markdown:body,plainText:body,contentHash:'',baseContentHash:'',baseMarkdown:'',pinned:false,createdAt:0,updatedAt:Date.now(),modifiedBy:'fixture',deleted:false,deletedAt:0};
+const repository={get:async()=>note} as unknown as MemoRepository;
+mount(()=>{let scroll:Scroller|undefined,jumped=false;const started=Date.now(),[offset,setOffset]=createSignal(0);onFrame(()=>{if(!jumped&&scroll&&Date.now()-started>6000){jumped=true;scroll.scrollTo(18000,{immediate:true});}const next=scroll?.offset()??0;if(next!==offset())setOffset(next);});return <View class="absolute inset-0 bg-black"><NoteDetailScreen repository={repository} noteId={note.noteId} width={metrics.logicalWidth} height={metrics.logicalHeight} input={async()=>null} onBack={()=>{}} ref={value=>{if(value.scroller)scroll=value.scroller;}}/><View accessibilityLabel={`OFFSET:${offset().toFixed(1)}`} class="absolute left-[0] top-[0] w-[100] h-[20] bg-[#333333]"><Text class="text-xs text-white">{offset().toFixed(1)}</Text></View></View>});

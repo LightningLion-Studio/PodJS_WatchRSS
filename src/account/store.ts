@@ -1,0 +1,15 @@
+import { SecureStorage, WatchAccountState, WatchEntitlementSnapshot, WatchTelemetryConfig } from "./types";
+
+const KEY = "state_json";
+const entitlement = (v: any): WatchEntitlementSnapshot => ({ plan: typeof v?.plan === "string" && v.plan ? v.plan : "free", active: v?.active !== false, expiresAtMillis: Number(v?.expiresAtMillis || 0), features: Array.isArray(v?.features) ? v.features.map(String).map((x: string) => x.trim()).filter(Boolean) : [] });
+const telemetry = (v: any): WatchTelemetryConfig => ({ anonymousEnabled: v?.anonymousEnabled !== false, diagnosticsEnabled: v?.diagnosticsEnabled === true, sampleRate: typeof v?.sampleRate === "number" ? v.sampleRate : 1 });
+
+export class WatchAccountStore {
+  private readonly listeners = new Set<() => void>();
+  constructor(private readonly storage: SecureStorage, private readonly key = KEY) {}
+  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  private changed(): void { for (const listener of [...this.listeners]) { try { listener(); } catch { /* observers cannot invalidate a committed account write */ } } }
+  async read(): Promise<WatchAccountState | null> { const raw = await this.storage.get(this.key); if (!raw) return null; try { const j = JSON.parse(raw); const state: WatchAccountState = { userId: String(j.userId || "").trim(), phoneMasked: String(j.phoneMasked || "").trim(), installId: String(j.installId || "").trim(), watchDeviceToken: String(j.watchAccessToken || j.watchDeviceToken || "").trim(), tokenExpiresAtMillis: Number(j.accessTokenExpiresAtMillis || j.tokenExpiresAtMillis || 0), watchRefreshToken: String(j.watchRefreshToken || "").trim(), refreshTokenExpiresAtMillis: Number(j.refreshTokenExpiresAtMillis || 0), backendBaseUrl: String(j.backendBaseUrl || "").trim(), posthogHost: String(j.posthogHost || "").trim(), posthogProjectApiKey: String(j.posthogProjectApiKey || "").trim(), entitlement: entitlement(j.entitlement), telemetryConfig: telemetry(j.telemetryConfig), updatedAtMillis: Number(j.updatedAtMillis || 0) }; return state.userId && state.watchDeviceToken ? state : null; } catch (_) { return null; } }
+  async save(state: WatchAccountState): Promise<void> { await this.storage.set(this.key, JSON.stringify({ userId: state.userId, phoneMasked: state.phoneMasked, installId: state.installId, watchDeviceToken: state.watchDeviceToken, tokenExpiresAtMillis: state.tokenExpiresAtMillis, watchAccessToken: state.watchDeviceToken, accessTokenExpiresAtMillis: state.tokenExpiresAtMillis, watchRefreshToken: state.watchRefreshToken, refreshTokenExpiresAtMillis: state.refreshTokenExpiresAtMillis, backendBaseUrl: state.backendBaseUrl, posthogHost: state.posthogHost, posthogProjectApiKey: state.posthogProjectApiKey, updatedAtMillis: state.updatedAtMillis, entitlement: { plan: state.entitlement.plan, active: state.entitlement.active, expiresAtMillis: state.entitlement.expiresAtMillis, features: state.entitlement.features }, telemetryConfig: state.telemetryConfig })); this.changed(); }
+  async clear(): Promise<void> { await this.storage.remove(this.key); this.changed(); }
+}

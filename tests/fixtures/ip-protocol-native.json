@@ -1,0 +1,523 @@
+{
+  "sourceSha256": "273826b59425ab6ea6412a1a9e8222e9f82aa1247f80cc1fde74f95f144a1893",
+  "runtime": "Desktop JVM executing unchanged native IpSyncProtocol.kt",
+  "cases": [
+    {
+      "valid": true,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "0mZLf-KHmMTiOX5DO6yACY6MNnzdslOWPoibKbDhd9U=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "TQeZpQwHJ_m37-diyCeJpmzn31gpY-oemtq1eN4uhcQ=",
+        "acceptedResumeSeq": 0,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|39999|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "0X5UhQNSErztQ8vHJ9n1Tql5cg2MnsXCrIms1hzrmLk=",
+        "type": "hello",
+        "version": 2,
+        "lastAckSeq": 0
+      }
+    },
+    {
+      "valid": false,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 1,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "XgPmlhr-AhNJLHNFI4vyaUxqbmlfHXBW0zdrk6hAhro=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "cwYbWwKsHB0V_proXiKjpvEGhiXtNCRoRa9rRawIX_M=",
+        "acceptedResumeSeq": 1,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "1|\u624b\u673a\ud83d\ude00|7|2000000000000|39999|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "lWd5LpnZNQYpuHpdX6y8inS_cNcCcpo7y1dL0V7q7_w=",
+        "type": "hello",
+        "resumeSessionId": "resume",
+        "version": 2,
+        "lastAckSeq": 1
+      }
+    },
+    {
+      "valid": false,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 999
+      },
+      "tampered": false,
+      "signature": "Vky_-htfTV-xkp63hGbW4eQZTyF5esB6U6CsD0YI0aA=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "3_jERCG75kIRwUrXkU3k4DEQwoDOzSeF6ZhyyPjcnvg=",
+        "acceptedResumeSeq": 2,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|999|39999|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "yWIHAiTo7G3MPR7Wa4a2Hw0tjB4dU7ejq2v3WBNEOzA=",
+        "type": "hello",
+        "version": 2,
+        "lastAckSeq": 2
+      }
+    },
+    {
+      "valid": false,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 0,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "mUyyBPBcmMCSNHNGJgAyR2vXNma2TaS3OtpjkvBYtCo=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "bImLhktKezhgDW1ClVz92L0JZSNf_INOUfn_CVf1quE=",
+        "acceptedResumeSeq": 3,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|0|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "CP3KKsIptTkxQ5WSSt_JJzEG4uskpUyFTFVqgOHS7F0=",
+        "type": "hello",
+        "resumeSessionId": "resume",
+        "version": 2,
+        "lastAckSeq": 3
+      }
+    },
+    {
+      "valid": false,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 65536,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "KW1tzNqTOClneUaJ6O-VTYx2h3UdkxrBiH4iVgXi9uA=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "yfgAt2oyIVmfjNst0VJIn0cK6QzeosHcz3uD9ebyV4M=",
+        "acceptedResumeSeq": 4,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|65536|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "OYwpmJg2IlLC0-q-GMElnICu9-bxhojeAGW8iR5_L_A=",
+        "type": "hello",
+        "version": 2,
+        "lastAckSeq": 4
+      }
+    },
+    {
+      "valid": false,
+      "input": {
+        "endpoints": [],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "Cm1pv8PlBZovwbgKLbkCU1GwRZmNFa3nV2Vw_sDWkv8=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "xf0sqaLE0fqANgixPo8hcva0sIDxYawPI1pttFQKFeQ=",
+        "acceptedResumeSeq": 5,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|39999||challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "ipYdL7Kwna0EcqLUyhakF0P06XDfQO6F2vGN5-ASijU=",
+        "type": "hello",
+        "resumeSessionId": "resume",
+        "version": 2,
+        "lastAckSeq": 5
+      }
+    },
+    {
+      "valid": true,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "z",
+            "transportKind": "future"
+          },
+          {
+            "address": "bad"
+          },
+          null,
+          [
+            "compact",
+            "10.0.0.2",
+            "phoneHotspot",
+            250
+          ]
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "-YxojEN-Odyb__6nO16NllfsbJiYBaOuKU9VZkiV4gA=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "P3W-Pc1_VRDZ0IS3r7V_0s7xsRs0n9lpHy6LH9aSVv0=",
+        "acceptedResumeSeq": 6,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|39999|compact,10.0.0.2,ipv4,phoneHotspot,250;z,192.168.1.2,ipv4,unknownLocal,50;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "d2wJLIyyjynph7_5LPqOp-cXAGspPNuA78SG3SciaX8=",
+        "type": "hello",
+        "version": 2,
+        "lastAckSeq": 6
+      }
+    },
+    {
+      "valid": true,
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "n",
+            "transportKind": "wifiLan",
+            "priority": 4294967297
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "AAECAwQFBgcICQoLDA0ODw==",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "tampered": false,
+      "signature": "yvhR6J3ZqTWYmt3S6G0sQUMDl65u8xCuI8Bqyf9inqA=",
+      "ack": {
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "routeKind": "wifiLan",
+        "hmac": "jdTKawOQW38RMa869-eLwb7O_lqEZQLf5Ni3Wje2a8o=",
+        "acceptedResumeSeq": 7,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|39999|n,192.168.1.2,ipv4,wifiLan,1;|challenge|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "challenge",
+        "endpointEpoch": 7,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "C3-3E1hO0P3CKEytMfjUji_LPXp8T3Q1vBxDc-fC1DY=",
+        "type": "hello",
+        "resumeSessionId": "resume",
+        "version": 2,
+        "lastAckSeq": 7
+      }
+    },
+    {
+      "valid": true,
+      "input": {
+        "p": 40000,
+        "a": [
+          [
+            "wifi",
+            "10.1.2.3",
+            "wifiLan",
+            300
+          ]
+        ],
+        "c": "short",
+        "e": 8,
+        "v": 2,
+        "x": 2000000000000,
+        "id": "phone",
+        "k": "AAECAwQFBgcICQoLDA0ODw=="
+      },
+      "tampered": false,
+      "signature": "qdqOSjcqwDxfHR0-TADAy-Nj6tpkpEHjae4vq62JoCg=",
+      "ack": {
+        "serverDeviceId": "phone",
+        "routeKind": "wifiLan",
+        "hmac": "K1SBIrp7pzqhTDFD5iIaJktP4clLhYeVQDtcRwQINPE=",
+        "acceptedResumeSeq": 8,
+        "sessionId": "session",
+        "serverNonce": "serverNonce"
+      },
+      "ackValid": true,
+      "canonical": "2|phone|8|2000000000000|40000|wifi,10.1.2.3,ipv4,wifiLan,300;|short|AAECAwQFBgcICQoLDA0ODw==",
+      "hello": {
+        "challengeId": "short",
+        "endpointEpoch": 8,
+        "watchDeviceId": "watch\ud83d\ude00",
+        "clientNonce": "nonce",
+        "hmac": "rhlZ_Bd0WiBqpVg_R7fo8GyiAldCfIYNrNaw-j7ibOw=",
+        "type": "hello",
+        "version": 2,
+        "lastAckSeq": 8
+      }
+    },
+    {
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "not+url/key",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|39999|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|not+url/key",
+      "error": "IllegalArgumentException"
+    },
+    {
+      "input": {
+        "endpoints": [
+          {
+            "address": "192.168.1.2",
+            "endpointId": "b",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "192.168.1.3",
+            "endpointId": "a",
+            "transportKind": "wifiLan",
+            "family": "ipv4",
+            "priority": 300
+          },
+          {
+            "address": "127.0.0.1",
+            "endpointId": "x",
+            "transportKind": "bluetoothBridge"
+          }
+        ],
+        "challengeId": "challenge",
+        "port": 39999,
+        "challengeSecret": "",
+        "serverDeviceId": "\u624b\u673a\ud83d\ude00",
+        "epoch": 7,
+        "version": 2,
+        "expiresAt": 2000000000000
+      },
+      "canonical": "2|\u624b\u673a\ud83d\ude00|7|2000000000000|39999|a,192.168.1.3,ipv4,wifiLan,300;b,192.168.1.2,ipv4,wifiLan,300;x,127.0.0.1,ipv4,bluetoothBridge,100;|challenge|",
+      "error": "IllegalArgumentException"
+    }
+  ]
+}

@@ -1,0 +1,382 @@
+{
+  "cases": [
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "heartbeat",
+        "sequence": 1
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "heartbeat",
+        "sessionId": "s",
+        "sequence": 1
+      },
+      "state": null
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 1,
+        "preset": {
+          "schemaVersion": 2,
+          "id": "p",
+          "name": "base",
+          "body": {
+            "fontAssetId": null,
+            "fontFaceIndex": 0,
+            "variationSettings": "",
+            "fontSizeSp": 14,
+            "fontWeight": 400,
+            "italic": false,
+            "underline": false,
+            "strikethrough": false,
+            "colorArgb": 4294111986,
+            "lineHeightEm": 1.35,
+            "letterSpacingEm": 0,
+            "paragraphSpacingDp": 6,
+            "firstLineIndentEm": 0,
+            "horizontalPaddingDp": 14,
+            "alignment": "START",
+            "lineBreakMode": "PARAGRAPH",
+            "hyphenation": "NONE",
+            "renderMode": "READABILITY",
+            "fontSynthesis": "ENABLED"
+          },
+          "categoryTypographyEnabled": false,
+          "title": {},
+          "subtitle": {},
+          "quote": {},
+          "code": {},
+          "link": {},
+          "background": {
+            "type": "SOLID",
+            "colorArgb": 4278190080,
+            "assetId": null,
+            "fit": "CROP",
+            "focusX": 0.5,
+            "focusY": 0.5,
+            "zoom": 1,
+            "rotationDegrees": 0,
+            "blurDp": 0,
+            "brightness": 1,
+            "saturation": 1,
+            "overlayColorArgb": 4278190080,
+            "overlayOpacity": 0,
+            "videoTrimStartMs": 0,
+            "videoTrimEndMs": 60000,
+            "videoSpeed": 1,
+            "loop": true,
+            "posterAssetId": null
+          },
+          "codeBackgroundColorArgb": 4280753672,
+          "accentColorArgb": 4294924854,
+          "updatedAt": 0,
+          "modifiedBy": "",
+          "deleted": false
+        }
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "update",
+        "sessionId": "s",
+        "sequence": 1,
+        "applied": true
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 1,
+        "name": "base",
+        "fontSizeSp": 14,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 1,
+        "changes": {
+          "name": "stale"
+        }
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "update",
+        "sessionId": "s",
+        "sequence": 1,
+        "applied": false
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 1,
+        "name": "base",
+        "fontSizeSp": 14,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 2,
+        "changes": {
+          "name": " renamed ",
+          "body": {
+            "fontAssetId": null,
+            "fontFaceIndex": 0,
+            "variationSettings": "",
+            "fontSizeSp": 22,
+            "fontWeight": 400,
+            "italic": false,
+            "underline": false,
+            "strikethrough": false,
+            "colorArgb": 4294111986,
+            "lineHeightEm": 1.35,
+            "letterSpacingEm": 0,
+            "paragraphSpacingDp": 6,
+            "firstLineIndentEm": 0,
+            "horizontalPaddingDp": 14,
+            "alignment": "START",
+            "lineBreakMode": "PARAGRAPH",
+            "hyphenation": "NONE",
+            "renderMode": "READABILITY",
+            "fontSynthesis": "ENABLED"
+          }
+        }
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "update",
+        "sessionId": "s",
+        "sequence": 2,
+        "applied": true
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 3,
+        "changes": {}
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "update",
+        "sessionId": "s",
+        "sequence": 3,
+        "applied": true
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "heartbeat",
+        "sequence": 7
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "heartbeat",
+        "sessionId": "s",
+        "sequence": 7,
+        "appliedSequence": 7
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 8,
+        "changes": {
+          "body": null
+        }
+      },
+      "error": true,
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 8,
+        "changes": {
+          "name": "failed-sequence-retry"
+        }
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "update",
+        "sessionId": "s",
+        "sequence": 8,
+        "applied": false
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "heartbeat",
+        "sequence": 0
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "heartbeat",
+        "sessionId": "s",
+        "sequence": 0,
+        "appliedSequence": 8
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": "other",
+        "phase": "stop"
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "stop",
+        "sessionId": "other",
+        "applied": false
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 2,
+        "name": "renamed",
+        "fontSizeSp": 22,
+        "resourceTransferInProgress": false
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "resourceHandoff",
+        "sequence": 9,
+        "presetJson": "{\"schemaVersion\": 2, \"id\": \"p\", \"name\": \"base\", \"body\": {\"fontAssetId\": null, \"fontFaceIndex\": 0, \"variationSettings\": \"\", \"fontSizeSp\": 14, \"fontWeight\": 400, \"italic\": false, \"underline\": false, \"strikethrough\": false, \"colorArgb\": 4294111986, \"lineHeightEm\": 1.35, \"letterSpacingEm\": 0, \"paragraphSpacingDp\": 6, \"firstLineIndentEm\": 0, \"horizontalPaddingDp\": 14, \"alignment\": \"START\", \"lineBreakMode\": \"PARAGRAPH\", \"hyphenation\": \"NONE\", \"renderMode\": \"READABILITY\", \"fontSynthesis\": \"ENABLED\"}, \"categoryTypographyEnabled\": false, \"title\": {}, \"subtitle\": {}, \"quote\": {}, \"code\": {}, \"link\": {}, \"background\": {\"type\": \"SOLID\", \"colorArgb\": 4278190080, \"assetId\": null, \"fit\": \"CROP\", \"focusX\": 0.5, \"focusY\": 0.5, \"zoom\": 1, \"rotationDegrees\": 0, \"blurDp\": 0, \"brightness\": 1, \"saturation\": 1, \"overlayColorArgb\": 4278190080, \"overlayOpacity\": 0, \"videoTrimStartMs\": 0, \"videoTrimEndMs\": 60000, \"videoSpeed\": 1, \"loop\": true, \"posterAssetId\": null}, \"codeBackgroundColorArgb\": 4280753672, \"accentColorArgb\": 4294924854, \"updatedAt\": 0, \"modifiedBy\": \"\", \"deleted\": false}"
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "resourceHandoff",
+        "sessionId": "s",
+        "sequence": 9,
+        "applied": true
+      },
+      "state": {
+        "sessionId": "s",
+        "sequence": 9,
+        "name": "base",
+        "fontSizeSp": 14,
+        "resourceTransferInProgress": true
+      }
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "stop"
+      },
+      "response": {
+        "success": true,
+        "action": "previewReader",
+        "phase": "stop",
+        "sessionId": "s",
+        "applied": true
+      },
+      "state": null
+    },
+    {
+      "request": {
+        "version": 2,
+        "sessionId": " s ",
+        "phase": "update",
+        "sequence": 10,
+        "changes": {
+          "name": "missing-baseline"
+        }
+      },
+      "error": true,
+      "state": null
+    }
+  ],
+  "coalescingBefore": {
+    "sessionId": "c",
+    "sequence": 0,
+    "name": "base",
+    "fontSizeSp": 14,
+    "resourceTransferInProgress": false
+  },
+  "coalescingAfter": {
+    "sessionId": "c",
+    "sequence": 2,
+    "name": "two",
+    "fontSizeSp": 14,
+    "resourceTransferInProgress": false
+  },
+  "timeoutExpired": true,
+  "sourceHashes": {
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/reader/ReaderPresetModels.kt": "44cefe9172b7f86ceeae1e59f8ce3646db17b9ee11a3dc21dd1fc234f5369fef",
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/reader/WatchReaderPresetPreviewSession.kt": "379ce65db6599a69b78d4f4fe43894f285855c36917a1b7c80f44c6c2d36abf4",
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/ReaderPresetPreviewPayload.kt": "97716ab5bfc7316fccd258539ac378b9748de9fbf957c3040b56822109b506ec"
+  },
+  "runtime": "Desktop JVM with unmodified native preview session/payload/models and Android JSON. Wire cases disable coalescing; separate coalescing test uses 1000 ms and expiry test uses 80 ms. Not device/UI validation."
+}

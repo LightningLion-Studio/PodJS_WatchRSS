@@ -1,0 +1,1185 @@
+{
+  "cases": [
+    {
+      "name": "empty",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-False-equal",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-False-newtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":101,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-False-oldtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":99,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-False-newhash",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"new\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"x\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "new",
+          "chunkIndexes": [
+            1
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-False-unavailable",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"bodyAvailable\":false}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-False-deleted",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"deleted\":true,\"deletedAt\":101}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-False-read",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"isRead\":true}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-False-progress-epsilon",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.501,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-False-progress-ahead",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5010001,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-False-readingtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"readingPositionChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-False-save",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"favoriteChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-equal",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-True-newtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":101,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-oldtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":99,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-True-newhash",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"new\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"x\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "new",
+          "chunkIndexes": [
+            1
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-unavailable",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"bodyAvailable\":false}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-True-deleted",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"deleted\":true,\"deletedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-read",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"isRead\":true}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-progress-epsilon",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.501,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "full-True-progress-ahead",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5010001,\"bodySyncMode\":\"full\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-readingtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"readingPositionChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "full-True-save",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"full\",\"favoriteChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-equal",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-False-newtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":101,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-oldtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":99,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-False-newhash",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"new\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"x\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "new",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-unavailable",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"bodyAvailable\":false}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-False-deleted",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"deleted\":true,\"deletedAt\":101}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-read",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"isRead\":true}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-progress-epsilon",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.501,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-False-progress-ahead",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5010001,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-readingtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"readingPositionChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-False-save",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"favoriteChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": false,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-True-equal",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-True-newtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":101,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": true
+        }
+      ]
+    },
+    {
+      "name": "saved-True-oldtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":99,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-True-newhash",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"new\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"x\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "new",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-True-unavailable",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"bodyAvailable\":false}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-True-deleted",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"deleted\":true,\"deletedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "saved-True-read",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"isRead\":true}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": true
+        }
+      ]
+    },
+    {
+      "name": "saved-True-progress-epsilon",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.501,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "saved-True-progress-ahead",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5010001,\"bodySyncMode\":\"saved\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": true
+        }
+      ]
+    },
+    {
+      "name": "saved-True-readingtime",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"readingPositionChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": true
+        }
+      ]
+    },
+    {
+      "name": "saved-True-save",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodySyncMode\":\"saved\",\"favoriteChangedAt\":1}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": true
+        }
+      ]
+    },
+    {
+      "name": "shape-bodyHash-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u7f3a\u5c11\u6574\u4f53\u54c8\u5e0c\uff1aa.bodyHash"
+    },
+    {
+      "name": "shape-bodyByteCount-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":-1,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5927\u5c0f\u65e0\u6548\uff1aa.bodyByteCount=-1"
+    },
+    {
+      "name": "shape-bodyByteCount-1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":0,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u6570\u4e0d\u5339\u914d\uff1aa.chunkHashes expected=1 actual=3"
+    },
+    {
+      "name": "shape-bodyByteCount-2",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":5,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "shape-bodyByteCount-3",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":7,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u6570\u4e0d\u5339\u914d\uff1aa.chunkHashes expected=4 actual=3"
+    },
+    {
+      "name": "shape-bodyByteCount-4",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":\"6\",\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.bodyByteCount=6"
+    },
+    {
+      "name": "shape-bodyByteCount-5",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":null,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.bodyByteCount=null"
+    },
+    {
+      "name": "shape-bodyByteCount-6",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6.0,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.bodyByteCount=6.0"
+    },
+    {
+      "name": "shape-chunkSize-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":-1,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u5927\u5c0f\u65e0\u6548\uff1aa.chunkSize=-1"
+    },
+    {
+      "name": "shape-chunkSize-1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":0,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u5927\u5c0f\u65e0\u6548\uff1aa.chunkSize=0"
+    },
+    {
+      "name": "shape-chunkSize-2",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":\"2\",\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkSize=2"
+    },
+    {
+      "name": "shape-chunkSize-3",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":null,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkSize=null"
+    },
+    {
+      "name": "shape-chunkSize-4",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2.0,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkSize=2.0"
+    },
+    {
+      "name": "shape-chunkHashes-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u6570\u4e0d\u5339\u914d\uff1aa.chunkHashes expected=3 actual=0"
+    },
+    {
+      "name": "shape-chunkHashes-1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u6570\u4e0d\u5339\u914d\uff1aa.chunkHashes expected=3 actual=1"
+    },
+    {
+      "name": "shape-chunkHashes-2",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",null,\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5b57\u6bb5\u7c7b\u578b\u65e0\u6548\uff1aa.chunkHashes[1]"
+    },
+    {
+      "name": "shape-chunkHashes-3",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\" \",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u5143\u6570\u636e\u5305\u542b\u7a7a\u5206\u5757\u54c8\u5e0c\uff1aa.chunkHashes[1]"
+    },
+    {
+      "name": "shape-chunkHashes-4",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":null,\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u6e05\u5355\u5206\u5757\u6570\u4e0d\u5339\u914d\uff1aa.chunkHashes expected=3 actual=0"
+    },
+    {
+      "name": "shape-articleId-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "shape-articleId-1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":null,\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "null",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "shape-bodyAvailable-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodyAvailable\":false}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "shape-bodyAvailable-1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"bodyAvailable\":\"false\"}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "shape-deleted-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "shape-sourceDeviceId-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"sourceDeviceId\":null}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "deleted-independentChangedAt",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100,\"independentChangedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "deleted-favoriteChangedAt",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100,\"favoriteChangedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "deleted-watchLaterChangedAt",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100,\"watchLaterChangedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "deleted-deletedAt",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "deleted-readingPositionChangedAt",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100,\"readingPositionChangedAt\":101}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "deleted-updatedAt",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":101,\"readingProgress\":0.5,\"deleted\":true,\"deletedAt\":100}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    },
+    {
+      "name": "budget--1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": -1,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-0",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 0,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-1",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 1,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-2",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-3",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 3,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-4",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 4,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "d",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-5",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 5,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "d",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0
+          ],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "budget-6",
+      "local": "{\"articleManifest\":[]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"b\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"c\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5,\"deleted\":true},{\"articleId\":\"d\",\"bodyHash\":\"body\",\"bodyByteCount\":2,\"chunkSize\":2,\"chunkHashes\":[\"d\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 6,
+      "support": true,
+      "ok": true,
+      "requests": [
+        {
+          "articleId": "a",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "b",
+          "bodyHash": "body",
+          "chunkIndexes": [
+            0,
+            1,
+            2
+          ],
+          "metadataOnly": false
+        },
+        {
+          "articleId": "c",
+          "bodyHash": "body",
+          "chunkIndexes": [],
+          "metadataOnly": false
+        }
+      ]
+    },
+    {
+      "name": "duplicate-local-last",
+      "local": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"old\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5},{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "remote": "{\"articleManifest\":[{\"articleId\":\"a\",\"bodyHash\":\"body\",\"bodyByteCount\":6,\"chunkSize\":2,\"chunkHashes\":[\"a\",\"b\",\"c\"],\"metadataHash\":\"meta\",\"updatedAt\":100,\"readingProgress\":0.5}]}",
+      "limit": 2147483647,
+      "support": true,
+      "ok": true,
+      "requests": []
+    }
+  ],
+  "sdk": 30,
+  "device": "OWW242",
+  "sources": {
+    "phoneconnection/bluetooth/LibrarySyncPayload.kt": "7ab6a6bc59aa95ffa920c22df7f8a8be79421b517c5c2f38d03fea5820d26c2f",
+    "data/rss/SyncedSavedArticle.kt": "fbdd00c7ed143db59afee8b5599957465bb64d38f6b7fc620918f27a951a3a7f"
+  },
+  "scope": "Actual Android production parseArticleManifest and buildBodyRequestsForRemoteArticles, isolated reference instrumentation. Local manifests are constructed from parsed fixture values, not exported from Room."
+}

@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.bilirsa","name":"Bili RSA Host Verification","versionName":"0.1.0","versionCode":1,"capabilities":["data.kv","crypto.basic","host.lifecycle","runtime.timer"]}

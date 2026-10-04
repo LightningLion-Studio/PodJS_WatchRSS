@@ -1,0 +1,62 @@
+import org.gradle.api.GradleException
+
+// Supply this as the LAST explicit -I script, after native inject.gradle or
+// inject-info-restoration.gradle, or after the existing Pod startup init scripts.
+// This script selects only the test runner and androidTest source directory.
+def harness = new File('/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/tests/android-font-scale').canonicalFile
+def javaSources = new File(harness, 'java')
+def runners = [
+    'com.lightningstudio.watchrss.onboardingreference': 'dev.podjs.tests.fontscale.NativeFontScaleRunner',
+    'dev.podjs.tests.startup': 'dev.podjs.tests.fontscale.PodFontScaleRunner'
+]
+def selected = []
+
+def verifyIdentity = { project, android ->
+    def appId = android.defaultConfig.applicationId
+    def runner = runners[appId]
+    if (runner == null) {
+        throw new GradleException("Font-scale runner refuses applicationId '${appId}'. " +
+            'Use the existing isolated native or Pod startup setup, with this init script last; ' +
+            'production IDs are never rewritten.')
+    }
+    def testId = android.defaultConfig.testApplicationId ?: "${appId}.test"
+    if (testId != "${appId}.test") {
+        throw new GradleException("Font-scale runner refuses testApplicationId '${testId}'")
+    }
+    if (!android.productFlavors.isEmpty()) {
+        throw new GradleException('Font-scale runner refuses product flavors that can change final identities')
+    }
+    def testedBuild = android.buildTypes.getByName(android.testBuildType)
+    if ((testedBuild.applicationIdSuffix ?: '') != '') {
+        throw new GradleException('Font-scale runner refuses a tested build with an applicationIdSuffix')
+    }
+    [appId: appId, testId: testId.toString(), runner: runner]
+}
+
+gradle.beforeProject { project ->
+    project.afterEvaluate {
+        if (project.path in [':app', ':androidApp'] && project.plugins.hasPlugin('com.android.application')) {
+            def android = project.extensions.getByName('android')
+            // The pre-existing isolated init script has now assigned its final applicationId.
+            def identity = verifyIdentity(project, android)
+            android.defaultConfig.testInstrumentationRunner = identity.runner
+            android.sourceSets.getByName('androidTest').java.srcDir(javaSources)
+            selected.add([project: project, identity: identity])
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    if (selected.size() != 1) {
+        throw new GradleException('Font-scale init requires exactly one isolated :app or :androidApp target')
+    }
+    def item = selected[0]
+    def android = item.project.extensions.getByName('android')
+    if (verifyIdentity(item.project, android) != item.identity ||
+            android.defaultConfig.testInstrumentationRunner != item.identity.runner) {
+        throw new GradleException('A later configuration hook changed the isolated font-scale runner or identity')
+    }
+    if (!android.sourceSets.getByName('androidTest').java.srcDirs.any { it.canonicalFile == javaSources }) {
+        throw new GradleException('Font-scale runner sources were removed from androidTest')
+    }
+}

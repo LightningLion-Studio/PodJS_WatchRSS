@@ -1,0 +1,13 @@
+import {mount} from '@pocketjs/framework/solid';
+import {onFrame} from '@pocketjs/framework/lifecycle';
+import {getDisplayMetrics} from '@podjs/framework/watch';
+import {NoteDetailScreen} from '../../src/ui/NotesScreen.tsx';
+import type {MemoRepository} from '../../src/notes/repository.ts';
+import type {MemoNote} from '../../src/notes/types.ts';
+const metrics=getDisplayMetrics();
+const body=Array.from({length:20},(_,i)=>`第${i+1}段：WWW iii mixed English words with narrow and wide glyphs; 你好世界，宽度必须按字库测量。`).join('\n');
+const note:MemoNote={noteId:'fixture-note',folderId:null,title:'正文测量',markdown:body,plainText:body,contentHash:'',baseContentHash:'',baseMarkdown:'',pinned:false,createdAt:0,updatedAt:Date.now(),modifiedBy:'fixture',deleted:false,deletedAt:0};
+const repository={get:async()=>note} as unknown as MemoRepository;
+let scrollOffset=()=>0,lastLog=0;
+onFrame(()=>{const now=Date.now();if(now-lastLog>1000){lastLog=now;console.log('NOTE_SCROLL_OFFSET',scrollOffset());}});
+mount(()=><NoteDetailScreen repository={repository} noteId={note.noteId} width={metrics.logicalWidth} height={metrics.logicalHeight} input={async()=>null} onBack={()=>{}} ref={value=>{if(value.scroller)scrollOffset=value.scroller.offset;}}/>);

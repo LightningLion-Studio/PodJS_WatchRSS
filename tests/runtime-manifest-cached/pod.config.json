@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.manifestcached","name":"WatchRSS Cached Manifest","versionName":"0.1.0","versionCode":1,"capabilities":["data.sqlite","data.kv","data.files.chunks","data.uri","crypto.basic","host.lifecycle","runtime.timer"]}

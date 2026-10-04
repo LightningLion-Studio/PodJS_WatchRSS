@@ -1,0 +1,146 @@
+[
+  {
+    "name": "both-newer",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 150,
+    "later": true,
+    "laterAt": 170,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "both-older",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 50,
+    "later": true,
+    "laterAt": 50,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "favorite-only",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 150,
+    "later": true,
+    "laterAt": 50,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "later-only",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 50,
+    "later": true,
+    "laterAt": 170,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "equal-lower-peer",
+    "peer": "a",
+    "favorite": true,
+    "favoriteAt": 100,
+    "later": true,
+    "laterAt": 120,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "equal-higher-peer",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 100,
+    "later": true,
+    "laterAt": 120,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "unsave-newer",
+    "peer": "z",
+    "favorite": false,
+    "favoriteAt": 150,
+    "later": false,
+    "laterAt": 170,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "zero-unsave",
+    "peer": "z",
+    "favorite": false,
+    "favoriteAt": 0,
+    "later": false,
+    "laterAt": 0,
+    "metadataOnly": true,
+    "authoritative": false
+  },
+  {
+    "name": "authoritative-zero-unsave",
+    "peer": "z",
+    "favorite": false,
+    "favoriteAt": 0,
+    "later": false,
+    "laterAt": 0,
+    "metadataOnly": true,
+    "authoritative": true
+  },
+  {
+    "name": "authoritative-old-save",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 50,
+    "later": true,
+    "laterAt": 50,
+    "metadataOnly": true,
+    "authoritative": true
+  },
+  {
+    "name": "no-stored-body",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 150,
+    "later": true,
+    "laterAt": 170,
+    "metadataOnly": true,
+    "authoritative": false,
+    "noStoredBody": true
+  },
+  {
+    "name": "bad-metadata-hash",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 150,
+    "later": true,
+    "laterAt": 170,
+    "metadataOnly": true,
+    "authoritative": false,
+    "badHash": true
+  },
+  {
+    "name": "no-saved-state",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 150,
+    "later": true,
+    "laterAt": 170,
+    "metadataOnly": true,
+    "authoritative": false,
+    "noStates": true
+  },
+  {
+    "name": "full-without-state",
+    "peer": "z",
+    "favorite": true,
+    "favoriteAt": 150,
+    "later": true,
+    "laterAt": 170,
+    "metadataOnly": false,
+    "authoritative": false,
+    "noStates": true
+  }
+]

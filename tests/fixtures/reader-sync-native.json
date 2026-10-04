@@ -1,0 +1,962 @@
+{
+  "parsing": [
+    {
+      "raw": "{}",
+      "expected": {
+        "presets": [],
+        "fonts": [],
+        "backgrounds": [],
+        "deletions": []
+      }
+    },
+    {
+      "raw": "{\"presets\":[null,\"ignored\",{\"id\":\"p\",\"name\":\"p\",\"payloadJson\":\"{}\",\"updatedAt\":1,\"modifiedBy\":\"a\",\"deleted\":false}]}",
+      "expected": {
+        "presets": [
+          {
+            "id": "p",
+            "name": "p",
+            "payloadJson": "{}",
+            "updatedAt": 1,
+            "modifiedBy": "a",
+            "deleted": false
+          }
+        ],
+        "fonts": [],
+        "backgrounds": [],
+        "deletions": []
+      }
+    },
+    {
+      "raw": "{\"presets\":[{\"id\":\"p\",\"name\":\"p\",\"payloadJson\":\"{}\",\"updatedAt\":1,\"modifiedBy\":\"a\",\"deleted\":false},{\"id\":\"bad\"}]}",
+      "error": true
+    },
+    {
+      "raw": "{\"presets\":[{\"id\":\"p\",\"name\":null,\"payloadJson\":\"{}\",\"updatedAt\":\"3.9\",\"modifiedBy\":\"a\",\"deleted\":\"TRUE\"}]}",
+      "expected": {
+        "presets": [
+          {
+            "id": "p",
+            "name": "null",
+            "payloadJson": "{}",
+            "updatedAt": 3,
+            "modifiedBy": "a",
+            "deleted": true
+          }
+        ],
+        "fonts": [],
+        "backgrounds": [],
+        "deletions": []
+      }
+    }
+  ],
+  "conflicts": [
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 1,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": false,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": true
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "a"
+      },
+      "wins": false
+    },
+    {
+      "local": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "incoming": {
+        "updatedAt": 2,
+        "deleted": true,
+        "modifiedBy": "z"
+      },
+      "wins": false
+    }
+  ],
+  "transfer": [
+    {
+      "index": 1,
+      "error": "\u8d44\u6e90\u4f20\u8f93\u5df2\u53d8\u5316\uff0c\u8bf7\u4ece\u7b2c\u4e00\u5757\u91cd\u8bd5"
+    },
+    {
+      "index": 0,
+      "response": {
+        "success": true,
+        "action": "syncReader",
+        "phase": "pushResource",
+        "received": true,
+        "applied": false,
+        "chunkIndex": 0,
+        "chunkSha256": "9ed3b916b5b6b1dbe61b8844c8130657b9bc4f7ff80a07c7835989c911ad430a"
+      }
+    },
+    {
+      "index": 0,
+      "response": {
+        "success": true,
+        "action": "syncReader",
+        "phase": "pushResource",
+        "received": true,
+        "applied": false,
+        "chunkIndex": 0,
+        "chunkSha256": "9ed3b916b5b6b1dbe61b8844c8130657b9bc4f7ff80a07c7835989c911ad430a"
+      }
+    },
+    {
+      "index": 1,
+      "response": {
+        "success": true,
+        "action": "syncReader",
+        "phase": "pushResource",
+        "received": true,
+        "applied": true,
+        "chunkIndex": 1,
+        "chunkSha256": "da4a51839ac39aec93a9000e4ac50b7441655d1569772703e4ecf90d46c4dac5"
+      },
+      "targetHash": "bab0fd65561184e5400d0e8f44be1937d41e49163d798724366d342857c7495b"
+    },
+    {
+      "index": 1,
+      "response": {
+        "success": true,
+        "action": "syncReader",
+        "phase": "pushResource",
+        "received": true,
+        "applied": true,
+        "chunkIndex": 1,
+        "chunkSha256": "da4a51839ac39aec93a9000e4ac50b7441655d1569772703e4ecf90d46c4dac5"
+      },
+      "targetHash": "bab0fd65561184e5400d0e8f44be1937d41e49163d798724366d342857c7495b"
+    }
+  ],
+  "pullLast": {
+    "success": true,
+    "action": "syncReader",
+    "phase": "pullResource",
+    "kind": "font",
+    "fileName": "font.ttf",
+    "totalBytes": 1048583,
+    "chunkIndex": 1,
+    "chunkCount": 2,
+    "chunkSha256": "da4a51839ac39aec93a9000e4ac50b7441655d1569772703e4ecf90d46c4dac5",
+    "data": "AwMDAwMDAw=="
+  },
+  "sourceHashes": {
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/ReaderPresetSyncPayload.kt": "1683c1d0c7ac12bdee6ea12815b24d4b7f0b151555ae79fec024676eff22acef",
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/reader/ReaderResourceStore.kt": "f13d1f21021797340fb358658c8851f6bf7417f56ea645022bd5210b90899edc",
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/reader/ReaderPresetEntities.kt": "0d446d6e32513eff39e317be1121018830d5c8f774e6f098dec6e48928de3147",
+    "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/reader/ReaderPresetRepository.kt": "a597fc84d4807c2846af3704e1b3087aeb4f32ca84dcf2e139c05fb614bb4380"
+  },
+  "runtime": "Desktop JVM: verbatim native wire/resource methods and winsOver; model declarations extracted; Android Context replaced with temporary filesDir; database merge not exercised."
+}

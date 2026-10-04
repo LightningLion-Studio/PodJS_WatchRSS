@@ -1,0 +1,13 @@
+{
+  "entry": "main.tsx",
+  "appId": "dev.podjs.tests.notereaderedit",
+  "name": "Note Reader Edit Fixture",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "capabilities": ["data.sqlite", "input.text", "input.touch", "input.rotary", "host.lifecycle"],
+  "resources": {
+    "fontRegular": "../../assets/fonts/watch_sans.ttf",
+    "fontBold": "../../assets/fonts/reader_default_bold.ttf",
+    "extraCharsFile": "../../assets/fonts/charset.txt"
+  }
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "html": "<main><p>短</p></main><article><nav>导航</nav><h1>原文标题</h1><p>比较长的实际正文文字。</p><img data-src=\"../a.png\" srcset=\"other.png 2x\"></article>",
+    "baseUrl": "https://example.test/news/item",
+    "expected": "<article><h1>原文标题</h1><p>比较长的实际正文文字。</p><img data-src=\"../a.png\" src=\"https://example.test/a.png\"></article>"
+  },
+  {
+    "html": "<div id=\"content\"><form>订阅</form><p>正文 &amp; 中文</p><video><source src=\"/a.mp4\"></video><iframe src=\"//video.test/embed\"></iframe></div>",
+    "baseUrl": "https://example.test/news/item",
+    "expected": "<div id=\"content\"><p>正文 &amp; 中文</p><video><source src=\"https://example.test/a.mp4\"></video><iframe src=\"https://video.test/embed\"></iframe></div>"
+  },
+  {
+    "html": "<body><header>顶部</header><p>无语义容器正文</p><footer>尾部</footer></body>",
+    "baseUrl": "https://example.test/news/item",
+    "expected": "<body><p>无语义容器正文</p></body>"
+  },
+  {
+    "html": "<article><img data-original=\"/cover.jpg\"></article>",
+    "baseUrl": "https://example.test/news/item",
+    "expected": "<article><img data-original=\"/cover.jpg\" src=\"https://example.test/cover.jpg\"></article>"
+  },
+  {
+    "html": "<article><script>var a=1;</script><style>p{color:red}</style></article>",
+    "baseUrl": "https://example.test/news/item",
+    "expected": null
+  },
+  {
+    "html": "<div class=\"left_zw\"><p>新闻正文</p><button>按钮</button><svg>图标</svg></div>",
+    "baseUrl": "https://example.test/news/item",
+    "expected": "<div class=\"left_zw\"><p>新闻正文</p></div>"
+  }
+]

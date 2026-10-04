@@ -1,0 +1,20 @@
+{
+  "entry": "main.tsx",
+  "appId": "dev.podjs.tests.notelayoutprogress",
+  "name": "Note Layout Progress Fixture",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "capabilities": ["data.sqlite", "data.kv", "host.lifecycle", "runtime.timer", "input.touch", "input.rotary", "data.images", "text.layout", "text.raster"],
+  "resources": {
+    "fontRegular": "../../assets/fonts/watch_sans.ttf",
+    "fontBold": "../../assets/fonts/reader_default_bold.ttf",
+    "extraCharsFile": "../../assets/fonts/charset.txt",
+    "fontSlots": [
+      {"slot": 33, "px": 12, "path": "../../assets/fonts/reader_default_regular.ttf", "rasterAdvances": true},
+      {"slot": 34, "px": 14, "path": "../../assets/fonts/reader_default_regular.ttf", "rasterAdvances": true},
+      {"slot": 35, "px": 16, "path": "../../assets/fonts/reader_default_regular.ttf", "rasterAdvances": true},
+      {"slot": 36, "px": 18, "path": "../../assets/fonts/reader_default_regular.ttf", "rasterAdvances": true},
+      {"slot": 37, "px": 21.7, "path": "../../assets/fonts/reader_default_bold.ttf", "bold": true, "rasterAdvances": true}
+    ]
+  }
+}

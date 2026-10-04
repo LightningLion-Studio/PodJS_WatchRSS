@@ -1,0 +1,976 @@
+# 实施状态
+
+本文件记录真实完成边界，不将接口存在、单元测试通过或安装成功视为完整产品交付。
+
+## 备忘录缺失图片提示与下载入口：2026-09-26
+
+原生备忘录图片加载失败时，在阅读预设背景上显示两行副标题色提示，并提供带下划线的“下载手机端app以在手机上编辑和同步内容”入口。PodJS 此前仅显示小号黑色提示，缺少下载入口，图片占位固定 180dp。现在图片按原生 96–260dp 范围和成功加载后的宽高比排版；缺图时显示原生大小、颜色和位置的提示，点击入口打开已有的二维码下载弹窗。图像成功路径的独立资源夹具也通过，未发生被清理资源的引用泄漏。
+
+OWW242 生产组件隔离截图使用同一浅色 20sp 预设、同一缺失本地图片和 180 物理像素滚动；原生由 Compose 测试捕获，PodJS 由应用窗口 PixelCopy 捕获，以绕开仍占焦点的 `SysUI.Charging`。两张原始 466×466 图未裁剪或遮罩，全屏 RGB MAE 从 11.394 降到 1.1556/255，提示区域为 0.0897/255；链接字形区域仍为 7.5226/255。独立包在自己的 Activity 内分发点击后确实打开二维码弹窗，仪器测试 1/1 通过。截图、哈希和限制见[设备回执](../artifacts/note-image-parity-receipt.json)。这不证明正式应用实体手指输入、其他预设或所有图片尺寸的逐像素一致。
+
+应用 772 项测试、TypeScript 检查和正式 Android 打包通过。最新 APK [`watchrss-podjs-note-image-parity.apk`](../artifacts/watchrss-podjs-note-image-parity.apk) 已覆盖安装到 OWW242，归档和设备 `base.apk` SHA-256 同为 `6947502e0dbb1a48d9187a5ebf72db36435b3ac67f61d54776568169f9b1caac`，473 个 ZIP 条目可读且无条目间空洞。升级前后 279 个用户数据文件路径相同、33 张业务表逻辑内容一致，`quick_check=ok`、外键错误零，KV 仅同步诊断时间线变化。独立包已卸载，正式 Activity 已恢复；整体迁移继续进行。
+
+## 备忘录表格行内代码样式：2026-09-26
+
+原生表格单元格的行内代码隐藏反引号，但在保留的字符范围使用阅读预设的代码字色和底色。PodJS 先前只做文本转换，字符仍由正文色绘制且没有底纹。现按原生正则记录行内代码在显示文本中的 UTF-16 范围，按换行后的片段绘制底纹和代码字色；原文字段与编辑光标映射保持原样。
+
+OWW242 上用生产 Compose 表格与 PodJS 生产阅读组件显示同一张浅色 20sp 表格，内容包含字面 `**原文**` 和 `前\`码\`后`。代码底纹 RGB 与原生一致；未裁切／遮罩的全屏 RGB MAE 从 2.4797 降至 2.3864/255，代码区域（x300–429、y325–382）从 12.4881 降至 9.7042/255。PodJS 截图来自应用窗口 PixelCopy，因为 `SysUI.Charging` 仍覆盖系统截图。原生和 PodJS 仪器测试各 1 项通过，逐像素回执见[表格行内代码设备记录](../artifacts/note-table-code-receipt.json)。底纹边界仍有约 1–2 个物理像素差异，字形栅格也未完全一致；多行代码、其他主题和实体操作未验收。
+
+应用 771 项测试、TypeScript 检查和正式 Android 打包通过。最新 APK [`watchrss-podjs-note-table-code.apk`](../artifacts/watchrss-podjs-note-table-code.apk) 已覆盖安装，归档与设备 `base.apk` SHA-256 同为 `c2bdc7c1cb63e8e409a53569a7820f36db2a972219d5028bf8ac76906a2535c4`，473 个 ZIP 条目可读。升级前后 278 个用户文件路径相同，33 张业务表逻辑内容一致，`quick_check=ok`、外键错误零，KV 仅同步诊断时间线变化。隔离包已卸载，正式 Activity 运行中，系统充电提示仍占焦点。整体迁移继续进行。
+
+## 备忘录表格单元格 Markdown 文本：2026-09-26
+
+原生 `watchNoteTableCellText` 只去掉行内代码的反引号，`**粗体**`、链接语法等其余标记仍按字面显示。PodJS 此前对单元格调用通用纯文本转换，额外剥掉这些标记，导致显示文本和编辑光标映射都与原生不同。现给单元格单独采用原生规则，保留其他 Markdown 原文；行内代码的颜色与底色仍待补齐。
+
+对应语义回归已加入应用测试，771 项应用测试与 TypeScript 检查通过。正式 APK [`watchrss-podjs-note-table-cell.apk`](../artifacts/watchrss-podjs-note-table-cell.apk) 已覆盖安装，设备 `base.apk` 与归档 SHA-256 同为 `f4e85752af697431295774e55d9493fde48af4d84eb31b14bfc0a806a35f8ce6`，473 个 ZIP 条目可读。升级前后 278 个用户数据文件路径相同、33 张业务表逻辑内容一致，`quick_check=ok`、外键错误零；KV 仅同步诊断时间线变化。见[部署回执](../artifacts/note-table-cell-receipt.json)。这次对新增标记样例尚无原生／PodJS 设备截图对照，完整迁移仍未完成。
+
+## 备忘录表格阅读外观：2026-09-26
+
+原生 `WatchNoteTable` 的浅色 20sp 两列两行参考使用透明表身、10% 正文色表头、24% 正文色圆角外框、20% 正文色单元格线、半粗体表头与 7dp 纵向文字留白。PodJS 此前把整张表涂成代码背景色，没有边框，行高也多约 10 物理像素。现按原生结构绘制表格，并让表头采用半粗体对应的字库槽位；行高和编辑光标锚点随内边距更新。
+
+同内容、未裁切／遮罩的 466×466 原生与 PodJS 图片，整图 RGB MAE 从 8.8305 降到 1.1501/255，表格区域（x28–437、y234–397）从 26.388 降到 2.3096/255。原生截图来自生产 Compose 组件仪器测试；PodJS 最终截图由独立包的应用窗口 PixelCopy 取得，因为手表此时有 `SysUI.Charging` 全屏提示覆盖系统截图。PNG、哈希、指标和测试结果见[表格设备回执](../artifacts/note-table-visual-receipt.json)。此状态仍有边框 1px 位置、字形栅格差异；长单元格换行、内联代码、横滑、其他预设和实体输入尚未对照。
+
+应用 770 项测试、TypeScript 检查、原生表格 1 项和 PodJS 窗口捕获 1 项设备测试及正式打包通过。APK [`watchrss-podjs-note-table-visual.apk`](../artifacts/watchrss-podjs-note-table-visual.apk) 已覆盖安装，归档与设备 `base.apk` SHA-256 同为 `9fb4e0d3d0a4cacc1b10cc070e733aadf2a7038234ccded8427f1958f3c8370c`；473 个 ZIP 条目可读。升级前后 278 个用户文件路径相同，33 张业务表逻辑内容一致，`quick_check=ok`、外键错误零；KV 仅同步诊断时间线变化。隔离包已卸载，正式 Activity 和进程运行中，但系统充电提示仍占焦点。整体迁移未完成。
+
+## 长备忘录批量原生排版：2026-09-26
+
+在上一版渐进发布基础上，Android 宿主和框架新增有上限的 `text.layoutBatch`：首批 4 段、后续每批最多 16 段及 262,144 个 UTF-16 单元；单段错误隔离，取消后不再发布。备忘录阅读页现使用批量请求，标题与其他阅读器原有排版路径不变。
+
+OWW242 对相同 120 段夹具做三次独立包运行，首批 4 段分别在 539／321／314ms 发布，全部完成分别为 1562／1348／1356ms，错误零。前版顺序请求的一次结果为首批 562ms、全部 2732ms；两组不是严格交错基准，不能把全部差额都归因于批量接口。生产阅读组件的 120 段长文在程序滚动 1600dp 后仍显示第 12–13 段。相同浅色 20sp 静态参考页的改动前后截图逐像素相同（466×466、差异像素零），见[设备回执](../artifacts/note-layout-batch-receipt.json)。实体手指滚动和其余预设／富文本状态仍需验收。
+
+前一轮的 2–3 秒均匀灰屏也在正式应用冷启动首页复现，PNG 哈希与长文夹具灰屏相同；正式应用当时的窗口记录显示系统 `Splash Screen` 位于最上层。因此该截图不能作为长文绘制失败的证据。尚未单独量出系统启动覆盖层消失到阅读正文首帧的间隔。
+
+应用 770 项测试、框架服务 47 项、OWW242 宿主排版 3 项、TypeScript 检查和 Android 打包通过。正式 APK [`watchrss-podjs-note-layout-batch.apk`](../artifacts/watchrss-podjs-note-layout-batch.apk) 已覆盖安装，归档与设备 `base.apk` SHA-256 同为 `2288610d28006b0643ffcd264d9da0200111ca9b01f9f8ea78fdafdc768ea8af`，473 个 ZIP 条目可读。升级前后 278 个用户数据文件路径相同、33 张业务表逻辑内容一致，`quick_check=ok`、外键错误零；KV 仅同步诊断时间线变化。隔离夹具已卸载，正式 Activity 已恢复前台。整体迁移继续进行中。
+
+## 长备忘录原生排版渐进发布：2026-09-26
+
+备忘录阅读页原先等正文所有段落完成 Android 排版请求后才发布结果。现先发布 4 段，此后每 16 段发布一次，最后发布余量；每次交给 UI 的布局映射都是独立快照，未完成段落仍使用原有字库排版。请求仍顺序执行，取消后不再发布。
+
+OWW242 独立夹具用 120 段固定中文正文复测：首批 4 段在 562ms 发布，120 段全部在 2732ms 完成，错误零；发布数量依次为 4、20、36、52、68、84、100、116、120。此前同设备顺序请求 120 段、只在最后发布的基线耗时 2996ms。两次耗时不能直接归因于此改动的总吞吐提升；改动确定的是首批结果在整批结束前可供页面使用。回执见[长文渐进排版](../artifacts/note-layout-progress-receipt.json)。本夹具测量排版服务和发布时点，尚未测量完整阅读页首帧或长文滚动。
+
+另用生产 `NoteDetailScreen` 挂载 120 段、4450 字的独立长文夹具：重启后第 6 秒截图可见标题、元数据和第一段，程序跳到 1600dp 后第 12–13 段可见，状态回读 `offset=1600`。第 2／3 秒的截图为均匀灰色，尚未区分系统启动覆盖层和应用绘制耗时，不能宣称首帧已优化；程序滚动也不代替实体手指验收。截图与回执见[长文阅读页设备记录](../artifacts/note-long-reader-screen-receipt.json)。
+
+应用 767 项测试、TypeScript 检查和 Android 打包通过。正式 APK [`watchrss-podjs-note-layout-progress.apk`](../artifacts/watchrss-podjs-note-layout-progress.apk) 已覆盖安装，归档与 OWW242 `base.apk` 的 SHA-256 同为 `a1d464f785add2bd7571e22a63d705b9f3beab387235f3a7acdd1b3524470657`，473 个 ZIP 条目可读。覆盖升级并启动前后，278 个用户数据文件路径相同、33 张业务表逻辑内容一致，`quick_check=ok`、外键错误零；KV 仅同步诊断时间线变化。隔离夹具已卸载，正式 Activity 恢复前台。真实长文阅读页、实体手指操作、其他富文本样式和整体迁移仍待验收。
+
+## 备忘录空白编辑页原生画面对照：2026-09-26
+
+在同一块 OWW242 上分别打开原生与 PodJS 的“新建备忘录”空白编辑页，不输入内容。原生截图 [`note-editor-empty-native.png`](../artifacts/note-editor-empty-native.png) 显示 14dp 文档水平留白、顶部对齐的撤销／重做图标、`watch_sans` 正文提示及未聚焦时的橙色光标；此前 PodJS 截图 [`note-editor-empty-podjs.png`](../artifacts/note-editor-empty-podjs.png) 的正文提示靠右且偏下，光标缺失。现调整文档留白、字体及字体内边距，让宿主在未聚焦时绘制并跟随选择位置移动的光标，顶部工具图标也对齐原生。
+
+正式包复拍 [`note-editor-empty-podjs-formal.png`](../artifacts/note-editor-empty-podjs-formal.png) 与最终隔离包截图字节一致。原生／PodJS 全屏平均 RGB 绝对误差由 `8.666/8.549/8.506` 降至 `0.254/0.254/0.254`（满量程 255）；正文及光标区域无差异像素，仍有 2,909 个像素集中于标题、顶部图标和底部图标的字形栅格。逐区数据见[画面对照](../artifacts/note-editor-paired-comparison.json)。这是空白页的静态对照，不能推论有内容、输入法弹出或滚动中的全部画面一致。
+
+应用 763 项测试、类型检查、框架服务 46 项通过；宿主输入测试在 OWW242 和手机各 6 项通过，隔离编辑器的关闭保存、退后台保存、撤销／重做各 1 项通过。正式包中已有长备忘录的滑动及表冠光标测试 1/1 通过。APK [`watchrss-podjs-note-editor-paired.apk`](../artifacts/watchrss-podjs-note-editor-paired.apk) 与设备 `base.apk` SHA-256 同为 `be0d234d2664229d42d975ea84166e68add8de1e3fefc0c1de3c9d8fcb34d2b8`；升级与正式操作前后 279 个数据文件、33 张业务表逻辑内容一致，`quick_check=ok`、外键错误为零。详见[部署回执](../artifacts/note-editor-paired-deployment-receipt.json)。实体手指、表冠、输入法和整体迁移仍待验收。
+
+## 备忘录编辑后返回阅读位置：2026-09-26
+
+原生备忘录详情页在编辑器开合期间保留同一个阅读列表状态；PodJS 此前重新挂载阅读列表会新建滚动控制器，返回时跳到顶部。现让详情页持有阅读滚动控制器，并在笔记内容更新后把原位置限制到新的最大滚动范围。隔离包挂载生产详情页和 90 行固定正文：自动滚动到 598dp 后通过 ADB 点击“编辑”和“关闭编辑”，无障碍树回读为 `before=598.0 after=598.0`，返回画面继续显示第 24–35 行。截图为 [`note-return-after.png`](../artifacts/note-return-after.png)。
+
+正式包还打开现有 23,355 字的 README 备忘录，用 ADB 滚动到文档中段、反向轻划露出“编辑”按钮，再打开并关闭编辑器，过程中没有改动文本。返回前后 `[!IMPORTANT]` 和紧随其后的正文在无障碍树中保持相同的 y 坐标；两张 466×466 系统截图逐像素一致，见 [`note-return-formal-before.png`](../artifacts/note-return-formal-before.png) 与 [`note-return-formal-after.png`](../artifacts/note-return-formal-after.png)。
+
+应用 763 项测试和 TypeScript 检查通过。正式 APK [`watchrss-podjs-note-return-scroll.apk`](../artifacts/watchrss-podjs-note-return-scroll.apk) 已安装，归档与设备 `base.apk` SHA-256 均为 `23c029b5109106c7eca75f45adb1ef80b66704cf954fd9e20993061e30b92a0f`。升级、启动和正式笔记往返前后 279 个用户数据文件、33 张业务表的逻辑内容一致，`quick_check=ok`、外键错误为零；SQLite、PodJS KV 与 WorkManager 文件字节有变化，正式 Activity 已恢复前台。见[回执](../artifacts/note-return-deployment-receipt.json)。实体手指操作和原生画面对照仍待验收，整体迁移未完成。
+
+## 备忘录表冠移动光标：2026-09-26
+
+原生编辑器在标题聚焦时每次表冠事件移动一个 Unicode 码点；其余情况下正文按转速累计移动码点，缓慢时 50 格一步、持续快速时约 6 格一步，反向时丢弃先前的小数累计。PodJS 编辑器原先不接收表冠，事件直接进入通用页面滚动。现在 Android Activity 处理滚轮事件时，若备忘录文档处于活动状态，先交给宿主编辑器按原生曲线移动光标，并保持光标可见；未打开编辑器时仍走原有通用输入路径。
+
+OWW242 和连接手机上的宿主输入 instrumentation 各通过 5 项，包含原生慢速、快速、反向累计规则及代理项 Unicode 码点跨越。正式 OWW242 的 Activity 分发测试 1/1 通过：正文表冠后 UTF-16 光标从 `28→29`，正文保持未聚焦；标题聚焦时单次事件从 `0→1`。日志见 [`note-crown-formal-caret.log`](../artifacts/note-crown-formal-caret.log)。正式 APK [`watchrss-podjs-note-crown.apk`](../artifacts/watchrss-podjs-note-crown.apk) 与设备 `base.apk` 的 SHA-256 均为 `348dc473f04abf330ca451ea05b504fde6090df22e1c8635c479b24875e06bf3`；覆盖升级和测试前后 279 个应用数据文件、33 张业务表逻辑内容一致，`quick_check=ok`、外键错误为零。详见[回执](../artifacts/note-crown-deployment-receipt.json)。测试通过 Activity 注入滚轮事件，不等于实体表冠验收；其他交互与画面对齐及整体迁移仍未完成。
+
+## 备忘录整篇文档滚动与视觉行光标：2026-09-26
+
+原生编辑页将标题、日期字数和正文放在同一可滚动文档里，进入编辑时把阅读页传来的光标位置居中；正文未聚焦时，纵向划动按 24dp 一步移动视觉行光标，并保持光标处于可见区域。PodJS 原先只有固定位置的两个原生输入框。现在 Android 宿主把标题、日期和随内容增高的正文放入共享 `ScrollView`，保留屏幕固定的上、下工具栏；进入编辑页按传入光标居中，未聚焦正文按原生步长移动视觉行，轻点正文才聚焦并打开输入法。
+
+OWW242 独立包用 120 行文本从第 80 行进入编辑页，初始显示第 79–81 行，划动后显示第 75–77 行；截图为 [`note-document-scroll-initial.png`](../artifacts/note-document-scroll-initial.png) 和 [`note-document-cursor-swipe.png`](../artifacts/note-document-cursor-swipe.png)。宿主根窗口手势仪器测试在 OWW242 与手机各通过 3 项。正式包打开 23,355 字 README 备忘录后，专门的正式应用测试直接读取原生光标：UTF-16 偏移 `12→28`、视觉行 `1→3`，滚动偏移 61px，正文仍未聚焦，测试 1/1 通过。新建页的关闭保存、退后台保存和撤销／重做 3 项隔离测试在各自清空夹具数据后全部通过；首次连跑的两项失败由前一项留下的夹具笔记造成，不是生产数据回归。应用 763 项测试、框架 46 项服务测试和 TypeScript 检查通过。
+
+正式 APK [`watchrss-podjs-note-document.apk`](../artifacts/watchrss-podjs-note-document.apk) 已安装，归档与设备 `base.apk` SHA-256 均为 `49f6745e0c779aab9a33bf98cd9ef608b1be37051e6267519f44f17fdbb328f3`。升级、正式笔记打开关闭和手势测试前后，279 个应用数据文件、33 张业务表的逻辑内容一致，`quick_check=ok`、外键错误为零；SQLite、PodJS KV 和 WorkManager 文件字节哈希有变化。正式滑动后的两张系统截图与滑动前 PNG 完全相同，不能用它们证明动画或画面变化，手势结论来自直接读取光标的 instrumentation。原生／PodJS 同内容逐像素比较、正式应用的实体手指、表冠与输入法操作仍待验收。详见[回执](../artifacts/note-document-deployment-receipt.json)。整体迁移未完成。
+
+## 备忘录打开时的输入焦点：2026-09-26
+
+原生编辑页打开时不自动聚焦标题或正文；PodJS 宿主原先在创建两个原生输入框后立即聚焦正文并弹出键盘。宿主行内输入现支持可选的不自动聚焦，备忘录标题和正文都使用该选项。正式 OWW242 上打开已有 README 备忘录的编辑页，两个 `EditText` 均未获得焦点，系统输入法 `mInputShown=false`，页面截图为 [`note-editor-focus-formal.png`](../artifacts/note-editor-focus-formal.png)。标题或正文被点击后的实体输入仍待验收。
+
+应用 763 项测试、TypeScript 检查、框架 46 项服务测试通过；宿主输入框 instrumentation 在 OWW242 和手机各通过 1 项。正式包 [`watchrss-podjs-note-editor-focus.apk`](../artifacts/watchrss-podjs-note-editor-focus.apk) 与设备 `base.apk` SHA-256 均为 `a9ac16cce152fb81b0621839b9fa3623b8ad75192e3ec376925c169eaf65260d`。覆盖安装和一次冷启动前后 279 个应用数据文件、33 张表逻辑内容一致，`quick_check=ok`、外键错误为零；SQLite、PodJS KV 和 WorkManager 文件的字节哈希有变化。详见[回执](../artifacts/note-editor-focus-deployment-receipt.json)。整篇文档滚动、按视觉行移动光标和原生逐像素对照仍未完成，整体迁移继续进行。
+
+## 备忘录编辑器页面外观：2026-09-26
+
+原生编辑器使用黑底文档、居中标题、上下 56dp 渐变工具栏和底部居中的关闭图标；PodJS 此前是两块灰色输入框与右下角“完成”按钮。现调整为原生页面结构，空标题／正文提示改为“新建备忘录”“直接输入原始文本”，已有笔记显示日期字数；宿主输入框支持居中标题和零内部水平留白的正文。OWW242 隔离截图见 [`note-editor-chrome-isolated.png`](../artifacts/note-editor-chrome-isolated.png)。首次设备截图发现关闭图标偏右，修正底栏纵向布局后，仪器测试测得关闭按钮中心 x=233px、标题 top=84px、正文 top=164px。关闭保存、退后台即时保存、撤销／重做各 1 项设备 instrumentation 通过；应用 763 项、框架 46 项测试、宿主输入框 1 项设备测试和 TypeScript 检查通过。
+
+正式包 [`watchrss-podjs-note-editor-chrome.apk`](../artifacts/watchrss-podjs-note-editor-chrome.apk) 已安装，设备与归档 SHA-256 均为 `fc95d2d2ca96afeebf440752cfa82469cf521ac905676473ffa1879dd3a2aed4`。升级前后 279 个应用数据文件、33 张表逻辑内容一致，仅 WorkManager 文件变化；`quick_check=ok`、外键错误为零，见[回执](../artifacts/note-editor-chrome-deployment-receipt.json)。这次是参照原生源码与隔离设备截图的外观改动，还没有相同内容的原生／PodJS逐像素对照；整篇文档滚动、按视觉行划动光标和实体手指操作仍不对齐。整体迁移仍未完成。
+
+## 备忘录退后台即时保存：2026-09-26
+
+原生编辑器在 `ON_STOP` 时立即提交草稿。PodJS 此前只依赖前台逐帧检查 600ms 自动保存，快速退后台后可能留下一份未提交的修改。现监听宿主生命周期，离开 active 状态就顺序提交待保存草稿。OWW242 隔离包使用生产编辑器：修改标题和正文约 90ms 后退后台，退后台前数据库零笔记，约 146ms 后两字段已完整写入。1 项设备 instrumentation、763 项应用测试及 TypeScript 检查通过。
+
+正式包 [`watchrss-podjs-note-background-save.apk`](../artifacts/watchrss-podjs-note-background-save.apk) 已安装，设备与归档 SHA-256 均为 `8be5f1bbce9c32ef0bd5cc4eb4694dcd148003183e7e3d3a1b4562b0e16644c3`。升级前后 279 个应用数据文件、33 张表逻辑内容一致，仅 WorkManager 文件变化；`quick_check=ok`、外键错误为零。详见[回执](../artifacts/note-background-save-deployment-receipt.json)。测试不覆盖生命周期事件送达前的强制杀进程或正式笔记实体操作，整体迁移仍未完成。
+
+## 备忘录表格编辑光标定位：2026-09-26
+
+原生表格中的文字单元格同样参与阅读页“编辑”光标定位，且横向滚动会改变屏幕中心最近的单元格。PodJS 之前未记录表格单元格的位置，点击“编辑”会落到附近的普通段落或正文开头。现在按表格每行每列的文字区域记录定位信息，并读取表格实际横向滚动偏移。OWW242 隔离包挂载生产阅读页：未横滑时，光标落在左下单元格对应的第 39 字；向左横滑后，落在右下单元格对应的第 44 字。2 项设备 instrumentation 和 763 项应用测试、类型检查通过。
+
+正式包 [`watchrss-podjs-note-table-anchor.apk`](../artifacts/watchrss-podjs-note-table-anchor.apk) 已安装，设备与归档 SHA-256 均为 `f07776f67dc023cff58ddfdc875c82b4e961f0e2e6ef81d5c37263621b4824fc`。升级前后 279 个应用数据文件、33 张表逻辑内容一致，仅 WorkManager 文件变化；`quick_check=ok`、外键错误为零。详见[回执](../artifacts/note-table-anchor-deployment-receipt.json)。隔离测试不能替代正式笔记的实体输入或逐像素画面对照，完整迁移仍未完成。
+
+## 备忘录阅读页编辑光标定位：2026-09-26
+
+原生阅读页会将屏幕中心附近的可见文字映射回原始 Markdown，并把编辑光标放在对应位置。PodJS 之前始终把光标放在正文末尾。现在阅读页记录预览文字行的源位置，点击“编辑”时按当前滚动位置求出光标偏移，并经 `selectionStart` 传到 Android 原生 `EditText`。OWW242 上宿主输入框测试 1/1 通过；隔离包挂载生产阅读页两次测试均通过，383 字正文在初始位置的光标为第 24 字，程序滚动到约 158dp 后为第 152 字，均非首尾。应用 762 项测试、TypeScript 检查、框架 46 项服务测试及正式包构建通过。
+
+正式包 [`watchrss-podjs-note-editor-anchor.apk`](../artifacts/watchrss-podjs-note-editor-anchor.apk) 已安装，设备与归档 SHA-256 均为 `af8596ac6f52d4c19bc3aab350f82cf66e346cd0b2c8c9046892354a9db546c0`。升级前后 279 个应用数据文件、33 张表逐行摘要一致；仅 WorkManager 数据文件变化，`quick_check=ok`、外键错误为零，正式 Activity 已恢复前台。详见[回执](../artifacts/note-anchor-deployment-receipt.json)。隔离测试未覆盖复杂 HTML、表格、图片、CRLF 文本和不同字体缩放的光标映射，也不能替代正式应用的实体手指和画面对照。滚动夹具初版误用运行时定时器导致阅读页停留加载态，改为框架逐帧回调后测试通过；该失败不是生产光标映射失败。整体迁移仍在进行中。
+
+## 收藏列表正式加载态接线：2026-09-26
+
+页面容器的全局加载占位此前先于 `SavedItemsScreen` 生效，使组件已有的标题和四条骨架屏在正式应用中不可达。收藏／稍后再看现在即使正在加载也渲染自身组件，由组件控制骨架屏和禁用列表手势。正式包重新打开收藏页后显示完整布局；一次系统录屏中出现交替黑帧且页面切换晚于采样窗口，不能把该录屏视为骨架屏画面验收。加载态的原生逐帧对照仍待完成。
+
+760 项应用测试、TypeScript 检查及 Android 打包与 ZIP 校验通过。当前正式 APK `artifacts/watchrss-podjs-saved-loading-shell.apk` 与 OWW242 安装包 SHA-256 均为 `18c7faa5e08a9d1c1d5455ef127f98db7bc9027884242ddea4fff03ab35f6ae2`；覆盖安装前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零。应用已恢复焦点。前一节的 APK 哈希是该节改动之前的版本。
+
+## 收藏与稍后再看正式页面容器：2026-09-26
+
+隔离夹具中的标题虽已居中，正式包仍额外显示了页面容器的“收藏”标题，并把完整的 `SavedItemsScreen` 下移 42dp，导致提示框、卡片和手势区域都偏离原生页面。现将收藏和稍后再看标记为组件自行提供标题；正式 OWW242 截图 `artifacts/formal-saved-shell-fixed.png`、`artifacts/formal-watch-later-shell-fixed.png` 均不再出现重复标题，提示框和首张卡片上边界恢复到原生夹具的 y=182、312px。更改前的正式截图为 `artifacts/formal-saved-initial.png`。
+
+在正式稍后再看列表执行 130px 左滑，松手后条目保留；过程中的系统截图为全黑，不能用来判定侧滑按钮画面或动画，隔离夹具的手势回执也不能替代正式页面的跨阈值移除、撤销和物理手指验收。760 项应用测试、TypeScript 检查、Android 打包及 APK ZIP 校验通过。正式包 `artifacts/watchrss-podjs-saved-shell-parity.apk` 和 OWW242 安装包 SHA-256 均为 `3cec61eb2fcb71b3ad6eb3a8ef841bcea9c679a74526be11bea774155129a96b`。升级与低阈值手势前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零；正式应用已恢复焦点。
+
+## 备忘录正文测量与收藏标题居中：2026-09-26
+
+备忘录阅读页的文字换行改用当前打包字库的实际宽度测量；原先以中英文固定宽度估算，混排段落会在错误的位置换行。15px／19px 正文改用框架支持的字号类，表格单元格的测量结果在一次布局中复用。OWW242 独立包以 220 段、14,852 字的中英混排正文验证：从正文区域滑动后滚动偏移约 200dp，后续段落可见；跳转到偏移 18,000dp 时第 205–207 段仍正常显示，截图为 `artifacts/note-measure-valid-swipe.png` 和 `artifacts/note-measure-autojump.png`。初次测试从底部“编辑”按钮发起手势，误进入编辑页；该黑帧不是正文滚动结果。
+
+收藏列表标题改为明确的全宽居中。相同单条目夹具在 OWW242 复拍后，标题区域 RGB 平均绝对误差从 38.487 降到 18.746，全屏从 14.645 降到 12.315；仍有字体栅格差异。截图为 `artifacts/reference-saved-list-item.png` 和 `artifacts/podjs-saved-list-title-centered.png`。收藏手势的隔离真机回归见 `artifacts/saved-gesture-device/receipt.json`，包含长按跨行排序、左滑阈值和撤销；它不是正式应用的手指操作验收。
+
+760 项应用测试、TypeScript 检查和 Android 打包通过。正式 APK `artifacts/watchrss-podjs-note-measure-saved-title.apk` 与 OWW242 安装包 SHA-256 同为 `e884d7128483c65898aa3a409c482bb2f9fe3c144df0a553ec890a42d218239d`。覆盖升级前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零；独立包已卸载，正式应用恢复焦点。备忘录与原生逐像素对照、正式应用的物理输入及整体迁移仍待完成。
+
+## 备忘录阅读页日期与字数：2026-09-26
+
+原生 `NotesActivity.noteMetadata` 使用 `DateUtils.getRelativeTimeSpanString(..., FORMAT_ABBREV_RELATIVE)` 和 Kotlin `Char.isWhitespace` 计数；PodJS 旧版直接输出英文区域格式的完整时间。已在 OWW242 的 Android 11 系统上用只读 `DateUtils` 探针记录分钟、小时、昨天/前天、七天后日期和跨年格式，回执在 `artifacts/note-date-native-probe.txt`。当前中文手表环境下，PodJS 现按这些阈值显示相对时间，并按 Kotlin 空白字符规则计数 UTF-16 字符。独立阅读页的固定 8 月 17 日笔记显示“8月17日 · 6 字”（`artifacts/note-metadata-fixture.png`）；正式 README 阅读页显示“8月17日 · 23355 字”（`artifacts/note-metadata-formal-reader.png`），不再显示英文完整时间。其他系统语言的原生本地化输出尚未接入宿主服务，不能宣称跨语言完全一致。
+
+760 项应用测试、TypeScript 检查和 Android 打包通过。当前正式 APK `artifacts/watchrss-podjs-note-metadata.apk` 与 OWW242 安装包 SHA-256 均为 `ae75fdb2af9f58cb1774746c0dc3e96ab8dcb41178984c9eec88618c7cff7ead`。覆盖升级前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零。探针文件和独立包已从设备移除，正式应用恢复至备忘录列表。完整迁移仍未完成。
+
+## 备忘录卡片换行与命中：2026-09-26
+
+正式 PodJS 列表的长摘要原先超过卡片右边界，短笔记也占固定 84dp；原生 `FeedTextCard` 把标题和摘要各限制在最多两行，卡片高度随文字变化。PodJS 现在使用实际设备字库测量换行与省略号，按行数计算卡片高度，并让点击/长按的行命中使用同一组高度。独立包固定了长摘要、两行标题和短笔记：截图 `artifacts/note-card-fixture-initial.png`、`note-card-fixture-scrolled.png`；ADB 长按第一、第二条分别得到 `ACTIONS:long`、`ACTIONS:title`，点击第三条得到 `OPEN:short`。正式应用的 README 摘要已在卡片内换行并截断，底部短笔记与新建按钮也正常显示：`artifacts/note-card-layout-formal-list.png`、`note-card-layout-formal-bottom.png`。尚无含相同笔记内容的原生截图，不能宣称卡片逐像素一致。
+
+758 项应用测试、TypeScript 检查和 Android 打包通过。当前正式 APK `artifacts/watchrss-podjs-note-card-layout.apk` 与 OWW242 安装包 SHA-256 均为 `2b50b0e92adb5b4f8a8e137e4eaaeb78741da246e85d6006fe10060666bc0d7b`。升级前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零；隔离包已卸载，正式应用恢复至备忘录列表。真实手指/表冠与完整迁移仍待验收。
+
+## 备忘录空列表与新建按钮：2026-09-26
+
+用 OWW242 上的原生空列表 `artifacts/note-native-list.png` 对照独立 PodJS 包加载的生产 `NotesListScreen`。第一次实拍发现 PodJS 新建按钮从 y=452px 才露出下缘，而原生按钮从 y=381px 开始。缩短空状态行后，按钮已完整显示；把旧的文字“+”换为与原生 `Icons.Default.Add` 路径相同的 Material 图标，并补上新建按钮的无障碍名称。最终独立包截图 `artifacts/note-empty-podjs-pixel.png` 中提示框左右边界与原生同为 x=36–429px，上下边界分别为 y=164–277px 与原生 y=163–276px；新建按钮分别为 x=188–275px、y=382–465px 与原生 x=189–276px、y=381–465px。整图平均 RGB 绝对误差为 8.455/255，文字栅格化与少量边界仍有差异，未达到逐像素一致。
+
+独立包点击新建按钮得到 `CREATE_TAPPED` 回调，截图在 `artifacts/note-empty-create-tap.png`。正式包含 5 条备忘录，列表顶部与底部也已实拍：`artifacts/note-empty-parity-formal-list.png`、`note-empty-parity-formal-bottom.png`。应用 757 项测试、TypeScript 检查和 Android 打包通过。当前正式 APK `artifacts/watchrss-podjs-note-empty-parity.apk` 与设备安装包 SHA-256 都是 `f76d2b9eca2c9d1fa24dc936c0391df5999f8d5d72b8059ad029d1c9486020c1`；覆盖升级前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零。独立包已卸载，设备恢复至正式应用的备忘录列表。实际在正式应用创建备忘录、手指和表冠操作、全路线逐像素一致及完整迁移仍待验收。
+
+## 备忘录列表标题与手机同步入口：2026-09-26
+
+在 OWW242 上直接打开原生手表应用的备忘录空列表，原生标题与条数居中，手机同步提示约从 y=163px 到 y=278px；旧 PodJS 主包标题靠左、提示从 y=144px 到 y=272px。现按原生 `NotesActivity` 的列表顶部间距和提示高度调整，PodJS 正式列表截图显示标题居中，提示约从 y=164px 到 y=280px。原生空列表与 PodJS 当前含 5 条备忘录的列表不能据此宣称完整逐像素一致；截图在 `artifacts/note-native-list.png`、`note-list-parity-after.png`。
+
+布局调整后，长按命中映射也改为与列表渲染共用尺寸常量，覆盖首条起止、行间距及第二条起点的边界回归；定向测试、TypeScript 检查和 Android 打包通过，真机长按第一条仍打开操作页。当前正式 APK `artifacts/watchrss-podjs-note-list-parity.apk` 与 OWW242 安装包 SHA-256 都是 `882450e42b0a3d0230e7b2e7eac16be20f925f8523a3a825d25119cd9154c6e7`。安装前后 33 张业务表逐行摘要一致，`quick_check=ok`，外键错误为零；设备已恢复到正式应用。物理手指、表冠和有数据的原生列表逐像素对照尚未完成。
+
+## 备忘录操作与删除确认：2026-09-26
+
+对照原生 `NoteActionsActivity` 和 `ActionDialogScreen`，备忘录长按操作页现使用居中的 160dp×48dp 按钮、8dp 间隔，并使用原生删除确认标题和说明。OWW242 主包实测首次发现绝对定位容器导致整列偏左，改为根据屏幕宽度计算左边距后，截图中按钮边界为 x=74–393px，屏幕中心为 233px。点击“删除”仅进入确认页，点击左侧取消按钮返回操作页，再点击“取消”返回仍有 5 条备忘录的列表；未执行删除确认。截图在 `artifacts/note-actions-dialog-final.png`、`note-actions-confirm-final.png`、`note-actions-cancel-final.png` 和 `note-actions-list-final.png`。
+
+757 项应用测试和 TypeScript 检查通过。正式 APK `artifacts/watchrss-podjs-note-actions.apk` 已覆盖安装，设备与归档 SHA-256 均为 `315deeb9b19a07ad20664077e6844c16282f1a9d93856e9eade3645de05798f3`。安装前后 33 张业务表逐行摘要一致，`quick_check=ok`、外键错误为零；运行时 SQLite 文件、WorkManager 数据库和 PodJS KV 文件字节变化，因此不声明文件级一致。设备最终恢复到正式应用的备忘录列表。原生逐像素对照、文件夹选择实际交互和完整迁移仍待验收。
+
+## 频道搜索页内输入：2026-09-25
+
+原生 `RssSearchScreen` 使用页内 `OutlinedTextField`，`RssSearchViewModel` 对逐字关键词做 180 毫秒防抖；PodJS 之前只能点击搜索栏后打开宿主弹窗，确认后才查询。现在 Android 宿主在应用绘制的搜索栏上方放置真正的单行 `EditText`，通过带会话编号的变化/提交事件回传文字；PodJS 页面即时更新关键词，并在 180 毫秒后查询。滚动、提交、打开结果或离开页面都会关闭会话；旧宿主不支持新操作时仍可使用弹窗。框架事件测试 45 项通过，OWW242 独立宿主测试 1 项验证了真实编辑框的边界和会话销毁，未注入触摸或键盘。应用 748 项测试、TypeScript 检查、Android 构建/打包和 APK ZIP 检查通过。
+
+主包 `artifacts/watchrss-podjs-inline-search.apk` 已覆盖安装到 OWW242，设备与归档 APK SHA-256 均为 `0ed1d18fcd8ff2207da0e3f3ff38abe93722410d270270fa30b7ba83d571d851`；启动达到首个纹理帧。安装前主 SQLite SHA-256 为 `556b7af520398ce1d4423d73f84bfd93bd996974d650740bab680caa3ef88ba7`；启动后的文件字节哈希变化，但 32 张应用表的逐行摘要和行数全部保持一致，完整性与外键检查通过。系统 `SysUI.Charging` 仍占据焦点，页内输入法、搜索结果更新、滚动和实体屏幕画面尚无物理操作验收；独立宿主测试不能替代整页交互。
+
+## 频道搜索跨行高亮：2026-09-25
+
+原生在整段 `AnnotatedString` 上标记关键词，再由 Compose 自动换行；PodJS 旧实现先分行再逐行找词，关键词恰好跨标题或摘要换行点时两边都不高亮。现先在完整文字中定位命中，再映射到每条可见行，尾行省略号只绘制仍可见的部分。新增跨行和截断回归；应用 748 项测试、TypeScript 检查及 Android 资源构建通过。此处尚无新跨行夹具的实体截图；页内输入仍依赖弹窗，完整交互和物理画面验收未完成。
+
+## 频道搜索实体静态画面对照：2026-09-25
+
+隔离原生参考包直接渲染生产 `RssSearchScreen`，隔离 PodJS 包渲染生产 `RssSearchScreen.tsx`；两侧使用同一组两篇文章和“同步”关键词，在 OWW242 读取 466×466 渲染帧，未注入触摸或键盘。首次 PodJS 截图发现测试包漏打 12px 字库，摘要完全不显示；修正夹具字体并按原生资源核对字号后，搜索页标题为 17sp、文章标题 14sp、摘要 9sp，输入框和卡片顶部与原生截图对齐。最终两图的整图平均 RGB 绝对误差为 **5.078/255**，仍有字形和轮廓栅格差异，非逐像素一致。截图、哈希、区域误差和边界见 [对照数据](../artifacts/rss-search-comparison.json)。
+
+正式应用 747 项 Bun 测试、TypeScript 检查、Android 打包与 APK ZIP 校验通过。新主包已在 OWW242 有保护升级，设备和构建 APK SHA-256 均为 `6b4a1863729c07c01400e967892c496202e6d811056addbd66fdfd2beacb5030`；安装前后主 SQLite SHA-256 均为 `556b7af520398ce1d4423d73f84bfd93bd996974d650740bab680caa3ef88ba7`。本次隔离 PodJS 包已卸载；原生参考包保留以供后续对照。原生通过页内输入框编辑关键词，PodJS 当前仍调用宿主弹窗；搜索输入、滚动、表冠、点击结果和被充电浮层遮挡的最终面板仍未验收。此前小节所述“尚未安装主包”是当时状态，已由本节覆盖。
+
+## 搜索跨块正文：2026-09-25
+
+原生搜索对 Room 的 `content` 和 `originalContent` 字段做 `LIKE`；PodJS 为避免大字段回传将部分长正文拆块，旧 SQL 只逐块做 `LIKE`，关键词恰好跨两块时会漏检。现在对相邻正文块和原文块的接缝补做带转义的字面匹配，并返回接缝附近文字作为高亮摘要；定向 SQLite 用例验证两个来源各自的跨块命中与未命中。应用 747 项测试、TypeScript 检查、Android 打包与 APK ZIP 校验通过；新调试包 SHA-256 为 `4c15e4cac6712299fdf418898fb8b79e71cc7d9566db34818c956c896ec963ec`。这是相邻块搜索修复，尚未覆盖长于整块的关键词；没有安装到手表主包，也没有实体搜索界面验收。原生也把大篇导入正文存为文件标记，`RssItemDao.searchItems` 不扫描外置文件，故目前不能将“任意导入 TXT 正文可搜索”列为已证实的原生迁移缺口。
+
+## 频道搜索页面接入：2026-09-25
+
+此前服务层虽已按原生字段查询最多 120 条，可见搜索页仍调用旧的 30 条分页列表，并显示频道名而不是命中摘要。现页面使用专用搜索结果、命中摘要、空查询/无结果/加载状态；资料库事件触发的重新查询也走相同路径，过期异步结果不会覆盖新关键词。页面按原生的 18dp 安全边距、6dp 卡片间距、16dp 卡片圆角及 9dp 内边距改为可变高度滚动；标题和摘要各最多两行，使用渲染字库测量换行，命中词绘制主题色背景和黑字。应用 `bun run test` 746 项通过，TypeScript 检查、Android 构建与打包、APK ZIP 校验通过；本次生成的调试 APK SHA-256 为 `3331e612ad2ea4add83244c9939b3417543483fa7f6d4768b1d442e58e33a87f`。OWW242 当前焦点为 `SysUI.Charging`，此改动尚未安装到主包，也未取得无遮挡页面、实际输入/表冠或原生截图对照；PodJS 仍通过宿主文本输入弹窗编辑关键词，原生为页内输入框，交互尚不一致。
+
+## 导入章节稳定 ID 的重复同步缓存：2026-09-25
+
+同步仓库现在按原始链接缓存最多 8,192 个已成功计算的稳定文章 ID；链接变化会重新计算，解析或哈希失败不会入缓存。OWW242 隔离包使用 5,378 篇真实 TXT 章节及完整正文编码缓存，在**同一进程**内先生成一次完整清单，再显式清除仓库的整份快照缓存并重新生成：第一轮 153.9 秒、16,138 次哈希；第二轮 125.0 秒、10,760 次哈希，URL 哈希从 5,378 次降为零，两轮均无正文重新编码，5,378 条清单逐项 JSON 一致。第二轮仍需约两分钟，首次同步没有因此提速；这是单次双轮测量，不代表稳定延迟或完整蓝牙传输。隔离库 5,378 篇文章与 5,378 条正文编码缓存保持完整，SQLite 检查通过。
+
+新增链接变化回归后，743 项应用测试、TypeScript 检查、Android 打包及 ZIP 校验通过。主包 `artifacts/watchrss-podjs-stable-id-cache.apk` 与 OWW242 安装包 SHA-256 均为 `60ab16e4dc69b057b2ccf493ecb04333a3eeb22308d9e6a256fa896d846bd52e`；安装前后主 SQLite SHA-256 均为 `556b7af520398ce1d4423d73f84bfd93bd996974d650740bab680caa3ef88ba7`，16 个频道、6,006 篇文章、7 条备忘录和完整性／外键检查不变。隔离包及设备临时数据库副本已清理。主应用的实际完整资料库蓝牙同步、无遮挡画面与实体交互仍未验收。
+
+## 导入章节大清单重复快照优化：2026-09-25
+
+用 OWW242 独立包和完整缓存的 5,378 篇真实 TXT 章节副本复测：前一版两次分别为 177.5、179.6 秒，均无正文重新编码；分段计时的后一轮中哈希宿主调用约 61.2 秒、SQL 查询约 26.6 秒、URI 解析约 20.5 秒。现在只对手机伴侣生成的规范 `https://watchrss.local/import-txt-novel/<32 位小写十六进制>/chapter/<4 位数字>-<16 位小写十六进制>` 链接直接计算相同的稳定 ID，其他 URL 仍经 Android URI 解析；这 5,378 篇全部符合格式。另对未变化的快照指纹跳过逐条数据库写入，保留修订守卫与变化记录。新隔离包单轮完整缓存清单为 **157.3 秒**，URI 宿主调用 0、正文编码 0、清单 5,378 条且正文全部可用；首末正文哈希与旧版相同。独立库仍有 5,378 条指纹、5,387 条变更记录，SQLite 检查通过。这个单轮对照不能证明稳定性能，也没有覆盖完整蓝牙传输；157 秒仍明显偏慢。
+
+743 项应用测试、TypeScript 检查、Android 打包和 ZIP 校验通过。主包 `artifacts/watchrss-podjs-manifest-fast.apk` 与 OWW242 安装包 SHA-256 均为 `72db4a8e7f928b63f167fdda2ec83942123e317a851229a89822754c2e7daafb`。安装前后主库 SHA-256 均为 `556b7af520398ce1d4423d73f84bfd93bd996974d650740bab680caa3ef88ba7`，16 个频道、6,006 篇文章、7 条备忘录保持不变，`quick_check=ok`、外键错误为零。隔离包与设备临时数据库副本已移除；主应用未做物理触摸、可见页面或正式资料库同步验收。
+
+## 导入章节重复清单元数据计算：2026-09-25
+
+已缓存的导入章节在一次同步快照里原先会对同一个正文来源重复计算元数据哈希。现在当清单修复阶段解析到的来源与已准备的来源相同，且正文哈希一致时，复用已经计算出的清单；不同来源或未缓存正文仍保留原有重建逻辑。测试夹具确认重复快照中该章节只计算一次元数据哈希，原生首轮／重复清单逐项对照仍一致。742 项应用测试、TypeScript 检查和 Android 打包通过。`artifacts/watchrss-podjs-manifest-hash.apk` 与 OWW242 安装包 SHA-256 均为 `bf103fdd07c8b88f639ef6af0c75554e2cae3df40f19ff70b7178add06d331f1`；安装前后主 SQLite 文件 SHA-256 均为 `556b7af520398ce1d4423d73f84bfd93bd996974d650740bab680caa3ef88ba7`，16 个频道、6006 篇文章保持不变，`quick_check=ok` 且无外键错误。该优化没有重新测量 5,378 章设备清单耗时，不能宣称此前 222 秒的耗时已解决。
+
+## 文章与导入章节搜索：2026-09-25
+
+按原生 `RssItemDao.searchItems` 和 `buildSearchPattern`，搜索现在覆盖标题、描述、摘要、正文及原文分块，并把 `%`、`_`、反斜杠按字面字符匹配。205 章 SQLite 夹具可按标题找到列表 200 条上限之外的章节；只读迁移库中，在 2,583 章频道抽样的第 301 条也被相同条件找到（开发机单轮 0.064 秒，不是手表延迟）。742 项应用测试、TypeScript 检查与 Android 打包通过。当前包 `artifacts/watchrss-podjs-search-parity.apk` 与 OWW242 安装包 SHA-256 均为 `3a89bcd6bb90e3fff96ce306ec76c8cfb03b872e6eb8bea37818ba493352e515`；主 SQLite 安装前后逐字节相同，完整性及外键检查通过。可见搜索操作与整书导航仍待实体设备验收。
+
+## 朗读语音配置与云端引擎基础：2026-09-25
+
+云端朗读 HTTP 错误现按原生提供商分支解析：应用默认语音提取 `error.message`，MiniMax 提取 `base_resp.status_msg`／`message`，Azure token、Azure 合成和豆包分别采用原生对应的状态或响应正文。错误文本限制为 512 字，避免异常长响应淹没界面。741 项应用测试、TypeScript 检查与 Android 打包通过。此前包 `artifacts/watchrss-podjs-tts-errors.apk` 与 OWW242 安装包 SHA-256 均为 `4a5abce70c3b171948cae5f092b18e3662a86e71a6264eb4387514459b8768b7`，安装前后主 SQLite 文件逐字节相同，完整性与外键检查通过；真实提供商错误页仍需现场验收。
+
+第三方语音引擎现不再读取无关的手表账号。语音响应下载改用宿主分配的私有临时文件，并核对返回路径、大小和每个读取分块；失败时只清理本次拥有的文件。新增多分块、路径不匹配、截短及非自有文件边界测试后，应用 740 项测试、TypeScript 检查与 Android 打包通过。此前包 `artifacts/watchrss-podjs-tts-transport.apk` 与当时 OWW242 安装包 SHA-256 均为 `78d62c5514ca41adfbd9c848129966863ab6c661e6c550b296921972dd246bc3`，安装前后主 SQLite 文件逐字节相同，完整性与外键检查通过。真实提供商下载和声音仍待验收。
+
+语音配置二维码页已按原生 `ServerScreen` 补齐“配置朗读语音”标题、三秒黑底到白底过渡、二维码／无 WiFi／完成状态、关闭按钮及手机下载入口。737 项应用测试、TypeScript 检查和 Android 打包通过。此前包 `artifacts/watchrss-podjs-tts-screen.apk` 与 OWW242 安装包 SHA-256 均为 `e826a8892d22a39b13dd6e3f6c5d90de97ac1f790caeb116932c5e0eaecab5e6`；主 SQLite 文件哈希仍为 `556b7af520398ce1d4423d73f84bfd93bd996974d650740bab680caa3ef88ba7`。当前没有无遮挡的实体页面截图，不能宣称视觉一致。
+
+对照原生 `watch-版本名+版本号` 请求标头，已修正云端朗读、AI 摘要及摘要令牌刷新此前发送固定开发版字符串的问题；协议正文请求也复用同一来源。737 项应用测试、TypeScript 检查与 Android 打包通过。前一轮包 `artifacts/watchrss-podjs-app-version.apk` 与 OWW242 安装包 SHA-256 均为 `dffe1fdc064ec0f0421b5eb021b6a207b6ef96656109f1e724c568ed76556ab7`；主 SQLite 安装前后文件哈希相同。尚未用真实后端凭据验收云端请求。
+
+PodJS 已加入与原生手表相同的“手机扫码配置语音”设置入口、一次性配对证明及 AES-GCM 加密配置接口。API Key 仅存于安全存储，读取只返回脱敏值；持久化引擎支持本地、应用默认语音、MiniMax、Azure 和豆包。朗读服务已按原生请求格式接入四种云端语音，使用私有临时 MP3 播放，段落结束后清理文件。OWW242 原生运行时测试验证临时 MP3 能播放到结束、1.25× 播放速度可设置；734 项 PodJS 测试与 TypeScript 检查通过。APK `artifacts/watchrss-podjs-tts-config.apk` 与设备安装包 SHA-256 均为 `d53dd0231220a564ac8df625eaddd58fc2d416966a3918664945cd8079d19b5f`，升级前后主 SQLite 文件逐字节相同，`integrity_check=ok`。
+
+异步播放启动期间按停止时，服务现在等待启动命令结束后再停止音频，防止旧段落在停止之后响起；后续段落也会等待前一次停止完成，旧段落清理不误删新文件。延迟启动回归及完整 737 项应用测试、TypeScript 检查、Android 打包通过。更新包 `artifacts/watchrss-podjs-tts-cancel.apk` 与 OWW242 安装包 SHA-256 均为 `2f2d9673700ce57abeac74bef07eb490e5d362f8fdacbf950ee1e04b32e8d5fd`；安装前后主 SQLite 文件逐字节相同，完整性与外键检查通过。
+
+手机伴侣仓库的 `AGENTS.md` 明确将其连接模式限定为蓝牙同步；手机端二维码／WiFi 配置客户端不在当前产品范围。手表端扫码入口与原生手表一致，但现有手机伴侣不能据此完成配置。配对协议已由本地跨语言向量和加密 HTTP 路由测试覆盖，尚未完成双设备现场扫码或配置写入。手表当前 WiFi 未启用，真实提供商凭据合成、段落连续播放、实体画面和声音也未验证。安装后没有模拟实体触摸、焦点或朗读手势；系统 `SysUI.Charging` 浮层仍妨碍实际画面验收。完整迁移继续开放。
+
+## TXT 小说本地频道识别与同步：2026-09-25
+
+手机伴侣已使用 `https://watchrss.local/import-txt-novel/...` 表示分章 TXT 小说；主手表库有四个这种频道、共 5,378 章。此前 PodJS 未把它们识别为本地内容：刷新会请求虚拟网址，未收藏章节也不会进入发往手机的资料库清单，正文同步模式及“清空内容”入口也会误判。现已按手机端标识补齐 PodJS 与原生手表的本地内容判断、清单 SQL 和刷新跳过逻辑。本地章节也不再预取虚拟网页原文，直接返回已同步正文。定向测试验证无网络刷新和原文请求、章节顺序、清空、未收藏章节带正文导出，以及手机章节入库；隔离手机和手表实机又完成正式 TXT 章节选择仓库路径、两章蓝牙同步与 13 万字正文回读；独立手表包的正式阅读页绘制标题和多行正文。现已在隔离库实机跑完 5,378 章的手表到手机覆盖传输，并核对全部正文；反向同规模传输也已在隔离库通过；正式资料库替换、文件选择与章节确认界面、章节列表和物理交互仍未验收。详见 [TXT 分章实机记录](imported-txt-novel-sync.md)。
+
+2026-09-25 又在 OWW242 隔离包完成 5,378 章**合成资料库**的完整同步清单生成。修订顺序和批量阅读进度迁移修复后，冷清单一次完成需 557.5 秒、16,422 次 SQL 查询；所有章节正文可用，但速度仍不理想，也不代表真实 5,378 章已经通过蓝牙传输。712 项应用测试和类型检查通过，主包 APK 已更新，设备与归档 SHA-256 均为 `39c715bc7cff6101dd3e8e8d0e371aac57d381541ae0d10ffc06a3d8ce1fcde6`。主库安装前后文件哈希相同、SQLite 检查通过，原有 16 频道、6,006 文章、7 条独立备忘录保持不变。详见 [规模验证记录](txt-novel-manifest-scale.md)。
+
+后续检查发现该合成资料库首次清单结束后未写入正文缓存：本地章节的同步 ID 与 SQL `dedup_key` 不同，后续正文来源查找失配。现让具有原生正文哈希的导入章节回到已选中的来源行并发布可复用缓存。隔离 OWW242 上 100 章测试的第三次清单使用了 100 条缓存、正文重新编码为 0，第二/第三次清单一致。更新的主 APK SHA-256 为 `df91e98c5c02d2fbfa3ff67d02027728fb2f2e0832ab6ca7f385c115c767004f`，设备安装哈希匹配并启动到首帧；主库全部 32 张表的行内容与更新前一致，SQLite 检查通过。真实 5,378 章首次缓存构建、重复清单耗时和完整蓝牙传输仍待实机验证；详见 [缓存验证记录](txt-novel-manifest-cache.md)。
+
+又用主库中四个 TXT 小说频道的五篇真实章节在 OWW242 隔离包核对：五个原生正文哈希均与 PodJS 实际编码哈希一致，五条缓存成功发布；再次生成清单时正文编码为零且清单完全一致。隔离包和设备临时副本已清理，主库 32 张表的所有行与测试前相同，SQLite 检查通过。这仍是抽样，不等于逐篇验证 5,378 章或完成蓝牙传输。
+
+随后把主库全部 5,378 篇真实 TXT 章节、原生哈希、分块和五个外置正文文件复制到独立包。完整清单中 5,378 篇正文全部可用，逐篇原生正文哈希与 PodJS 实际编码及内容哈希均一致；隔离库有 5,378 条正文缓存。再次生成清单时正文编码为零，清单完全一致，但仍耗时 222.3 秒。第一次干净运行的完整耗时因夹具先后漏放、截短五个长文件名而没有得到有效样本；文件按完整名称补齐后，部分缓存已预热的完成轮耗时 309.6 秒。完整蓝牙传输和规模性能优化仍未完成。隔离包清理后，主应用已恢复，主库 32 张表所有行未变、SQLite 检查通过。详见 [缓存验证记录](txt-novel-manifest-cache.md)。
+
+## 同篇文章冲突合并：2026-09-25
+
+隔离手机和手表以同一 URL/稳定 ID 持有一篇文章：手机正文较新，手表收藏状态较新，手机另有稍后再看状态。正式手机同步管理器在已配对 RFCOMM 上完成双向合并；两端最终各只有一篇文章，正文采用手机新版，同时保留手表收藏和手机稍后再看。手表应用 ACK、peer 状态、SQLite 完整性均通过。测试包清理后，主包 16 频道、6006 文章等计数未变。此例不覆盖删除冲突、多端并改或大资料库。详见 [资料库会话](sync-library-session.md)。
+
+## 手机 EPUB 两章到手表：2026-09-25
+
+正式手机导入仓库解析两章 EPUB，经正式蓝牙同步管理器与配对 RFCOMM 送到独立 PodJS 手表包。手表收到一本频道及两章文章，按章节 URL 编号核对第一章、第二章的标题和正文；阅读服务逐章返回预期内容。第二轮将第一章扩为额外 13 万汉字，验证手机文件化 HTML 经传输、手表文件化存储后完整回读；应用 ACK、数据库完整性均通过。独立手表包中的正式阅读页也已实机绘制标题及多行正文；修复无断点长汉字段落触发的无障碍 4096 字节异常，主包更新后数据计数与完整性不变。测试数据没有进入手机或手表主库，测试包已清理。文件选择界面、手表章节列表、目录链接/图片、整书规模与滚动性能、冲突及物理视觉交互仍待验证。详见 [EPUB 同步实机记录](imported-epub-sync.md)。
+
+## 手机导入 TXT 到手表分块阅读服务：2026-09-25
+
+正式手机伴侣的 `importLocalContent` 把 166,269 字节 TXT 存为外置文件，再由正式 `PhoneBluetoothSyncManager` 通过配对蓝牙同步给独立 PodJS 手表包。手表接收后生成文件标记，11 个 16-KiB 阅读块回读全文与手机导入原文逐字一致；`services.getArticle` 返回阅读器句柄且不向正文暴露标记。测试使用手机内存 Room 库和独立缓存目录，未改动手机或手表主库。测试包清理并恢复主包后，16 频道、6006 文章、7 备忘录等计数及 SQLite 完整性检查不变。手机文件选择／导入确认界面、手表可见阅读页面、触摸与定位、大书内存和 EPUB/章节导入仍需验证。详见 [TXT 同步实机记录](imported-txt-sync.md)。
+
+## B 站播放源与原生请求对齐：2026-09-25
+
+原生手表请求 MP4 (`qn=32`、`fnval=1`、`platform=html5`)，并选用第一个 `durl` 地址；旧 PodJS 播放入口默认请求 DASH，遇到多个 `durl` 还会报“分段视频播放尚未接入”。两个入口现都请求原生 MP4 参数，WBI 仅返回 voucher／空流或缺少签名密钥时按原生 SDK 规则重试旧接口，有 `durl` 时优先使用第一段。原生 SDK 定向测试、PodJS 707 项应用测试、类型检查和打包通过。OWW242 主包已更新为 `artifacts/watchrss-podjs-bili-mp4-parity.apk`，安装与归档 SHA-256 均为 `f36490ebfd069bcf03f80b1feb36293287730a51bb8f182b33b3caa00730fbda`；启动达到首个纹理帧，16 频道、6006 文章、7 备忘录、105 正文缓存、6 保存状态和 2 peer 状态保持不变，数据库检查通过。另在独立手表包以测试密钥验证了生产 RSA-OAEP-SHA256 宿主加密桥接，解密精确还原输入；先前文档称其不可用已更正。真实 B 站播放、账号续期及画面/声音验收仍未完成。详见 [B 站迁移](bili-migration.md)。
+
+## 物理手机与手表的正文回传修复：2026-09-25
+
+配对手机向隔离手表夹具发送 180,598 字节分块正文时，发现接收方 gzip 哈希被误用作本地回传缓存，导致会话在回传阶段失败。现只复用手表本机编码的缓存；同一实机交换已通过正文逐字节还原、收藏/稍后再看、阅读位置和应用 ACK 后游标提交。703 项应用测试及类型检查通过。修复主包已部署 OWW242，安装哈希匹配，原有 16 频道/6006 文章等数据与 SQLite 完整性检查通过。手机主应用的完整资料库同步和真实 UI 操作仍未验收。详见 [资料库会话](sync-library-session.md)。
+
+后续同日验证：独立蓝牙夹具的“手表覆盖手机”模式接收并计数 1 篇手机文章，但在手表端应用 0 篇；正式手机伴侣的设备探测也找到当前 PodJS 主包并匹配设备身份。两项均为实机配对蓝牙验证，仍不等于正式手机资料库合并/覆盖或用户操作验收。测试包已移除，主包数据数量和完整性复核通过。
+
+再用手机伴侣正式 `PhoneBluetoothSyncManager` 和内存 Room 库，对独立手表包完成两次单向覆盖和一次双向合并。“手表覆盖手机”后手机收到 1 篇文章、准确正文及收藏/稍后再看状态；“手机覆盖手表”后隔离手表仅保留手机的 1 篇文章，旧文章被清除，正文与两个保存状态一致。合并后手机和手表各保留两篇不同来源的文章及两条不同来源的备忘录，正文与 Markdown 内容一致，手机收到的阅读器同步警告为空。测试都经过已配对实机蓝牙、设备身份校验及持久会话应用 ACK。主手表包在测试期间已停止，双方测试包清理后恢复主包；16 频道/6006 文章等数据再次保持不变。此结果仍不涵盖冲突、大资料库、备忘录附件、非空阅读器资源或真实界面操作。详见 [资料库会话](sync-library-session.md)。
+
+## 账号状态页源码增量：2026-09-24
+
+「我的 → 账号」已接到只读状态页，展示原生发布版的脱敏绑定、会员、诊断和令牌状态；未绑定时提供现有手机下载弹窗。安全存储中的令牌与密钥不会交给界面。674 项应用测试、类型检查和应用构建通过；隔离包的 1 项 OWW242 渲染测试及三张夹具截图通过。此处记录的是首次账号状态页构建；主包部署和账号同步动作的后续结果见 [账号状态页](account-status.md)。
+
+## 启动引导与协议页进行中：2026-09-21
+
+法律页v2已完成一次真实进程死亡后的挂起响应恢复：外部 `am kill` 后PID31248→2790，同一系统task／ActivityRecord保留；实际saved元数据与10174字节正文引用跨进程保持，旧锚点经loading丢弃，响应后回到顶部。此结论限定于独立目标 `5516518c…` 的held-response路径，不代表低内存回收、快响应保持或原生像素对照。既有 `956f4e4c…` 三轮18项专项通过仍保留原范围；受控首帧前保持与自然即时HTTP实际归零分别记录。
+
+备案冻结相位已覆盖1.0、1.3、1.8字号，最大8位通道差分别为2、2、1，均非逐像素一致。新增Java分段诊断目标 `a0d1b3fc…` 的一轮正常时钟采样中，24次完整render的P50／P95为24.854／38.175ms，copy+getPixels占这些调用实际总耗时的36.53%，TextureView通知P50仍为65.466ms；终态PNG与前轮及冻结参考相同。另配普通runner测试APK的SDK诊断专项4项通过，失败／拒绝的前次尝试未计入。单轮插桩结果不代表稳定性能收益、实际GPU呈现或流畅性通过。自然快路径、低内存回收、API31+模糊、已发布恢复文件清理、正式部署、物理操作及整体迁移仍未完成。分轮日志、实际进程死亡审计及性能／字号边界见 [引导与协议页](onboarding.md)。
+
+## 设置范围与分享启用条件当前增量：2026-09-14
+
+已部署。501 项应用测试和类型检查、2 项真机测试通过；移除原生不存在的“清理缓存／隐私与日志”占位项，补备案入口与分享说明，按 Kotlin 空白规则修正按钮及缺链接提示。七张组件截图已检查，30 张业务表与 188 个受保护文件一致，主包只读与阅读器预览回归通过。完整设置页像素、实际点击和返回仍未验收。详见 [范围核对](settings-parity-audit.md)。
+
+## 分享上一增量：2026-09-14
+
+分享分流、原生设备限制、操作页退出逻辑和 UTF-8 白码黑底二维码已部署。500 项应用测试、32 项服务契约测试、2 项手表测试通过；18 组文本与原生实际函数对照，普通／中文／长链接从 GPU 帧解码成功，保存六张截图。30 张业务表、188 个受保护文件保持一致，主包只读及七次阅读预览回归通过。真实系统选择器、操作页返回端到端、跨扫码器编码识别、完整像素和物理交互尚未验收。详见 [分享证据与边界](system-share.md)。
+
+## 图片缓存上一增量：2026-09-14
+
+持久图片缓存、正文图片预取、全屏图片源文件保留以及三个高级设置入口已部署。495 项应用测试、34 项 SDK 测试通过；真机覆盖并发取消、重开复用、损坏缓存恢复、原生淘汰规则及容量／预取选项对照，保留十一张截图。30 张业务表、188 个受保护文件保持一致，主包只读及七次阅读预览回归通过。视频缓存生成器、离线完整流程、手动清理、系统分享、物理操作及完整迁移尚未完成。详见 [缓存证据与边界](managed-cache.md)。
+
+## 从手机输入上一增量：2026-09-14
+
+设置入口、临时 HTTP 服务、二维码及蓝牙地址交接已部署。486 项应用测试、34 项 SDK 测试、四项真机 TCP 测试通过；17 组响应与原生处理函数一致，生产二维码通过原生 ZXing 解码。配对手机两次连接进入实际确认流程，取消后未创建订阅。部署后 30 张表与 188 个受保护文件一致；主包只读及七次阅读预览回归通过。局域网、原生手机界面、物理操作和完整迁移未完成。详见 [远程输入证据与边界](remote-input.md)。
+
+## 音量设置上一增量：2026-09-14
+
+滚轮音量、防干扰和静音开播三个占位入口已替换为控件并部署。481 项应用测试通过；真机独立包的 25 组选值与原生函数一致，九种控件状态已截图。30 张业务表和 188 个受保护文件保持一致。物理操作及完整原生设置页像素对照未完成。详见 [音量设置证据与边界](media-volume-settings.md)。
+
+## 段落排版上一增量：2026-09-14
+
+自动断词、两端对齐、整段文字上下文及文字渲染模式已部署到 PodJS 主应用。原生 144 组配置、588 行与 8300 个光标位置通过；12 组实际阅读／预览画面对比在声明区域内零像素差异。应用 479 项与 SDK 36 项测试通过，更新后的 30 张应用表和 188 个受保护文件保持一致。完整迁移仍未完成。详见 [段落渲染证据与边界](reader-paragraphs.md)。
+
+## 阅读资源上一增量：2026-09-14
+
+正式 PodJS 应用已部署“资源清单更新只保存实际变化的预设记录”修复。477 项应用测试通过。独立物理手机／手表通过配对 RFCOMM 上传可渲染字体、分成两块的 PNG、视频及海报，并完成首块重复、断线重连续传、逐字节回读及实际预览验证。该资源路径没有使用 ADB 转发。测试期间原应用 191 个文件与 30 张表保持一致；部署后数据审计和临时应用／转发清理均通过。
+
+详见 [阅读资源传输](reader-resource-transfer.md) 和其中的部署收据。字体／背景的原生像素对照范围分别见 [字体](reader-fonts.md)、[背景](reader-backgrounds.md)。原生手机 UI、Wi-Fi、其他格式／场景与完整物理验收仍未完成。
+
+下面保留较早实施记录。旧 APK、测试数量和当时的待办不代表上述增量之后的状态；其他功能仍按对应文档与真机证据核对。
+
+## 应用
+
+| 模块 | 状态 |
+| --- | --- |
+| 外部项目配置、独立 Android 包 | 已实现并构建 |
+| RSS/Atom、SQLite 仓储、长文、分页 | 已接入开发界面；有单元/SQLite测试 |
+| 搜索、收藏、文章笔记、文本输入 | 已接入；完整交互验收待完成 |
+| 共享阅读布局、进度/自动滚动控制器 | 已接入 UI；普通文章自动滚动/重开恢复有真机测试 |
+| 导入 TXT 分块阅读/朗读/定位与 EPUB 章节 | TXT 的手机生产仓库导入→蓝牙同步→手表分块阅读服务及简单两章 EPUB 的导入→同步→手表章节服务已用隔离数据实机验证；文件选择 UI、可见阅读页、目录媒体、大书性能和物理验收待完成 |
+| 系统 TTS | 文章队列与播控已接入，中文引擎已就绪；正文触点起读及重试锚点已通过定向真机测试，高亮与跟随滚动已通过受控真机回调测试；完整起读边界、表冠音量及真实出声验收仍待完成 |
+| 账号、云/TUS、蓝牙协议 | 共享模块有测试；尚未完成产品端到端集成 |
+| 迁移/完整媒体/其他三端 | 未完成 |
+
+## 已取得的设备证据
+
+- OWW242（Android 11）安装并启动独立包；PodJS 日志确认 WatchRSS bundle/pak 的哈希及首帧提交。
+- Android 11 Keystore 初次测试发现自定义 IV 被拒绝，已修复为由 Keystore 生成 IV。
+- SQLite 事务回滚、分页限制、跨实例持久化以及安全存储/媒体状态等 11 项原生测试通过。
+- 应用 smoke 测试通过：启动真实 Activity、确认 SQLite schema、读取真实 TextureView 非黑帧。
+- 手表系统持续显示“连续充电时间过长，请插拔数据线继续充电”，因此系统截图不能证明应用实际可见；等待重新插拔数据线后完成触摸、表冠和视觉验收。
+
+所有手机双端同步、真实云恢复、覆盖升级、60 秒滚动性能和 10 分钟稳定性仍未通过验收。没有操作生产后端或旧版用户数据。
+
+## 最终本地检查
+
+- 应用 Bun：25 项通过；应用与框架 TypeScript 检查通过。
+- 框架 Bun：18 项通过；Rust runtime：4 项通过；gallery 默认构建通过。
+- 原生 HTTP 追加的 4 项测试在 OWW242 上通过，覆盖大于 256 KiB 下载、HTTP 失败保留旧文件、跨来源移除授权头及取消连接。
+- 上述测试不涵盖未接入的完整账号/同步/迁移，也不等于产品功能对齐。
+
+## Android 开发包
+
+- 文件：`artifacts/watchrss-podjs-0.1.0-dev.apk`，包名 `com.lightningstudio.watchrss.podjs`。
+- SHA-256：`095444cdded4317179dd6f802b965972cfec46ffe4cda5105c2688a9646e9022`。
+- 最后一次应用 smoke 测试通过（13.461 秒）：验证启动、数据库就绪、点击头像进入我的菜单、返回首页。保存了 `artifacts/render-home.png` 和 `artifacts/render-profile.png`。
+- 曾发现内联样式 `left/top` 与 PodJS ABI 不符导致启动异常，现已替换为 `insetL/insetT`，最后一次真机 smoke 覆盖了修复。
+- Android 原仓库实施前后的未提交差异 SHA-256 均为 `87c601a6aa4ff5bf9feab97e72e5b51303cf9d17186c23b578b4d818464ff5ab`。
+
+这张图片来自设备上真实 TextureView 的渲染输出，不能替代被充电提示遮挡的最终显示面板与物理输入验收。
+
+## 页面还原进度（本轮）
+
+首页和我的页已按当前 Android 源码、圆屏资源和同设备截图重建。字体与原版文件哈希一致，新增精确字号、Material 图标、按条目高度滚动和页面返回栈。尚未迁移入口明确提示未完成。
+
+修复大字体包加载时 Java 缓冲区扩容导致的 OOM，修复 CLI 清单硬编码 PocketJS revision 与实际原生构建不一致的问题。字体缓存使用输入哈希和逐图集摘要校验，gallery 回归构建通过。
+
+- home 最新截图不同像素占比：7.32%；不代表视觉或交互验收通过。
+- profile 最新截图不同像素占比：5.07%；不代表视觉或交互验收通过。
+
+其余页面、长按/滑动操作、同步、迁移和四端全功能交付均未完成；不以这两页开发进度代替完整交付。
+
+## Android 性能修复与 Vulkan 绘制
+
+Android 开发包已改为 Vulkan 直接绘制 DrawList。最终包冷启动 1358 / 1368 / 1372 ms；首页与我的页在 GPU 改造前后逐像素一致。最终三项启动、导航、生命周期和 Activity 重建 smoke 通过，原生宿主 15 项测试通过。十分钟测试在前一版 LRU GPU 包完成，之后的同步修复包已做短回归，不能混记为同一 APK 的十分钟测试。详见 [性能证据](performance.md)。
+
+这次修复不表示所有页面已按原版 1:1 完成，也不表示全功能迁移已经验收；当前仍未达到持续 60 FPS。
+
+首页头像边框修复：内外圆共享平移取整，避免小数滚动改变 0.7dp 边框轮廓。当前包已安装 OWW242，Rust core 131 项及 Android smoke 4 项通过；首页与我的页静态截图保持逐像素一致。详见性能证据中的边框回归记录。
+
+滚轮与侧滑返回：修正应用层滚轮符号；共享 TS 保留页面栈与上一页滚动位置，直接跟随水平拖动，支持取消回弹及距离/速度提交。Android 首页使用 OPPO/OPlus watch 的系统滑动退出窗口，非 OPPO 或请求失败时走边缘手势后的系统返回。宿主取消触摸现在会取消识别器，不再误发点击/惯性。OWW242 的 7 项 smoke 与 5 项宿主输入测试通过；非 OPPO 分支通过在 OWW242 上强制选择 fallback 验证，尚无非 OPPO 真机。已录屏检查短滑回弹、长滑返回及 OPPO 回桌面，证据见 performance.md。
+
+圆屏应用内返回已改为整页圆形向右移动。背景与所有子内容共同裁剪，圆外显示上一页。Android/Wear 宿主显式启用新增裁剪指令，其余旧宿主保持原有裁剪协议，尚未做跨端圆形返回验收。OWW242 当前安装包的 8 项真机测试通过，含圆内平移、圆外背景及取消恢复逐像素验证；Core 133 项通过。录屏：artifacts/watchrss-circle-back.mp4。
+
+## RSS 主流程增量（2026-09-12）
+
+RSS 列表卡片、未读反馈、当前频道刷新、长按操作、收藏/稍后再看独立本地状态和二维码分享已接入。旧 PodJS 收藏采用幂等回填，两个保存类型分别保留取消记录。90 项 Bun 测试及 TypeScript/应用构建通过。真机 smoke 被当前系统充电界面和不可用/黑色 TextureView 阻塞，未通过；不能记为功能或视觉验收完成。具体范围和剩余差异见 [RSS 迁移记录](rss-migration.md)。
+
+## Goal 后续推进：RSS 阅读与预览
+
+更正上一阶段的测试结论：黑帧主要来自旧 smoke 抓取空白视频 TextureView，已改为主 `PodRuntimeView`。另修复了真实阅读页 `fontSize` 非法属性导致的页面创建失败。
+
+RSS 图片卡片、原始图片比例、实际字库测量及正文优先的预览摘要已接入。97 项 Bun、TypeScript、应用构建通过；OWW242 图片解码 4 项通过；模拟器 RSS 阅读/保存闭环通过。原生操作页图像比较仍有 3.2728% 像素差异，不能称为画面一致。字体大字号缩放、完整频道/阅读/同步等仍未完成。详情及复现命令见 [RSS 迁移记录](rss-migration.md)。
+
+
+Goal 继续：新增朗读语速子页、持久化和系统 TTS 初始化/语速/分段/取消/完成与错误状态链路。应用 103 项、框架协议 7 项测试通过；OWW242 全量 11 项通过后修正了旧设置测试的误定位，真实设置→语速→返回定向通过；宿主媒体 3 项通过。设备中文初始化仍明确返回 `tts_language_unavailable`，不能称为中文朗读可用。完整阅读器、自动滚动、原生语音源、同步及视觉一致性仍待继续。最终 APK 哈希和证据见 [RSS 迁移记录](rss-migration.md)。
+
+## 阅读位置与自动滚动增量（2026-09-13）
+
+已接入原生式单击启停、双击控制页、表冠/手动滚动暂停、自动开始设置、正文锚点保存与重启恢复。修正 Android realm 缺少 `setTimeout` 的接入错误，朗读轮询也使用宿主计时服务。应用 109 项、真机全量 12 项通过；发现并修正重建时的同步宿主配对锁交接竞争后，宿主 4 项与最终包 2 项定向测试通过，最终进程错误日志为空。控制页仍有 5.65% 不同像素，完整 HTML/媒体阅读器、预设、字节锚点及同步仍未完成。详见 [阅读器迁移记录](reader-migration.md)。
+
+2026-09-13 reader update: structured content blocks now drive variable-height text/image/video rows, with source text/media anchors for reflow and restore. Inline image decode, full-screen fit view and back are exercised by real-watch instrumentation. Default role font geometry is ported; font rasterization, custom presets, full native reader chrome, zoom/pan and provider-specific RSS video behavior are still incomplete or unverified. See `reader-migration.md` for scoped evidence and remaining differences.
+
+Image preview update: single-tap exit, double-tap scale cycle, pinch and bounded pan/back handoff are implemented. Deep-zoom image resolution and exact native motion/loading presentation remain incomplete; see reader migration evidence.
+
+Original-resolution image tiling is implemented with visible-region sampling, bounded concurrent decodes and temporary-download ownership. Native image/HTTP tests and application checks pass; detailed final renderer evidence and remaining preview gaps are tracked in `reader-migration.md`.
+
+Original webpage reading now has native-extractor fixture coverage, charset-aware bounded download, independent chunked cache, failure fallback, per-open switching and channel-default activation. Long-cache reopen and the existing reader/image flows pass on OWW242. Reader chrome, channel-settings entry, original-button browser warning, complete sync and multi-second large-document stalls remain incomplete; see `reader-migration.md` for exact final-build evidence.
+
+### 2026-09-13 RSS 频道详情与设置增量
+
+普通 RSS 列表标题已接入频道详情、频道内搜索、二维码分享、标记全频道已读及频道设置。原文默认模式可在手表设置并持久化；删除需确认后才返回首页。132 项应用测试通过；OWW242 专项验证覆盖页面路由、重启持久化和删除确认。后台刷新/原文预取、媒体条件设置、本地导入清空、同步删除记录和原生像素对照仍未完成，不能视为完整频道迁移。详细范围见 `rss-migration.md` 最新章节。
+
+### 2026-09-13 后台刷新与原文可见预取
+
+频道原文开关现在会在保存后后台刷新 RSS；原文只在列表停止滚动后按实际可见文章预取。请求合并、前台队列优先、关闭/删除处理和滚动期间暂停写入已接入。原文预览独立保存，刷新 RSS 后仍可补齐缺失图片，旧原文缓存可通过有限长度片段补建预览。146 项应用测试通过；最终构建通过 3 项 OWW242 专项（含 54 万字原文、频道设置、预取及刷新保图），此前全量 17 项也通过。安装包哈希与手表一致，证据及版本范围见 `rss-migration.md`。媒体频道设置、预设、阅读器原生交互、同步及画面对照仍需继续，完整迁移未完成。
+
+
+### 2026-09-13 RSS 附件媒体与后台播放
+
+正文与原文模式都已接入实际图片/视频附件，避免把派生预览图当成附件；媒体频道的后台播放开关独立持久化。补齐加载期间退后台的暂停时序、重试清除旧错误，以及 RSS 视频放大后两轴拖动。150 项应用测试、类型检查和构建通过。OWW242 专项已验证真实视频合成画面、失败重试、暂停准备、手动恢复、后台开关、旋转拖动和返回停止。首次全量 17/18 通过；备忘录测试的首页就绪条件已修正且定向通过，最终全量结果另附。Bilibili/抖音链接解析覆盖不能代替本批真实在线播放验收；完整媒体画面、音频、同步等仍未完成。详见 `rss-migration.md`。
+
+
+本批最终记录：图标调整前 OWW242 全量 18/18 通过；最终图标版本专项通过，APK 与安装包哈希一致。更正此前预览误判：所谓“头部消失”的原始 PNG 与首次打开截图逐像素完全相同，标题及原文按钮完整，未证实应用渲染缺陷。全部试验性渲染改动已撤回。增加窗口级标题/按钮像素检查后，原始归档 APK 连续六轮播放、返回及后台设置切换通过。证据见 `rss-migration.md` 最后一节；完整迁移仍有其他未完成项。
+
+### 2026-09-13 本地导入频道清空
+
+补齐原生指定导入频道的“清空内容”及取消/确认交互。执行后保留频道、阅读设置和其他频道数据，级联移除文章关联缓存，并先保存持久删除记录；刷新取消与迟到响应不复活已清空文章已有测试。152 项应用测试与类型检查通过，OWW242 全量 19/19 通过；最终提示文字换行调整后的专项另行通过，原始 PNG 验证两行可见且边缘无裁切。最终 APK `b60444262c308a6402eeb52ec1bf60afb698420824ab118712bdd814babfab2a` 与安装包匹配。
+
+本地删除日志尚未接入原生手机同步协议，频道整页视觉对照、旧删除确认布局、离线文件回收、阅读页固定底栏与原生正文末尾动作等差异仍待完成。详细范围与证据见 `rss-migration.md`。
+
+### 2026-09-13 频道设置画面对照与框架圆角修复
+
+清空/删除行改为原生全宽52dp及删除图标，说明、间距、确认框颜色和布局一并对齐。独立参考包采用release分支，成功采集5个原生页面；debug专有渐变未带入PodJS。像素对照定位并修复框架奇数尺寸圆角超出布局边界的问题，修复前失败、修复后通过的测试已归档。
+
+框架146项、应用152项及最终OWW242全量19项全部通过。最终APK `c725f493658d307b7f4ca6bee2f5e9d6f8e8f42476e2e29ef5118617c54afc1a` 与安装包一致。对照仍有1px位置/尺寸和抗锯齿差异，详见 `artifacts/channel-settings-comparison.html` 及JSON数值。完整迁移仍需继续阅读页结构、功能与同步等差异。
+
+### 2026-09-13 阅读页整页滚动与正文末尾动作
+
+移除固定阅读顶栏和底栏，标题、原文/朗读按钮及收藏/分享/自动滚动改为同一滚动文档；收藏后保留当前阅读页。正文/媒体锚点兼容旧阅读进度，标题和页尾新增独立位置标记。已有笔记数据保留，额外文章笔记的兼容入口仍待处理。
+
+156 项应用测试与类型检查通过；图标最终调整前 OWW242 全量 19/19 通过，最终包两项专项验证收藏与稍后再看独立、分享往返、原文失败重试/缓存/频道默认。最终 APK `052b0d4fbcf49be129b267e3c73371448dafc720ebd9727acf75c63c26173032` 与安装包匹配。原生 release 阅读页已对照；AI 入口、完整朗读流程、字重/栅格化、预设及同步等仍未完成，不能称为画面一致。证据和范围详见 `reader-migration.md` 与 `artifacts/reader-comparison.html`。
+
+## 阅读标题字体与采样修复（2026-09-13）
+
+已按 OWW242 原生默认阅读字体构建粗体资源，保留旧字体字符回退，并修复缩放字形覆盖率插值。标题原始截图平均像素误差从 36.27 降至 23.51/255；仍不一致，按钮位置相差 2px，AI/完整朗读等仍待完成。最终包真机全套 19/19、应用 156/156、核心渲染 147/147、GPU 回归与 TypeScript 通过。安装包与构建 SHA-256 一致，证据见 `artifacts/reader-font-apk-receipt.json`、原始对照见 `artifacts/reader-comparison.html`。
+
+## 阅读页行内 AI 总结与图片解码（2026-09-13）
+
+已接入原生式中央按钮、展开/收起、等待/生成/错误/完成状态、401/403 刷新令牌、402 提示、失败重试、完成结果复用和离开页面取消；使用缓存原文，保留 RSS 正文和收藏数据。真机本地服务器验证通过，尚未验收真实付费后台或手机账号同步；AI 设置、提示词选择、用量统计与独立总结入口仍待补齐。
+
+首轮完整回归 19/20，通过诊断定位图片 Base64 解码阻塞（256KiB 平均 934.25ms）；原生快路径将同项测量降至 3.67ms。最终无采样代码的安装包全套 20/20 通过，另有应用 167/167、运行时 56/56、HTTP 8/8、框架 9/9、codec 3/3 与 TypeScript 验证。证据见 `artifacts/summary-apk-receipt.json`，画面对照见 `artifacts/summary-comparison.html`。字体、精确位置、完整原生朗读及其他迁移差异仍未完成。
+
+## AI 设置、提示词与用量统计（2026-09-13）
+
+已接入账号条件下的 AI 开关、自动总结、四个提示词预设、Token 显示偏好和用量统计页。统计包含累计调用、输入/输出、近 7 天趋势、供应商分布与最近 200 条记录；取消或返回不会清空历史，实际清空须确认。保留原始用量 JSON，并兼容真实接口的 camelCase 字段，修正原生实现对这些字段的漏计。
+
+最终包 `c73c0768d310c079dab9b0e4fbf297e38f1e835e47df34b4315bc4f1b75b5c51` 与 OWW242 已安装包一致。应用 171 项、字体编译器 68 项、运行时 56 项和渲染核心 147 项测试通过。手表设备报告全套 21/21 通过，随后明确指定手表序列号的两个 AI 专项也通过。首次完整 Gradle 运行误选了另一个已连接手机，导致整体任务失败；已停止该设备测试，并只卸载本轮新装的两个测试包，保留了恢复记录，不能把该混合任务称为整体通过。
+
+证据见 `artifacts/ai-settings-apk-receipt.json`、`artifacts/ai-settings-full-watch.xml`、`artifacts/ai-settings-device-scope-recovery.json` 和 `artifacts/ai-settings-comparison.html`。最终验证进程未记录 PodJS/AndroidRuntime 错误，临时诊断代码和键已移除。截图仍有字形栅格及少量位置差异；真实付费后台、手机账号同步、完整阅读器预设和朗读配置仍未完成验收。Token 显示偏好沿用原生行内阅读页不消费该标志的行为，独立总结页面另列范围说明。
+
+## 阅读器预设数据层（2026-09-13，尚未接入页面）
+
+新增原生 schema 1/2 解码、正文与分类样式继承、背景参数、旧字体/主题迁移、选择持久化及定时/日出日落计算。348 组日出日落结果与原生 Kotlin 一致，另有 6 组原生预设解码与五类样式结果对照；原始记录、删除记录和未知版本均保留，异常顶层数据不会被默认值覆盖。应用测试 181/181、类型检查通过。
+
+本阶段只验证数据层，尚未连接生产页面，没有新安装包，也未操作设备或修改用户配置。预设选择页面、时间选择与定位、实际阅读样式、手机资源同步和真机视觉验收仍待完成。细节及已知差异见 `docs/reader-presets-migration.md`。
+
+
+## 阅读器预设页面、时间选择与浅色阅读（2026-09-13）
+
+已接入深色/浅色/自动、独立预设选择与跟随浅色、固定切换时间、日出日落模式和手机下载二维码；系统时间选择器确认/取消可用，选择及规则持久化。实际阅读页应用正文/分类字号、行高、颜色、支持的粗体与对齐、字距和纯色背景，浅色按钮与图标已修正，阅读锚点保留。旧字号只参与初始预设迁移，遵循原生已初始化预设不随旧开关改写的行为。
+
+最终应用测试 182/182、框架服务 45/45、TypeScript 与手表全套 24/24 通过；全套只指定 OWW242，耗时 536.204 秒，零失败零跳过。受控规则与手表本地时间一致性已验证，未持续观察真实时间边界。测试恢复预设/设置快照，只清理自己的文章及关联记录。最终安装包与发布包 SHA-256 均为 `4a21a06a7651149140650973083c6e89f91f2366f9dbd3daca68736f1ec5b21a`，前版 APK 已另存。
+
+原生三个顶部页面和自动规则控件有有效原图对照；独立菜单窗口全透明，审计用例明确跳过，仅窗口几何有效，不算视觉通过。对照仍有字形与位置差异。真实定位权限/结果、手机预设资源同步、自定义字体及图片/视频背景、其他原生阅读表面和最终人工验收仍未完成，不能称为完整迁移。详见 `artifacts/reader-presets-apk-receipt.json`、`artifacts/reader-presets-comparison.html` 与 `docs/reader-presets-migration.md`。
+
+## 文章朗读队列、播控与本地语音选择（2026-09-13）
+
+已接入标题／正文分段、同频道队列、暂停后重读当前段、上一篇／下一篇、自动下一篇、离散语速、停止与返回文章。点击“大声朗读”留在文章页，长按打开播控。停止和新会话保留进程内的自动下一篇与播控语速选择，和原生控制器一致。普通设置页的独立语速状态未擅自合并。
+
+修复应用缺失 `media.tts` 声明及固定语言初始化问题。按原生规则枚举已安装引擎、优先离线中文／英语并回退语言后，OWW242 实际返回 `com.yuemeng.speechsuite / zh-CN / xiaoyan / ready`；仅初始化，未请求真实合成或播放。初次页面渲染因不支持的 `borderRadius` 失败，已改用框架支持的圆角类；关闭自动下一篇的斜线及返回文字位置也已修正，失败日志保留。
+
+最终候选包手表全套 **28/28** 通过，556.845 秒，零失败零跳过；应用 **195/195**、框架 **46/46**、TypeScript 检查通过。44 组分段文本及字符坐标与直接编译的原生 Kotlin 结果一致；原生生产 Compose 的四个脚本状态截图有效。最终设备回归使用生产页面和宿主分发，但语音合成由明确标注的测试适配器替代，不能当作听觉验收。最终进程 PodJS/AndroidRuntime 错误为零。
+
+交付 APK 和实际安装包 SHA-256 均为 `953ed8f795b75d3bd445bd9bbef489d6e1585eb08da983a8021c346ca0d053af`，前一预设版本已另存。三个同状态全图对照 RGB MAE 为 5.55–5.79/255；错误状态因语速不同不计算一致指标，原图均保留。起读点的原生标点边界、逐词高亮／跟随滚动、表冠音量、导入长文流式朗读、完整后台策略及实际声音仍待继续。整体迁移未完成。
+
+证据与限制见 `artifacts/speech-apk-receipt.json`、`artifacts/speech-playback-comparison.html` 和 `docs/read-aloud-migration.md`。
+
+
+## 2026-09-13 触点起读与重试锚点
+
+正文长按传递实际触点，按行测量还原原文字符位置；已修正标题仍可见时正文误从标题起读，以及错误重试丢失起点。初始文章的起点保留在会话队列中，切回本篇仍使用它；停止和新会话清除。
+
+原生提取函数 115 组偏移对照、应用 199 项测试及类型检查通过。OWW242 定向播控用例 1/1 通过，含实际提交引擎文字的断言；全套 28 项未在此次包上重跑。安装与交付哈希相同，见 `artifacts/speech-anchor-apk-receipt.json`。真实音频、用户物理手势、所有字形命中、空内容回退与导入长文锚点仍未完整验收。
+
+
+## 2026-09-13 高亮与跟随滚动
+
+引擎范围回调、900 毫秒估计高亮、标题与正文源坐标映射、居中跟随、手动滚动后的 3 秒等待、暂停保留与旧段过滤已接入。应用 204/204、框架 47/47、原生纯函数 600 组对照、定向真机 2/2 及原生页面 2/2 通过。安装与交付 SHA-256 为 `3131a6fa2bf1bb02fe33b07c28a017e31ca1d3e3185b39d4a64260f157bdf4c1`。全套手表测试未在此包重跑；真实音频与用户物理输入尚未验收。
+
+`artifacts/speech-highlight-comparison.html` 展示未经平移和裁切的原图。换行和字体测量仍存在明显差异，包括 PodJS 允许句号落到行首的观察；后续需核对原生排版规则。详见 `docs/read-aloud-migration.md` 与 `artifacts/highlight-apk-receipt.json`。
+
+## 2026-09-13 · 原生段落断行接入
+
+正文整段排版通过框架 `text.layout` 接入 Android StaticLayout。当前采用实际渲染像素宽度和字号，返回 UTF-16 行起止位置，保留 CRLF 原文映射；文章／预设切换取消旧请求，段落串行处理后一次发布整个布局，复用原文锚点恢复位置。宿主能力顺序与打包声明的对应检查已加入，修复了一次启动兼容性校验失败。
+
+OWW242 上生产接口与原生生产 DetailTextBlock 的 48 组断行一致；应用 207/207、框架定向 17/17、宿主真机 2/2、应用定向真机 2/2 通过。页面测试断言正文首行确实采用原生断行，并复测脚本引擎高亮、手动滚动等待、恢复跟随、暂停、队列与长按起读点。当前交付／安装 SHA-256 为 `265c63457fa9e2b0834a7993ed89484aa01058434198e76c0855ed7c4043c163`，四个应用／测试包安装身份均已核对；原生正文源码未修改。
+
+对照见 `artifacts/paragraph-highlight-comparison.html`，记录见 `artifacts/paragraph-apk-receipt.json`。正文全图 RGB MAE 从上一高亮版 50.6526 降为 38.1384/255，标题视图从 26.4086 降为 19.2276；原图未裁切、平移或遮罩。断行修正不等于画面一致：原生 14sp / 1.35em 逐行实际高度为 38px，PodJS 仍使用 37.8px，基线和顶部可见范围也有差异。自定义字体、自动断词、更多排版字段、真实音频、完整后台行为及完整迁移仍待完成。全套真机用例未在此包重跑。
+
+## 2026-09-13 · 行框、基线与屏幕边缘文字
+
+正文和标题均使用宿主返回的逐行高度及基线；SDK 读取实际加载图集的逻辑像素尺寸和基线，将字形放到对应位置。宿主的行高处理保留首末行裁剪、后备字体行距及末尾空行规则。原生探针扩展为 252 组正文、36 组实际 DetailTitle，生产接口的行末、可见行末、顶部、底部、基线全部与 288 组原生结果相符。
+
+另修复引擎将负坐标起点字形整字丢弃的问题：支持扩展绘制指令的宿主使用已有的有符号字形指令，保留仍在屏幕内的部分。回归测试在修复前失败；当前核心 148 项、独立提交快照 146 项通过。修复已按该仓库要求发布为草稿 PR：https://github.com/gfhdhytghd/pocketjs/pull/1 ，未合并。
+
+最终应用 209/209、框架定向 27/27、Rust 宿主 57/57、Android 排版接口真机 2/2、页面真机 3/3 通过。页面验证包含上边缘可见文字像素、高亮与跟随、播控与起读点、自动滚动暂停及原文位置恢复。当前交付与安装 SHA-256 为 `f363f15a175b7c7f524835be50bee4a03eab63d5b37c28887f9578ef0913104b`；应用、测试、原生参考及宿主测试共五个包均核对安装哈希，见 `artifacts/metrics-apk-receipt.json`。原生生产源码差异仍为原有 `17fbfdbe…`，未被修改。
+
+`artifacts/metrics-highlight-comparison.html` 保留未经平移、裁切或遮罩的原图。标题视图全图 RGB MAE 为 18.5587/255（上一版 19.2276），正文为 31.6840（上一版 38.1384）；仍不一致。正文高亮矩形与原生同为 x252–379、y214–251，但字形存在约 1 像素的垂直相位差。引擎目前将字形坐标取整到逻辑像素，在 2x 设备上无法表达所有物理像素位置；图集字形来源、栅格化和缩放几何也仍需核对。完整功能迁移、真实声音及用户物理输入验收仍未完成，全套真机用例未在此包重跑。
+
+
+## 2026-09-13 · 亚像素布局与字形采样
+
+已修复两处逻辑像素取整：Taffy／布局回读，以及字形绘制指令。Android/Wear 明确启用浮点布局与新增 GLYPH_RUN_F32；旧宿主默认行为不变。GPU 保留字形基向量和起点的浮点值，以单个平行四边形采样字形，软件渲染和局部重绘同步支持。逻辑基线 14.5 在 2x 屏幕上现在落在物理像素 29，旧模式的 30 被回归测试同时保留。
+
+当前交付与实际安装 APK SHA-256 为 `d7eff61ea100ea99367d938f83b308a37ddd2dd75b47fd106c708e9a1572e0fb`，前一 f363 版本另存。应用 209/209、TypeScript 检查、核心当前树 150/150、独立提交 148/148、Rust 运行时 57/57、C++ GPU 解码和推送常量 sanitizer 验证通过。真机 4/4 用例在 83.923 秒通过，覆盖朗读高亮、手动宽限与恢复、播控队列及错误、自动滚动位置恢复、返回手势取消与提交。采集日志记录 GPU 321 帧、CPU 0 帧；五个应用／测试包身份均重新核对。测试恢复既有设置并仅删除自身样例记录；全套真机用例未重跑。
+
+`artifacts/subpixel-highlight-comparison.html` 使用完整 466×466 原图，不平移、不裁切、不遮罩：标题全图 RGB MAE 从 18.5587 降到 9.9140，正文从 31.6840 降到 16.5604。正文高亮框仍为 x252–379、y214–251，顶部可见文字像素 1289。原生截图沿用此前生产参考捕获，本轮未重新运行原生排版探针；详见 `artifacts/subpixel-apk-receipt.json` 的来源声明。PocketJS 核心已发布草稿 PR https://github.com/gfhdhytghd/pocketjs/pull/2 ，未合并。
+
+字形及字距仍不一致，坐标修复不能替代字体来源和栅格化核对。语音测试仍使用不发声的脚本适配器；真实声音、物理输入、其他未迁移功能和完整迁移均未验收。
+
+
+## 2026-09-13 · 阅读器独立字体与字符宽度
+
+原生生产 Compose 探针新增三组字体测量与逐字符框，288 组已有行框结果保持一致。正文默认字体的数字 0／1 均为 16 个物理像素，而应用主题字体中的 1 为 11 像素；原来打包图集又取整到逻辑像素，1 实际只有 10 像素。当前为阅读器独立配置 OWW242 默认字体档案：Roboto Regular 优先，OPlusSans3 的 wght=550 提供 CJK，兼容字符来自原字体；其他页面继续使用原主题字体。默认标题按 21.7sp 单独烘焙，避免由 18sp 图集缩放。
+
+框架支持应用显式字体槽 33–63 和可选 v4 字体图集。v4 在 cmap 中保存浮点逻辑字宽，编译器先按物理像素取整；v2/v3 行为保持不变。项目配置解析、动态槽打包及字体缓存包含新资源。12 个原生宽度样本中 10 个完全相同，正文／标题的 `A short line` 各差 1 个物理像素；仍无通用字形塑形和字偶距支持。
+
+应用 209/209、TypeScript 检查、核心当前树 151/151、独立提交 149/149、编译器及项目配置 17/17、独立编译器 9/9、Rust 运行时 57/57 通过。原生探针 1/1 用例在 14.697 秒通过；页面真机 4/4 用例在 146.037 秒通过，覆盖朗读高亮及跟随、预设切换／浅色／自动规则与持久化、阅读位置恢复及返回手势取消／提交。日志为 GPU 750 帧、CPU 0 帧。完整真机套件未重跑，脚本语音仍不验证真实音频。
+
+当前交付／安装 SHA-256 为 `2bce3765a0d01a4161d5ac208584cd24c1fcae68c05a1c8f0aa9468dd1e489ef`，五个包的安装身份已核对，前一 d7eff 包另存。`artifacts/font-profile-highlight-comparison.html` 保留完整 466×466 原图，不平移、裁切、遮罩：正文 RGB MAE 16.5604→3.4516，标题 9.9140→3.4412，仍非逐像素一致。原生截图沿用早先生产捕获，本轮刷新的是行框与字体探针；来源、源码哈希与范围见 `artifacts/font-profile-apk-receipt.json`。
+
+核心草稿 PR：https://github.com/gfhdhytghd/pocketjs/pull/3 。独立编译时发现上一 PR #2 的 TypeScript 常量位置不正确，已在 #2 以 4241575 修正并通过 6 项编译器测试，再将 #3 基于修正后的分支重建；此前安装包的工作区代码原本有效。两份 PR 均未合并。
+
+此字体档案针对已观察的 OWW242 字体配置；运行时导入字体、任意字重、字形塑形／字偶距及其他未完成功能仍未实现或验证。五个额外完整字符图集使 APK 增加约 76 MB（当前 397,202,730 字节），资源复用／按需字体仍待优化。真实声音、物理输入及完整迁移尚未验收。
+
+
+## 2026-09-13：朗读新会话的静音开播
+
+朗读队列现在使用设置里的开播音量上限，仅在新建会话、首次提交语音前执行；暂停恢复、上一篇／下一篇和错误重试保留用户后来改变的音量。原生规则为只压低超出上限的音量，0% 明确静音，正百分比至少保留一个实际音量步进；系统固定音量和未超限时不写入。原生设置里的无效上限统一按 10% 处理。取消发生在异步音量读取期间时，不再写入或提交旧会话；音量服务异常不阻止朗读。
+
+框架增加 `mediaVolume.state()/setIndex()`，通过 `media.audio` 访问共享 `STREAM_MUSIC`，返回最小／最大／当前物理索引及固定状态。应用已声明该能力。设置后读取系统实际值，支持系统策略自行钳制，不把请求值冒充实测值。没有额外添加音频焦点策略。
+
+`scripts/reference/capture-start-volume.py` 编译未修改的 `MediaVolumePolicy.kt` 与 `MediaPlaybackStartVolumeLimit.kt`，4125 组决策全部一致。应用 215 项／38808 次断言、框架 50 项／273 次断言、TypeScript 和双 ARM ABI 打包均通过。手表宿主测试 2 项通过（0.093 秒），分别检查隔离写入适配器和真实系统只读状态；生产朗读队列与高亮跟随测试 2 项通过（48.484 秒）。测试报告确认两次新会话共写入两次，恢复、切篇和错误重试不重复限幅。音量和 TTS 写入均为明确标记的测试适配器，本阶段没有改动真实系统音量或合成可听音频。
+
+当前安装 APK SHA-256：`725b76ca9d0f10f7d34ed8db7225b88824c956ed2035778fbb2f055e40c08a8e`，与 `artifacts/watchrss-podjs-0.1.0-dev.apk` 一致；上一个字体阶段包备份为 `watchrss-podjs-font-profile-2bce3765.apk`。安装身份、源文件和原生对照哈希见 `artifacts/start-volume-apk-receipt.json`；测试详情见 `start-volume-*-device.log` 和 `start-volume-speech-scripted.json`。本次没有重跑整个真机测试套件，也没有重新拍摄原生界面。
+
+仍待完成：朗读播控页的实体旋钮、21% 连续会话防干扰限幅及通知、1200 毫秒音量浮层；真实发声／背景行为验收、导入与云端 TTS 及其他迁移差异仍保留。完整迁移目标未完成。
+
+
+## 2026-09-13：朗读旋钮限幅与音量浮层
+
+朗读播控页现在按原生使用原始 Android 滚动量，采用反向输入、0.01 输入系数和 0.06 音量范围灵敏度。框架新增 `onRawScrollInput`，保留原始数值、事件时间与设备来源；原有列表的归一化轴与鼠标缩放没有改动。应用声明 `input.rotary`，仅当前播控页、开启音量控制且宿主处于活动状态时响应。
+
+连续调高从低音量开始时，在 21% 虚拟音量处限幅，同一轮只提示一次；超过 600 毫秒无事件才开始新一轮，反向调节或外部系统音量变化清除旧限幅。保留小数累积，在物理整数索引提交时取整；系统固定音量不写入。异步读写按顺序处理，批量输入逐条计算方向／时间／限幅，仅合并最终系统写入。离开页面、停用设置和进入后台会清除浮层及未提交输入。浮层显示虚拟音量百分比，1200 毫秒后隐藏。
+
+原生对照直接编译未修改的音量策略，并从输入／浮层源码提取三个系数；2520 组结果覆盖小数输入、边界值、反向和恰好 600／超过 600 毫秒的区别，全部一致。应用 221 项／43869 次断言、框架 51 项／276 次断言和 TypeScript 通过。真机宿主 9 项通过（0.219 秒）；最终应用包的启用／禁用旋钮、限幅与浮层、朗读队列、列表滚动方向 4 项通过（50.689 秒）。原生固定浮层展示测试 1 项通过（4.377 秒），只注入显示状态，没有改变系统音量。
+
+视觉对照发现文字高了约 9 像素、胶囊高了 2 像素，修正后重新构建、安装并重跑 4 项。完整 466×466 RGB 帧未裁剪、对齐或屏蔽，平均绝对差由 5.5776 降至 4.8974，仍非像素一致；字形边缘与部分既有播控元素继续保留差异。见 `artifacts/crown-volume-comparison.html` 和 `crown-volume-native-comparison.json`。
+
+当前安装 APK SHA-256：`d4bcaf862cb9354eccc3b54e7d3a835e1cae60c10be0f3f7d6f311d6b51c67ba`，与 `artifacts/watchrss-podjs-0.1.0-dev.apk` 一致；前一开播限幅包保留为 `watchrss-podjs-start-volume-725b76ca.apk`。全部五个安装身份、原生源码未改变的哈希、测试和图像证据见 `artifacts/crown-volume-apk-receipt.json`。这些输入由 instrumentation 产生，音量写入使用隔离适配器；实体表冠手感、真实系统音量及实际发声未验收。完整真机套件未重跑。导入／云端朗读、完整后台行为及其他迁移差异仍未完成，整体目标保持进行中。
+
+
+## 导入 TXT 分块朗读接线（2026-09-13）
+
+生产 SpeechPlayback 现在支持异步、按需的段落来源。ImportedTextStore 按原生 16 KiB 字节边界读取本地 `article_content` 文件，处理 UTF-8 跨块回退；Android 文件服务新增 `file.read` 的 `encoding: utf8`，按 Java String 的替换语义处理坏字节。应用服务识别 TXT 导入链接，优先采用缓存原文中的合法文件标记，其次是正文标记，避免把整份正文送入 JS 或误抓取远程原文。当前应用还没有导入文件生产流程，设备验证文件是隔离测试夹具。
+
+段落来源使用 peek/consume，只有当前朗读确认完成才前进。暂停/恢复保留待读段，旧队列回调不能推进新队列，未知总段数显示“第 N 段”。导入块号和 UTF-16 坐标保留在段落与高亮数据中，但阅读器尚未消费这些导入坐标。
+
+验证：应用 typecheck 和 231 项全套单测通过（44,655 断言）；执行未改动 Kotlin 导入来源得到 90 组对照，文件存储另有 31 组文件与 12 组标记对照。e3aca8af 真机上文件服务 3 项通过；生产 JS 到静音模拟 TTS 的导入测试 1 项通过，16383 个空格后的汉字、emoji 跨 16 KiB 边界正确读出“汉😀导入正文。”，显示“第 2 段”。已有队列/暂停/倍速/错误恢复及阅读高亮 2 项回归通过。首次导入测试误用了该页面没有的“大声朗读”按钮，改为真实长按入口后通过；保留首次失败日志。真实发声及用户物理操作仍未验收。
+
+已安装并校验应用 SHA-256 `524c979ea6d1e2300ec6f9d2bf3227c9c7e9b2396c0acb89fefc44890c006fba`，APK 内 JS 与构建产物逐字节相等，应用/应用测试/运行时测试 APK 的设备哈希均相符。测试前后 SQLite 业务表与 KV 完全相等，备份在 artifacts/imported-speech-data-before.tar。详见 [安装与测试凭据](../artifacts/imported-speech-apk-receipt.json)、[设备截图](../artifacts/imported-speech-device.png)。
+
+未完成：导入阅读器当前仍会显示文件标记，分页与触摸起读/高亮映射尚未接线，手机导入生产流程仍缺失。停止后的旧异步来源不会发声，但尚需终止其剩余空白块扫描。本次只完成导入分块朗读链路的接线与上述验证，不能视为导入功能或整体迁移完成。
+
+
+## 导入 TXT 阅读器接线（2026-09-13，替代前节的文件标记显示限制）
+
+已将导入文件元数据接入文章服务和 ReaderBody。合法本地文件标记不再进入正文解析；有文件句柄时按可见范围逐块读取、按原生段落接口布局，每次只加载一个待显示块，不先拼接整本正文。未加载块采用原生的 1 dp/块间距占位；空白块不绘制正文。读过的文本块和布局目前保留在阅读会话中，尚未完成大文件内存/性能验收。
+
+新增块号、原始 UTF-16 字符位置和行内比例的阅读锚点；支持按原生字节进度直接跳到目标块，并在字体重排、关闭重开时恢复位置。长按正文映射为导入块坐标，导入朗读的高亮也映射回该块。停止或切换朗读队列会关闭旧来源，待返回的单块读取不再继续扫描后续空白块；暂停仍保留当前段。
+
+验证：typecheck 与 239 项单测通过（44,749 次断言）。独立执行未改动原生函数得到 8 组 UTF-8 坐标、48 组字节恢复目标对照。真机 e3aca8af 共通过 6 个应用测试：导入完整朗读、导入长按起读、导入中段恢复、普通队列暂停/倍速/错误恢复、普通阅读高亮、普通阅读自动滚动/重开恢复。另对两个导入朗读测试增加正文高亮断言后复测通过。高亮补测首次被仅供预设列表使用的辅助函数边界限制挡住，改用已核实的返回按钮位置后通过，保留失败日志。
+
+64 KiB 文件从 60% 位置直接恢复到块索引 2，最终保存原始字符偏移 2746、行内比例 0.8421052631578947；重开前后 466×466 位图逐像素相同。这个结论只证明 PodJS 自身重开恢复稳定，不证明与原生 Android 逐像素相等。导入文件和数据库记录均为隔离测试夹具；静音模拟 TTS 不证明真实音频输出，程序化触摸/旋钮不算用户物理操作验收。
+
+当前已安装 APK SHA-256：`395f9b6ad55686c25b9c78364f0363fe1b5545edd91819d491e1c186276ac7c7`。应用与测试 APK 的设备哈希匹配，包内 JS 与构建产物一致。测试前后 SQLite 各表与 KV 完全相等；当前业务表基线为空，不能把这个检查扩大解释为已验收真实导入数据迁移。详情见 [安装与验证记录](../artifacts/imported-reader-apk-receipt.json)、[导入高亮](../artifacts/imported-reader-touch-highlight.png)、[恢复后的画面](../artifacts/imported-reader-position-after.png)。
+
+仍需继续：手机导入/文件生产流程、真实数据迁移与保护验证、大文件内存性能、真实音频/物理交互验收，以及整体原生功能与画面差异。未将整体迁移标记完成。
+
+截图复核补充：导入正文中的 emoji 当前显示为缺字方框。文件 UTF-8 和传入模拟 TTS 的字符正确，并不证明字形正确。设备存在 `/system/fonts/NotoColorEmoji.ttf`，但尚未验证原生对照画面，也未接入 PodJS 的 emoji 字体回退；此差异仍未完成。
+
+
+## 正文彩色 emoji（2026-09-13，替代此前正文缺字限制）
+
+阅读正文含 emoji 的行现通过框架 `text.raster` 使用 Android TextPaint/StaticLayout 和系统颜色字体栅格化，再上传 RGBA 纹理。覆盖此次验证的 😀、👩‍💻、🇨🇳、👍🏽；正文高亮和长按起读使用原生 UTF-16 caret 坐标。普通行继续使用已有字体图集。框架按相同参数共享纹理、最多并行两个栅格请求，最后一个引用释放纹理，取消操作并清理临时文件。
+
+应用 242 项单测（44,762 断言）、框架 52 项（285 断言）、typecheck 通过。最终安装包真机应用 5 项、运行时 2 项通过；原生 release 对照 1 项通过。截图确认组合 emoji 为彩色，😀 水平边界与原生一致；垂直覆盖仍约差 1 像素，两页布局不同，不能称为整帧像素一致。静音 TTS 与程序化输入不证明真实发声和物理操作体验。
+
+当前应用 APK SHA-256 为 `19a6db2edcf0c991d65e52bf08b3f372902d3cff52aa7d9faa84d5c5dc67b69f`，五个应用/测试/原生对照安装身份均已核对；包内 JS 与构建产物逐字节一致。测试前后 SQLite 表与 KV 完全一致，业务表基线为空，真实数据迁移仍待验证。旧包保留为 `watchrss-podjs-imported-reader-395f9b6a.apk`。详见 [安装凭据](../artifacts/emoji-apk-receipt.json)、[组合 emoji 真机截图](../artifacts/emoji-composed.png)、[数据核对](../artifacts/emoji-data-verification.json)。
+
+范围限制：标题及正文外文字尚未使用此回退；自定义字体、RTL、ZWJ 内精确触点映射未验收。手机导入生产流程、大文件内存性能、真实音频与用户物理交互仍待完成。整体迁移保持进行中。
+
+
+## 导入正文文件生产基础（2026-09-13，尚未接入手机接收器）
+
+新增 ImportedTextWriter 和 Android 宿主适配器，按未修改原生 FileArticleContentStore 的 v2 文件名规则，以文章键与正文的 SHA-256 命名。按最多 32,768 个 UTF-16 单元编码，不在一个桥接请求中发送整篇文本；跨块 surrogate pair 保持完整，孤立 surrogate 使用 Java 的 ASCII 问号替换。先写独立临时文件，经完整字节数/哈希复核后原子发布，才返回正文标记。正文变化写入新文件，保留旧版本，取消/校验失败不发布数据库引用。
+
+框架文件服务新增唯一临时文件、带预期偏移的追加、流式 SHA-256 和校验后原子提交。完全一致的目标文件可复用；错误偏移、错误哈希和非法路径不会替换旧文件。临时文件限制 8 个，正常关闭宿主和取消未交付临时文件请求时回收。强制杀进程仍可能留下 .part 文件；提交后才取消可能留下完整但未引用的内容文件，后续回收必须结合数据库引用判断。
+
+原生未修改源码重新执行，新增 8 组写入对照，加上已有 31 组文件读取与 12 组标记对照。新实现的文件名/字节与原生相符，包含重复键、更新内容、跨块 emoji、异常 UTF-16 及较长正文。应用 247 项测试（44,973 断言）、框架 53 项（298 断言）和 typecheck 通过。OWW242 运行时 4 项测试通过（1.685 秒），覆盖超过 2 MiB 分块发布、相同目标复用、错误校验保护、临时文件限制/清理，测试目录最后为空。见 [验证记录](../artifacts/import-writer-receipt.json)。
+
+本阶段没有重建或安装应用 APK，当前应用仍为正文 emoji 阶段的 `19a6db2edcf0c991d65e52bf08b3f372902d3cff52aa7d9faa84d5c5dc67b69f`。写入器尚未由 UI 或手机同步管理器调用；不能把文件服务验证说成手机导入端到端成功。原生同步管理器、文章事务应用、手机传输、真实数据迁移及大文件性能仍待继续，整体迁移未完成。
+
+
+## 同步正文重建与实际宿主调用链（2026-09-13）
+
+新增原生 ArticleSyncBody 对应的正文形状校验、分块与整体哈希校验、缺块时复用本地编码分块、完整本地正文复用，以及仅元数据模式的本地正文/完整分块清单复核。正文 JSON 编码保留原生的斜杠转义和 Java UTF-8 行为；解析时要求 contentText，拒绝重复正文键、错误字段类型、尾随数据和过深嵌套。新增实际宿主适配器，压缩与解压使用 Android 文件服务，文本通过有状态 UTF-8 reader 分段读取后重建。
+
+原生未修改源码在 JVM 上产生 8 组正文和 23 组解析对照，随后在独立原生 release 包的 OWW242 上重新捕获 8 组压缩字节。发现这 8 组 Android gzip 的 OS 字节为 00、桌面 JVM 为 ff，头部之后的字节相同；直接采用 JVM 压缩哈希会造成不匹配。因此生产适配器和正文测试使用实际 Android 字节作为对照。宿主的八组 gzip 输出与该原生 Android 对照逐字节一致。
+
+应用 253 项单测（45,046 断言）、框架 54 项（314 断言）、typecheck 通过；运行时 8 项真机测试通过（3.178 秒），覆盖压缩/解压、解压上限、CRC 失败、普通 JSON 回退、异常 UTF-8 替换、surrogate pair 跨读取边界、reader 生命周期，以及上一阶段原子文件发布回归。原生捕获测试 1 项通过（4.139 秒）。
+
+另构建并安装独立 `dev.podjs.tests.syncbody` 验证包，使用生产 TypeScript、SDK、Android 服务和现有 ImportedTextStore，实际完成 3 组原生 gzip 比对→正文重建→文件写入→阅读器回读。两组文本为 260,000 / 260,002 字节，分别读取 16 个块；同时通过本地未变分块复用和重复正文键拒绝检查。整个验证脚本耗时 58.853 秒，包含重复编码、哈希和回读；页面延迟与大文件性能仍待单独验收。四个相关临时目录最终为空，验证进程已停止。测试壳首次启动因 Text 上不支持的 fontSize 属性失败，删除该属性后重新构建、安装并通过，保留初始崩溃日志。
+
+详情见 [安装与验证记录](../artifacts/sync-body-receipt.json)、[实际 JS 调用链结果](../artifacts/sync-body-harness-result.json)、[gzip 平台差异](../artifacts/sync-body-gzip-platform-comparison.json)。五个相关已安装包均核对 SHA-256，验证包内 JS 与对应 dist 逐字节一致，原生/运行时测试包内的对照输入也与工作区一致。
+
+手机传输、文章分批接收、数据库合并和同步成功确认仍未接入。正文重建目前仍在 JS 中持有编码字节与解码后的完整 JSON/文本，大文件内存尚未验收。本阶段更新的是独立验证包与测试包，用户使用的 PodJS 应用仍为 `19a6db2edcf0c991d65e52bf08b3f372902d3cff52aa7d9faa84d5c5dc67b69f`，其 UI 尚未调用新的同步代码。整体迁移继续进行。
+
+### 2026-09-13：接收端收藏状态事务合并（尚未接手机批次）
+
+新增 `sync/saved-state.ts`、同步身份/文章映射/收藏状态表，将收藏和稍后再看的时间戳、设备 ID 冲突决策放进 SQLite UPSERT；UI 状态与同步来源原子提交。已映射文章的本地收藏操作会在同一事务记录来源，无变化操作保留原来源。设备 ID 平局按 Kotlin UTF-16 顺序比较；原生降序 sortOrder 转换为当前 UI 的升序字段。删除文章仅清空同步引用、保留记录，完整文章删除协议仍未接通。
+
+原生两个合并方法逐字提取后在 JVM DAO/media doubles 上执行，得到 144 组对照。Bun SQLite 和手表独立验证包 `dev.podjs.tests.syncstate` 均通过全部 144 组；真机还验证了本地写入交错、双向事务失败回滚、身份持久化及删除引用处理。应用全量 259 tests / 45368 assertions 通过；类型检查已包含两个 TSX 真机验证入口。初版验证入口漏导入 mount 导致启动失败，修复并重装同一验证包后通过，最终结果用时 24801 ms（整个多场景验证耗时，不是单次同步性能）。
+
+证据：`artifacts/sync-state-receipt.json`、`sync-state-harness-result.json`、`docs/sync-saved-state.md`。主应用 APK 和安装 SHA 仍为 `19a6db2...67b69f`；新逻辑尚未在主 UI 初始化同步身份/映射。手机批次选择、文章正文和阅读位置落库、完整删除/媒体清理、peer cursor/change log/ACK 均待接入，不能据此宣称端到端手机同步或完全迁移已完成。
+
+### 2026-09-13：文章正文、阅读位置与收藏原子接收；主阅读器切到 SQLite
+
+新增 `sync/article-receiver.ts`，对单篇非删除文章先校验正文、发布大文件，再在同一 SQLite 事务合并文章、原文、预览、正文元数据、阅读位置和收藏。新增 `reader/sql-progress.ts` 并接入主 ReaderBody 服务：旧 KV 锚点保留并只迁移一次；远端位置胜出时不再被旧 KV 覆盖；本地小于 0.001f 的进度变化遵循原生阈值；连续本地保存按调用顺序提交，远端未来时钟不会阻止本地操作。普通 HTML 文件 marker 也能通过文章/原文服务还原，导入纯文本继续走分块阅读。
+
+原生 upsert 方法逐字执行（DAO/元数据/文件辅助函数 doubles，非 Room 完整证明）得到 48 组实体合并对照，全部通过 Bun SQLite 与真机实际 QuickJS/SQLite/文件链验证。扩展同一个 `dev.podjs.tests.syncstate` 验证包，48 组文章与 144 组收藏规则、54,000 UTF-16 单位正文读回、损坏拒绝、完整事务回滚、旧 KV 迁移、原生进度阈值、未来时钟和本地保存顺序全部通过。最终整套真机数据验证耗时 82725 ms，不是单次同步性能。应用全量 268 tests / 45601 assertions 通过，TS/TSX 类型检查通过。
+
+主 APK 已更新为 `01a97b7ff492f2f14f75c993353520efdd5749c21799043477ae2fb0837c849f`，并完成安装、冷启动日志及数据库新增表检查。主库升级前 channels/articles/notes 等业务表均为空；升级前后旧表逐行相同，设置 KV 仅 page 从 saved 变为 home（既有启动行为），其他值不变。主库空数据校验不能替代有内容迁移证明；含数据场景由隔离验证包覆盖。主包备份在本地 artifacts，旧包保留可回退。系统“连续充电时间过长”提示遮挡屏幕，未宣称画面/物理滚动验收通过。
+
+边界：接收类尚未接手机入口，完整删除、媒体清理、manifest 选择与 metadataHash、旧 RSS 稳定 ID 映射、peer cursor/change log、跨帧批次和 ACK 仍待实现；空正文新文章的原文缓存边缘行为也待对齐。普通 HTML/codec 的整字符串内存与大书性能未验收。证据见 `docs/sync-article-receive.md`、`artifacts/article-receive-receipt.json` 与对应日志；完整迁移 goal 保持进行中。
+
+### 2026-09-13：跨帧文章接收与原生 Android 解析对照
+
+新增 `sync/article-batches.ts`，按原生批次索引/数量约定接收文章阶段：当前文章跨帧合并、过滤未请求正文/分块、检查非连续重复文章与冲突元数据，逐篇调用已验证的文章事务。所有预期帧和提交完成后才返回实际完成数量；缺帧、取消、提交失败均不返回完成结果。已提交的较早文章可能在后续帧失败时保留，符合逐篇提交模型。跨帧 byteCount/重复字节校验采用原生完整 parser 的严格规则，未复制 native streaming helper 遗漏字段/静默丢弃冲突副本的行为。
+
+`FrameDecoder` 改为读取四字节长度后一次分配帧缓冲，避免碎片输入时反复复制累计正文；新增 `wire-json.ts` 保留 JSON 数字原始 token，使严格字段拒绝 `1.0`、`1e0`。Base64 允许原生支持的无填充尾部和等价尾位，拒绝非法 padding/空白；SHA 大小写精确比较，重复分块按字节比较。原生实测明确 JSON null 字段会成为字符串 `null`，已按实际行为对齐。
+
+原生独立 reference instrumentation 直接调用生产 LibrarySyncPayload/ArticleSyncBody，19 组文章、10 组批次、17 组 Base64 共 46 组全部匹配；collector 校验原始输入并可字节一致重新生成 fixture。Bun 全量 275 tests / 45689 assertions 通过，TS/TSX 类型检查通过。
+
+同一个隔离验证包 `dev.podjs.tests.syncstate` 改用专门 batch 入口：QuickJS 先跑 46 组 Android corpus，再将两篇文章的三帧分成 22,738 个、每个最多 13 字节的片段，调用生产文章接收器完成两篇提交，并读回 260,000 字符正文。数据库注入失败和截断均不能产生完成结果。整组数据测试耗时 20328 ms，非单篇同步性能。测试包停用后核对文章/频道/同步表及正文临时目录均清理完成。
+
+主应用保持已安装 `01a97b7f...37c849f`；本轮未宣称真实手机蓝牙连接成功，也未发送 wire ACK。manifest 选择、删除、双向正文回应、peer cursor/change log 与最终 ACK/session 仍待接通。帧为标准 JSON、深度上限 128，精确整数受 JS 范围限制；待收压缩正文上限 64 MiB，内存/性能未完整验收。证据见 `docs/sync-article-batches.md`、`artifacts/article-batches-receipt.json` 和对应原生/QuickJS 真机日志。
+
+## 2026-09-13 同步清单选择原生对照
+
+新增 `src/sync/manifest.ts`，实现原生正文请求选择（删除元数据、正文/分块复用、阅读进度 Float 阈值、metadata-only 能力门控与分块预算）。原生手表直接调用生产函数所得 84 组结果全部一致；完整单元测试 281 项、类型检查通过。隔离 QuickJS 测试包用选择器选出实际接收请求，经过 22,738 个片段接收两篇文章，26 万字符正文读回一致，数据库失败及截断完成门控通过。测试耗时 20,449 ms 是整组测试时间，不是同步性能指标。测试数据库及正文文件已清理，测试包已停止。
+
+证据：`artifacts/manifest-receipt.json`、`manifest-harness-result.json`、`reference-manifest-selection-device.json`；说明见 `docs/sync-manifest-selection.md`。本次没有更新主应用 APK，已核验安装包仍为 `01a97b7f...`。本地数据库清单/metadataHash 导出、完整删除、手机连接会话、双向正文返回及最终 ACK 尚未完成，不能宣称手机同步完成。
+
+## 2026-09-13 本地清单、元数据哈希与正文响应
+
+新增本地 SQL 清单生成及正文响应准备，涵盖收藏/稍后读分组、独立/导入文章、取消收藏与删除日志。正文从实际文件/数据库内容重建；补齐 Android JSONObject 元数据哈希、原生 URL 标识、Jsoup HTML 文本，以及重复导出后的正文缓存行为。原生 Room 的 9 条清单连续两次逐项一致，16 个 URL 标识、8 个元数据哈希与 8 份正文编码真机一致。非空数据库中的已同步文章 metadata-only 更新经批接收器成功落盘；实际删除正文文件后标记不可用，快照期间本地修改会拒绝发布混合状态。
+
+应用测试 287 项、框架测试 55 项、类型检查、主应用 CLI 构建及测试 APK Gradle 构建通过。最终真机整组测试 25,188 ms（不是同步性能指标）；测试包已停止，13 张相关表的测试行及文件均已清理。主应用仍使用原安装包 `01a97b7f...`，当前已恢复到前台。本次通用 URI/HTML 宿主能力只部署于隔离测试包。
+
+证据见 `artifacts/local-manifest-receipt.json`、`local-manifest-harness-result.json`、`reference-local-manifest-device.json`，范围说明见 `docs/sync-local-manifest.md`。普通 RSS 原始条目与规范同步 ID 的多条目绑定/重映射尚需补齐；非空接收测试明确使用已同步规范 ID，不能替代这一验证。手机完整会话、传入删除、源同步、返回帧、游标及最终 ACK 仍未完成。
+
+## 2026-09-13 普通 RSS 身份对应、独立收藏绑定与主应用升级
+
+补齐普通 RSS 的 GUID 条目与规范同步文章 ID 的多条目对应。传入 metadata-only 文章先按原生收藏状态绑定寻找原始正文；验证后事务性创建规范条目并受控迁移主绑定，旧 RSS 条目及其收藏入口保留。收藏和稍后读按各自冲突结果独立绑定，保存创建时间与操作时间分开；普通 bind 仍禁止越权换绑。主应用本地收藏操作现在在同一事务中写入 URL alias 和同步日志，并使用首次创建后持久保留的随机 UUID。
+
+原生生产 repository 的 14 组 Room 合并结果与 Bun/手表 QuickJS 逐项一致。应用 294 tests / 45,967 assertions、类型检查和主应用构建通过。手表额外验证回滚、换绑保护、UUID 稳定、首次本地收藏记录、普通 RSS metadata-only 接收以及旧 alias 后续操作；整组耗时 13,095 ms，非同步性能指标。隔离测试包数据清理情况见 receipt。
+
+主应用已重新构建安装。升级前后 20 张原表数据、全部 KV 和 169 个持久文件一致，仅新增两张表和设备身份；数据库完整性检查通过。主应用原文章库为空，因此非空旧库升级/回滚证据来自自动化测试，不能表述为用户非空文章库的真机升级验证。证据和安装包哈希见 `artifacts/alias-receipt.json`、`alias-data-verification.json`；实现边界见 `docs/sync-alias-receive.md`。
+
+普通 RSS 身份对应这一已知缺口在上述原生样本中关闭；手机完整传输会话、传入删除编排、源同步、返回帧、peer cursor/change sequence、最终 ACK 和物理交互/画面验收仍未完成，不标记整体迁移完成。
+
+## 2026-09-13 同步会话阶段、正文返回与最终确认
+
+新增 watch-side 会话调度、帧流适配、清单/正文响应分批和 SQL peer cursor/change sequence 存储。持久会话覆盖 probe、cursor、manifest、articles、complete 与显式结束；只有成功的 applied ACK 才调用持久游标更新，received-only、失败/缺失确认、正文阶段失败都不能推进游标。SDK 新增提交后逐语句 SQLite changes()，文章接收的 applied 计数与原生收藏/稍后读状态操作一致。
+
+原生 `WatchBluetoothSyncServer.serveStreams` 在独立 reference 应用的内存 Room 上执行 12 组完整会话，响应帧及持久 peer 状态已捕获。另有 9 组原生正文返回样本覆盖大正文、多帧、metadata-only、局部分块与错误索引；常规响应所有字段（除 sentAt）一致。10 个 Float 边界按实际 Float 值比较，极小数的等价十进制文本不要求与旧 Java 格式逐字一致。
+
+隔离 QuickJS 手表包通过 12 组会话、9 组正文返回和 14 组带真实提交计数的原生接收对照。生产帧流、会话、本地清单、文章接收与 SQL 游标存储用 552 个最多 17 字节的读取片段完成双向交换；实际 SQL 证明 received ACK 不更新游标、applied ACK 才更新，事务失败及截断不误报成功。大正文由真实宿主编码后与原生字节一致。整组 53,640 ms，非同步性能指标。
+
+应用 323 tests / 46,099 assertions、框架 56 tests / 323 assertions、类型检查及构建通过。测试包已停止，17 张相关表及正文临时文件清空，主应用恢复前台。主应用安装包仍为上一版 `67074d38...`，没有将测试 peer 当成真实手机连接。主应用连接入口、Bluetooth/IP 传输、源/删除/替换的实际仓库接线、全量本地 change-log hooks、并发快照与序列边界以及物理交互验收仍待完成。证据见 `artifacts/session-receipt.json`，详细范围见 `docs/sync-library-session.md`。
+
+### Source/deletion repository implementation, 2026-09-13
+
+Added SQL source merge/export and body-validated article deletion with a library
+revision guard. Native reference instrumentation captured 16 source and 13
+article deletion cases; all native row/export outcomes match the new SQLite
+checks. Application suite now 355 passing tests, framework 57, typecheck and host
+Java compilation passed. See [repository evidence](sync-library-repository.md).
+Main session wiring, local deletion journal migration, authoritative replacement,
+actual phone transport, and PodJS device execution of this increment remain
+pending; the main installed APK was not replaced.
+
+### SQL session adapter and Android query binding, 2026-09-13
+
+The session repository now connects article/source stores, consumes local delete
+journals, detects same-clock edits, guards sequence boundaries, and applies
+native replacement retention rules. Six more native replacement cases and all
+35 repository cases passed in the PodJS device harness. Device testing found and
+fixed numeric query parameters being bound as text in the host SQLite service.
+Application tests: 369 passed; framework: 57 passed; TypeScript passed. Main local
+source deletion now records its sync tombstone atomically. See
+[sync-library-adapter.md](sync-library-adapter.md) for scope, limitations and
+separate harness/deployment evidence. Actual radio transport and main sync UI
+remain pending.
+
+### RFCOMM transport implementation, 2026-09-13
+
+Added secure RFCOMM listeners, bounded byte streams, deadline/cancellation
+cleanup, an independent stream worker, and the application listener/session
+binding with native service identity. Six host tests passed on the device,
+including real listener lifecycle and nonblocking SQLite dispatch. Application
+suite: 374 tests; framework: 58 tests. Public capabilities, permission/UI flow
+and actual phone transfer remain pending. Main APK remains a9ba3025; only the
+isolated runtime test APK was installed. See [transport evidence](sync-rfcomm-transport.md).
+
+## Phone connection UI and guest RFCOMM capability
+
+Profile navigation now includes the native “连接手机” instructions and download dialog; reader presets share the proportional dialog. JNI and Android target capabilities expose RFCOMM/byte streams, with per-request Bluetooth permission cancellation. The isolated watch guest verified actual listener creation/cancel/reopen/close and SQL concurrency. No remote phone transferred data. Production foreground listening, session cleanup/action integration, Android 12+ permission interaction and physical visual acceptance remain pending. See [phone connection evidence](phone-connection.md).
+
+## Foreground policy and background service completion
+
+Added native foreground listener timing/transfer/lease policy with six controller tests. Fixed background callback suspension through an explicit service-only runtime turn. The isolated watch guest completed SQL, timers and RFCOMM cancellation after entering background with no increase in frame callbacks. Main production listener wiring, power/media ports, repository cleanup and real phone exchange remain pending. See [foreground evidence](sync-foreground.md).
+
+## 2026-09-24：账号同步动作与主包部署
+
+应用动作现处理 `syncAccount`，复用账号页的安全存储，校验原生发布版 HTTPS 后端规则，并在写入成功后返回不含令牌的确认。应用 677 项测试和 TypeScript 检查通过；OWW242 隔离包验证真实宿主安全存储的写入/读回、无效地址保持旧值和夹具清理。主包已安装，设备与归档 APK SHA-256 一致：`b1a10156097d0601a51bc17ba8ef3360b0dc47d15988a889e055f88428361d7c`。启动日志正常。全量 smoke 因系统 `SysUI.Charging` 持有焦点，在首页就绪检查处连续失败后停止；实际手机账号传输、令牌刷新、物理输入和原生画面一致性未完成。详见 [账号状态页后续记录](account-status.md)。
+
+随后补齐 `ping` 与 `pullSavedItems`：收藏／稍后读从实际 SQLite 保存状态按保存列表顺序导出非空链接。应用 680 项测试与类型检查通过；扩展隔离包在 OWW242 验证真实 SQL 服务、动作响应和账号安全存储并清理夹具。最终安装 APK 为 `artifacts/watchrss-podjs-account-saved-actions.apk`，SHA-256 `351a5622e62b0171e1384b8ac7debb156b1a1a445dc5f87d82017d8814c11b4b`，与设备安装路径一致。页面级全量 smoke 仍受充电界面遮挡，真实手机往返未验收。
+
+## 2026-09-24：真实原生 v18 数据的只读离线阶段
+
+原生 OWW242 数据库为 Room v18，含 16 个频道、6006 篇文章、7 条笔记；当前 PodJS 用户库对应表为空。已将原生数据库、应用文件/偏好及 PodJS 启用前数据库分别备份到本机仅用户可读的目录，并从副本构建单独的 PodJS 阶段库。频道/文章主键、正文长度、笔记、外键及完整性检查通过。发现 8 条原生同步状态引用已删除文章，转换为无本地引用的同步状态；1 个启用中的背景主文件缺失，仅有校验不符的 `.part` 文件；后续核对确认其 watch 变体完整有效，原生与 PodJS 均优先使用该变体。阶段库尚未部署，阅读资产与设置目前分别暂存，账号安全存储和同步正文元数据仍需处理。详见 [v18 离线阶段](native-v18-staging.md)。
+
+源文件 tar 也已安全解包成单独的私有 PodJS 文件阶段：59 个完整文件、129,629,776 字节，23 个文章正文引用、1 个离线媒体引用和 6 个启用字体均通过存在性/哈希检查；不完整背景文件仍拒绝作为主资源；1 个 watch 变体的大小与 SHA-256 已通过验证，可供当前阅读器加载。阶段库和文件阶段均未写入手表应用数据。统计见 [文件阶段报告](../artifacts/native-v18-file-stage-report.json)。
+
+另把 11 个阅读预设记录、8 个字体元数据、1 个背景元数据、5 条删除记录及当前主题选择/时间规则转为私有 PodJS ReaderPresetStore JSON 阶段。生产读取和清单解析通过，8 个预设可用；背景主文件缺失但 watch 变体可用。见 [阅读预设阶段报告](../artifacts/native-v18-reader-stage-report.json)。
+
+原生 DataStore 的实际 8 个设置键已离线按 protobuf 类型解码，5 个映射到私有 PodJS 设置/引导阶段，旧主题键由阅读预设选择覆盖，2 个临时提示计数仅在原始 tar 保留。生产设置与引导存储读回完全一致；加密账号、云密钥尚未迁入。见 [设置阶段报告](../artifacts/native-v18-settings-stage-report.json)。
+
+离线媒体正式表、阅读页本地图片优先路径、失败提示/重试及文章删除后的文件回收已接入。Room v18 的两条记录在新阶段库中逐字段对应：一条 162,029 字节图片在文件阶段存在，一条保留失败状态。阶段库升级检查、`quick_check`、外键检查、683 项应用测试、TypeScript 检查和主包构建通过。主包已安装在 OWW242，归档为 `artifacts/watchrss-podjs-offline-media.apk`，归档和设备安装路径的 SHA-256 均为 `6579e3d91988dd0878800583b8f6b34057b212f33f40722916c9a53f6b77d5b6`；安装后首帧正常。当前停在新手引导页，页面尚未触发服务初始化，设备现存数据库也尚未创建新表；不模拟用户点按完成引导。另在 OWW242 隔离包用真实 SQLite/文件服务通过本地图片解码、失败重试和写回验证，随后卸载夹具并恢复主包；见 [离线媒体运行时证据](../artifacts/native-v18-offline-runtime-receipt.json)。阶段库仍未部署到手表，真实网络重试、物理画面与完整清理行为尚需设备验证，不能把离线阶段视为迁移完成。见 [v18 离线阶段](native-v18-staging.md)。
+
+原生 5486 个非空 `syncBodyHash` 已进入阶段库，源/目标 ID 与哈希逐项相同；PodJS 清单先沿用原生值，正文更新后清除旧值并重建正文缓存。应用 684 项测试、类型检查、构建与阶段库生产 schema 重开通过。OWW242 主包更新为 `artifacts/watchrss-podjs-native-sync-hash.apk`，归档与设备安装 APK 的 SHA-256 均为 `3a6dbe447256561f75797de81e480761a85f677f182f67bc977319f7490534a9`，启动正常。阶段库仍未启用，设备仍停在引导页。
+
+真实阶段库和 59 个暂存文件已在 OWW242 隔离包通过生产清单生成：6006 篇文章、5486 条原生哈希、193 条清单项，88 条正文缓存成功，数据库完整性/外键检查通过；首次生成耗时约 100 秒。已加入分页与按需正文/URI读取，687 项测试和类型检查通过。主包更新为 `artifacts/watchrss-podjs-native-v18-perf.apk`，设备与归档 SHA-256 均为 `93f36f63fcd0838abe6228cb32d6757e0efb02013483072668a0267a8f0788ec`，启动正常。阶段数据尚未启用，用户物理完成引导仍是下一步；见 [设备回执](../artifacts/native-v18-stage-runtime-receipt.json)。
+
+用户随后在手表完成引导，已备份新的 PodJS 数据并启用原生 v18 阶段库、设置、11 个阅读预设和 59 个文件。Android `tar` 对 22 个长文件名的截断已通过单文件传输修复，最终 59 个文件逐项哈希相符。重启后主包正常显示，数据库完整性、外键及 12 张核心表与阶段库逐行一致，原有引导同意保持不变。原生账号密文仍不能跨应用复用，手机同步和实际阅读画面尚待验收；见 [启用回执](../artifacts/native-v18-activation-receipt.json)。
+
+用户在手表手动打开原有 RSS 文章，设备截图与无障碍层级显示标题、正文及阅读控件，标题在阶段库中唯一匹配且正文非空，进程正常。私有截图不放入仓库；见 [阅读回执](../artifacts/native-v18-reader-runtime-receipt.json)。同一数据库版本的同步快照现在可在会话内复用，正文导出后释放，修改库后重建；688 项测试、类型检查和打包通过，新包已归档但尚未安装，避免打断手机同步验证。最终画面一致性仍未宣称通过。
+
+用户选择稍后进行手机同步后，清单缓存包已安装，设备与归档 APK SHA-256 均为 `0b7b11e4c96f0aaec6f1fc3da95c6a70eb3d813fb0f525d18924d3a13e3e861e`。迁移数据库和 KV 保留，启动无崩溃；更新重启使临时阅读页面回到首页。真实手机同步和缓存后的设备时延仍待测。
+
+完整文件集的 OWW242 隔离测试测得首次库清单约 423 秒，同一快照的后续步骤仅 108/25/39 毫秒；持久正文缓存后的新快照约 33.9 秒，105 条活跃正文和 193 条清单项均可用。主包自建缓存与隔离包 105 条记录、25 个文件逐项一致。已部署按需编码版本 `artifacts/watchrss-podjs-native-v18-persistent-cache.apk`，设备/归档 SHA-256 `30f59ad7ab8f029095208059fc5297e8ac3b2a606c648b87fc4f0263d6fd7e53`；689 项测试、类型检查、构建与重启后数据库完整性通过。真实手机同步、账号重下发和视觉/物理验收仍未完成；详见 [缓存回执](../artifacts/native-v18-persistent-cache-receipt.json)。
+
+在已预热数据上又完成 OWW242 隔离回归：清单两次分别 38.2 秒、34.9 秒，请求正文按需重建 146 毫秒且与原始清单哈希一致。夹具已卸载，主包回到前台。手机实际端到端同步仍待用户稍后操作。
+
+清单扫描增量移除重复整库读取，并以修订触发器和使用中缓存行复核并发修改。相同预热夹具在 OWW242 上两次清单构建为 26.7 秒、23.6 秒，193 项清单及 105 项可用正文保持一致。690 项应用测试、类型检查与打包通过。主包更新为 `artifacts/watchrss-podjs-native-v18-manifest-scan.apk`，设备/归档 SHA-256 `2a0d8804221f5f5ceaff81b2681df0323a1099ef90005b2d99530fa315c7c63e`；重启后 6006 篇文章、105 条正文缓存和 7 条备忘录保留，数据库完整性与外键检查通过。隔离包和临时文件已清理。真实手机同步及完整画面、物理输入验收仍未完成；见 [清单扫描回执](../artifacts/native-v18-manifest-scan-receipt.json)。
+
+进一步只扫描与同步相关的 105 篇候选文章，保留对未保存同源正文的按需查找。OWW242 同一预热夹具的元数据查询从每轮 61 次降至 2 次，两次清单构建约 16.7 秒、14.3 秒，193 项清单及 105 项可用正文保持一致。691 项应用测试、类型检查和打包通过。主包已部署 `artifacts/watchrss-podjs-native-v18-selected-scan.apk`，设备/归档 SHA-256 `b18e13cbb88ddfa57d1f7f64770c0c735c6c282390784ec0085ab22c55de76d8`；重启后 6006 篇文章、105 条正文缓存和 7 条备忘录保留，数据库检查通过。隔离包已卸载，真实手机同步、视觉与物理操作仍未验收；见 [筛选扫描回执](../artifacts/native-v18-selected-scan-receipt.json)。
+
+手机 `clearLibrary` 动作现已接入共享同步仓储：清空 RSS 库及同步游标，保留设备身份、账号、阅读预设和独立备忘录，数据库失败时事务回滚。693 项应用测试、类型检查及 OWW242 独立包真实 SQLite/动作处理器专项通过。主包更新为 `artifacts/watchrss-podjs-clear-library-action.apk`，设备/归档 SHA-256 `eeef0f485bc31ab81c4b0d287a42a5d42cbdb9221ac2b8c1af55441e3dfb3887`；升级后原 6006 篇文章、7 条备忘录和 105 条正文缓存均保留，数据库完整性与外键检查通过。未在主包执行清空，也未做真实手机往返；见 [动作说明](sync-clear-library.md)。
+
+### 2026-09-25 内置媒体频道缓存删除增量
+
+B 站封面改用独立的 `bili-preview` 桶。删除 B 站／抖音频道时，已持久化的频道走资料库删除路径，并取消下载、清理对应媒体桶；旧版本仅有虚拟卡片时也会清理对应桶。抖音删除前清除登录 Cookie。缓存测试覆盖进行中的下载取消和其他桶文件保留；服务测试覆盖两个已持久化频道的删除。696 项应用测试、类型检查、Android 构建和打包通过。OWW242 已覆盖安装 `artifacts/watchrss-podjs-provider-cache-delete.apk`，设备／归档 SHA-256 `22d6902aad4807ab34924a552fe965a4e6f6bd5c0c0645a0477f79fec0309c56`；启动日志无 PodJS／AndroidRuntime 错误。安装前后 16 个频道、6006 篇文章、7 条备忘录、105 条同步正文及 6 条保存状态均保留，数据库 quick_check 为 ok、外键错误为 0。没有在主应用执行删除，真机删除链路、原生逐像素对照与完整迁移仍未验收。
+
+### 2026-09-25 内置频道持久化与首页来源
+
+首页内置媒体卡片现在只从持久化频道表生成。新建资料库在同一 schema 事务中写入原生默认的 B 站与抖音频道；已有资料库不会自动复活被删除的频道。推荐页及手动输入对应网站 URL 会幂等创建真实频道，并保留原生默认的“原文阅读”偏好。旧版 `media.hidden-channels` 标记会在服务初始化时转为实际删除，再移除标记。699 项应用测试、类型检查、Android 构建和打包通过。
+
+OWW242 当前迁移库升级前后均为 16 个频道，其中内置频道仅 `builtin:bili`；6006 篇文章、7 条备忘录、105 条同步正文、6 条保存状态保持不变，`quick_check=ok`、外键错误为 0。已安装 `artifacts/watchrss-podjs-persisted-builtin-channels.apk`，设备与归档 SHA-256 均为 `ea98841218ccba6bdf8848c28a0c3f484e82ff9d4873bf4d83a59dffcac4a81e`。真实首页截图显示 B 站卡片，当前窗口焦点为 PodJS 主 Activity；没有模拟点击或在主库执行删除／重新添加。对照原生当前画面、手动删除/添加以及其他设备数据库的迁移路径仍未验收。
+
+### 2026-09-25 手表作为覆盖同步来源
+
+修正 `watchToPhoneReplace` 在手机附带非空文章批次时误判“未请求正文”的问题。现在解析和计数，但不向手表库写入，仍检查批次顺序；与原生服务的来源模式分支一致。定向会话回归、701 项应用测试、类型检查及 Android 构建通过。OWW242 主包更新为 `artifacts/watchrss-podjs-watch-source-replace.apk`，设备／归档 SHA-256 `9e55ac7403435c7d8d88eb3315739883772e9ace039d90b8cd314750b5aef5cb`；升级前后核心表计数、数据库完整性及外键检查通过。没有发起真实手机覆盖同步，完整协议、画面和物理验收仍未完成。细节见 [会话说明](sync-library-session.md)。
+
+随后在 OWW242 独立原生参考包增加第 13 个会话案例，实际生产 `serveStreams` 收到非空手机文章后完成覆盖同步，`applied=0`、Room 文章数为 0，PodJS 对同一原始输入与原生响应/peer 状态逐字段回放通过。参考应用测试 `OK (1 test)`，更新夹具后的应用全套 702 项通过；主应用数据没有参与该回放。见 [原生会话夹具](../tests/fixtures/library-session-android.json)。
+
+### 2026-09-25 真实 5,378 章蓝牙覆盖测试
+
+隔离手表库向手机内存库进行完整覆盖测试，身份、游标和 6 帧清单均通过。手机请求 5,378 篇正文后，手表在 30 分钟会话限时内没有发出首个正文响应，手机因超时关闭 socket；因此全量正文传输和手机入库未通过。已修复会话内快照在五分钟后无修订变化仍过期的重复扫描，并通过超过五分钟的缓存回归测试；正文物化、分帧和端到端耗时仍需复测。正式两端资料库未用于接收写入。详见 [蓝牙实测记录](real-novel-bluetooth.md)。
+
+随后完成正文序列化与大小校验优化，并把强制全量／权威覆盖同步的手机总超时延长到 60 分钟（普通增量仍为 30 分钟）。第二轮真机蓝牙已收齐 134 帧，但在旧 30 分钟限时触发时尚未入库。第三轮在 OWW242 隔离真实书库与手机内存数据库间**完整通过**：5,378 篇正文、4 个来源全部入库，手机逐篇正文 SHA-256 汇总与原始书库一致；手机测试耗时 1,943.354 秒，手表报告成功。714 项应用测试、类型检查、构建／打包及手机测试构建已通过。正式手表库 32 张表的行内容未变，正式手机库没有参与这次导入；测试包已卸载、两端正式应用已恢复。这个结果覆盖了真实全量“手表到手机替换”的协议及数据，但不覆盖反向同规模传输、正式库替换、视觉和物理交互验收。详细时间线与哈希见 [蓝牙实测记录](real-novel-bluetooth.md)。
+
+反向的“手机到手表替换”随后也在隔离库**完整通过**：手机独立数据库中的四个真实 TXT 书源、5,378 篇与 51,597,047 字节正文，经 87 帧蓝牙传至空白 OWW242 隔离库。手机测试耗时 2,899.558 秒并完成会话；手表落库 5,378 篇、四个频道与 5,378 条正文缓存。导出后的独立 SQLite 逐篇核对 ID、标题、URL 和正文，零缺失、零不一致，`quick_check=ok`、外键错误零。接收端原先在无回传正文请求时仍重建整库快照；现已短路，完成库上的设备验证耗时 0 毫秒，715 项应用测试和类型检查通过。正式手表 APK `artifacts/watchrss-podjs-empty-export.apk` 已安装，设备／归档 SHA-256 同为 `d70455d8c4654b84006c4438f505a07b7f1c3b7121b2bf2b0cd70b82f3f85c30`；其 32 张正式库表逐行内容未变。正式手机库未直接参与同步读写，测试使用事先复制筛选的副本；测试包及临时文件已清理，两端正式应用已恢复。完整时间线见 [蓝牙实测记录](real-novel-bluetooth.md)。正式资料库替换与画面、物理交互验收仍未进行。
+
+### 2026-09-25 RSS 频道长列表连续加载
+
+频道列表对照原生 `FeedViewModel` 改为首屏 12 篇、每次追加 8 篇、最多显示 200 篇；接近底部自动追加，同时保留手动“加载更多”。服务查询可读取第 201 篇作为是否继续加载的前瞻行，搜索和保存列表仍使用各自分页。应用 `bun run test` 716 项通过，TypeScript 检查及 Android 打包通过。修复包为 `artifacts/watchrss-podjs-feed-continuous.apk`，SHA-256 `2dd1f4c58489969db576e363100f235e3d4e8c0683d42f3fbf4babad9496789b`；OWW242 覆盖安装后的设备 `base.apk` 哈希一致，主 Activity 已恢复前台且进程正常。覆盖安装前后数据库文件哈希因启动初始化改变，因此仅核对了安装后静态副本：16 个频道、6006 篇文章、7 条备忘录、6 条保存状态，`quick_check=ok`、外键错误为零。连续滚动、视觉及物理手势仍待用户真机验收。
+
+随后按原生 `FeedActions` 把底部按钮改为居中的内容宽度胶囊，44 dp 高、上下各 4 dp，禁用时半透明；原先 PodJS 的 36 dp 满宽按钮与源码不符。716 项应用测试和类型检查再次通过。首次增量打包产生了一个多出约 253 MB 未索引 ZIP 数据的异常 APK；清理 `androidApp` 构建输出后重打包，ZIP 内无大段空隙，异常包已移除。当前安装及归档为 `artifacts/watchrss-podjs-feed-native-footer-clean.apk`，SHA-256 `b127c34c8489b848d54ecea7b9a54fe776defa50f4d7f1719ab7a1468b9f91b4`，设备 `base.apk` 与之相同。安装后静态数据库副本 `quick_check=ok`、外键错误零，16 个频道、6006 篇文章、7 条备忘录、6 条保存状态保留。充电浮层仍持有窗口焦点，真实列表画面尚未验收。
+
+正式资料库副本暴露了前述 201 条前瞻查询的实际边界：频道“虎嗅”的同形 SQL 结果约 778,143 字节，超过宿主测试中的 512 KiB 单次响应上限。频道列表现在以至多 24 条一段、显式 offset 读取连续前缀，并保留第 201 条的“还有更多”判断；相同副本内各频道、各段的最大 JSON 结果约 101,496 字节。回归先验证 201 条 4 KiB 预览会超限，再验证分段结果的前 200 条顺序及 offset；应用 717 项测试、类型检查和 Android 打包通过。已安装 `artifacts/watchrss-podjs-feed-chunked.apk`，SHA-256 `67463b2cd2b3adbac0c74da185276dc845938c2b4a4d96c28e14834daea7089b` 与设备 `base.apk` 一致；安装后库保留 16 个频道、6006 篇文章、7 条备忘录、6 条保存状态，`quick_check=ok`、外键错误零。主进程启动且无近期 PodJS/AndroidRuntime 错误；充电浮层仍遮挡前台，实际滚动待物理验收。
+
+### 2026-09-25 RSS 条目侧滑操作
+
+对照原生 `SwipeActionRow` 增加左滑展开的两个 72 dp 操作按钮（收藏、稍后再看），动作区总揭示宽度 164 dp、半程阈值与 180 ms 收展动画。一次只展开一个条目；点开其他条目或滚动列表会收起当前条目。按钮调用现有独立收藏/稍后读状态写入，再更新列表。应用 717 项测试、类型检查与 Android 打包通过；新增 SVG 的首次构建因 48×48 非 2 的幂尺寸被资源编译器拒绝，调整为 32×32 后通过。已覆盖安装 `artifacts/watchrss-podjs-rss-swipe.apk`，设备／归档 SHA-256 同为 `ade3d8af23767de82abf06409d62b4558266a677eb51d31b0329dd9dd69f09ca`。安装后数据库仍有 16 个频道、6006 篇文章、7 条备忘录、6 条保存状态，完整性与外键检查通过。侧滑手势与按钮画面尚未在无遮挡真机上验收。
+
+### 2026-09-25 收藏列表与撤销
+
+收藏／稍后再看页现按原生列表提供顶部说明、手机端同步入口、左滑移除、长按拖动排序及三秒撤销。RSS 与抖音保存条目统一显示，RSS 顺序写回保存状态，混合列表顺序保存在本地 KV。应用 717 项测试、TypeScript 检查及 Android 打包通过。已安装 `artifacts/watchrss-podjs-saved-list.apk`；归档与 OWW242 `base.apk` 的 SHA-256 同为 `9395b1b5a4c27bf2f8e8510039e1a5696f9c89333844430324caae8a3894e364`。安装后主进程运行、Activity 已恢复；静态数据库副本有 16 个频道、6006 篇文章、7 条备忘录、6 条保存状态和 105 条同步正文，`quick_check=ok`、外键错误为零。当前 `SysUI.Charging` 持有窗口焦点，因此列表视觉、侧滑、长按拖动、撤销和物理操作尚未在无遮挡设备上验收。
+
+随后补上原生页面的四行加载骨架，加载期间暂不显示手机端同步入口，不再露出上一个收藏类型的旧条目，也不接收旧列表的拖动／侧滑；未触发移除的侧滑按原生 180 ms 回弹。717 项测试、TypeScript 检查再次通过。增量打包再次产生未索引 ZIP 空洞，已移走构建输出并从头打包；最终 APK 约 298 MB，最大 ZIP 条目间隙 9,135 字节、`testzip` 通过。当前安装与归档 `artifacts/watchrss-podjs-saved-loading.apk` 的 SHA-256 均为 `62411117689bc5c6bcd2b3ee7ecda54edee0ed014821b87c0da3fc2e1593c78c`。安装前后 33 张数据库表逐行摘要一致，`quick_check=ok`、外键错误零；主进程与 Activity 正常。`SysUI.Charging` 仍持有窗口焦点，骨架动画和手势的实体画面尚未验收。
+
+对照原生 `SavedItemsActivity`，收藏／稍后再看列表里的 B 站视频链接现在进入 B 站详情，而普通 RSS 条目仍打开阅读器。从稍后再看进入普通文章、读到列表末尾且该状态仍有效时，返回会自动移除条目并复用三秒撤销；底部判断采用原生 8 dp 容差，短于视口的内容不被误判为读完。新增边界回归后应用 719 项测试、TypeScript 检查和干净打包通过。当前安装及归档 `artifacts/watchrss-podjs-saved-return.apk` 的 SHA-256 均为 `640fca307958474be6f1a0c13f21518febad07e60d89c0d65a49c3f574459fa4`，APK ZIP 校验通过、最大条目间隙 9,135 字节；安装前后 33 张数据库表逐行摘要一致，完整性和外键检查通过。充电浮层仍遮住手表画面，真实点击、读到底返回、撤销及 B 站详情画面未完成实体验收。
+
+正式库副本当前共有 2 条收藏和 2 条稍后再看；稍后再看的两条均为 B 站视频链接，现有解析器可读出各自的 BV 与 CID。普通 RSS“读到底返回自动移除”因此没有可直接用于只读验收的正式样本。收藏列表继续补上原生的页面标题、文章内容与排序提示、同步入口和撤销按钮的无障碍语义。719 项测试、TypeScript 检查和干净打包通过；当前安装与归档 `artifacts/watchrss-podjs-saved-a11y.apk` 的 SHA-256 均为 `3490b982846554d47e1311b76b2fb5cef3ff211e169a3047f812da93086200e3`。安装前后 33 张数据库表逐行摘要一致，`quick_check=ok`、外键错误零；主进程正常。`SysUI.Charging` 仍遮挡应用，实际无障碍树及物理输入未验收。
+
+### 2026-09-25 手机读取手表调试日志
+
+补齐此前返回“不支持”的 `pullDebugLog`：手表在 KV 中有界保存同步状态、允许的动作名和成功／失败标志，按原生字段返回日志尾部、截断标志和字符总数；不记录请求正文、URL、对端 ID、令牌或原始异常消息。应用 722 项测试、类型检查通过。真实手机生产 `collectWatchDebugLog()` 经已配对蓝牙对正式 PodJS 手表执行只读请求，设备测试 `OK (1 test)`，得到 683 字符、未截断。最终包 `artifacts/watchrss-podjs-debug-log.apk` 与设备 `base.apk` SHA-256 均为 `6ec4e29759f790f848fc2c0d065a58ba29fd5293d3199162f132ef67a308969a`；安装及读取前后 33 张手表数据库表逐行摘要一致，完整性与外键检查通过。此日志只覆盖同步诊断，尚不等于原生 `AppLogger` 全应用内容；详情见 [调试日志实测](debug-log-sync.md)。
+
+### 2026-09-25 图片 EXIF 方向
+
+框架图片服务现按 EXIF 方向处理整图及分块，包含镜像、旋转和宽高互换。OWW242 独立测试包以四象限 JPEG 检查 8 种方向的概览和局部块，`PodImageServicesTest` 全套 7 项通过。主包已更新为 `artifacts/watchrss-podjs-exif.apk`，设备与归档 SHA-256 同为 `d9631de6144082e92ce5ed54f8dbf54284b5a50d59cbc1c1dbd26791b4fd325c`。安装前后 33 张数据库表逐表内容摘要一致，`quick_check=ok`、外键错误零；进程启动正常。尚未将相同 EXIF 夹具与原生 Coil 做逐像素画面对照，大图采样及实际阅读/背景画面仍需验收。详见 [图片背景记录](reader-backgrounds.md) 与 [设备回执](../artifacts/reader-exif-receipt.json)。
+
+随后在隔离原生参考包以正式 Coil 依赖解码同样的四象限 JPEG，OWW242 上 8 种方向的宽高和四角颜色均符合预期，`OK (1 test)`；PodJS 分块测试补充 2 倍缩采样下的同项检查，图片服务 7 项再通过。两侧方向与宽高行为有同设备证据；任意大图的逐像素和采样滤镜一致性仍未证明。
+
+进一步取两侧同一 JPEG 的完整解码 RGBA：8 种方向各自的输入文件 SHA-256 相同，输出逐字节 SHA-256 也全部相同。该合成夹具的整图像素一致，记录见 [像素比对](../artifacts/reader-exif-pixel-comparison.json)；尚不能推广为所有图片、局部采样或最终阅读画面一致。
+
+原生隔离参考包同时证实一个分支差异：全屏图片预览使用 `RssImageLoader`，EXIF=6 的 JPEG 仍以原始 64×32 方向显示；文章内 Coil 则旋转。PodJS 全屏概览及分块已显式选择原始方向，文章内和背景保持 EXIF 处理。OWW242 图片服务 7 项、应用 722 项、类型检查和打包通过。新主包 `artifacts/watchrss-podjs-exif-preview.apk` 与设备 `base.apk` SHA-256 同为 `2f45478ed8af5dfa982f6b538803861c2c6ffeed5772c154f4aa6655f4db37a0`；升级前后 33 张数据库表逐表内容一致，完整性与外键检查正常。真实 EXIF 图片的全屏画面、原生 `RGB_565` 色彩路径、缩放大图与物理手势仍待验收；详见 [预览回执](../artifacts/reader-exif-preview-receipt.json)。
+
+原生全屏 JPEG 实测使用 `RGB_565`。同一批 8 种 EXIF 夹具在之前 PodJS 原始方向 `ARGB_8888` 解码下，逐字节输出均与原生不同；全屏概览与分块改用 `RGB_565` 后，8 组源文件哈希及完整 RGBA 输出哈希都与原生全屏加载器相同。应用 722 项、图片服务 7 项、类型检查及打包通过。当前安装／归档 `artifacts/watchrss-podjs-exif-rgb565.apk` 的 SHA-256 同为 `1b1108cc4710a3c15ba7a3f89ff4972038a65d701c1199386d95ca246b73e653`；33 张数据库表升级前后内容一致，`quick_check=ok`、外键错误零。比对和设备证据见 [全屏色彩回执](../artifacts/reader-exif-rgb565-receipt.json)。任意大图分块采样、真实画面和实体操作仍未验收。
+
+大图分块再对照：同一 1031×513 JPEG 的原生整图与 PodJS 六块 `RGB_565` 原尺寸解码，修复前 1,819 个像素不同且只分布在四条分块边界列。区域解码多取一像素后裁回，528,903 个像素全部相同；图片服务 8 项通过。已安装 `artifacts/watchrss-podjs-image-tile-halo.apk`，设备／归档 SHA-256 同为 `70e5529e3259fddeb04a32ea0b73ce174a6fcd8ed52d639138493bde20ae1aff`，33 张数据库表内容不变，完整性与外键检查正常。2 倍采样的最后奇数边缘存在区域解码列数差异，当前证据不足以判断实际屏幕误差；真实画面与实体手势仍未验收。详情见 [分块接缝回执](../artifacts/large-image-tile-seam-receipt.json)。
+
+隔离原生及 PodJS 静态页面随后在 OWW242 完成不注入手势的 466×466 窗口截图。两边大图占据相同的 466×232 区域，黑色上下边距完全一致；PodJS 右侧没有独立黑条。图像区域 RGB 平均绝对误差为 18.309/15.454/20.546，右侧 36 列相近，差异分布于整幅图。见 [画面比对](../artifacts/large-image-fit-render-comparison.json)。初次截图未记录 JPEG 原文件哈希，输入同一性后来由下方复核确认；像素画面仍不一致。隔离 PodJS 包已卸载，正式应用恢复；物理屏幕仍被 `SysUI.Charging` 遮挡。
+
+同设备重跑原生和 PodJS 隔离截图时补录了各自 JPEG 的 SHA-256：均为 `5e88519f68c42287f939f5a721f1458c7ea5de49c1b66ab8edfc89ddb9862de3`。两侧新截图哈希也分别与先前截图完全相同，因此上述误差确实来自相同输入字节。两个隔离测试通过，临时包已清理，PodJS 主包仍在。静态画面仍有大范围像素差异，不能据此宣称画面或物理交互一致。
+
+继续比对发现原生全屏使用原始尺寸位图，PodJS 在适配视图误选了 2 倍降采样。现对不超过 1536×1536 的图片保留原始像素瓦片，隔离实机截图的图像区域 RGB 平均误差降至 8.726/6.826/8.630，但仍不是像素一致。应用 723 项测试、类型检查、隔离截图测试和 Android 构建通过；已部署同签名 debug 主包，归档与设备 APK SHA-256 均为 `4bbfdb52881161101dff2cf42ba0231abc74e0b3385622ecf55e154290cfe663`。安装前与启动后 33 张 SQLite 表的行内容及数量相同、`quick_check=ok`、无外键错误。中途 release 变体临时关闭了既有 `run-as`，最终 debug 变体已恢复后完成数据核对。其他尺寸与格式、缩放/平移画面、物理操作和完整迁移仍待验证。见 [前后对比](../artifacts/large-image-fullres-comparison.json)。
+
+再按原生 Compose 图片的平滑缩放方式，为 PodJS 瓦片增加线性纹理采样：运行时暴露可选采样上传接口，旧宿主保留原有路径。同一 OWW242、同一 JPEG 的隔离窗口图像区域 RGB 平均误差进一步降到 0.902/0.949/0.934；仍非逐像素一致。723 项应用测试、应用和 PocketJS 类型检查、Rust surface 测试、隔离图片测试与 Android 构建通过；PodJS 工作区根目录 `tsc` 因 Harmony 测试模块/类型错误未通过，不计入验证成功。更新 debug 主包与设备 `base.apk` SHA-256 均为 `4ae364112f41571682e40ce31b53aae53a1c4059406fee3d786b4d72ade12bbd`。升级前后 33 张 SQLite 表的逻辑行哈希与数量一致、完整性检查通过；部署收据见 [数据审计](../artifacts/image-linear-deployment-receipt.json)。实物显示仍由 `SysUI.Charging` 遮挡，其他尺寸、缩放和平移、物理操作及整体迁移继续开放。
+
+线性采样暴露了瓦片边缘缺少邻接像素的细线：同一截图的第 231 列误差 16.616，末行误差 7.139。现在对一级采样瓦片增加最多 1 像素邻边、使用 510 像素内容步长并裁剪到原瓦片区域；边界误差分别降到 0.947、0.873，整块图像区域 RGB 平均误差为 0.836/0.898/0.871。应用 724 项测试、类型检查、隔离实机截图及 Android 构建通过。主 debug 包与设备 APK SHA-256 均为 `d815e1fbcef509e86d031e2a26b3f4e42fcfd4d98df0dff9b16ff3fdd4fc57c4`；33 张 SQLite 表升级前后行哈希与数量一致，完整性检查通过。详见 [三阶段图像对比](../artifacts/large-image-fullres-comparison.json) 与 [部署收据](../artifacts/image-seam-deployment-receipt.json)。二级及更高降采样路径、其他尺寸与格式、缩放平移和物理验收仍未完成。
+
+新增 2053×1027 同源 JPEG 隔离对照，原生与 PodJS 输入 SHA-256 均为 `aad0dcf9714e9625b3208492bd7ec1439db8fd1260b29fa9e2c5247d3faa1d29`。原先 4 倍降采样的图像区域 RGB 平均误差为 21.859/28.894/30.700；对不超过 250 万像素且单边不超过 3072 的图片保留原始瓦片、等待 15 块可见瓦片全部完成后，误差降到 0.869/0.974/0.960。概览图到全清晰的单轮时间仍为 4.368 秒；更大图片仍走降采样，画面及性能未解决。隔离原生/PodJS 截图、8 项 Android 图片服务测试、725 项应用测试、类型检查及构建通过。更新主包和设备 APK SHA-256 均为 `98e53c9860efe09cc5b0ca25bf7143f968241cc62bb2876c97d9a3c34940e9e9`；主库 33 张表的行哈希与数量在升级前后相同，完整性检查通过。详见 [同源画面对照](../artifacts/large-sampled-fit-comparison.json) 与 [部署收据](../artifacts/large-sampled-deployment-receipt.json)。物理操作及整体迁移仍未完成。
+
+继续用 4096×2048 同源 JPEG 在 OWW242 隔离应用比对：原先 8 倍采样的图像区域 RGB 平均误差为 45.357/34.112/37.931；2 倍采样仍为 8.718/7.705/9.162；保留原始像素、待 45 块瓦片就绪后为 0.834/0.898/0.870。现将原始瓦片适用范围扩至单边不超过 4096、总像素不超过 8,388,608。全清晰就绪的单轮时间达 15.513 秒，画质改善伴随明显等待；更大图片和性能优化仍未完成。[三档画面对照](../artifacts/very-large-fit-comparison.json)记录输入、截图哈希及计时。725 项应用测试、类型检查、隔离原生/PodJS 截图和 Android 构建通过。主包与设备 APK SHA-256 均为 `c5333b88a7fa740971636779deb98b32503612c90b14742f1af7668d6d36835a`；启动前后 33 张 SQLite 表的逻辑行哈希与数量一致，完整性和外键检查通过，详见[部署收据](../artifacts/very-large-deployment-receipt.json)。`SysUI.Charging` 仍遮挡实体屏幕，任意图片、缩放平移、实体手势及整体迁移尚未验收。
+
+针对 45 块瓦片的等待分段计时，旧跨宿主文件读取累计 41.481 秒，超过区域解码累计 20.733 秒。运行时新增仅允许读取 `images/decoded-<十进制>.rgba`、拒绝符号链接且限制 512×512 RGBA 大小的本地字节路径；旧宿主或读取失败时仍回退原文件服务。相同 OWW242 夹具复测累计读取降至 0.166 秒，概览图到全部清晰瓦片就绪从 15.771 降到 **6.050 秒**，新旧截图 SHA-256 完全相同。计时均为单轮、多个瓦片并发，不能作为稳定性能基准；详见[分阶段计时](../artifacts/image-direct-performance.json)。Rust 72 项通过（另有 1 项原有忽略）、应用 725 项、类型检查、隔离图片测试及双 ABI Android 构建通过。主包与设备 APK SHA-256 均为 `58a889aa96fb1d7a9481e5ed90570fd6ffbd9a3ada4ddec74b481f98e2134105`；升级前后 33 张 SQLite 表逻辑行哈希和数量一致，完整性与外键检查通过，见[部署收据](../artifacts/image-direct-deployment-receipt.json)。原始瓦片解码仍需数秒，更大图片和实体交互/画面验收仍未完成。
+
+将同源夹具扩展到 4096×3072：原生与 PodJS JPEG 输入 SHA-256 相同，原先 8 倍采样在图像区域的 RGB 平均误差为 45.356/34.080/37.896。现对单边不超过 4096、总像素不超过 12,582,912 的图片保留原始瓦片，63 块全部就绪后误差降至 0.834/0.899/0.880；隔离测试通过，进程运行中一次 PSS 采样为 176,043 KiB。概览图到全清晰单次仍需 **10.660 秒**，不能视为性能或内存峰值验收。详见[同源画面对照](../artifacts/extended-image-fit-comparison.json)。应用 726 项、类型检查、原生/PodJS 隔离图片测试和 Android 构建通过。更新主包与设备 APK SHA-256 均为 `e4ae9ed98251806f2ff8995b3e16eec66cb2500402aaabd52f2b0c20fe1cc6be`；33 张 SQLite 表升级前后逻辑行哈希和数量相同，完整性与外键检查通过，见[部署收据](../artifacts/extended-image-deployment-receipt.json)。超出此尺寸的图片、任意格式、缩放平移、实体画面/手势及整体迁移仍未完成。
+
+同一 63 瓦片夹具的宿主分段计时发现，反复创建 `BitmapRegionDecoder` 累计耗时 12.889 秒。现最多复用 4 个空闲解码器，单次只借给一个请求，并以文件规范路径、设备号/inode、大小及纳秒级修改/变更时间核对来源；源文件更新时重开，服务关闭时回收。新增同路径文件替换测试，Android 图片服务 9 项全部通过。单轮复测创建解码器累计降至 0.883 秒，全瓦片就绪从 10.539 降到 **8.155 秒**，PodJS 截图 SHA-256 完全相同；详见[分阶段计时](../artifacts/decoder-pool-performance.json)。应用 726 项、类型检查、隔离图片测试及 Android 构建通过。主包与设备 APK SHA-256 均为 `85f48e4b203f46f404a9840694816ae615c0ed8bf8dbc089919c1406c8a06e6b`；升级前后 33 张 SQLite 表逻辑行哈希和数量相同，完整性及外键检查正常，见[部署收据](../artifacts/decoder-pool-deployment-receipt.json)。实际 JPEG 解码/裁切仍耗数秒，超限图片和实体交互/画面验收继续开放。
+
+图片页卸载时现发送 `image.release`，回收空闲解码器，并使尚在使用中的旧代解码器归还后回收，避免解码器随主进程长期驻留。旧宿主若不支持该可选清理请求，页面导航不受影响。定向设备测试确认旧实例确已回收，图片服务 9 项、应用 726 项、应用/框架 TypeScript 检查及 Android 构建通过。新主包与设备 APK SHA-256 均为 `7c8204e7aa09cea6074cb9f13a8e80fc6f66c857fbe4f726652d52de36de0e7e`；升级前后 33 张 SQLite 表逻辑内容与数量相同，完整性和外键检查通过，见[部署收据](../artifacts/decoder-release-deployment-receipt.json)。多次真实图片切换的内存峰值、长时性能、实体画面和手势仍待验证。
+
+区域解码后的 RGBA 写出改为每次批量转换和写入 16 行，减少逐行 `Bitmap.getPixels` 与文件写入调用。相同 4096×3072 隔离 JPEG 夹具的 63 块测试两次通过，首次截图 SHA-256 与改动前完全一致；累计写出耗时从前一轮的 4.658 秒降为 2.910／2.912 秒，概览到全部瓦片就绪为 8.035／7.795 秒。一次未先停止旧夹具进程的重复测试因上次活动删除图片而报 `file_not_found`，停止夹具后复测通过；少量并发单轮数据不足以证明稳定的整页性能收益，详见[计时回执](../artifacts/image-row-batch-performance.json)。图片服务 9 项和应用 726 项通过，正式主包 `artifacts/watchrss-podjs-image-row-batch.apk` 与 OWW242 安装包 SHA-256 均为 `a12f52da94d8d46d14515a7613046297f230cc2ce45b9e538a5710c03df0d86d`。启动前后 33 张数据库表的逐行摘要及数量相同，`quick_check=ok`、外键错误为零，见[部署收据](../artifacts/image-row-batch-deployment-receipt.json)。充电浮层仍遮挡实体屏幕，真实图片切换的峰值内存、缩放平移和物理操作未验收。
+
+### 2026-09-25 全屏图片加载与缺失提示
+
+对照原生 `ImagePreviewScreen`，PodJS 全屏图片现在在加载期间显示居中进度环；本地图片缺失时改为“图片未同步／请在手机端重新同步”，并提供打开现有手机下载弹窗的链接。远程图片失败仍使用原生的“图片加载失败／请稍后重试”。OWW242 上两个隔离包分别运行原生生产 Composable 和 PodJS 页面，均未注入触摸；缺失本地图片的 466×466 截图中，两行提示第一行边界完全一致，第二行只差底部 1 像素；下载入口左右各差 2 像素。截图并非像素一致，内容区域平均绝对 RGB 误差为 16.141，字形渲染仍有差异。见[截图比对](../artifacts/image-failure-comparison.json)。下载弹窗的真实点击和加载动画尚未做实体交互验收。
+
+### 2026-09-25 全屏大图反复打开的内存回收
+
+隔离包交替加载 2053×1027 和 4096×3072 JPEG 六轮。此前图片卸载后文件与解码器已释放，渲染器的 RGBA 转换缓存却继续持有旧纹理，空闲 PSS 从 45,342 KiB 增到 227,874 KiB。渲染缓存现在在每帧解码前清除已释放或修订过的纹理；同时把瓦片临时文件删除请求限制为最多四个并发，避免一次卸载 63 块图片触发宿主请求上限。相同六轮隔离设备测试通过，空闲 PSS 为 36,288、36,162、39,140、39,139、40,865、36,302 KiB；六轮均无残留解码文件和空闲解码器，新增 C++ 回归测试验证释放后 RGBA 副本确实消失。应用 726 项测试、类型检查和正式包构建通过。正式 APK 与 OWW242 安装包 SHA-256 均为 `10f3e46254b8bcc8bb9fb9ef9a5adb19d2e8158702cbbe81d4fc0543dda7bec5`，启动至首帧 4238 ms；升级前后 33 张 SQLite 表逐行摘要和数量相同，完整性与外键检查通过。详见[部署收据](../artifacts/image-cache-prune-deployment-receipt.json)。六轮隔离测试不能替代真实手势缩放、长时使用或被系统充电提示遮挡的实体屏幕验收。
+
+### 2026-09-25 全屏图片手势状态对齐
+
+对照原生 `ImagePreviewScreen` 与 `BaseWatchActivity`，PodJS 图片页现按双指中心点逐帧更新比例和偏移，缩放停止后的 100 毫秒内抑制单纯拖动，松手后按原生 `FloatExponentialDecaySpec` 的 13.6 摩擦系数延续缩放，并同时延续平移惯性；新触点会取消惯性。回退候选只从左侧 65% 区域开始，并在图片已平移到最右边界后接管向右滑动。确定性状态测试覆盖缩放公式、衰减和回退边界；全量应用测试、类型检查及 Android 构建通过。正式 APK 与 OWW242 安装包 SHA-256、启动和数据库核对见[部署收据](../artifacts/image-gesture-deployment-receipt.json)。系统充电浮层仍覆盖屏幕，双指实际触感、回退竞争和画面不能由这些测试代替验收。
+
+此前图片缺失提示版本曾通过 726 项应用测试、TypeScript 检查、原生/PodJS 隔离截图测试和正式 Android 构建。当时归档的 `artifacts/watchrss-podjs-image-failure.apk` SHA-256 为 `b8d054846aa2c36d25d039c92e6b16d853e543631168703477b9086655a6c96b`；对应部署收据见[图片缺失提示回执](../artifacts/image-failure-deployment-receipt.json)。这段是历史记录，当前安装包见本文开头的最新状态。
+
+### 2026-09-25 添加 RSS 预览与确认
+
+对照原生 `AddRssViewModel` 和 `DefaultRssRepository`，PodJS 的添加订阅流程现在先只读预览，再用同一份预览内容确认入库；重复地址返回已有频道，首批文章标为已读。服务回归验证了预览未入库、确认只拉取一次、35 篇初始文章与重复订阅。修正该回归的联合类型收窄后，`bun run test` 749 项通过，`bun run typecheck` 通过。直接运行 `bun test tests` 会额外运行 `artifacts` 下的历史隔离测试，产生 1 项与当前源码无关的失败。
+
+Android 打包通过。首次增量产物包含约 253 MB 未索引 ZIP 空洞；移开 `androidApp` 的旧构建输出后重新打包，最终 `artifacts/watchrss-podjs-rss-add-preview.apk` 为 298,190,950 字节、473 个 ZIP 条目、无大间隙，ZIP 完整性检查通过，SHA-256 为 `a485a4536975e1e8e5725b1ab27a66d235c4e9178ed92b66ca09e61dbd6c2cd2`。该包已覆盖安装到 OWW242，设备 `base.apk` 哈希一致，主 Activity 恢复并有进程运行。安装前后 32 张应用 SQLite 表逐表内容摘要一致，`quick_check=ok`、外键错误为零；277 个受保护文件中仅同步启动诊断日志追加和 WorkManager `Preference` 记录变化。私有备份哈希及核对见 [部署回执](../artifacts/rss-add-preview-deployment-receipt.json)。`SysUI.Charging` 仍持有窗口焦点，原生与 PodJS 添加页的实际画面、真实输入和整体迁移仍待验证。
+
+随后按原生输入页调整按钮：地址为空时不显示提交；非空时使用居中圆形 `+` 按钮；可重试的解析错误提供独立的“重试”“取消”。保留从手机输入入口。应用测试仍为 749 项通过，TypeScript 检查及干净 Android 打包通过；473 个 ZIP 条目完整且无间隙。更新包 `artifacts/watchrss-podjs-rss-add-ui.apk` 已安装，设备与归档 SHA-256 均为 `bdad3027463b5520b1c49837813b71dc2695c92786e5e1200b75c7f32abab432`。安装前后 32 张应用表逐表内容未变，`quick_check=ok`、外键错误零；其他文件仅诊断日志追加和 WorkManager 偏好变化，见 [更新回执](../artifacts/rss-add-ui-deployment-receipt.json)。主 Activity 与进程正常；系统充电浮层仍持有焦点，按钮画面及物理点击尚未验收。
+
+直接添加的服务入口也按原生 `DefaultRssRepository.addChannel` 对齐：无协议域名补 `http://`，非法地址包括 `builtin:` 伪地址会被拒绝；已有订阅直接返回且不再次抓取；新订阅的首批文章标记为已读。已存在的内置频道不再补写其偏好记录。新增回归后应用测试 750 项通过，TypeScript 检查及干净 Android 打包通过。最新 APK `artifacts/watchrss-podjs-rss-direct-native.apk` 的归档与 OWW242 安装文件 SHA-256 均为 `6631890ca9c148e93e04f8951a40718d7c47026273f17982afabda8cf2c9bd80`；ZIP 校验通过且无条目间隙。安装前后 32 张应用表逐表内容一致，`quick_check=ok`、外键错误零；仅启动诊断日志追加及 WorkManager `Preference` 变化，见 [部署回执](../artifacts/rss-direct-native-deployment-receipt.json)。充电浮层继续遮挡实体画面，手动添加与真实网络失败场景尚未验收。
+
+OWW242 隔离夹具分别渲染原生生产 `AddRssScreen` 与 PodJS 生产组件的相同预填地址输入状态。对照发现 PodJS 的若干 `text-[Npx]` 字号不受框架解析器支持，造成地址和说明缺字；已改为受支持的字号，并调整标题、浮动标签、输入框、说明和提交按钮的位置。当时版本的内容区域平均绝对 RGB 误差为 15.072，画面随后又经下段状态对照更新。应用测试 750 项、类型检查、隔离截图测试及正式 Android 打包通过。当时的正式包 `artifacts/watchrss-podjs-rss-add-visual.apk` 已安装，设备和归档 SHA-256 均为 `a67f396ed50c516b931961443c7c0234668f5cd52415eeced10ae695c9714199`；升级前后 33 张 SQLite 表的逻辑内容一致，完整性和外键检查通过，详情见[历史画面对照与部署回执](../artifacts/rss-add-visual-comparison.json)。隔离夹具没有注入触摸；正式应用仍被 `SysUI.Charging` 遮挡，实体输入、错误/预览状态与完整迁移验收继续开放。
+
+随后扩展同设备夹具，直接渲染空地址、解析错误、预览成功和重复订阅四种原生／PodJS 生产页面状态。空地址页现在把标签留在输入框内部，不显示 URL 占位内容和提交按钮；错误页按原生显示两枚并排操作按钮；预览与重复订阅页恢复按钮底色，并按原生垂直居中。描边、按钮和错误文字颜色改为原生主题值，删除添加页中原生没有的“从手机输入”和重复订阅的“修改地址”按钮；系统返回在预览／重复订阅状态退出页面，预览页仍可用“修改地址”返回输入。五个状态的截图、哈希和全屏平均绝对 RGB 误差见[状态对照与部署回执](../artifacts/rss-add-states-comparison.json)，误差分别为输入 10.154、空地址 6.585、错误 11.844、预览 5.504、重复订阅 9.506，仍不是像素一致。750 项应用测试、TypeScript、四项原生与五项 PodJS 隔离截图测试及 Android 打包通过。最新正式包 `artifacts/watchrss-podjs-rss-add-states.apk` 已安装，设备和归档 SHA-256 均为 `d1b2f9aa52f9f41d17f03fab293ad138005581fdb71d48d8d11719dc3fd10f10`；升级前后 33 张 SQLite 表逻辑内容一致，`quick_check=ok`、外键错误零。主进程与 Activity 正常，充电浮层仍遮挡正式画面；实体输入、真实网络响应、视觉字形和完整迁移验收仍未完成。
+
+### 2026-09-25 跨页面样式字面量检查
+
+添加 RSS 的缺字原因也存在于其他页面：框架遇到不支持的类词会忽略整条样式字面量。扫描 769 条静态可枚举的 JSX `class` 值发现 9 条无效，涉及共享页标题、协作者头像、RSS 侧滑按钮文字、图片缺失页下载入口、收藏列表和抖音标题。已替换为受支持的字号或移除无效的 `font-normal`，并增加直接调用当前打包编译器解析器的回归测试；现在扫描结果为 0 条无效。OWW242 缺失本地图片隔离页复拍通过：全图平均绝对 RGB 误差由 3.637 降至 3.034，下载入口区域由 45.746 降至 37.235，仍非像素一致；其他受影响页尚未逐页复拍。751 项应用测试、TypeScript 和正式 Android 打包通过。更新包 `artifacts/watchrss-podjs-valid-styles.apk` 的设备／归档 SHA-256 均为 `2e185d9000b9024a85778bd5c24a41ad751e785f8c0d32512add6e60b10309e9`；覆盖安装前后 33 张应用数据库表的逻辑内容一致，`quick_check=ok`、外键错误零，详见[部署与截图回执](../artifacts/valid-styles-deployment-receipt.json)。主进程已恢复，`SysUI.Charging` 仍遮挡正式画面，实体手势和完整视觉／功能迁移仍未验收。
+
+### 2026-09-25 收藏／稍后再看列表画面对照
+
+OWW242 上使用固定收藏条目和空列表夹具，分别渲染原生生产 `SavedItemsScreen` 与 PodJS 生产组件。PodJS 原先将页面说明挤成单行，同步提示用错文案且字号、卡片高度和摘要字号偏小；已按原生资源调整为两行说明、手机端内容编辑提示、84dp 条目和 14sp 摘要，并修正空列表文案的位置。单条目隔离截图里同步提示与首张卡片上边缘均与原生的 182／312 像素位置相同；整图平均绝对 RGB 差为 14.645/255，仍有字形和细节差异。空列表夹具曾过早抓到未绘完的帧，测试现在等待标题绘出；最终空列表复拍的整图误差为 11.985/255，文案像素顶缘与原生差 2 像素。
+
+用户指出实际侧滑画面有差异；只读 ADB 截图确认“稍后再看”图标呈黑色实心圆。原 SVG 依赖描边，现换成白色填充钟形；OWW242 上的独立图标夹具截图已验证浅色钟面与指针出现，新图标也已进入正式包，打开侧滑动作后的正式界面仍待复核。侧滑揭示宽度、阈值和动画参数经源码对照与原生相同，但这不能证明真实手势路径一致。
+
+751 项应用测试、类型检查、两项原生隔离截图测试、两项 PodJS 隔离截图测试、图标隔离截图测试及 Android 打包通过。正式包 `artifacts/watchrss-podjs-saved-list-parity.apk` 已覆盖安装到 OWW242，设备 APK 与归档 SHA-256 同为 `42a626fb4a97052f40cb765d8a25b53b39a1fc39897f80064335b819687d90e4`；安装前后 33 张应用表的逻辑内容一致，`quick_check=ok`、外键错误为零。见[部署和画面对照回执](../artifacts/saved-list-parity-deployment-receipt.json)。正式应用已恢复焦点；收藏列表的物理左滑、长按排序、撤销以及整项迁移验收仍未完成。
+
+### 2026-09-25 RSS 侧滑按钮图标与文字中线
+
+用户要求图标与字体中线对齐。原生 `SwipeActionButton` 将 16dp 图标和 12sp 文案放在同一纵向列，水平居中，组件间距 4dp。PodJS 原先未设置纵向排列，使图标与文字在同一横排；现改为 `flex-col` 并以 4dp 顶部间距对齐。OWW242 独立夹具挂载生产 `RssFeedScreen`，仅在夹具上用 ADB 展开侧滑：收藏按钮图标／文字中心 x 相差 0.5 像素，稍后再看为 0 像素；见[截图及像素测量](../artifacts/rss-swipe-alignment-isolated-receipt.json)。
+
+751 项应用测试、TypeScript 检查及 Android 打包通过。正式包 `artifacts/watchrss-podjs-rss-swipe-alignment.apk` 已安装到 OWW242，设备与归档 SHA-256 均为 `7bda0eb4a1858c020f39d8c69bc25e108c3c5c7ba7817d2d27e547a0a8e64d05`；覆盖安装前后 33 张应用表逻辑内容相同、`quick_check=ok`、外键错误零，详见[部署回执](../artifacts/rss-swipe-alignment-deployment-receipt.json)。夹具并不等于正式应用的实体手势验收；整体迁移仍未完成。
+
+### 2026-09-26 收藏列表手势隔离验收
+
+针对收藏／稍后再看列表的实体手势差异，在 OWW242 上以独立夹具挂载生产 `SavedItemsScreen` 和三条固定数据，未对主包注入输入。ADB 左滑 130 物理像素时条目保留并回弹；左滑 200 像素时仅移除目标条目。纵向滚动能移动列表。仪器测试用同一指针按住 750ms、跨行移动到下一条再抬起，观察到 `REORDER:bravo,alpha,charlie`；随后删除 alpha 并点击撤销，得到 `REMOVE:fixture:alpha` 和 `UNDO:fixture:alpha`。JUnit 1/1 通过，证据、输入轨迹、截图和局限见[设备手势回执](../artifacts/saved-gesture-device/receipt.json)。
+
+这证明生产组件在该设备运行时可以处理长按排序、阈值两侧的左滑和撤销，并不等于正式应用内所有 RSS/Douyin 保存类型或真实用户手指的完整验收。普通 ADB `tap 233 84` 曾有一次未触发撤销，随后 `tap 233 60` 成功；两点均在按钮边界内，精确仪器测试稳定通过，原因尚未复现。隔离包已卸载，正式应用恢复焦点且 APK 哈希仍为 `7bda0eb4a1858c020f39d8c69bc25e108c3c5c7ba7817d2d27e547a0a8e64d05`。
+
+### 2026-09-26 备忘录列表入口对齐（源码与构建）
+
+原生 `NotesFeedList` 在标题下始终显示手机端编辑／同步提示，并以长按笔记卡片进入 `NoteActionsActivity`。PodJS 此前在空列表分支遗漏了提示，笔记操作只能通过额外的“⋮”按钮进入。现在空列表和有笔记列表共用一套条目，显示“下载手机端app以在手机上编辑和同步内容”，打开现有下载二维码弹窗；长按按滚动偏移定位笔记，列表标题、提示、卡片间隙和横向安全区不会误开操作页，弹窗期间停止列表手势。移除了原生列表中没有的角落“⋮”按钮。
+
+OWW242 独立夹具挂载生产 `NotesListScreen` 和三条固定笔记，复拍确认提示完整显示两行。ADB 短按第一条得到 `OPEN:alpha`，按住 850ms 得到 `ACTIONS:alpha`，点击提示弹出二维码下载页；截图及包哈希见[设备回执](../artifacts/notes-list-fixture-receipt.json)。为了使短按从列表手势回调稳定打开条目，回调推迟到当前手势帧之后执行。长按后第一次点提示未打开，第二次才成功；原因仍需追查，不能把点击可靠性视为验收通过。
+
+`bun run test` 752 项通过（其中新增坐标／滚动边界测试），`bun run typecheck` 和 Android 打包通过。最终构建产物为 `artifacts/watchrss-podjs-notes-list-entry.apk`，SHA-256 为 `d231fdc9aec7eba14fbc08adee4742406a25f90c0e533ea65d2dd097c6fa0779`，473 个 ZIP 条目完整。此包尚未安装到正式应用；夹具已卸载，正式包保持上一节的已安装版本。原生逐像素对照、真实手指及正式应用导航、备忘录编辑器、导入和同步等总体迁移缺口仍未关闭。
+
+### 2026-09-26 Android 触点边界保留与正式部署
+
+继续追查备忘录长按后的首次点击丢失，定位到 Android 宿主 `nativeInput` 只保留最新触点数组：一次短按的按下和抬起都发生在两帧之间时，JS 只看到抬起后的空数组。`TouchSnapshotQueue` 现在逐帧交付触点数／ID 的增减边界，保留初始坐标并合并后续移动，避免短按消失；备忘录列表同时直接处理提示和条目命中。独立 C++ 测试覆盖同帧按下／抬起、快速拖动和双指增减。
+
+OWW242 隔离包冷启动后重复三轮“长按 alpha 850ms → 首次点手机端提示”，三轮均直接出现二维码，截图哈希相同。新运行时下，既有收藏列表仪器测试的跨行长按排序、左滑移除和撤销仍为 1/1 通过。应用 752 项测试、TypeScript 检查、Android 打包和 ZIP 完整性检查通过，见[部署与测试回执](../artifacts/touch-queue-deployment-receipt.json)。
+
+正式包 `artifacts/watchrss-podjs-notes-touch-queue.apk` 已覆盖安装到 OWW242，设备 `base.apk` 与归档 SHA-256 均为 `0a942dc516ebd3c304b8a3cd06a6aebec67c8a7f5957eec24b316d4361d7c747`。升级前后 33 张应用表逻辑内容一致，`quick_check=ok`、外键错误零；改变的 KV 键只有同步诊断时间线，另有 SQLite 文件本体及 WorkManager 数据库变化。隔离包均已卸载，正式 Activity 恢复。真实手指、正式应用备忘录导航、原生逐像素对照及整体迁移仍待验收。
+
+
+### 2026-09-26 备忘录内联编辑与自动保存
+
+备忘录详情页现可直接编辑标题和多行正文，并在修改后自动保存；退出编辑器时等待未完成的写入。保存队列按顺序提交，避免较慢的旧写入覆盖新内容，标题的前后空格按原样保留。空白新建页不会生成空笔记；不支持内联输入的宿主仍可使用原有文本输入服务。
+
+OWW242 隔离夹具挂载生产编辑器，Android 仪器测试依次修改标题、正文、清空标题、再次修改标题并点击完成，数据库结果符合预期，1/1 通过。应用测试 755 项、类型检查和 APK ZIP 完整性检查通过。正式包 [`watchrss-podjs-note-inline-editor.apk`](../artifacts/watchrss-podjs-note-inline-editor.apk) 已安装，设备与归档 SHA-256 同为 `10a5e7bf0d33b3bb2814959b12e2c905c00c41a569776cac2d95cc5998ddcc11`，正式 Activity 正常。安装前后 279 个用户数据文件均保留、33 张应用表逻辑内容一致；变化的 KV 键仅为同步诊断时间线。证据见[部署回执](../artifacts/note-editor-deployment-receipt.json)。隔离测试未验证正式应用内的实体手指输入、导航或原生逐像素画面，整体迁移仍未完成。
+
+
+### 2026-09-26 备忘录正文撤销与重做
+
+原生编辑器的正文历史会把 500 毫秒内、相邻范围上的同类输入合并，最多保留 200 步。PodJS 现按此规则记录正文编辑，提供撤销／重做按钮；Android 内联输入宿主增加受 `input.text` 能力约束的文本更新方法，更新时抑制回调，避免撤销动作再次写入历史。最初设备测试发现能力映射遗漏，随后又发现文字箭头缺字、图标遮挡按钮触点；已分别修复并在最终隔离包重跑。
+
+OWW242 仪器测试在生产编辑器组件中写入三行正文，依次点击撤销、重做，核对原生输入框及数据库自动保存，1/1 通过；最终截图确认两枚矢量箭头正常显示。应用 757 项测试、TypeScript、框架服务 46 项测试和正式 APK ZIP 校验通过。正式包 [`watchrss-podjs-note-history.apk`](../artifacts/watchrss-podjs-note-history.apk) 已覆盖安装，设备与归档 SHA-256 同为 `6420a9dc9fc3f173c20f428ecaaac3ee7ad08062ee82188f645f6c22d9b4c42f`。升级前后 279 个用户数据文件均在、33 张应用表逻辑内容一致，`quick_check=ok`、外键错误零；变化的 KV 键仅为同步诊断时间线，详见[部署回执](../artifacts/note-history-deployment-receipt.json)。隔离包已清理，正式 Activity 恢复。原生的光标锚点、表冠导航及完整视觉一致性尚未实现或验收。
+
+
+### 2026-09-26 备忘录阅读页正文与编辑浮层
+
+原生阅读页将“编辑”固定在底部，向下滚动时隐藏，向上滚动时恢复；PodJS 此前把按钮放在正文末尾。现在改为底部浮层，并保留正文末尾 64dp 间距。OWW242 独立夹具还发现正文预览首行使用宿主不支持的动态 `fontSize` 样式，导致加载后黑屏；改为打包器认可的字号类后，45 行固定笔记能正常显示。滚动到顶部时的回弹曾再次隐藏浮层，现按顶部边界恢复显示。
+
+独立夹具上的 ADB 下滑／上滑截图分别显示按钮隐藏和恢复；初始与回到顶部的截图 SHA-256 完全相同。点击底部按钮后，Android 可访问性树出现标题与正文两个原生 `EditText`。应用 757 项测试、TypeScript、Android 打包及 ZIP 校验通过。正式包 [`watchrss-podjs-note-reader-edit.apk`](../artifacts/watchrss-podjs-note-reader-edit.apk) 已覆盖安装到 OWW242，设备／归档 SHA-256 均为 `fe7b42ca5108e8587ed9797f2ccec8360e8e76676a4593a411bbfa506138df49`。升级前后 279 个用户数据文件均在、33 张应用表逻辑内容相同，`quick_check=ok`、外键错误零，见[设备回执](../artifacts/note-reader-edit-deployment-receipt.json)。独立夹具已卸载，正式 Activity 恢复；原生逐像素对照、实体手指和正式应用内的备忘录导航仍待验收。
+
+### 2026-09-26 备忘录阅读页预设主题
+
+原生备忘录阅读页使用当前阅读器预设的背景和正文、标题、说明文字颜色，PodJS 此前固定黑底白字。现接入已有的阅读背景组件，并让正文、引用、代码、表格、图片提示和底部编辑按钮跟随预设颜色；编辑器自身仍沿用原生的纯黑编辑表面。OWW242 独立浅色预设夹具截图显示米色背景、深色正文和浅底深字编辑按钮，见[截图](../artifacts/note-reader-light-fixture.png)。该夹具只验证浅色状态的静态显示，不等于原生逐像素一致或实体手势验收。
+
+应用 763 项测试、TypeScript 检查和正式 Android 打包通过，APK ZIP 的 473 个条目均可读取。正式包 [`watchrss-podjs-note-reader-theme.apk`](../artifacts/watchrss-podjs-note-reader-theme.apk) 已覆盖安装到 OWW242；设备与归档 SHA-256 均为 `8dc26255c049b0fcd1c5cb27e315a3652ff43f5520c9f4a1df6ccdd99976831b`。安装并启动前后 279 个用户数据文件均在、33 张应用表逻辑内容相同，`quick_check=ok`、外键错误零；KV 仅同步诊断时间线变化。夹具已卸载，正式 Activity 与进程已恢复。完整回执见[主题部署证据](../artifacts/note-reader-theme-deployment-receipt.json)。原生字体度量、不同预设的图片与视频背景、真实用户输入及完整迁移仍需继续验收。
+
+### 2026-09-26 备忘录阅读页预设字号与行高
+
+原生备忘录的标题、说明、正文与表格文字读取当前阅读预设的字号和行高，PodJS 此前仅接入颜色，文本仍使用固定字号。现在标题、说明、正文、引用、代码和表格按预设选择正式字库槽位并缩放；换行测量与从阅读中心进入编辑器时的光标定位使用相同的缩放宽度。新增缩放光标回归，应用 764 项测试、TypeScript 检查通过。
+
+OWW242 独立夹具以浅色、正文 20sp 预设挂载生产 `NoteDetailScreen`，截图中的标题、说明、正文和代码均可见。夹具初版漏打正式应用已有的字库槽位，导致文字不显示；补齐 33–37 槽位后重建复拍通过。当前有效[截图](../artifacts/note-reader-light-20sp-fixture.png)及[部署回执](../artifacts/note-reader-font-deployment-receipt.json)均来自最终夹具。正式 Android 包 [`watchrss-podjs-note-reader-font.apk`](../artifacts/watchrss-podjs-note-reader-font.apk) 已覆盖安装，设备与归档 SHA-256 均为 `b224cd4d487b91d1add6abb6e826265c1fbf28ea5b001ed9464f79373cb10c4b`；ZIP 473 个条目可读。安装并启动前后 279 个数据文件均在、33 张应用表逻辑内容一致，`quick_check=ok`、外键错误零，KV 仅诊断时间线变化。夹具已卸载，正式 Activity 已恢复。此证据尚不能证明原生逐像素或复杂 Markdown/表格光标映射一致，真实手指与表冠操作也未验收。
+
+### 2026-09-26 备忘录阅读页标题及内容间距
+
+继续对照原生 `WatchNoteRichTextLazyColumn`：阅读内容左右留白应为 14dp、顶部 22dp，标题首行限宽 150dp、后续行 190dp；标题与说明、页头与正文块、各正文块之间各为 10dp，正文块自身上下各留 5dp。PodJS 先前使用 18dp 横向留白和逐行 2dp 间距。现改为显式页头／内容块间距，并复用已有原生标题断行规则；阅读中心进入编辑器的光标坐标同步使用 14dp 横向留白、22dp 顶距和实际条目高度。
+
+OWW242 独立浅色 20sp 夹具显示标题按首行限宽分为两行，正文横向区域和间距已更新；[截图](../artifacts/note-reader-layout-20sp-fixture.png)仅验证 PodJS 生产组件的设备画面，尚无同内容原生逐像素对照。应用 765 项测试、TypeScript 检查及正式 Android 打包通过。最新[正式包](../artifacts/watchrss-podjs-note-reader-layout.apk)已覆盖安装，设备／归档 SHA-256 均为 `61c345f917f20ff7ca1f7dd601676794b29523356ceaf06bbbf0ea67913714b1`；ZIP 473 个条目可读。安装并启动前后 279 个数据文件均在、33 张应用表逻辑内容一致，`quick_check=ok`、外键错误零，KV 仅诊断时间线变化。夹具已卸载，正式 Activity 恢复；见[部署回执](../artifacts/note-reader-layout-deployment-receipt.json)。复杂富文本、表格编辑光标和实体操作仍未验收，完整迁移继续进行中。
+
+### 2026-09-26 备忘录阅读页原生排版对照
+
+用原生 `WatchNoteRichTextLazyColumn` 仪器测试与 PodJS 独立夹具渲染相同的浅色 20sp 笔记，实测原生标题／说明高度为 83dp／29dp，正文第一行在第 9 个汉字后换行。PodJS 阅读页现在向 Android 文本排版服务请求标题、说明和普通正文行的断点、行高与基线，并用系统字形绘制这些行；请求失败或宿主无此能力时保留原有字库渲染。原生这一状态的引用文字不缩进且沿用正文颜色，PodJS 据截图和排版回调同步修正。底部编辑按钮宽度从 72dp 改为原生的 44dp。
+
+同内容、原始 466×466 PNG 未平移／裁切／遮罩：整图 RGB MAE 从 14.1173 降至 0.4633/255；前 320 行 MAE 为 0.0200/255。原图分别是[原生](../artifacts/native-note-light-20sp-reference.png)与[最终源码 PodJS](../artifacts/podjs-note-light-20sp-final.png)，计算、哈希和验证范围见[回执](../artifacts/note-reader-native-layout-receipt.json)。原生仪器测试 1/1，应用 765 项测试、TypeScript 和 Android 打包通过。正式包 `artifacts/watchrss-podjs-note-reader-native-layout.apk` 已覆盖安装到 OWW242，设备／归档 SHA-256 均为 `387b848d6a49d225be9da689237d71cfa8941b46df6bf31266f3b6892e79b863`，ZIP 473 项可读。覆盖安装并启动前后 279 个数据文件均在、33 张应用表逻辑内容相同，`quick_check=ok`、外键错误零；KV 仅同步诊断时间线变化。隔离包已卸载，正式 Activity 已恢复。
+
+这组像素数据只覆盖一个静态浅色 20sp 状态。复杂内联样式、代码、表格、其他预设、长笔记请求时延、正式应用内导航、真实手指／表冠及整体迁移仍需分别验收。
+
+### 2026-09-26 备忘录围栏代码阅读预览对齐
+
+继续将同一笔记滚动 180 物理像素后，发现 PodJS 显示围栏代码的文字和底色，原生 `BasicRichText` 则没有绘制代码正文。另用单行、双行代码两份原生仪器样例核实：原生 `renderedText` 均为前文、一个空白行、后文；代码源文本仍在 Markdown 中。PodJS 阅读预览现把连续围栏代码折叠为一个由 Android 正文排版服务测量的空白行，不改数据库、同步载荷或编辑器源文本。
+
+同偏移量、未裁切／遮罩的 466×466 截图对照，整图 RGB MAE 从 2.3022 降为 0.0206/255；见[原生滚动图](../artifacts/native-note-light-20sp-scrolled-no-button.png)、[PodJS 滚动图](../artifacts/podjs-note-light-20sp-code-parity-scrolled.png)和[回执](../artifacts/note-reader-code-parity-receipt.json)。原生仪器测试 3/3、应用测试 766/766、TypeScript 与正式 Android 打包通过。最终包 `artifacts/watchrss-podjs-note-reader-code-parity.apk` 已覆盖安装到 OWW242，设备／归档 SHA-256 均为 `b09abe64a795c4b3d0ba4c73ad6e7506d6741e307cf1fb9428fd6eea2004e5b0`，ZIP 473 项可读。安装并启动前后 279 个文件和 33 张应用表逻辑内容一致，`quick_check=ok`、外键错误零；KV 只更新同步诊断时间线。原生测试图片已从原生应用私有目录清理，PodJS 隔离包已卸载，正式 Activity 已恢复前台。代码块折叠是当前原生阅读页行为，完整富文本、表格、长文性能、其他预设及实体操作仍未验收。
+
+### 2026-09-26 长备忘录排版请求基线
+
+在 OWW242 独立夹具中，使用与阅读页相同的 `requestReaderLayout` 和浅色 20sp 预设，对 120 个不同的短正文段逐段请求 Android 排版，全部 120 段发布、错误零，耗时 2996ms；原始 KV 回执见[基线](../artifacts/note-long-layout-benchmark.json)。这测量的是宿主排版往返时延，不包含长笔记的解析、首次绘制、滚动或原生 Compose 同状态耗时。当前阅读页要等所有段落测完才发布原生排版结果，因此长笔记可能保持字库回退布局数秒；需要继续优化批量／渐进请求并用设备上的长笔记复测。测试夹具已卸载，正式包仍为上一节的 `b09abe64…004e5b0`，前台恢复。

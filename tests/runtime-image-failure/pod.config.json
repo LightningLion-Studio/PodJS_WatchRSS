@@ -1,0 +1,13 @@
+{
+  "entry": "main.tsx",
+  "appId": "dev.podjs.tests.imagefailure",
+  "name": "Image Failure Verification",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "capabilities": ["data.images", "data.files.chunks", "data.kv", "runtime.timer", "host.lifecycle", "input.touch", "system.browser"],
+  "resources": {
+    "fontRegular": "../../assets/fonts/watch_sans.ttf",
+    "fontBold": "../../assets/fonts/reader_default_bold.ttf",
+    "extraCharsFile": "charset.txt"
+  }
+}

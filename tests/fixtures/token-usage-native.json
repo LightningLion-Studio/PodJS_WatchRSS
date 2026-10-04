@@ -1,0 +1,327 @@
+{
+  "source": "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/llm/LlmTokenUsageRepository.kt",
+  "sourceSha256": "1fe01d072ef140e3d06a522aa58d3651bd8d85442b7e77586b36165cca131b89",
+  "androidSourceHashes": {
+    "JSON.java": "a2cc5e4bf64bfe3edd73c6a14409f3200640454051d9947ee79f16a2396a19b1",
+    "JSONArray.java": "24f10dbe57a9228b8aec8a891355c26285e7fc4e070a2f826a080300e3ca4180",
+    "JSONException.java": "26e10aae9c209dabbc8f15b4156fe9fdc87f5d9d2cb2d2f078b475a61ba0df7d",
+    "JSONObject.java": "b7770e43fdad8415e8f5c37a7dc06a7c1ffb3a16c557887ded1479f3116c868f",
+    "JSONStringer.java": "8772ac80610cd62e906330152b09864c471a0921f199f4b9d670d98050e3d86c",
+    "JSONTokener.java": "744c9ffb50c2472d7269c8d64a7d8331ea1a1691fb6536619ac9590e9ebbbd4b"
+  },
+  "runtime": "Desktop JVM, verbatim native Kotlin normalize and Android 36 org.json; annotations removed only. No device/UI acceptance.",
+  "cases": [
+    {
+      "raw": "{}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"input_tokens\":2,\"output_tokens\":3,\"inputTokens\":9,\"totalTokens\":12}",
+      "expected": {
+        "inputTokens": 2,
+        "outputTokens": 3
+      }
+    },
+    {
+      "raw": "{\"completion_tokens_details\":{\"reasoning_tokens\":-1},\"reasoning_tokens\":7,\"cached_tokens\":9}",
+      "expected": {
+        "reasoningTokens": 7
+      }
+    },
+    {
+      "raw": "{\"completion_tokens_details\":{\"reasoning_tokens\":0},\"reasoning_tokens\":7,\"prompt_tokens_details\":{\"cached_tokens\":2}}",
+      "expected": {
+        "reasoningTokens": 0,
+        "cachedPromptTokens": 2
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":null,\"completion_tokens\":null,\"total_tokens\":null,\"input_tokens\":null,\"output_tokens\":null,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"completion_tokens_details\":{\"reasoning_tokens\":null},\"prompt_tokens_details\":{\"cached_tokens\":null}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":true,\"completion_tokens\":true,\"total_tokens\":true,\"input_tokens\":true,\"output_tokens\":true,\"promptTokenCount\":true,\"candidatesTokenCount\":true,\"totalTokenCount\":true,\"completion_tokens_details\":{\"reasoning_tokens\":true},\"prompt_tokens_details\":{\"cached_tokens\":true}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":[],\"completion_tokens\":[],\"total_tokens\":[],\"input_tokens\":[],\"output_tokens\":[],\"promptTokenCount\":[],\"candidatesTokenCount\":[],\"totalTokenCount\":[],\"completion_tokens_details\":{\"reasoning_tokens\":[]},\"prompt_tokens_details\":{\"cached_tokens\":[]}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":{},\"completion_tokens\":{},\"total_tokens\":{},\"input_tokens\":{},\"output_tokens\":{},\"promptTokenCount\":{},\"candidatesTokenCount\":{},\"totalTokenCount\":{},\"completion_tokens_details\":{\"reasoning_tokens\":{}},\"prompt_tokens_details\":{\"cached_tokens\":{}}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0,\"input_tokens\":0,\"output_tokens\":0,\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"totalTokenCount\":0,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0}}",
+      "expected": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "reasoningTokens": 0,
+        "cachedPromptTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "promptTokenCount": 0,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 0
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":-1,\"completion_tokens\":-1,\"total_tokens\":-1,\"input_tokens\":-1,\"output_tokens\":-1,\"promptTokenCount\":-1,\"candidatesTokenCount\":-1,\"totalTokenCount\":-1,\"completion_tokens_details\":{\"reasoning_tokens\":-1},\"prompt_tokens_details\":{\"cached_tokens\":-1}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":1.9,\"completion_tokens\":1.9,\"total_tokens\":1.9,\"input_tokens\":1.9,\"output_tokens\":1.9,\"promptTokenCount\":1.9,\"candidatesTokenCount\":1.9,\"totalTokenCount\":1.9,\"completion_tokens_details\":{\"reasoning_tokens\":1.9},\"prompt_tokens_details\":{\"cached_tokens\":1.9}}",
+      "expected": {
+        "promptTokens": 1,
+        "completionTokens": 1,
+        "totalTokens": 1,
+        "reasoningTokens": 1,
+        "cachedPromptTokens": 1,
+        "inputTokens": 1,
+        "outputTokens": 1,
+        "promptTokenCount": 1,
+        "candidatesTokenCount": 1,
+        "totalTokenCount": 1
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":-0.9,\"completion_tokens\":-0.9,\"total_tokens\":-0.9,\"input_tokens\":-0.9,\"output_tokens\":-0.9,\"promptTokenCount\":-0.9,\"candidatesTokenCount\":-0.9,\"totalTokenCount\":-0.9,\"completion_tokens_details\":{\"reasoning_tokens\":-0.9},\"prompt_tokens_details\":{\"cached_tokens\":-0.9}}",
+      "expected": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "reasoningTokens": 0,
+        "cachedPromptTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "promptTokenCount": 0,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 0
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":2147483648,\"completion_tokens\":2147483648,\"total_tokens\":2147483648,\"input_tokens\":2147483648,\"output_tokens\":2147483648,\"promptTokenCount\":2147483648,\"candidatesTokenCount\":2147483648,\"totalTokenCount\":2147483648,\"completion_tokens_details\":{\"reasoning_tokens\":2147483648},\"prompt_tokens_details\":{\"cached_tokens\":2147483648}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":4294967297,\"completion_tokens\":4294967297,\"total_tokens\":4294967297,\"input_tokens\":4294967297,\"output_tokens\":4294967297,\"promptTokenCount\":4294967297,\"candidatesTokenCount\":4294967297,\"totalTokenCount\":4294967297,\"completion_tokens_details\":{\"reasoning_tokens\":4294967297},\"prompt_tokens_details\":{\"cached_tokens\":4294967297}}",
+      "expected": {
+        "promptTokens": 1,
+        "completionTokens": 1,
+        "totalTokens": 1,
+        "reasoningTokens": 1,
+        "cachedPromptTokens": 1,
+        "inputTokens": 1,
+        "outputTokens": 1,
+        "promptTokenCount": 1,
+        "candidatesTokenCount": 1,
+        "totalTokenCount": 1
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":9007199254740993,\"completion_tokens\":9007199254740993,\"total_tokens\":9007199254740993,\"input_tokens\":9007199254740993,\"output_tokens\":9007199254740993,\"promptTokenCount\":9007199254740993,\"candidatesTokenCount\":9007199254740993,\"totalTokenCount\":9007199254740993,\"completion_tokens_details\":{\"reasoning_tokens\":9007199254740993},\"prompt_tokens_details\":{\"cached_tokens\":9007199254740993}}",
+      "expected": {
+        "promptTokens": 1,
+        "completionTokens": 1,
+        "totalTokens": 1,
+        "reasoningTokens": 1,
+        "cachedPromptTokens": 1,
+        "inputTokens": 1,
+        "outputTokens": 1,
+        "promptTokenCount": 1,
+        "candidatesTokenCount": 1,
+        "totalTokenCount": 1
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":9223372036854775807,\"completion_tokens\":9223372036854775807,\"total_tokens\":9223372036854775807,\"input_tokens\":9223372036854775807,\"output_tokens\":9223372036854775807,\"promptTokenCount\":9223372036854775807,\"candidatesTokenCount\":9223372036854775807,\"totalTokenCount\":9223372036854775807,\"completion_tokens_details\":{\"reasoning_tokens\":9223372036854775807},\"prompt_tokens_details\":{\"cached_tokens\":9223372036854775807}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":9223372036854775808,\"completion_tokens\":9223372036854775808,\"total_tokens\":9223372036854775808,\"input_tokens\":9223372036854775808,\"output_tokens\":9223372036854775808,\"promptTokenCount\":9223372036854775808,\"candidatesTokenCount\":9223372036854775808,\"totalTokenCount\":9223372036854775808,\"completion_tokens_details\":{\"reasoning_tokens\":9223372036854775808},\"prompt_tokens_details\":{\"cached_tokens\":9223372036854775808}}",
+      "expected": {
+        "promptTokens": 2147483647,
+        "completionTokens": 2147483647,
+        "totalTokens": 2147483647,
+        "reasoningTokens": 2147483647,
+        "cachedPromptTokens": 2147483647,
+        "inputTokens": 2147483647,
+        "outputTokens": 2147483647,
+        "promptTokenCount": 2147483647,
+        "candidatesTokenCount": 2147483647,
+        "totalTokenCount": 2147483647
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":-9223372036854775808,\"completion_tokens\":-9223372036854775808,\"total_tokens\":-9223372036854775808,\"input_tokens\":-9223372036854775808,\"output_tokens\":-9223372036854775808,\"promptTokenCount\":-9223372036854775808,\"candidatesTokenCount\":-9223372036854775808,\"totalTokenCount\":-9223372036854775808,\"completion_tokens_details\":{\"reasoning_tokens\":-9223372036854775808},\"prompt_tokens_details\":{\"cached_tokens\":-9223372036854775808}}",
+      "expected": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "reasoningTokens": 0,
+        "cachedPromptTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "promptTokenCount": 0,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 0
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":9007199254740993.0,\"completion_tokens\":9007199254740993.0,\"total_tokens\":9007199254740993.0,\"input_tokens\":9007199254740993.0,\"output_tokens\":9007199254740993.0,\"promptTokenCount\":9007199254740993.0,\"candidatesTokenCount\":9007199254740993.0,\"totalTokenCount\":9007199254740993.0,\"completion_tokens_details\":{\"reasoning_tokens\":9007199254740993.0},\"prompt_tokens_details\":{\"cached_tokens\":9007199254740993.0}}",
+      "expected": {
+        "promptTokens": 2147483647,
+        "completionTokens": 2147483647,
+        "totalTokens": 2147483647,
+        "reasoningTokens": 2147483647,
+        "cachedPromptTokens": 2147483647,
+        "inputTokens": 2147483647,
+        "outputTokens": 2147483647,
+        "promptTokenCount": 2147483647,
+        "candidatesTokenCount": 2147483647,
+        "totalTokenCount": 2147483647
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":1e30,\"completion_tokens\":1e30,\"total_tokens\":1e30,\"input_tokens\":1e30,\"output_tokens\":1e30,\"promptTokenCount\":1e30,\"candidatesTokenCount\":1e30,\"totalTokenCount\":1e30,\"completion_tokens_details\":{\"reasoning_tokens\":1e30},\"prompt_tokens_details\":{\"cached_tokens\":1e30}}",
+      "expected": {
+        "promptTokens": 2147483647,
+        "completionTokens": 2147483647,
+        "totalTokens": 2147483647,
+        "reasoningTokens": 2147483647,
+        "cachedPromptTokens": 2147483647,
+        "inputTokens": 2147483647,
+        "outputTokens": 2147483647,
+        "promptTokenCount": 2147483647,
+        "candidatesTokenCount": 2147483647,
+        "totalTokenCount": 2147483647
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"NaN\",\"completion_tokens\":\"NaN\",\"total_tokens\":\"NaN\",\"input_tokens\":\"NaN\",\"output_tokens\":\"NaN\",\"promptTokenCount\":\"NaN\",\"candidatesTokenCount\":\"NaN\",\"totalTokenCount\":\"NaN\",\"completion_tokens_details\":{\"reasoning_tokens\":\"NaN\"},\"prompt_tokens_details\":{\"cached_tokens\":\"NaN\"}}",
+      "expected": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "reasoningTokens": 0,
+        "cachedPromptTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "promptTokenCount": 0,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 0
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"Infinity\",\"completion_tokens\":\"Infinity\",\"total_tokens\":\"Infinity\",\"input_tokens\":\"Infinity\",\"output_tokens\":\"Infinity\",\"promptTokenCount\":\"Infinity\",\"candidatesTokenCount\":\"Infinity\",\"totalTokenCount\":\"Infinity\",\"completion_tokens_details\":{\"reasoning_tokens\":\"Infinity\"},\"prompt_tokens_details\":{\"cached_tokens\":\"Infinity\"}}",
+      "expected": {
+        "promptTokens": 2147483647,
+        "completionTokens": 2147483647,
+        "totalTokens": 2147483647,
+        "reasoningTokens": 2147483647,
+        "cachedPromptTokens": 2147483647,
+        "inputTokens": 2147483647,
+        "outputTokens": 2147483647,
+        "promptTokenCount": 2147483647,
+        "candidatesTokenCount": 2147483647,
+        "totalTokenCount": 2147483647
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"-Infinity\",\"completion_tokens\":\"-Infinity\",\"total_tokens\":\"-Infinity\",\"input_tokens\":\"-Infinity\",\"output_tokens\":\"-Infinity\",\"promptTokenCount\":\"-Infinity\",\"candidatesTokenCount\":\"-Infinity\",\"totalTokenCount\":\"-Infinity\",\"completion_tokens_details\":{\"reasoning_tokens\":\"-Infinity\"},\"prompt_tokens_details\":{\"cached_tokens\":\"-Infinity\"}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"3.9\",\"completion_tokens\":\"3.9\",\"total_tokens\":\"3.9\",\"input_tokens\":\"3.9\",\"output_tokens\":\"3.9\",\"promptTokenCount\":\"3.9\",\"candidatesTokenCount\":\"3.9\",\"totalTokenCount\":\"3.9\",\"completion_tokens_details\":{\"reasoning_tokens\":\"3.9\"},\"prompt_tokens_details\":{\"cached_tokens\":\"3.9\"}}",
+      "expected": {
+        "promptTokens": 3,
+        "completionTokens": 3,
+        "totalTokens": 3,
+        "reasoningTokens": 3,
+        "cachedPromptTokens": 3,
+        "inputTokens": 3,
+        "outputTokens": 3,
+        "promptTokenCount": 3,
+        "candidatesTokenCount": 3,
+        "totalTokenCount": 3
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\" 4 \",\"completion_tokens\":\" 4 \",\"total_tokens\":\" 4 \",\"input_tokens\":\" 4 \",\"output_tokens\":\" 4 \",\"promptTokenCount\":\" 4 \",\"candidatesTokenCount\":\" 4 \",\"totalTokenCount\":\" 4 \",\"completion_tokens_details\":{\"reasoning_tokens\":\" 4 \"},\"prompt_tokens_details\":{\"cached_tokens\":\" 4 \"}}",
+      "expected": {
+        "promptTokens": 4,
+        "completionTokens": 4,
+        "totalTokens": 4,
+        "reasoningTokens": 4,
+        "cachedPromptTokens": 4,
+        "inputTokens": 4,
+        "outputTokens": 4,
+        "promptTokenCount": 4,
+        "candidatesTokenCount": 4,
+        "totalTokenCount": 4
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"\",\"completion_tokens\":\"\",\"total_tokens\":\"\",\"input_tokens\":\"\",\"output_tokens\":\"\",\"promptTokenCount\":\"\",\"candidatesTokenCount\":\"\",\"totalTokenCount\":\"\",\"completion_tokens_details\":{\"reasoning_tokens\":\"\"},\"prompt_tokens_details\":{\"cached_tokens\":\"\"}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"0x10\",\"completion_tokens\":\"0x10\",\"total_tokens\":\"0x10\",\"input_tokens\":\"0x10\",\"output_tokens\":\"0x10\",\"promptTokenCount\":\"0x10\",\"candidatesTokenCount\":\"0x10\",\"totalTokenCount\":\"0x10\",\"completion_tokens_details\":{\"reasoning_tokens\":\"0x10\"},\"prompt_tokens_details\":{\"cached_tokens\":\"0x10\"}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"0x1.8p2\",\"completion_tokens\":\"0x1.8p2\",\"total_tokens\":\"0x1.8p2\",\"input_tokens\":\"0x1.8p2\",\"output_tokens\":\"0x1.8p2\",\"promptTokenCount\":\"0x1.8p2\",\"candidatesTokenCount\":\"0x1.8p2\",\"totalTokenCount\":\"0x1.8p2\",\"completion_tokens_details\":{\"reasoning_tokens\":\"0x1.8p2\"},\"prompt_tokens_details\":{\"cached_tokens\":\"0x1.8p2\"}}",
+      "expected": {
+        "promptTokens": 6,
+        "completionTokens": 6,
+        "totalTokens": 6,
+        "reasoningTokens": 6,
+        "cachedPromptTokens": 6,
+        "inputTokens": 6,
+        "outputTokens": 6,
+        "promptTokenCount": 6,
+        "candidatesTokenCount": 6,
+        "totalTokenCount": 6
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"3f\",\"completion_tokens\":\"3f\",\"total_tokens\":\"3f\",\"input_tokens\":\"3f\",\"output_tokens\":\"3f\",\"promptTokenCount\":\"3f\",\"candidatesTokenCount\":\"3f\",\"totalTokenCount\":\"3f\",\"completion_tokens_details\":{\"reasoning_tokens\":\"3f\"},\"prompt_tokens_details\":{\"cached_tokens\":\"3f\"}}",
+      "expected": {
+        "promptTokens": 3,
+        "completionTokens": 3,
+        "totalTokens": 3,
+        "reasoningTokens": 3,
+        "cachedPromptTokens": 3,
+        "inputTokens": 3,
+        "outputTokens": 3,
+        "promptTokenCount": 3,
+        "candidatesTokenCount": 3,
+        "totalTokenCount": 3
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"+2D\",\"completion_tokens\":\"+2D\",\"total_tokens\":\"+2D\",\"input_tokens\":\"+2D\",\"output_tokens\":\"+2D\",\"promptTokenCount\":\"+2D\",\"candidatesTokenCount\":\"+2D\",\"totalTokenCount\":\"+2D\",\"completion_tokens_details\":{\"reasoning_tokens\":\"+2D\"},\"prompt_tokens_details\":{\"cached_tokens\":\"+2D\"}}",
+      "expected": {
+        "promptTokens": 2,
+        "completionTokens": 2,
+        "totalTokens": 2,
+        "reasoningTokens": 2,
+        "cachedPromptTokens": 2,
+        "inputTokens": 2,
+        "outputTokens": 2,
+        "promptTokenCount": 2,
+        "candidatesTokenCount": 2,
+        "totalTokenCount": 2
+      }
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"\\u00a04\\u00a0\",\"completion_tokens\":\"\\u00a04\\u00a0\",\"total_tokens\":\"\\u00a04\\u00a0\",\"input_tokens\":\"\\u00a04\\u00a0\",\"output_tokens\":\"\\u00a04\\u00a0\",\"promptTokenCount\":\"\\u00a04\\u00a0\",\"candidatesTokenCount\":\"\\u00a04\\u00a0\",\"totalTokenCount\":\"\\u00a04\\u00a0\",\"completion_tokens_details\":{\"reasoning_tokens\":\"\\u00a04\\u00a0\"},\"prompt_tokens_details\":{\"cached_tokens\":\"\\u00a04\\u00a0\"}}",
+      "expected": {}
+    },
+    {
+      "raw": "{\"prompt_tokens\":\"bad\",\"completion_tokens\":\"bad\",\"total_tokens\":\"bad\",\"input_tokens\":\"bad\",\"output_tokens\":\"bad\",\"promptTokenCount\":\"bad\",\"candidatesTokenCount\":\"bad\",\"totalTokenCount\":\"bad\",\"completion_tokens_details\":{\"reasoning_tokens\":\"bad\"},\"prompt_tokens_details\":{\"cached_tokens\":\"bad\"}}",
+      "expected": {}
+    }
+  ]
+}

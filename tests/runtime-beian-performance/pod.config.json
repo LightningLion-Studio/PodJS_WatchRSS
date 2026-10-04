@@ -1,0 +1,58 @@
+{
+  "entry": "src/main.tsx",
+  "appId": "dev.podjs.tests.startup",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "name": "Beian Normal Clock Verification",
+  "capabilities": [
+    "text.layout",
+    "text.environment",
+    "text.raster",
+    "data.kv",
+    "data.images",
+    "data.files.chunks",
+    "runtime.timer",
+    "system.share"
+  ],
+  "resources": {
+    "fontRegular": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/watch_sans.ttf",
+    "fontBold": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/reader_default_bold.ttf",
+    "extraCharsFile": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/charset.txt",
+    "fontSlots": [
+      {
+        "slot": 33,
+        "px": 12,
+        "path": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 34,
+        "px": 14,
+        "path": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 35,
+        "px": 16,
+        "path": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 36,
+        "px": 18,
+        "path": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 37,
+        "px": 21.7,
+        "path": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/reader_default_bold.ttf",
+        "bold": true,
+        "rasterAdvances": true
+      }
+    ],
+    "assets": {
+      "fonts/watch-sans.ttf": "/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/assets/fonts/watch_sans.ttf"
+    }
+  }
+}

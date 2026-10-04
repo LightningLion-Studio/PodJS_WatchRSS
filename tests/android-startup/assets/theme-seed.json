@@ -1,0 +1,192 @@
+{
+  "startup-content-mounts": 0,
+  "watchrss.onboarding": {
+    "oobeSeenVersion": 0,
+    "privacyPolicyAgreedVersion": 0,
+    "futureField": "keep"
+  },
+  "watchrss.reader-presets": {
+    "version": 1,
+    "records": [
+      {
+        "schemaVersion": 2,
+        "id": "theme-light",
+        "name": "已有浅色",
+        "body": {
+          "fontAssetId": null,
+          "fontFaceIndex": 0,
+          "variationSettings": "",
+          "fontSizeSp": 20,
+          "fontWeight": 400,
+          "italic": false,
+          "underline": false,
+          "strikethrough": false,
+          "colorArgb": 4280426267,
+          "lineHeightEm": 1.35,
+          "letterSpacingEm": 0,
+          "paragraphSpacingDp": 6,
+          "firstLineIndentEm": 0,
+          "horizontalPaddingDp": 14,
+          "alignment": "START",
+          "lineBreakMode": "PARAGRAPH",
+          "hyphenation": "NONE",
+          "renderMode": "READABILITY",
+          "fontSynthesis": "ENABLED"
+        },
+        "categoryTypographyEnabled": false,
+        "title": {},
+        "subtitle": {},
+        "quote": {},
+        "code": {},
+        "link": {},
+        "background": {
+          "type": "SOLID",
+          "colorArgb": 4294505452,
+          "assetId": null,
+          "fit": "CROP",
+          "focusX": 0.5,
+          "focusY": 0.5,
+          "zoom": 1,
+          "rotationDegrees": 0,
+          "blurDp": 0,
+          "brightness": 1,
+          "saturation": 1,
+          "overlayColorArgb": 4278190080,
+          "overlayOpacity": 0,
+          "videoTrimStartMs": 0,
+          "videoTrimEndMs": 60000,
+          "videoSpeed": 1,
+          "loop": true,
+          "posterAssetId": null
+        },
+        "codeBackgroundColorArgb": 4294108617,
+        "accentColorArgb": 4292429600,
+        "updatedAt": 1000,
+        "modifiedBy": "",
+        "deleted": false
+      },
+      {
+        "schemaVersion": 2,
+        "id": "theme-dark",
+        "name": "已有深色",
+        "body": {
+          "fontAssetId": null,
+          "fontFaceIndex": 0,
+          "variationSettings": "",
+          "fontSizeSp": 22,
+          "fontWeight": 400,
+          "italic": false,
+          "underline": false,
+          "strikethrough": false,
+          "colorArgb": 4294111986,
+          "lineHeightEm": 1.35,
+          "letterSpacingEm": 0,
+          "paragraphSpacingDp": 6,
+          "firstLineIndentEm": 0,
+          "horizontalPaddingDp": 14,
+          "alignment": "START",
+          "lineBreakMode": "PARAGRAPH",
+          "hyphenation": "NONE",
+          "renderMode": "READABILITY",
+          "fontSynthesis": "ENABLED"
+        },
+        "categoryTypographyEnabled": false,
+        "title": {},
+        "subtitle": {},
+        "quote": {},
+        "code": {},
+        "link": {},
+        "background": {
+          "type": "SOLID",
+          "colorArgb": 4278190080,
+          "assetId": null,
+          "fit": "CROP",
+          "focusX": 0.5,
+          "focusY": 0.5,
+          "zoom": 1,
+          "rotationDegrees": 0,
+          "blurDp": 0,
+          "brightness": 1,
+          "saturation": 1,
+          "overlayColorArgb": 4278190080,
+          "overlayOpacity": 0,
+          "videoTrimStartMs": 0,
+          "videoTrimEndMs": 60000,
+          "videoSpeed": 1,
+          "loop": true,
+          "posterAssetId": null
+        },
+        "codeBackgroundColorArgb": 4280753672,
+        "accentColorArgb": 4294924854,
+        "updatedAt": 1001,
+        "modifiedBy": "",
+        "deleted": false
+      },
+      {
+        "id": "removed",
+        "deleted": true,
+        "opaque": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "future",
+        "schemaVersion": 99,
+        "payload": {
+          "keep": true
+        }
+      }
+    ],
+    "selection": {
+      "mode": "DARK",
+      "lightPresetId": "theme-light",
+      "darkPresetId": "theme-dark",
+      "darkFollowsLight": false,
+      "futureSelection": "keep"
+    },
+    "schedule": {
+      "mode": "FIXED_TIME",
+      "lightStartMinutes": 420,
+      "darkStartMinutes": 1140,
+      "latitude": null,
+      "longitude": null,
+      "locationUpdatedAt": 0,
+      "futureSchedule": {
+        "keep": true
+      }
+    },
+    "assets": {
+      "fonts": [],
+      "backgrounds": [
+        {
+          "id": "future-background",
+          "metadata": {
+            "keep": true
+          }
+        }
+      ],
+      "deletions": []
+    },
+    "futureEnvelope": {
+      "revision": 4,
+      "payload": [
+        "keep",
+        {
+          "asset": "external"
+        }
+      ]
+    }
+  },
+  "watchrss.settings": {
+    "fontSizeSp": 26,
+    "futureSetting": {
+      "keep": true
+    }
+  },
+  "preserved-fixture-data": {
+    "articles": [
+      "kept"
+    ]
+  }
+}

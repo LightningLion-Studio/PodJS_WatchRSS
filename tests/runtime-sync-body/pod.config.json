@@ -1,0 +1,12 @@
+{
+  "entry": "main.tsx",
+  "appId": "dev.podjs.tests.syncbody",
+  "name": "Sync Body Verification",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "capabilities": [
+    "data.files.chunks",
+    "crypto.basic",
+    "data.kv"
+  ]
+}

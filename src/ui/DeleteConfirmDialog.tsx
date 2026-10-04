@@ -1,0 +1,22 @@
+import { Image, Text, View } from "@pocketjs/framework/components";
+import { getOps } from "@pocketjs/framework/host";
+import { measuredLines } from "../reader/measured-text.ts";
+
+/** Native WatchConfirmDialog geometry, scaled from its 466-unit design. */
+export function DeleteConfirmDialog(props:{width:number;height:number;title:string;message:string;busy:boolean;onConfirm:()=>void;onCancel:()=>void}) {
+  const scale=()=>Math.min(props.width,props.height)/466;
+  const lines=()=>measuredLines(props.message,193,text=>getOps().measureText(text,22),20);
+  const textTop=()=>96+(204-(46*(1+lines().length)+8))/2;
+  return <View class="absolute inset-0 bg-[#000000]" onPress={()=>{}}>
+    <Text class="absolute text-[17px] text-center text-[#f5f5f5]" style={{insetL:40*scale(),width:193,scale:2*scale(),originX:-.5,originY:-.5,insetT:textTop()*scale(),lineHeight:23,height:23}}>{props.title}</Text>
+    <Text class="absolute text-[17px] text-center text-[#b6b6b6]" style={{insetL:40*scale(),width:193,scale:2*scale(),originX:-.5,originY:-.5,insetT:(textTop()+54)*scale(),lineHeight:23,height:23*lines().length}}>{lines().join("\n")}</Text>
+    <View class="absolute rounded-[9999] bg-[#23272a]" style={{insetL:113*scale(),insetT:332*scale(),width:104*scale(),height:104*scale()}}>
+      <Image src="../assets/icons/close.svg" class="absolute" style={{insetL:28*scale(),insetT:28*scale(),width:48*scale(),height:48*scale()}}/>
+      <View class="absolute inset-0" onPress={()=>{if(!props.busy)props.onCancel();}} focusable={!props.busy} accessibilityRole="button" accessibilityLabel="取消删除"/>
+    </View>
+    <View class="absolute rounded-[9999] bg-[#e54d4d]" style={{insetL:249*scale(),insetT:332*scale(),width:104*scale(),height:104*scale()}}>
+      <Image src="../assets/icons/delete-forever.svg" class="absolute" style={{insetL:28*scale(),insetT:28*scale(),width:48*scale(),height:48*scale()}}/>
+      <View class="absolute inset-0" onPress={()=>{if(!props.busy)props.onConfirm();}} focusable={!props.busy} accessibilityRole="button" accessibilityLabel="确认删除"/>
+    </View>
+  </View>;
+}

@@ -1,0 +1,36 @@
+import {expect,test} from 'bun:test';
+import {synthesizeCloudSpeech} from '../src/tts/cloud-synth.ts';
+import type {HttpRequest,HttpTransport} from '../src/cloud/types.ts';
+import type {TtsConfig} from '../src/tts/config-store.ts';
+import {watchAppVersion,watchAppVersionValue} from '../src/core/app-version.ts';
+const bytes=(v:string)=>new TextEncoder().encode(v);
+const text=(v?:Uint8Array)=>new TextDecoder().decode(v);
+const config=(engine:TtsConfig['engine']):TtsConfig=>({engine,model:'',voiceId:'',speed:1,baseUrl:''});
+test('cloud engines send native-compatible requests and decode audio',async()=>{
+ expect(watchAppVersionValue(' 1.2 ',3)).toBe('watch-1.2+3');
+ const calls:HttpRequest[]=[];
+ const transport:HttpTransport={request:async request=>{calls.push(request);const body=request.url.includes('issueToken')?'azure-token':request.url.includes('cognitiveservices')?'MP3':request.url.includes('minimaxi')?JSON.stringify({data:{audio:'4d5033'}}):request.url.includes('openspeech')?JSON.stringify({data:{audio:'TVAz'}}):JSON.stringify({audio:'4d5033'});return {status:200,headers:{},body:bytes(body)};}};
+ const base={apiKey:'secret',text:'阅读 <正文>',rate:1.25,requestId:'123'};
+ expect(text(await synthesizeCloudSpeech(transport,{...base,config:config('minimax')}))).toBe('MP3');
+ expect(JSON.parse(text(calls[0]?.body)).voice_setting.voice_id).toBe('male-qn-qingse');
+ expect(calls[0]?.headers.Authorization).toBe('Bearer secret');
+ expect(text(await synthesizeCloudSpeech(transport,{...base,config:config('azure')}))).toBe('MP3');
+ expect(calls[1]?.url).toContain('issueToken');expect(text(calls[2]?.body)).toContain('&lt;正文&gt;');
+ expect(text(await synthesizeCloudSpeech(transport,{...base,config:config('doubao')}))).toBe('MP3');
+ expect(calls[3]?.headers.Authorization).toBe('Bearer; secret');
+ expect(text(await synthesizeCloudSpeech(transport,{...base,config:config('backend_default'),account:{backendBaseUrl:'https://watchrss.example',watchDeviceToken:'device-token'}}))).toBe('MP3');
+ expect(JSON.parse(text(calls[4]?.body)).speed).toBe(1);
+ expect(calls[4]?.headers.Authorization).toBe('Bearer device-token');
+ expect(calls[4]?.headers['X-WatchRSS-App-Version']).toBe(watchAppVersion);
+});
+test('cloud synthesis reports native provider errors and bounded fallback text',async()=>{
+ const base={apiKey:'secret',text:'阅读',rate:1,requestId:'123'};
+ const fail=(status:number,value:string)=>({request:async()=>({status,headers:{},body:bytes(value)})});
+ await expect(synthesizeCloudSpeech(fail(403,'{"error":{"message":"授权已失效"}}'),{...base,config:config('backend_default'),account:{backendBaseUrl:'https://watchrss.example',watchDeviceToken:'device-token'}})).rejects.toThrow('授权已失效');
+ await expect(synthesizeCloudSpeech(fail(429,'{"base_resp":{"status_msg":"请求过快"}}'),{...base,config:config('minimax')})).rejects.toThrow('请求过快');
+ await expect(synthesizeCloudSpeech(fail(401,''),{...base,config:config('azure')})).rejects.toThrow('Azure token 请求失败：HTTP 401');
+ let calls=0;
+ await expect(synthesizeCloudSpeech({request:async()=>++calls===1?{status:200,headers:{},body:bytes('token')}:{status:400,headers:{},body:bytes('SSML 无效')}},{...base,config:config('azure')})).rejects.toThrow('SSML 无效');
+ await expect(synthesizeCloudSpeech(fail(500,'X'.repeat(600)),{...base,config:config('doubao')})).rejects.toThrow('X'.repeat(512));
+ await expect(synthesizeCloudSpeech(fail(503,'bad json'),{...base,config:config('minimax')})).rejects.toThrow('HTTP 503');
+});

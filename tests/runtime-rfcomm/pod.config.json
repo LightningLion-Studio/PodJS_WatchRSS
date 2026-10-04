@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.syncstate","name":"RFCOMM Guest Verification","versionName":"0.1.0","versionCode":1,"capabilities":["net.rfcomm","net.stream","data.sqlite","data.kv","runtime.timer"]}

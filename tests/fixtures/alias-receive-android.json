@@ -1,0 +1,1056 @@
+{
+  "cases": [
+    {
+      "input": {
+        "name": "both-newer",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 150,
+        "later": true,
+        "laterAt": 170,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 2,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "createdAt": 150
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "createdAt": 170
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 150,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 170,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "both-older",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 50,
+        "later": true,
+        "laterAt": 50,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 0,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 300,
+          "source": "local"
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 400,
+          "source": "local"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "favorite-only",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 150,
+        "later": true,
+        "laterAt": 50,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 1,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "createdAt": 150
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 150,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 400,
+          "source": "local"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "later-only",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 50,
+        "later": true,
+        "laterAt": 170,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 1,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "createdAt": 170
+        }
+      ],
+      "states": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 300,
+          "source": "local"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 170,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "equal-lower-peer",
+        "peer": "a",
+        "favorite": true,
+        "favoriteAt": 100,
+        "later": true,
+        "laterAt": 120,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 0,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 300,
+          "source": "local"
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 400,
+          "source": "local"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "equal-higher-peer",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 100,
+        "later": true,
+        "laterAt": 120,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 2,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "createdAt": 100
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "createdAt": 120
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "unsave-newer",
+        "peer": "z",
+        "favorite": false,
+        "favoriteAt": 150,
+        "later": false,
+        "laterAt": 170,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 2,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": false,
+          "changedAt": 150,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": false,
+          "changedAt": 170,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "zero-unsave",
+        "peer": "z",
+        "favorite": false,
+        "favoriteAt": 0,
+        "later": false,
+        "laterAt": 0,
+        "metadataOnly": true,
+        "authoritative": false
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 0,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 300,
+          "source": "local"
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 400,
+          "source": "local"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "authoritative-zero-unsave",
+        "peer": "z",
+        "favorite": false,
+        "favoriteAt": 0,
+        "later": false,
+        "laterAt": 0,
+        "metadataOnly": true,
+        "authoritative": true
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 2,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": false,
+          "changedAt": 0,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": false,
+          "changedAt": 0,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "authoritative-old-save",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 50,
+        "later": true,
+        "laterAt": 50,
+        "metadataOnly": true,
+        "authoritative": true
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 2,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "createdAt": 50
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "createdAt": 50
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 50,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 50,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "no-stored-body",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 150,
+        "later": true,
+        "laterAt": 170,
+        "metadataOnly": true,
+        "authoritative": false,
+        "noStoredBody": true
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": false,
+      "error": "\u4ec5\u5143\u6570\u636e\u540c\u6b65\u7f3a\u5c11\u53ef\u590d\u7528\u7684\u672c\u5730\u6b63\u6587\uff1af05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": null,
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 300,
+          "source": "local"
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 400,
+          "source": "local"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "bad-metadata-hash",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 150,
+        "later": true,
+        "laterAt": 170,
+        "metadataOnly": true,
+        "authoritative": false,
+        "badHash": true
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": false,
+      "error": "\u540c\u6b65\u6b63\u6587\u603b\u6821\u9a8c\u5931\u8d25\uff1af05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 100,
+          "sortOrder": 300,
+          "source": "local"
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 120,
+          "sortOrder": 400,
+          "source": "local"
+        }
+      ]
+    },
+    {
+      "input": {
+        "name": "no-saved-state",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 150,
+        "later": true,
+        "laterAt": 170,
+        "metadataOnly": true,
+        "authoritative": false,
+        "noStates": true
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": false,
+      "error": "\u4ec5\u5143\u6570\u636e\u540c\u6b65\u7f3a\u5c11\u53ef\u590d\u7528\u7684\u672c\u5730\u6b63\u6587\uff1af05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        }
+      ],
+      "states": []
+    },
+    {
+      "input": {
+        "name": "full-without-state",
+        "peer": "z",
+        "favorite": true,
+        "favoriteAt": 150,
+        "later": true,
+        "laterAt": 170,
+        "metadataOnly": false,
+        "authoritative": false,
+        "noStates": true
+      },
+      "articleId": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+      "bodyHash": "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da",
+      "bodyBytes": 42,
+      "chunkSize": 131072,
+      "chunkHashes": [
+        "0fc2d30b09d38b377b351eba2e54326521c536aac457f60f12d1c5d0169538da"
+      ],
+      "encodedBase64": "H4sIAAAAAAAAAKtWSs7PK0nNKwlJrShRslJKyk+pVKoFADB93/QWAAAA",
+      "ok": true,
+      "applied": 2,
+      "items": [
+        {
+          "id": 1,
+          "dedupKey": "feed-guid",
+          "title": "Original RSS",
+          "content": "body",
+          "progress": 0.800000011920929,
+          "position": 3,
+          "readingAt": 200,
+          "isRead": true
+        },
+        {
+          "id": 2,
+          "dedupKey": "f05467121e0ae4fff90fb8761547d80337693c6a2111431aa3d84fe77315493a",
+          "title": "Remote",
+          "content": "body",
+          "progress": 0.20000000298023224,
+          "position": 1,
+          "readingAt": 50,
+          "isRead": false
+        }
+      ],
+      "entries": [
+        {
+          "itemId": 1,
+          "type": "FAVORITE",
+          "createdAt": 30
+        },
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "createdAt": 150
+        },
+        {
+          "itemId": 1,
+          "type": "WATCH_LATER",
+          "createdAt": 40
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "createdAt": 170
+        }
+      ],
+      "states": [
+        {
+          "itemId": 2,
+          "type": "FAVORITE",
+          "saved": true,
+          "changedAt": 150,
+          "sortOrder": 500,
+          "source": "z"
+        },
+        {
+          "itemId": 2,
+          "type": "WATCH_LATER",
+          "saved": true,
+          "changedAt": 170,
+          "sortOrder": 600,
+          "source": "z"
+        }
+      ]
+    }
+  ],
+  "sdk": 30,
+  "device": "OWW242",
+  "sources": {
+    "data/rss/DefaultRssRepository.kt": "5bd64d095da9f7c8642935dcbc2ae428fa289f25401a41b64198ad32eef36218",
+    "data/rss/ArticleSyncBody.kt": "d2d89140ad0548e7146e2589759c695bb7a710adb846a5c125bfe04b82b132aa",
+    "data/db/SavedEntryDao.kt": "357b2836c92e071102f7f24ea1655d0bfdab2e55f0bbf435e2d12f494ebb4b31",
+    "data/db/SavedSyncStateDao.kt": "50f87c34e9c31adb53aa82bbde15e5eb7b4e2384ddf45cffc28f5b0a45f5f8ab"
+  },
+  "scope": "Actual native mergeSyncedChunkedArticles into in-memory Room, including original RSS alias retention and per-type saved bindings. Native applied statistics are captured but not equivalent to the current article commit receipt."
+}

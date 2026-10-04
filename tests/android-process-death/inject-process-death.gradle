@@ -1,0 +1,152 @@
+import org.gradle.api.GradleException
+import org.gradle.api.tasks.compile.JavaCompile
+
+// This init script is deliberately restricted to the isolated WatchRSS debug APK.
+// It must never become an init script in GRADLE_USER_HOME or the SDK build itself.
+def targetPackage = 'dev.podjs.tests.startup'
+def targetNamespace = 'dev.podjs.androidwatch'
+def sdkRepository = new File('/home/wilf/data/PodJS').canonicalFile
+def appRepository = new File('/home/wilf/data/OPPO_Develop/PodJS_WatchRSS').canonicalFile
+def sdkRoot = new File('/home/wilf/data/PodJS/podjs-watch/platforms/android').canonicalFile
+def harness = new File('/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/tests/android-process-death').canonicalFile
+def targetJava = new File(harness, 'target/java')
+def targetApplication = new File(targetJava, 'dev/podjs/tests/processdeath/ProcessDeathApplication.java')
+def targetManifest = new File(harness, 'target/AndroidManifest.xml')
+def supplied = gradle.startParameter.projectProperties
+def debugIdentities = []
+
+if (supplied['watchRssProcessDeathHarness'] != 'true') {
+    throw new GradleException('Process-death harness requires -PwatchRssProcessDeathHarness=true')
+}
+if (supplied['podAppId'] != targetPackage) {
+    throw new GradleException("Process-death harness requires -PpodAppId=${targetPackage}")
+}
+if (gradle.startParameter.taskNames != [':androidApp:assembleDebug']) {
+    throw new GradleException('Process-death harness permits only :androidApp:assembleDebug; no installation or test tasks')
+}
+def buildArgument = supplied['watchRssProcessDeathBuildDir']
+if (!buildArgument || !new File(buildArgument).isAbsolute()) {
+    throw new GradleException('Process-death harness requires an absolute -PwatchRssProcessDeathBuildDir')
+}
+def ownBuild = new File(buildArgument).canonicalFile
+if (!(ownBuild.name ==~ /watchrss-process-death-[A-Za-z0-9][A-Za-z0-9._-]*/)) {
+    throw new GradleException('Dedicated build directory basename must start with watchrss-process-death- and include a run identifier')
+}
+if (ownBuild.toPath().startsWith(sdkRepository.toPath()) || ownBuild.toPath().startsWith(appRepository.toPath())) {
+    throw new GradleException('Dedicated build directory must be outside SDK and WatchRSS repositories')
+}
+def ownPath = { String relative ->
+    def candidate = new File(ownBuild, relative).canonicalFile
+    if (!candidate.toPath().startsWith(ownBuild.toPath())) {
+        throw new GradleException("Dedicated build child path escapes through a symlink: ${relative}")
+    }
+    candidate
+}
+def ownCache = ownPath('gradle-cache')
+if (gradle.startParameter.projectCacheDir?.canonicalFile != ownCache) {
+    throw new GradleException("Use --project-cache-dir ${ownCache} for this dedicated build")
+}
+if (!targetApplication.isFile() || !targetManifest.isFile()) {
+    throw new GradleException('Process-death Application or dedicated debug manifest is missing')
+}
+
+gradle.settingsEvaluated { settings ->
+    if (settings.settingsDir.canonicalFile != sdkRoot) {
+        throw new GradleException("Process-death harness must build the SDK at ${sdkRoot}")
+    }
+}
+
+gradle.beforeProject { project ->
+    def relativeProject = project.path == ':' ? '_root' : project.path.substring(1).replace(':', '/')
+    def projectBuild = ownPath("projects/${relativeProject}")
+    project.layout.buildDirectory.set(projectBuild)
+    project.afterEvaluate {
+        if (project.layout.buildDirectory.get().asFile.canonicalFile != projectBuild) {
+            throw new GradleException("${project.path} changed the dedicated build directory")
+        }
+    }
+
+    if (project.path == ':runtime') {
+        project.plugins.withId('com.android.library') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                // CMake otherwise uses runtime/.cxx even with a separate buildDirectory.
+                android.externalNativeBuild.cmake.buildStagingDirectory = ownPath('native/runtime')
+            }
+        }
+    }
+
+    if (project.path == ':androidApp') {
+        project.plugins.withId('com.android.application') {
+            def components = project.extensions.getByName('androidComponents')
+            components.finalizeDsl { android ->
+                if (android.namespace != targetNamespace) {
+                    throw new GradleException("MainActivity namespace must remain ${targetNamespace}")
+                }
+                if (android.defaultConfig.applicationId != targetPackage) {
+                    throw new GradleException("Application ID must remain ${targetPackage}")
+                }
+                if (android.testBuildType != 'debug') {
+                    throw new GradleException('Process-death harness refuses a non-debug testBuildType')
+                }
+                if (!android.productFlavors.isEmpty()) {
+                    throw new GradleException('Process-death harness refuses product flavors that could change package identity')
+                }
+                def debug = android.buildTypes.getByName('debug')
+                if (!debug.debuggable || (debug.applicationIdSuffix ?: '') != '') {
+                    throw new GradleException('Process-death harness requires a debuggable build without an application ID suffix')
+                }
+                android.sourceSets.getByName('debug').java.srcDir(targetJava)
+                android.sourceSets.getByName('debug').manifest.srcFile(targetManifest)
+            }
+            components.onVariants(components.selector().withBuildType('debug')) { variant ->
+                debugIdentities.add([name: variant.name, applicationId: variant.applicationId])
+            }
+            project.tasks.withType(JavaCompile).configureEach { compileTask ->
+                if (compileTask.name == 'compileDebugJavaWithJavac') {
+                    compileTask.doFirst {
+                        if (!compileTask.source.files.any { it.canonicalFile == targetApplication.canonicalFile }) {
+                            throw new GradleException('Dedicated ProcessDeathApplication is absent from debug compilation')
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (debugIdentities.size() != 1 || debugIdentities[0].name != 'debug' ||
+            debugIdentities[0].applicationId.get() != targetPackage) {
+        throw new GradleException('Final debug variant does not have the isolated package identity')
+    }
+    def targetProject = gradle.rootProject.project(':androidApp')
+    def android = targetProject.extensions.getByName('android')
+    def debug = android.buildTypes.getByName('debug')
+    if (android.namespace != targetNamespace ||
+            android.sourceSets.getByName('debug').manifest.srcFile.canonicalFile != targetManifest) {
+        throw new GradleException('Final debug namespace or dedicated manifest changed')
+    }
+    if (android.testBuildType != 'debug' || !debug.debuggable ||
+            (debug.applicationIdSuffix ?: '') != '' || !android.productFlavors.isEmpty()) {
+        throw new GradleException('Final debug build no longer meets the dedicated harness constraints')
+    }
+    gradle.rootProject.allprojects.each { project ->
+        def relativeProject = project.path == ':' ? '_root' : project.path.substring(1).replace(':', '/')
+        if (project.layout.buildDirectory.get().asFile.canonicalFile != ownPath("projects/${relativeProject}")) {
+            throw new GradleException("Final ${project.path} build directory escaped the dedicated build")
+        }
+    }
+    def runtime = gradle.rootProject.project(':runtime').extensions.getByName('android')
+    if (runtime.externalNativeBuild.cmake.buildStagingDirectory?.canonicalFile != ownPath('native/runtime') ||
+            gradle.startParameter.projectCacheDir?.canonicalFile != ownPath('gradle-cache')) {
+        throw new GradleException('Final native staging or project cache escaped the dedicated build')
+    }
+    def forbidden = graph.allTasks.find { task ->
+        def name = task.name.toLowerCase(java.util.Locale.ROOT)
+        name.contains('release') || name.contains('install') || name.contains('connected') ||
+            name.contains('androidtest') || name.startsWith('test') || name.contains('deviceprovider')
+    }
+    if (forbidden != null) {
+        throw new GradleException("Unexpected task in dedicated process-death build: ${forbidden.path}")
+    }
+}

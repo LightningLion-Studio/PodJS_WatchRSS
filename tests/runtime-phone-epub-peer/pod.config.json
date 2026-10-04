@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.phoneepub","name":"Phone EPUB Sync Verification","versionName":"0.1.0","versionCode":1,"capabilities":["data.sqlite","data.kv","data.files.chunks","data.uri","data.images","crypto.basic","net.rfcomm","net.stream","host.lifecycle","runtime.timer"]}

@@ -1,0 +1,260 @@
+{
+  "scenario": "static",
+  "testClass": "dev.podjs.reference.InfoRestorationReferenceTest",
+  "targetPackage": "com.lightningstudio.watchrss.onboardingreference",
+  "activityClass": "com.lightningstudio.watchrss.InfoActivity",
+  "productionBuildBranch": true,
+  "backendUrl": "http:\/\/127.0.0.1:38679",
+  "clonedComposable": false,
+  "physicalInputInjected": false,
+  "focusInputInjected": false,
+  "networkScope": "only loopback fixture; real production OkHttp fetch",
+  "userRecordsSeeded": false,
+  "scrollOutcomeAsserted": false,
+  "composeTestClockAutoAdvance": true,
+  "timingScope": "real Android Activity\/network lifecycle; Compose test clock, not unrestricted production frame scheduling",
+  "processDeathTested": false,
+  "pidBefore": 12727,
+  "passed": true,
+  "before": {
+    "scrollAxis": 6037,
+    "scrollAxisMax": "6137.0",
+    "activityIdentity": 238200426,
+    "activityClass": "com.lightningstudio.watchrss.InfoActivity",
+    "texts": [
+      {
+        "text": "STATIC 第09段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 0,
+        "right": 438,
+        "bottom": 88
+      },
+      {
+        "text": "STATIC 第10段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 100,
+        "right": 438,
+        "bottom": 213
+      },
+      {
+        "text": "STATIC 第11段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 225,
+        "right": 438,
+        "bottom": 338
+      },
+      {
+        "text": "STATIC 第12段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 350,
+        "right": 438,
+        "bottom": 463
+      },
+      {
+        "text": "STATIC 第13段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0
+      },
+      {
+        "text": "STATIC 第14段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 305,
+        "right": 438,
+        "bottom": 418
+      }
+    ],
+    "capture": {
+      "file": "native-info-static-before.png",
+      "method": "window PixelCopy",
+      "capturedAtMillis": 144864759,
+      "width": 466,
+      "height": 466,
+      "pixelSha256": "b2162594393e3d8628c99bdefd0c6b94f88bacca0275b1575745d33b06b47b43",
+      "pngSha256": "ce0ad9cbe8aebf7c3e13dcee485c256e8d68f24115a3a302384b911c6a3dc02f"
+    }
+  },
+  "after": {
+    "scrollAxis": 6037,
+    "scrollAxisMax": "6137.0",
+    "activityIdentity": 223744237,
+    "activityClass": "com.lightningstudio.watchrss.InfoActivity",
+    "texts": [
+      {
+        "text": "STATIC 第09段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 0,
+        "right": 438,
+        "bottom": 88
+      },
+      {
+        "text": "STATIC 第10段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 100,
+        "right": 438,
+        "bottom": 213
+      },
+      {
+        "text": "STATIC 第11段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 225,
+        "right": 438,
+        "bottom": 338
+      },
+      {
+        "text": "STATIC 第12段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 28,
+        "top": 350,
+        "right": 438,
+        "bottom": 463
+      },
+      {
+        "text": "STATIC 第13段。此内容仅用于隔离协议页面的生命周期与滚动验证。",
+        "left": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0
+      }
+    ],
+    "capture": {
+      "file": "native-info-static-after.png",
+      "method": "window PixelCopy",
+      "capturedAtMillis": 144865263,
+      "width": 466,
+      "height": 466,
+      "pixelSha256": "b2162594393e3d8628c99bdefd0c6b94f88bacca0275b1575745d33b06b47b43",
+      "pngSha256": "ce0ad9cbe8aebf7c3e13dcee485c256e8d68f24115a3a302384b911c6a3dc02f"
+    }
+  },
+  "observedScrollDelta": 0,
+  "observedScrollUnchanged": true,
+  "observedPixelsEqual": true,
+  "recreation": {
+    "firstIdentity": 238200426,
+    "secondIdentity": 223744237,
+    "instanceChanged": true,
+    "savedBundleObserved": true,
+    "restoredBundleObserved": true,
+    "oldDestroyed": true,
+    "mechanism": "real Activity.recreate; system-owned Bundle"
+  },
+  "requests": [],
+  "serverFailures": [],
+  "lifecycle": [
+    {
+      "event": "created",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144863753,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "started",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144863767,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "resumed",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144863771,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "paused",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144864778,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "stopped",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144864782,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "saved",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144864782,
+      "bundlePresent": true,
+      "bundleKeys": [
+        "android:fragments",
+        "android:lastAutofillId",
+        "android:viewHierarchyState"
+      ]
+    },
+    {
+      "event": "destroyed",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 238200426,
+      "atMillis": 144864809,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "created",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 223744237,
+      "atMillis": 144864829,
+      "bundlePresent": true,
+      "bundleKeys": [
+        "android:fragments",
+        "android:lastAutofillId",
+        "android:viewHierarchyState",
+        "androidx.lifecycle.BundlableSavedStateRegistry.key"
+      ]
+    },
+    {
+      "event": "started",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 223744237,
+      "atMillis": 144864846,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "resumed",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 223744237,
+      "atMillis": 144864849,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "paused",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 223744237,
+      "atMillis": 144865280,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "stopped",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 223744237,
+      "atMillis": 144865304,
+      "bundlePresent": false,
+      "bundleKeys": []
+    },
+    {
+      "event": "destroyed",
+      "activity": "com.lightningstudio.watchrss.InfoActivity",
+      "identity": 223744237,
+      "atMillis": 144865338,
+      "bundlePresent": false,
+      "bundleKeys": []
+    }
+  ],
+  "pidAfter": 12727
+}

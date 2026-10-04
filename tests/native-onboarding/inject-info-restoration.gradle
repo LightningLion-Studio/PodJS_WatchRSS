@@ -1,0 +1,19 @@
+// Isolated production-Activity reference. Never changes the production applicationId or backend.
+gradle.beforeProject { project ->
+    project.afterEvaluate {
+        if (project.name == 'app') {
+            def harness = new File('/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/tests/native-onboarding')
+            project.android.defaultConfig.applicationId = 'com.lightningstudio.watchrss.onboardingreference'
+            project.android.defaultConfig.testApplicationId = 'com.lightningstudio.watchrss.onboardingreference.test'
+            project.android.defaultConfig.testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
+            project.android.testBuildType = 'release'
+            project.android.buildTypes.release.signingConfig = project.android.buildTypes.debug.signingConfig
+            project.android.buildTypes.release.minifyEnabled = false
+            project.android.buildTypes.release.shrinkResources = false
+            project.android.buildTypes.release.buildConfigField 'String', 'WATCHRSS_BACKEND_URL', '"http://127.0.0.1:38679"'
+            project.android.sourceSets.release.kotlin.srcDir(new File(harness, 'target/kotlin'))
+            project.android.sourceSets.release.manifest.srcFile(new File(harness, 'target/AndroidManifest.xml'))
+            project.android.sourceSets.androidTest.kotlin.srcDir(new File(harness, 'test'))
+        }
+    }
+}

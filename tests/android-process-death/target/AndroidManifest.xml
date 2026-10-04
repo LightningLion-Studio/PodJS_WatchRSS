@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Used only by inject-process-death.gradle for the isolated debug package. -->
+    <application
+        android:name="dev.podjs.tests.processdeath.ProcessDeathApplication"
+        android:usesCleartextTraffic="true" />
+</manifest>

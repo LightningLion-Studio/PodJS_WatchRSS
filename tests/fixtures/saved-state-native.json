@@ -1,0 +1,3392 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/rss/DefaultRssRepository.kt",
+  "sourceSha256": "5bd64d095da9f7c8642935dcbc2ae428fa289f25401a41b64198ad32eef36218",
+  "extractedMethodsSha256": "8535b1ae07b9647d040244978be502ccbe134079f2992d3cb375829ac9b20406",
+  "runtime": "Desktop JVM; verbatim native applySyncedState/applySyncedTombstoneState; DAO/media doubles, not Room or media validation.",
+  "cases": [
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": null,
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": null,
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": null,
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": null,
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": null,
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": null,
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": null,
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 0,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 99,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "phone"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "z"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": true,
+        "sortOrder": 73,
+        "changedAt": 101,
+        "sourceDeviceId": "a"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ud83d\ude00"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": false,
+      "applied": false,
+      "expected": {
+        "itemId": 1,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": true
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": false,
+      "applied": true,
+      "expected": {
+        "itemId": 1,
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": false,
+      "tombstone": true,
+      "applied": false,
+      "expected": {
+        "itemId": null,
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    },
+    {
+      "current": {
+        "saved": true,
+        "sortOrder": 42,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "authoritative": true,
+      "tombstone": true,
+      "applied": true,
+      "expected": {
+        "itemId": null,
+        "saved": false,
+        "sortOrder": 0,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "remote": {
+        "saved": false,
+        "sortOrder": 73,
+        "changedAt": 100,
+        "sourceDeviceId": "\ue000"
+      },
+      "entrySaved": false
+    }
+  ]
+}

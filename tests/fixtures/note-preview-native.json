@@ -1,0 +1,650 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/WatchNoteRichText.kt",
+  "sourceSha256": "f9683312cef08f92cd57c2dd5cdb0447ba4e193d586c5fc91f4eb606ccfb5ba0",
+  "parserSha256": "483fc5c71bf0636244ec9d326eeb6e4b228fb5afb8680141b18f163fd4a2b5c6",
+  "runtime": "Desktop Kotlin JVM; verbatim block parser, no Compose renderer.",
+  "cases": [
+    {
+      "input": "",
+      "offsets": [],
+      "blocks": []
+    },
+    {
+      "input": "\n\n",
+      "offsets": [],
+      "blocks": []
+    },
+    {
+      "input": "\u7b2c\u4e00\u6bb5\n\n\u7b2c\u4e8c\u6bb5",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "\u7b2c\u4e00\u6bb5\n\n\u7b2c\u4e8c\u6bb5",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "# \u6807\u9898\n**\u7c97\u4f53**\n> \u5f15\u7528",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "# \u6807\u9898\n**\u7c97\u4f53**\n> \u5f15\u7528",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "before ![\u56fe](assets/test.png) after",
+      "offsets": [
+        0,
+        null,
+        28
+      ],
+      "blocks": [
+        {
+          "markup": "before ",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "path": "assets/test.png",
+          "kind": "image",
+          "description": "\u56fe"
+        },
+        {
+          "markup": " after",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "![one](assets/a%20b.png \"title\") ![two](https://x/z)",
+      "offsets": [
+        null,
+        23,
+        null
+      ],
+      "blocks": [
+        {
+          "path": "assets/a b.png",
+          "kind": "image",
+          "description": "one"
+        },
+        {
+          "markup": " ",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "path": "https://x/z",
+          "kind": "image",
+          "description": "two"
+        }
+      ]
+    },
+    {
+      "input": "<p>\u4e4b\u524d</p><img src=\"assets/test.png\" alt=\"\u8bf4\u660e\"><p>\u4e4b\u540e</p>",
+      "offsets": [
+        0,
+        null,
+        45
+      ],
+      "blocks": [
+        {
+          "markup": "<p>\u4e4b\u524d</p>",
+          "kind": "rich",
+          "html": true
+        },
+        {
+          "path": "assets/test.png",
+          "kind": "image",
+          "description": "\u8bf4\u660e"
+        },
+        {
+          "markup": "<p>\u4e4b\u540e</p>",
+          "kind": "rich",
+          "html": true
+        }
+      ]
+    },
+    {
+      "input": "<IMG src=\"assets/a.png\" alt=\"X\">",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "<IMG src=\"assets/a.png\" alt=\"X\">",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "<img src=x><img alt=\"missing\">",
+      "offsets": [
+        0,
+        11
+      ],
+      "blocks": [
+        {
+          "markup": "<img src=x>",
+          "kind": "rich",
+          "html": true
+        },
+        {
+          "markup": "<img alt=\"missing\">",
+          "kind": "rich",
+          "html": true
+        }
+      ]
+    },
+    {
+      "input": "<span style=\"color:red\">\u7ea2\u8272</span>",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "<span style=\"color:red\">\u7ea2\u8272</span>",
+          "kind": "rich",
+          "html": true
+        }
+      ]
+    },
+    {
+      "input": "```md\n![not image](x)\n|a|b|\n|---|---|\n```\n![real](assets/x)",
+      "offsets": [
+        0,
+        null
+      ],
+      "blocks": [
+        {
+          "markup": "```md\n![not image](x)\n|a|b|\n|---|---|\n```",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "path": "assets/x",
+          "kind": "image",
+          "description": "real"
+        }
+      ]
+    },
+    {
+      "input": "~~~~\n```\n![still code](x)\n~~~~",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "~~~~\n```\n![still code](x)\n~~~~",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "| A | B |\n| :--- | ---: |\n|x|y|\n|short|\nafter",
+      "offsets": [
+        null,
+        32
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "End"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "A",
+              "B"
+            ],
+            [
+              "x",
+              "y"
+            ]
+          ]
+        },
+        {
+          "markup": "|short|\nafter",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "a\\|b|c\n---|---\nx|y|extra",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "a|b",
+              "c"
+            ],
+            [
+              "x",
+              "y"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "A\tB\n1\t2",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "A",
+              "B"
+            ],
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "A\tB\tC",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "A",
+              "B",
+              "C"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "A\tB",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "A\tB",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "A  B  C\n\n1  2  3\n4  5  6",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "A",
+              "B",
+              "C"
+            ],
+            [
+              "1",
+              "2",
+              "3"
+            ],
+            [
+              "4",
+              "5",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "A  B\n1  2",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "A  B\n1  2",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "A  B\n1  2\n3  4",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "A",
+              "B"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "Option  Type  Default  Description\n`name` string `x` Description text\n`other` bool empty More text",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start",
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "Option",
+              "Type",
+              "Default",
+              "Description"
+            ],
+            [
+              "`name`",
+              "string",
+              "`x`",
+              "Description text"
+            ],
+            [
+              "`other`",
+              "bool",
+              "empty",
+              "More text"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "Lua function  Legacy dispatcher  Meaning\n`foo()` `bar` some explanation",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "Lua function",
+              "Legacy dispatcher",
+              "Meaning"
+            ],
+            [
+              "`foo()`",
+              "`bar`",
+              "some explanation"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "Argument  Accepted by  Meaning\n`x` `one`, `two` only detail here",
+      "offsets": [
+        null
+      ],
+      "blocks": [
+        {
+          "alignments": [
+            "Start",
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "Argument",
+              "Accepted by",
+              "Meaning"
+            ],
+            [
+              "`x`",
+              "`one`, `two` only",
+              "detail here"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ncccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "offsets": [
+        0,
+        1002,
+        1703
+      ],
+      "blocks": [
+        {
+          "markup": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "markup": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "markup": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "```\ncode code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code \n```\nend",
+      "offsets": [
+        0,
+        2509
+      ],
+      "blocks": [
+        {
+          "markup": "```\ncode code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code code \n```",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "markup": "end",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "first\r\n![img](assets/a)\r\nlast",
+      "offsets": [
+        0,
+        null,
+        25
+      ],
+      "blocks": [
+        {
+          "markup": "first",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "path": "assets/a",
+          "kind": "image",
+          "description": "img"
+        },
+        {
+          "markup": "last",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "    ![indented](a)\n    ```\n|a|b|\n|---|---|",
+      "offsets": [
+        0,
+        null,
+        19,
+        null
+      ],
+      "blocks": [
+        {
+          "markup": "    ",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "path": "a",
+          "kind": "image",
+          "description": "indented"
+        },
+        {
+          "markup": "    ```",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "alignments": [
+            "Start",
+            "Start"
+          ],
+          "kind": "table",
+          "headerRows": 1,
+          "rows": [
+            [
+              "a",
+              "b"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "input": "<p><sub>x</sub></p>",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "<p><sub>x</sub></p>",
+          "kind": "rich",
+          "html": true
+        }
+      ]
+    },
+    {
+      "input": "![broken](a b)",
+      "offsets": [
+        0
+      ],
+      "blocks": [
+        {
+          "markup": "![broken](a b)",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    },
+    {
+      "input": "x\n\n![image](x)\ny",
+      "offsets": [
+        0,
+        null,
+        15
+      ],
+      "blocks": [
+        {
+          "markup": "x\n",
+          "kind": "rich",
+          "html": false
+        },
+        {
+          "path": "x",
+          "kind": "image",
+          "description": "image"
+        },
+        {
+          "markup": "y",
+          "kind": "rich",
+          "html": false
+        }
+      ]
+    }
+  ]
+}

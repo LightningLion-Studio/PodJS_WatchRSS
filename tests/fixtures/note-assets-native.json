@@ -1,0 +1,456 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchNoteAssetSyncPayload.kt",
+  "sourceSha256": "b2f50d42ded4d131ca4db4bdfa17393721aaf6bf989f48e975782f14054ee7a7",
+  "runtime": "Unchanged native receiver on desktop JVM with real files; not Android Bluetooth/UI.",
+  "cases": [
+    {
+      "name": "single-and-reuse",
+      "steps": [
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "data": "not base64",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": true
+          },
+          "files": {
+            "notes/assets/test.png": {
+              "size": 3,
+              "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358"
+            }
+          }
+        },
+        {
+          "response": {
+            "alreadyPresent": true,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": true
+          },
+          "files": {
+            "notes/assets/test.png": {
+              "size": 3,
+              "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "steps": [
+        {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dataLength": 0,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": true
+          },
+          "files": {
+            "notes/assets/test.png": {
+              "size": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "two-chunks",
+      "steps": [
+        {
+          "sha256": "f226f7dd7e4264b01952b649e4ca5c961026c5e4232be51c6370bca382af2678",
+          "dataLength": 524288,
+          "chunkCount": 2,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "f226f7dd7e4264b01952b649e4ca5c961026c5e4232be51c6370bca382af2678",
+          "dataLength": 5,
+          "chunkCount": 2,
+          "dataByte": 65,
+          "chunkIndex": 1,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": false
+          },
+          "files": {
+            "notes/assets/.test.png.part": {
+              "size": 524288,
+              "sha256": "5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903"
+            }
+          }
+        },
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": true
+          },
+          "files": {
+            "notes/assets/test.png": {
+              "size": 524293,
+              "sha256": "f226f7dd7e4264b01952b649e4ca5c961026c5e4232be51c6370bca382af2678"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "short-intermediate",
+      "steps": [
+        {
+          "sha256": "c34ab6abb7b2bb595bc25c3b388c872fd1d575819a8f55cc689510285e212385",
+          "dataLength": 8,
+          "chunkCount": 2,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "c34ab6abb7b2bb595bc25c3b388c872fd1d575819a8f55cc689510285e212385",
+          "dataLength": 5,
+          "chunkCount": 2,
+          "dataByte": 65,
+          "chunkIndex": 1,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": false
+          },
+          "files": {
+            "notes/assets/.test.png.part": {
+              "size": 8,
+              "sha256": "c34ab6abb7b2bb595bc25c3b388c872fd1d575819a8f55cc689510285e212385"
+            }
+          }
+        },
+        {
+          "files": {
+            "notes/assets/.test.png.part": {
+              "size": 8,
+              "sha256": "c34ab6abb7b2bb595bc25c3b388c872fd1d575819a8f55cc689510285e212385"
+            }
+          },
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u5206\u5757\u987a\u5e8f\u9519\u8bef"
+        }
+      ]
+    },
+    {
+      "name": "bad-hash-preserves-target",
+      "steps": [
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "4a8d8134f29b0b7b60c126f5532bc9f5d9bb73037373cf6fb872d81f1dcefdfd",
+          "dataLength": 4,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": true
+          },
+          "files": {
+            "notes/assets/test.png": {
+              "size": 3,
+              "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358"
+            }
+          }
+        },
+        {
+          "files": {
+            "notes/assets/test.png": {
+              "size": 3,
+              "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358"
+            },
+            "notes/assets/.test.png.part": {
+              "size": 4,
+              "sha256": "63c1dd951ffedf6f7fd968ad4efa39b8ed584f162f46e715114ee184f8de9201"
+            }
+          },
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u6821\u9a8c\u5931\u8d25"
+        }
+      ]
+    },
+    {
+      "name": "restart-first",
+      "steps": [
+        {
+          "sha256": "f226f7dd7e4264b01952b649e4ca5c961026c5e4232be51c6370bca382af2678",
+          "dataLength": 524288,
+          "chunkCount": 2,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": false
+          },
+          "files": {
+            "notes/assets/.test.png.part": {
+              "size": 524288,
+              "sha256": "5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903"
+            }
+          }
+        },
+        {
+          "response": {
+            "alreadyPresent": false,
+            "success": true,
+            "action": "syncNoteAsset",
+            "complete": true
+          },
+          "files": {
+            "notes/assets/test.png": {
+              "size": 3,
+              "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "rejected-inputs",
+      "steps": [
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 2,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "../escape"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "."
+        },
+        {
+          "sha256": "bad",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 1,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 0,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "data": "!",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "5a1fb17e8f35dbe368b8c70609a8f0085cb131703e84e3224cf111f80cb3b29c",
+          "dataLength": 524289,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "files": {},
+          "error": "\u4e0d\u652f\u6301\u7684\u5907\u5fd8\u5f55\u56fe\u7247\u540c\u6b65\u7248\u672c"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u6587\u4ef6\u540d\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u6587\u4ef6\u540d\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u6821\u9a8c\u503c\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u5206\u5757\u5e8f\u53f7\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u5206\u5757\u5e8f\u53f7\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "Input byte[] should at least have 2 bytes for base64 bytes"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u5206\u5757\u8fc7\u5927"
+        }
+      ]
+    },
+    {
+      "name": "trailing-line-breaks",
+      "steps": [
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "a\n"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358\n",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        },
+        {
+          "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+          "data": "QUFB\n",
+          "dataLength": 3,
+          "chunkCount": 1,
+          "dataByte": 65,
+          "chunkIndex": 0,
+          "version": 1,
+          "storageKey": "test.png"
+        }
+      ],
+      "results": [
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u6587\u4ef6\u540d\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "\u5907\u5fd8\u5f55\u56fe\u7247\u6821\u9a8c\u503c\u65e0\u6548"
+        },
+        {
+          "files": {},
+          "error": "Illegal base64 character a"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.syncstate","name":"Note Sync Verification","versionName":"0.1.0","versionCode":1,"capabilities":["data.sqlite","data.kv","host.lifecycle","runtime.timer"]}

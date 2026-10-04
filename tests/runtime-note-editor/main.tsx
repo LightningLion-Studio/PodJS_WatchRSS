@@ -1,0 +1,13 @@
+import {mount} from '@pocketjs/framework/solid';
+import {getDisplayMetrics} from '@podjs/framework/watch';
+import {sqlite} from '@podjs/framework/services';
+import {View,Text} from '@pocketjs/framework/components';
+import {createSignal,Show} from 'solid-js';
+import type {SqlDatabase} from '../../src/core/types.ts';
+import {MemoRepository} from '../../src/notes/repository.ts';
+import {NoteDetailScreen} from '../../src/ui/NotesScreen.tsx';
+const metrics=getDisplayMetrics();
+const repo=new MemoRepository(sqlite as SqlDatabase,'note-editor-fixture');
+const [ready,setReady]=createSignal(false),[event,setEvent]=createSignal('READY');
+void repo.initialize().then(()=>setReady(true),error=>setEvent('ERROR:'+String(error)));
+mount(()=><View class="absolute inset-0 bg-black"><Show when={ready()} fallback={<Text>Loading editor</Text>}><NoteDetailScreen repository={repo} width={metrics.logicalWidth} height={metrics.logicalHeight} input={async()=>null} onBack={()=>setEvent('CLOSED')} onError={setEvent}/></Show><View class="absolute left-[2] right-[2] bottom-[2] bg-[#17191a]"><Text class="text-[10px] leading-[12px] text-[#55ff88]">{event()}</Text></View></View>);

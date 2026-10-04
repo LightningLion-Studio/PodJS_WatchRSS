@@ -1,0 +1,11 @@
+# Paired phone note and image synchronization
+
+The `tests/android-note-peer/WatchRssNotePeerTest.java` Android instrumentation client and `tests/runtime-note-peer` watch guest exercise a real secure RFCOMM connection on a dedicated test UUID. They use the already-paired physical phone/watch. The phone client is a protocol fixture, not the normal companion application's UI or production client implementation.
+
+One persistent connection carries an initial note, a phone-generated 512×512 PNG larger than one 512 KiB protocol chunk, an already-present resource request, a newer note, a stale conflicting note, a malformed request, a tombstone, a final note export and session completion. Every response receives an applied ACK. The phone checks response values and remote closure. The watch uses the production framed session, application action dispatcher, memo repository and note asset receiver; it checks all ACKs, durable tombstone state, stored PNG digest, real image decoding dimensions and notification counts.
+
+The client is hard-coded to the isolated UUID and cannot reach the main application's public listener through this test. The guest requires an empty memo table and absent fixture resource before starting. It removes only its named test note and asset after the session, checks article counts remained unchanged and records the outcome. The main application is archived before/after and restored to the foreground. The phone-only instrumentation package is removed afterward when verified absent before installation; the watch's pre-existing native instrumentation package is not replaced.
+
+`scripts/verification/run-note-peer.py` operates already-installed fixtures and records phone/guest outputs. `collect-note-peer-receipt.py` compares independent phone/watch digest, image size, action/ACK counts and installed artifacts. Timing is one fixture run, not a general throughput benchmark.
+
+This verifies the physical Bluetooth protocol and durable storage path for notes/resources. Normal companion-app flow, full article-library exchange, IP upgrade, account/reader actions and visual/gesture fidelity remain pending. The system charging overlay has not been treated as visual acceptance.

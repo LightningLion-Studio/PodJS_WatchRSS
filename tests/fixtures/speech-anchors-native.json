@@ -1,0 +1,927 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt",
+  "sha256": "2b3657c4df261378f7c499a2612d883ea688a6c828e516b62603a9a1ebefabc5",
+  "extractedSha256": "6613947fdb19d95837d616e0c207d6e8bbe8ed7cc948ba82a371063498984cf2",
+  "cases": [
+    {
+      "input": {
+        "offset": -2,
+        "text": ""
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": ""
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": ""
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": ""
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": ""
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "正文   从这里开始"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "正文   从这里开始"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "正文   从这里开始"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "正文   从这里开始"
+      },
+      "visible": 1,
+      "pressed": 1
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "正文   从这里开始"
+      },
+      "visible": 2,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "正文   从这里开始"
+      },
+      "visible": 3,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "正文   从这里开始"
+      },
+      "visible": 4,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "正文   从这里开始"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "正文   从这里开始"
+      },
+      "visible": 6,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "正文   从这里开始"
+      },
+      "visible": 7,
+      "pressed": 7
+    },
+    {
+      "input": {
+        "offset": 8,
+        "text": "正文   从这里开始"
+      },
+      "visible": 8,
+      "pressed": 8
+    },
+    {
+      "input": {
+        "offset": 9,
+        "text": "正文   从这里开始"
+      },
+      "visible": 9,
+      "pressed": 9
+    },
+    {
+      "input": {
+        "offset": 10,
+        "text": "正文   从这里开始"
+      },
+      "visible": 10,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 11,
+        "text": "正文   从这里开始"
+      },
+      "visible": 10,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 12,
+        "text": "正文   从这里开始"
+      },
+      "visible": 10,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 3,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 3,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 3,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 3,
+      "pressed": 1
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 6,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 6,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 6,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 8,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 8,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 8,
+      "pressed": 7
+    },
+    {
+      "input": {
+        "offset": 8,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 8,
+      "pressed": 8
+    },
+    {
+      "input": {
+        "offset": 9,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 9,
+      "pressed": 9
+    },
+    {
+      "input": {
+        "offset": 10,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 10,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 11,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 10,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 12,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "visible": 10,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 1
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 2
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 7
+    },
+    {
+      "input": {
+        "offset": 8,
+        "text": "One: two; three?"
+      },
+      "visible": 10,
+      "pressed": 8
+    },
+    {
+      "input": {
+        "offset": 9,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 10,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 11,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 11
+    },
+    {
+      "input": {
+        "offset": 12,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 12
+    },
+    {
+      "input": {
+        "offset": 13,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 13
+    },
+    {
+      "input": {
+        "offset": 14,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 14
+    },
+    {
+      "input": {
+        "offset": 15,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 15
+    },
+    {
+      "input": {
+        "offset": 16,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 16
+    },
+    {
+      "input": {
+        "offset": 17,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 16
+    },
+    {
+      "input": {
+        "offset": 18,
+        "text": "One: two; three?"
+      },
+      "visible": 16,
+      "pressed": 16
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "前\r\n 后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "前\r\n 后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "前\r\n 后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "前\r\n 后"
+      },
+      "visible": 1,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "前\r\n 后"
+      },
+      "visible": 2,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "前\r\n 后"
+      },
+      "visible": 3,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "前\r\n 后"
+      },
+      "visible": 4,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "前\r\n 后"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "前\r\n 后"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "前\r\n 后"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "前   \u001c后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "前   \u001c后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "前   \u001c后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "前   \u001c后"
+      },
+      "visible": 1,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "前   \u001c后"
+      },
+      "visible": 2,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "前   \u001c后"
+      },
+      "visible": 3,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "前   \u001c后"
+      },
+      "visible": 4,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "前   \u001c后"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "前   \u001c后"
+      },
+      "visible": 6,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "前   \u001c后"
+      },
+      "visible": 6,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 8,
+        "text": "前   \u001c后"
+      },
+      "visible": 6,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "前﻿后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "前﻿后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "前﻿后"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "前﻿后"
+      },
+      "visible": 1,
+      "pressed": 1
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "前﻿后"
+      },
+      "visible": 2,
+      "pressed": 2
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "前﻿后"
+      },
+      "visible": 3,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "前﻿后"
+      },
+      "visible": 3,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "前﻿后"
+      },
+      "visible": 3,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 1
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 2
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 7,
+      "pressed": 6
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 7
+    },
+    {
+      "input": {
+        "offset": 8,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 8
+    },
+    {
+      "input": {
+        "offset": 9,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 9
+    },
+    {
+      "input": {
+        "offset": 10,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 10
+    },
+    {
+      "input": {
+        "offset": 11,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 11
+    },
+    {
+      "input": {
+        "offset": 12,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 12
+    },
+    {
+      "input": {
+        "offset": 13,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 13
+    },
+    {
+      "input": {
+        "offset": 14,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 14
+    },
+    {
+      "input": {
+        "offset": 15,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 15
+    },
+    {
+      "input": {
+        "offset": 16,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 15
+    },
+    {
+      "input": {
+        "offset": 17,
+        "text": "中文😀标点。English!"
+      },
+      "visible": 15,
+      "pressed": 15
+    },
+    {
+      "input": {
+        "offset": -2,
+        "text": "é组合字"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": -1,
+        "text": "é组合字"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 0,
+        "text": "é组合字"
+      },
+      "visible": 0,
+      "pressed": 0
+    },
+    {
+      "input": {
+        "offset": 1,
+        "text": "é组合字"
+      },
+      "visible": 1,
+      "pressed": 1
+    },
+    {
+      "input": {
+        "offset": 2,
+        "text": "é组合字"
+      },
+      "visible": 2,
+      "pressed": 2
+    },
+    {
+      "input": {
+        "offset": 3,
+        "text": "é组合字"
+      },
+      "visible": 3,
+      "pressed": 3
+    },
+    {
+      "input": {
+        "offset": 4,
+        "text": "é组合字"
+      },
+      "visible": 4,
+      "pressed": 4
+    },
+    {
+      "input": {
+        "offset": 5,
+        "text": "é组合字"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 6,
+        "text": "é组合字"
+      },
+      "visible": 5,
+      "pressed": 5
+    },
+    {
+      "input": {
+        "offset": 7,
+        "text": "é组合字"
+      },
+      "visible": 5,
+      "pressed": 5
+    }
+  ]
+}

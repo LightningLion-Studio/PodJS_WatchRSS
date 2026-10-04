@@ -1,0 +1,7207 @@
+{
+  "source": "Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt",
+  "sha256": "1943d6a47d88b6d1ff9f3a5b4a1454d0ef2ba64c8691de3ca817ee474904c1ef",
+  "extractedSha256": "3a8c0cef2ff6fd74fc83905283dfb769956057bf5a555d2a7f45b75880edf2f6",
+  "cases": [
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": ""
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 0,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "   "
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 1,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 9,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 10,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 10,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 10,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 10,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 11,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 27627
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2763
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 2402
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "正文   从这里开始。下一段！"
+      },
+      "offset": 14,
+      "start": 14,
+      "end": 15,
+      "units": 10.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 2,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 6,
+      "start": 6,
+      "end": 8,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 6,
+      "start": 6,
+      "end": 8,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 6,
+      "start": 6,
+      "end": 8,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 6,
+      "start": 6,
+      "end": 8,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 8,
+      "start": 8,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 14773
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1477
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1285
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "甲， 乙。 丙！末尾"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 10,
+      "units": 5.54,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "One: two; three?"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "One: two; three?"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "One: two; three?"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "One: two; three?"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "One: two; three?"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 3,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "One: two; three?"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "One: two; three?"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "One: two; three?"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "One: two; three?"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "One: two; three?"
+      },
+      "offset": 7,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "One: two; three?"
+      },
+      "offset": 7,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "One: two; three?"
+      },
+      "offset": 7,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "One: two; three?"
+      },
+      "offset": 7,
+      "start": 5,
+      "end": 8,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "One: two; three?"
+      },
+      "offset": 12,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "One: two; three?"
+      },
+      "offset": 12,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "One: two; three?"
+      },
+      "offset": 12,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "One: two; three?"
+      },
+      "offset": 12,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 9653
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "One: two; three?"
+      },
+      "offset": 15,
+      "start": 10,
+      "end": 15,
+      "units": 3.6200000000000014,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "前\r\n 后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "前\r\n 后"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "前   \u001c后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 5333
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "前   \u001c后"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 6,
+      "units": 2,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "前﻿后"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "前﻿后"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 2,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "前﻿后"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 2,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "前﻿后"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 2,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "前﻿后"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 2,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 5813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "前﻿后"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 3,
+      "units": 2.1799999999999997,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 7,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 8,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 8,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 8,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 8,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 17813
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1781
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1549
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "中文😀标点。English!"
+      },
+      "offset": 14,
+      "start": 7,
+      "end": 14,
+      "units": 6.6800000000000015,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "é组合字"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "é组合字"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "é组合字"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "é组合字"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "é组合字"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 1,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "é组合字"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "é组合字"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "é组合字"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "é组合字"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "é组合字"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "é组合字"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "é组合字"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "é组合字"
+      },
+      "offset": 3,
+      "start": 3,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 9227
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "é组合字"
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 5,
+      "units": 3.46,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 4,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 6,
+      "start": 5,
+      "end": 7,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 6,
+      "start": 5,
+      "end": 7,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 6,
+      "start": 5,
+      "end": 7,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 6,
+      "start": 5,
+      "end": 7,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 13,
+      "start": 13,
+      "end": 14,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 13,
+      "start": 13,
+      "end": 14,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 13,
+      "start": 13,
+      "end": 14,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 13,
+      "start": 13,
+      "end": 14,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 22,
+      "start": 22,
+      "end": 23,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 22,
+      "start": 22,
+      "end": 23,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 22,
+      "start": 22,
+      "end": 23,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 22,
+      "start": 22,
+      "end": 23,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 31,
+      "start": 31,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 31,
+      "start": 31,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 31,
+      "start": 31,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 31,
+      "start": 31,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 34,
+      "start": 34,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 34,
+      "start": 34,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 34,
+      "start": 34,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 34,
+      "start": 34,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 45733
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 4573
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 3977
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "OPPO X9 Pro (8+256GB)/A_12-4.5，速度提升！"
+      },
+      "offset": 35,
+      "start": 35,
+      "end": 36,
+      "units": 17.14999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 4,
+      "start": 4,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 6293
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "\t。， 末尾  "
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 8,
+      "units": 2.36,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 1,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 3,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 4,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 4,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 4,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 4,
+      "start": 0,
+      "end": 6,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 16747
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1675
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1456
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "1２٣۴५६-ＡΒé"
+      },
+      "offset": 9,
+      "start": 7,
+      "end": 10,
+      "units": 6.279999999999999,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 7,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 8,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 8,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 8,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 1,
+      "start": 1,
+      "end": 8,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 10,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 10,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 10,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 2,
+      "start": 2,
+      "end": 10,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 12,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 5,
+      "start": 5,
+      "end": 12,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 12,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 9,
+      "start": 9,
+      "end": 12,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 26667
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2667
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 2319
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "あいう カタカナ 한국어"
+      },
+      "offset": 11,
+      "start": 11,
+      "end": 12,
+      "units": 10,
+      "durationMs": 1200
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": -1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": -1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": -1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": -1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 0,
+      "start": 0,
+      "end": 6,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.05,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 50,
+      "start": 50,
+      "end": 56,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.05,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 50,
+      "start": 50,
+      "end": 56,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.05,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 50,
+      "start": 50,
+      "end": 56,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.05,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 50,
+      "start": 50,
+      "end": 56,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.13,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 129,
+      "start": 129,
+      "end": 135,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.13,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 129,
+      "start": 129,
+      "end": 135,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.13,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 129,
+      "start": 129,
+      "end": 135,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.13,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 129,
+      "start": 129,
+      "end": 135,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.25,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 249,
+      "start": 249,
+      "end": 255,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.25,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 249,
+      "start": 249,
+      "end": 255,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.25,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 249,
+      "start": 249,
+      "end": 255,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.25,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 249,
+      "start": 249,
+      "end": 255,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.5,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 499,
+      "start": 499,
+      "end": 505,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.5,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 499,
+      "start": 499,
+      "end": 505,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.5,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 499,
+      "start": 499,
+      "end": 505,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.5,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 499,
+      "start": 499,
+      "end": 505,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.75,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 749,
+      "start": 749,
+      "end": 755,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.75,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 749,
+      "start": 749,
+      "end": 755,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.75,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 749,
+      "start": 749,
+      "end": 755,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.75,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 749,
+      "start": 749,
+      "end": 755,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 0.985,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 985,
+      "start": 985,
+      "end": 991,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 0.985,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 985,
+      "start": 985,
+      "end": 991,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 0.985,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 985,
+      "start": 985,
+      "end": 991,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 0.985,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 985,
+      "start": 985,
+      "end": 991,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 1,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 66667
+    },
+    {
+      "input": {
+        "rate": 0.05,
+        "progress": 2,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1,
+        "progress": 2,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 240000
+    },
+    {
+      "input": {
+        "rate": 1.15,
+        "progress": 2,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 231884
+    },
+    {
+      "input": {
+        "rate": 4,
+        "progress": 2,
+        "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+      },
+      "offset": 999,
+      "start": 999,
+      "end": 1000,
+      "units": 1000,
+      "durationMs": 66667
+    }
+  ]
+}
