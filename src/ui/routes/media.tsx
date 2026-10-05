@@ -20,6 +20,7 @@ import {
 import type { AppServices, Channel } from "../service.ts";
 import type { Page, RouteEntry } from "./types.ts";
 import type { HttpExportMode } from "../../remote-input/exports.ts";
+import type { DouyinPreparedSource } from "../douyin/video-sessions.ts";
 
 interface MediaRoutesProps {
   preset: () => ReaderPreset;
@@ -63,6 +64,8 @@ interface MediaRoutesProps {
     entry: RouteEntry,
     direction: "next" | "previous",
   ) => Promise<void>;
+  prepareDouyinAdjacent:(entry:RouteEntry,direction:"next"|"previous")=>Promise<DouyinPreparedSource|undefined>;
+  promoteDouyinAdjacent:(entry:RouteEntry,prepared:DouyinPreparedSource)=>Promise<boolean>;
   openHttpExport: (mode: HttpExportMode) => void;
   onDouyinLogoutSuccess: () => void;
 }
@@ -207,6 +210,16 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onPrevious={
             props.entry.queue
               ? () => props.changeDouyinVideo(props.entry, "previous")
+              : undefined
+          }
+          onPrepareAdjacent={
+            props.entry.queue
+              ? direction => props.prepareDouyinAdjacent(props.entry,direction)
+              : undefined
+          }
+          onPromoteAdjacent={
+            props.entry.queue
+              ? prepared => props.promoteDouyinAdjacent(props.entry,prepared)
               : undefined
           }
           ref={(handle) => (props.entry.player = handle)}

@@ -11,6 +11,7 @@ export class DouyinPlaybackQueue {
   private cursor:string|null;
   private hasMore:boolean;
   private generation=0;
+  private previewGeneration=0;
   private quarantined=new Set<string>();
   private persistence:Promise<void>=Promise.resolve();
   private readonly limit:number;
@@ -22,7 +23,7 @@ export class DouyinPlaybackQueue {
     this.cursor=options.cursor?.trim()||null;this.hasMore=options.hasMore===true;
   }
   snapshot():Omit<DouyinPlaybackQueueState,"item">&{item:DouyinItem|null}{return {item:this.items[this.index]??null,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore};}
-  cancel(){this.generation++;}
+  cancel(){this.generation++;this.previewGeneration++;}
   /** Playback records on foreground preparation, never speculative resolution.
    * Native list/history detail-entry writes separately update the same deduplicated store. */
   async settled():Promise<void>{
@@ -31,18 +32,52 @@ export class DouyinPlaybackQueue {
     this.persistence=write;await write;
   }
   async prefetch():Promise<void>{const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId);}}
+  /** Resolve one adjacent pager item without moving the persisted playback anchor. */
+  async preview(direction:"next"|"previous"):Promise<DouyinResult<DouyinPlaybackQueueState>>{
+    const op=++this.previewGeneration,current=this.index;
+    if(direction==="previous"){
+      if(current<=0)return {ok:false,code:"UNSUPPORTED",message:"已经是第一个视频"};
+      return this.resolvePreviewAt(current-1,op);
+    }
+    let lastFailure:DouyinResult<DouyinPlaybackQueueState>={ok:false,code:"UNSUPPORTED",message:"已经是最后一个视频"};
+    for(let attempt=0;attempt<40;attempt++){
+      let target=current+1;
+      if(target>=this.items.length&&this.hasMore){
+        const oldCursor=this.cursor,page=await this.client.fetchFeedPage({cursor:this.cursor,count:12});
+        if(op!==this.previewGeneration||current!==this.index)return cancelled();if(!page.ok)return page;
+        this.cursor=page.data.nextCursor;this.hasMore=page.data.hasMore&&this.cursor!==oldCursor;
+        let merged=this.unique([...this.items,...page.data.items]).filter(item=>!this.quarantined.has(item.awemeId));
+        const overflow=Math.max(0,merged.length-this.limit);
+        if(overflow){merged=merged.slice(overflow);this.index=Math.max(-1,this.index-overflow);target=this.index+1;}else target=current+1;
+        this.items=merged;
+      }
+      if(target>=this.items.length){if(this.hasMore)continue;return lastFailure;}
+      const result=await this.resolvePreviewAt(target,op);
+      if(op!==this.previewGeneration)return cancelled();if(result.ok)return result;
+      if(result.code==="NOT_LOGGED_IN"||result.code==="CANCELLED")return result;
+      lastFailure=result;this.quarantined.add(this.items[target].awemeId);this.items.splice(target,1);
+    }
+    return lastFailure;
+  }
+  /** Commit only the item previously resolved for a pager promotion. */
+  commitPreview(awemeId:string):DouyinResult<DouyinPlaybackQueueState>{
+    const target=this.items.findIndex(item=>item.awemeId===awemeId);this.previewGeneration++;this.generation++;
+    if(target<0)return {ok:false,code:"CANCELLED",message:"预加载视频已失效"};
+    this.index=target;const item=this.items[target]!;
+    return {ok:true,data:{item,playlist:[...this.items],index:target,cursor:this.cursor,hasMore:this.hasMore},source:"feed-cache"};
+  }
   async recover():Promise<DouyinResult<DouyinPlaybackQueueState>>{
-    const op=++this.generation;const result=await this.resolveAt(this.index,op,true);
+    this.previewGeneration++;const op=++this.generation;const result=await this.resolveAt(this.index,op,true);
     if(op!==this.generation)return cancelled();if(result.ok)return result;return this.discard();
   }
   async discard():Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const current=this.items[this.index];if(current){this.quarantined.add(current.awemeId);this.items.splice(this.index,1);this.index--;}
     return this.next();
   }
-  async current():Promise<DouyinResult<DouyinPlaybackQueueState>>{return this.resolveAt(this.index,++this.generation);}
-  async previous():Promise<DouyinResult<DouyinPlaybackQueueState>>{const op=++this.generation;if(this.index<=0)return {ok:false,code:"UNSUPPORTED",message:"已经是第一个视频"};return this.resolveAt(this.index-1,op);}
+  async current():Promise<DouyinResult<DouyinPlaybackQueueState>>{this.previewGeneration++;return this.resolveAt(this.index,++this.generation);}
+  async previous():Promise<DouyinResult<DouyinPlaybackQueueState>>{this.previewGeneration++;const op=++this.generation;if(this.index<=0)return {ok:false,code:"UNSUPPORTED",message:"已经是第一个视频"};return this.resolveAt(this.index-1,op);}
   async next():Promise<DouyinResult<DouyinPlaybackQueueState>>{
-    const op=++this.generation;
+    this.previewGeneration++;const op=++this.generation;
     let lastFailure:DouyinResult<DouyinPlaybackQueueState>={ok:false,code:"UNSUPPORTED",message:"已经是最后一个视频"};
     // Bound both failed candidates and duplicate-only server pages; never spin on a bad cursor.
     for(let attempt=0;attempt<40;attempt++){
@@ -70,6 +105,13 @@ export class DouyinPlaybackQueue {
     if(op!==this.generation)return cancelled();if(!resolved.ok)return resolved;
     this.items[target]=resolved.data;this.index=target;
     return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};
+  }
+  private async resolvePreviewAt(target:number,op:number):Promise<DouyinResult<DouyinPlaybackQueueState>>{
+    const candidate=this.items[target];if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
+    const resolved=await this.client.resolvePlayback(candidate.awemeId);
+    if(op!==this.previewGeneration||target<0||target>=this.items.length)return cancelled();if(!resolved.ok)return resolved;
+    this.items[target]=resolved.data;
+    return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:target,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};
   }
   private unique(items:DouyinItem[]){const seen=new Set<string>();return items.filter(item=>{const id=item.awemeId.trim();if(!id||seen.has(id))return false;seen.add(id);return true;});}
 }

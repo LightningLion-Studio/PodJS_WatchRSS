@@ -18,6 +18,7 @@ import type { BiliRoute } from "../bili/index.tsx";
 import type { DouyinPlayRequest, DouyinRoute } from "../douyin/index.tsx";
 import type { AppServices, Article, Channel } from "../service.ts";
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
+import type { DouyinPreparedSource } from "../douyin/video-sessions.ts";
 import type { RouteEntry, SetPage } from "./types.ts";
 
 interface MediaControllerDependencies {
@@ -269,6 +270,8 @@ export function createMediaRouteController(
       .buildPlaybackHeaders()
       .then((headers) => ({
         immersive: request.immersive,
+        awemeId: request.item.awemeId,
+        posterUrl: request.item.coverUrl,
         url: request.playback.playUrl,
         title: request.item.description,
         headers,
@@ -326,6 +329,8 @@ export function createMediaRouteController(
     }
     entry.playback = {
       ...entry.playback!,
+      awemeId: result.data.item.awemeId,
+      posterUrl: result.data.item.coverUrl,
       url: result.data.item.playUrl,
       title: result.data.item.description,
       headers,
@@ -333,6 +338,33 @@ export function createMediaRouteController(
     };
     dependencies.setError("");
     dependencies.setPlayingSource(entry.playback);
+  };
+
+  const prepareDouyinAdjacent = async (
+    entry:RouteEntry,
+    direction:"next"|"previous",
+  ):Promise<DouyinPreparedSource|undefined> => {
+    if(!entry.queue||dependencies.current()!==entry)return;
+    const result=await entry.queue.preview(direction);
+    if(dependencies.current()!==entry||!result.ok)return;
+    const headers=await douyinClient.buildPlaybackHeaders();
+    if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
+    return {key:result.data.item.awemeId,source:{
+      ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
+      url:result.data.item.playUrl,title:result.data.item.description,headers,
+      webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
+    }};
+  };
+
+  const promoteDouyinAdjacent = async (
+    entry:RouteEntry,
+    prepared:DouyinPreparedSource,
+  ):Promise<boolean> => {
+    if(!entry.queue||dependencies.current()!==entry)return false;
+    const result=entry.queue.commitPreview(prepared.key);
+    if(!result.ok||dependencies.current()!==entry)return false;
+    entry.playback=prepared.source;dependencies.setError("");dependencies.setPlayingSource(prepared.source);
+    return true;
   };
 
   const biliOriginal = () =>
@@ -407,6 +439,8 @@ export function createMediaRouteController(
       }
       entry.playback = {
         ...entry.playback!,
+        awemeId: result.data.item.awemeId,
+        posterUrl: result.data.item.coverUrl,
         url: result.data.item.playUrl,
         title: result.data.item.description,
         headers,
@@ -525,6 +559,8 @@ export function createMediaRouteController(
     douyinPlay,
     douyinNavigate,
     changeDouyinVideo,
+    prepareDouyinAdjacent,
+    promoteDouyinAdjacent,
     biliOriginal,
     setBiliOriginal,
     recoverDouyinVideo,

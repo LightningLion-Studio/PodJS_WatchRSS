@@ -1,0 +1,75 @@
+import {describe,expect,test} from "bun:test";
+import type {VideoSessionState} from "@podjs/framework/services";
+import {
+  DouyinVideoSessionPool,
+  douyinPagerProgress,
+  douyinPagerSettleProgress,
+  shouldFallbackFromVideoSessions,
+  shouldSettleDouyinPager,
+  shouldUseDouyinVideoSessions,
+  type DouyinPreparedSource,
+} from "../../src/ui/douyin/video-sessions.ts";
+
+const source=(key:string):DouyinPreparedSource=>({key,source:{immersive:true,awemeId:key,url:`https://video/${key}`,posterUrl:`https://cover/${key}`,title:key,platform:"douyin"}});
+const sessionState=(sessionId:string,prewarming=false):VideoSessionState=>({ok:true,sessionId,state:prewarming?"prewarmed":"ready",positionMs:0,durationMs:1000,width:1080,height:1920,muted:prewarming,volume:1,prewarming,presented:!prewarming,hasRenderedFirstFrame:true,targetBufferBytes:6291456});
+const bounds={x:0,y:0,width:240,height:240};
+
+function fakePort(){
+  const calls:{method:string;sessionId?:string;progress?:number}[]=[];
+  let transitionGate:Promise<void>|undefined;
+  return {
+    calls,
+    gateTransition(gate:Promise<void>){transitionGate=gate;},
+    prepare(options:any){calls.push({method:options.prewarm?"prewarm":"prepare",sessionId:options.sessionId});return {cancel(){calls.push({method:"cancel",sessionId:options.sessionId});},result:Promise.resolve(sessionState(options.sessionId,options.prewarm))};},
+    async play(id:string){calls.push({method:"play",sessionId:id});return sessionState(id);},
+    async pause(id:string){calls.push({method:"pause",sessionId:id});return sessionState(id);},
+    async seek(id:string){return sessionState(id);},async stop(id:string){return sessionState(id);},
+    async release(id:string){calls.push({method:"release",sessionId:id});return {sessionId:id,released:true};},
+    async setBounds(id:string){return sessionState(id);},async state(id:string){return sessionState(id);},
+    async setTransform(id:string){return sessionState(id);},async setVolume(id:string){return sessionState(id);},
+    async promote(id:string){calls.push({method:"promote",sessionId:id});return {...sessionState(id),state:"playing"};},
+    async transition(options:any){calls.push({method:"transition",sessionId:options.toSessionId,progress:options.progress});if(transitionGate){const gate=transitionGate;transitionGate=undefined;await gate;}return {fromSessionId:options.fromSessionId,toSessionId:options.toSessionId,progress:options.progress,direction:options.direction,fromOffsetYPx:0,toOffsetYPx:0,composited:true as const};},
+  };
+}
+
+describe("Douyin video sessions",()=>{
+  test("keeps the complete legacy path on old or non-immersive hosts",()=>{
+    expect(shouldUseDouyinVideoSessions(source("1").source,false)).toBe(false);
+    expect(shouldUseDouyinVideoSessions({...source("1").source,immersive:false},true)).toBe(false);
+    expect(shouldUseDouyinVideoSessions(source("1").source,true)).toBe(true);
+  });
+
+  test("matches native positional/velocity settle and cancellation rebound",()=>{
+    expect(douyinPagerProgress(-43.2,240)).toBeCloseTo(.18);
+    expect(shouldSettleDouyinPager(.179,0,"up")).toBe(false);
+    expect(shouldSettleDouyinPager(.18,0,"up")).toBe(true);
+    expect(shouldSettleDouyinPager(.05,-125,"up")).toBe(true);
+    expect(shouldSettleDouyinPager(.8,125,"up")).toBe(false);
+    expect(douyinPagerSettleProgress(.6,0,220)).toBe(0);
+  });
+
+  test("coalesces rapid drag updates and promotes by swapping/reusing two slots",async()=>{
+    const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+    await pool.prepare(source("1"),{...source("1").source,bounds}).result;
+    await pool.prewarm(source("2"),{...source("2").source,bounds});
+    let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);port.gateTransition(gate);
+    const first=pool.transition(.1,"up",bounds),second=pool.transition(.5,"up",bounds),third=pool.transition(.9,"up",bounds);
+    await Promise.resolve();release();await Promise.all([first,second,third]);
+    expect(port.calls.filter(call=>call.method==="transition").map(call=>call.progress)).toEqual([.1,.9]);
+    const promoted=await pool.promote("up",bounds);expect(promoted.source.key).toBe("2");
+    await pool.prewarm(source("3"),{...source("3").source,bounds});
+    const prepares=port.calls.filter(call=>call.method==="prepare"||call.method==="prewarm");
+    expect(prepares[0]!.sessionId).toBe(prepares[2]!.sessionId);
+    expect(new Set(prepares.map(call=>call.sessionId)).size).toBe(2);
+  });
+
+  test("classifies service errors for legacy degradation and releases every slot",async()=>{
+    expect(shouldFallbackFromVideoSessions(new Error("video_decoder_limit"))).toBe(true);
+    expect(shouldFallbackFromVideoSessions(new Error("cancelled"))).toBe(false);
+    const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+    await pool.prepare(source("1"),{...source("1").source,bounds}).result;
+    await pool.releaseAll();
+    expect(port.calls.filter(call=>call.method==="release")).toHaveLength(3);
+    expect(new Set(port.calls.filter(call=>call.method==="release").map(call=>call.sessionId)).size).toBe(2);
+  });
+});
