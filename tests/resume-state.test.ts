@@ -49,3 +49,11 @@ test("cold-start resolution keeps home as the safe fallback for deleted content"
   await expect(resolveResumeTarget({ version: 1, kind: "reader", articleId: "deleted" }, resolver))
     .resolves.toEqual({ version: 1, kind: "home" });
 });
+
+test("only native resumable activities are recorded (no channel list or Bili feed)", () => {
+  expect(resumeTargetForStack([{ page: "home" }, { page: "articles", channelId: "7" }] as never)).toEqual({ version: 1, kind: "home" });
+  expect(resumeTargetForStack([{ page: "home" }, { page: "bili", biliRoute: { name: "entry" } }] as never)).toEqual({ version: 1, kind: "home" });
+  expect(resumeTargetForStack([{ page: "home" }, { page: "bili", biliRoute: { name: "detail", bvid: "BV1xx" } }] as never).kind).toBe("bili");
+  expect(resumeTargetForStack([{ page: "home" }, { page: "articles", channelId: "7" }, { page: "reader", readerArticle: { id: "42" } }] as never)).toEqual({ version: 1, kind: "reader", articleId: "42" });
+  expect(resumeTargetForStack([{ page: "home" }, { page: "douyin", douyinRoute: { name: "settings" } }] as never)).toEqual({ version: 1, kind: "home" });
+});

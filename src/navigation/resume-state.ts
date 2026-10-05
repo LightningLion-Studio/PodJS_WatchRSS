@@ -100,6 +100,8 @@ export function validateResumeTarget(value: unknown): ResumeTarget | null {
   return null;
 }
 
+const NATIVE_RESUMABLE_DOUYIN = new Set(["entry", "feed", "detail", "history"]);
+
 export function resumeTargetForStack(entries: readonly ResumeStackEntry[]): ResumeTarget {
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index]!;
@@ -107,17 +109,16 @@ export function resumeTargetForStack(entries: readonly ResumeStackEntry[]): Resu
       const articleId = text(entry.readerArticle?.id);
       if (articleId) return { version: 1, kind: "reader", articleId };
     }
-    if (entry.page === "articles") {
-      const channelId = text(entry.channelId);
-      if (channelId) return { version: 1, kind: "articles", channelId };
-    }
+    // Native only records activities overriding buildResumeIntent(): DetailActivity,
+    // BiliDetail/BiliPlayer, DouyinEntry/Detail/Player/History, RssPlayer and HomeFeedList.
+    // FeedActivity (channel article list) and BiliEntryActivity are not resumable.
     if (entry.page === "bili") {
       const route = sanitizedBiliRoute(entry.biliRoute);
-      if (route) return { version: 1, kind: "bili", route };
+      if (route && route.name === "detail") return { version: 1, kind: "bili", route };
     }
     if (entry.page === "douyin") {
       const route = sanitizedDouyinRoute(entry.douyinRoute);
-      if (route) return { version: 1, kind: "douyin", route };
+      if (route && NATIVE_RESUMABLE_DOUYIN.has(String(route.name))) return { version: 1, kind: "douyin", route };
     }
     if (entry.page === "home") return { version: 1, kind: "home" };
   }
