@@ -12,20 +12,25 @@ bun run build
 bun run package:android
 ```
 
-`pod.config.json` 定义入口、应用标识、字库和所需宿主能力。`framework.lock.json` 记录本次框架基线；目前还依赖框架工作区的配套未提交改动，不能只按该提交号构建。应用使用 `com.lightningstudio.watchrss.podjs`，不会覆盖已安装的正式版。
+`pod.config.json` 定义入口、应用标识、字库和所需宿主能力。`framework.lock.json` 锁定已提交的框架基线与 PocketJS revision（`requiresLocalChanges=false`）；构建环境必须能取得这两个提交。应用使用 `com.lightningstudio.watchrss.podjs`，不会覆盖已安装的原生正式版。
 
-## 已接入的开发流程
+## 已接入
 
-- SQLite 持久化订阅、文章、已读、收藏和文章笔记。
-- 通过原生流式 HTTP 下载 RSS/Atom，支持离线阅读和长正文分块存储。
-- Solid TSX 订阅、文章、收藏、搜索、笔记和基础设置页面；原生文本输入、分页、表冠与返回事件。
-- 共享阅读文本布局、原生 TTS，以及自定义字体和图片／视频阅读背景；具体原生画面对照范围见功能文档。
-- 生产前台同步监听与协议分发；配对蓝牙已完成隔离手机／手表的阅读资源上传、断线续传、回读与实际渲染验证。
+- RSS/Atom、SQLite 订阅与文章库、离线长文、收藏／稍后再看、文章笔记、导入内容删除、首页刷新和频道管理。
+- 阅读器正文/原文、媒体与离线回退、阅读预设、最终进度冲刷、自动滚动、TTS 播控、首页朗读卡片与实时频谱。
+- protocol v14 蓝牙/IP 同步、实时预览流、阅读资源、统一平台保存库、账号/Token/日志动作、旧 HTTP 导出页面与连接状态页。
+- B 站推荐/搜索/列表分页、原文模式、分 P/互动/离线详情、播放失败换源、评论与楼中楼。
+- 抖音沉浸/RSS 双模式、最近窗口与队列恢复、离线详情、网络遮罩、登录/二步验证、退出清理，以及双 session 预热和跟手竖向切片；旧宿主保留单播放器回落。
+- 信息页状态恢复、应用内 WebView、应用级脱敏日志和加密上传、分享二维码比例、用量 telemetry；版本公告/更新代码存在但仍关闭，见下方边界。
+
+以上均按源码与自动化验证描述，不等于设备验收。当前集成树通过 1021 项应用测试、TypeScript 检查和 Android-watch 打包；本轮无在线设备，真机证据仍为 PENDING。提交与逐项边界见 [2026-10-04 迁移冲刺](docs/implementation-status.md#2026-10-04-迁移冲刺)。
 
 ## 尚未完成
 
-完整功能、交互与画面一致仍未达到。阅读资源的最新进展见 [手机资源传输](docs/reader-resource-transfer.md)、[字体](docs/reader-fonts.md)、[背景](docs/reader-backgrounds.md) 和 [预览](docs/reader-preview.md)。段落排版与真机原生对照见 [段落渲染](docs/reader-paragraphs.md)。音量设置入口进展见 [音量设置](docs/media-volume-settings.md)。「从手机输入」与蓝牙地址交接见 [远程输入](docs/remote-input.md)。图片缓存与高级设置见 [缓存进展](docs/managed-cache.md)。分享分流、二维码与设备限制见 [分享进展](docs/system-share.md)。设置占位清理、备案入口与分享启用规则见 [设置范围核对](docs/settings-parity-audit.md)。该已部署设置增量通过 501 项应用测试。正在进行的独立包验证见 [启动引导与协议页](docs/onboarding.md)；新增代码尚未据此视为正式部署或完整产品验收。
+- **等待设备验收（全部）**：本轮所有源码完成项都需要 OWW242/配对手机上的安装升级、数据完整性、页面/视觉、物理手势、媒体表面、登录、网络/后台、蓝牙/IP/HTTP 互通和错误恢复证据。当前没有在线 ADB 设备；不要把 1021 项单测或打包成功写成产品验收。
+- **等待用户决定版本分发策略**：PodJS 使用 `com.lightningstudio.watchrss.podjs`，与原生包名不同；宿主没有 `packageUpdate` 能力，尚不能完成目标包校验、下载进度与系统安装器链路。`VERSION_ANNOUNCEMENTS_ENABLED=false`，在分发/安装/回滚策略确定前不启用版本公告更新。
+- **原生仅 debug 构建存在、release 无的能力**：云同步（`WatchRssApplication` 在 release 会取消 worker）、声波/引导 Wi-Fi、Debug 蓝牙同步页、性能探针、抖音调试注入、TTS 调试设置、重新进入引导。它们未迁移，但不列为当前 release 对齐阻塞；是否迁移等待用户决定。
 
-原生手机伴侣 UI、Wi-Fi／自动发现、任意资源格式和大文件、完整文章排版、长期性能／耗电及物理手势等仍需逐项验证。独立开发包的有保护升级已验证，但不代表可以替换原生正式包或已达到发布条件。
+设备验收清单仍以 [docs/acceptance.md](docs/acceptance.md) 为准，其中 `NOT VERIFIED` 未因本轮源码与打包结果而改动。功能差距和提交级证据见三份审计：[A-1](docs/parity-gap-audit-a.md)、[A-2](docs/parity-gap-audit-a2.md)、[B](docs/parity-gap-audit-b.md)。
 
 功能验收基线见 [docs/acceptance.md](docs/acceptance.md)，数据/协议约定见 [docs/migration-contract.md](docs/migration-contract.md)。当前测试证据与限制见 [docs/implementation-status.md](docs/implementation-status.md)。
