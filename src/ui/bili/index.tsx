@@ -25,6 +25,7 @@ import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
 
 const infoIcon = "../assets/icons/info.svg";
 const playIcon = "../assets/icons/play-circle.svg";
+const playIconDark = "../assets/icons/play-circle-dark.svg";
 const starIcon = "../assets/icons/star.svg";
 const thumbIcon = "../assets/icons/bili-thumb-up.svg";
 const coinIcon = "../assets/icons/bili-coin.svg";
@@ -320,20 +321,26 @@ function ResultsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { na
 
 // Native BiliDetailScreen.kt (original-content mode): reader background, 18dp side padding,
 // 6dp item spacing, 3:2 cover, meta card, four 44dp action circles, 分P, 简介.
-const ON_SURFACE = "#f5f5f5", ON_SURFACE_VARIANT = "#b6b6b6";
+/** Native WatchDark/WatchLight colorScheme, chosen by the reader preset's background luminance. */
+interface DetailPalette { dark: boolean; background: string; surface: string; surfaceVariant: string; onSurface: string; onSurfaceVariant: string; overlay: string; scrim: string }
+function detailPalette(dark: boolean): DetailPalette {
+  return dark
+    ? { dark, background: "#0b1211", surface: "#1c1f21", surfaceVariant: "#23272a", onSurface: "#f5f5f5", onSurfaceVariant: "#b6b6b6", overlay: "#0b1211b3", scrim: "#0b121199" }
+    : { dark, background: "#f7f4f0", surface: "#ffffff", surfaceVariant: "#ede6de", onSurface: "#1c1b1f", onSurfaceVariant: "#4a4a4a", overlay: "#f7f4f0b3", scrim: "#f7f4f099" };
+}
 // Native passes showCommentEntry = false; the 评论 section is kept but hidden like native.
 const SHOW_COMMENT_ENTRY = false;
 
-function sectionTitle(title: string, trailing?: string): ScrollEntry {
+function sectionTitle(pal: DetailPalette, title: string, trailing?: string): ScrollEntry {
   return { height: 20, render: () => <View class="absolute inset-0">
-    <Text class="absolute left-[0] top-[0.75] text-[17px] leading-[20] text-[#b6b6b6]">{title}</Text>
-    {trailing ? <Text class="absolute right-[0] top-[2] text-[9px] leading-[17] text-[#b6b6b6]">{trailing}</Text> : null}
+    <Text class="absolute left-[0] top-[0.75] text-[17px] leading-[20]" style={{ textColor: pal.onSurfaceVariant }}>{title}</Text>
+    {trailing ? <Text class="absolute right-[0] top-[2] text-[9px] leading-[17]" style={{ textColor: pal.onSurfaceVariant }}>{trailing}</Text> : null}
   </View> };
 }
 
-function surfaceCard(text: string, width: number, color = ON_SURFACE_VARIANT, onPress?: () => void): ScrollEntry {
+function surfaceCard(pal: DetailPalette, text: string, width: number, color = pal.onSurfaceVariant, onPress?: () => void): ScrollEntry {
   const wrapped = measuredLines(text, width - 12, measureFor(17));
-  return { height: 12 + wrapped.length * 21, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={text} class="absolute inset-0 rounded-[16] bg-[#1c1f21]">
+  return { height: 12 + wrapped.length * 21, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={text} class="absolute inset-0 rounded-[16]" style={{ bgColor: pal.surface }}>
     <Text class="absolute left-[6] right-[6] top-[6] text-[17px] leading-[21] text-center" style={{ textColor: color }}>{wrapped.join("\n")}</Text>
   </View> };
 }
@@ -366,19 +373,19 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
   }
   const preset = () => props.preset ?? defaultReaderPreset();
   const backgrounds = useReaderBackgrounds();
-  // Native draws reader TITLE/BODY colours on the dark surface card; on light presets that is
-  // dark-on-dark, so the card keeps onSurface text there.
-  const cardText = (color: string) => readerChrome(preset()).dark ? color : ON_SURFACE;
   const entries = createMemo<ScrollEntry[]>(() => {
+    // Cards follow the preset's light/dark scheme; the reader TITLE/BODY colours then sit on a
+    // matching surface (native kept a dark card even on light presets: dark-on-dark text).
+    const pal = detailPalette(readerChrome(preset()).dark);
     const width = props.width ?? 233, cardWidth = width - 36, inner = cardWidth - 12;
     const data = state().detail, it = data?.item, st = state();
     const titleFont = presetContentFont(preset(), "title"), bodyFont = presetContentFont(preset(), "body");
     const measureScaled = (font: typeof titleFont) => (text: string) => getOps().measureText(text, font.fontSlot) * font.scale;
-    const fontText = (font: typeof titleFont, text: string, top: number, w: number) => <Text class={readerTextClass(font.fontSlot)} style={{ insetT: top, width: w / font.scale, fontSlot: font.fontSlot, scale: font.scale, originX: -.5, originY: -.5, lineHeight: font.lineHeight / font.scale, textColor: cardText(font.color), tracking: (font.tracking ?? 0) / font.scale, textAlign: 0 }}>{text}</Text>;
-    const cover: ScrollEntry = { height: cardWidth * 2 / 3, render: () => <View onPress={() => void play()} focusable accessibilityRole="button" accessibilityLabel="播放" class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+    const fontText = (font: typeof titleFont, text: string, top: number, w: number) => <Text class={readerTextClass(font.fontSlot)} style={{ insetT: top, width: w / font.scale, fontSlot: font.fontSlot, scale: font.scale, originX: -.5, originY: -.5, lineHeight: font.lineHeight / font.scale, textColor: font.color, tracking: (font.tracking ?? 0) / font.scale, textAlign: 0 }}>{text}</Text>;
+    const cover: ScrollEntry = { height: cardWidth * 2 / 3, render: () => <View onPress={() => void play()} focusable accessibilityRole="button" accessibilityLabel="播放" class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
       {it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={cardWidth} height={cardWidth * 2 / 3} fit="cover" class="absolute left-[0] top-[0]" /> : null}
-      <View class="absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" />
-      <View class="absolute w-[36] h-[36] rounded-full bg-[#0b121199] items-center justify-center" style={{ insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={playIcon} style={{ width: 24, height: 24 }} /></View>
+      <View class={pal.dark ? "absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" : "absolute inset-0 bg-gradient-to-b from-transparent to-[#f7f4f0b3]"} />
+      <View class="absolute w-[36] h-[36] rounded-full items-center justify-center" style={{ bgColor: pal.scrim, insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={pal.dark ? playIcon : playIconDark} style={{ width: 24, height: 24 }} /></View>
     </View> };
     const title = measuredLines(it?.title?.trim() || "加载中...", inner, measureScaled(titleFont), 3);
     const owner = it?.owner?.name?.trim();
@@ -388,22 +395,22 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     const metaHeight = chipsTop + (chips.length ? 21 + 6 : 0);
     let chipLeft = 6;
     const chipBoxes = chips.map(text => { const w = getOps().measureText(text, FONT_SLOT[9]) + 8, left = chipLeft; chipLeft += w + 4; return { text, left, w }; });
-    const meta: ScrollEntry = { height: metaHeight, render: () => <View accessibilityLabel={[it?.title, owner && `UP 主：${owner}`, ...chips].filter(Boolean).join("，")} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+    const meta: ScrollEntry = { height: metaHeight, render: () => <View accessibilityLabel={[it?.title, owner && `UP 主：${owner}`, ...chips].filter(Boolean).join("，")} class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
       {title.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * titleFont.lineHeight, width: inner, height: titleFont.lineHeight }}>{fontText(titleFont, line, 1, inner)}</View>)}
-      {owner ? <Text class="absolute left-[6] text-[9px] leading-[17] text-[#b6b6b6]" style={{ insetT: ownerTop + 1 }}>{`UP 主：${owner}`}</Text> : null}
-      {chipBoxes.filter(chip => chip.left + chip.w <= cardWidth - 6).map(chip => <View class="absolute h-[21] rounded-[10.5] bg-[#23272a]" style={{ insetL: chip.left, insetT: chipsTop, width: chip.w }}><Text class="absolute left-[4] top-[2] text-[9px] leading-[17] text-[#b6b6b6]">{chip.text}</Text></View>)}
+      {owner ? <Text class="absolute left-[6] text-[9px] leading-[17]" style={{ insetT: ownerTop + 1, textColor: pal.onSurfaceVariant }}>{`UP 主：${owner}`}</Text> : null}
+      {chipBoxes.filter(chip => chip.left + chip.w <= cardWidth - 6).map(chip => <View class="absolute h-[21] rounded-[10.5]" style={{ insetL: chip.left, insetT: chipsTop, width: chip.w, bgColor: pal.surfaceVariant }}><Text class="absolute left-[4] top-[2] text-[9px] leading-[17]" style={{ textColor: pal.onSurfaceVariant }}>{chip.text}</Text></View>)}
     </View> };
     const size = Math.max(36, Math.min(44, (cardWidth - 18) / 4)), rowLeft = (cardWidth - size * 4 - 18) / 2;
     const locked = st.busy || st.loading || !data;
     const actionButtons = [
-      { icon: thumbIcon, label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
-      { icon: coinIcon, label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
-      { icon: starIcon, label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
-      { icon: shareIcon, label: "转发", selected: false, onPress: share },
+      { icon: pal.dark ? thumbIcon : "../assets/icons/bili-thumb-up-dark.svg", label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
+      { icon: pal.dark ? coinIcon : "../assets/icons/bili-coin-dark.svg", label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
+      { icon: pal.dark ? starIcon : "../assets/icons/star-dark.svg", label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
+      { icon: pal.dark ? shareIcon : "../assets/icons/share-dark.svg", label: "转发", selected: false, onPress: share },
     ];
     const iconSize = Math.min(24, Math.max(18, size * .55));
     const actions: ScrollEntry = { height: size, render: () => <View class="absolute inset-0">
-      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class={button.selected ? "absolute bg-[#ff6026] items-center justify-center" : "absolute bg-[#23272a] items-center justify-center"} style={{ insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
+      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center" style={{ bgColor: button.selected ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
         <Image src={button.icon} style={{ width: iconSize, height: iconSize }} />
       </View>)}
     </View> };
@@ -414,9 +421,9 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       const label = page.part?.trim() || `第${page.page ?? 1}集`, wrapped = measuredLines(label, textWidth, measureFor(17), 2);
       const height = 14.5 + wrapped.length * 17;
       return { height, render: () => <View onPress={busy() ? undefined : () => controller.select(index)} focusable accessibilityRole="button" accessibilityLabel={`${label}${duration ? `，${duration}` : ""}`}
-        class={selected ? "absolute inset-0 rounded-[16] bg-[#23272a] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16] bg-[#1c1f21]"}>
-        <Text class="absolute left-[6] top-[7.75] text-[17px] leading-[17] text-[#f5f5f5]" style={{ width: textWidth }}>{wrapped.join("\n")}</Text>
-        {duration ? <Text class="absolute right-[6] text-[9px] leading-[17] text-[#b6b6b6]" style={{ insetT: (height - 17) / 2 + .5 }}>{duration}</Text> : null}
+        class={selected ? "absolute inset-0 rounded-[16] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16]"} style={{ bgColor: selected ? pal.surfaceVariant : pal.surface }}>
+        <Text class="absolute left-[6] top-[7.75] text-[17px] leading-[17]" style={{ width: textWidth, textColor: pal.onSurface }}>{wrapped.join("\n")}</Text>
+        {duration ? <Text class="absolute right-[6] text-[9px] leading-[17]" style={{ insetT: (height - 17) / 2 + .5, textColor: pal.onSurfaceVariant }}>{duration}</Text> : null}
       </View> };
     });
     const desc = data?.desc?.trim();
@@ -426,18 +433,18 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       const all = measuredLines(desc, inner, measure), canExpand = all.length > 3;
       const shown = expanded() || !canExpand ? all : measuredLines(desc, inner - arrow, measure, 3);
       const height = 12 + shown.length * bodyFont.lineHeight;
-      return [sectionTitle("简介"), { height, render: () => <View onPress={canExpand ? () => setExpanded(value => !value) : undefined} focusable={canExpand} accessibilityRole={canExpand ? "button" : undefined} accessibilityLabel={desc} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+      return [sectionTitle(pal, "简介"), { height, render: () => <View onPress={canExpand ? () => setExpanded(value => !value) : undefined} focusable={canExpand} accessibilityRole={canExpand ? "button" : undefined} accessibilityLabel={desc} class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
         {shown.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * bodyFont.lineHeight, width: inner, height: bodyFont.lineHeight }}>{fontText(bodyFont, line, 0, inner)}</View>)}
-        {canExpand && !expanded() ? <Text class="absolute right-[6] text-[17px] leading-[21] text-[#f5f5f5]" style={{ insetT: height - 6 - 21 }}>▼</Text> : null}
+        {canExpand && !expanded() ? <Text class="absolute right-[6] text-[17px] leading-[21]" style={{ insetT: height - 6 - 21, textColor: pal.onSurface }}>▼</Text> : null}
       </View> }];
     };
     const message = st.error ? String(st.error) : busy() || st.message || (st.offline ? "本地已保存详情" : "");
     return [
       cover, meta, actions,
-      ...(pages.length ? [sectionTitle("分P", `${pages.length} 个`), ...pageEntries] : []),
+      ...(pages.length ? [sectionTitle(pal, "分P", `${pages.length} 个`), ...pageEntries] : []),
       ...description(),
-      ...(SHOW_COMMENT_ENTRY && it?.aid ? [sectionTitle("评论"), surfaceCard("查看评论", cardWidth, ON_SURFACE, () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
-      ...(message ? [surfaceCard(message, cardWidth)] : []),
+      ...(SHOW_COMMENT_ENTRY && it?.aid ? [sectionTitle(pal, "评论"), surfaceCard(pal, "查看评论", cardWidth, pal.onSurface, () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
+      ...(message ? [surfaceCard(pal, message, cardWidth)] : []),
       { height: 50, render: () => <View class="absolute inset-0" /> },
     ];
   });
