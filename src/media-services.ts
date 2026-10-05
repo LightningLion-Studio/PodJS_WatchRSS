@@ -1,3 +1,5 @@
+import {getExternalSavedStore,getDouyinSavedStore} from "./services.ts";
+import {biliExternalItem} from "./core/external-saved.ts";
 import { rsaOaepSha256, bytesToBase64, delay, hostOperation, fileChunks, base64ToBytes, secureStorage, type DownloadResult } from "@podjs/framework/services";
 import { createBiliClient } from "./bili/index.ts";
 import { DouyinClient } from "./douyin/index.ts";
@@ -23,9 +25,10 @@ export const mediaTransport: HttpTransport = {
  }
 };
 const secure={get:async(key:string)=>(await secureStorage.get(key))??null,set:secureStorage.set,delete:secureStorage.delete};
-export const biliClient=createBiliClient({transport:mediaTransport,secureStore:secure,rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
+export const biliClient=createBiliClient({transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
 export const douyinClient=new DouyinClient({
  transport:mediaTransport,
+ savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
  secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
  historyStorage:{get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}}
 });

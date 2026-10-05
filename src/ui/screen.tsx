@@ -37,7 +37,6 @@ import { ShareQrScreen } from "./ShareQrScreen.tsx";
 import { createBiliPlaybackCheckpoint, type BiliPlaybackCheckpointController } from "../bili/playback.ts";
 import { DouyinPlaybackQueue } from "../douyin/playback-queue.ts";
 import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../media/douyin-login.ts";
-import type { DouyinSavedEntry } from "../douyin/index.ts";
 import { ScrollEntries } from "./ScrollEntries.tsx";
 import { authorizeInBrowser } from "../media/browser-auth.ts";
 import { BiliScreen, type BiliRoute } from "./bili/index.tsx";
@@ -58,6 +57,7 @@ import { createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { BackMotion } from "./back-motion.ts";
 import HomeScreen from "./HomeScreen.tsx";
+import { HomeEntryPlacementStore } from "./home-placement.ts";
 import { NotesListScreen, NoteDetailScreen, NoteActionsScreen, type NoteActionsHandle } from "./NotesScreen.tsx";
 import { AdvancedSettingsScreen, SettingsScreen, SpeechSettingsScreen, type SettingsRoute } from "./SettingsScreen.tsx";
 import { SettingsStore, type SettingsState } from "../settings/index.ts";
@@ -121,15 +121,15 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const [channelPlayback,setChannelPlayback]=createSignal<Record<string,{hasPlayableMedia:boolean;continuePlaybackInBackground:boolean}>>({});
   const [originalModes,setOriginalModes]=createSignal<Record<string,boolean>>({});
   const [channels, setChannels] = createSignal<Channel[]>([]);
+  const notesHomePlacement = new HomeEntryPlacementStore().read();
   const [articles, setArticles] = createSignal<Article[]>([]);
-  const [savedVideos,setSavedVideos]=createSignal<DouyinSavedEntry[]>([]);
   const [savedEntries,setSavedEntries]=createSignal<SavedDisplayItem[]>([]);
-  const [savedUndo,setSavedUndo]=createSignal<{item:SavedDisplayItem;video?:DouyinSavedEntry;type:"favorite"|"watchLater"}|null>(null);
+  const [savedUndo,setSavedUndo]=createSignal<{item:SavedDisplayItem;type:"favorite"|"watchLater"}|null>(null);
   let savedUndoTimer:ReturnType<typeof delay>|null=null;
   let savedUndoVersion=0,savedLoadVersion=0;
   onCleanup(()=>savedUndoTimer?.cancel());
   const [article, setArticle] = createSignal<Article | null>(null);
-  const [loading, setLoading] = createSignal(true), [busy, setBusy] = createSignal(false), [error, setError] = createSignal("");
+  const [loading, setLoading] = createSignal(true), [busy, setBusy] = createSignal(false), [homeRefreshing,setHomeRefreshing]=createSignal(false), [error, setError] = createSignal("");
   const [query, setQuery] = createSignal("");
   const [searchResults,setSearchResults]=createSignal<Article[]>([]);
   const [searchLoading,setSearchLoading]=createSignal(false);
@@ -191,43 +191,30 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     try {
       const rss:Article[]=[];
       for(let offset=0;;offset+=24){const part=await props.services.listArticles({saveType:type,offset,pageSize:24});rss.push(...part);if(part.length<24)break;}
-      const videos=await douyinClient.listSaved(type);
-      const entries:SavedDisplayItem[]=[
-        ...rss.map(article=>({key:`rss:${article.id}`,kind:"rss" as const,articleId:article.id,title:article.title,summary:article.excerpt??"暂无摘要",channelTitle:article.channelTitle??"RSS",savedAt:article.savedAt??0,sortOrder:article.saveSortOrder??-(article.savedAt??0)})),
-        ...videos.map(video=>({key:`douyin:${video.awemeId}`,kind:"douyin" as const,awemeId:video.awemeId,title:video.item.description||"抖音视频",summary:video.item.description||"暂无摘要",channelTitle:"抖音",savedAt:video.savedAtMillis,sortOrder:-video.savedAtMillis}))
-      ];
-      entries.sort((a,b)=>a.sortOrder-b.sortOrder||a.key.localeCompare(b.key));
-      let order:string[]=[];
-      try {const stored=JSON.parse(kv.get<string>(`watchrss.saved.order.${type}`)??"[]");if(Array.isArray(stored))order=stored.filter((key):key is string=>typeof key==="string");}catch{}
-      if(order.length){const rank=new Map(order.map((key,index)=>[key,index]));entries.sort((a,b)=>{const ai=rank.get(a.key),bi=rank.get(b.key);return ai===undefined&&bi===undefined?a.sortOrder-b.sortOrder:ai===undefined?-1:bi===undefined?1:ai-bi;});}
-      if(version===savedLoadVersion&&current().page===(type==="favorite"?"saved":"watch-later"))batch(()=>{setArticles(rss);setSavedVideos(videos);setSavedEntries(entries);currentQuery={saveType:type};});
+      const entries:SavedDisplayItem[]=rss.map(article=>({key:`rss:${article.id}`,kind:"rss",articleId:article.id,title:article.title,summary:article.excerpt??"暂无摘要",channelTitle:article.channelTitle??"RSS",savedAt:article.savedAt??0,sortOrder:article.saveSortOrder??-(article.savedAt??0)}));
+      if(version===savedLoadVersion&&current().page===(type==="favorite"?"saved":"watch-later"))batch(()=>{setArticles(rss);setSavedEntries(entries);currentQuery={saveType:type};});
     }catch(e){if(version===savedLoadVersion)setError(String(e));}finally{if(version===savedLoadVersion)setLoading(false);}
   }
   function clearSavedUndo(){savedUndoVersion++;savedUndoTimer?.cancel();savedUndoTimer=null;setSavedUndo(null);}
   async function removeSaved(item:SavedDisplayItem){
     const type=current().page==="saved"?"favorite":"watchLater";
-    const video=item.kind==="douyin"?savedVideos().find(entry=>entry.awemeId===item.awemeId):undefined;
     try {
-      if(item.kind==="rss")await props.services.setSaveState(item.articleId!,type,false);
-      else if(video)await douyinClient.setSaved(video.item,type,false);
-      else throw new Error("保存项目不存在");
-      clearSavedUndo();setSavedUndo({item,video,type});
+      await props.services.setSaveState(item.articleId!,type,false);
+      clearSavedUndo();setSavedUndo({item,type});
       const version=savedUndoVersion;
       savedUndoTimer=delay(3000);void savedUndoTimer.result.then(()=>{if(savedUndoVersion===version)setSavedUndo(null);},()=>{});
       setSavedEntries(entries=>entries.filter(entry=>entry.key!==item.key));
-      if(item.kind==="rss")setArticles(items=>items.filter(article=>article.id!==item.articleId));else setSavedVideos(items=>items.filter(entry=>entry.awemeId!==item.awemeId));
-      const key=`watchrss.saved.order.${type}`;
-      try {const order=JSON.parse(kv.get<string>(key)??"[]");if(Array.isArray(order))kv.set(key,JSON.stringify(order.filter((value:unknown)=>value!==item.key)));}catch{}
+      setArticles(items=>items.filter(article=>article.id!==item.articleId));
     }catch(e){setError(String(e));}
   }
   async function undoSaved(){
     const undo=savedUndo();if(!undo)return;clearSavedUndo();
-    try {if(undo.item.kind==="rss")await props.services.setSaveState(undo.item.articleId!,undo.type,true);else if(undo.video)await douyinClient.setSaved(undo.video.item,undo.type,true);await loadSaved(undo.type);}catch(e){setError(String(e));}
+    try {await props.services.setSaveState(undo.item.articleId!,undo.type,true);await loadSaved(undo.type);}catch(e){setError(String(e));}
   }
   async function reorderSaved(items:SavedDisplayItem[]){
-    const type=current().page==="saved"?"favorite":"watchLater",key=`watchrss.saved.order.${type}`;
-    try {setSavedEntries(items);kv.set(key,JSON.stringify(items.map(item=>item.key)));await props.services.reorderSavedArticles(type,items.filter(item=>item.kind==="rss").map(item=>item.articleId!));}
-    catch(e){kv.delete(key);setError(String(e));await loadSaved(type);}
+    const type=current().page==="saved"?"favorite":"watchLater";
+    try {setSavedEntries(items);await props.services.reorderSavedArticles(type,items.map(item=>item.articleId!));}
+    catch(e){setError(String(e));await loadSaved(type);}
   }
   async function loadFeedArticles(channelId:string,limit=feedVisibleCount(),initial=false) {
     const version=++feedRequestVersion;
@@ -264,6 +251,17 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     try { const full=await props.services.getArticle(item.id); if(current()===origin){setArticle(full??item);setPage("rss-actions");} }
     catch(e){setError(String(e));} finally{setBusy(false);}
   }
+  async function deleteArticle() {
+    const selected=article();if(!selected||busy())return;
+    setBusy(true);
+    try {
+      await props.services.deleteArticle(selected.id);
+      setArticles(items=>items.filter(item=>item.id!==selected.id));
+      popPage(true);
+      setArticle(null);
+      await loadChannels();
+    } catch(e){setError(String(e));}finally{setBusy(false);}
+  }
   async function saveArticleState(type:"favorite"|"watchLater",saved:boolean,navigateBack=true) {
     const selected=article(); if(!selected||busy())return;
     setBusy(true);
@@ -289,11 +287,13 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     try { const [enabled,playback]=await Promise.all([props.services.getChannelOriginalMode(id),props.services.getChannelPlaybackSettings(id)]);setOriginalModes(m=>({...m,[id]:enabled}));setChannelPlayback(m=>({...m,[id]:playback}));if(current()===origin)setPage("channel-settings",{channelId:id}); }
     catch(e){setError(String(e));}finally{setBusy(false);}
   }
-  async function channelAction(id:string,action:"original"|"background"|"read"|"delete"|"clear") {
+  async function channelAction(id:string,action:"original"|"background"|"move"|"pin"|"read"|"delete"|"clear") {
     if(busy())return;setBusy(true);setError("");
     try {
       if(action==="original") {const enabled=!originalModes()[id];await props.services.setChannelOriginalMode(id,enabled);setOriginalModes(m=>({...m,[id]:enabled}));setChannels(items=>items.map(c=>c.id===id?{...c,useOriginalContent:enabled}:c));}
       else if(action==="background") {const value=channelPlayback()[id];if(!value?.hasPlayableMedia)return;const enabled=!value.continuePlaybackInBackground;await props.services.setChannelBackgroundPlayback(id,enabled);setChannelPlayback(m=>({...m,[id]:{...value,continuePlaybackInBackground:enabled}}));}
+      else if(action==="move") {await props.services.moveChannelToTop(id);setChannels(await props.services.listChannels());}
+      else if(action==="pin") {const channel=channels().find(item=>item.id===id);if(!channel)return;await props.services.setChannelPinned(id,!channel.isPinned);setChannels(await props.services.listChannels());}
       else if(action==="read") {await props.services.markChannelRead(id);setArticles(items=>items.map(a=>a.channelId===id?{...a,read:true}:a));setChannels(items=>items.map(c=>c.id===id?{...c,unreadCount:0}:c));}
       else if(action==="clear") {await props.services.clearLocalContent(id);setArticles(items=>items.filter(a=>a.channelId!==id));setChannels(items=>items.map(c=>c.id===id?{...c,unreadCount:0}:c));setChannelPlayback(m=>({...m,[id]:{...m[id],hasPlayableMedia:false}}));}
       else {await props.services.deleteChannel(id);setChannels(items=>items.filter(c=>c.id!==id));setArticles(items=>items.filter(a=>a.channelId!==id));setStack([{page:"home"}]);}
@@ -318,7 +318,7 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     }catch(e){if(version===searchRequestVersion&&current().page==="search"&&current().channelId===channelId)setError(String(e));}
     finally{if(version===searchRequestVersion)setSearchLoading(false);}
   }
-  async function refresh() { setBusy(true); setError(""); try { await props.services.refresh(current().channelId); if(page()==="home") await loadChannels(); else if(page()==="articles"&&current().channelId)await loadFeedArticles(current().channelId!,feedVisibleCount());else if(page()==="saved"||page()==="watch-later")await loadSaved(page()==="saved"?"favorite":"watchLater");else if(page()==="search"&&current().channelId)await searchChannelArticles(current().channelId!,query());else await loadArticles(currentQuery); } catch (e) { setError(String(e)); } finally { setBusy(false); } }
+  async function refresh() { const refreshAll=page()==="home";setBusy(true);if(refreshAll)setHomeRefreshing(true);setError(""); try { await props.services.refresh(current().channelId); if(page()==="home") await loadChannels(); else if(page()==="articles"&&current().channelId)await loadFeedArticles(current().channelId!,feedVisibleCount());else if(page()==="saved"||page()==="watch-later")await loadSaved(page()==="saved"?"favorite":"watchLater");else if(page()==="search"&&current().channelId)await searchChannelArticles(current().channelId!,query());else await loadArticles(currentQuery); } catch (e) { setError(String(e)); } finally { if(refreshAll)setHomeRefreshing(false);setBusy(false); } }
   const pendingFeedUpdates=new Set<string>();let updatingFeed=false,pendingLibraryUpdate=false;
   function updateFeedWhenSettled(){
     const origin=current(),id=origin.channelId,snapshot=currentQuery;
@@ -466,7 +466,7 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     <Show when={busy()}><Text class="absolute right-[14] top-[18] text-xs text-[#45d6a7]">处理中</Text></Show>
     <View class={page()==="video" ? "absolute left-[0] right-[0] bottom-[0] overflow-hidden" : "absolute left-[0] right-[0] bottom-[0] overflow-hidden bg-[#000000]"} style={{insetT:selfTitled()?0:42}}>
       <Show when={!active() || !loading() || page()==="saved" || page()==="watch-later"} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#9aa9c4]">加载中…</Text></View>}>
-        <Show when={page() === "home"}><HomeScreen width={width} channels={channels()} height={height} onProfile={() => void go("profile")} onNotes={() => void go("notes")} onRecommend={() => void go("recommendations")} onAdd={() => void doAdd()} onChannel={channel => { if(channel.url==="builtin:bili")void biliNavigate({name:"entry"});else if(channel.url==="builtin:douyin")douyinNavigate({name:"entry"}); else { setFeedVisibleCount(12);setFeedHasMore(false);setPage("articles",{channelId:channel.id});void loadFeedArticles(channel.id,12,true); } }} onBeian={() => informationNavigate("beian")} ref={v => entry.list = v} /></Show>
+        <Show when={page() === "home"}><HomeScreen width={width} channels={channels()} notesPlacement={notesHomePlacement} height={height} refreshing={homeRefreshing()} busy={busy()} onRefresh={()=>void refresh()} onProfile={() => void go("profile")} onNotes={() => void go("notes")} onRecommend={() => void go("recommendations")} onAdd={() => void doAdd()} onChannel={channel => { if(channel.url==="builtin:bili")void biliNavigate({name:"entry"});else if(channel.url==="builtin:douyin")douyinNavigate({name:"entry"}); else { setFeedVisibleCount(12);setFeedHasMore(false);setPage("articles",{channelId:channel.id});void loadFeedArticles(channel.id,12,true); } }} onMoveChannelToTop={channel=>channelAction(channel.id,"move")} onToggleChannelPinned={channel=>channelAction(channel.id,"pin")} onMarkChannelRead={channel=>channelAction(channel.id,"read")} onDeleteChannel={channel=>channelAction(channel.id,"delete")} onBeian={() => informationNavigate("beian")} ref={v => entry.list = v} /></Show>
         <Show when={page() === "add-rss"}><AddRssScreen width={width} height={height} active={active()} initialUrl={entry.addUrl??""} preview={props.services.previewChannel} confirm={props.services.confirmAddChannel} input={props.services.input} openInlineInput={props.services.openInlineInput} onAdded={channel=>void openAddedChannel(channel).catch(error=>setError(String(error)))} onExisting={channel=>void openAddedChannel(channel).catch(error=>setError(String(error)))} ref={value=>{entry.list=value;entry.internalBack=value.onRootBack;}}/></Show>
         <Show when={page() === "profile"}><ProfileScreen height={height} onSelect={i => { if (i === 0) void go("account-status"); else if (i === 1) void go("saved"); else if (i === 2) void go("watch-later"); else if (i === 3) void go("phone-connection"); else if (i === 4) void go("settings"); else if(i===5) informationNavigate("about"); else if(i===6) informationNavigate("contact-developer"); else setError("此页面尚未迁移"); }} onBeian={() => informationNavigate("beian")} ref={v => entry.list = v} /></Show>
         <Show when={page() === "account-status"}><AccountStatusScreen width={width} height={height} active={active} load={props.services.readAccountStatus} subscribe={props.services.subscribeAccountStatus} onError={setError} ref={value=>{entry.list=value;entry.internalBack=value.onRootBack;}}/></Show>
@@ -478,11 +478,11 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
           <Show when={page()==="channel-share"}><ShareQrScreen width={width} height={height} title={c().title} url={c().url} topHint={CHANNEL_SHARE_QR_HINT} onClose={()=>popPage()} onError={setError}/></Show>
         </>}</Show>
         <Show when={page() === "articles"}><RssFeedScreen width={width} height={height} active={active()} originalEnabled={channels().find(c=>c.id===entry.channelId)?.useOriginalContent} onOriginalPaused={paused=>{if(entry.channelId)props.services.setOriginalUpdatesPaused(entry.channelId,paused);}} onOriginalContents={ids=>{if(entry.channelId)void props.services.requestOriginalContents(entry.channelId,ids).catch(()=>{});}} title={channels().find(c=>c.id===entry.channelId)?.title??"文章"} onInfo={()=>{if(entry.channelId)setPage("channel-detail",{channelId:entry.channelId});}} items={articles()} refreshing={busy()} loadingMore={feedLoadingMore()} canNext={feedHasMore()} onOpen={a=>void openArticle(a)} onActions={a=>void openArticleActions(a)} onFavorite={a=>void toggleFeedSave(a,"favorite")} onWatchLater={a=>void toggleFeedSave(a,"watchLater")} onRefresh={()=>void refresh()} onNext={loadMoreFeedArticles} ref={v=>entry.list=v}/></Show>
-        <Show when={page() === "saved" || page() === "watch-later"}><SavedItemsScreen width={width} height={height} active={active()} type={page()==="saved"?"favorite":"watchLater"} items={savedEntries()} loading={loading()} undoVisible={!!savedUndo()} onOpen={item=>{if(item.kind==="rss"){const value=articles().find(article=>article.id===item.articleId);if(!value)return;const bili=value.link?.includes("/video/")?biliVideoTarget(value.link):null;if(bili)void biliNavigate({name:"detail",...bili});else void openArticle(value,page()==="watch-later");}else if(item.awemeId)void douyinNavigate({name:"detail",awemeId:item.awemeId});}} onRemove={item=>void removeSaved(item)} onUndo={()=>void undoSaved()} onReorder={items=>void reorderSaved(items)} onError={setError} ref={v=>entry.list=v}/></Show>
+        <Show when={page() === "saved" || page() === "watch-later"}><SavedItemsScreen width={width} height={height} active={active()} type={page()==="saved"?"favorite":"watchLater"} items={savedEntries()} loading={loading()} undoVisible={!!savedUndo()} onOpen={item=>{if(item.kind==="rss"){const value=articles().find(article=>article.id===item.articleId);if(!value)return;const bili=value.link?.includes("/video/")?biliVideoTarget(value.link):null;const douyin=douyinVideoTarget(value.link);if(bili)void biliNavigate({name:"detail",...bili});else if(douyin?.awemeId)void douyinNavigate({name:"detail",awemeId:douyin.awemeId});else void openArticle(value,page()==="watch-later");}else if(item.awemeId)void douyinNavigate({name:"detail",awemeId:item.awemeId});}} onRemove={item=>void removeSaved(item)} onUndo={()=>void undoSaved()} onReorder={items=>void reorderSaved(items)} onError={setError} ref={v=>entry.list=v}/></Show>
         <Show when={page() === "bili"}><BiliScreen onShare={share} width={width} height={height} route={entry.biliRoute??{name:"entry"}} client={biliClient} settings={{showOriginalContent:true,originalContentEnabled:biliOriginal(),onOriginalContentChange:value=>mediaSetting("bili","original-content",value,setBiliOriginal),showContinuePlaybackInBackground:true,continuePlaybackInBackgroundEnabled:biliBackground(),onContinuePlaybackInBackgroundChange:value=>mediaSetting("bili","background-playback",value,setBiliBackground),deleteEnabled:channels().some(item=>item.url==="builtin:bili"),onDeleteChannel:()=>deleteBuiltin("bili")}} onNavigate={route=>void biliNavigate(route).catch(e=>setError(String(e)))} onBack={()=>popPage()} input={(title,value)=>props.services.input(title,value)} onError={setError} onOpenUrl={url=>void openUrl(url)} ref={v=>{if(v.scroller)entry.list={scroller:v.scroller};entry.internalBack=v.onRootBack;}}/></Show>
         <Show when={page() === "douyin"}><DouyinScreen onShare={share} width={width} height={height} route={entry.douyinRoute??{name:"entry"}} client={douyinClient} settings={{originalContentEnabled:douyinOriginal(),onOriginalContentChange:value=>mediaSetting("douyin","original-content",value,setDouyinOriginal),continuePlaybackInBackgroundEnabled:douyinBackground(),onContinuePlaybackInBackgroundChange:value=>mediaSetting("douyin","background-playback",value,setDouyinBackground),onDeleteChannel:()=>deleteBuiltin("douyin")}} onNavigate={douyinNavigate} onBack={()=>popPage()} onPlay={douyinPlay} onRequestQrLogin={()=>void douyinLogin()} input={(title,value)=>props.services.input(title,value)} onUnsupported={setError} ref={v=>entry.list=v}/></Show>
         <Show when={page() === "video" && entry.playback}><VideoPlayerScreen width={width} height={height} source={active()?(playingSource()??entry.playback!):entry.playback!} active={active()} offset={active()?backOffset():0} round={metrics.shape==="round"} onOpenWeb={()=>void openUrl((playingSource()??entry.playback)?.webUrl??"")} onProgress={(p,d)=>void entry.checkpoint?.onProgress(p,d).catch(e=>setError(String(e)))} onCheckpoint={(t,p,d)=>void entry.checkpoint?.onCheckpoint(t,p,d).catch(e=>setError(String(e)))} onNext={entry.queue?()=>changeDouyinVideo(entry,"next"):undefined} onPrevious={entry.queue?()=>changeDouyinVideo(entry,"previous"):undefined} ref={handle=>entry.player=handle}/></Show>
-        <Show when={page()==="rss-actions" && article()}>{a=><RssActionsScreen width={width} height={height} article={a()} systemShare={settings().shareUseSystem&&systemShareAvailable()} busy={busy()} onBack={()=>popPage()} onShare={()=>share({origin:"detail",title:wireFields.trim(a().title),link:wireFields.trim(a().link??"")},()=>setPage("rss-share"))} onSave={(type,saved)=>void saveArticleState(type,saved)} ref={v=>entry.list=v}/>}</Show>
+        <Show when={page()==="rss-actions" && article()}>{a=><RssActionsScreen width={width} height={height} article={a()} channelUrl={channels().find(c=>c.id===a().channelId)?.url} onDelete={()=>void deleteArticle()} systemShare={settings().shareUseSystem&&systemShareAvailable()} busy={busy()} onBack={()=>popPage()} onShare={()=>share({origin:"detail",title:wireFields.trim(a().title),link:wireFields.trim(a().link??"")},()=>setPage("rss-share"))} onSave={(type,saved)=>void saveArticleState(type,saved)} ref={v=>{entry.list=v;entry.internalBack=v.goBack;}}/>}</Show>
         <Show when={page()==="rss-share" && article()}>{a=><ShareQrScreen width={width} height={height} title={a().title} url={a().link??""} onClose={()=>popPage()} onError={setError}/>}</Show>
         <Show when={page()==="settings-llm-usage"}><LlmUsageScreen width={width} height={height} load={()=>props.services.readSummaryUsage!()} clear={()=>props.services.clearSummaryUsage!()} onBack={()=>popPage()} onError={setError} ref={v=>{entry.list=v;entry.internalBack=v.onRootBack;}}/></Show>
         <Show when={page()==="settings-reader-presets"&&presetState()}>{state=><ReaderPresetScreen width={width} height={height} state={state()} active={active} onMode={mode=>updatePreset(()=>presetStore.setThemeMode(mode))} onSelect={(kind,id)=>updatePreset(()=>presetStore.selectPreset(kind,id))} onSchedule={patch=>updatePreset(()=>presetStore.updateSchedule(patch))} onLocation={(latitude,longitude)=>updatePreset(()=>presetStore.setSunLocation(latitude,longitude))} onError={setError} ref={value=>{entry.list=value;entry.internalBack=value.goBack;}}/>}</Show>

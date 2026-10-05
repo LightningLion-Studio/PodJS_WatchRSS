@@ -370,7 +370,7 @@ test("empty original is retryable and never replaces the RSS content",async()=>{
  }finally{feedBytes=saved;}
 });
 
-test("channel mutations preserve other channels and dependent state is removed only on delete", async()=>{
+  test("channel mutations preserve other channels and dependent state is removed only on delete", async()=>{
   database.exec("PRAGMA foreign_keys=ON");
   feedBytes=new TextEncoder().encode(feed(2));
   const a=await services.services.addChannel("https://example.test/channel-a");
@@ -395,7 +395,48 @@ test("channel mutations preserve other channels and dependent state is removed o
   expect(database.query("SELECT count(*) n FROM source_preferences WHERE channel_id=?").get(Number(a.id))).toEqual({n:0});
   expect(database.query("SELECT count(*) n FROM article_saved_states WHERE article_id=?").get(Number(article.id))).toEqual({n:0});
   expect(await services.services.listArticles({channelId:b.id})).toHaveLength(2);
-});
+  });
+  test("home channels use native pinned and descending logical order",async()=>{
+    await services.services.listChannels();
+    const rows=[
+      ["https://home-order.example/older","older",10,0],
+      ["https://home-order.example/newer","newer",30,0],
+      ["https://home-order.example/pinned","pinned",20,1],
+      ["https://home-order.example/phone","phone",-40,0],
+    ] as const;
+    try{
+      for(const [url,title,order,pinned] of rows)database.query("INSERT INTO channels(url,title,created_at,sort_order,is_pinned) VALUES(?,?,1,?,?)").run(url,title,order,pinned);
+      database.query("INSERT INTO sync_source_states VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(rows[3][0],"phone","phone","",null,null,1,40,40,0,0,0);
+      const channels=(await services.services.listChannels()).filter(channel=>channel.url.startsWith("https://home-order.example/"));
+      expect(channels.map(channel=>[channel.title,channel.sortOrder,channel.isPinned])).toEqual([
+        ["pinned",20,true],["phone",40,false],["newer",30,false],["older",10,false],
+      ]);
+    }finally{
+      database.query("DELETE FROM channels WHERE url LIKE 'https://home-order.example/%'").run();
+      database.query("DELETE FROM sync_source_states WHERE url LIKE 'https://home-order.example/%'").run();
+    }
+  });
+  test("refresh all skips builtins, continues after failure, and reports the first error",async()=>{
+    await services.services.listChannels();
+    const first="https://refresh-all.example/a",second="https://refresh-all.example/b";
+    database.query("INSERT INTO channels(url,title,created_at,sort_order) VALUES(?,?,1,0)").run(first,"A");
+    database.query("INSERT INTO channels(url,title,created_at,sort_order) VALUES(?,?,1,0)").run(second,"B");
+    feedResponses.set(first,[Promise.resolve().then(()=>{throw new Error("first refresh failed");})]);
+    feedResponses.set(second,[Promise.resolve(new TextEncoder().encode(feed(1)))]);
+    const before=feedRequests.length;
+    try{
+      await expect(services.services.refresh()).rejects.toThrow("first refresh failed");
+      const requests=feedRequests.slice(before);
+      expect(requests.filter(url=>url===first||url===second)).toEqual([first,second]);
+      expect(requests.some(url=>url.startsWith("builtin:"))).toBe(false);
+    }finally{
+      for(const url of [first,second]){
+        const row=database.query("SELECT id FROM channels WHERE url=?").get(url) as {id:number}|null;
+        if(row){database.query("DELETE FROM articles WHERE channel_id=?").run(row.id);await services.services.deleteChannel(String(row.id));}
+      }
+      feedResponses.delete(first);feedResponses.delete(second);
+    }
+  });
 
 test("deleting a persisted Bili channel clears only its provider cache",async()=>{
   const channel=database.query("SELECT id FROM channels WHERE url='builtin:bili'").get() as {id:number};
@@ -522,4 +563,24 @@ test("imported EPUB and TXT novel chapters survive refresh without network reque
     expect(await services.services.listArticles({channelId:String(id)})).toHaveLength(0);
     expect(database.query("SELECT count(*) n FROM local_article_deletions WHERE channel_url=?").get(url)).toEqual({n:2});
   }
+});
+
+test("single imported article deletion service cleans owned files and leaves its sibling and channel",async()=>{
+  const now=Date.now(),url='https://watchrss.local/import-epub/c2-single-delete';
+  database.query('INSERT INTO channels(url,title,created_at) VALUES(?,?,?)').run(url,'C2',now);
+  const channel=database.query('SELECT id FROM channels WHERE url=?').get(url) as {id:number};
+  database.query("INSERT INTO articles(channel_id,title,content,link,dedup_key,fetched_at) VALUES(?,'Delete','watchrss-watch-content:c2-body.txt',?,'c2-delete',?)").run(channel.id,url+'/1',now);
+  const item=database.query("SELECT id FROM articles WHERE dedup_key='c2-delete'").get() as {id:number};
+  database.query("INSERT INTO articles(channel_id,title,content,link,dedup_key,fetched_at) VALUES(?,'Keep','body',?,'c2-keep',?)").run(channel.id,url+'/2',now);
+  downloaded.set('article_content/c2-body.txt',new TextEncoder().encode('body'));
+  downloaded.set(`offline/rss/${item.id}/image.png`,new Uint8Array([1]));
+  await services.services.deleteArticle(String(item.id));
+  expect(await services.services.getArticle(String(item.id))).toBeNull();
+  expect(downloaded.has('article_content/c2-body.txt')).toBe(false);
+  expect(downloaded.has(`offline/rss/${item.id}/image.png`)).toBe(false);
+  expect((await services.services.listArticles({channelId:String(channel.id)})).map(a=>a.title)).toEqual(['Keep']);
+  expect((await services.services.listChannels()).some(c=>c.id===String(channel.id))).toBe(true);
+  const before=database.query("SELECT count(*) n FROM sync_change_log WHERE reason='delete'").get();
+  await services.services.deleteArticle(String(item.id));
+  expect(database.query("SELECT count(*) n FROM sync_change_log WHERE reason='delete'").get()).toEqual(before);
 });

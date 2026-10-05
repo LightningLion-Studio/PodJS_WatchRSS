@@ -1,9 +1,11 @@
+import {DeleteConfirmDialog} from "./DeleteConfirmDialog.tsx";
+import {isDeletableLocalContentChannel} from "../core/imported-content.ts";
 import {shareActionEnabled} from "../sharing/policy.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { measuredLines, watchTitleLines } from "../reader/measured-text.ts";
 import { createGesture } from "@pocketjs/framework/gesture";
-import { For, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import {onFrame} from "@pocketjs/framework/lifecycle";
 import type { Scroller } from "@pocketjs/framework/kinetics";
@@ -82,12 +84,15 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
     if(props.canNext&&!props.loadingMore&&last>=props.items.length&&lastAutoLoadCount!==props.items.length){lastAutoLoadCount=props.items.length;props.onNext();}
   }} onScrollStateChange={value=>{setScrolling(value);if(value)setOpenSwipeId(null);props.onOriginalPaused?.(value);}} onRefresh={props.onRefresh} ref={props.ref}/>;
 }
-export function RssActionsScreen(props:{width:number;height:number;article:Article;systemShare?:boolean;busy:boolean;onSave:(type:"favorite"|"watchLater",saved:boolean)=>void;onShare:()=>void;onBack:()=>void;ref?:(value:{scroller:Scroller})=>void}) {
+export function RssActionsScreen(props:{width:number;height:number;article:Article;channelUrl?:string;onDelete:()=>void;systemShare?:boolean;busy:boolean;onSave:(type:"favorite"|"watchLater",saved:boolean)=>void;onShare:()=>void;onBack:()=>void;ref?:(value:{scroller:Scroller;goBack:()=>boolean})=>void}) {
+  const [confirm,setConfirm]=createSignal(false);
+  const goBack=()=>{if(!confirm())return false;if(props.busy)return true;setConfirm(false);return true;};
   const entries=()=>[
     {label:props.article.saved?"取消收藏":"收藏",act:()=>props.onSave("favorite",!props.article.saved),enabled:!props.busy},
     {label:props.article.watchLater?"取消稍后再看":"稍后再看",act:()=>props.onSave("watchLater",!props.article.watchLater),enabled:!props.busy},
     {label:"分享",act:props.onShare,enabled:!props.busy&&shareActionEnabled(props.article.title,props.article.link,!!props.systemShare)},
+    ...(isDeletableLocalContentChannel(props.channelUrl)?[{label:"删除",act:()=>setConfirm(true),enabled:!props.busy}]:[]),
     {label:"取消",act:props.onBack,enabled:!props.busy}
   ].map(item=>({height:48,render:()=> <View onPress={item.enabled?item.act:undefined} focusable={item.enabled} class="absolute top-[0] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center" style={{width:Math.min(160,props.width-44),insetL:Math.max(0,(props.width-44-160)/2)}}><Text class={item.enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#939393]"}>{item.label}</Text></View>}));
-  return <ScrollEntries height={props.height} entries={entries()} padding={22} verticalPadding={22} gap={8} ref={props.ref}/>;
+  return <><ScrollEntries height={props.height} entries={entries()} padding={22} verticalPadding={22} gap={8} inputActive={()=>!confirm()&&!props.busy} ref={value=>props.ref?.({...value,goBack})}/><Show when={confirm()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除内容" message="删除后会从本机和下次同步中移除此内容" busy={props.busy} onCancel={()=>setConfirm(false)} onConfirm={props.onDelete}/></Show></>;
 }

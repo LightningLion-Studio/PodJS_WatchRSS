@@ -1,6 +1,7 @@
 import {BUILTIN_CHANNELS} from './builtin-channels.ts';
 
 export const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`,
   `CREATE TABLE IF NOT EXISTS sync_library_revision (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)`,
   `INSERT OR IGNORE INTO sync_library_revision(id,revision) VALUES(1,0)`,
   `CREATE TABLE IF NOT EXISTS sync_article_deletions (article_id TEXT PRIMARY KEY,url TEXT NOT NULL,changed_at INTEGER NOT NULL,source_device_id TEXT NOT NULL,source_order TEXT NOT NULL)`,

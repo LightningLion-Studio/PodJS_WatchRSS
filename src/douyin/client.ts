@@ -16,11 +16,11 @@ const fail=<T>(code:"NOT_LOGGED_IN"|"REQUEST_FAILED"|"PARSE_FAILED"|"UNSUPPORTED
 export class DouyinClient {
   private readonly now:()=>number;
   private readonly signer:DouyinSigner;
-  private readonly saved:DouyinSavedStore;
+  private readonly saved:NonNullable<DouyinClientOptions["savedStore"]>;
   private readonly feedCache=new Map<string,{item:DouyinItem;resolvedAtMillis:number}>();
   private feedCursor:string|null=null;
   private feedHasMore=false;
-  constructor(private readonly options:DouyinClientOptions){this.now=options.now??Date.now;this.signer=options.signer??new ABogusSigner();this.saved=new DouyinSavedStore(options.savedStorage??options.historyStorage??options.secureStorage,this.now);}
+  constructor(private readonly options:DouyinClientOptions){this.now=options.now??Date.now;this.signer=options.signer??new ABogusSigner();this.saved=options.savedStore??new DouyinSavedStore(options.savedStorage??options.historyStorage??options.secureStorage,this.now);}
   async readCookie(){return (await this.options.secureStorage.get(COOKIE_KEY))?.trim()||null;}
   async isLoggedIn(){return (await this.readCookie())!==null;}
   private clearFeedCache(){this.feedCache.clear();this.feedCursor=null;this.feedHasMore=false;}

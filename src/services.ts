@@ -1,3 +1,6 @@
+import {ImportedArticleDeletion} from "./core/imported-article-deletion.ts";
+import {ExternalSavedStore} from "./core/external-saved.ts";
+import {DouyinSavedStore} from "./douyin/saved.ts";
 import {readTokenUsageForSync} from './sync/token-usage.ts';
 import {builtinForInput,type BuiltinChannel} from './core/builtin-channels.ts';
 import {managedCache} from './cache/host.ts';
@@ -5,6 +8,7 @@ import {readSavedLinks,type SavedLinkType} from './sync/saved-links.ts';
 import {SqlLibrarySessionRepository,type RemovedLibraryContent} from "./sync/library-repository.ts";
 import {importedTextWriter} from "./reader/imported-text-storage.ts";
 import {SqlSourceSyncStore} from "./sync/source-store.ts";
+import {SqlLocalRssActions} from "./sync/local-rss-actions.ts";
 import {ensureSyncDevice,prepareLocalSaveAlias} from "./sync/local-identity.ts";
 import {hostArticleBodyCodec,hostSyncText} from "./sync/article-body-host.ts";
 import {SqlReadingProgressStore} from "./reader/sql-progress.ts";
@@ -45,12 +49,18 @@ export const db: SqlDatabase = {
   transaction: statements => sqlite.transaction(statements as { sql: string; params?: (string | number | null)[] }[]),
   transactionChanges: statements => sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]),
 };
+const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
+const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
+export async function getExternalSavedStore(){await init();return externalSavedStore;}
+export async function getDouyinSavedStore(){await init();return douyinSavedStore;}
 export const memoRepository = new MemoRepository(db, "podjs-watch");
 let ready: Promise<void> | undefined;
 function init(): Promise<void> { return ready ??= (async()=>{
   const fresh=!(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")).length;
   await initializeSchema(db,{seedBuiltinChannels:fresh});
   await ensureSyncDevice(db,async()=>base64ToBytes((await hostOperation<{bytesBase64:string}>("crypto.random",{bytes:16}).result).bytesBase64));
+  // Retry committed deletions after process interruption; keep failed work queued.
+  await new ImportedArticleDeletion(db,hostSyncText,hostArticleBodyCodec,fileChunks,itemId=>originalCache.cancelItems([String(itemId)])).cleanupPending().catch(()=>{});
   // Native seeds only on database creation. Never revive a channel deleted from an existing library.
   const legacyHidden=kv.get<unknown>('media.hidden-channels');
   if(Array.isArray(legacyHidden)){
@@ -61,6 +71,7 @@ function init(): Promise<void> { return ready ??= (async()=>{
     }
     kv.delete('media.hidden-channels');
   }
+  await douyinSavedStore.migrate();
 })().catch(error => { ready = undefined; throw error; }); }
 async function insertBuiltin(builtin:BuiltinChannel,now=Date.now()):Promise<import('./ui/service.ts').Channel>{
   const existing=(await db.query("SELECT id,url,title,description FROM channels WHERE url=?",[builtin.url]))[0];
@@ -96,6 +107,7 @@ async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string
 }
 const sourceSync = new SqlSourceSyncStore(db,{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")});
 const repo = new WatchRssRepository(db, fetchFeedText, hydrateStoredContent,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec),async id=>{const device=(await db.query("SELECT device_id FROM sync_local_identity WHERE id=1"))[0];if(!device)throw new Error("同步身份未初始化");return sourceSync.localDeleteStatements(id,String(device.device_id));});
+const localRssActions = new SqlLocalRssActions(db,hostSyncText,hostArticleBodyCodec);
 const importedTextStore = new ImportedTextStore({
   stat: path => fileChunks.stat(path),
   read: async (path,offset,maxBytes) => base64ToBytes((await fileChunks.read(path,offset,maxBytes)).dataBase64),
@@ -136,8 +148,11 @@ export const services: AppServices = {
   async setChannelBackgroundPlayback(id,enabled) {await init();await db.execute("INSERT INTO source_media_preferences(channel_id,continue_in_background) VALUES(?,?) ON CONFLICT(channel_id) DO UPDATE SET continue_in_background=excluded.continue_in_background",[Number(id),enabled?1:0]);},
   async getChannelOriginalMode(id) { await init(); return (await repo.getSourcePreferences(Number(id))).useOriginalContent; },
   async setChannelOriginalMode(id,enabled) { await init(); await repo.setSourcePreferences(Number(id),{useOriginalContent:enabled}); void refreshChannel(id,true).catch(error=>emitChannel({id,kind:"error",message:String(error)})); },
-  async markChannelRead(id) { await init(); await db.execute("UPDATE articles SET is_read=1 WHERE channel_id=?",[Number(id)]); },
+  async moveChannelToTop(id) { await init(); await localRssActions.moveChannelToTop(Number(id)); },
+  async setChannelPinned(id,pinned) { await init(); await localRssActions.setChannelPinned(Number(id),pinned); },
+  async markChannelRead(id) { await init(); await localRssActions.markChannelRead(Number(id)); },
   async deleteChannel(id) { await init(); const channel=(await db.query('SELECT id,url FROM channels WHERE id=?',[Number(id)]))[0];if(!channel)return;const itemIds=(await db.query('SELECT id FROM articles WHERE channel_id=?',[Number(id)])).map(row=>Number(row.id));const job=refreshJobs.get(id);if(job){job.cancelled=true;job.cancel?.();}originalCache.cancelChannel(id);await repo.removeChannel(Number(id));await cleanupRemovedContent({itemIds,channels:[{id:Number(channel.id),url:String(channel.url)}]}); },
+  async deleteArticle(id) { await init();await new ImportedArticleDeletion(db,hostSyncText,hostArticleBodyCodec,fileChunks,itemId=>originalCache.cancelItems([String(itemId)])).delete(Number(id));emitChannel({id:"*",kind:"library"}); },
   async clearLocalContent(id) {
     await init();
     const row=(await db.query("SELECT url FROM channels WHERE id=?",[Number(id)]))[0];
@@ -153,7 +168,12 @@ export const services: AppServices = {
   setOriginalUpdatesPaused(id,paused) { originalCache.setPaused(id,paused); },
   async requestOriginalContents(id,articles) { await init();const channel=(await db.query('SELECT url FROM channels WHERE id=?',[Number(id)]))[0];if(!channel||isImportedContentUrl(String(channel.url)))return;await originalCache.prefetch(id,articles); },
   subscribeChannel(listener) { channelListeners.add(listener);return ()=>channelListeners.delete(listener); },
-  async listChannels() { await init(); return (await db.query(`SELECT c.*,COALESCE(p.use_original_content,0) use_original_content, (SELECT COUNT(*) FROM articles a WHERE a.channel_id=c.id AND a.is_read=0) unread_count FROM channels c LEFT JOIN source_preferences p ON p.channel_id=c.id ORDER BY sort_order,title`)).map(r => ({ id:String(r.id),title:String(r.title),url:String(r.url),description:r.description == null ? null : String(r.description),imageUrl:r.image_url == null ? null : String(r.image_url),isPinned:Boolean(Number(r.is_pinned)),useOriginalContent:Boolean(Number(r.use_original_content)),lastFetchedAt:r.last_fetched_at == null ? null : Number(r.last_fetched_at),unreadCount:Number(r.unread_count) })); },
+  async listChannels() { await init(); return (await db.query(`SELECT c.*,COALESCE(p.use_original_content,0) use_original_content,
+    CASE WHEN s.sort_order IS NOT NULL THEN s.sort_order WHEN c.sort_order<0 THEN -c.sort_order ELSE c.sort_order END logical_sort_order,
+    (SELECT COUNT(*) FROM articles a WHERE a.channel_id=c.id AND a.is_read=0) unread_count
+    FROM channels c LEFT JOIN source_preferences p ON p.channel_id=c.id
+    LEFT JOIN sync_source_states s ON s.url=c.url AND s.deleted=0
+    ORDER BY c.is_pinned DESC,logical_sort_order DESC,c.created_at DESC`)).map(r => ({ id:String(r.id),title:String(r.title),url:String(r.url),description:r.description == null ? null : String(r.description),imageUrl:r.image_url == null ? null : String(r.image_url),isPinned:Boolean(Number(r.is_pinned)),sortOrder:Number(r.logical_sort_order),createdAt:Number(r.created_at),useOriginalContent:Boolean(Number(r.use_original_content)),lastFetchedAt:r.last_fetched_at == null ? null : Number(r.last_fetched_at),unreadCount:Number(r.unread_count) })); },
   async listArticles(query: ArticleQuery = {}) {
     await init();
     const conditions: string[] = [], params: unknown[] = [];
@@ -260,7 +280,16 @@ export const services: AppServices = {
     pendingAddPreviews.delete(token);
     return {id:String(channel.id),url:channel.url,title:result.channel.title,description:result.channel.description};
   },
-  async refresh(channelId) { await init(); if(channelId) await refreshChannel(channelId); else for(const c of await repo.listChannels()) await refreshChannel(String(c.id)); },
+  async refresh(channelId) {
+    await init();
+    if(channelId){await refreshChannel(channelId);return;}
+    let firstError:unknown;
+    for(const channel of await repo.listChannels()){
+      if(channel.url.startsWith("builtin:"))continue;
+      try{await refreshChannel(String(channel.id));}catch(error){firstError??=error;}
+    }
+    if(firstError!==undefined)throw firstError;
+  },
   async markRead(id) { await init(); await repo.setRead(Number(id)); },
   async toggleSaved(id,saved) { await init(); if(saved === undefined) { const rows=await db.query("SELECT is_saved FROM articles WHERE id=?",[Number(id)]); saved=!rows[0]?.is_saved; } await repo.setSaved(Number(id),saved); },
   async setSaveState(id,type,saved) { await init(); await repo.setSaveState(Number(id),type,saved); },

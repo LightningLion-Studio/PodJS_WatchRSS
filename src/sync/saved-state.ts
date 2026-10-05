@@ -1,3 +1,4 @@
+import {externalSavedAliasCleanup} from "./external-saved-projection.ts";
 import type { SqlDatabase, SqlParams } from "../core/types.ts";
 
 export type SyncSaveType = "favorite" | "watchLater";
@@ -39,7 +40,7 @@ export function localSavedStateStatements(itemId: number, type: SyncSaveType): S
     ON CONFLICT(article_id,save_type) DO UPDATE SET item_id=excluded.item_id,url=excluded.url,
       saved=excluded.saved,changed_at=excluded.changed_at,sort_order=excluded.sort_order,
       source_device_id=excluded.source_device_id,source_order=excluded.source_order
-    WHERE sync_saved_states.saved!=excluded.saved`, params: [itemId, type] }];
+    WHERE sync_saved_states.saved!=excluded.saved`, params: [itemId, type] },...externalSavedAliasCleanup(itemId,type)];
 }
 
 /** Saved-state persistence only. Article selection, body application, whole
@@ -120,6 +121,7 @@ export class SyncSavedStateStore {
         ON CONFLICT(article_id,save_type) DO UPDATE SET saved=excluded.saved,changed_at=excluded.changed_at,sort_order=excluded.sort_order`,params},
       {sql:`UPDATE articles SET is_saved=COALESCE((SELECT saved FROM article_saved_states WHERE article_id=articles.id AND save_type='favorite'),0)
         WHERE id IN(SELECT s.item_id FROM sync_saved_states s WHERE ${where})`,params},
+      ...externalSavedAliasCleanup(articleId,type),
     ];
   }
 }

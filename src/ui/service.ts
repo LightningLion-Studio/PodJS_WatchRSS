@@ -6,6 +6,8 @@ export interface Channel {
   description?: string | null;
   imageUrl?: string | null;
   isPinned?: boolean;
+  sortOrder?: number;
+  createdAt?: number;
   useOriginalContent?: boolean;
   lastFetchedAt?: number | null;
   unreadCount?: number;
@@ -77,9 +79,12 @@ export interface AppServices {
   setChannelBackgroundPlayback(id:string,enabled:boolean):Promise<void>;
   getChannelOriginalMode(id: string): Promise<boolean>;
   setChannelOriginalMode(id: string, enabled: boolean): Promise<void>;
+  moveChannelToTop(id: string): Promise<void>;
+  setChannelPinned(id: string, pinned: boolean): Promise<void>;
   markChannelRead(id: string): Promise<void>;
   deleteChannel(id: string): Promise<void>;
   clearLocalContent(id: string): Promise<void>;
+  deleteArticle(id: string): Promise<void>;
   listArticles(query?: ArticleQuery): Promise<Article[]>;
   searchArticles?(channelId:string,keyword:string):Promise<Article[]>;
   getArticle(id: string): Promise<Article | null>;
