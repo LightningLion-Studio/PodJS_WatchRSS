@@ -10,7 +10,7 @@ import {getOps} from '@pocketjs/framework/host';
 import {createGesture} from '@pocketjs/framework/gesture';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import type {Scroller} from '@pocketjs/framework/kinetics';
-import {getDisplayMetrics,kv,onAxisDelta,onSystemBack,onLifecycleChange,lifecycle,RelativeAxis,RelativeAxisUnits,setNavigationState} from '@podjs/framework/watch';
+import {getDisplayMetrics,kv,onAxisDelta,onSystemBack,onLifecycleChange,lifecycle,RelativeAxis,RelativeAxisUnits,setNavigationState,navigationStateSnapshot} from '@podjs/framework/watch';
 import {application,type ActivityState} from '@podjs/framework/services';
 import {captureIntro,restoreIntro,captureCustomization,restoreCustomization,type CustomizationDraft} from '../onboarding/restoration.ts';
 import {captureLegalNavigation,hydrateLegalNavigation,prepareLegalNavigation,type LegalNavigation,type StartupLegalPage} from '../onboarding/legal-restoration.ts';
@@ -110,7 +110,10 @@ function StartupTransition(props:{ready:()=>boolean;exit:()=>boolean;render:()=>
 }
 
 function StartupLoading(props:{exitElapsedMs:number}){
- setNavigationState({canGoBack:false,rootSwipeEnabled:false});onCleanup(()=>setNavigationState({canGoBack:false}));
+ // The overlay now outlives the content mount: only undo our own navigation state,
+ // never the stack state the content published while the overlay was fading.
+ setNavigationState({canGoBack:false,rootSwipeEnabled:false});const ownState=navigationStateSnapshot();
+ onCleanup(()=>{if(navigationStateSnapshot()===ownState)setNavigationState({canGoBack:false});});
  const metrics=getDisplayMetrics(),frame=()=>startupExitFrame(props.exitElapsedMs);
  // Pod apps cannot own the host Android splash window; animate the first app
  // surface while the resolved destination is already mounted underneath.

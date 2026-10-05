@@ -80,9 +80,10 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
     ...(props.items.length?[{height:52,render:()=> {
       const label=props.loadingMore?"加载中...":props.canNext?"加载更多":"没有更多";
       const enabled=props.canNext&&!props.loadingMore;
-      const buttonWidth=Math.min(props.width-44,measureFor(17)(label)+18);
-      return <View class="absolute inset-0 items-center">
-        <View onPress={enabled?props.onNext:undefined} focusable={enabled} class="absolute top-[4] h-[44] rounded-[47] bg-[#2a2a2a] items-center justify-center" style={{width:buttonWidth,opacity:enabled?1:.5}}>
+      // Native FeedPillButton: 17sp text, 9dp horizontal padding, 44dp height, surfaceVariant, 0.5 alpha when disabled.
+      const buttonWidth=Math.min(props.width-44,getOps().measureText(label,22)+18);
+      return <View class="absolute inset-0">
+        <View onPress={enabled?props.onNext:undefined} focusable={enabled} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center" style={{insetL:(props.width-36-buttonWidth)/2,width:buttonWidth,opacity:enabled?1:.5}}>
           <Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
         </View>
       </View>;
