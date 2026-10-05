@@ -1,3 +1,4 @@
+import type { ReaderPreset } from "../../reader/preset.ts";
 import type { BrowserOrigin } from "../../browser/open.ts";
 import { Show } from "solid-js";
 import type { ShareHandler } from "../../sharing/policy.ts";
@@ -21,6 +22,7 @@ import type { Page, RouteEntry } from "./types.ts";
 import type { HttpExportMode } from "../../remote-input/exports.ts";
 
 interface MediaRoutesProps {
+  preset: () => ReaderPreset;
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
@@ -116,6 +118,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       </Show>
       <Show when={props.page() === "douyin"}>
         <DouyinScreen
+          preset={props.preset()}
           active={props.active()}
           onShare={props.share}
           width={props.width}

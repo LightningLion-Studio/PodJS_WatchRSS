@@ -2,6 +2,7 @@ import type { DouyinFeedSnapshot, DouyinItem, DouyinSecureStorage } from "./type
 
 export interface RecentFeed extends DouyinFeedSnapshot { anchorAwemeId: string | null; savedAtMillis: number; resolved: Record<string, number> }
 const EMPTY = (): RecentFeed => ({ items: [], cursor: null, hasMore: false, anchorAwemeId: null, savedAtMillis: 0, resolved: {} });
+export const QUEUE_KEY = "douyin.playback-queue.v1";
 export const FEED_KEY = "douyin.feed.v1", RECENT_KEY = "douyin.recent-window.v1";
 export function normalizeItems(items: DouyinItem[]): DouyinItem[] {
   const seen = new Set<string>();
@@ -10,9 +11,9 @@ export function normalizeItems(items: DouyinItem[]): DouyinItem[] {
 export class DouyinFeedStore {
   private writes: Promise<void> = Promise.resolve();
   constructor(private storage: DouyinSecureStorage) {}
-  private async read(key: string): Promise<RecentFeed> {
+  async read(key: string): Promise<RecentFeed> {
     const raw = await this.storage.get(key);
-    try { const value = JSON.parse(raw ?? "null"); if (!value || !Array.isArray(value.items)) return EMPTY(); const items = normalizeItems(value.items).slice(0, 40); return { items, cursor: typeof value.cursor === "string" ? value.cursor : null, hasMore: value.hasMore === true, anchorAwemeId: items.some(x => x.awemeId === value.anchorAwemeId) ? value.anchorAwemeId : null, savedAtMillis: Number(value.savedAtMillis) || 0, resolved: value.resolved && typeof value.resolved === "object" ? value.resolved : {} }; } catch { return EMPTY(); }
+    try { const value = JSON.parse(raw ?? "null"); if (!value || !Array.isArray(value.items)) return EMPTY(); const items = normalizeItems(value.items).slice(0, key === QUEUE_KEY ? 200 : 40); return { items, cursor: typeof value.cursor === "string" ? value.cursor : null, hasMore: value.hasMore === true, anchorAwemeId: items.some(x => x.awemeId === value.anchorAwemeId) ? value.anchorAwemeId : null, savedAtMillis: Number(value.savedAtMillis) || 0, resolved: value.resolved && typeof value.resolved === "object" ? value.resolved : {} }; } catch { return EMPTY(); }
   }
   async bootstrap(): Promise<RecentFeed> {
     await this.writes;
@@ -29,5 +30,5 @@ export class DouyinFeedStore {
     const write = this.writes.catch(() => {}).then(() => this.storage.set(key, value));
     this.writes = write; return write;
   }
-  clear(): Promise<void> { const write = this.writes.catch(() => {}).then(async () => { await this.storage.remove(FEED_KEY); await this.storage.remove(RECENT_KEY); }); this.writes = write; return write; }
+  clear(): Promise<void> { const write = this.writes.catch(() => {}).then(async () => { await this.storage.remove(FEED_KEY); await this.storage.remove(RECENT_KEY); await this.storage.remove(QUEUE_KEY); }); this.writes = write; return write; }
 }

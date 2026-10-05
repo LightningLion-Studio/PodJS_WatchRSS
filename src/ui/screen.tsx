@@ -1437,6 +1437,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
+              preset={readerPreset}
               entry={entry}
               page={entryPage}
               active={active}

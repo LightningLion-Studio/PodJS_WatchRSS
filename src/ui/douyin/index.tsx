@@ -1,3 +1,6 @@
+import { ReaderBody } from "../ReaderBody.tsx";
+import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
+import { loadDouyinDetail, douyinDetailBlocks } from "../../douyin/detail.ts";
 import { browser } from "@podjs/framework/services";
 import { douyinBrowserAvailable } from "../../douyin/browser.ts";
 import { hasCapability } from "@podjs/framework/watch";
@@ -14,10 +17,8 @@ import type { Scroller } from "@pocketjs/framework/kinetics";
 import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack } from "solid-js";
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
-import { RemoteImage } from "../RemoteImage.tsx";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
 import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
-import { DOUYIN_PUBLIC_MEDIA_HEADERS } from "../../douyin/index.ts";
 import type { DouyinClient, DouyinContent, DouyinHistoryEntry, DouyinItem, DouyinResult } from "../../douyin/index.ts";
 
 export type DouyinRoute =
@@ -25,7 +26,7 @@ export type DouyinRoute =
   | { name: "channel-info" }
   | { name: "login" }
   | { name: "feed" }
-  | { name: "detail"; awemeId: string }
+  | { name: "detail"; awemeId: string; item?: DouyinItem; playlist?: DouyinItem[] }
   | { name: "history" }
   | { name: "actions"; awemeId: string }
   | { name: "share"; awemeId: string }
@@ -42,6 +43,7 @@ export interface DouyinSettingsBindings {
   onDeleteChannel: () => void | Promise<void>;
 }
 export interface DouyinScreenProps {
+  preset?: ReaderPreset;
   active?:boolean;
   onShare?:ShareHandler;
   width: number;
@@ -66,7 +68,6 @@ interface FeedSnapshot { items: DouyinItem[]; cursor?: string; hasMore: boolean 
 /** One bounded feed window per client/session; route changes do not trigger requests. */
 const feedSnapshots = new WeakMap<DouyinClient, FeedSnapshot>();
 const MAX_FEED_SNAPSHOT_ITEMS = 40;
-const playIcon = "../assets/icons/play-circle.svg";
 
 function lines(text: string, width: number, size = 13): string[] {
   const cjk = size, latin = Math.ceil(size / 2);
@@ -83,12 +84,6 @@ function itemSummary(item: DouyinItem): string {
 function formatCount(value: number): string { return value >= 10_000 ? `${(value / 10_000).toFixed(value >= 100_000 ? 0 : 1)}万` : String(value); }
 function header(title: string, subtitle?: string): ScrollEntry {
   return { height: subtitle ? 50 : 34, render: () => <View class="absolute inset-0 items-center"><Text class="absolute top-[0] left-[0] right-[0] text-center text-lg leading-[26] text-[#f5f5f5]">{title}</Text><Show when={subtitle}><Text class="absolute top-[29] left-[0] right-[0] text-center text-xs leading-[14] text-[#b6b6b6]">{subtitle}</Text></Show></View> };
-}
-function wrappedHeader(title: string, subtitle: string, width: number): ScrollEntry {
-  const titleLines = lines(title, width - 64, 18).slice(0, 3);
-  const subtitleLines = lines(subtitle, width - 56, 12).slice(0, 2);
-  const subtitleTop = titleLines.length * 26 + 3;
-  return { height: subtitleTop + subtitleLines.length * 14 + 4, render: () => <View class="absolute inset-0 items-center"><Text class="absolute top-[0] left-[14] right-[14] text-center text-lg leading-[26] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text style={{ insetT: subtitleTop }} class="absolute left-[10] right-[10] text-center text-xs leading-[14] text-[#b6b6b6]">{subtitleLines.join("\n")}</Text></View> };
 }
 function button(label: string, onPress?: () => void, danger = false): ScrollEntry {
   return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[24] bg-[#2a2a2a] items-center justify-center"><Show when={danger} fallback={<Text class="text-base leading-[20] text-[#f5f5f5]">{label}</Text>}><Text class="text-base leading-[20] text-[#ff5a5f]">{label}</Text></Show></View> };
@@ -161,30 +156,85 @@ function LoginScreen(props: DouyinScreenProps) {
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
+/** Native list/history callers mark before navigation; saved-reader entry does not. */
+function detailNavigation(props: DouyinScreenProps, onRecorded?: () => Promise<void>) {
+  let busy = false, disposed = false;
+  onCleanup(() => { disposed = true; });
+  return async (item: DouyinItem, playlist?: DouyinItem[]) => {
+    if (busy || disposed) return;
+    busy = true;
+    try {
+      await props.client.recordHistory(item);
+      if (disposed) return;
+      await onRecorded?.();
+      if (!disposed) props.onNavigate({name:"detail",awemeId:item.awemeId,item,...(playlist ? {playlist} : {})});
+    } finally { busy = false; }
+  };
+}
+
 function FeedScreen(props: DouyinScreenProps) {
+  const openDetail = detailNavigation(props);
+  const [resume, setResume] = createSignal<Awaited<ReturnType<DouyinClient["restorePlaybackQueue"]>>>();
+  onMount(() => { let current = true; onCleanup(() => { current = false; }); void props.client.restorePlaybackQueue().then(value => { if (current) setResume(value); }).catch(() => {}); });
+  const continuePlayback = async () => {
+    const queue = resume(), id = queue?.anchorAwemeId; if (!queue || !id) return;
+    try {
+      const result = await props.client.resolvePlayback(id);
+      if (!result.ok) { setError(result.message); return; }
+      props.onPlay({item:result.data,playback:result.data,playlist:queue.items,cursor:queue.cursor ?? undefined,hasMore:queue.hasMore});
+      props.onNavigate({name:"player",awemeId:id});
+    } catch (error) { setError(String(error)); }
+  };
   const initial = feedSnapshots.get(props.client);
   const [items, setItems] = createSignal<DouyinItem[]>(initial?.items ?? []), [cursor, setCursor] = createSignal<string | undefined>(initial?.cursor), [hasMore, setHasMore] = createSignal(initial?.hasMore ?? true), [loading, setLoading] = createSignal(false), [error, setError] = createSignal("");
   const load = async (append = false) => { if (loading()) return; setLoading(true); setError(""); const result = await props.client.fetchFeedPage({ cursor: append ? cursor() : undefined, count: 12 }); if (result.ok) { const nextItems = (append ? [...items(), ...result.data.items] : result.data.items).slice(-MAX_FEED_SNAPSHOT_ITEMS); const snapshot = { items: nextItems, cursor: result.data.nextCursor || undefined, hasMore: result.data.hasMore }; feedSnapshots.set(props.client, snapshot); setItems(snapshot.items); setCursor(snapshot.cursor); setHasMore(snapshot.hasMore); } else setError(messageOf(result, "加载失败")); setLoading(false); };
   createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
-  const card = (item: DouyinItem): ScrollEntry => { const titleLines = lines(itemTitle(item), props.width - 60, 17).slice(0, 2), summaryLines = lines(itemSummary(item), props.width - 60, 12).slice(0, 1); return { height: 51 + titleLines.length * 21, render: () => <View onPress={() => props.onNavigate({ name: "detail", awemeId: item.awemeId })} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-[17px] leading-[21] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[10] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; };
-  const entries = createMemo<ScrollEntry[]>(() => [{height:40,render:()=> <View onPress={()=>props.onNavigate({name:"channel-info"})} focusable class="absolute inset-0 items-center"><Text class="text-lg text-white">抖音 ›</Text></View>}, button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void load(false)), ...(error() ? [statusCard("加载失败", error())] : []), ...items().map(card), ...(items().length === 0 && !loading() && !error() ? [statusCard("暂无内容", "刷新以获取推荐内容")] : []), button(loading() ? "加载中..." : hasMore() ? "加载更多" : "没有更多了", !loading() && hasMore() ? () => void load(true) : undefined)]);
+  const card = (item: DouyinItem): ScrollEntry => { const titleLines = lines(itemTitle(item), props.width - 60, 17).slice(0, 2), summaryLines = lines(itemSummary(item), props.width - 60, 12).slice(0, 1); return { height: 51 + titleLines.length * 21, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-[17px] leading-[21] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[10] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; };
+  const entries = createMemo<ScrollEntry[]>(() => [{height:40,render:()=> <View onPress={()=>props.onNavigate({name:"channel-info"})} focusable class="absolute inset-0 items-center"><Text class="text-lg text-white">抖音 ›</Text></View>}, button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void load(false)), ...(error() ? [statusCard("加载失败", error())] : []), ...(resume()?.anchorAwemeId ? [button("继续上次播放", () => void continuePlayback())] : []), ...items().map(card), ...(items().length === 0 && !loading() && !error() ? [statusCard("暂无内容", "刷新以获取推荐内容")] : []), button(loading() ? "加载中..." : hasMore() ? "加载更多" : "没有更多了", !loading() && hasMore() ? () => void load(true) : undefined)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
 function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
   const [content, setContent] = createSignal<DouyinContent | null>(null), [error, setError] = createSignal("");
-  createEffect(() => { const id = props.awemeId; setContent(null); setError(""); void props.client.fetchDetail(id).then(result => result.ok ? setContent(result.data) : setError(messageOf(result, "内容加载失败"))); });
+  createEffect(() => {
+    const id = props.awemeId, route = props.route;
+    let current = true; onCleanup(() => { current = false; });
+    setContent(null); setError("");
+    void loadDouyinDetail(props.client, id, route.name === "detail" ? route.item : undefined)
+      .then(result => { if (current) result.ok ? setContent(result.data) : setError(result.message); })
+      .catch(error => { if (current) setError(String(error)); });
+  });
   const item = () => content()?.kind === "video" ? (content() as Extract<DouyinContent, { kind: "video" }>).item : null;
-  const play = async () => { const current = item(); if (!current) return; const result = await props.client.resolvePlayback(current.awemeId); if (result.ok) { await props.client.recordHistory(result.data); const snapshot=props.client.feedSnapshot(),playlist=snapshot.items.some(entry=>entry.awemeId===current.awemeId)?snapshot.items:[result.data,...snapshot.items]; props.onPlay({ item: current, playback: result.data, playlist, ...(snapshot.cursor?{cursor:snapshot.cursor}:{}), hasMore:snapshot.hasMore }); props.onNavigate({ name: "player", awemeId: current.awemeId }); } else setError(messageOf(result, "当前内容暂无可用视频地址")); };
-  const entries = createMemo<ScrollEntry[]>(() => { const currentContent = content(); if (!currentContent) return [header("抖音视频"), statusCard(error() ? "加载失败" : "正在加载", error() || "正在读取内容...")]; const current = item(), body = (currentContent.kind === "video" ? currentContent.item.description : currentContent.description).trim() || "这是一条来自抖音的信息流内容。", bodyLines = lines(body, props.width - 36, 13), author = currentContent.kind === "video" ? currentContent.item.authorName : currentContent.authorName, cover = currentContent.kind === "video" ? currentContent.item.coverUrl : currentContent.imageUrls[0]; return [wrappedHeader(current ? itemTitle(current) : body, `作者：${author?.trim() || "未知作者"}`, props.width), ...(cover ? [{ height: 124, render: () => <View onPress={current ? () => void play() : undefined} focusable={!!current} class="absolute inset-0 rounded-[16] overflow-hidden bg-[#1c1f21]"><RemoteImage url={cover} width={props.width - 36} height={124} class="absolute inset-0" headers={{ ...DOUYIN_PUBLIC_MEDIA_HEADERS }} /><Show when={current}><View class="absolute inset-0 items-center justify-center"><View class="w-[42] h-[42] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} class="w-[32] h-[32]" /></View></View></Show></View> } as ScrollEntry] : []), { height: Math.max(40, bodyLines.length * 18 + 12), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#f5f5f5]">{bodyLines.join("\n")}</Text> }, ...(error() ? [statusCard("无法播放", error())] : []), ...(current ? [button("播放", () => void play()), button("更多操作", () => props.onNavigate({ name: "actions", awemeId: current.awemeId }))] : [statusCard("图文内容", "当前内容没有视频播放流")])]; });
-  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
+  const play = async () => {
+    const current = item(); if (!current) return;
+    try {
+      const result = await props.client.resolvePlayback(current.awemeId);
+      if (!result.ok) { setError(result.message); return; }
+      const route = props.route, historyQueue = route.name === "detail" ? route.playlist : undefined;
+      const snapshot = props.client.feedSnapshot();
+      const playlist = historyQueue ?? (snapshot.items.some(entry => entry.awemeId === current.awemeId) ? snapshot.items : [current, ...snapshot.items]);
+      props.onPlay({ item: current, playback: result.data, playlist, cursor: historyQueue ? undefined : snapshot.cursor ?? undefined, hasMore: historyQueue ? false : snapshot.hasMore });
+      props.onNavigate({ name: "player", awemeId: current.awemeId });
+    } catch (error) { setError(String(error)); }
+  };
+  const preset = () => props.preset ?? defaultReaderPreset();
+  return <Show when={content()} fallback={<ScrollEntries height={props.height} entries={[header("抖音视频"), statusCard(error() ? "加载失败" : "正在加载", error() || "正在读取内容...")]} ref={props.ref} />}>
+    {value => <ReaderBody articleId={`douyin:${props.awemeId}`} text="" blocks={douyinDetailBlocks(value())}
+      preset={preset()} fontSize={preset().body.fontSizeSp} lineHeight={preset().body.fontSizeSp * preset().body.lineHeightEm}
+      width={props.width} height={props.height} active={props.active !== false} autoStart={false} speed={0}
+      onMedia={block => { if (block.type === "video") void play(); }} onControls={() => {}}
+      onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })}
+      footer={[...(error() ? [statusCard("无法播放", error())] : []), ...(item() ? [button("播放", () => void play()), button("更多操作", () => props.onNavigate({name:"actions",awemeId:props.awemeId}))] : [])]} />}
+  </Show>;
+
 }
 
 function HistoryScreen(props: DouyinScreenProps) {
   const [history, setHistory] = createSignal<DouyinHistoryEntry[]>([]), [error, setError] = createSignal("");
   const refresh = async () => { try { setHistory(await props.client.listHistory()); } catch (e) { setError(String(e)); } };
+  const openDetail = detailNavigation(props, refresh);
   createEffect(() => { if (props.route.name === "history") void refresh(); });
-  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => props.onNavigate({ name: "detail", awemeId: item.awemeId })} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
+  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => void openDetail(item, history().map(entry => entry.item)).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 

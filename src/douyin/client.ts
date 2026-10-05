@@ -1,4 +1,4 @@
-import { DouyinFeedStore, FEED_KEY, RECENT_KEY, normalizeItems } from "./feed-store.ts";
+import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems } from "./feed-store.ts";
 import { utf8Decode } from "../cloud/types.ts";
 import { parseDouyinDetail, parseDouyinFeed } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
@@ -22,6 +22,12 @@ export class DouyinClient {
   private readonly feedStore:DouyinFeedStore;
   private feedCursor:string|null=null;
   private feedHasMore=false;
+  private historyWrites:Promise<void>=Promise.resolve();
+  private writeHistory(write:()=>Promise<void>){
+    const pending=this.historyWrites.catch(()=>{}).then(write);
+    this.historyWrites=pending;return pending;
+  }
+
   constructor(private readonly options:DouyinClientOptions){this.feedStore=new DouyinFeedStore(options.historyStorage??options.secureStorage);this.now=options.now??Date.now;this.signer=options.signer??new ABogusSigner();this.saved=options.savedStore??new DouyinSavedStore(options.savedStorage??options.historyStorage??options.secureStorage,this.now);}
   async readCookie(){return (await this.options.secureStorage.get(COOKIE_KEY))?.trim()||null;}
   async isLoggedIn(){return (await this.readCookie())!==null;}
@@ -45,10 +51,24 @@ export class DouyinClient {
     await this.feedStore.save(FEED_KEY,{...snapshot,items:bootstrap});
   }
 
-  async recordHistory(item:DouyinItem){const id=item.awemeId.trim(),playUrl=item.playUrl.trim();if(!id||!playUrl)return;const store=this.options.historyStorage??this.options.secureStorage, old=await this.listHistory();const entries=[{item:{...item,awemeId:id,playUrl},watchedAtMillis:this.now()},...old.filter(x=>x.item.awemeId!==id)].slice(0,200);await store.set(HISTORY_KEY,JSON.stringify(entries));await this.markWatchedId(id);}
+  async savePlaybackQueue(items:DouyinItem[],anchorAwemeId:string,cursor:string|null,hasMore:boolean){
+    await this.feedStore.save(QUEUE_KEY,{items:normalizeItems(items).slice(0,200),anchorAwemeId,cursor,hasMore,savedAtMillis:this.now(),resolved:{}});
+  }
+  async restorePlaybackQueue(){return this.feedStore.read(QUEUE_KEY);}
+
+  async recordHistory(item:DouyinItem){
+    const id=item.awemeId.trim(),playUrl=item.playUrl.trim();if(!id||!playUrl)return;
+    const snapshot={...item,awemeId:id,playUrl},watchedAtMillis=this.now();
+    await this.writeHistory(async()=>{
+      const store=this.options.historyStorage??this.options.secureStorage,old=await this.listHistory();
+      const entries=[{item:snapshot,watchedAtMillis},...old.filter(x=>x.item.awemeId!==id)].slice(0,200);
+      await store.set(HISTORY_KEY,JSON.stringify(entries));await this.writeWatchedId(id);
+    });
+  }
   async listHistory():Promise<DouyinHistoryEntry[]>{const raw=await (this.options.historyStorage??this.options.secureStorage).get(HISTORY_KEY);if(!raw)return [];try{const v=JSON.parse(raw);return Array.isArray(v)?v.filter(x=>x&&typeof x==="object"&&x.item?.awemeId&&Number.isFinite(Number(x.watchedAtMillis))):[];}catch{return [];}}
-  async clearHistory(){const store=this.options.historyStorage??this.options.secureStorage;await store.remove(HISTORY_KEY);await store.remove(WATCHED_KEY);}
-  async markWatchedId(awemeId:string){const id=awemeId.trim();if(!id)return;const store=this.options.historyStorage??this.options.secureStorage,ids=(await this.listWatchedIds()).filter(x=>x!==id);ids.push(id);await store.set(WATCHED_KEY,JSON.stringify(ids.slice(-1000)));}
+  async clearHistory(){await this.writeHistory(async()=>{const store=this.options.historyStorage??this.options.secureStorage;await store.remove(HISTORY_KEY);await store.remove(WATCHED_KEY);});}
+  async markWatchedId(awemeId:string){await this.writeHistory(()=>this.writeWatchedId(awemeId));}
+  private async writeWatchedId(awemeId:string){const id=awemeId.trim();if(!id)return;const store=this.options.historyStorage??this.options.secureStorage,ids=(await this.listWatchedIds()).filter(x=>x!==id);ids.push(id);await store.set(WATCHED_KEY,JSON.stringify(ids.slice(-1000)));}
   async listWatchedIds():Promise<string[]>{const raw=await (this.options.historyStorage??this.options.secureStorage).get(WATCHED_KEY);if(!raw)return [];try{const value=JSON.parse(raw);return Array.isArray(value)?value.map(String).map(x=>x.trim()).filter(Boolean).slice(-1000):[];}catch{return [];}}
   async clearWatchActivity(){await this.clearHistory();}
   async getSavedState(awemeId:string){return this.saved.state(awemeId);}
