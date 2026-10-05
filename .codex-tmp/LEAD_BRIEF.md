@@ -37,3 +37,6 @@ Your context may get compacted during long tasks. To survive that:
 Unit tests do not cover asset packing. Before reporting any app task, run in your worktree:
 `bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts build --target=android-watch --project=<your worktree path>`
 It must succeed. Image assets must rasterize to power-of-two sizes ≤ 512 (SVG width/height × 2; use 32 or 64 like the existing icons).
+
+## Device (from 2026-10-04 23:15)
+OWW242 `e3aca8af` is connected. **Only wrss-impl may run adb/install/instrumentation.** Other agents must not touch the device (use `adb devices` at most). User decisions: PodJS will eventually take over the native package name `com.lightningstudio.watchrss`; port ALL native debug-only features, gated by the host debug flag (`application.buildInfo().debugBuild`) exactly as native gates them on BuildConfig.DEBUG.
