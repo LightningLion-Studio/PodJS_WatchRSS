@@ -1,3 +1,4 @@
+import {cloudDisabled,type CloudGuard} from "./guard";
 import { CloudCrypto, CloudUploadObject, HttpTransport, HttpResponse, utf8Encode, utf8Decode } from "./types";
 
 const CHUNK_BYTES = 6 * 1024 * 1024;
@@ -19,12 +20,13 @@ function resolveLocation(location: string, base: string): string {
   return base.replace(/\/[^/]*$/, "/") + location;
 }
 
-export interface TusOptions { maxRetries?: number; chunkBytes?: number; }
+export interface TusOptions { guard?: CloudGuard; maxRetries?: number; chunkBytes?: number; }
 export interface TusSource { size: number; sha256: string; read(offset: number, length: number): Promise<Uint8Array> | Uint8Array; }
 
 export class SupabaseTusUploader {
   constructor(private readonly http: HttpTransport, private readonly crypto: CloudCrypto, private readonly options: TusOptions = {}) {}
   async upload(target: CloudUploadObject, source: Uint8Array | TusSource): Promise<void> {
+    (this.options.guard??cloudDisabled).require();
     const size = source instanceof Uint8Array ? source.length : source.size;
     if (size !== target.sizeBytes) throw new Error("待上传云对象长度不匹配");
     if (source instanceof Uint8Array) {
@@ -72,12 +74,12 @@ export class SupabaseTusUploader {
   }
   private async patch(url: string, token: string, offset: number, body: Uint8Array, total: number): Promise<number> {
     const r = await this.http.request({ method: "PATCH", url, headers: { "Tus-Resumable": TUS_VERSION, "Upload-Offset": String(offset), "x-signature": token, "content-type": "application/offset+octet-stream" }, body });
-    if (r.status === 409) return total;
+    if (r.status === 409) throw error(r);
     if (r.status < 200 || r.status >= 300) throw error(r);
     const value = h(r, "Upload-Offset");
     if (value === undefined || !/^\d+$/.test(value)) throw new Error("TUS服务端未返回上传偏移量");
     const next = Number(value);
-    if (next < offset || next > total) throw new Error("TUS服务端返回了无效偏移量");
+    if (next !== offset + body.length || next > total) throw new Error("TUS服务端返回了无效偏移量");
     return next;
   }
 }
