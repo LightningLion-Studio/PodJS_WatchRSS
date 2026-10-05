@@ -1,6 +1,6 @@
 import {expect,test} from "bun:test";
 import {Database} from "bun:sqlite";
-import {SummarySession,summarySourceText,type SummaryState,type SummaryDependencies} from "../src/llm/summary.ts";
+import {SummarySession,summaryDisplayText,summarySourceText,summaryTokenUsageText,type SummaryState,type SummaryDependencies} from "../src/llm/summary.ts";
 import {loadSummarySource} from "../src/llm/source.ts";
 import {SCHEMA} from "../src/core/schema.ts";
 import {utf8Encode,utf8Decode,type HttpRequest} from "../src/cloud/types.ts";
@@ -16,6 +16,16 @@ function fixture(overrides:Partial<SummaryDependencies>={},preset=()=>1){
 test("summary sends bounded native input and preset, persists usage and reuses done result",async()=>{
  const f=fixture({},()=>3);await f.session.start();await f.session.start();expect(f.requests).toHaveLength(1);
  const r=f.requests[0];expect(r.url).toBe("https://summary.test/api/v1/llm/default-model/article-summary");expect(r.headers.Authorization).toBe("Bearer access");expect(r.headers['X-WatchRSS-App-Version']).toBe(watchAppVersion);expect(JSON.parse(utf8Decode(r.body!))).toEqual({title:"标题",content:"原文 & 摘要",contentHash:"a".repeat(64),promptPreset:3,stream:false});expect(f.session.state).toEqual({status:"done",text:"总结结果",inputTokens:12,outputTokens:4,totalTokens:16});expect(f.usage).toHaveLength(1);
+});
+test("summary presentation keeps the full error visible and gates per-request token usage",()=>{
+ const error:SummaryState={status:"error",text:"",error:"后端暂不可用"};
+ expect(summaryDisplayText(error)).toBe("生成失败\n后端暂不可用\n点击重试");
+ expect(summaryDisplayText({status:"error",text:""})).toBe("生成失败\n未知错误\n点击重试");
+ const done:SummaryState={status:"done",text:"总结",inputTokens:12,outputTokens:4,totalTokens:16};
+ expect(summaryTokenUsageText(done,false)).toBeNull();
+ expect(summaryTokenUsageText(done,true)).toBe("输入 12 · 输出 4 · 合计 16");
+ expect(summaryTokenUsageText({...done,totalTokens:undefined},true)).toBeNull();
+ expect(summaryTokenUsageText({status:"done",text:"总结",totalTokens:16},true)).toBe("合计 16");
 });
 test("summary refreshes once for 401 or 403 and reports exhausted authorization",async()=>{
  for(const code of [401,403]){let calls=0;const auth:string[]=[];const f=fixture({transport:{request:async r=>{auth.push(r.headers.Authorization);return ++calls===1?reply(code,{}):reply(200,{text:"刷新后"});}}});await f.session.start();expect(f.refreshes).toEqual([false,true]);expect(auth).toEqual(["Bearer access","Bearer refreshed"]);expect(f.session.state.text).toBe("刷新后");}

@@ -2,7 +2,7 @@ import {Text, View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import type {Scroller} from '@pocketjs/framework/kinetics';
 import {createEffect, createMemo, createSignal, onCleanup, Show} from 'solid-js';
-import type {AccountStatusSnapshot} from '../account/status.ts';
+import {accountCloudLines,type AccountStatusSnapshot} from '../account/status.ts';
 import {DownloadPhoneAppDialog} from './DownloadPhoneAppDialog.tsx';
 import {ScrollEntries, type ScrollEntry} from './ScrollEntries.tsx';
 import {watchUiLines} from './text-layout.ts';
@@ -55,14 +55,18 @@ export function AccountStatusScreen(props: {
       {height:8,render:()=>null},
       {height:promptHeight,render:()=><View onPress={()=>setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] text-[17px] leading-[21] text-[#f5f5f5]" style={{insetT:(promptHeight-prompt.length*21)/2}}>{prompt.join('\n')}</Text></View>},
     );
-    else rows.push(
-      line(value.phoneLabel, 21, false, 26),
-      line(`会员：${value.plan}`),
-      line(`状态：${value.active ? '有效' : '未生效'}`),
-      line(`诊断：${value.diagnosticsEnabled ? '已开启' : '未开启'}`),
-      line(`Access Token：${value.accessTokenExpired ? '待刷新' : '有效'}`),
-      line(`Refresh Token：${value.refreshTokenStatus === 'legacy' ? '旧版，需重新同步' : value.refreshTokenStatus === 'expired' ? '已过期' : '有效'}`),
-    );
+    else {
+      rows.push(
+        line(value.phoneLabel, 21, false, 26),
+        line(`会员：${value.plan}`),
+        line(`状态：${value.active ? '有效' : '未生效'}`),
+        line(`诊断：${value.diagnosticsEnabled ? '已开启' : '未开启'}`),
+        line(`Access Token：${value.accessTokenExpired ? '待刷新' : '有效'}`),
+        line(`Refresh Token：${value.refreshTokenStatus === 'legacy' ? '旧版，需重新同步' : value.refreshTokenStatus === 'expired' ? '已过期' : '有效'}`),
+      );
+      const cloudLines = accountCloudLines(value);
+      cloudLines.forEach((text, index) => rows.push(line(text, index === cloudLines.length - 1 ? 12 : 17, index === cloudLines.length - 1, index === cloudLines.length - 1 ? 34 : 21)));
+    }
     rows.push({height:24,render:()=>null});
     return rows;
   });

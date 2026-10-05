@@ -15,7 +15,7 @@ import { createContentLayouter, presetContentFont, readerColor } from "../reader
 import {onFrame} from "@pocketjs/framework/lifecycle";
 import {hostOperation,textLayout} from "@podjs/framework/services";
 import {measuredLines} from "../reader/measured-text.ts";
-import type {SummaryState} from "../llm/summary.ts";
+import {summaryDisplayText,summaryTokenUsageText,type SummaryState} from "../llm/summary.ts";
 import {createMemo,createSignal,createEffect,onCleanup} from "solid-js";
 import {Image,Text,View} from "@pocketjs/framework/components";
 import {getOps} from "@pocketjs/framework/host";
@@ -31,7 +31,7 @@ import type {SpeechAnchor} from "../reader/speech-segments.ts";
 export function ReaderScreen(props:{
  highlight?:SpeechHighlight;mediaCacheMode?:string;
  preset:ReaderPreset;article:Article;services:AppServices;width:number;height:number;fontSize:number;lineHeight:number;
- llmEnabled:boolean;llmAutoSummarize:boolean;llmPromptPreset:number;
+ llmEnabled:boolean;llmAutoSummarize:boolean;llmPromptPreset:number;llmShowTokenUsage?:boolean;
  active:boolean;autoStart:boolean;speed:number;favorite:boolean;speaking:boolean;busy:boolean;
  onFavorite:()=>void;onShare:()=>void;onSpeak:(article:Article)=>void;
  onSpeechControls:(article:Article,anchor?:SpeechAnchor)=>void;
@@ -60,8 +60,9 @@ export function ReaderScreen(props:{
  onCleanup(()=>{disposed=true;session.dispose();});
  onFrame(()=>{if(loading()&&props.active)setRotation((Date.now()%1200)/1200*360);});
  const toggleSummary=()=>{setExpanded(value=>!value);if(expanded()&&(summary().status==="idle"||summary().status==="error"))void session.start();};
- const summaryText=()=>summary().status==="error"?"总结失败，点击重试":summary().text|| (summary().status==="waiting"?"正在等待原文加载...":summary().status==="generating"?"正在生成总结...":"正在准备总结...");
+ const summaryText=()=>summaryDisplayText(summary());
  const summaryLines=createMemo(()=>measuredLines(summaryText(),props.width-36,text=>getOps().measureText(text,1)));
+ const tokenUsageLines=createMemo(()=>{const text=summaryTokenUsageText(summary(),props.llmShowTokenUsage??false);return text?measuredLines(text,props.width-60,value=>getOps().measureText(value,0)):[];});
  const summaryIcon=(size:number)=>loading()?<Image src={chrome().dark?"../assets/icons/ai-loading.svg":"../assets/icons/ai-loading-light.svg"} style={{width:size,height:size,rotate:rotation()}}/>:<Image src={chrome().dark?"../assets/icons/ai-summary.svg":"../assets/icons/ai-summary-light.svg"} style={{width:size,height:size}}/>;
  const spacer=(height:number):ScrollEntry=>({height,render:()=>null});
  const titleFont=()=>presetContentFont(props.preset,"title");
@@ -99,7 +100,7 @@ export function ReaderScreen(props:{
    spacer(22),
    {height:titleLayout().height,render:()=> <View onPress={()=>handle()?.tap()} class="absolute inset-0">{titleRects().map(rect=><View debugName="SpeechTitleHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:highlightColor()}}/>)}{titleRows().map(row=><View class="absolute left-[0] right-[0]" style={{insetT:row.top,height:row.lineHeight}}>{requiresReaderSystemText(row.text,props.preset,"title")&&hasCapability("text.raster")?<SystemTextLine pixelScale={getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth} options={systemTextOptions({...row,textAlign:1},"title",props.fontSize,props.width-28,getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth,props.preset,getFontMetrics(row.fontSlot),fonts())} onCarets={positions=>setTitleCarets(previous=>{const next=new Map(previous);if(positions)next.set(row,positions);else next.delete(row);return next;})} fallback={<Text class="absolute text-center text-lg font-bold" style={{insetL:0,insetT:row.textOffsetY??0,width:(props.width-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color}}>{row.text}</Text>}/>:<Text class="absolute text-center text-lg font-bold" style={{insetL:0,insetT:row.textOffsetY??0,width:(props.width-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color}}>{row.text}</Text>}</View>)}</View>},
    ...(!imported()||props.llmEnabled?[spacer(6),{height:actionsHeight(),render:()=> <View class="absolute inset-0">{!imported()&&source.canRead()?pill(()=>source.enabled()?"阅读RSS":"阅读原文",false,source.toggle):null}{props.llmEnabled?<View onPress={toggleSummary} focusable class="absolute top-[0] w-[38] h-[38] rounded-[19] items-center justify-center" style={{insetL:(props.width-28-38)/2,insetT:(actionsHeight()-38)/2,bgColor:expanded()?chrome().summaryAction:chrome().action,borderWidth:chrome().dark?0:1,borderColor:chrome().border}}>{summaryIcon(loading()?18:26)}</View>:null}{!imported()?pill(()=>"大声朗读",true,()=>{handle()?.pause();props.onSpeak(speechArticle());}):null}</View>}]:[]),
-   ...(props.llmEnabled&&expanded()?[spacer(6),{height:20+summaryLines().length*17,render:()=> <View onPress={()=>{if(summary().status==="error")void session.start();}} class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text><Text class="absolute left-[4] right-[4] top-[20] text-sm leading-[17]" style={{textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{summaryLines().join("\n")}</Text></View>}]:[]),
+   ...(props.llmEnabled&&expanded()?[spacer(6),{height:20+summaryLines().length*17,render:()=> <View onPress={()=>{if(summary().status==="error")void session.start();}} focusable={summary().status==="error"} class="absolute inset-0"><View class="absolute left-[4] top-[0] h-[14] w-[14] items-center justify-center">{summaryIcon(14)}</View><Text class="absolute left-[24] top-[0] text-xs leading-[14]" style={{textColor:chrome().active}}>AI 总结</Text><Text class="absolute left-[4] right-[4] top-[20] text-sm leading-[17]" style={{textColor:summary().status==="error"?"#ff8a80":`${chrome().content.slice(0,7)}eb`}}>{summaryLines().join("\n")}</Text></View>},...(tokenUsageLines().length?[spacer(6),{height:36+tokenUsageLines().length*14,render:()=> <View class="absolute inset-0 rounded-[10]" style={{bgColor:chrome().action}}><Text class="absolute left-[12] right-[12] top-[8] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>Token 用量</Text><Text class="absolute left-[12] right-[12] top-[26] text-xs leading-[14]" style={{textColor:`${chrome().content.slice(0,7)}b8`}}>{tokenUsageLines().join("\n")}</Text></View>}]:[])]:[]),
    ...(source.notice()?[{height:40,render:()=> <Text class="absolute inset-0 text-xs leading-[16] text-[#aaa]">{source.notice()}</Text>}]:[]),
    ...(offlineFailures()||retryingOffline()?[{height:34,render:()=> <View onPress={()=>void retryOffline()} focusable={!retryingOffline()} class="absolute inset-0 items-center justify-center"><Text class="text-xs text-[#ffb88c]">{retryingOffline()?"重试中...":"离线媒体下载失败，点此重试"}</Text></View>}]:[]),spacer(6)
   ]);

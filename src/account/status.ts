@@ -1,5 +1,11 @@
 import type {WatchAccountState} from './types.ts';
 
+export interface AccountCloudStatus {
+  message: string;
+  usedBytes: number;
+  quotaBytes: number;
+}
+
 /** The account page receives display data only; credentials stay in secure storage. */
 export interface AccountStatusSnapshot {
   phoneLabel: string;
@@ -8,9 +14,11 @@ export interface AccountStatusSnapshot {
   diagnosticsEnabled: boolean;
   accessTokenExpired: boolean;
   refreshTokenStatus: 'legacy' | 'expired' | 'valid';
+  /** Absent when no real watch cloud-sync service is connected, matching native release behavior. */
+  cloud?: AccountCloudStatus;
 }
 
-export function accountStatusSnapshot(state: WatchAccountState | null, now = Date.now()): AccountStatusSnapshot | null {
+export function accountStatusSnapshot(state: WatchAccountState | null, now = Date.now(), cloud?: AccountCloudStatus): AccountStatusSnapshot | null {
   if (!state) return null;
   return {
     phoneLabel: state.phoneMasked || '已绑定账号',
@@ -20,5 +28,20 @@ export function accountStatusSnapshot(state: WatchAccountState | null, now = Dat
     accessTokenExpired: state.tokenExpiresAtMillis > 0 && state.tokenExpiresAtMillis <= now,
     refreshTokenStatus: !state.watchRefreshToken ? 'legacy'
       : state.refreshTokenExpiresAtMillis > 0 && state.refreshTokenExpiresAtMillis <= now ? 'expired' : 'valid',
+    ...(cloud ? {cloud} : {}),
   };
+}
+
+/** Native hides the whole cloud section when the service is unavailable. */
+export function accountCloudLines(status: AccountStatusSnapshot): string[] {
+  if (!status.cloud) return [];
+  if (status.plan === 'member' && status.active) {
+    const lines = [`云中继：${status.cloud.message}`];
+    if (status.cloud.quotaBytes > 0) {
+      lines.push(`空间：${Math.floor(status.cloud.usedBytes / 1048576)} / ${Math.floor(status.cloud.quotaBytes / 1048576)} MiB`);
+    }
+    lines.push('首次使用需在手机会员云空间中批准这块手表。');
+    return lines;
+  }
+  return ['云存储：会员可用；本地资料与蓝牙同步不受影响。'];
 }
