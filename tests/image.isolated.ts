@@ -50,7 +50,7 @@ mock.module("@podjs/framework/services", () => ({
   },
 }));
 
-const { bindRemoteImage, remoteImageResourceCounts } = await import("../src/ui/RemoteImage.tsx");
+const { bindRemoteImage, remoteImageResourceCounts, releaseRetainedRemoteImages } = await import("../src/ui/RemoteImage.tsx");
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const roots: Array<() => void> = [];
 function mount(url: string): void {
@@ -59,6 +59,7 @@ function mount(url: string): void {
 
 afterEach(async () => {
   while (roots.length) roots.pop()!();
+  releaseRetainedRemoteImages();
   await tick();
   calls.length = 0;
   cancelled.length = 0;
@@ -80,6 +81,13 @@ describe("RemoteImage", () => {
     roots.pop()!();
     expect(calls.filter(call => call[0] === "freeTexture")).toHaveLength(0);
     roots.pop()!();
+    // The finished texture is retained for scroll-back reuse until evicted or released.
+    expect(calls.filter(call => call[0] === "freeTexture")).toHaveLength(0);
+    expect(remoteImageResourceCounts().cached).toBe(1);
+    mount("https://img.example/cover.png");
+    expect(calls.filter(call => call[0] === "uploadTexture")).toHaveLength(1);
+    roots.pop()!();
+    releaseRetainedRemoteImages();
     expect(calls).toContainEqual(["freeTexture", 41]);
     expect(remoteImageResourceCounts().cached).toBe(0);
   });
@@ -113,4 +121,4 @@ test("download failure reaches all subscribers including a late subscriber",asyn
  roots.push(bindRemoteImage(props,{id:nextNode++} as never));expect(errors).toEqual([failure,failure,failure]);
 });
 
-test("local note images decode without downloading and retain the owned source after release",async()=>{const path="notes/assets/kept.png";const release=bindRemoteImage({url:"assets/kept.png",filePath:path,width:2,height:1},{id:nextNode++} as never);await tick();expect(pendingDownloads.size).toBe(0);expect(imageFiles).toEqual([path]);expect(calls.some(c=>c[0]==="uploadTexture")).toBe(true);release();await tick();expect(removedFiles).not.toContain(path);expect(removedFiles).toContain("images/a.rgba");expect(remoteImageResourceCounts()).toEqual({active:0,queued:0,cached:0});});
+test("local note images decode without downloading and retain the owned source after release",async()=>{const path="notes/assets/kept.png";const release=bindRemoteImage({url:"assets/kept.png",filePath:path,width:2,height:1},{id:nextNode++} as never);await tick();expect(pendingDownloads.size).toBe(0);expect(imageFiles).toEqual([path]);expect(calls.some(c=>c[0]==="uploadTexture")).toBe(true);release();releaseRetainedRemoteImages();await tick();expect(removedFiles).not.toContain(path);expect(removedFiles).toContain("images/a.rgba");expect(remoteImageResourceCounts()).toEqual({active:0,queued:0,cached:0});});
