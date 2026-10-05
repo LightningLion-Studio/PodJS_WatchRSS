@@ -1,9 +1,15 @@
+import { hasCapability } from "@podjs/framework/watch";
+import { authorizeInBrowser } from "../../media/browser-auth.ts";
+import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
+import { observeHostInternet } from "../../onboarding/network-host.ts";
+import type { InternetStatus } from "../../onboarding/state.ts";
+import { loginGate, loginError } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
 import {wireFields} from "../../sync/article-batches.ts";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
-import { createEffect, createMemo, createSignal, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack } from "solid-js";
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RemoteImage } from "../RemoteImage.tsx";
@@ -102,15 +108,50 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
 }
 
 function LoginScreen(props: DouyinScreenProps) {
-  const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal(props.loginQrImage ? "请使用抖音手机客户端扫码登录" : props.onRequestQrLogin ? "打开抖音官方登录页，完成登录后点“完成”返回手表。" : "当前宿主未提供抖音网页登录入口，可从手机复制抖音 Cookie 后输入。");
-  const inputCookie = async () => {
-    const cookie = await props.input("输入抖音 Cookie"); if (!cookie?.trim()) return;
-    setBusy(true); const result = await props.client.applyCookie(cookie.trim()); setBusy(false);
-    if (result.ok) { const verified = await props.client.isLoggedIn(); if (verified) { feedSnapshots.delete(props.client); props.onNavigate({ name: "entry" }); } else setMessage("Cookie 已保存，但抖音未确认登录状态"); }
-    else setMessage(messageOf(result, "Cookie 登录失败"));
+  const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal(props.loginQrImage ? "请使用抖音手机客户端扫码登录" : "打开抖音官方登录页，完成登录后点“完成”返回手表。");
+  const [internet, setInternet] = createSignal<InternetStatus>("checking");
+  const [browserAvailable, setBrowserAvailable] = createSignal(hasCapability("system.browser.auth"));
+  const gate = () => loginGate(internet(), browserAvailable());
+  let disposed = false, generation = 0;
+  let authorization: ReturnType<typeof authorizeInBrowser> | undefined;
+  onMount(() => onCleanup(observeHostInternet(status => {
+    setInternet(status);
+    if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setBusy(false); }
+  })));
+  onCleanup(() => { disposed = true; generation++; authorization?.cancel(); });
+  const openLogin = async () => {
+    if (gate() || busy()) return;
+    const current = ++generation;
+    setBusy(true);
+    try {
+      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});
+      const result = await authorization.result;
+      if (disposed || current !== generation || gate()) return;
+      const saved = await props.client.applyCookie(result.cookie);
+      if (!saved.ok) throw new Error(saved.message);
+      if (!disposed && current === generation) { feedSnapshots.delete(props.client); props.onNavigate({name:"entry"}); }
+    } catch (error) {
+      if (!disposed && current === generation) { const failure = loginError(error); setMessage(failure.message); if (failure.unavailable) setBrowserAvailable(false); }
+    } finally { if (!disposed && current === generation) { authorization = undefined; setBusy(false); } }
   };
-  const detail = lines(message(), props.width - 60, 12);
-  const entries = createMemo<ScrollEntry[]>(() => [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={props.onRequestQrLogin} focusable={!!props.onRequestQrLogin} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={props.loginQrImage} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={props.loginQrImage!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail.length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail.join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
+  const inputCookie = async () => {
+    if (gate() || busy()) return;
+    setBusy(true);
+    try {
+      const cookie = await props.input("输入抖音 Cookie"); if (!cookie?.trim() || disposed || gate()) return;
+      const result = await props.client.applyCookie(cookie.trim());
+      if (disposed) return;
+      if (result.ok) {
+        const verified = await props.client.isLoggedIn();
+        if (disposed) return;
+        if (verified) { feedSnapshots.delete(props.client); props.onNavigate({ name: "entry" }); }
+        else setMessage("Cookie 已保存，但抖音未确认登录状态");
+      } else setMessage(messageOf(result, "Cookie 登录失败"));
+    } catch (error) { if (!disposed) setMessage(`Cookie 登录失败：${String(error)}`); }
+    finally { if (!disposed) setBusy(false); }
+  };
+  const detail = () => lines(message(), props.width - 60, 12);
+  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={props.loginQrImage} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={props.loginQrImage!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
@@ -160,7 +201,7 @@ function SettingsScreen(props: DouyinScreenProps) {
   const [loggedIn, setLoggedIn] = createSignal<boolean | null>(null), [message, setMessage] = createSignal(""), [confirmDelete, setConfirmDelete] = createSignal(false);
   createEffect(() => { if (props.route.name === "settings") void props.client.isLoggedIn().then(setLoggedIn); });
   const setting = (label: string, enabled: boolean, onToggle: () => void): ScrollEntry => ({ height: 52, render: () => <View onPress={onToggle} focusable class="absolute inset-0 rounded-[26] bg-[#2a2a2a]"><Text class="absolute left-[12] top-[16] text-base leading-[20] text-[#f5f5f5]">{label}</Text><Show when={enabled} fallback={<View class="absolute right-[11] top-[13] w-[40] h-[26] rounded-[13] bg-[#555555]"><View class="absolute left-[3] top-[3] w-[20] h-[20] rounded-full bg-white" /></View>}><View class="absolute right-[11] top-[13] w-[40] h-[26] rounded-[13] bg-[#ff4d67]"><View class="absolute left-[17] top-[3] w-[20] h-[20] rounded-full bg-white" /></View></Show></View> });
-  const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [header("删除频道"), statusCard("确认删除？", "删除后将移除本地缓存"), button("确认删除", async () => { try { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); setConfirmDelete(false); } catch (error) { setMessage(String(error)); setConfirmDelete(false); } }, true), button("取消", () => setConfirmDelete(false))] : [header("设置", loggedIn() ? "已登录" : "未登录"), setting("原文阅读模式", props.settings.originalContentEnabled, () => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#b6b6b6]">开启后进入沉浸短视频流</Text> }, setting("在后台继续播放", props.settings.continuePlaybackInBackgroundEnabled, () => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)), button("退出登录", loggedIn() ? async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); setMessage("已退出登录"); } catch (e) { setMessage(`退出失败：${String(e)}`); } } : undefined, true), button("删除频道", () => setConfirmDelete(true), true), ...(message() ? [statusCard("状态", message())] : [])]);
+  const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [header("删除频道"), statusCard("确认删除？", "删除后将移除本地缓存"), button("确认删除", async () => { try { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); setConfirmDelete(false); } catch (error) { setMessage(String(error)); setConfirmDelete(false); } }, true), button("取消", () => setConfirmDelete(false))] : [header("设置", loggedIn() ? "已登录" : "未登录"), setting("原文阅读模式", props.settings.originalContentEnabled, () => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#b6b6b6]">开启后进入沉浸短视频流</Text> }, setting("在后台继续播放", props.settings.continuePlaybackInBackgroundEnabled, () => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)), button("退出登录", loggedIn() ? async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); setMessage("已退出登录"); props.onNavigate({name:"channel-info"}); } catch (e) { setMessage(`退出失败：${String(e)}`); } } : undefined, true), button("删除频道", () => setConfirmDelete(true), true), ...(message() ? [statusCard("状态", message())] : [])]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 

@@ -1,3 +1,5 @@
+import { clearBiliLogoutData, clearDouyinLogoutData } from "./media/logout.ts";
+import { managedCache } from "./cache/host.ts";
 import { readLocalBiliDetail } from "./bili/local-detail.ts";
 import {getExternalSavedStore,getDouyinSavedStore} from "./services.ts";
 import {biliExternalItem} from "./core/external-saved.ts";
@@ -26,8 +28,9 @@ export const mediaTransport: HttpTransport = {
  }
 };
 const secure={get:async(key:string)=>(await secureStorage.get(key))??null,set:secureStorage.set,delete:secureStorage.delete};
-export const biliClient=createBiliClient({transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
+export const biliClient=createBiliClient({onLogout:()=>clearBiliLogoutData(kv,managedCache),transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
 export const douyinClient=new DouyinClient({
+ onLogout:()=>clearDouyinLogoutData(managedCache),
  transport:mediaTransport,
  savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
  secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
