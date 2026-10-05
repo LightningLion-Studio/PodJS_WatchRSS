@@ -1,11 +1,11 @@
-import {startupMark} from '../core/startup-trace.ts';
+import {afterFirstScreen,startupMark} from '../core/startup-trace.ts';
 import {usageTelemetry,recordHostReleaseOobeOpened} from '../telemetry/host.ts';
 import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('StartupGate');
 import {openBrowserUrl} from "../browser/open.ts";
 import {For,Show,createEffect,createMemo,createSignal,onCleanup,untrack,type JSX} from 'solid-js';
-import {Text,View} from '@pocketjs/framework/components';
+import {Image,Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {createGesture} from '@pocketjs/framework/gesture';
 import {onFrame} from '@pocketjs/framework/lifecycle';
@@ -93,29 +93,30 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
  })().catch(error=>{if(current===generation)setFatal(String(error));});};
  load();
  const destination=createMemo(()=>session()?.destination);
- return <StartupTransition ready={()=>!!fatal()||!!session()} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost onExit={props.onExit} session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
+ // Like native, keep the launch surface until the first content screen has data.
+ const [contentReady,setContentReady]=createSignal(false);
+ void afterFirstScreen(8000).then(()=>{startupMark('overlay.contentReady');setContentReady(true);});
+ return <StartupTransition ready={()=>!!fatal()||!!session()} exit={()=>!!fatal()||(!!session()&&(destination()!=='content'||contentReady()))} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost onExit={props.onExit} session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
    <StartupContent render={props.content}/>
   </Show></Show>}/>;
 }
 
-function StartupTransition(props:{ready:()=>boolean;render:()=>JSX.Element}){
+function StartupTransition(props:{ready:()=>boolean;exit:()=>boolean;render:()=>JSX.Element}){
  const [elapsed,setElapsed]=createSignal(0),[finished,setFinished]=createSignal(false);let started:number|undefined;
  const now=()=>globalThis.performance?.now?.()??Date.now();
- createEffect(()=>{if(!props.ready()){started=undefined;setElapsed(0);setFinished(false);return;}if(started===undefined){started=now();setElapsed(0);setFinished(false);}});
- onFrame(()=>{if(started===undefined||finished())return;const value=Math.max(0,now()-started);setElapsed(value);if(value>=STARTUP_EXIT_DURATION_MS)setFinished(true);});
+ createEffect(()=>{if(!props.exit()){started=undefined;setElapsed(0);setFinished(false);return;}if(started===undefined){startupMark('overlay.exitStart');started=now();setElapsed(0);setFinished(false);}});
+ onFrame(()=>{if(started===undefined||finished())return;const value=Math.max(0,now()-started);setElapsed(value);if(value>=STARTUP_EXIT_DURATION_MS){startupMark('overlay.finished');setFinished(true);}});
  return <><Show when={props.ready()}>{props.render()}</Show><Show when={!finished()}><StartupLoading exitElapsedMs={elapsed()}/></Show></>;
 }
 
 function StartupLoading(props:{exitElapsedMs:number}){
  setNavigationState({canGoBack:false,rootSwipeEnabled:false});onCleanup(()=>setNavigationState({canGoBack:false}));
- const metrics=getDisplayMetrics(),badge=82,frame=()=>startupExitFrame(props.exitElapsedMs);
+ const metrics=getDisplayMetrics(),frame=()=>startupExitFrame(props.exitElapsedMs);
  // Pod apps cannot own the host Android splash window; animate the first app
  // surface while the resolved destination is already mounted underneath.
- return <View debugName="WatchRssLaunchOverlay" accessibilityLabel="腕上RSS正在启动" accessibilityHidden={props.exitElapsedMs>0} onPress={()=>{}} class="absolute inset-0 bg-[#030506]" style={{opacity:frame().opacity,scale:frame().scale}}>
-  <View class="absolute w-[126] h-[126] rounded-[9999] bg-[#15211f]" style={{insetL:(metrics.logicalWidth-126)/2,insetT:(metrics.logicalHeight-126)/2-20}}/>
-  <View class="absolute rounded-[9999] bg-[#111719] border-[#ff6026] border-[1] items-center justify-center" style={{insetL:(metrics.logicalWidth-badge)/2,insetT:(metrics.logicalHeight-badge)/2-20,width:badge,height:badge}}><Text class="text-[21px] leading-[26] text-[#ff7845]">RSS</Text></View>
-  <Text class="absolute left-[18] right-[18] text-lg leading-[22] text-[#f5f5f5] text-center" style={{insetT:metrics.logicalHeight/2+35}}>腕上RSS</Text>
-  <Text class="absolute left-[18] right-[18] text-xs leading-[14] text-[#b6b6b6] text-center" style={{insetT:metrics.logicalHeight/2+62}}>抬腕即读，轻巧聚合</Text>
+ return <View debugName="WatchRssLaunchOverlay" accessibilityLabel="腕上RSS正在启动" accessibilityHidden={props.exitElapsedMs>0} onPress={()=>{}} class="absolute inset-0 bg-black" style={{opacity:frame().opacity,scale:frame().scale}}>
+  {/* Native LaunchScreenOverlay frame captured on OWW242 (466px) padded to 512px; drawn 1:1. */}
+  <Image src="../assets/icons/launch-native.png" class="absolute w-[256] h-[256]" style={{insetL:(metrics.logicalWidth-256)/2,insetT:(metrics.logicalHeight-256)/2}}/>
  </View>;
 }
 

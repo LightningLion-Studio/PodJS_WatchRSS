@@ -1,3 +1,4 @@
+import { delay } from "@podjs/framework/services";
 import { appLogger } from "../logs/app-logger.ts";
 
 const now = () => globalThis.performance?.now?.() ?? Date.now();
@@ -24,5 +25,6 @@ const firstScreen = new Promise<void>(resolve => { firstScreenResolve = resolve;
 export function startupFirstScreen(): void { firstScreenResolve?.(); firstScreenResolve = undefined; }
 /** Resolves after the first content screen loaded, or after `maxMs` as a fallback. */
 export function afterFirstScreen(maxMs = 3000): Promise<void> {
-  return Promise.race([firstScreen, new Promise<void>(resolve => setTimeout(resolve, maxMs))]);
+  // QuickJS setTimeout is a zero-delay microtask polyfill; use the host timer.
+  return Promise.race([firstScreen, delay(maxMs).result.then(() => undefined, () => undefined)]);
 }
