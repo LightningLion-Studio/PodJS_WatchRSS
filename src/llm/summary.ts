@@ -35,6 +35,20 @@ export function summarySourceText(source:string,plainText=false):string {
  return out;
 }
 const positive=(v:unknown)=>{const n=typeof v==="number"?v:Number(v);return Number.isFinite(n)&&n>0?Math.trunc(n):undefined;};
+/** Keep the native summary failure reason visible in the card until the user retries. */
+export function summaryDisplayText(state:SummaryState):string {
+ if(state.status==="error")return `生成失败\n${state.error?.trim()||"未知错误"}\n点击重试`;
+ return state.text||(state.status==="waiting"?"正在等待原文加载...":state.status==="generating"?"正在生成总结...":"正在准备总结...");
+}
+/** Native only shows this request's usage when enabled and a total was returned. */
+export function summaryTokenUsageText(state:SummaryState,show:boolean):string|null {
+ if(!show||state.status!=="done"||state.totalTokens===undefined)return null;
+ const parts:string[]=[];
+ if(state.inputTokens!==undefined)parts.push(`输入 ${state.inputTokens}`);
+ if(state.outputTokens!==undefined)parts.push(`输出 ${state.outputTokens}`);
+ parts.push(`合计 ${state.totalTokens}`);
+ return parts.join(" · ");
+}
 /** One reader owns one session: folding preserves results; retry cannot overlap a live request. */
 export class SummarySession {
  state:SummaryState={status:"idle",text:""};
