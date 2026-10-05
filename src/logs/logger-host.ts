@@ -29,8 +29,13 @@ export const hostAppLogger=new AppLogger(createHostLogFile(),()=>new Date(),(lev
  if(level==='E')console.error(line);else if(level==='W')console.warn(line);else console.info(line);
 });
 let started=false;
-export function startAppLogger(){
+export function startAppLogger(deferInit?:Promise<void>){
  if(started)return;started=true;installAppLogger(hostAppLogger);
  let legacy:string|undefined;try{legacy=kv.get<string>('watchrss.sync.diagnostics.v1');}catch{}
- void hostAppLogger.init(legacy).catch(()=>{});
+ // The full-file redaction scan reads the whole log (hundreds of KB through file.read);
+ // run it after the first screen so it never delays startup. Appends still work meanwhile.
+ // One full-file redaction scan migrates logs from builds that did not redact per line; it is
+ // regex-heavy over hundreds of KB, so remember it and never repeat it on later starts.
+ const flag='watchrss.applog.redacted.v1';let scanned=false;try{scanned=kv.get<boolean>(flag)===true;}catch{}
+ void (deferInit??Promise.resolve()).then(()=>hostAppLogger.init(legacy,!scanned)).then(()=>{if(!scanned)try{kv.set(flag,true);}catch{}}).catch(()=>{});
 }

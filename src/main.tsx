@@ -42,7 +42,7 @@ function ContentApp(){
  return <WatchRSS services={services} createDebugBluetooth={sync.createDebugBluetooth} bluetoothSync={sync.bluetooth} announcements={createAnnouncementServices()} onSyncMediaKeepAliveChange={enabled=>sync.setMediaEnabled(enabled)} />;
 }
 function App(){const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(()=>{void applyCloudBuildPolicy().catch(()=>{});startupMark('debugBuild.ready');setReady(true);});return <Show when={ready()}><StartupGate content={()=> <ContentApp/>}/></Show>;}
-startAppLogger();
+startAppLogger(afterFirstScreen(5000));
 setTelemetryDeviceId(async()=>{await afterFirstScreen();return (await getLibrarySyncRepository()).deviceId();});
 usageTelemetry.recordAppLaunch();
 mount(App);

@@ -93,9 +93,10 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
  })().catch(error=>{if(current===generation)setFatal(String(error));});};
  load();
  const destination=createMemo(()=>session()?.destination);
- // Like native, keep the launch surface until the first content screen has data.
+ // Like native, keep the launch surface until the first content screen has data, but never
+ // longer than 1.5s: a resumed non-home route may not load the channel list at all.
  const [contentReady,setContentReady]=createSignal(false);
- void afterFirstScreen(8000).then(()=>{startupMark('overlay.contentReady');setContentReady(true);});
+ void afterFirstScreen(1500).then(()=>{startupMark('overlay.contentReady');setContentReady(true);});
  return <StartupTransition ready={()=>!!fatal()||!!session()} exit={()=>!!fatal()||(!!session()&&(destination()!=='content'||contentReady()))} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost onExit={props.onExit} session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
    <StartupContent render={props.content}/>
   </Show></Show>}/>;
