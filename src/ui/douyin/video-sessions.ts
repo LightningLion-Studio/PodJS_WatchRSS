@@ -1,13 +1,16 @@
 import {
   videoSessions,
+  hostOperation,
   type HostOperation,
   type VideoBounds,
   type VideoPrepare,
+  type VideoSessionCapabilities,
   type VideoSessionState,
   type VideoSessionTransitionState,
   type VideoState,
 } from "@podjs/framework/services";
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
+import type { DouyinItem } from "../../douyin/types.ts";
 
 export const DOUYIN_PAGER_SNAP_POSITIONAL_THRESHOLD = .18;
 // Compose PagerDefaults uses the platform minimum fling velocity before the
@@ -17,6 +20,17 @@ export const DOUYIN_PAGER_SETTLE_DURATION_MS = 220;
 
 export type DouyinPagerDirection = "up" | "down";
 export interface DouyinPreparedSource { key:string; source:PlaybackSource }
+type VideoDecoderProfile={videoMime?:string;videoWidth?:number;videoHeight?:number};
+
+export function douyinDecoderProfile(item:DouyinItem,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight">{
+  const variant=item.variants.find(candidate=>candidate.playUrl===url);
+  if(!variant)return {};
+  return {
+    ...(variant.codec==="h264"?{videoMime:"video/avc"}:variant.codec==="h265"?{videoMime:"video/hevc"}:{}),
+    ...(variant.width>0?{videoWidth:variant.width}:{}),
+    ...(variant.height>0?{videoHeight:variant.height}:{}),
+  };
+}
 
 export function shouldUseDouyinVideoSessions(source:PlaybackSource,capable:boolean):boolean {
   return capable&&source.platform==="douyin"&&source.immersive===true;
@@ -42,6 +56,7 @@ export function douyinPagerSettleProgress(from:number,to:0|1,elapsedMs:number):n
 }
 
 interface SessionPort {
+  capabilities(profile?:VideoDecoderProfile):Promise<VideoSessionCapabilities>;
   prepare(options:Parameters<typeof videoSessions.prepare>[0]):HostOperation<VideoSessionState>;
   play(sessionId:string):Promise<VideoSessionState>;
   pause(sessionId:string):Promise<VideoSessionState>;
@@ -55,6 +70,11 @@ interface SessionPort {
   promote(sessionId:string,options:{replaceSessionId?:string;bounds?:VideoBounds;autoplay?:boolean}):Promise<VideoSessionState>;
   transition(options:{fromSessionId:string;toSessionId:string;progress:number;direction:DouyinPagerDirection;bounds?:VideoBounds}):Promise<VideoSessionTransitionState>;
 }
+
+const defaultSessionPort:SessionPort={
+  ...videoSessions,
+  capabilities:(profile={})=>hostOperation<VideoSessionCapabilities>("video.session.capabilities",profile).result,
+};
 
 let nextPoolId=1;
 const state=(value:VideoSessionState):VideoState=>({
@@ -75,9 +95,14 @@ export class DouyinVideoSessionPool {
   private transitionRunning:Promise<void>|undefined;
   private latestTransition:{progress:number;direction:DouyinPagerDirection;bounds:VideoBounds}|undefined;
 
-  constructor(private readonly port:SessionPort=videoSessions){
+  constructor(private readonly port:SessionPort=defaultSessionPort){
     const id=nextPoolId++;
     this.activeId=`dy${id}a`;this.standbyId=`dy${id}b`;
+  }
+
+  async supportsPrewarm(profile:VideoDecoderProfile={}):Promise<boolean>{
+    const capability=await this.port.capabilities(profile);
+    return capability.decoderLimit>=2&&capability.surfacePromotion&&capability.verticalTransition;
   }
 
   prepare(source:DouyinPreparedSource,options:VideoPrepare):HostOperation<VideoState>{

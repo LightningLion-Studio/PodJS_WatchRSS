@@ -184,7 +184,7 @@ def main():
              '-PpodDistDir=' + str(a.framework / 'dist/projects' / FORMAL / 'android-watch'),
              '-PpodTestAssetsDir=' + str(ROOT / 'tests/android/assets'),
              '-PpodTestSourceDir=' + str(ROOT / 'tests/android/java')], a.dry_run, cwd=android)
-        for path in ['app/build/outputs/apk/debug/app-debug.apk', 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk']:
+        for path in ['app/build/outputs/apk/debug/androidApp-debug.apk', 'app/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk']:
             run(a.adb + ['install', '-r', str(android / path)], a.dry_run)
         classes = ','.join('dev.podjs.androidwatch.WatchRssSmokeTest#' + name for name in
             ['launchesRendersAndInitializesChannelsDatabase', 'migratedRoutesReturnToHomeRoot'])

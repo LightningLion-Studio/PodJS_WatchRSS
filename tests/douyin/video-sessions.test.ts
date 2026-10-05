@@ -2,6 +2,7 @@ import {describe,expect,test} from "bun:test";
 import type {VideoSessionState} from "@podjs/framework/services";
 import {
   DouyinVideoSessionPool,
+  douyinDecoderProfile,
   douyinPagerProgress,
   douyinPagerSettleProgress,
   shouldFallbackFromVideoSessions,
@@ -14,11 +15,12 @@ const source=(key:string):DouyinPreparedSource=>({key,source:{immersive:true,awe
 const sessionState=(sessionId:string,prewarming=false):VideoSessionState=>({ok:true,sessionId,state:prewarming?"prewarmed":"ready",positionMs:0,durationMs:1000,width:1080,height:1920,muted:prewarming,volume:1,prewarming,presented:!prewarming,hasRenderedFirstFrame:true,targetBufferBytes:6291456});
 const bounds={x:0,y:0,width:240,height:240};
 
-function fakePort(){
+function fakePort(decoderLimit=2){
   const calls:{method:string;sessionId?:string;progress?:number}[]=[];
   let transitionGate:Promise<void>|undefined;
   return {
     calls,
+    async capabilities(){return {capability:"media.video.sessions",maxSessions:2,decoderLimit,decoderInUse:0,targetBufferBytesPerSession:6291456,targetBufferBytesTotal:6291456*decoderLimit,prewarmTimeoutMs:2500,prewarmMode:"hidden_first_frame",surfacePromotion:decoderLimit>=2,verticalTransition:decoderLimit>=2,surfaceComposition:"android_texture_view",backgroundPlayback:false};},
     gateTransition(gate:Promise<void>){transitionGate=gate;},
     prepare(options:any){calls.push({method:options.prewarm?"prewarm":"prepare",sessionId:options.sessionId});return {cancel(){calls.push({method:"cancel",sessionId:options.sessionId});},result:Promise.resolve(sessionState(options.sessionId,options.prewarm))};},
     async play(id:string){calls.push({method:"play",sessionId:id});return sessionState(id);},
@@ -37,6 +39,22 @@ describe("Douyin video sessions",()=>{
     expect(shouldUseDouyinVideoSessions(source("1").source,false)).toBe(false);
     expect(shouldUseDouyinVideoSessions({...source("1").source,immersive:false},true)).toBe(false);
     expect(shouldUseDouyinVideoSessions(source("1").source,true)).toBe(true);
+  });
+
+  test("rejects the two-player path when the host reports one decoder",async()=>{
+    const single=new DouyinVideoSessionPool(fakePort(1) as any);
+    expect(await single.supportsPrewarm()).toBe(false);
+    const dual=new DouyinVideoSessionPool(fakePort(2) as any);
+    expect(await dual.supportsPrewarm()).toBe(true);
+  });
+
+  test("passes the selected Douyin codec and dimensions to the host probe",()=>{
+    const item={awemeId:"1",description:"",createdAtSeconds:0,authorId:"",authorName:"",likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:"h264",durationMs:0,variants:[
+      {playUrl:"h264",codec:"h264" as const,bitrate:1,width:720,height:1280},
+      {playUrl:"hevc",codec:"h265" as const,bitrate:1,width:1080,height:1920},
+    ]};
+    expect(douyinDecoderProfile(item)).toEqual({videoMime:"video/avc",videoWidth:720,videoHeight:1280});
+    expect(douyinDecoderProfile(item,"hevc")).toEqual({videoMime:"video/hevc",videoWidth:1080,videoHeight:1920});
   });
 
   test("matches native positional/velocity settle and cancellation rebound",()=>{

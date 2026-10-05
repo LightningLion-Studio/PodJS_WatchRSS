@@ -21,7 +21,7 @@ import type { BiliRoute } from "../bili/index.tsx";
 import type { DouyinPlayRequest, DouyinRoute } from "../douyin/index.tsx";
 import type { AppServices, Article, Channel } from "../service.ts";
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
-import type { DouyinPreparedSource } from "../douyin/video-sessions.ts";
+import { douyinDecoderProfile, type DouyinPreparedSource } from "../douyin/video-sessions.ts";
 import type { RouteEntry, SetPage } from "./types.ts";
 
 interface MediaControllerDependencies {
@@ -277,6 +277,7 @@ export function createMediaRouteController(
         awemeId: request.item.awemeId,
         posterUrl: request.item.coverUrl,
         url: douyinDebug.playbackUrl(request.item.awemeId,request.playback.playUrl),
+        ...douyinDecoderProfile(request.playback),
         title: request.item.description,
         headers,
         ...playbackPreferences(),
@@ -336,6 +337,7 @@ export function createMediaRouteController(
       awemeId: result.data.item.awemeId,
       posterUrl: result.data.item.coverUrl,
       url: douyinDebug.playbackUrl(result.data.item.awemeId,result.data.item.playUrl,direction==="next"),
+      ...douyinDecoderProfile(result.data.item),
       title: result.data.item.description,
       headers,
       webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
@@ -358,6 +360,7 @@ export function createMediaRouteController(
     return {key:result.data.item.awemeId,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
       url:douyinDebug.playbackUrl(result.data.item.awemeId,result.data.item.playUrl,direction==="next"),title:result.data.item.description,headers,
+      ...douyinDecoderProfile(result.data.item),
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
     }};
   };
@@ -448,6 +451,7 @@ export function createMediaRouteController(
         awemeId: result.data.item.awemeId,
         posterUrl: result.data.item.coverUrl,
         url: douyinDebug.playbackUrl(result.data.item.awemeId,result.data.item.playUrl),
+        ...douyinDecoderProfile(result.data.item),
         title: result.data.item.description,
         headers,
         webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
