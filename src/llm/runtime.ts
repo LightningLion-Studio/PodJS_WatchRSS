@@ -6,6 +6,7 @@ import type {SqlDatabase} from "../core/types.ts";
 import {watchAppVersion} from '../core/app-version.ts';
 import {SummarySession,type SummaryState} from "./summary.ts";
 import {loadSummarySource} from "./source.ts";
+import {appendUsage} from "./usage.ts";
 
 export const summaryAccountStore=new WatchAccountStore({get:async key=>(await secureStorage.get(key))??null,set:secureStorage.set,remove:secureStorage.delete});
 let sequence=0;
@@ -25,7 +26,7 @@ export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,
  }};
  let tokens:WatchTokenManager|undefined;
  return new SummarySession({source:waiting=>loadSummarySource(db,id,original,waiting),account:()=>summaryAccountStore.read(),freshAccount:(account,force)=>{tokens??=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport,appVersion:watchAppVersion});return tokens.freshAccount(force);},transport,
-  recordUsage:async(model,usage)=>{await db.execute("INSERT INTO llm_token_usage(provider,model,request_id,usage_json,created_at) VALUES(?,?,?,?,?)",["WatchRSS",model,`${Date.now()}_${++sequence}_server_summary`,JSON.stringify(usage??null),Date.now()]);},
+  recordUsage:async(model,usage)=>{const createdAt=Date.now();await appendUsage(db,{provider:"WatchRSS",model,requestId:`${createdAt}_${++sequence}_server_summary`,usage,createdAt});},
   cancel:()=>{disposed=true;for(const task of requests)task.cancel();requests.clear();}
  },preset,changed);
 }

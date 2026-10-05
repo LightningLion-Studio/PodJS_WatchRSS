@@ -75,6 +75,7 @@ import { HomeEntryPlacementStore } from "./home-placement.ts";
 import type { SettingsRoute } from "./SettingsScreen.tsx";
 import { SettingsStore, type SettingsState } from "../settings/index.ts";
 import type { InformationPage } from "./InformationScreens.tsx";
+import { checkpointInformationSnapshot } from "./information-route-state.ts";
 import type { RecommendedChannel } from "../rss/recommendations.ts";
 import { memoRepository } from "../services.ts";
 import {
@@ -163,6 +164,7 @@ export default function WatchRSS(props: {
       motion.phase !== "idle"
     )
       return;
+    checkpointInformationSnapshot(current());
     current().list?.scroller.stop();
     setStack((entries) => [...entries, { page: next, ...data }]);
   }
@@ -450,6 +452,7 @@ export default function WatchRSS(props: {
     onLifecycleChange((value) => {
       setForeground(value === "active");
       const entry = current();
+      if (value !== "active") checkpointInformationSnapshot(entry);
       if (value !== "active" && entry.page === "reader" && entry.reader)
         backgroundReaderFlush.begin(
           entry,

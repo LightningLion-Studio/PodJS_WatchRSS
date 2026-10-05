@@ -15,7 +15,7 @@ import {hostArticleBodyCodec,hostSyncText} from "./sync/article-body-host.ts";
 import {SqlReadingProgressStore} from "./reader/sql-progress.ts";
 import {ReadingProgressStore} from "./reader/progress.ts";
 import {kv} from "@podjs/framework/watch";
-import {readUsage,clearUsage} from "./llm/usage.ts";
+import {readUsage,clearUsage,subscribeUsageChanges} from "./llm/usage.ts";
 import { ImportedTextStore, importedTextFileName } from "./reader/imported-text.ts";
 import { importedSpeechSource, importedReaderHandle } from "./reader/imported-speech.ts";
 import {createSummarySession,summaryAccountStore} from "./llm/runtime.ts";
@@ -144,6 +144,7 @@ export const services: AppServices = {
   async getSpeechSource(article,anchor) { await init();return importedSpeechSource(db,importedTextStore,article,anchor); },
   async readSummaryUsage(){await init();return readUsage(db);},
   async clearSummaryUsage(){await init();await clearUsage(db);},
+  subscribeSummaryUsage(listener){return subscribeUsageChanges(listener);},
   async hasSummaryAccount(){return !!(await summaryAccountStore.read())?.watchDeviceToken;},
   createSummary(id,preset,changed){return createSummarySession({query:async(sql,params)=>{await init();return db.query(sql,params);},execute:async(sql,params)=>{await init();return db.execute(sql,params);},transaction:db.transaction},id,preset,()=>originalArticle(id),changed);},
   async getChannelPlaybackSettings(id) {await init();const row=(await db.query("SELECT EXISTS(SELECT 1 FROM articles WHERE channel_id=? AND (COALESCE(audio_url,'')<>'' OR COALESCE(video_url,'')<>'')) has_media,COALESCE((SELECT continue_in_background FROM source_media_preferences WHERE channel_id=?),0) enabled",[Number(id),Number(id)]))[0];return {hasPlayableMedia:!!Number(row.has_media),continuePlaybackInBackground:!!Number(row.enabled)};},

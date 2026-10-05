@@ -6,7 +6,10 @@ import type { BiliRoute } from "../bili/index.tsx";
 import type { DouyinRoute } from "../douyin/index.tsx";
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { ReaderBodyHandle } from "../ReaderBody.tsx";
-import type { InformationPage } from "../InformationScreens.tsx";
+import type {
+  InformationPage,
+  InformationSnapshot,
+} from "../InformationScreens.tsx";
 import type { VirtualListHandle } from "@pocketjs/framework/virtual-list";
 import type { HttpExportMode } from "../../remote-input/exports.ts";
 
@@ -71,6 +74,8 @@ export type RouteEntry = {
   douyinFailures?: Set<string>;
   noteId?: string;
   informationPage?: InformationPage;
+  informationSnapshot?: InformationSnapshot;
+  informationSnapshotReader?: () => InformationSnapshot;
   exportMode?: HttpExportMode;
   phoneAbilityLabel?: string;
   returnRemoteUrl?: boolean;

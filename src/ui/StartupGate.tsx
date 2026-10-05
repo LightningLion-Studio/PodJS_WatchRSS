@@ -28,6 +28,7 @@ import {InformationScreen,type InformationPage,type InformationSnapshot,type Inf
 import {BackMotion} from './back-motion.ts';
 import {ScrollEntries} from './ScrollEntries.tsx';
 import {watchUiLines} from './text-layout.ts';
+import {STARTUP_EXIT_DURATION_MS,startupExitFrame} from './startup-transition.ts';
 
 /** Content is a factory so it cannot mount or start foreground work before the
  * native startup version gates have resolved. Storage injection is for isolated
@@ -87,15 +88,25 @@ export function StartupGate(props:{content:()=>JSX.Element;storage?:OnboardingSt
  })().catch(error=>{if(current===generation)setFatal(String(error));});};
  load();
  const destination=createMemo(()=>session()?.destination);
- return <Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()} fallback={<StartupLoading/>}>{value=><OnboardingHost session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
-  <StartupContent render={props.content}/>
- </Show></Show>;
+ return <StartupTransition ready={()=>!!fatal()||!!session()} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
+   <StartupContent render={props.content}/>
+  </Show></Show>}/>;
 }
 
-function StartupLoading(){
+function StartupTransition(props:{ready:()=>boolean;render:()=>JSX.Element}){
+ const [elapsed,setElapsed]=createSignal(0),[finished,setFinished]=createSignal(false);let started:number|undefined;
+ const now=()=>globalThis.performance?.now?.()??Date.now();
+ createEffect(()=>{if(!props.ready()){started=undefined;setElapsed(0);setFinished(false);return;}if(started===undefined){started=now();setElapsed(0);setFinished(false);}});
+ onFrame(()=>{if(started===undefined||finished())return;const value=Math.max(0,now()-started);setElapsed(value);if(value>=STARTUP_EXIT_DURATION_MS)setFinished(true);});
+ return <><Show when={props.ready()}>{props.render()}</Show><Show when={!finished()}><StartupLoading exitElapsedMs={elapsed()}/></Show></>;
+}
+
+function StartupLoading(props:{exitElapsedMs:number}){
  setNavigationState({canGoBack:false,rootSwipeEnabled:false});onCleanup(()=>setNavigationState({canGoBack:false}));
- const metrics=getDisplayMetrics(),badge=82;
- return <View debugName="WatchRssLaunchOverlay" class="absolute inset-0 bg-[#030506]">
+ const metrics=getDisplayMetrics(),badge=82,frame=()=>startupExitFrame(props.exitElapsedMs);
+ // Pod apps cannot own the host Android splash window; animate the first app
+ // surface while the resolved destination is already mounted underneath.
+ return <View debugName="WatchRssLaunchOverlay" accessibilityLabel="腕上RSS正在启动" accessibilityHidden={props.exitElapsedMs>0} onPress={()=>{}} class="absolute inset-0 bg-[#030506]" style={{opacity:frame().opacity,scale:frame().scale}}>
   <View class="absolute w-[126] h-[126] rounded-[9999] bg-[#15211f]" style={{insetL:(metrics.logicalWidth-126)/2,insetT:(metrics.logicalHeight-126)/2-20}}/>
   <View class="absolute rounded-[9999] bg-[#111719] border-[#ff6026] border-[1] items-center justify-center" style={{insetL:(metrics.logicalWidth-badge)/2,insetT:(metrics.logicalHeight-badge)/2-20,width:badge,height:badge}}><Text class="text-[21px] leading-[26] text-[#ff7845]">RSS</Text></View>
   <Text class="absolute left-[18] right-[18] text-lg leading-[22] text-[#f5f5f5] text-center" style={{insetT:metrics.logicalHeight/2+35}}>腕上RSS</Text>
