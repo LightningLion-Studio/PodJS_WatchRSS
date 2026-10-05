@@ -99,7 +99,7 @@ def upload(adb, root):
         timer = threading.Timer(900, proc.kill)
         timer.start()
         try:
-            with tarfile.open(fileobj=proc.stdin, mode='w|') as archive:
+            with tarfile.open(fileobj=proc.stdin, mode='w|', format=tarfile.GNU_FORMAT) as archive:
                 for path in sorted(root.rglob('*')):
                     info = archive.gettarinfo(str(path), arcname=path.relative_to(root).as_posix())
                     info.uid = info.gid = 0
