@@ -13,6 +13,7 @@ import {
   SpeechPlayback,
   type SpeechPlaybackState,
 } from "../reader/speech-playback.ts";
+import { SpeechSpectrum } from "../reader/speech-spectrum.ts";
 import { TtsConfigStore } from "../tts/config-store.ts";
 import {
   ReaderPresetStore,
@@ -44,6 +45,7 @@ import {
   RelativeAxis,
   RelativeAxisUnits,
   lifecycle,
+  hasCapability,
   onLifecycleChange,
   getDisplayMetrics,
   kv,
@@ -58,6 +60,7 @@ import {
 } from "../navigation/reader-exit.ts";
 import {
   browser,
+  speech,
   video,
   mediaVolume,
   hostOperation,
@@ -301,6 +304,12 @@ export default function WatchRSS(props: {
   const [feedLoadingMore, setFeedLoadingMore] = createSignal(false);
   let feedRequestVersion = 0;
   const [speechState, setSpeechState] = createSignal<SpeechPlaybackState>();
+  const [speechSpectrum, setSpeechSpectrum] = createSignal<readonly number[]>([]);
+  const spectrum = new SpeechSpectrum({
+    supported: () => hasCapability("media.tts.spectrum"),
+    onSpectrum: listener => speech.onSpectrum(listener),
+    setSpectrumEnabled: enabled => speech.setSpectrumEnabled(enabled),
+  }, setSpeechSpectrum);
   const [platformLoginState, setPlatformLoginState] =
     createSignal<HomePlatformLoginState>({ bili: false, douyin: false });
   const speechPlayback = new SpeechPlayback(
@@ -308,6 +317,7 @@ export default function WatchRSS(props: {
     (state) => {
       const previous = speechState();
       setSpeechState(state);
+      spectrum.update(foreground() && page() === "home", state);
       if (
         state.phase === "error" &&
         state.error !== previous?.error &&
@@ -391,6 +401,9 @@ export default function WatchRSS(props: {
   const [presetState, setPresetState] = createSignal<ReaderPresetState>();
   const [presetRevision, setPresetRevision] = createSignal(0);
   const [foreground, setForeground] = createSignal(lifecycle() === "active");
+  createEffect(() => spectrum.update(foreground() && page() === "home", speechState()));
+  onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()));
+  onCleanup(() => spectrum.dispose());
   onCleanup(
     onLifecycleChange((value) => {
       setForeground(value === "active");
@@ -1278,6 +1291,7 @@ export default function WatchRSS(props: {
               busy={busy}
               platformLoginState={platformLoginState}
               speechState={speechState}
+              speechSpectrum={speechSpectrum}
               services={props.services}
               go={go}
               openSpeech={() => setPage("speech-playback")}

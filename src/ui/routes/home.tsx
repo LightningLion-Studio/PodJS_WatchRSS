@@ -27,6 +27,7 @@ interface HomeRoutesProps {
   busy: () => boolean;
   platformLoginState: () => HomePlatformLoginState;
   speechState: () => SpeechPlaybackState | undefined;
+  speechSpectrum: () => readonly number[];
   services: AppServices;
   go: (page: Page) => Promise<void>;
   openSpeech: () => void;
@@ -74,6 +75,7 @@ export function HomeRoutes(props: HomeRoutesProps) {
           busy={props.busy()}
           platformLoginState={props.platformLoginState()}
           speechState={props.speechState()}
+          speechSpectrum={props.speechSpectrum()}
           onSpeech={props.openSpeech}
           onRefresh={() => void props.refresh()}
           onProfile={() => void props.go("profile")}
