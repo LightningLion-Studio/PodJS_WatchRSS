@@ -14,14 +14,18 @@ let statusCapability = true;
 let probe: () => Promise<BrowserAvailability>, capability = true, calls: string[] = [], network: (status: InternetStatus) => void;
 mock.module('@pocketjs/framework/renderer', () => ({ createComponent, mergeProps, memo: createMemo, effect: createRenderEffect }));
 mock.module('@pocketjs/framework/components', () => ({ View: (p: Node['props']) => element('View', p), Text: (p: Node['props']) => element('Text', p), Image: (p: Node['props']) => element('Image', p) }));
-mock.module('@podjs/framework/watch', () => ({ hasCapability: (name: string) => name === 'system.browser.auth' || (name === 'system.browser.auth.status' ? statusCapability : capability) }));
-mock.module('@podjs/framework/services', () => ({ DOUYIN_AUTH_STATUS_SCRIPT: 'framework-status-script', browser: { availability: () => { calls.push('probe'); return { result: probe() }; } } }));
+const realWatch = await import('@podjs/framework/watch');
+mock.module('@podjs/framework/watch', () => ({ ...realWatch, hasCapability: (name: string) => name === 'system.browser.auth' || (name === 'system.browser.auth.status' ? statusCapability : capability) }));
+const realServices = await import('@podjs/framework/services');
+mock.module('@podjs/framework/services', () => ({ ...realServices, DOUYIN_AUTH_STATUS_SCRIPT: 'framework-status-script', browser: { availability: () => { calls.push('probe'); return { result: probe() }; } } }));
 mock.module('../src/media/browser-auth.ts', () => ({ authorizeInBrowser: (options: any) => { authOptions = options; calls.push('authorize'); return { result: new Promise((resolve, reject) => { finishAuth = resolve; rejectAuth = reject; }), cancel: () => { calls.push('cancel'); } }; } }));
 mock.module('../src/onboarding/network-host.ts', () => ({ observeHostInternet: (fn: typeof network) => { network = fn; fn('available'); return () => {}; } }));
 mock.module('../src/ui/ScrollEntries.tsx', () => ({ ScrollEntries: (p: Node['props']) => element('ScrollEntries', { children: createMemo(() => p.entries.map((entry: any) => entry.render())) }) }));
 for (const [path, name] of [['../src/ui/douyin/ImmersiveEntry.tsx', 'ImmersiveEntry'], ['../src/ui/RemoteImage.tsx', 'RemoteImage'], ['../src/ui/SafeQrScreen.tsx', 'SafeQrScreen'], ['../src/ui/ShareQrScreen.tsx', 'ShareQrScreen']] as const) mock.module(path, () => ({ [name]: () => null }));
 let readerProps: any;
 mock.module('../src/ui/ReaderBody.tsx', () => ({ReaderBody: (p: any) => {readerProps=p;return element('ReaderBody',p);}}));
+// Douyin detail renders through the shared reader-styled MediaReaderDetail (title row + blocks).
+mock.module('../src/ui/MediaReaderDetail.tsx', () => ({MediaReaderDetail: (p: any) => {readerProps={...p,fontSize:p.preset.body.fontSizeSp,onMedia:()=>p.onPlay()};return element('MediaReaderDetail',p);}}));
 const { DouyinScreen } = await import('../src/ui/douyin/index.tsx');
 const stops: (() => void)[] = []; afterEach(() => { for (const stop of stops.splice(0)) stop(); });
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -70,7 +74,7 @@ test('detail passes selected reader preset and offline metadata to the common re
   let request: any, destination: any;
   const client={resolvePlayback:async()=>({ok:true,data:item}),feedSnapshot:()=>({items:[sample('feed')],cursor:'feed-cursor',hasMore:true})};
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,preset,route:{name:'detail',awemeId:'1',item,playlist},client,onPlay:(value:any)=>request=value,onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
-  await settle();expect(readerProps.preset).toBe(preset);expect(readerProps.fontSize).toBe(23);expect(readerProps.blocks[0].text).toBe('title 1');
+  await settle();expect(readerProps.preset).toBe(preset);expect(readerProps.fontSize).toBe(23);expect(readerProps.title).toBe('title 1');
   readerProps.onMedia({type:'video'});await settle();
   expect(request.playlist).toEqual(playlist);expect(request.hasMore).toBe(false);expect(request.cursor).toBeUndefined();expect(destination).toEqual({name:'player',awemeId:'1'});
 });
@@ -92,7 +96,7 @@ test('saved detail metadata lookup does not create Douyin watched history on rea
   let writes=0;
   const client={listHistory:async()=>[],listSaved:async()=>[{item:sample('saved')}],recordHistory:async()=>{writes++;}};
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:'saved'},client,settings:{}} as unknown as DouyinScreenProps);});
-  await settle();expect(readerProps.blocks[0].text).toBe('title saved');expect(writes).toBe(0);
+  await settle();expect(readerProps.title).toBe('title saved');expect(writes).toBe(0);
 });
 
 

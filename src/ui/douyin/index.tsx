@@ -11,6 +11,9 @@ import type { InternetStatus } from "../../onboarding/state.ts";
 import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
+import { MediaReaderDetail } from "../MediaReaderDetail.tsx";
+import { readerChrome } from "../../reader/chrome.ts";
+import { readerColor } from "../../reader/content-layout.ts";
 import {wireFields} from "../../sync/article-batches.ts";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
@@ -239,15 +242,31 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
     } catch (error) { setError(String(error)); }
   };
   const preset = () => props.preset ?? defaultReaderPreset();
-  return <Show when={content()} fallback={<ScrollEntries height={props.height} entries={[header("抖音视频"), statusCard(error() ? "加载失败" : "正在加载", error() || "正在读取内容...")]} ref={props.ref} />}>
-    {value => <ReaderBody articleId={`douyin:${props.awemeId}`} text="" blocks={douyinDetailBlocks(value())}
-      preset={preset()} fontSize={preset().body.fontSizeSp} lineHeight={preset().body.fontSizeSp * preset().body.lineHeightEm}
-      width={props.width} height={props.height} active={props.active !== false} autoStart={false} speed={0}
-      onMedia={block => { if (block.type === "video") void play(); }} onControls={() => {}}
-      onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })}
-      footer={[...(error() ? [statusCard("无法播放", error())] : []), ...(item() ? [button("播放", () => void play()), button("更多操作", () => props.onNavigate({name:"actions",awemeId:props.awemeId}))] : [])]} />}
+  // Native DouyinDetailActivity renders the article DetailContent: reader title, then the blocks,
+  // then the reader's favorite / share circles. Favorite uses the persistent local saved store.
+  const [favorite, setFavorite] = createSignal(false), [notice, setNotice] = createSignal("");
+  createEffect(() => { const id = props.awemeId; void Promise.resolve(props.client.getSavedState?.(id)).then(saved => setFavorite(!!saved?.favorite)).catch(() => {}); });
+  const toggleFavorite = async () => {
+    const current = item(); if (!current) return;
+    try { const saved = await props.client.toggleSaved(current, "favorite"); setFavorite(saved); setNotice(saved ? "已收藏" : "已取消收藏"); }
+    catch (error) { setError(String(error)); }
+  };
+  const share = () => {
+    const title = wireFields.trim(item()?.description ?? "") || "抖音视频", qr = () => props.onNavigate({ name: "share", awemeId: props.awemeId });
+    if (props.onShare) props.onShare({ origin: "detail", title, link: douyinShareLink(props.awemeId) }, qr); else qr();
+  };
+  return <Show when={content()} fallback={<View class="absolute inset-0 items-center justify-center" style={{ bgColor: readerColor(preset().background.colorArgb) }}>
+      <Text class="text-[21px] leading-[26] text-center" style={{ textColor: readerChrome(preset()).content }}>{error() || "加载中..."}</Text>
+    </View>}>
+    {value => {
+      const blocks = () => douyinDetailBlocks(value());
+      const title = () => { const first = blocks()[0]; return first?.type === "text" ? first.text : "抖音视频"; };
+      return <MediaReaderDetail width={props.width} height={props.height} preset={preset()} active={props.active !== false}
+        articleId={`douyin:${props.awemeId}`} title={title()} blocks={blocks().slice(1)} message={error() || notice()}
+        favorite={favorite} onPlay={() => void play()} onFavorite={() => void toggleFavorite()} onShare={share}
+        onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })} />;
+    }}
   </Show>;
-
 }
 
 function HistoryScreen(props: DouyinScreenProps) {
