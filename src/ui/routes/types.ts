@@ -8,10 +8,14 @@ import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { ReaderBodyHandle } from "../ReaderBody.tsx";
 import type { InformationPage } from "../InformationScreens.tsx";
 import type { VirtualListHandle } from "@pocketjs/framework/virtual-list";
+import type { HttpExportMode } from "../../remote-input/exports.ts";
 
 export type Page =
   | "add-rss"
   | "remote-input"
+  | "log-upload"
+  | "bluetooth-connection"
+  | "phone-connection-unavailable"
   | "tts-config"
   | "reader-preview"
   | "phone-connection"
@@ -67,6 +71,10 @@ export type RouteEntry = {
   douyinFailures?: Set<string>;
   noteId?: string;
   informationPage?: InformationPage;
+  exportMode?: HttpExportMode;
+  phoneAbilityLabel?: string;
+  returnRemoteUrl?: boolean;
+  unavailableMessage?: string;
   recommendationGroup?: string;
   list?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;

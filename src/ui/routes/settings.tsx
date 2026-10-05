@@ -116,6 +116,7 @@ export function SettingsRoutes(props: SettingsRoutesProps) {
       </Show>
       <Show when={props.page() === "remote-input"}>
         <RemoteInputScreen
+          exportMode={props.entry.exportMode}
           width={props.width}
           height={props.height}
           active={props.active}

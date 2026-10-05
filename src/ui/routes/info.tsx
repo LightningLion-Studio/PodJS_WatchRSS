@@ -5,6 +5,8 @@ import {
   type InformationPage,
 } from "../InformationScreens.tsx";
 import { RecommendationScreen } from "../RecommendationScreen.tsx";
+import { LogUploadScreen } from "../LogUploadScreen.tsx";
+import { createHostLogUploadOptions } from "../../logs/host.ts";
 import type { Page, RouteEntry, SetPage } from "./types.ts";
 
 type InformationProps = Parameters<typeof InformationScreen>[0];
@@ -50,9 +52,17 @@ export function InfoRoutes(props: InfoRoutesProps) {
           active={() => props.active() && props.foreground()}
           page={props.entry.informationPage ?? "about"}
           onNavigate={props.openInformation}
+          onUploadLogs={() => props.setPage("log-upload")}
           onOpenUrl={(url) => void props.openUrl(url)}
           legalBaseUrl="https://sly-data-plane.watchrss.cn"
           ref={(value) => (props.entry.list = value)}
+        />
+      </Show>
+      <Show when={props.page() === "log-upload"}>
+        <LogUploadScreen
+          height={props.height}
+          options={createHostLogUploadOptions()}
+          active={() => props.active() && props.foreground()}
         />
       </Show>
     </>

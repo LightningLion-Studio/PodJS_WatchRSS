@@ -8,6 +8,7 @@ import type { BiliRoute } from "../bili/index.tsx";
 import type { DouyinRoute } from "../douyin/index.tsx";
 import type { Article } from "../service.ts";
 import type { Page, RouteEntry } from "./types.ts";
+import type { HttpExportMode } from "../../remote-input/exports.ts";
 
 interface SavedRoutesProps {
   entry: RouteEntry;
@@ -26,6 +27,7 @@ interface SavedRoutesProps {
   undo: () => Promise<void>;
   reorder: (items: SavedDisplayItem[]) => Promise<void>;
   setError: (message: string) => void;
+  openExport: (mode: HttpExportMode) => void;
 }
 
 export function SavedRoutes(props: SavedRoutesProps) {
@@ -67,6 +69,7 @@ export function SavedRoutes(props: SavedRoutesProps) {
         onUndo={() => void props.undo()}
         onReorder={(items) => void props.reorder(items)}
         onError={props.setError}
+        onSync={() => props.openExport(props.page() === "saved" ? "favorite" : "watchLater")}
         ref={(value) => (props.entry.list = value)}
       />
     </Show>

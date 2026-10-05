@@ -93,8 +93,14 @@ import { RssRoutes } from "./routes/rss.tsx";
 import { SavedRoutes } from "./routes/saved.tsx";
 import { createSavedRouteController } from "./routes/saved-controller.ts";
 import { SettingsRoutes } from "./routes/settings.tsx";
+import { PhoneRoutes } from "./routes/phone.tsx";
 import { routeIsSelfTitled, routeTitle } from "./routes/meta.ts";
 import type { Page, RouteEntry } from "./routes/types.ts";
+import type { ApplicationForegroundSync } from "../sync/application-foreground.ts";
+import type { createAnnouncementServices } from "../announcement/host.ts";
+import { loadHomeNotices } from "../announcement/home.ts";
+import type { Announcement, PushMessage } from "../announcement/models.ts";
+import { HomeNoticeDialog } from "./HomeNoticeDialog.tsx";
 
 type Entry = RouteEntry;
 const bg = "#050507",
@@ -107,9 +113,16 @@ const rowHeight = 48;
 
 export default function WatchRSS(props: {
   services: AppServices;
+  bluetoothSync?: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh">;
+  announcements?: ReturnType<typeof createAnnouncementServices>;
   onSyncMediaKeepAliveChange?: (enabled: boolean) => void;
 }) {
   const metrics = getDisplayMetrics();
+  const bluetoothSync = props.bluetoothSync ?? {
+    state: "disposed" as const,
+    subscribe: () => () => {},
+    refresh: async () => {},
+  };
   const width = Math.max(
     160,
     metrics.logicalWidth - metrics.safeInsets.left - metrics.safeInsets.right,
@@ -404,6 +417,35 @@ export default function WatchRSS(props: {
   createEffect(() => spectrum.update(foreground() && page() === "home", speechState()));
   onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()));
   onCleanup(() => spectrum.dispose());
+  const [pendingAnnouncement, setPendingAnnouncement] = createSignal<Announcement | null>(null);
+  const [pendingPushMessages, setPendingPushMessages] = createSignal<PushMessage[]>([]);
+  const homeNoticeVisible = () => !!pendingAnnouncement() || pendingPushMessages().length > 0;
+  const dismissHomeNotice = () => {
+    if (pendingPushMessages().length) {
+      setPendingPushMessages([]);
+      return true;
+    }
+    const announcement = pendingAnnouncement();
+    if (!announcement || announcement.forceUpdate || !props.announcements) return false;
+    props.announcements.repository.markDismissed(announcement);
+    setPendingAnnouncement(null);
+    return true;
+  };
+  let homeNoticesChecked = false;
+  let homeNoticesAlive = true;
+  createEffect(() => {
+    const services = props.announcements;
+    if (!services || homeNoticesChecked || !foreground()) return;
+    homeNoticesChecked = true;
+    void loadHomeNotices(services.repository).then(result => {
+      if (!homeNoticesAlive) return;
+      batch(() => {
+        setPendingAnnouncement(result.announcement);
+        setPendingPushMessages(result.messages);
+      });
+    });
+  });
+  onCleanup(() => { homeNoticesAlive = false; });
   onCleanup(
     onLifecycleChange((value) => {
       setForeground(value === "active");
@@ -1072,6 +1114,7 @@ export default function WatchRSS(props: {
     }
   });
   const removeBack = onSystemBack(() => {
+    if (page() === "home" && dismissHomeNotice()) return true;
     if (stack().length <= 1) return false;
     if (motion.phase !== "idle") return true;
     motion.begin(0);
@@ -1130,6 +1173,7 @@ export default function WatchRSS(props: {
       motion.phase !== "idle"
     )
       return;
+    if (page() === "bluetooth-connection") return;
     const url = takeRemoteInput();
     if (url === undefined) return;
     if (page() === "remote-input") popPage(true);
@@ -1198,6 +1242,31 @@ export default function WatchRSS(props: {
     hostOperation("ui.toast", { message }).result.catch(() => {});
   const addRecommendation = (channel: RecommendedChannel) => {
     void doAdd(channel.url);
+  };
+  const openHttpExport = (exportMode: "favorite" | "watchLater" | "bili") =>
+    setPage("remote-input", { exportMode });
+  const receiveBluetoothUrl = (url: string, destination: "return" | "add") => {
+    takeRemoteInput(url);
+    const entries = stack();
+    const caller = entries.at(-2);
+    const target: Entry = { page: "add-rss", addUrl: url };
+    if (destination === "return" && caller?.page === "add-rss")
+      setStack([...entries.slice(0, -2), target]);
+    else setStack([...entries.slice(0, -1), target]);
+    motion.reset();
+    setBackOffset(0);
+  };
+  const returnHomeAfterDouyinLogout = () => {
+    for (const entry of stack()) entry.queue?.cancel();
+    batch(() => {
+      setStack([{ page: "home" }]);
+      setPlayingSource(undefined);
+      setError("");
+      setBackOffset(0);
+    });
+    motion.reset();
+    void video.stop().catch(() => {});
+    void hostToast("已退出登录");
   };
   const openAddedChannel = async (channel: Channel) => {
     await loadChannels();
@@ -1282,7 +1351,7 @@ export default function WatchRSS(props: {
             <HomeRoutes
               entry={entry}
               page={entryPage}
-              active={active}
+              active={() => active() && !(entryPage() === "home" && homeNoticeVisible())}
               width={width}
               height={height}
               channels={channels}
@@ -1365,6 +1434,7 @@ export default function WatchRSS(props: {
               undo={undoSaved}
               reorder={reorderSaved}
               setError={setError}
+              openExport={openHttpExport}
             />
             <MediaRoutes
               entry={entry}
@@ -1402,6 +1472,8 @@ export default function WatchRSS(props: {
               douyinReady={douyinReady}
               douyinActions={douyinActions}
               changeDouyinVideo={changeDouyinVideo}
+              openHttpExport={openHttpExport}
+              onDouyinLogoutSuccess={returnHomeAfterDouyinLogout}
             />
             <SettingsRoutes
               entry={entry}
@@ -1451,6 +1523,16 @@ export default function WatchRSS(props: {
               addRecommendation={addRecommendation}
               openUrl={openUrl}
             />
+            <PhoneRoutes
+              entry={entry}
+              page={entryPage}
+              active={active}
+              width={width}
+              height={height}
+              bluetoothSync={bluetoothSync}
+              onUrl={receiveBluetoothUrl}
+              popPage={popPage}
+            />
           </Show>
           <ReaderRoutes
             entry={entry}
@@ -1481,6 +1563,20 @@ export default function WatchRSS(props: {
             toast={hostToast}
             openRssVideo={openRssVideo}
           />
+          <Show when={active() && entryPage() === "home" && props.announcements} keyed>
+            {services => <HomeNoticeDialog
+              width={width}
+              height={height}
+              announcement={pendingAnnouncement()}
+              messages={pendingPushMessages()}
+              updater={services.updater}
+              onDismissAnnouncement={announcement => {
+                services.repository.markDismissed(announcement);
+                setPendingAnnouncement(null);
+              }}
+              onDismissMessages={dismissHomeNotice}
+            />}
+          </Show>
         </View>
       </View>
     );

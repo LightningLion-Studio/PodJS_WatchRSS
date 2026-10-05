@@ -59,3 +59,8 @@ test('inbox observation preserves queue order, unsubscribe and exception isolati
  enqueueRemoteInput('  ');enqueueRemoteInput('https://one.test');stop();enqueueRemoteInput('https://two.test');
  expect(values).toEqual(['https://one.test']);expect(takeRemoteInput()).toBe('https://one.test');expect(takeRemoteInput()).toBe('https://two.test');expect(takeRemoteInput()).toBeUndefined();
 });
+test('route owner consumes its observed URL without stealing older queued input',()=>{
+ enqueueRemoteInput('https://older.test');enqueueRemoteInput(' https://owned.test/rss ');enqueueRemoteInput('https://later.test');
+ expect(takeRemoteInput('https://owned.test/rss')).toBe(' https://owned.test/rss ');
+ expect(takeRemoteInput()).toBe('https://older.test');expect(takeRemoteInput()).toBe('https://later.test');expect(takeRemoteInput()).toBeUndefined();
+});

@@ -49,3 +49,12 @@ test('probe errors reuse B6 unavailable handling', async () => {
   probe = async () => { throw { code: 'webview_unavailable' }; }; const f = mount(); await settle(); f.press(); await settle();
   expect(calls).toEqual(['probe']); expect(f.text()).toContain('无法打开登录页');
 });
+test('successful settings logout delegates clear-task navigation to the route owner',async()=>{
+ let returned=0,navigated=0,logout=0;
+ const client={isLoggedIn:async()=>true,logout:async()=>{logout++;}};
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'settings'},client,onBack(){},onNavigate(){navigated++;},onLogoutSuccess(){returned++;},onPlay(){},settings:{originalContentEnabled:false,onOriginalContentChange(){},continuePlaybackInBackgroundEnabled:false,onContinuePlaybackInBackgroundChange(){},onDeleteChannel(){}},input:async()=>null} as unknown as DouyinScreenProps);});
+ await settle();
+ const exit=nodes(root).find(node=>node.kind==='View'&&node.props.onPress&&nodes(node.props.children).some(child=>child.kind==='Text'&&child.props.children==='退出登录'))!;
+ await exit.props.onPress();await settle();
+ expect({logout,returned,navigated}).toEqual({logout:1,returned:1,navigated:0});
+});

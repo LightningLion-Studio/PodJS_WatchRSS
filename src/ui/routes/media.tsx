@@ -18,6 +18,7 @@ import {
 } from "../VideoPlayerScreen.tsx";
 import type { AppServices, Channel } from "../service.ts";
 import type { Page, RouteEntry } from "./types.ts";
+import type { HttpExportMode } from "../../remote-input/exports.ts";
 
 interface MediaRoutesProps {
   entry: RouteEntry;
@@ -60,6 +61,8 @@ interface MediaRoutesProps {
     entry: RouteEntry,
     direction: "next" | "previous",
   ) => Promise<void>;
+  openHttpExport: (mode: HttpExportMode) => void;
+  onDouyinLogoutSuccess: () => void;
 }
 
 export function MediaRoutes(props: MediaRoutesProps) {
@@ -92,6 +95,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
               .channels()
               .some((item) => item.url === "builtin:bili"),
             onDeleteChannel: () => props.deleteBuiltin("bili"),
+            onSyncWatchRecords: () => props.openHttpExport("bili"),
           }}
           onNavigate={(route) =>
             void props
@@ -133,6 +137,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onRequestQrLogin={() => void props.loginDouyin()}
           input={(title, value) => props.services.input(title, value)}
           onUnsupported={props.setError}
+          onLogoutSuccess={props.onDouyinLogoutSuccess}
           ref={(value) => (props.entry.list = value)}
         />
       </Show>

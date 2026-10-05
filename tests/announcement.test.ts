@@ -3,8 +3,18 @@ import {AnnouncementClient, AnnouncementRepository, ANNOUNCEMENT_BACKEND, compar
   parseAnnouncement, parsePushMessages, AppUpdateService, type Announcement, type AnnouncementStorage,
   type UpdatePort, type DownloadedApk, type DownloadProgress} from '../src/announcement/index.ts';
 import {utf8Encode, type HttpRequest} from '../src/cloud/types.ts';
+import {loadHomeNotices,VERSION_ANNOUNCEMENTS_ENABLED} from '../src/announcement/home.ts';
 
 const announcement: Announcement = {version: '2.1', changelogMarkdown: '# 新版', forceUpdate: false, downloadUrl: 'https://example.test/update.apk'};
+test('PodJS distribution gate skips version lookup but keeps push; enabled path delegates native order',async()=>{
+ expect(VERSION_ANNOUNCEMENTS_ENABLED).toBe(false);
+ const calls:string[]=[];
+ const repository={async checkHome(){calls.push('announcement-first');return {announcement,messages:[]};},async fetchNewMessages(){calls.push('push');return [{id:1,title:'通知',body:'内容'}];}};
+ expect(await loadHomeNotices(repository as never)).toEqual({announcement:null,messages:[{id:1,title:'通知',body:'内容'}]});
+ expect(calls).toEqual(['push']);calls.length=0;
+ expect(await loadHomeNotices(repository as never,true)).toEqual({announcement,messages:[]});
+ expect(calls).toEqual(['announcement-first']);
+});
 const wire = {version: '2.1', changelog_md: '# 新版', force_update: false, download_url: announcement.downloadUrl};
 function fixture(responses: unknown[]) {
   const requests: HttpRequest[] = [];

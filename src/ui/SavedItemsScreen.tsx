@@ -20,14 +20,14 @@ export interface SavedDisplayItem {
   awemeId?:string;
 }
 
-const SAFE=18, GAP=6, HEADER_HEIGHT=66, PROMPT_HEIGHT=60, ROW_HEIGHT=84;
+const SAFE=18, GAP=6, HEADER_HEIGHT=66, PROMPT_HEIGHT=116, ROW_HEIGHT=84;
 const ITEM_START=SAFE+HEADER_HEIGHT+GAP+PROMPT_HEIGHT+GAP;
 const STEP=ROW_HEIGHT+GAP;
 const pad=(n:number)=>String(n).padStart(2,"0");
 function savedTime(timestamp:number){if(!timestamp||timestamp<0)return "未更新";const date=new Date(timestamp);return `${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;}
 function move<T>(items:T[],from:number,to:number){const next=items.slice(),[item]=next.splice(from,1);next.splice(to,0,item!);return next;}
 
-export function SavedItemsScreen(props:{width:number;height:number;active:boolean;type:"favorite"|"watchLater";items:SavedDisplayItem[];loading:boolean;undoVisible:boolean;onOpen:(item:SavedDisplayItem)=>void;onRemove:(item:SavedDisplayItem)=>void;onUndo:()=>void;onReorder:(items:SavedDisplayItem[])=>void;onError:(message:string)=>void;ref?:(handle:{scroller:Scroller})=>void}){
+export function SavedItemsScreen(props:{width:number;height:number;active:boolean;type:"favorite"|"watchLater";items:SavedDisplayItem[];loading:boolean;undoVisible:boolean;onOpen:(item:SavedDisplayItem)=>void;onRemove:(item:SavedDisplayItem)=>void;onUndo:()=>void;onReorder:(items:SavedDisplayItem[])=>void;onError:(message:string)=>void;onSync?:()=>void;ref?:(handle:{scroller:Scroller})=>void}){
   const [display,setDisplay]=createSignal(props.items);
   const [dragKey,setDragKey]=createSignal<string|null>(null),[dragOffset,setDragOffset]=createSignal(0);
   const [swipeKey,setSwipeKey]=createSignal<string|null>(null),[swipeOffset,setSwipeOffset]=createSignal(0);
@@ -87,7 +87,10 @@ export function SavedItemsScreen(props:{width:number;height:number;active:boolea
   </View>});
   const entries=createMemo<ScrollEntry[]>(()=>[
     {height:HEADER_HEIGHT,render:()=> <View class="absolute inset-0"><Text accessibilityRole="header" class="absolute left-[0] right-[0] top-[3] text-center text-[21px] leading-[26] text-[#f5f5f5]">{title()}</Text><Text class="absolute left-[4] right-[4] top-[30] text-xs leading-[17] text-[#b6b6b6]">{lines("保存在本地，离线可读，长按可拖动排序",12,props.width-2*SAFE-8,2)}</Text></View>},
-    ...(!props.loading?[{height:PROMPT_HEIGHT,render:()=> <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] top-[1] h-[57] rounded-[16] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[10] text-[17px] leading-[20] text-[#f5f5f5]">{lines("下载手机端app以在手机上编辑和同步内容",17,props.width-2*SAFE-20,2)}</Text></View>}]:[]),
+    ...(!props.loading?[{height:PROMPT_HEIGHT,render:()=> <View class="absolute inset-0">
+      <View onPress={props.onSync} focusable={!!props.onSync} accessibilityRole="button" accessibilityLabel={`开始${operation()}`} class="absolute left-[0] right-[0] top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center"><Text class="text-[17px] leading-[21] text-[#f5f5f5]">开始{operation()}</Text></View>
+      <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端App" class="absolute left-[0] right-[0] top-[56] h-[52] items-center justify-center"><Text class="text-xs leading-[17] text-[#b6b6b6]">下载手机端App以完成{operation()}</Text></View>
+    </View>}]:[]),
     ...(props.loading?[0,1,2,3].map(skeleton):display().map(item=>({height:ROW_HEIGHT,render:()=> <View class="absolute inset-0 overflow-hidden rounded-[16] bg-black">{dragKey()===item.key?null:card(item)}</View>}))),
     ...(!props.loading&&!display().length?[{height:48,render:()=> <Text class="absolute left-[0] right-[0] top-[8] text-sm leading-[18] text-center text-[#b6b6b6]">{props.type==="favorite"?"暂无收藏":"暂无稍后再看"}</Text>}]:[]),
     {height:40,render:()=> <View/>}
