@@ -14,3 +14,24 @@ The parent app selects the RSS presentation when the built-in Bilibili channel h
 - Player: `BiliPlayerScreen.kt`. Playback resolution is live and the route carries the typed `BiliPlayUrl`; the parent host owns video rendering and controls.
 
 All dimensions in the TSX are logical pixels for the 233 logical-pixel round viewport (466 physical pixels at density 2).
+
+## C11 comments (2026-10-04)
+
+`CommentScreen.tsx` follows the two native comment Screens and `BiliCommentCard` at density 2:
+64dp fixed app bar; horizontal safe padding 18dp; list gap 8dp; card radius 16dp/padding 12dp;
+avatar 36dp/crop; text body 17sp/21sp, author bold 14sp/17sp, metadata 12sp/14sp;
+20sp inline emotes; pictures 100dp boxes with 8dp trailing padding and horizontal scrolling.
+Uses Watch dark colors (#0b1211, #1c1f21, #23272a, #f5f5f5, #b6b6b6, #ff6026),
+VIP nickname override, UP and is_up_top badges. Names/body are measured with rendering font slots.
+Links stay literal and mentions blue, without external navigation, matching CommentRichText.
+
+`bili/comments.ts` owns next vs pn pagination, initial pins, root and retry/refresh/disposal.
+The native SDK's comment endpoints are unsigned and omit sort/mode: do not add WBI or a login gate.
+ReplyPagingSource continues until an empty page even if the reply cursor says end.
+Root is connected explicitly here because the current native ViewModel does not transfer its paging source's root.
+Top/regular duplicate rpid is retained once (pin first). Repeated main cursors stop instead of looping.
+Error text is native “加载失败: …”; tapping it retries. A “加载更多” row supplements settled-range prefetch.
+Reply cards are read-only; only main comment cards navigate, using rpid rather than comment.root.
+
+Verification is local contract/component tests only. Font rasterization, inherited system font scale,
+physical scrolling/crown, round-screen clipping, real remote images and live API behavior still need device acceptance.

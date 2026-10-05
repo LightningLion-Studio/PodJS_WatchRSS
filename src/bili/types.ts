@@ -25,7 +25,20 @@ export interface BiliDashStream { id?: number; baseUrl?: string; backupUrl: stri
 export interface BiliPlayUrl { quality?: number; format?: string; timeLength?: number; acceptQuality: number[]; acceptDescription: string[]; dash?: { video: BiliDashStream[]; audio: BiliDashStream[] }; durl: { order?: number; length?: number; size?: number; url?: string; backupUrl: string[] }[] }
 export interface BiliFavoriteFolder { id?: number; fid?: number; mid?: number; title?: string; mediaCount?: number; attr?: number; favState?: number }
 export interface BiliFavoritePage { mediaId?: number; title?: string; hasMore: boolean; medias: Array<BiliItem & { favTime?: number }> }
-export interface BiliComment { rpid?: number; oid?: number; mid?: number; root?: number; parent?: number; count?: number; replyCount?: number; like?: number; ctime?: number; member?: { mid?: string; name?: string; avatar?: string }; content?: { message?: string; pictures?: Array<{ url?: string; width?: number; height?: number }> }; replies?: BiliComment[] }
+export interface BiliCommentContent {
+  message?: string;
+  emote?: Record<string, { id?: number; text?: string; url?: string; type?: number; size?: number }>;
+  members?: Array<{ mid?: string; name?: string }>;
+  jumpUrl?: Record<string, { title?: string; state?: number; prefixIcon?: string; clickable?: boolean }>;
+  pictures?: Array<{ url?: string; width?: number; height?: number }>;
+}
+export interface BiliComment {
+  rpid?: number; oid?: number; mid?: number; root?: number; parent?: number;
+  count?: number; replyCount?: number; like?: number; ctime?: number;
+  member?: { mid?: string; name?: string; avatar?: string; vip?: { nicknameColor?: string } };
+  content?: BiliCommentContent; replies?: BiliComment[];
+  replyControl?: { upReply?: boolean; isUpTop?: boolean; isNote?: boolean };
+}
 export interface BiliCommentPage { cursor?: { next?: number; isEnd?: boolean; mode?: number }; replies: BiliComment[]; topReplies: BiliComment[]; upperMid?: number }
 export interface BiliReplyPage { root?: BiliComment; replies: BiliComment[]; cursor?: BiliCommentPage["cursor"] }
 export interface BiliHistoryCursor { max?: number; viewAt?: number; business?: string; pageSize?: number }
