@@ -1,3 +1,6 @@
+import {usageTelemetry} from '../telemetry/host.ts';
+import {TelemetryScreenSession} from '../telemetry/usage.ts';
+import {telemetryScreen,telemetryScreenOwner} from '../telemetry/screens.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('screen');
 import { openBrowserUrl, type BrowserOrigin } from "../browser/open.ts";
@@ -190,6 +193,9 @@ export default function WatchRSS(props: {
               item.articleId === leaving.readerArticle?.id,
           )
         : undefined;
+    if (leaving.page === "reader" && telemetryReaders.has(leaving)) {
+      telemetryReaders.delete(leaving); usageTelemetry.recordArticleReadFinished();
+    }
     current().queue?.cancel();
     if (leaving.page === "saved" || leaving.page === "watch-later")
       clearSavedUndo();
@@ -418,6 +424,23 @@ export default function WatchRSS(props: {
   const [presetState, setPresetState] = createSignal<ReaderPresetState>();
   const [presetRevision, setPresetRevision] = createSignal(0);
   const [foreground, setForeground] = createSignal(lifecycle() === "active");
+  const telemetrySession = new TelemetryScreenSession(usageTelemetry, () => globalThis.performance?.now?.() ?? Date.now());
+  const telemetryReaders = new WeakSet<Entry>();
+  const telemetryPlayers = new WeakSet<Entry>();
+  createEffect(() => {
+    const entries = stack();
+    const owner = telemetryScreenOwner(entries);
+    telemetrySession.update(owner, owner && telemetryScreen(owner), foreground());
+    for (const value of entries) {
+      if (value.page === "reader" && value.readerArticle && !telemetryReaders.has(value)) {
+        telemetryReaders.add(value); usageTelemetry.recordArticleReadStarted();
+      }
+      if (value.page === "video" && value.playback && !value.playback.immersive && !telemetryPlayers.has(value)) {
+        telemetryPlayers.add(value); usageTelemetry.recordVideoPlayed();
+      }
+    }
+  });
+  onCleanup(() => telemetrySession.pause());
   createEffect(() => spectrum.update(foreground() && page() === "home", speechState()));
   onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()));
   onCleanup(() => spectrum.dispose());
@@ -1003,11 +1026,13 @@ export default function WatchRSS(props: {
   }
   async function refresh() {
     const refreshAll = page() === "home";
+    if (refreshAll && homeRefreshing()) return;
     setBusy(true);
     if (refreshAll) setHomeRefreshing(true);
     setError("");
     try {
-      await props.services.refresh(current().channelId);
+      try { await props.services.refresh(current().channelId); }
+      finally { if (refreshAll) usageTelemetry.recordFeedRefreshed(); }
       if (page() === "home") await loadChannels();
       else if (page() === "articles" && current().channelId)
         await loadFeedArticles(current().channelId!, feedVisibleCount());
@@ -1227,6 +1252,7 @@ export default function WatchRSS(props: {
     recoverRssDouyinVideo,
     deleteBuiltin,
   } = createMediaRouteController({
+    onRssSourcePublished: () => usageTelemetry.recordVideoPlayed(),
     services: props.services,
     current,
     motion,

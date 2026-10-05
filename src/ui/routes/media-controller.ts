@@ -21,6 +21,7 @@ import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { RouteEntry, SetPage } from "./types.ts";
 
 interface MediaControllerDependencies {
+  onRssSourcePublished?: () => void;
   services: AppServices;
   current: () => RouteEntry;
   motion: { readonly phase: string };
@@ -474,6 +475,7 @@ export function createMediaRouteController(
         manual,
       );
       if (source) {
+        dependencies.onRssSourcePublished?.();
         entry.playback = source;
         dependencies.setError("");
         dependencies.setPlayingSource(source);

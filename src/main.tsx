@@ -1,3 +1,5 @@
+import {usageTelemetry,setTelemetryDeviceId} from './telemetry/host.ts';
+import {getLibrarySyncRepository} from './services.ts';
 import {startAppLogger} from './logs/logger-host.ts';
 import { mount } from "@pocketjs/framework/solid";
 import {onCleanup} from "solid-js";
@@ -13,4 +15,6 @@ function ContentApp(){
 }
 function App(){return <StartupGate content={()=> <ContentApp/>}/>;}
 startAppLogger();
+setTelemetryDeviceId(async()=>(await getLibrarySyncRepository()).deviceId());
+usageTelemetry.recordAppLaunch();
 mount(App);

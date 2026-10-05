@@ -1,3 +1,5 @@
+import {usageTelemetry,recordHostReleaseOobeOpened} from '../telemetry/host.ts';
+import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('StartupGate');
 import {openBrowserUrl} from "../browser/open.ts";
@@ -152,6 +154,15 @@ function OnboardingHost(props:{session:OnboardingSession;controller:OnboardingCo
  let introHandle:{onBack:()=>boolean;scroller:()=>Scroller|undefined}|undefined,privacyScroller:Scroller|undefined;
  const motion=new BackMotion(width),[offset,setOffset]=createSignal(0);
  const destination=createMemo(()=>props.session.destination);
+ const telemetrySession=new TelemetryScreenSession(usageTelemetry,()=>globalThis.performance?.now?.()??Date.now());
+ let oobeVisited=false;
+ createEffect(()=>{
+  const top=currentLegal(),dest=destination();
+  if(dest==='intro'&&!oobeVisited){oobeVisited=true;void recordHostReleaseOobeOpened();}
+  const screen=top?(top.page==='beian'?'BeianActivity':'InfoActivity'):dest==='intro'?'OobeActivity':dest==='privacy'?'PrivacyPolicyConsentActivity':undefined;
+  telemetrySession.update(top??dest,screen,active());
+ });
+ onCleanup(()=>telemetrySession.pause());
  createEffect(()=>{if(!active()){motion.reset();setOffset(0);}});
  const saveLegal=(entries:LegalEntry[])=>props.saveLegal({pages:entries.map(entry=>entry.page),snapshots:entries.map(entry=>entry.page==='beian'?null:entry.snapshot?.()??entry.restoredState??null)});
  const cacheSnapshot=(entry:LegalEntry,snapshot:InformationSnapshot)=>{if(entry.page==='beian'||!legal().includes(entry))return;entry.restoredState=snapshot;saveLegal(legal());};
