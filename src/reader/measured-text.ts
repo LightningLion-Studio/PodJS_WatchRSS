@@ -1,4 +1,4 @@
-import { layoutText } from "./layout.ts";
+import { layoutUiText as layoutText } from "./line-break.ts";
 
 export type TextMeasurer = (text:string)=>number;
 /** Truncate only after wrapping with the same font provider used to paint. */
@@ -24,7 +24,7 @@ export function normalizeWatchTitle(title:string):string {
   return normalized.replace(/ /g,(_space,offset:number)=>/[\w\-/]/.test(normalized[offset-1]??"")&&/[\w\-/]/.test(normalized[offset+1]??"")?" ":"");
 }
 /** Android WatchTitleFormatting first-line/other-line limits and orphan balancing. */
-export function* watchTitleMeasurements(title:string,width:number,firstWidth=150,otherWidth=190):Generator<string,string[],number> {
+export function* watchTitleMeasurements(title:string,width:number,firstWidth=150,otherWidth=190,protectedSuffix?:string,minPrefixCharsBeforeSuffix=0):Generator<string,string[],number> {
   const chars=Array.from(normalizeWatchTitle(title)), result:string[]=[];
   const limits=[Math.max(1,Math.min(width,firstWidth)),Math.max(1,Math.min(width,otherWidth))];
   for(let start=0;start<chars.length;){
@@ -40,10 +40,21 @@ export function* watchTitleMeasurements(title:string,width:number,firstWidth=150
     const prefix=Array.from(prev);
     if(prefix.length>1){const last=prefix.pop()!;if((yield last+result[index])<=limits[1]){result[index-1]=prefix.join("");result[index]=last+result[index];if(index>1)index-=2;}}
   }
+  // Native balanceProtectedSuffixLines: keep at least N visible title chars before the hint.
+  const normalized=normalizeWatchTitle(title),last=result.length-1;
+  if(protectedSuffix&&minPrefixCharsBeforeSuffix>1&&result.length>=2&&mostlyCjk(normalized.slice(0,normalized.length-protectedSuffix.length))&&result[last].endsWith(protectedSuffix)){
+    const visible=(line:string)=>Array.from(line.slice(0,line.length-protectedSuffix.length).trimEnd()).filter(ch=>!/\s/.test(ch)).length;
+    while(visible(result[last])<minPrefixCharsBeforeSuffix){
+      const prev=Array.from(result[last-1]);if(prev.length<=1)break;
+      const shifted=prev[prev.length-1]+result[last];
+      if((yield shifted)>limits[last===0?0:1])break;
+      prev.pop();result[last-1]=prev.join("");result[last]=shifted;
+    }
+  }
   return result.length?result:[""];
 }
 
-export function watchTitleLines(title:string,width:number,measure:TextMeasurer,firstWidth=150,otherWidth=190):string[] {
- const plan=watchTitleMeasurements(title,width,firstWidth,otherWidth);let step=plan.next();
+export function watchTitleLines(title:string,width:number,measure:TextMeasurer,firstWidth=150,otherWidth=190,protectedSuffix?:string,minPrefixCharsBeforeSuffix=0):string[] {
+ const plan=watchTitleMeasurements(title,width,firstWidth,otherWidth,protectedSuffix,minPrefixCharsBeforeSuffix);let step=plan.next();
  while(!step.done)step=plan.next(measure(step.value));return step.value;
 }

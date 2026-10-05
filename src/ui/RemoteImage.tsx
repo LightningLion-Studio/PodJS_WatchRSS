@@ -6,6 +6,7 @@ import { imageFitRect } from "./image-fit.ts";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { Image, View, type NodeMirror } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
+import { getDisplayMetrics } from "@podjs/framework/watch";
 import { base64ToBytes, hostOperation } from "@podjs/framework/services";
 
 export interface RemoteImageProps {
@@ -47,6 +48,7 @@ interface Entry {
 
 const MAX_DECODED_BYTES = 512 * 512 * 4;
 const MAX_CONCURRENT = 3;
+let loggedScale = false;
 const entries = new Map<string, Entry>();
 const queue: Entry[] = [];
 let active = 0;
@@ -126,7 +128,12 @@ function pump(): void {
 }
 
 export function bindRemoteImage(props: RemoteImageProps, node: NodeMirror, onSize?: (width:number,height:number)=>void): () => void {
-  const maximum = Math.max(1, Math.min(512, Math.ceil(Math.max(props.width, props.height))));
+  // Decode at device pixels (logical × scale), like native Coil sizing to the view; capped by the 512px texture budget.
+  const metrics = getDisplayMetrics(), pixelScale = metrics.logicalWidth > 0 ? metrics.physicalWidth / metrics.logicalWidth : 1;
+  // The host texture is the largest power of two <= maxDimension, so round the request up.
+  const devicePx = Math.ceil(Math.max(props.width, props.height) * pixelScale);
+  const maximum = Math.max(1, Math.min(512, 2 ** Math.ceil(Math.log2(Math.max(1, devicePx)))));
+  if (!loggedScale) { loggedScale = true; logConsole.info(`RemoteImage scale=${pixelScale} request=${props.width}x${props.height} maxDimension=${maximum}`); }
   const key = `${props.cacheBucket??"images"}\u0000${props.inline?"inline":"general"}\u0000${props.filePath??""}\u0000${props.url}\u0000${maximum}\u0000${normalizedHeaders(props.headers)}`;
   let entry = entries.get(key);
   if (!entry) {
