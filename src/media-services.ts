@@ -1,3 +1,4 @@
+import {appLogger} from './logs/app-logger.ts';
 import { clearBiliLogoutData, clearDouyinLogoutData } from "./media/logout.ts";
 import { managedCache } from "./cache/host.ts";
 import { readLocalBiliDetail } from "./bili/local-detail.ts";
@@ -14,6 +15,7 @@ let sequence=0;
 export const mediaTransport: HttpTransport = {
  async request(request:HttpRequest):Promise<HttpResponse> {
   if(request.method!=="GET"&&request.method!=="POST")throw new Error("Unsupported media request method");
+  appLogger.d('Network',`${request.method} ${request.url}`);
   const path=`media-json/request-${Date.now()}-${++sequence}.json`;
   try {
    const response=await hostOperation<DownloadResult>("http.download",{url:request.url,path,method:request.method,bodyBase64:request.body?bytesToBase64(request.body):undefined,headers:request.headers,maxBytes:8*1024*1024,timeoutMs:30000}).result;
@@ -23,8 +25,9 @@ export const mediaTransport: HttpTransport = {
     if(!chunk.length||offset+chunk.length>bytes.length)throw new Error("服务器响应下载不完整");
     bytes.set(chunk,offset);offset+=chunk.length;
    }
+   appLogger.i('Network',`media response status=${response.status} bytes=${response.size}`);
    return {status:response.status,headers:response.headers,body:bytes};
-  } finally {await fileChunks.remove(path).catch(()=>{});}
+  } catch(error){appLogger.e('Network','Media request failed',error);throw error;} finally {await fileChunks.remove(path).catch(()=>{});}
  }
 };
 const secure={get:async(key:string)=>(await secureStorage.get(key))??null,set:secureStorage.set,delete:secureStorage.delete};

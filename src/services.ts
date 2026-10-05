@@ -1,3 +1,4 @@
+import {appLogger} from './logs/app-logger.ts';
 import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
 import {ImportedArticleDeletion} from "./core/imported-article-deletion.ts";
 import {ExternalSavedStore} from "./core/external-saved.ts";
@@ -89,6 +90,7 @@ let downloadSequence = 0;
 let addPreviewSequence=0;
 const pendingAddPreviews=new Map<string,{url:string;xml:string|null;builtin:BuiltinChannel|undefined}>();
 async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string> {
+  appLogger.d('Network',`RSS fetch ${url}`);
   const path = `feeds/fetch-${Date.now()}-${++downloadSequence}.xml`;
   try {
     const request=http.download(url,path,8*1024*1024);
@@ -104,8 +106,9 @@ async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string
       if(!value.length) throw new Error("订阅下载不完整");
       bytes.set(value,offset); offset += value.length;
     }
+    appLogger.d('Network',`download bytes=${bytes.length}`);
     return utf8ToString(bytes);
-  } finally { await fileChunks.remove(path).catch(() => {}); }
+  } catch(error){appLogger.e('Network','RSS fetch failed',error);throw error;} finally { await fileChunks.remove(path).catch(() => {}); }
 }
 const sourceSync = new SqlSourceSyncStore(db,{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")});
 const repo = new WatchRssRepository(db, fetchFeedText, hydrateStoredContent,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec),async id=>{const device=(await db.query("SELECT device_id FROM sync_local_identity WHERE id=1"))[0];if(!device)throw new Error("同步身份未初始化");return sourceSync.localDeleteStatements(id,String(device.device_id));});
@@ -233,7 +236,7 @@ export const services: AppServices = {
       article.searchSnippet=searchSnippet(term,description,content,value(row,'summary_match')||value(row,'summary'));
       return article;});
   },
-  async getArticle(id) { await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)]); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=mapArticle(rows[0]); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=buildArticleBlocks(article.rawContent,article); article.content=contentText(article.contentBlocks); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
+  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)]); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=mapArticle(rows[0]); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=buildArticleBlocks(article.rawContent,article); article.content=contentText(article.contentBlocks); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
   getOriginalArticle(id) { return originalArticle(id); },
   async addChannel(url) {
     await init();
@@ -334,6 +337,7 @@ const originalCache=new OriginalContentCache(db,async(sourceUrl,job)=>{
     const response=await request.result;
     const bytes=new Uint8Array(response.size);let offset=0;
     while(offset<bytes.length){if(job.cancelled)throw new Error("原文请求已取消");const chunk=await fileChunks.read(path,offset);const data=base64ToBytes(chunk.dataBase64);if(!data.length||data.length>bytes.length-offset||chunk.size!==bytes.length)throw new Error("原文下载不完整");bytes.set(data,offset);offset+=data.length;}
+    appLogger.d('Network',`download bytes=${bytes.length}`);
     return utf8ToString(bytes);
   }finally{await fileChunks.remove(path).catch(()=>{});}
 },2,id=>emitChannel({id,kind:"original"}));
@@ -343,6 +347,7 @@ function originalArticle(id:string):Promise<Article>{
   const request=loadOriginalArticle(id).finally(()=>originalRequests.delete(id));originalRequests.set(id,request);return request;
 }
 async function loadOriginalArticle(id:string):Promise<Article>{
+ appLogger.d('DetailScreen','Load original article');
   const article=await services.getArticle(id);if(!article)throw new Error("文章不存在");
   if(article.importedText||isImportedContentUrl(article.link))return article;
   const cached=await originalCache.get(id),sourceUrl=cached.sourceUrl,html=await hydrateStoredContent(cached.html);

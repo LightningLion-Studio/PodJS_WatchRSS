@@ -49,8 +49,8 @@ describe('native log encryption compatibility',()=>{
 describe('collection and lifecycle',()=>{
  test('collects persistent safe timeline without payloads',async()=>{
   const map=new Map<string,string>();const log=new SyncDiagnosticLog({get:k=>map.get(k),set:(k,v)=>{map.set(k,v);}},()=>new Date(0));
-  expect(await diagnosticLogSource(log)()).toBeNull();log.action('password=secret',false);log.failure('ip');
-  const text=await diagnosticLogSource(log)();expect(text).toContain('action=unknown');expect(text).not.toContain('secret');expect(text).toContain('ip failure');
+  expect(await diagnosticLogSource({readLogs:async()=>log.pull(700_000).log||null})()).toBeNull();log.action('password=secret',false);log.failure('ip');
+  const text=await diagnosticLogSource({readLogs:async()=>log.pull(700_000).log||null})();expect(text).toContain('action=unknown');expect(text).not.toContain('secret');expect(text).toContain('ip failure');
  });
  test('empty/load failure/whitespace never upload',async()=>{
   for(const source of [async()=>null,async()=>'',async()=>{throw Error('read');},async()=> '  ']){

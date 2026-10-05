@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('SpeechPlaybackScreen');
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import { onRawScrollInput, onLifecycleChange, lifecycle } from "@podjs/framework/watch";
 import { mediaVolume, delay, hostOperation } from "@podjs/framework/services";
@@ -19,7 +21,7 @@ export function SpeechPlaybackScreen(props: {
   const [volume,setVolume]=createSignal({visible:false,percent:0});
   const volumeController=new CrownVolumeController(mediaVolume,{after:(ms,callback)=>{const timer=delay(ms);void timer.result.then(callback,()=>{});return()=>timer.cancel();}},setVolume,
     ()=>{void hostOperation("ui.toast",{message:"音量调节防干扰触发，先停下以继续调整音量"}).result.catch(()=>{});},
-    error=>console.warn("朗读音量调节失败",error));
+    error=>logConsole.warn("朗读音量调节失败",error));
   const removeRaw=onRawScrollInput(event=>{if(props.active&&props.volumeEnabled&&lifecycle()==="active")volumeController.adjust(event.vertical,event.uptimeMs,props.volumeGuard);});
   const removeLifecycle=onLifecycleChange(state=>{if(state!=="active")volumeController.reset();});
   createEffect(()=>{props.active;props.volumeEnabled;props.volumeGuard;volumeController.reset();});

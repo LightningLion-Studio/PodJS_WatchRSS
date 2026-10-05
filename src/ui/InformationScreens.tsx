@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('InformationScreens');
 import { Text, View } from "@pocketjs/framework/components";
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import {getDisplayMetrics, hasCapability} from '@podjs/framework/watch';
@@ -119,7 +121,7 @@ export function InformationScreen(props: InformationScreenProps) {
     void request.result.then(content => {
       if (current) { batch(() => { setLegal(content); setLegalError(null); setIsLoading(false); }); report('response-applied'); }
     }).catch(error => {
-      if (current) { console.warn('Legal document fetch failed', String(error)); batch(() => { setLegal(null); setLegalError('协议正文加载失败，请检查网络后重试。'); setIsLoading(false); }); report('response-applied'); }
+      if (current) { logConsole.warn('Legal document fetch failed', String(error)); batch(() => { setLegal(null); setLegalError('协议正文加载失败，请检查网络后重试。'); setIsLoading(false); }); report('response-applied'); }
     });
     onCleanup(() => { current = false; request.cancel(); });
   });
@@ -204,7 +206,7 @@ function InformationError(props:{width:number;height:number;message:string;activ
         });
       }));
       if (current) setLayout({message:measured[0]!, button:measured[1]!});
-    })().catch(error => { if (current) console.warn('Information error text layout', String(error)); });
+    })().catch(error => { if (current) logConsole.warn('Information error text layout', String(error)); });
   });
   const messageHeightPx = () => layout()?.message.heightPx ?? Math.round(34 * pixelScale);
   const labelHeightPx = () => layout()?.button.heightPx ?? Math.round(17 * pixelScale);

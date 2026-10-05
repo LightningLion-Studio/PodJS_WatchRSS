@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('BeianScreen');
 import { View } from "@pocketjs/framework/components";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { getDisplayMetrics, hasCapability } from "@podjs/framework/watch";
@@ -54,7 +56,7 @@ export function BeianScreen(props: BeianScreenProps) {
     if (!Number.isInteger(value.sdkInt) || value.sdkInt < 30) { setQrAvailable(false); return; }
     setSdkInt(value.sdkInt);
   }).catch(error => {
-    if (current) { console.warn("Beian platform", String(error)); setSdkInt(30); }
+    if (current) { logConsole.warn("Beian platform", String(error)); setSdkInt(30); }
   });
   let firstFrame: number | undefined;
   onFrame(() => {

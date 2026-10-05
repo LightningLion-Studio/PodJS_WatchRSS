@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('ReaderPresetSingleLinePreview');
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
@@ -30,7 +32,7 @@ export function ReaderPresetSingleLinePreview(props: {
     setNative(new Map());
     if (!hasCapability("text.layout")) return;
     const metrics = getDisplayMetrics();
-    const task = requestReaderLayout([current], width, preset.body.fontSizeSp, metrics.physicalWidth / metrics.logicalWidth, preset, args => textLayout.layout(args), setNative, error => console.warn("Reader preset line layout", String(error)), props.fonts, "preview");
+    const task = requestReaderLayout([current], width, preset.body.fontSizeSp, metrics.physicalWidth / metrics.logicalWidth, preset, args => textLayout.layout(args), setNative, error => logConsole.warn("Reader preset line layout", String(error)), props.fonts, "preview");
     onCleanup(() => task.cancel());
   });
   const row = createMemo(() => layOut([block()], contentWidth(), props.preset.body.fontSizeSp, {}, props.preset, native()).rows.find(value => value.kind === "text"));

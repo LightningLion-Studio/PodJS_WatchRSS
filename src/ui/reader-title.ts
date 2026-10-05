@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('reader-title');
 import {readerFontPixels} from "../reader/font-assets.ts";
 import {createEffect,createSignal,onCleanup,untrack,type Accessor} from 'solid-js';
 import {getOps} from '@pocketjs/framework/host';
@@ -23,10 +25,10 @@ export function useReaderTitle(title:Accessor<string>,width:Accessor<number>,pre
   const task=requestWatchTitleLines(text,w,pixelScale,t=>textLayout.measure({...resolve(spec),text:t,fontSizePx:readerFontPixels(spec,pixelScale),fontWeight:spec.fontWeight,italic:spec.italic,letterSpacingEm:spec.letterSpacingEm,textMotion:profile==="preview"?"subpixel":spec.renderMode==="LINEAR_SMOOTH"?"animated":"static"}),value=>{
    if(!current)return;
    native=true;setLines(value);
-  },error=>{if(current)console.warn('Reader title font',String(error));});
+  },error=>{if(current)logConsole.warn('Reader title font',String(error));});
   void task.done.then(()=>notify({settled:true,native}),error=>{
    if(!current)return;
-   console.warn('Reader title font',String(error));notify({settled:true,native:false});
+   logConsole.warn('Reader title font',String(error));notify({settled:true,native:false});
   });
   onCleanup(()=>{current=false;task.cancel();});
  });

@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {hostOperation,fileChunks,bytesToBase64,base64ToBytes,type DownloadResult} from '@podjs/framework/services';
 import type {HttpTransport} from '../cloud/types.ts';
 
@@ -17,6 +18,7 @@ const hostPorts:TtsTransportPorts={
 };
 /** Read JSON/hex, base64 JSON, or raw MP3 through an owned private download file. */
 export function createTtsTransport(ports:TtsTransportPorts=hostPorts):HttpTransport{return {async request(request){
+ appLogger.d('Network',`${request.method} ${request.url}`);
  let path:string|undefined;
  try{
   const temporary=await ports.createTemp('tts');
@@ -34,7 +36,8 @@ export function createTtsTransport(ports:TtsTransportPorts=hostPorts):HttpTransp
    if(!part.length||part.length>maximum||bytesToBase64(part)!==chunk.dataBase64||chunk.eof!==(offset+part.length===body.length))throw Error('语音服务响应下载不完整');
    body.set(part,offset);offset+=part.length;
   }
+  appLogger.i('Network',`response status=${response.status} bytes=${body.length}`);
   return {status:response.status,headers:response.headers,body};
- }finally{if(path!==undefined)await ports.remove(path).catch(()=>{});}
+ }catch(error){appLogger.e('Network','Request failed',error);throw error;}finally{if(path!==undefined)await ports.remove(path).catch(()=>{});}
 }};}
 export const ttsTransport=createTtsTransport();
