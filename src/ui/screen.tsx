@@ -1,3 +1,7 @@
+import {activityStateHub} from '../navigation/activity-host.ts';
+import {captureActivityNavigation,restoreActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
+import {InformationActivity} from '../navigation/information-activity.ts';
+import {RouteActivityProvider} from './route-activity.tsx';
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
 const HOME_SNAPSHOT_KEY = "watchrss.home.channels.v1";
 function readHomeChannelSnapshot(): Channel[] | undefined {
@@ -58,6 +62,7 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  untrack,
 } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import {
@@ -153,8 +158,18 @@ export default function WatchRSS(props: {
   );
   const resumeStore = new AppResumeStore(kv);
   const startupResume = resumeStore.read();
+  const activityEntries=restoreActivityNavigation(activityStateHub.read(),debugGate.allowed);
   const [resumeReady, setResumeReady] = createSignal(false);
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
+  const checkpoints=new Map<Entry,Set<()=>void>>();
+  const saveActivity=()=>untrack(()=>{
+    if(!resumeReady())return;
+    for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();
+    const next=captureActivityNavigation(activityStateHub.read(),stack());
+    void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
+  });
+  const informationActivity=new InformationActivity(saveActivity,error=>logConsole.warn('Information restore',String(error)));
+  onCleanup(()=>informationActivity.close());
   const [playingSource, setPlayingSource] = createSignal<PlaybackSource>();
   const current = () => stack()[stack().length - 1];
   const page = () => current().page;
@@ -299,7 +314,7 @@ export default function WatchRSS(props: {
   // Cold start renders the home list from the last snapshot (synchronous KV) so the first screen
   // does not wait for database setup; the live list replaces it a moment later. Only used when
   // the app resumes to home, otherwise the snapshot would flash before the restored page.
-  const homeSnapshot = startupResume ? undefined : readHomeChannelSnapshot();
+  const homeSnapshot = startupResume || (activityEntries?.length??0)>1 ? undefined : readHomeChannelSnapshot();
   const [channels, setChannels] = createSignal<Channel[]>(homeSnapshot ?? []);
   const notesHomePlacement = new HomeEntryPlacementStore().read();
   const [articles, setArticles] = createSignal<Article[]>([]);
@@ -496,7 +511,12 @@ export default function WatchRSS(props: {
     onLifecycleChange((value) => {
       setForeground(value === "active");
       const entry = current();
-      if (value !== "active") checkpointInformationSnapshot(entry);
+      if (value !== "active") {
+        for(const item of stack()){
+          const snapshot=checkpointInformationSnapshot(item);if(snapshot)informationActivity.save(item,snapshot);
+        }
+        saveActivity();
+      }
       if (value !== "active" && entry.page === "reader" && entry.reader)
         backgroundReaderFlush.begin(
           entry,
@@ -526,7 +546,10 @@ export default function WatchRSS(props: {
   });
   createEffect(() => {
     const entries = stack();
-    if (resumeReady()) resumeStore.save(resumeTargetForStack(entries));
+    if (resumeReady()) {
+      resumeStore.save(resumeTargetForStack(entries));
+      informationActivity.prune(entries);saveActivity();
+    }
   });
   try {
     setPresetState(presetStore.ensureSeeded(true, settings().fontSizeSp));
@@ -689,12 +712,42 @@ export default function WatchRSS(props: {
     }
   }
   async function restoreStartupNavigation() {
+    const baseline=stack();let owned=baseline;
     try {
       await loadChannels();
+      if(stack()!==baseline)return;
+      if(activityEntries){
+        const entries=await resolveActivityNavigation(activityEntries,{
+          hasChannel:id=>channels().some(channel=>channel.id===id),article:id=>props.services.getArticle(id),
+          canRestore:entry=>entry.page!=='reader-preview'||!!readerPreviewSession.state(),
+        });
+        for(const entry of entries)await informationActivity.restore(entry);
+        if(entries.some(entry=>entry.page==='notes'||entry.page==='note-detail'||entry.page==='note-actions'))await memoRepository.initialize();
+        if(stack()!==baseline)return;owned=entries;
+        batch(()=>{setStack(entries);const lastReader=[...entries].reverse().find(entry=>entry.readerArticle);if(lastReader)setArticle(lastReader.readerArticle!);});
+        const feed=[...entries].reverse().find(entry=>entry.page==='articles');
+        if(feed?.channelId)await loadFeedArticles(feed.channelId,Number(routeMemory(feed).retained.feedCount)||12,true);
+        const saved=[...entries].reverse().find(entry=>entry.page==='saved'||entry.page==='watch-later');
+        if(saved)await loadSaved(saved.page==='saved'?'favorite':'watchLater');
+        const search=entries.at(-1);
+        if(search?.page==='search'&&search.channelId){const draft=routeMemory(search).retained.query;if(typeof draft==='string')await searchChannelArticles(search.channelId,draft);}
+        if(stack()!==entries)return;
+        const playback=entries.at(-1);
+        if(playback?.page==='video'&&playback.videoTarget){
+          const target=playback.videoTarget;
+          // Re-resolve signed URLs/headers from current credentials, never restore them from a Bundle.
+          owned=entries.slice(0,-1);setStack(owned);
+          if(target.kind==='bili')await biliNavigate({...target,name:'player'},playback.memory);
+          else if(target.kind==='douyin')await restoreDouyinVideo(target.awemeId,target.immersive,playback.memory);
+          else {const rss=await props.services.getArticle(target.articleId);if(rss&&stack()===owned)await openRssVideo(rss,target.url,playback.memory);}
+        }
+        return;
+      }
       const target = await resolveResumeTarget(startupResume, {
         hasChannel: (id) => channels().some((channel) => channel.id === id),
         getArticle: (id) => props.services.getArticle(id),
       });
+      if(stack()!==baseline)return;
       if (target.kind === "home") return;
       if (target.kind === "articles") {
         setStack([
@@ -726,8 +779,7 @@ export default function WatchRSS(props: {
         { page: "douyin", douyinRoute: target.route as DouyinRoute },
       ]);
     } catch (error) {
-      setStack([{ page: "home" }]);
-      setError(`无法恢复上次内容：${String(error)}`);
+      if(stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
     } finally {
       setResumeReady(true);
     }
@@ -744,6 +796,7 @@ export default function WatchRSS(props: {
     )
       return;
     const limit = Math.min(200, feedVisibleCount() + 8);
+    routeMemory(current()).retained.feedCount=limit;
     if (limit === feedVisibleCount()) return;
     setFeedLoadingMore(true);
     void loadFeedArticles(channelId, limit);
@@ -1003,6 +1056,7 @@ export default function WatchRSS(props: {
     if (searchDebounce) clearTimeout(searchDebounce);
     searchRequestVersion++;
     setQuery(value);
+    if(current().page==='search'){routeMemory(current()).retained.query=value;saveActivity();}
     setSearchResults([]);
     setSearchLoading(false);
     if (!value.trim()) return;
@@ -1016,6 +1070,7 @@ export default function WatchRSS(props: {
     const version = ++searchRequestVersion;
     const term = keyword.trim();
     setQuery(keyword);
+    if(current().page==='search'){routeMemory(current()).retained.query=keyword;saveActivity();}
     setError("");
     setSearchResults([]);
     if (!term) {
@@ -1264,6 +1319,7 @@ export default function WatchRSS(props: {
     setDouyinBackground,
     openRssVideo,
     biliNavigate,
+    restoreDouyinVideo,
     douyinLogin,
     douyinPlay,
     douyinNavigate,
@@ -1280,6 +1336,7 @@ export default function WatchRSS(props: {
     recoverRssDouyinVideo,
     deleteBuiltin,
   } = createMediaRouteController({
+    onActivityStateChange:saveActivity,
     onRssSourcePublished: () => usageTelemetry.recordVideoPlayed(),
     services: props.services,
     current,
@@ -1342,11 +1399,15 @@ export default function WatchRSS(props: {
   };
 
   const renderPage = (entry: Entry) => {
+    if(entry.page==='reader-scroll-controls')entry.reader=stack().slice(0,stack().indexOf(entry)).reverse().find(item=>item.page==='reader')?.reader;
     const entryPage = () => entry.page;
     const active = () => current() === entry;
     const selfTitled = () => routeIsSelfTitled(entryPage());
 
+    const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
+    onCleanup(()=>checkpoints.delete(entry));
     return (
+      <RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
       <View
         class={
           entryPage() === "video"
@@ -1557,6 +1618,7 @@ export default function WatchRSS(props: {
               setError={setError}
             />
             <NotesRoutes
+              onStateChange={saveActivity}
               entry={entry}
               page={entryPage}
               active={active}
@@ -1572,6 +1634,7 @@ export default function WatchRSS(props: {
               setError={setError}
             />
             <InfoRoutes
+              saveSnapshot={(item,snapshot)=>{if(snapshot)informationActivity.save(item,snapshot);}}
               entry={entry}
               page={entryPage}
               active={active}
@@ -1642,6 +1705,7 @@ export default function WatchRSS(props: {
           </Show>
         </View>
       </View>
+      </RouteActivityProvider>
     );
   };
 

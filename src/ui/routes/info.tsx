@@ -17,6 +17,7 @@ type InformationProps = Parameters<typeof InformationScreen>[0];
 
 interface InfoRoutesProps {
   entry: RouteEntry;
+  saveSnapshot?: (entry: RouteEntry,snapshot: InformationProps["restoredState"]) => void;
   page: () => Page;
   active: () => boolean;
   foreground: () => boolean;
@@ -65,7 +66,7 @@ export function InfoRoutes(props: InfoRoutesProps) {
           legalBaseUrl="https://sly-data-plane.watchrss.cn"
           restoredState={props.entry.informationSnapshot}
           onSnapshotChange={(snapshot) =>
-            rememberInformationSnapshot(props.entry, snapshot)
+            {rememberInformationSnapshot(props.entry, snapshot);props.saveSnapshot?.(props.entry,snapshot);}
           }
           ref={(value) => {
             props.entry.list = value;

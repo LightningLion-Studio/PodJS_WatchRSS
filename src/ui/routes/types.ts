@@ -56,6 +56,10 @@ export type Page =
   | "reader";
 
 export type RouteEntry = {
+  memory?: import("../../navigation/activity-navigation.ts").RouteMemory;
+  articleId?: string;
+  videoTarget?: import("../../navigation/activity-navigation.ts").VideoTarget;
+
   addUrl?: string;
   imageUrl?: string;
   imageFilePath?: string;
