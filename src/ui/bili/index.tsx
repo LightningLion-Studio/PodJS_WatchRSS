@@ -12,6 +12,9 @@ import { measuredLines } from "../../reader/measured-text.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RemoteImage } from "../RemoteImage.tsx";
+import { SwipeCard } from "../SwipeCard.tsx";
+import { BiliSideMenu } from "./BiliSideMenu.tsx";
+import { delay } from "@podjs/framework/services";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
 import { WatchSwitch } from "../AutoScrollSettingsScreen.tsx";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog.tsx";
@@ -100,6 +103,28 @@ function FeedScreen(props: BiliScreenProps) {
     get: <T,>(key: string) => authenticated(session.value()) ? kv.get<T>(key) : undefined,
     set: <T,>(key: string, value: T) => kv.set(key, value),
   }, changed));
+  // Native BiliFeedItemEntry: swipe left reveals 收藏 / 稍后再看 (disabled while scrolling);
+  // results surface as the bottom ToastMessage.
+  const [openSwipeId, setOpenSwipeId] = createSignal<string | null>(null);
+  const [scrolling, setScrolling] = createSignal(false);
+  const [toast, setToast] = createSignal("");
+  let sideMenu: { isEdge: (x: number) => boolean; edgeSwipe: (dx: number) => void } | undefined;
+  let toastGeneration = 0;
+  const showToast = (text: string) => { const own = ++toastGeneration; setToast(text); void delay(2000).result.then(() => { if (own === toastGeneration) setToast(""); }, () => {}); };
+  const itemKey = (item: BiliItem) => String(item.bvid ?? item.aid ?? item.title ?? "");
+  async function favorite(item: BiliItem) {
+    try {
+      const aid = num(item.aid); if (!aid) throw new Error("视频缺少 aid");
+      const folders = await props.client.favoriteFolders({ rid: aid, type: 2 });
+      const id = folders[0]?.id ?? folders[0]?.fid; if (!id) throw new Error("没有可用的收藏夹");
+      await props.client.favorite({ aid, bvid: item.bvid, savedItem: item, addMediaIds: [id] });
+      showToast("已收藏");
+    } catch (error) { showToast(error instanceof Error ? error.message : String(error)); }
+  }
+  async function watchLater(item: BiliItem) {
+    try { await props.client.addToView({ aid: num(item.aid) || undefined, bvid: item.bvid, savedItem: item }); showToast("已加入稍后再看"); }
+    catch (error) { showToast(error instanceof Error ? error.message : String(error)); }
+  }
   const entries = createMemo<ScrollEntry[]>(() => {
     const values = feed.state().items, loggedIn = authenticated(session.value());
     // Native BiliFeedHeader: "哔哩哔哩 ⓘ" (19sp bold #BDBDBD hint) then 6dp gap and the 9sp login caption.
@@ -115,13 +140,33 @@ function FeedScreen(props: BiliScreenProps) {
       ...(!session.loading() && !loggedIn ? [emptyStateEntry("需要登录", "登录后获取推荐内容", props.width ?? 233)] : []),
       ...values.map(item => {
         const open = () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid });
-        return (props.settings?.originalContentEnabled ?? true) ? listVideoEntry(item, undefined, props.width ?? 233, open) : rssFeedEntry(item, props.width ?? 233, open);
+        if (!(props.settings?.originalContentEnabled ?? true)) return rssFeedEntry(item, props.width ?? 233, open);
+        const card = listVideoCard(item, undefined, props.width ?? 233), key = itemKey(item);
+        return { height: card.height, render: () => <SwipeCard cardClass="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden"
+          onOpen={() => { if (openSwipeId()) setOpenSwipeId(null); else open(); }}
+          onActions={() => props.onNavigate({ name: "actions", aid: item.aid, bvid: item.bvid, cid: item.cid, title: item.title, owner: item.owner?.name, cover: item.cover })}
+          onFavorite={() => { setOpenSwipeId(null); void favorite(item); }} onWatchLater={() => { setOpenSwipeId(null); void watchLater(item); }}
+          open={openSwipeId() === key} swipeEnabled={!scrolling()} onStartSwipe={() => { if (openSwipeId() !== key) setOpenSwipeId(null); }}
+          onOpenSwipe={() => setOpenSwipeId(key)} onCloseSwipe={() => { if (openSwipeId() === key) setOpenSwipeId(null); }}
+          edgeSwipe={{ startX: x => sideMenu?.isEdge(x) ?? false, onSwipe: dx => sideMenu?.edgeSwipe(dx) }}>{card.content()}</SwipeCard> };
       }),
       ...(loggedIn && feed.state().loading && values.length ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">加载中...</Text> }] : [])];
   });
   // Native loads more once the last visible item is within 3 of the end.
   const settled = (_first: number, last: number) => { const state = feed.state(); if (last >= entries().length - 4 && state.canLoadMore && !state.loading && state.items.length) feed.more(); };
-  return <ScrollEntries onRefresh={feed.refetch} height={props.height} entries={entries()} gap={8} onSettledRange={settled} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />;
+  return <>
+    <ScrollEntries onRefresh={feed.refetch} height={props.height} entries={entries()} gap={8} onSettledRange={settled} onScrollStateChange={value => { setScrolling(value); if (value) setOpenSwipeId(null); }} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />
+    <BiliSideMenu ref={handle => { sideMenu = handle; }} width={props.width ?? 233} height={props.height} active={() => !openSwipeId()} items={() => {
+      const loggedIn = authenticated(session.value()), go = (route: BiliRoute) => () => props.onNavigate(route);
+      return [{ label: "频道信息", enabled: true, onPress: go({ name: "channel-info" }) },
+        ...(!loggedIn ? [{ label: "登录", enabled: true, onPress: go({ name: "login" }) }] : []),
+        { label: "搜索", enabled: loggedIn, onPress: go({ name: "search" }) },
+        { label: "稍后再看", enabled: loggedIn, onPress: go({ name: "watch-later" }) },
+        { label: "历史记录", enabled: loggedIn, onPress: go({ name: "history" }) },
+        { label: "收藏夹", enabled: loggedIn, onPress: go({ name: "favorites" }) }];
+    }} />
+    <Show when={toast()}><View class="absolute left-[16] right-[16] bottom-[12] items-center"><View class="rounded-[10] bg-[#1c1f21] px-[10] py-[6]"><Text class="text-xs leading-[14] text-center text-[#f5f5f5]">{toast()}</Text></View></View></Show>
+  </>;
 }
 
 /** Native ActionButton (watch_action_button 160x48dp, pill #2A2A2A, 17/23sp, disabled 60% text). */
@@ -161,19 +206,24 @@ function feedSummary(item: BiliItem): string {
   return parts.length ? parts.join(" · ") : "哔哩哔哩推荐";
 }
 
-/** Native BiliFeedCard: 100dp cover, background gradient, 8dp padding, 14sp title + 9sp summary at the bottom. */
-function listVideoEntry(item: BiliItem, summaryText: string | undefined, width: number, onPress: () => void): ScrollEntry {
+function listVideoCard(item: BiliItem, summaryText: string | undefined, width: number) {
   const cardWidth = width - 36, padding = 8, textWidth = cardWidth - padding * 2;
   const title = measuredLines(item.title || "哔哩哔哩视频", textWidth, measureFor(14), 2);
   const summary = measuredLines(summaryText ?? feedSummary(item), textWidth, measureFor(9), 2);
   const textHeight = title.length * 18 + 2 + summary.length * 9.9;
   const height = Math.max(100, textHeight + padding * 2), top = height - padding - textHeight;
-  return { height, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={`视频：${item.title ?? ""}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+  const content = () => <>
     {item.cover ? <RemoteImage cacheBucket="bili-preview" url={item.cover} width={cardWidth} height={100} fit="cover" class="absolute left-[0] top-[0]" /> : null}
     <View class="absolute left-[0] right-[0] top-[0] h-[100] bg-gradient-to-b from-transparent to-[#0b1211b3]" />
     {title.map((line, index) => <Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{ insetL: padding, insetR: padding, insetT: top + index * 18 }}>{line}</Text>)}
     <Text class="absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]" style={{ insetL: padding, insetR: padding, insetT: top + 2 + title.length * 18 }}>{summary.join("\n")}</Text>
-  </View> };
+  </>;
+  return { height, content };
+}
+/** Native BiliFeedCard: 100dp cover, background gradient, 8dp padding, 14sp title + 9sp summary at the bottom. */
+function listVideoEntry(item: BiliItem, summaryText: string | undefined, width: number, onPress: () => void): ScrollEntry {
+  const card = listVideoCard(item, summaryText, width);
+  return { height: card.height, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={`视频：${item.title ?? ""}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">{card.content()}</View> };
 }
 
 /** Native buildListSummary: "UP 主 · mm:ss", or 哔哩哔哩. */

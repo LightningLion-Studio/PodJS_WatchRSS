@@ -4,37 +4,15 @@ import {shareActionEnabled} from "../sharing/policy.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { measuredLines, watchTitleLines } from "../reader/measured-text.ts";
-import { createGesture } from "@pocketjs/framework/gesture";
 import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
-import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
-import {onFrame} from "@pocketjs/framework/lifecycle";
+import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
+import { SwipeCard } from "./SwipeCard.tsx";
 import type { Article } from "./service.ts";
 
 const measureFor=(size:number)=>(text:string)=>getOps().measureText(text,size===21?23:size===14?1:size===9?19:20);
 function lines(text:string,width:number,size:number,max:number) {return measuredLines(text,width,measureFor(size),max);}
-const REVEAL_WIDTH=164;
-function RssCard(props:{onOpen:()=>void;onActions:()=>void;onFavorite:()=>void;onWatchLater:()=>void;open:boolean;swipeEnabled:boolean;onStartSwipe:()=>void;onOpenSwipe:()=>void;onCloseSwipe:()=>void;children:JSX.Element}) {
-  let node:NodeMirror|undefined;
-  const [offset,setOffset]=createSignal(props.open?-REVEAL_WIDTH:0);
-  let dragging=false,dragStart=0,animation:{from:number;to:number;start:number}|null=null;
-  const animate=(to:number)=>{animation={from:offset(),to,start:Date.now()};};
-  onFrame(()=>{if(!animation)return;const part=Math.min(1,(Date.now()-animation.start)/180),eased=1-(1-part)*(1-part);setOffset(animation.from+(animation.to-animation.from)*eased);if(part>=1)animation=null;});
-  createEffect(()=>{const open=props.open,enabled=props.swipeEnabled;if(!dragging)animate(open&&enabled?-REVEAL_WIDTH:0);});
-  createGesture({region:{node:()=>props.swipeEnabled?node:null},axis:"x",panSlop:8,onLongPress:props.onActions,
-    onPanStart:()=>{dragging=true;animation=null;dragStart=offset();props.onStartSwipe();},
-    onPanMove:c=>setOffset(Math.max(-REVEAL_WIDTH,Math.min(0,dragStart+c.dx))),
-    onPanEnd:()=>{dragging=false;if(offset()<=-REVEAL_WIDTH/2){props.onOpenSwipe();animate(-REVEAL_WIDTH);}else{props.onCloseSwipe();animate(0);}},
-    onCancel:()=>{dragging=false;props.onCloseSwipe();animate(0);}
-  });
-  const action=(label:string,icon:string,right:number,press:()=>void)=><View onPress={press} focusable={props.open} class="absolute top-[0] bottom-[0] w-[72] rounded-[16] bg-[#2a2a2a] flex-col items-center justify-center" style={{insetR:right}}><Image src={icon} class="w-[16] h-[16]"/><Text class="mt-[4] text-xs leading-[14] text-[#f5f5f5]">{label}</Text></View>;
-  return <View class="absolute inset-0 overflow-hidden bg-black">
-    {action("收藏","../assets/icons/star.svg",80,props.onFavorite)}
-    {action("稍后再看","../assets/icons/watch-later.svg",4,props.onWatchLater)}
-    <View ref={value=>node=value} onPress={props.onOpen} focusable class="absolute inset-0 rounded-[16] overflow-hidden bg-[#1c1f21]" style={{translateX:offset()}}>{props.children}</View>
-  </View>;
-}
 export function RssFeedScreen(props:{width:number;height:number;title:string;active?:boolean;originalEnabled?:boolean;onOriginalPaused?:(paused:boolean)=>void;onOriginalContents?:(ids:string[])=>void;onInfo?:()=>void;items:Article[];refreshing:boolean;loadingMore:boolean;canNext:boolean;onOpen:(article:Article)=>void;onActions:(article:Article)=>void;onFavorite:(article:Article)=>void;onWatchLater:(article:Article)=>void;onRefresh:()=>void;onNext:()=>void;ref?:(value:{scroller:Scroller})=>void}) {
   const requested=new Set<string>();
   const [openSwipeId,setOpenSwipeId]=createSignal<string|null>(null);
@@ -68,13 +46,13 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
       const textHeight=title.length*18+2+summary.length*9.9;
       const cardHeight=image?Math.max(100,textHeight+padding*2):textHeight+padding*2;
       const top=image?cardHeight-padding-textHeight:padding;
-      return {height:cardHeight,render:()=> <RssCard onOpen={()=>{if(openSwipeId())setOpenSwipeId(null);else props.onOpen(a);}} onActions={()=>props.onActions(a)} onFavorite={()=>{setOpenSwipeId(null);props.onFavorite(a);}} onWatchLater={()=>{setOpenSwipeId(null);props.onWatchLater(a);}} open={openSwipeId()===a.id} swipeEnabled={(props.active??true)&&!scrolling()} onStartSwipe={()=>{if(openSwipeId()!==a.id)setOpenSwipeId(null);}} onOpenSwipe={()=>setOpenSwipeId(a.id)} onCloseSwipe={()=>{if(openSwipeId()===a.id)setOpenSwipeId(null);}}>
+      return {height:cardHeight,render:()=> <SwipeCard onOpen={()=>{if(openSwipeId())setOpenSwipeId(null);else props.onOpen(a);}} onActions={()=>props.onActions(a)} onFavorite={()=>{setOpenSwipeId(null);props.onFavorite(a);}} onWatchLater={()=>{setOpenSwipeId(null);props.onWatchLater(a);}} open={openSwipeId()===a.id} swipeEnabled={(props.active??true)&&!scrolling()} onStartSwipe={()=>{if(openSwipeId()!==a.id)setOpenSwipeId(null);}} onOpenSwipe={()=>setOpenSwipeId(a.id)} onCloseSwipe={()=>{if(openSwipeId()===a.id)setOpenSwipeId(null);}}>
         {image && <RemoteImage url={a.imageUrl!} width={props.width-36} height={cardHeight} fit="cover" class="absolute left-[0] top-[0]"/>}
         {image && <View class="absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]"/>}
         {!a.read && <View class="absolute w-[7] h-[7] rounded-full bg-[#ff6026]" style={{insetL:padding,insetT:top+6}}/>}
         <For each={title}>{(line,index)=><Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{insetL:padding+(index()===0?firstIndent:0),insetR:padding,insetT:top+index()*18}}>{line}</Text>}</For>
         <Text class={image?"absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]":"absolute text-[9px] leading-[9.9] text-[#b6b6b6b3]"} style={{insetL:padding,insetR:padding,insetT:top+2+title.length*18}}>{summary.join("\n")}</Text>
-      </RssCard>};
+      </SwipeCard>};
     }),
     ...(!props.items.length?[{height:48,render:()=> <Text class="text-sm text-center text-[#b6b6b6]">暂无内容</Text>}]:[]),
     ...(props.items.length?[{height:52,render:()=> {
