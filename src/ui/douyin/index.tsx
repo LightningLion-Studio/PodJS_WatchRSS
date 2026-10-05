@@ -1,14 +1,14 @@
 import { ReaderBody } from "../ReaderBody.tsx";
 import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
 import { loadDouyinDetail, douyinDetailBlocks } from "../../douyin/detail.ts";
-import { browser } from "@podjs/framework/services";
+import { browser, DOUYIN_AUTH_STATUS_SCRIPT } from "@podjs/framework/services";
 import { douyinBrowserAvailable } from "../../douyin/browser.ts";
 import { hasCapability } from "@podjs/framework/watch";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
 import { observeHostInternet } from "../../onboarding/network-host.ts";
 import type { InternetStatus } from "../../onboarding/state.ts";
-import { loginGate, loginError } from "./login-state.ts";
+import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
 import {wireFields} from "../../sync/article-batches.ts";
@@ -107,6 +107,9 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
 
 function LoginScreen(props: DouyinScreenProps) {
   const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal(props.loginQrImage ? "请使用抖音手机客户端扫码登录" : "打开抖音官方登录页，完成登录后点“完成”返回手表。");
+  const [authStatus, setAuthStatus] = createSignal(initialLoginStatus());
+  const [statusMode, setStatusMode] = createSignal(false);
+  const qrImage = () => statusMode() ? (authStatus().qr ? `data:${authStatus().qr!.mime};base64,${authStatus().qr!.imageBase64}` : undefined) : props.loginQrImage;
   const [internet, setInternet] = createSignal<InternetStatus>("checking");
   const [browserAvailable, setBrowserAvailable] = createSignal(hasCapability("system.browser.auth"));
   const gate = () => loginGate(internet(), browserAvailable());
@@ -114,24 +117,36 @@ function LoginScreen(props: DouyinScreenProps) {
   let authorization: ReturnType<typeof authorizeInBrowser> | undefined;
   onMount(() => onCleanup(observeHostInternet(status => {
     setInternet(status);
-    if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setBusy(false); }
+    if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setAuthStatus(initialLoginStatus()); setBusy(false); }
   })));
   onCleanup(() => { disposed = true; generation++; authorization?.cancel(); });
   const openLogin = async () => {
     if (gate() || busy()) return;
     const current = ++generation;
     setBusy(true);
+    setStatusMode(hasCapability("system.browser.auth.status"));
+    setAuthStatus(initialLoginStatus());
+    if (statusMode()) setMessage("正在加载抖音登录页…");
+    let acceptingStatus = true;
     try {
       const available = await douyinBrowserAvailable({ ...browser, hasCapability });
       if (disposed || current !== generation || gate()) return;
       if (!available) { setBrowserAvailable(false); return; }
-      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});
+      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
+        if (disposed || current !== generation || !acceptingStatus) return;
+        setAuthStatus(state => updateLoginStatus(state, event));
+        setMessage(loginStatusMessage(authStatus()));
+      }} : {}),requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});
       const result = await authorization.result;
+      acceptingStatus = false;
       if (disposed || current !== generation || gate()) return;
+      setAuthStatus(initialLoginStatus());
       const saved = await props.client.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);
       if (!disposed && current === generation) { feedSnapshots.delete(props.client); props.onNavigate({name:"entry"}); }
     } catch (error) {
+      acceptingStatus = false;
+      if (!disposed && current === generation) setAuthStatus(initialLoginStatus());
       if (!disposed && current === generation) { const failure = loginError(error); setMessage(failure.message); if (failure.unavailable) setBrowserAvailable(false); }
     } finally { if (!disposed && current === generation) { authorization = undefined; setBusy(false); } }
   };
@@ -152,8 +167,14 @@ function LoginScreen(props: DouyinScreenProps) {
     finally { if (!disposed) setBusy(false); }
   };
   const detail = () => lines(message(), props.width - 60, 12);
-  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={props.loginQrImage} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={props.loginQrImage!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
-  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
+  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
+  return <Show when={!gate() && statusMode() && authStatus().qr} fallback={<ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />}>
+    <View class="absolute inset-0 bg-black items-center justify-center">
+      <Text class="absolute top-[16] text-sm text-white">请使用手机扫码</Text>
+      <Image src={qrImage()!} style={{width: props.width * 0.7, height: props.height * 0.7}} class="rounded-[8]" />
+      <Text class="absolute bottom-[16] text-xs text-white">{loginStatusMessage(authStatus())}</Text>
+    </View>
+  </Show>;
 }
 
 /** Native list/history callers mark before navigation; saved-reader entry does not. */

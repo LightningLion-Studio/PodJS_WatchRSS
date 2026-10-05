@@ -8,13 +8,15 @@ import type { DouyinScreenProps } from '../src/ui/douyin/index.tsx';
 const require = createRequire(import.meta.url), { transformSync } = require('@babel/core');
 plugin({ name: 'douyin-login-solid', setup(builder) { builder.onLoad({ filter: /\/ui\/douyin\/index\.tsx$/ }, async args => ({ contents: transformSync(await Bun.file(args.path).text(), { filename: args.path, babelrc: false, configFile: false, presets: [[require('babel-preset-solid'), { generate: 'universal', moduleName: '@pocketjs/framework/renderer' }], [require('@babel/preset-typescript'), { isTSX: true, allExtensions: true }]] }).code, loader: 'js' })); } });
 type Node = { kind: string; props: Record<string, any> };
-function element(kind: string, props: Node['props']): Node { const rendered = Object.create(props); Object.defineProperty(rendered, 'children', { value: props.children }); return { kind, props: rendered }; }
+function element(kind: string, props: Node['props']): Node { const rendered = Object.create(props); Object.defineProperty(rendered, 'children', { get: () => props.children }); return { kind, props: rendered }; }
+let authOptions: any, finishAuth: (value: any) => void, rejectAuth: (error: any) => void;
+let statusCapability = true;
 let probe: () => Promise<BrowserAvailability>, capability = true, calls: string[] = [], network: (status: InternetStatus) => void;
 mock.module('@pocketjs/framework/renderer', () => ({ createComponent, mergeProps, memo: createMemo, effect: createRenderEffect }));
 mock.module('@pocketjs/framework/components', () => ({ View: (p: Node['props']) => element('View', p), Text: (p: Node['props']) => element('Text', p), Image: (p: Node['props']) => element('Image', p) }));
-mock.module('@podjs/framework/watch', () => ({ hasCapability: (name: string) => name === 'system.browser.auth' || capability }));
-mock.module('@podjs/framework/services', () => ({ browser: { availability: () => { calls.push('probe'); return { result: probe() }; } } }));
-mock.module('../src/media/browser-auth.ts', () => ({ authorizeInBrowser: () => { calls.push('authorize'); return { result: new Promise(() => {}), cancel: () => { calls.push('cancel'); } }; } }));
+mock.module('@podjs/framework/watch', () => ({ hasCapability: (name: string) => name === 'system.browser.auth' || (name === 'system.browser.auth.status' ? statusCapability : capability) }));
+mock.module('@podjs/framework/services', () => ({ DOUYIN_AUTH_STATUS_SCRIPT: 'framework-status-script', browser: { availability: () => { calls.push('probe'); return { result: probe() }; } } }));
+mock.module('../src/media/browser-auth.ts', () => ({ authorizeInBrowser: (options: any) => { authOptions = options; calls.push('authorize'); return { result: new Promise((resolve, reject) => { finishAuth = resolve; rejectAuth = reject; }), cancel: () => { calls.push('cancel'); } }; } }));
 mock.module('../src/onboarding/network-host.ts', () => ({ observeHostInternet: (fn: typeof network) => { network = fn; fn('available'); return () => {}; } }));
 mock.module('../src/ui/ScrollEntries.tsx', () => ({ ScrollEntries: (p: Node['props']) => element('ScrollEntries', { children: createMemo(() => p.entries.map((entry: any) => entry.render())) }) }));
 for (const [path, name] of [['../src/ui/douyin/ImmersiveEntry.tsx', 'ImmersiveEntry'], ['../src/ui/RemoteImage.tsx', 'RemoteImage'], ['../src/ui/SafeQrScreen.tsx', 'SafeQrScreen'], ['../src/ui/ShareQrScreen.tsx', 'ShareQrScreen']] as const) mock.module(path, () => ({ [name]: () => null }));
@@ -25,7 +27,7 @@ const stops: (() => void)[] = []; afterEach(() => { for (const stop of stops.spl
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function nodes(value: any): Node[] { if (typeof value === 'function') return nodes(value()); if (Array.isArray(value)) return value.flatMap(nodes); if (!value || typeof value !== 'object' || !('props' in value)) return []; return [value, ...nodes(value.props.children)]; }
 function mount() {
-  calls = []; capability = true;
+  calls = []; capability = true; statusCapability = true;
   const root = createRoot(stop => { stops.push(stop); return DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); });
   return { root, press: () => nodes(root).find(n => n.kind === 'View' && n.props.focusable && n.props.onPress)!.props.onPress(), text: () => nodes(root).filter(n => n.kind === 'Text').map(n => n.props.children).join('\n') };
 }
@@ -91,4 +93,39 @@ test('saved detail metadata lookup does not create Douyin watched history on rea
   const client={listHistory:async()=>[],listSaved:async()=>[{item:sample('saved')}],recordHistory:async()=>{writes++;}};
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:'saved'},client,settings:{}} as unknown as DouyinScreenProps);});
   await settle();expect(readerProps.blocks[0].text).toBe('title saved');expect(writes).toBe(0);
+});
+
+
+test('M4 renders PNG login and JPEG verification, clears QR and reports webpage state', async () => {
+  probe = async () => ({status:'available'}); const f=mount(); await settle(); f.press(); await settle();
+  expect(authOptions.qrExtractionScript).toBe('framework-status-script');
+  expect(authOptions.userAgent).toBe('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0');
+  const emit=authOptions.onStatus;
+  emit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'});
+  expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toBe('data:image/png;base64,AAAA');
+  expect(f.text()).toContain('请使用抖音App扫码登录');
+  emit({type:'qr',kind:'secondVerify',mime:'image/jpeg',imageBase64:'BBBB'});
+  expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toBe('data:image/jpeg;base64,BBBB');
+  expect(f.text()).toContain('二步验证');
+  emit({type:'qrCleared'}); expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+  emit({type:'verifying',active:true}); expect(f.text().replaceAll('\n','')).toContain('请在网页中完成二步验证');
+  emit({type:'verifying',active:false}); emit({type:'pageState',loading:true}); expect(f.text().replaceAll('\n','')).toContain('正在加载抖音登录页');
+  emit({type:'pageState',loading:false,loginPanelVisible:true}); expect(f.text().replaceAll('\n','')).toContain('请在网页中选择登录或验证方式');
+  emit({type:'pageState',loading:false,loginPanelVisible:false}); expect(f.text().replaceAll('\n','')).toContain('登录后点');
+  emit({type:'cancelled'}); expect(f.text()).toContain('已取消登录');
+  rejectAuth({code:'cancelled'}); await settle();
+  emit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'}); expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+  expect(f.text()).toContain('输入 Cookie');
+});
+test('M4 old host retains legacy extraction with no onStatus', async () => {
+  const {DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT}=await import('../src/media/douyin-login.ts');
+  probe=async()=>({status:'available'}); const f=mount(); statusCapability=false; await settle(); f.press(); await settle();
+  expect(authOptions.onStatus).toBeUndefined(); expect(authOptions.qrExtractionScript).toBe(DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT);
+  expect(authOptions.requiredCookieNames).toEqual(['sessionid']);
+});
+for (const cause of ['network','dispose'] as const) test(`M4 ignores status after ${cause}`, async()=>{
+  probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();const emit=authOptions.onStatus;
+  if(cause==='network') network('bluetooth'); else stops.pop()!();
+  const before=f.text();emit({type:'qr',kind:'secondVerify',mime:'image/jpeg',imageBase64:'AAAA'});
+  expect(f.text()).toBe(before);expect(calls).toContain('cancel');
 });
