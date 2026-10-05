@@ -92,3 +92,5 @@ export function routeTitle(page: Page): string {
 export function routeIsSelfTitled(page: Page): boolean {
   return titledByScreen.has(page);
 }
+
+export function routeIsKnown(value:unknown):value is Page { return typeof value==="string"&&Object.hasOwn(routeTitles,value); }

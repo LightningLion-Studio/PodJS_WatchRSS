@@ -13,6 +13,7 @@ type NoteDetailProps = Parameters<typeof NoteDetailScreen>[0];
 
 interface NotesRoutesProps {
   entry: RouteEntry;
+  onStateChange?:()=>void;
   page: () => Page;
   active: () => boolean;
   width: number;
@@ -55,6 +56,7 @@ export function NotesRoutes(props: NotesRoutesProps) {
           repository={memoRepository}
           refreshKey={props.refreshKey()}
           noteId={props.entry.noteId}
+          onNoteIdentity={id=>{props.entry.noteId=id;props.onStateChange?.();}}
           preset={props.preset()}
           backgroundSnapshot={props.backgroundSnapshot()}
           active={props.active()}

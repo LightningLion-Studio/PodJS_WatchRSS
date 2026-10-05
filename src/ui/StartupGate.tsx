@@ -1,3 +1,6 @@
+import {activityStateHub} from '../navigation/activity-host.ts';
+import {ONBOARDING_DRAFT_KEY} from '../onboarding/restoration.ts';
+import {STARTUP_LEGAL_KEY} from '../onboarding/legal-restoration.ts';
 import {afterFirstScreen,startupMark} from '../core/startup-trace.ts';
 import {usageTelemetry,recordHostReleaseOobeOpened} from '../telemetry/host.ts';
 import {TelemetryScreenSession} from '../telemetry/usage.ts';
@@ -48,7 +51,7 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
  let restoredLegal:LegalNavigation={pages:[],snapshots:[]};
  let legalWriter:ReturnType<typeof createLegalSnapshotWriter>|undefined;
  onCleanup(()=>{generation++;legalWriter?.close();});
- const saveActivityState=()=>{const current=generation;void application.activityState.write(activityState).catch(error=>{if(current===generation)setFatal(String(error));});};
+ const saveActivityState=()=>{const current=generation;void activityStateHub.write(activityState,[ONBOARDING_DRAFT_KEY,STARTUP_LEGAL_KEY]).catch(error=>{if(current===generation)setFatal(String(error));});};
  const saveCustomization=(draft:CustomizationDraft)=>{
   const current=controller?.snapshot();if(current?.destination!=='intro'||current.intro.page!==2)return;
   activityState=captureCustomization(activityState,draft);saveActivityState();
@@ -66,7 +69,7 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
  };
  const load=()=>{const current=++generation;legalWriter?.close();setFatal('');setSession(undefined);void(async()=>{
   const restored=await application.activityState.read();if(current!==generation)return;
-  activityState=restored;
+  activityState=restored;activityStateHub.seed(restored);
   if(startupDestination(store.load())==='intro')restoreCustomization(restored);
   const loadedLegal:LegalNavigation=startupDestination(store.load())==='content'?{pages:[],snapshots:[]}:
    await hydrateLegalNavigation(restored,legalFiles,legalBaseUrl,error=>logConsole.warn('Legal snapshot restore',String(error)));
@@ -83,7 +86,7 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
     const next=captureLegalNavigation(activityState,navigation);
     for(const reference of navigation.bodyReferences??[])if(reference)legalFiles.markPublished(reference);
     activityState=next;
-    await application.activityState.write(next);
+    await activityStateHub.write(next,[ONBOARDING_DRAFT_KEY,STARTUP_LEGAL_KEY]);
    },
    discard:reference=>legalFiles.discardUnpublished(reference),
    onError:error=>{if(current===generation)setFatal(String(error));},

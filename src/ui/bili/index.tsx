@@ -1,8 +1,9 @@
+import {restoredSignal,booleanState,stringState} from '../route-activity.tsx';
 import { CommentScreen } from "./CommentScreen.tsx";
 import { BiliDetailController, type DetailState, type DetailTarget } from "../../bili/detail.ts";
 import { BiliFeedBrowser, BiliSearchHistory, favoritePager, historyPager, searchPager, type BrowseState } from "../../bili/browse.ts";
 import {biliShareLink,biliActionTitle,type ShareHandler} from "../../sharing/policy.ts";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
@@ -324,11 +325,12 @@ function chipFlowEntry(labels: { label: string; onPress: () => void }[], width: 
 function SearchScreen(props: BiliScreenProps) {
   const hot = asyncData(() => props.client.hotSearch()), history = new BiliSearchHistory(kv);
   const [historyItems, setHistoryItems] = createSignal(history.read());
+  const [draft,setDraft]=restoredSignal('retained','bili-search-query','',stringState);
   function submit(query: string) { try { const target = history.submit(query); setHistoryItems(history.read()); if (target) props.onNavigate(target); } catch (error) { fail(props, error); } }
-  async function search() { if (!props.input) return fail(props, new Error("当前运行时未接入文字输入")); const query = await props.input("搜索哔哩哔哩"); if (query != null) submit(query); }
+  async function search() { if (!props.input) return fail(props, new Error("当前运行时未接入文字输入")); const query = await props.input("搜索哔哩哔哩",draft()); if (query != null) {setDraft(query);submit(query);} }
   const entries = createMemo<ScrollEntry[]>(() => {
     const width = props.width ?? 233, hotWords = hot.value() ?? [];
-    return [searchTitleEntry, searchBarEntry("", width, () => void search()),
+    return [searchTitleEntry, searchBarEntry(draft(), width, () => void search()),
       ...(historyItems().length ? [{ height: 40, render: () => <View class="absolute inset-0">
         <Text class="absolute left-[0] top-[10] text-sm leading-[20] text-white">搜索历史</Text>
         <View onPress={() => { try { history.clear(); setHistoryItems([]); } catch (error) { fail(props, error); } }} focusable accessibilityRole="button" accessibilityLabel="清空搜索历史" class="absolute right-[0] top-[0] h-[40] w-[56] items-center justify-center"><Text class="text-sm leading-[20] text-[#ff6026]">清空</Text></View>
@@ -395,15 +397,16 @@ function surfaceCard(pal: DetailPalette, text: string, width: number, color = pa
 function detailDuration(seconds?: number) { if (!seconds || seconds <= 0) return undefined; return durationText(seconds); }
 
 function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
+  const [selectedCid,saveSelectedCid]=restoredSignal<number>('retained','bili-selected-cid',num(props.route.cid),(v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>0);
   const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
   let controller: BiliDetailController;
   createEffect(() => {
-    const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: num(props.route.cid) || undefined };
+    const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: untrack(selectedCid) || undefined };
     controller = new BiliDetailController(props.client, kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
     const own = controller; setState(own.state); void own.load(); onCleanup(() => own.dispose());
   });
   const [busy, setBusy] = createSignal("");
-  const [expanded, setExpanded] = createSignal(false);
+  const [expanded, setExpanded] = restoredSignal('saved','bili-description-expanded',false,booleanState);
   let disposed = false; onCleanup(() => { disposed = true; });
   async function play() {
     if (busy()) return;
@@ -467,7 +470,7 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       const textWidth = inner - (duration ? getOps().measureText(duration, FONT_SLOT[9]) + 6 : 0);
       const label = page.part?.trim() || `第${page.page ?? 1}集`, wrapped = measuredLines(label, textWidth, measureFor(17), 2);
       const height = 14.5 + wrapped.length * 17;
-      return { height, render: () => <View onPress={busy() ? undefined : () => controller.select(index)} focusable accessibilityRole="button" accessibilityLabel={`${label}${duration ? `，${duration}` : ""}`}
+      return { height, render: () => <View onPress={busy() ? undefined : () => {controller.select(index);const cid=controller.selectedCid();if(cid)saveSelectedCid(cid);}} focusable accessibilityRole="button" accessibilityLabel={`${label}${duration ? `，${duration}` : ""}`}
         class={selected ? "absolute inset-0 rounded-[16] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16]"} style={{ bgColor: selected ? pal.surfaceVariant : pal.surface }}>
         <Text class="absolute left-[6] top-[7.75] text-[17px] leading-[17]" style={{ width: textWidth, textColor: pal.onSurface }}>{wrapped.join("\n")}</Text>
         {duration ? <Text class="absolute right-[6] text-[9px] leading-[17]" style={{ insetT: (height - 17) / 2 + .5, textColor: pal.onSurfaceVariant }}>{duration}</Text> : null}

@@ -1,3 +1,4 @@
+import {restoredSignal,booleanState} from './route-activity.tsx';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('ReaderScreen');
 import { openBrowserUrl } from "../browser/open.ts";
@@ -58,7 +59,7 @@ export function ReaderScreen(props:{
   catch(error){props.onError(String(error));}
   finally{setRetryingOffline(false);}
  };
- const [expanded,setExpanded]=createSignal(false),[rotation,setRotation]=createSignal(0);
+ const [expanded,setExpanded]=restoredSignal('saved','reader-summary-expanded',false,booleanState),[rotation,setRotation]=createSignal(0);
  const loading=()=>summary().status==="waiting"||summary().status==="generating";
  const session=props.services.createSummary(props.article.id,()=>props.llmPromptPreset,state=>{setSummary(state);if(state.status==="error"&&state.error)void hostOperation("ui.toast",{message:state.error}).result.catch(()=>props.onError(state.error!));});
  let disposed=false,autoRequested=false;
