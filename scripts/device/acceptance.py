@@ -118,13 +118,16 @@ def compare_receipts(before, after):
 def main():
     os.umask(0o077)  # Local receipts/logs can contain private metadata.
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action', choices=['digest', 'upgrade', 'cold-start', 'routes', 'capture', 'compare', 'framework-tests', 'logs', 'reset-isolated'])
+    p.add_argument('action', choices=['rehearse-takeover', 'digest', 'upgrade', 'cold-start', 'routes', 'capture', 'compare', 'framework-tests', 'logs', 'reset-isolated'])
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--serial', default=os.environ.get('ANDROID_SERIAL', 'e3aca8af'))
     p.add_argument('--package', default=FORMAL)
     p.add_argument('--out', type=Path, default=ROOT / 'artifacts/device-acceptance')
     p.add_argument('--label', default='before')
     p.add_argument('--apk', type=Path)
+    p.add_argument('--test-apk', type=Path)
+    p.add_argument('--cleanup-private', action='store_true')
+    p.add_argument('--takeover-timeout', type=int, default=300)
     p.add_argument('--reference', type=Path)
     p.add_argument('--actual', type=Path)
     p.add_argument('--framework', type=Path, default=FRAMEWORK)
@@ -142,6 +145,14 @@ def main():
     if a.action == 'reset-isolated' and (not a.allow_destructive or a.package != ISOLATED):
         p.error('reset requires --allow-destructive AND --package ' + ISOLATED)
     a.adb = ['adb', '-s', a.serial]
+    if a.action == 'rehearse-takeover':
+        from takeover_rehearsal import rehearse, REHEARSAL
+        if a.package != REHEARSAL or not a.apk or not a.test_apk:
+            p.error('rehearse-takeover requires --package ' + REHEARSAL + ' --apk and --test-apk')
+        if not 1 <= a.takeover_timeout <= 3600:
+            p.error('takeover timeout must be 1..3600 seconds')
+        rehearse(a)
+        return
     if not a.dry_run:
         # Even compare is gated: a live acceptance run must identify its target.
         try:
