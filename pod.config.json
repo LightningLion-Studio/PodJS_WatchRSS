@@ -4,6 +4,7 @@
   "versionName": "0.1.0-dev",
   "versionCode": 1,
   "name": "腕上RSS · PodJS",
+  "bytecode": { "stripSource": true },
   "android": {
     "resources": "android/res",
     "theme": "@style/Theme.WatchRSS.PodJS.Splash"
