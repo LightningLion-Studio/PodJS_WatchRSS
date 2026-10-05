@@ -1,3 +1,4 @@
+import { BiliFeedBrowser, BiliSearchHistory, favoritePager, historyPager, searchPager, type BrowseState } from "../../bili/browse.ts";
 import {biliShareLink,biliActionTitle,type ShareHandler} from "../../sharing/policy.ts";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
@@ -67,23 +68,41 @@ function rssFeedEntry(item: BiliItem, width: number, onPress: () => void): Scrol
     <Text class="absolute left-[12] right-[12] top-[52] h-[18] overflow-hidden text-[11px] leading-[15] text-[#999]">{summary.join("\n")}</Text>
   </View> };
 }
-function Scrolled(props: BiliScreenProps & { entries: ScrollEntry[] }) { return <ScrollEntries height={props.height} entries={props.entries} gap={8} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />; }
+function Scrolled(props: BiliScreenProps & { entries: ScrollEntry[]; onRefresh?: () => void }) { return <ScrollEntries onRefresh={props.onRefresh} height={props.height} entries={props.entries} gap={8} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />; }
+
+function pagedData<T>(source: () => unknown, factory: (changed: (state: BrowseState<T>) => void) => { state: BrowseState<T>; refresh: () => Promise<void>; loadMore: () => Promise<void>; dispose: () => void }) {
+  const [state, setState] = createSignal<BrowseState<T>>({ items: [], loading: true, canLoadMore: true });
+  let pager: ReturnType<typeof factory> | undefined;
+  createEffect(() => { source(); pager?.dispose(); pager = factory(value => setState(() => value)); setState(() => pager!.state); void pager.refresh(); });
+  onCleanup(() => pager?.dispose());
+  return { state, refetch: () => { void pager?.refresh(); }, more: () => { void pager?.loadMore(); } };
+}
+function pagingEntries<T>(page: ReturnType<typeof pagedData<T>>, width: number): ScrollEntry[] {
+  return [...(page.state().error ? [messageEntry(String(page.state().error), width)] : []),
+    ...(page.state().loading ? [messageEntry("加载中…", width)] : page.state().canLoadMore ? [buttonEntry(page.state().error ? "重试加载" : "加载更多", page.more)] : []),
+    buttonEntry("刷新", page.refetch)];
+}
 
 function FeedScreen(props: BiliScreenProps) {
   const session = asyncData(() => props.client.getSession());
-  const feed = asyncData(() => authenticated(session.value()), async loggedIn => loggedIn ? props.client.feed() : { items: [], source: "web" as const });
+  const feed = pagedData<BiliItem>(() => authenticated(session.value()), changed => new BiliFeedBrowser({ feed: () => authenticated(session.value()) ? props.client.feed() : Promise.resolve({ items: [], source: "web" }) }, {
+    get: <T,>(key: string) => authenticated(session.value()) ? kv.get<T>(key) : undefined,
+    set: <T,>(key: string, value: T) => kv.set(key, value),
+  }, changed));
   const entries = createMemo<ScrollEntry[]>(() => {
-    const values = feed.value()?.items ?? [], loggedIn = authenticated(session.value());
+    const values = feed.state().items, loggedIn = authenticated(session.value());
     const contentWidth = (props.width ?? 233) - 36, titleWidth = 105, iconSize = 16, groupWidth = titleWidth + 4 + iconSize, groupLeft = (contentWidth - groupWidth) / 2;
     return [{ height: 48, render: () => <View onPress={() => props.onNavigate({ name: "channel-info" })} focusable class="absolute inset-0"><Text style={{ insetL: groupLeft, width: titleWidth }} class="absolute top-[0] text-[21px] leading-[26] text-white text-center">哔哩哔哩</Text><Image src={infoIcon} style={{ insetL: groupLeft + titleWidth + 4, width: iconSize, height: iconSize }} class="absolute top-[5]" /><Text class="absolute left-[0] right-[0] top-[28] text-[9px] leading-[17] text-[#aaa] text-center">{loggedIn ? "已登录" : "未登录"}</Text></View> } as ScrollEntry,
       ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []),
-      ...(feed.error() ? [messageEntry(String(feed.error()), props.width ?? 233), buttonEntry("重新加载", feed.refetch)] : []),
-      ...(!session.loading() && loggedIn && !feed.loading() && !feed.error() && !values.length ? [messageEntry("暂无内容\n稍后再试或刷新", props.width ?? 233)] : []),
+      ...(!session.loading() && loggedIn && !feed.state().loading && !feed.state().error && !values.length ? [messageEntry("暂无内容\n稍后再试或刷新", props.width ?? 233)] : []),
       ...(!session.loading() && !loggedIn ? [messageEntry("需要登录\n登录后获取推荐内容", props.width ?? 233)] : []),
-      ...(loggedIn && feed.loading() ? [messageEntry("加载中…", props.width ?? 233)] : values.map(item => rssFeedEntry(item, props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid })))),
-      ...(loggedIn ? [buttonEntry("刷新", feed.refetch)] : [])];
+      ...values.map(item => {
+        const open = () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid });
+        return (props.settings?.originalContentEnabled ?? true) ? listVideoEntry(item, item.owner?.name ?? "", props.width ?? 233, open) : rssFeedEntry(item, props.width ?? 233, open);
+      }),
+      ...(loggedIn ? pagingEntries(feed, props.width ?? 233) : [])];
   });
-  return <Scrolled {...props} entries={entries()} />;
+  return <Scrolled {...props} entries={entries()} onRefresh={feed.refetch} />;
 }
 
 function ChannelInfoScreen(props: BiliScreenProps) {
@@ -98,9 +117,9 @@ function listVideoEntry(item: BiliItem, subtitle: string, width: number, onPress
 }
 
 function HistoryScreen(props: BiliScreenProps) {
-  const page = asyncData(() => props.client.history());
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("历史记录", "下拉刷新"), ...(page.loading() ? [messageEntry("加载中…", props.width ?? 233)] : []), ...(page.error() ? [messageEntry(String(page.error()), props.width ?? 233)] : []), ...(page.value()?.items ?? []).map(item => historyEntry(item, props.width ?? 233, props)), ...(!page.loading() && !page.error() && !page.value()?.items.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), buttonEntry("刷新", page.refetch)]);
-  return <Scrolled {...props} entries={entries()} />;
+  const page = pagedData<BiliHistoryItem>(() => props.client, changed => historyPager(props.client, changed));
+  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("历史记录"), ...page.state().items.map(item => historyEntry(item, props.width ?? 233, props)), ...(!page.state().loading && !page.state().error && !page.state().items.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), ...pagingEntries(page, props.width ?? 233)]);
+  return <Scrolled {...props} entries={entries()} onRefresh={page.refetch} />;
 }
 function historyEntry(item: BiliHistoryItem, width: number, props: BiliScreenProps) { const video: BiliItem = { aid: item.history?.oid, bvid: item.history?.bvid, cid: item.history?.cid, title: item.title, cover: item.cover, duration: item.duration, owner: { name: item.authorName } }; const progress = item.progress != null && item.duration ? `已看 ${Math.min(100, Math.round(item.progress / item.duration * 100))}%` : ""; return listVideoEntry(video, [item.authorName, progress].filter(Boolean).join(" · "), width, () => props.onNavigate({ name: "detail", aid: video.aid, bvid: video.bvid, cid: video.cid })); }
 
@@ -118,9 +137,9 @@ function FavoritesScreen(props: BiliScreenProps) {
 }
 
 function FavoriteFolderScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "favorite-folder" }> }) {
-  const page = asyncData(() => props.route.mediaId, mediaId => props.client.favoriteResources({ mediaId }));
-  const entries = createMemo<ScrollEntry[]>(() => [wrappedTitleEntry(props.route.title || page.value()?.title || "收藏夹", props.width ?? 233, "下拉刷新"), ...(page.loading() ? [messageEntry("加载中…", props.width ?? 233)] : []), ...(page.error() ? [messageEntry(String(page.error()), props.width ?? 233)] : []), ...(page.value()?.medias ?? []).map(item => listVideoEntry(item, [item.owner?.name, item.duration ? durationText(item.duration) : ""].filter(Boolean).join(" · "), props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))), ...(!page.loading() && !page.error() && !page.value()?.medias.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), buttonEntry("刷新", page.refetch)]);
-  return <Scrolled {...props} entries={entries()} />;
+  const page = pagedData<BiliItem>(() => props.route.mediaId, changed => favoritePager(props.client, props.route.mediaId, changed));
+  const entries = createMemo<ScrollEntry[]>(() => [wrappedTitleEntry(props.route.title || "收藏夹", props.width ?? 233), ...page.state().items.map(item => listVideoEntry(item, item.owner?.name ?? "", props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))), ...(!page.state().loading && !page.state().error && !page.state().items.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), ...pagingEntries(page, props.width ?? 233)]);
+  return <Scrolled {...props} entries={entries()} onRefresh={page.refetch} />;
 }
 
 function LoginScreen(props: BiliScreenProps) {
@@ -135,17 +154,21 @@ function LoginScreen(props: BiliScreenProps) {
 function statusText(value: QrPollResult) { if (value.status === "scanned") return "已扫码，请在手机确认"; if (value.status === "expired") return "二维码已过期"; if (value.status === "success") return "登录成功"; if (value.status === "error") return "登录失败"; return "等待扫码"; }
 
 function SearchScreen(props: BiliScreenProps) {
-  const hot = asyncData(() => props.client.hotSearch());
-  async function search(seed = "") { if (!props.input) return fail(props, new Error("当前运行时未接入文字输入")); const query = (await props.input("搜索哔哩哔哩", seed))?.trim(); if (query) props.onNavigate({ name: "results", query }); }
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("搜索"), buttonEntry("输入关键词", () => void search(), true), ...(hot.value() ?? []).slice(0, 10).map(word => buttonEntry(word.showName || word.keyword, () => props.onNavigate({ name: "results", query: word.keyword }))), ...(hot.loading() ? [messageEntry("正在加载热门搜索…", props.width ?? 233)] : []), ...(hot.error() ? [messageEntry(String(hot.error()), props.width ?? 233)] : [])]);
+  const hot = asyncData(() => props.client.hotSearch()), history = new BiliSearchHistory(kv);
+  const [historyItems, setHistoryItems] = createSignal(history.read());
+  function submit(query: string) { try { const target = history.submit(query); setHistoryItems(history.read()); if (target) props.onNavigate(target); } catch (error) { fail(props, error); } }
+  async function search() { if (!props.input) return fail(props, new Error("当前运行时未接入文字输入")); const query = await props.input("搜索哔哩哔哩"); if (query != null) submit(query); }
+  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("搜索"), buttonEntry("输入关键词 / AV / BV", () => void search(), true),
+    ...(historyItems().length ? [titleEntry("搜索历史"), ...historyItems().map(query => buttonEntry(query, () => submit(query))), buttonEntry("清空历史", () => { try { history.clear(); setHistoryItems([]); } catch (error) { fail(props, error); } })] : []),
+    ...(hot.value() ?? []).slice(0, 10).map(word => buttonEntry(word.showName || word.keyword, () => submit(word.keyword))), ...(hot.loading() ? [messageEntry("正在加载热门搜索…", props.width ?? 233)] : []), ...(hot.error() ? [messageEntry(String(hot.error()), props.width ?? 233)] : [])]);
   return <Scrolled {...props} entries={entries()} />;
 }
 
 function ResultsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "results" }> }) {
-  const results = asyncData(() => props.route.query, query => props.client.search(query));
-  async function revise() { const query = await props.input?.("搜索哔哩哔哩", props.route.query); if (query?.trim()) props.onNavigate({ name: "results", query: query.trim() }); }
-  const entries = createMemo<ScrollEntry[]>(() => { const values = (results.value()?.results ?? []).filter((item): item is Extract<BiliSearchResult, { kind: "video" }> => item.kind === "video"); return [titleEntry("搜索", props.route.query), buttonEntry("修改关键词", props.input ? () => void revise() : undefined), ...(results.loading() ? [messageEntry("正在搜索…", props.width ?? 233)] : []), ...(results.error() ? [messageEntry(String(results.error()), props.width ?? 233)] : []), ...values.map(item => searchResultEntry(item, props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid }))), ...(!results.loading() && !results.error() && !values.length ? [messageEntry("没有找到相关结果", props.width ?? 233)] : [])]; });
-  return <Scrolled {...props} entries={entries()} />;
+  const results = pagedData<Extract<BiliSearchResult, { kind: "video" }>>(() => props.route.query, changed => searchPager(props.client, props.route.query, changed));
+  async function revise() { const query = await props.input?.("搜索哔哩哔哩", props.route.query); if (query != null) { try { const target = new BiliSearchHistory(kv).submit(query); if (target) props.onNavigate(target); } catch (error) { fail(props, error); } } }
+  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("搜索", props.route.query), buttonEntry("修改关键词", props.input ? () => void revise() : undefined), ...results.state().items.map(item => searchResultEntry(item, props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid }))), ...(!results.state().loading && !results.state().error && !results.state().items.length ? [messageEntry("没有找到相关结果", props.width ?? 233)] : []), ...pagingEntries(results, props.width ?? 233)]);
+  return <Scrolled {...props} entries={entries()} onRefresh={results.refetch} />;
 }
 
 function searchResultEntry(item: Extract<BiliSearchResult, { kind: "video" }>, width: number, onPress: () => void): ScrollEntry {
@@ -158,11 +181,18 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
   const detail = asyncData(() => ({ aid: typeof props.route.aid === "number" ? props.route.aid : undefined, bvid: props.route.bvid }), ids => props.client.detail(ids));
   const [busy, setBusy] = createSignal("");
   async function play(cid?: number) { const data = detail.value(), actual = cid ?? (typeof props.route.cid === "number" ? props.route.cid : undefined) ?? data?.pages[0]?.cid; if (!actual) return fail(props, new Error("视频没有可播放的分 P")); try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true }); props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title }); } catch (error) { fail(props, error); } finally { setBusy(""); } }
-  const entries = createMemo<ScrollEntry[]>(() => { const data = detail.value(), it = data?.item, title = it?.title?.trim() || (it?.bvid ? `BV号 ${it.bvid}` : it?.aid ? `av${it.aid}` : "哔哩哔哩视频"), owner = it?.owner?.name?.trim() || "未知作者", desc = data?.desc?.trim() || "暂无简介", titleLines = lines(title, (props.width ?? 233) - 36, 21), authorLines = lines(`作者：${owner}`, (props.width ?? 233) - 36, 13), descLines = lines(`简介：${desc}`, (props.width ?? 233) - 36, 13); return [
-    ...(detail.loading() ? [messageEntry("正在加载视频详情…", props.width ?? 233)] : []), ...(detail.error() ? [messageEntry(String(detail.error()), props.width ?? 233)] : []),
-    ...(data ? [{ height: Math.max(32, titleLines.length * 25), render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[25] text-white text-center">{titleLines.join("\n")}</Text> }, { height: Math.max(20, authorLines.length * 18), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#aaa]">{authorLines.join("\n")}</Text> }, { height: Math.max(20, descLines.length * 18), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#e8e8e8]">{descLines.join("\n")}</Text> }] as ScrollEntry[] : []),
-    ...(data ? [{ height: 126, render: () => <View onPress={() => void play()} focusable class="absolute inset-0 rounded-[16] bg-[#242424] overflow-hidden items-center justify-center">{it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={(props.width ?? 233) - 36} height={126} class="absolute inset-0" /> : null}<View style={{ insetL: ((props.width ?? 233) - 36 - 48) / 2 }} class="absolute top-[39] w-[48] h-[48] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} style={{ width: 34, height: 34 }} /></View></View> } as ScrollEntry, { height: 40, render: () => <View class="absolute inset-0"><View onPress={() => props.onNavigate({ name: "actions", aid: it?.aid, bvid: it?.bvid, cid: props.route.cid, title, owner:it?.owner?.name, cover:it?.cover })} focusable class="absolute left-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Image src={starIcon} style={{ width: 21, height: 21 }} /></View><View onPress={() => {const qr=()=>props.onNavigate({ name:"share",aid:it?.aid,bvid:it?.bvid,title });if(props.onShare)props.onShare({origin:"bili-detail",title,link:biliShareLink(it?.bvid,it?.aid)},qr);else qr();}} focusable class="absolute right-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Text class="text-[9px] leading-[13] text-white">分享</Text></View></View> } as ScrollEntry] : []),
-    ...(busy() ? [messageEntry(busy(), props.width ?? 233)] : [])]; });
+  const original = () => props.settings?.originalContentEnabled ?? true;
+  const entries = createMemo<ScrollEntry[]>(() => { const data = detail.value(), it = data?.item, title = it?.title?.trim() || (it?.bvid ? `BV号 ${it.bvid}` : it?.aid ? `av${it.aid}` : "哔哩哔哩视频"), owner = it?.owner?.name?.trim() || "未知作者", desc = data?.desc?.trim() || "暂无简介", titleLines = lines(title, (props.width ?? 233) - 36, 21), authorLines = lines(`作者：${owner}`, (props.width ?? 233) - 36, 13), descLines = lines(`简介：${desc}`, (props.width ?? 233) - 36, 13); const textEntries = data ? [{ height: Math.max(32, titleLines.length * 25), render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[25] text-white text-center">{titleLines.join("\n")}</Text> }, { height: Math.max(20, authorLines.length * 18), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#aaa]">{authorLines.join("\n")}</Text> }, { height: Math.max(20, descLines.length * 18), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#e8e8e8]">{descLines.join("\n")}</Text> }] as ScrollEntry[] : [];
+    const [preview, ...actions] = data ? [{ height: 126, render: () => <View onPress={() => void play()} focusable class="absolute inset-0 rounded-[16] bg-[#242424] overflow-hidden items-center justify-center">{it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={(props.width ?? 233) - 36} height={126} class="absolute inset-0" /> : null}<View style={{ insetL: ((props.width ?? 233) - 36 - 48) / 2 }} class="absolute top-[39] w-[48] h-[48] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} style={{ width: 34, height: 34 }} /></View></View> } as ScrollEntry, { height: 40, render: () => <View class="absolute inset-0"><View onPress={() => props.onNavigate({ name: "actions", aid: it?.aid, bvid: it?.bvid, cid: props.route.cid, title, owner:it?.owner?.name, cover:it?.cover })} focusable class="absolute left-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Image src={starIcon} style={{ width: 21, height: 21 }} /></View><View onPress={() => {const qr=()=>props.onNavigate({ name:"share",aid:it?.aid,bvid:it?.bvid,title });if(props.onShare)props.onShare({origin:"bili-detail",title,link:biliShareLink(it?.bvid,it?.aid)},qr);else qr();}} focusable class="absolute right-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Text class="text-[9px] leading-[13] text-white">分享</Text></View></View> } as ScrollEntry] : [];
+    return [
+      ...(detail.loading() ? [messageEntry("正在加载视频详情…", props.width ?? 233)] : []),
+      ...(detail.error() ? [messageEntry(String(detail.error()), props.width ?? 233), buttonEntry("重试", detail.refetch)] : []),
+      ...(original() && preview ? [preview] : []), ...textEntries,
+      ...(!original() && preview ? [preview] : []), ...actions,
+      ...(original() && it?.aid ? [buttonEntry("评论", () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
+      ...(busy() ? [messageEntry(busy(), props.width ?? 233)] : []),
+    ];
+  });
   return <Scrolled {...props} entries={entries()} />;
 }
 
@@ -187,13 +217,12 @@ function ShareScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name
   return <SharedShareQrScreen width={props.width ?? 233} height={props.height} title={props.route.title || "扫码分享"} url={url} onClose={props.onBack} onError={message => fail(props, new Error(message))} />;
 }
 
-const ORIGINAL_CONTENT_KEY = "watchrss.bili.original-content";
 function settingEntry(label: string, enabled: boolean, onPress?: () => void): ScrollEntry { return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[24] bg-[#292929]"><Text class="absolute left-[14] top-[14] text-[17px] leading-[21] text-white">{label}</Text><View class={enabled ? "absolute right-[10] top-[10] w-[42] h-[28] rounded-[20] bg-[#fb7299] items-center justify-center" : "absolute right-[10] top-[10] w-[42] h-[28] rounded-[20] bg-[#4a4a4a] items-center justify-center"}><Text class="text-[11px] leading-[15] text-white">{enabled ? "开" : "关"}</Text></View></View> }; }
 function SettingsScreen(props: BiliScreenProps) {
-  const session = asyncData(() => props.client.getSession()), storedOriginal = kv.get<boolean>(ORIGINAL_CONTENT_KEY), [original, setOriginal] = createSignal(props.settings?.originalContentEnabled ?? storedOriginal ?? false), [background, setBackground] = createSignal(props.settings?.continuePlaybackInBackgroundEnabled ?? false), [confirmDelete, setConfirmDelete] = createSignal(false);
+  const session = asyncData(() => props.client.getSession()), [original, setOriginal] = createSignal(props.settings?.originalContentEnabled ?? true), [background, setBackground] = createSignal(props.settings?.continuePlaybackInBackgroundEnabled ?? false), [confirmDelete, setConfirmDelete] = createSignal(false);
   createEffect(() => { const value = props.settings?.originalContentEnabled; if (typeof value === "boolean" && value !== original()) setOriginal(value); });
   createEffect(() => { const value = props.settings?.continuePlaybackInBackgroundEnabled; if (typeof value === "boolean" && value !== background()) setBackground(value); });
-  function toggleOriginal() { const value = !original(); setOriginal(value); kv.set(ORIGINAL_CONTENT_KEY, value); props.settings?.onOriginalContentChange?.(value); }
+  function toggleOriginal() { const value = !original(); props.settings?.onOriginalContentChange?.(value); }
   function toggleBackground() { if (!props.settings?.onContinuePlaybackInBackgroundChange) return; const value = !background(); setBackground(value); props.settings.onContinuePlaybackInBackgroundChange(value); }
   const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [titleEntry("删除频道"), messageEntry("删除后将移除本地缓存", props.width ?? 233), buttonEntry("确认删除", async () => { try { await props.settings?.onDeleteChannel?.(); setConfirmDelete(false); } catch(error) { fail(props,error); } }), buttonEntry("取消", () => setConfirmDelete(false))] : [titleEntry("设置", session.loading() ? "加载中…" : authenticated(session.value()) ? "已登录" : "未登录"), ...(props.settings?.showOriginalContent ? [settingEntry("原文阅读模式", original(), toggleOriginal), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#999]">刷新时抓取原文正文与图片</Text> } as ScrollEntry] : []), ...(props.settings?.showContinuePlaybackInBackground ? [settingEntry("在后台继续播放", background(), props.settings.onContinuePlaybackInBackgroundChange ? toggleBackground : undefined)] : []), buttonEntry("退出登录", authenticated(session.value()) ? async () => { try { await props.client.clearSession(); props.onNavigate({ name: "feed" }); } catch (error) { fail(props, error); } } : undefined), buttonEntry("删除频道", props.settings?.deleteEnabled && props.settings.onDeleteChannel ? () => setConfirmDelete(true) : undefined)]);
   const rootBack = () => { if (!confirmDelete()) return false; setConfirmDelete(false); return true; };
