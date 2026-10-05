@@ -38,5 +38,9 @@ Unit tests do not cover asset packing. Before reporting any app task, run in you
 `bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts build --target=android-watch --project=<your worktree path>`
 It must succeed. Image assets must rasterize to power-of-two sizes ≤ 512 (SVG width/height × 2; use 32 or 64 like the existing icons).
 
-## Device (from 2026-10-04 23:15)
-OWW242 `e3aca8af` is connected. **Only wrss-impl may run adb/install/instrumentation.** Other agents must not touch the device (use `adb devices` at most). User decisions: PodJS will eventually take over the native package name `com.lightningstudio.watchrss`; port ALL native debug-only features, gated by the host debug flag (`application.buildInfo().debugBuild`) exactly as native gates them on BuildConfig.DEBUG.
+## Device (updated 2026-10-05)
+OWW242 `e3aca8af` is connected. **Since 2026-10-05 only the lead and the device agent wrss-device run adb/install/instrumentation** (rules: `.codex-tmp/device/DEVICE_BRIEF.md`). Other agents must not touch the device (use `adb devices` at most); put the exact device steps you need verified in your report and the lead dispatches them to wrss-device. Never touch RFCX70EGH6K (the user's phone). User decisions: PodJS will eventually take over the native package name `com.lightningstudio.watchrss`; port ALL native debug-only features, gated by the host debug flag (`application.buildInfo().debugBuild`) exactly as native gates them on BuildConfig.DEBUG.
+
+## UI rules (user, 2026-10-05)
+- Round screen (OWW242). Reading pages (article reader, note detail, information docs, Bili detail / RSS-mode detail, Douyin detail) use the reader preset's background; every other page is pure black. Do not reproduce the native debug-build WatchSurface vignette.
+- UI/frontend code is written by the lead; agents keep UI file changes minimal (data paths, wiring) and never restyle.

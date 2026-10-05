@@ -6,7 +6,7 @@ import {startAppLogger} from './logs/logger-host.ts';
 import { mount } from "@pocketjs/framework/solid";
 import {onCleanup,createSignal,Show} from "solid-js";
 import WatchRSS from "./ui/screen.tsx";
-import { services } from "./services.ts";
+import { services, warmServices } from "./services.ts";
 import {startApplicationCloudSync,stopApplicationCloudSync,applyCloudBuildPolicy} from './cloud/application';
 import {startApplicationForegroundSync} from "./sync/application-host.ts";
 import {StartupGate} from "./ui/StartupGate.tsx";
@@ -41,7 +41,10 @@ function ContentApp(){
  onCleanup(()=>{void sync.dispose();});
  return <WatchRSS services={services} createDebugBluetooth={sync.createDebugBluetooth} bluetoothSync={sync.bluetooth} announcements={createAnnouncementServices()} onSyncMediaKeepAliveChange={enabled=>sync.setMediaEnabled(enabled)} />;
 }
-function App(){const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(()=>{void applyCloudBuildPolicy().catch(()=>{});startupMark('debugBuild.ready');setReady(true);});return <Show when={ready()}><StartupGate content={()=> <ContentApp/>}/></Show>;}
+// The startup gate (activity state, onboarding) loads in parallel with the build info read;
+// only the content waits for the debug gate so debug-only UI is decided before it mounts.
+function App(){const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(()=>{void applyCloudBuildPolicy().catch(()=>{});startupMark('debugBuild.ready');setReady(true);});return <StartupGate content={()=> <Show when={ready()}><ContentApp/></Show>}/>;}
+warmServices();
 startAppLogger(afterFirstScreen(5000));
 setTelemetryDeviceId(async()=>{await afterFirstScreen();return (await getLibrarySyncRepository()).deviceId();});
 usageTelemetry.recordAppLaunch();

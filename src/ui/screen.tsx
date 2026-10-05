@@ -1,4 +1,14 @@
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
+const HOME_SNAPSHOT_KEY = "watchrss.home.channels.v1";
+function readHomeChannelSnapshot(): Channel[] | undefined {
+  try {
+    const value = kv.get<Channel[]>(HOME_SNAPSHOT_KEY);
+    return Array.isArray(value) && value.length && value.every(item => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.url === "string") ? value : undefined;
+  } catch { return undefined; }
+}
+function writeHomeChannelSnapshot(list: Channel[]): void {
+  try { kv.set(HOME_SNAPSHOT_KEY, list); } catch { /* snapshot is only a startup hint */ }
+}
 import {debugGate} from '../debug/host.ts';
 import type {DebugBluetoothSession} from '../debug/bluetooth.ts';
 import {usageTelemetry} from '../telemetry/host.ts';
@@ -286,11 +296,15 @@ export default function WatchRSS(props: {
   const [originalModes, setOriginalModes] = createSignal<
     Record<string, boolean>
   >({});
-  const [channels, setChannels] = createSignal<Channel[]>([]);
+  // Cold start renders the home list from the last snapshot (synchronous KV) so the first screen
+  // does not wait for database setup; the live list replaces it a moment later. Only used when
+  // the app resumes to home, otherwise the snapshot would flash before the restored page.
+  const homeSnapshot = startupResume ? undefined : readHomeChannelSnapshot();
+  const [channels, setChannels] = createSignal<Channel[]>(homeSnapshot ?? []);
   const notesHomePlacement = new HomeEntryPlacementStore().read();
   const [articles, setArticles] = createSignal<Article[]>([]);
   const [article, setArticle] = createSignal<Article | null>(null);
-  const [loading, setLoading] = createSignal(true),
+  const [loading, setLoading] = createSignal(!homeSnapshot),
     [busy, setBusy] = createSignal(false),
     [homeRefreshing, setHomeRefreshing] = createSignal(false),
     [error, setError] = createSignal("");
@@ -606,10 +620,13 @@ export default function WatchRSS(props: {
   const [notesRefreshKey, setNotesRefreshKey] = createSignal(0);
 
   async function loadChannels() {
-    setLoading(true);
+    // Keep showing the current list (e.g. the startup snapshot) while refreshing it.
+    if (!channels().length) setLoading(true);
     setError("");
     try {
-      setChannels(await props.services.listChannels());
+      const list = await props.services.listChannels();
+      setChannels(list);
+      writeHomeChannelSnapshot(list);
       startupMark("channels.loaded");
       startupFirstScreen();
     } catch (e) {
@@ -1135,6 +1152,7 @@ export default function WatchRSS(props: {
       updateFeedWhenSettled();
     });
     onCleanup(unsubscribe);
+    if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
     void restoreStartupNavigation();
   });
   createEffect(() => setNavigationState({ canGoBack: stack().length > 1 }));

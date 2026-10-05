@@ -56,6 +56,8 @@ export const db: SqlDatabase = {
 };
 const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
 const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
+/** Start database setup at JS start, in parallel with the startup gate; later calls share it. */
+export function warmServices():void{void init().catch(()=>{});}
 export async function getExternalSavedStore(){await init();return externalSavedStore;}
 export async function getDouyinSavedStore(){await init();return douyinSavedStore;}
 export const memoRepository = new MemoRepository(db, "podjs-watch");
