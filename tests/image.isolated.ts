@@ -5,9 +5,11 @@ let nextNode = 1;
 const calls: unknown[][] = [];
 const cancelled: string[] = [];
 const imageFiles:string[]=[],removedFiles:string[]=[];
+const hostMethods:string[]=[];
 const pendingDownloads = new Map<string, { resolve(value: { path: string }): void; reject(error:Error):void }>();
 const stored=new Map<string,number>();
 const rgba = new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255]);
+const pod=(globalThis as any).pod??((globalThis as any).pod={});
 
 mock.module("@pocketjs/framework/components", () => ({
   View: (props: unknown) => props,
@@ -35,6 +37,7 @@ mock.module("@podjs/framework/services", () => ({
   stringToUtf8:(value:string)=>new Uint8Array(Buffer.from(value)),
   base64ToBytes: (value: string) => new Uint8Array(Buffer.from(value, "base64")),
   hostOperation: (method: string, args: Record<string, unknown>) => {
+    hostMethods.push(method);
     if (method === "crypto.hash") return {result:Promise.resolve({digestBase64:createHash("sha256").update(Buffer.from(String(args.dataBase64),"base64")).digest("base64")}),cancel(){}};
     if (method === "http.download") {
       let resolve!: (value: { path: string }) => void;
@@ -63,7 +66,7 @@ afterEach(async () => {
   await tick();
   calls.length = 0;
   cancelled.length = 0;
-  pendingDownloads.clear();imageFiles.length=0;removedFiles.length=0;stored.clear();
+  pendingDownloads.clear();imageFiles.length=0;removedFiles.length=0;hostMethods.length=0;stored.clear();delete pod.uploadTextureFile;
 });
 
 describe("RemoteImage", () => {
@@ -102,6 +105,30 @@ describe("RemoteImage", () => {
     roots.pop()!();await tick();
     expect(cancelled).toContain("https://img.example/1.png");
   });
+});
+
+test("native decoded-file upload bypasses file.read and preserves retained-texture release",async()=>{
+  pod.uploadTextureFile=(path:string,width:number,height:number,psm:number)=>{calls.push(["uploadTextureFile",path,width,height,psm]);return 53;};
+  const release=bindRemoteImage({url:"assets/direct.png",filePath:"notes/assets/direct.png",width:2,height:1},{id:nextNode++} as never);
+  await tick();await tick();
+  expect(calls).toContainEqual(["uploadTextureFile","images/a.rgba",2,1,3]);
+  expect(calls.some(call=>call[0]==="uploadTexture")).toBe(false);
+  expect(hostMethods).not.toContain("file.read");
+  expect(removedFiles).not.toContain("images/a.rgba");
+  expect(calls).toContainEqual(["setImage",expect.any(Number),53]);
+  release();releaseRetainedRemoteImages();
+  expect(calls).toContainEqual(["freeTexture",53]);
+});
+
+test("cancellation during native decoded-file upload frees the returned handle without delivery",async()=>{
+  let release=()=>{};
+  pod.uploadTextureFile=()=>{release();return 54;};
+  release=bindRemoteImage({url:"assets/cancel.png",filePath:"notes/assets/cancel.png",width:2,height:1},{id:nextNode++} as never);
+  await tick();await tick();
+  expect(calls).toContainEqual(["freeTexture",54]);
+  expect(calls.some(call=>call[0]==="setImage"&&call[2]===54)).toBe(false);
+  expect(hostMethods).not.toContain("file.read");
+  expect(remoteImageResourceCounts()).toEqual({active:0,queued:0,cached:0});
 });
 
 test("intrinsic dimensions are retained for newly bound views sharing an uploaded texture",async()=>{

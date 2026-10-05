@@ -25,6 +25,7 @@ export interface RemoteImageProps {
 
 interface DecodeResult { path: string; width: number; height: number; sourceWidth?:number; sourceHeight?:number }
 interface ChunkResult { dataBase64: string; offset: number; size: number; eof: boolean }
+interface NativeTextureFileHost { uploadTextureFile?: (path:string,width:number,height:number,psm:number)=>number }
 interface Entry {
   key: string;
   refs: number;
@@ -63,7 +64,7 @@ function removeFile(path: string | undefined): void {
   void hostOperation("file.delete", { path }).result.catch(() => {});
 }
 
-async function readDecoded(entry: Entry, decoded: DecodeResult): Promise<Uint8Array> {
+function decodedSize(decoded:DecodeResult):number {
   if (!Number.isInteger(decoded.width) || !Number.isInteger(decoded.height)
       || decoded.width < 1 || decoded.height < 1 || decoded.width > 512 || decoded.height > 512
       || (decoded.width & (decoded.width - 1)) !== 0 || (decoded.height & (decoded.height - 1)) !== 0) {
@@ -71,6 +72,14 @@ async function readDecoded(entry: Entry, decoded: DecodeResult): Promise<Uint8Ar
   }
   const size = decoded.width * decoded.height * 4;
   if (size > MAX_DECODED_BYTES) throw new Error("远程图片解码结果过大");
+  return size;
+}
+
+function nativeTextureFileHost():NativeTextureFileHost|undefined {
+  return (globalThis as {pod?:NativeTextureFileHost}).pod;
+}
+
+async function readDecoded(entry: Entry, decoded: DecodeResult, size: number): Promise<Uint8Array> {
   const bytes = new Uint8Array(size);
   let offset = 0;
   while (offset < size) {
@@ -99,9 +108,19 @@ async function load(entry: Entry): Promise<void> {
     const decoded = await decodeOperation.result;
     entry.outputPath = decoded.path;
     if (entry.cancelled) return;
-    const rgba = await readDecoded(entry, decoded);
-    if (entry.cancelled) return;
-    const handle = getOps().uploadTexture(rgba, decoded.width, decoded.height, 3);
+    const size=decodedSize(decoded);
+    const nativeUpload=nativeTextureFileHost()?.uploadTextureFile;
+    let handle:number;
+    if(typeof nativeUpload==="function"){
+      // A supporting host consumes the generated path on every outcome.
+      entry.outputPath=undefined;
+      const result=nativeUpload(decoded.path,decoded.width,decoded.height,3);
+      handle=typeof result==="number"&&Number.isInteger(result)?result:-1;
+    }else{
+      const rgba = await readDecoded(entry, decoded, size);
+      if (entry.cancelled) return;
+      handle = getOps().uploadTexture(rgba, decoded.width, decoded.height, 3);
+    }
     if (handle < 0) throw new Error("远程图片纹理创建失败");
     if (entry.cancelled) { getOps().freeTexture?.(handle); return; }
     entry.handle = handle;
