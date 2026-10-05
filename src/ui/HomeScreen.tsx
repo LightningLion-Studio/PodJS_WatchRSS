@@ -7,6 +7,8 @@ import { DeleteConfirmDialog } from "./DeleteConfirmDialog.tsx";
 import { homeChannelAtLongPress, movableHomeEntries, shouldShowHomeEmptyState, type HomeHitEntry, type NotesHomePlacement } from "./home-model.ts";
 import { homeChannelSummary, homeSpeechCard, homeSpeechSpectrumBars, type HomePlatformLoginState } from "./home-extras.ts";
 import type { SpeechPlaybackState } from "../reader/speech-playback.ts";
+import { getOps } from "@pocketjs/framework/host";
+import { measuredLines } from "../reader/measured-text.ts";
 
 export interface HomeScreenProps {
   channels: Channel[]; notesPlacement: NotesHomePlacement; height: number; width: number;
@@ -56,16 +58,27 @@ function ChannelActions(props:{width:number;height:number;channel:Channel;busy:b
 export default function HomeScreen(props: HomeScreenProps) {
   const [selected,setSelected]=createSignal<Channel>();
   let scroller:Scroller|undefined;
-  const card = (title: string, summary: string, onPress?: () => void, twoLines = false, pinned = false, titleClass = "text-[17px]"): ScrollEntry => ({
-    height: twoLines ? 84 : 65,
-    render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole={onPress?"button":undefined} class={pinned ? "absolute inset-0 rounded-[16] bg-[#333333]" : "absolute inset-0 rounded-[16] bg-[#1c1f21]"}>
-      <Text style={{fontSlot:titleClass === "text-base" ? 2 : 22}} class="absolute left-[14] right-[6] top-[13] h-[21] overflow-hidden text-[17px] leading-[21] text-[#f5f5f5]">{title}</Text>
-      <Text class="absolute left-[14] right-[6] top-[32.5] h-[38] overflow-hidden text-sm leading-[19] text-[#b6b6b6]">{summary}</Text>
-    </View>
-  });
+  // Native HomeDefaultItem: 14dp start / 6dp end / 14.5dp vertical padding, title maxLines 1,
+  // summary maxLines 2 (one Text, "\n"-separated), unread dot 6dp after a 4dp gap, offset -4dp.
+  const cardWidth = () => props.width - 36;
+  const card = (opts: {title: string; summary: string; onPress?: () => void; summaryLines: 1 | 2; pinned?: boolean; titleSize: 16 | 17; dot?: boolean}): ScrollEntry => {
+    const columnWidth = cardWidth() - 14 - 6 - (opts.dot ? 10 : 0);
+    const titleSlot = opts.titleSize === 16 ? 2 : 22;
+    const title = measuredLines(opts.title, columnWidth, text => getOps().measureText(text, titleSlot), 1).join("\n");
+    const summary = measuredLines(opts.summary, columnWidth, text => getOps().measureText(text, 1), opts.summaryLines).join("\n");
+    const height = 14.5 * 2 + 19 + 17 * opts.summaryLines;
+    return {height, render: () => <View onPress={opts.onPress} focusable={!!opts.onPress} accessibilityRole={opts.onPress ? "button" : undefined}
+      accessibilityLabel={`${opts.title}，${opts.summary.replace("\n", "，")}`}
+      class={opts.pinned ? "absolute inset-0 rounded-[16] bg-[#23272a]" : "absolute inset-0 rounded-[16] bg-[#1c1f21]"}>
+      <Text style={{fontSlot: titleSlot, width: columnWidth}} class={opts.titleSize === 16 ? "absolute left-[14] top-[14.5] h-[19] overflow-hidden text-base leading-[19] text-[#f5f5f5]" : "absolute left-[14] top-[14.5] h-[19] overflow-hidden text-[17px] leading-[19] text-[#f5f5f5]"}>{title}</Text>
+      <Text style={{width: columnWidth, height: 17 * opts.summaryLines}} class="absolute left-[14] top-[33.5] overflow-hidden text-sm leading-[17] text-[#b6b6b6]">{summary}</Text>
+      <Show when={opts.dot}><View class="absolute w-[6] h-[6] rounded-full bg-[#ff6026]" style={{insetL: cardWidth() - 10 - 6, insetT: (height - 6) / 2}}/></Show>
+    </View>};
+  };
   const channelCard=(channel:Channel):ScrollEntry=>{
-    const summary=homeChannelSummary(channel,props.platformLoginState,formatTime);
-    return card(channel.title,summary,()=>props.onChannel(channel),true,!!channel.isPinned);
+    const builtin=channel.url==="builtin:bili"||channel.url==="builtin:douyin";
+    return card({title:channel.title,summary:homeChannelSummary(channel,props.platformLoginState,formatTime),onPress:()=>props.onChannel(channel),
+      summaryLines:2,pinned:!!channel.isPinned,titleSize:16,dot:!builtin&&(channel.unreadCount??0)>0});
   };
   const speechCard=():ScrollEntry|undefined=>{
     const model=homeSpeechCard(props.speechState);
@@ -88,10 +101,10 @@ export default function HomeScreen(props: HomeScreenProps) {
     </View>}},
     ...(speechCard()?[{entry:speechCard()!}]:[]),
     ...movableHomeEntries(props.channels,props.notesPlacement).map(item=>item.kind==="notes"
-      ? {entry:card("备忘录", "纯文本编辑 · 手机同步", props.onNotes, false, item.isPinned, "text-base")}
+      ? {entry:card({title:"备忘录",summary:"纯文本编辑 · 手机同步",onPress:props.onNotes,summaryLines:1,pinned:item.isPinned,titleSize:16})}
       : {entry:channelCard(item.channel),channel:item.channel}),
-    ...(shouldShowHomeEmptyState(props.channels)?[{entry:card("还没有 RSS 频道","点击下方添加你的第一个订阅源")}]:[]),
-    {entry:card("RSS推荐", "一键加入官方支持频道", props.onRecommend)},
+    ...(shouldShowHomeEmptyState(props.channels)?[{entry:card({title:"还没有 RSS 频道",summary:"点击下方添加你的第一个订阅源",summaryLines:1,titleSize:17})}]:[]),
+    {entry:card({title:"RSS推荐",summary:"一键加入官方支持频道",onPress:props.onRecommend,summaryLines:1,titleSize:17})},
     {entry:{height:56,render:() => <View class="absolute inset-0 items-center"><View onPress={props.onAdd} focusable style={{insetL:(props.width-36-48)/2}} class="absolute top-[4] w-[48] h-[48] rounded-[47] bg-[#23272a] items-center justify-center"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>}},
     {entry:{height:25,render:() => <View onPress={props.onBeian} focusable class="absolute inset-0 items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">浙ICP备2024111886号-5A</Text></View>}},
   ]);
