@@ -3,6 +3,10 @@ export interface HttpRequest {
   url: string;
   headers: Record<string, string>;
   body?: Uint8Array;
+  /** Per-connect/read inactivity budgets, not an overall request deadline. */
+  timeoutMs?: number;
+  readTimeoutMs?: number;
+  acceptHttpErrors?: boolean;
 }
 
 export interface HttpResponse {
