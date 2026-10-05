@@ -26,7 +26,8 @@ const ops = {
   setImage(id: number, handle: number) { calls.push(["setImage", id, handle]); },
   freeTexture(handle: number) { calls.push(["freeTexture", handle]); },
 };
-mock.module("@pocketjs/framework/host", () => ({ getOps: () => ops }));
+const realHost = await import("@pocketjs/framework/host");
+mock.module("@pocketjs/framework/host", () => ({ ...realHost, getOps: () => ops }));
 
 mock.module("@podjs/framework/services", () => ({
   fileChunks:{list:async(path:string)=>({entries:[...stored].filter(([p])=>p.startsWith(path+'/')).map(([path,size])=>({path,size,modified:1,file:true,directory:false}))}),stat:async(path:string)=>({exists:stored.has(path),file:stored.has(path),size:stored.get(path)??0}),touch:async()=>({modified:1}),remove:async(path:string)=>{stored.delete(path);removedFiles.push(path);}},
