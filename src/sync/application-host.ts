@@ -1,3 +1,6 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('application-host');
+import {hostAppLogger} from '../logs/logger-host.ts';
 import {clearRemoteInput,completeRemoteInput} from "../remote-input/inbox.ts";
 import {readerPreviewSession,requestReaderPreviewOpen,disposeReaderPreview} from "../reader/preview-host.ts";
 import {handleReaderPreview} from "./reader-preview.ts";
@@ -21,24 +24,24 @@ import {buildWatchMediaCapabilities} from './media-capabilities.ts';
 import {hostIpCrypto} from './ip-crypto-host.ts';
 export function startApplicationForegroundSync(){
  const storage={get:(key:string)=>kv.get<string>(key),set:(key:string,value:string)=>kv.set(key,value)};
- const diagnostics=new SyncDiagnosticLog(storage);
+ const diagnostics=new SyncDiagnosticLog(storage,undefined,message=>hostAppLogger.d('WatchSync',message));
  const accountTelemetry=new SyncAccountTelemetry(storage);
- const handleAction=createApplicationActionHandler({previewReader:request=>handleReaderPreview(request,readerPreviewSession,requestReaderPreviewOpen),readerSync:hasCapability('data.files.chunks')&&hasCapability('crypto.basic')?new ReaderSyncActions(new ReaderPresetStore(),new ReaderResources(hostReaderResourceFiles),notifyReaderPresetsChanged,()=>{readerPreviewSession.refreshResourceTransfer();}):undefined,readTokenUsage:getTokenUsageForSync,readSavedLinks:getSavedLinksForSync,readDebugLog:maxChars=>diagnostics.pull(maxChars),clearLibrary:async()=>{await (await getLibrarySyncRepository()).clearLibrary();notifyLibraryChanged();},notes:memoRepository,deviceId:async()=>(await getLibrarySyncRepository()).deviceId(),notesChanged:notifyNotesChanged,accountStore:summaryAccountStore,accountTelemetry,noteAssets:new NoteAssetReceiver(fileChunks)});
+ const handleAction=createApplicationActionHandler({previewReader:request=>handleReaderPreview(request,readerPreviewSession,requestReaderPreviewOpen),readerSync:hasCapability('data.files.chunks')&&hasCapability('crypto.basic')?new ReaderSyncActions(new ReaderPresetStore(),new ReaderResources(hostReaderResourceFiles),notifyReaderPresetsChanged,()=>{readerPreviewSession.refreshResourceTransfer();}):undefined,readTokenUsage:getTokenUsageForSync,readSavedLinks:getSavedLinksForSync,readDebugLog:maxChars=>hostAppLogger.pull(maxChars),clearLibrary:async()=>{await (await getLibrarySyncRepository()).clearLibrary();notifyLibraryChanged();},notes:memoRepository,deviceId:async()=>(await getLibrarySyncRepository()).deviceId(),notesChanged:notifyNotesChanged,accountStore:summaryAccountStore,accountTelemetry,noteAssets:new NoteAssetReceiver(fileChunks)});
  const watchCapabilities=buildWatchMediaCapabilities(getDisplayMetrics());
  diagnostics.state('bluetooth','starting');
  let disposed=false,ip:IpSyncController|undefined;
  const stopLifecycle=onLifecycleChange(state=>ip?.setActive(state==='active'));
- const stopNetwork=hasCapability('net.discovery')?onNetworkChange(()=>ip?.refresh(),error=>console.warn('WatchRSS network observer: '+String(error))):()=>{};
+ const stopNetwork=hasCapability('net.discovery')?onNetworkChange(()=>ip?.refresh(),error=>logConsole.warn('WatchRSS network observer: '+String(error))):()=>{};
  const ipReady=getLibrarySyncRepository().then(repository=>{
   if(disposed||!hasCapability('net.websocket'))return;
   ip=new IpSyncController({repository,acquireDescriptor:hasCapability('net.discovery')?()=>acquireIpDescriptor(discovery,delay):undefined,discover:hasCapability('net.discovery')?port=>{
    const operation=discovery.mdns({serviceType:'_watchrss-sync._tcp.',namePrefix:'WatchRSS-',expectedPort:port,windowMs:1500});
    return {cancel:()=>operation.cancel(),result:operation.result.then(({endpoints})=>endpoints.map(endpoint=>({endpointId:'mdns-'+endpoint.address,address:endpoint.address,family:'ipv4',transportKind:'wifiLan' as const,priority:300})))};
-  }:undefined,sockets:webSockets,streams:byteStreams,crypto:hostIpCrypto,delay,mediaLease:active=>silencePlayback.lease('ip-sync',active),onError:error=>{diagnostics.failure('ip');console.warn('WatchRSS IP sync: '+String(error));},onRoute:route=>{diagnostics.state('ip',route?route.endpoint.transportKind:'closed');console.info('WatchRSS IP route: '+(route?route.endpoint.transportKind:'closed'));}},{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);if(result.request.action==='syncLibrary')notifyLibraryChanged();}});
+  }:undefined,sockets:webSockets,streams:byteStreams,crypto:hostIpCrypto,delay,mediaLease:active=>silencePlayback.lease('ip-sync',active),onError:error=>{diagnostics.failure('ip');logConsole.warn('WatchRSS IP sync: '+String(error));},onRoute:route=>{diagnostics.state('ip',route?route.endpoint.transportKind:'closed');logConsole.info('WatchRSS IP route: '+(route?route.endpoint.transportKind:'closed'));}},{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);if(result.request.action==='syncLibrary')notifyLibraryChanged();}});
   ip.setActive(lifecycle()==='active');return ip;
- });void ipReady.catch(error=>console.warn('WatchRSS IP initialization: '+String(error)));
+ });void ipReady.catch(error=>logConsole.warn('WatchRSS IP initialization: '+String(error)));
  const bluetooth=new ApplicationForegroundSync({repository:getLibrarySyncRepository,createListener:createRfcommLibraryListener,lifecycle,onLifecycle:onLifecycleChange,display:displayPower,radio:rfcomm,silence:silencePlayback,delay,
-  onLibraryChanged:notifyLibraryChanged,onState:state=>{diagnostics.state('bluetooth',state);console.info('WatchRSS foreground sync: '+state);},onError:error=>{diagnostics.failure('bluetooth');console.warn('WatchRSS foreground sync: '+String(error));},
+  onLibraryChanged:notifyLibraryChanged,onState:state=>{diagnostics.state('bluetooth',state);logConsole.info('WatchRSS foreground sync: '+state);},onError:error=>{diagnostics.failure('bluetooth');logConsole.warn('WatchRSS foreground sync: '+String(error));},
  },{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);},offerIpEndpoint:async descriptor=>(await ipReady)?.offer(descriptor)??false});
  const ready=Promise.all([bluetooth.ready,ipReady]);void ready.catch(()=>{});
  let closing:Promise<void>|undefined;

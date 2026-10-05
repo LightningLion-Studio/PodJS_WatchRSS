@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('ReaderTitleEntry');
 import {batch,createEffect,createMemo,createSignal,onCleanup,untrack,type Accessor} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
@@ -41,10 +43,10 @@ export function useReaderTitleEntry(text:Accessor<string>,width:Accessor<number>
   },layouts=>{
    if(!isCurrent()||!layouts.get(value)?.length)return;
    nativeSucceeded=true;setNative(layouts);
-  },error=>{if(isCurrent())console.warn('Detail title layout',String(error));},inputs.fonts);
+  },error=>{if(isCurrent())logConsole.warn('Detail title layout',String(error));},inputs.fonts);
   void task.done.then(()=>finish(nativeSucceeded&&!!untrack(native).get(value)?.length),error=>{
    if(!isCurrent())return;
-   console.warn('Detail title layout',String(error));finish(false);
+   logConsole.warn('Detail title layout',String(error));finish(false);
   });
   onCleanup(()=>{current=false;task.cancel();});
  });

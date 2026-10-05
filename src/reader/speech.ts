@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import type { SpeechProgress } from "./speech-highlight.ts";
 export interface SpeechPort {
   initialize(): Promise<unknown>;
@@ -22,6 +23,7 @@ export class ReaderSpeech {
   private generation=0;
   constructor(private readonly port:SpeechPort,private readonly wait=()=>new Promise<void>(resolve=>setTimeout(resolve,200))){}
   async speak(text:string,rate=1,started?:()=>void,progress?:(event:SpeechProgress)=>void):Promise<void>{
+    appLogger.d('ReadAloudController',`speak chars=${text.length} rate=${rate}`);
     const generation=++this.generation;
     if(!text.trim())return;
     await this.port.initialize();
@@ -45,9 +47,9 @@ export class ReaderSpeech {
         if(state.state==="ready")break;
         if(state.state!=="speaking")throw new Error("朗读引擎未能完成当前段落");
       }
-      } finally {remove?.();}
+      } catch(error){appLogger.e('ReadAloudController','Playback failed',error);throw error;} finally {remove?.();}
       chunkOffset+=chunk.length;
     }
   }
-  async stop():Promise<void>{this.generation++;await this.port.stop();}
+  async stop():Promise<void>{appLogger.d('ReadAloudController','stop');this.generation++;await this.port.stop();}
 }

@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('screen');
 import { openBrowserUrl, type BrowserOrigin } from "../browser/open.ts";
 import { supportsSystemShare, openSystemShare } from "../sharing/host.ts";
 import { routeShare, type ShareHandler } from "../sharing/policy.ts";
@@ -146,12 +148,12 @@ export default function WatchRSS(props: {
     outcome: ReaderProgressFlushOutcome,
   ) => {
     if (outcome.status === "failed")
-      console.warn(
+      logConsole.warn(
         `Reader progress ${context} flush failed; continuing`,
         outcome.error,
       );
     else if (outcome.status === "timed-out")
-      console.warn(
+      logConsole.warn(
         `Reader progress ${context} flush timed out after ${outcome.timeoutMs}ms; continuing`,
       );
   };
@@ -408,7 +410,7 @@ export default function WatchRSS(props: {
   createEffect(() => {
     void managedCache
       .configure(settings().cacheLimitMb * 1024 * 1024)
-      .catch((error) => console.warn("Cache maintenance: " + String(error)));
+      .catch((error) => logConsole.warn("Cache maintenance: " + String(error)));
   });
   const presetStore = new ReaderPresetStore();
   const [presetState, setPresetState] = createSignal<ReaderPresetState>();

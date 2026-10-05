@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('StartupGate');
 import {openBrowserUrl} from "../browser/open.ts";
 import {For,Show,createEffect,createMemo,createSignal,onCleanup,untrack,type JSX} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
@@ -63,7 +65,7 @@ export function StartupGate(props:{content:()=>JSX.Element;storage?:OnboardingSt
   activityState=restored;
   if(startupDestination(store.load())==='intro')restoreCustomization(restored);
   const loadedLegal:LegalNavigation=startupDestination(store.load())==='content'?{pages:[],snapshots:[]}:
-   await hydrateLegalNavigation(restored,legalFiles,legalBaseUrl,error=>console.warn('Legal snapshot restore',String(error)));
+   await hydrateLegalNavigation(restored,legalFiles,legalBaseUrl,error=>logConsole.warn('Legal snapshot restore',String(error)));
   if(current!==generation)return;
   restoredLegal=loadedLegal;
   const owner=restoredLegal.owner??`task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;

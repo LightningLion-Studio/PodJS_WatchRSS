@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('speech-playback');
 import { fallbackDurationMs, fallbackHighlightOffsets, calibratedSpeechUnits, segmentHighlight, type SpeechHighlight, type SpeechProgress } from "./speech-highlight.ts";
 import type { Article, ArticleQuery } from "../ui/service.ts";
 import { articleSpeechSegments, type SpeechAnchor, type SpeechSegment } from "./speech-segments.ts";
@@ -76,7 +78,7 @@ export class SpeechPlayback {
       this.index = this.queue.findIndex(item => item.id === article.id);
       // Native applies the start limit once per new queue; failures must not block speech.
       try { await this.prepareNewSession?.(() => generation === this.generation); }
-      catch (error) { console.warn("朗读静音开播音量限制失败", error); }
+      catch (error) { logConsole.warn("朗读静音开播音量限制失败", error); }
       if (generation !== this.generation) return;
       await this.prepare(generation, article, anchor);
     } catch (error) { this.failed(generation, error); }

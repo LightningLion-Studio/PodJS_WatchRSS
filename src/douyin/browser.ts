@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('browser');
 import type { BrowserAvailability, BrowserSiteDataResult } from '@podjs/framework/services';
 
 /** DouyinRepository DOUYIN_COOKIE_URLS / DOUYIN_ORIGINS (native reference). */
@@ -14,7 +16,7 @@ export interface DouyinBrowser {
   availability(): { result: Promise<BrowserAvailability> };
 }
 export type BrowserDiagnostic = (message: string) => void;
-const warn: BrowserDiagnostic = message => console.warn(`[douyin.browser] ${message}`);
+const warn: BrowserDiagnostic = message => logConsole.warn(`[douyin.browser] ${message}`);
 function record(diagnostic: BrowserDiagnostic, message: string): void {
   // Diagnostic failure must never interfere with logout or authorization.
   try { diagnostic(message); } catch {}

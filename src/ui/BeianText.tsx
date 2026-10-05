@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('BeianText');
 import { Text, View } from "@pocketjs/framework/components";
 import { textLayout, type TextLayoutOptions } from "@podjs/framework/services";
 import { SystemTextLine, type SystemTextLineOptions } from "@podjs/framework/text";
@@ -54,7 +56,7 @@ export function useBeianText(width: Accessor<number>, density: number) {
       requests.push(titleRequest,subtitleRequest);
       const [titleResult,subtitleResult]=await Promise.all([titleRequest.result,subtitleRequest.result]);
       if(current)setMeasured({title:line(title,titleResult),subtitle:line(subtitle,subtitleResult)});
-    })().catch(error => { if (current) console.warn("Beian text layout", String(error)); });
+    })().catch(error => { if (current) logConsole.warn("Beian text layout", String(error)); });
   });
   return { widthPx, title: () => measured()?.title ?? fallback(26), subtitle: () => measured()?.subtitle ?? fallback(14) };
 }

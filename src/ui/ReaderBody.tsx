@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('ReaderBody');
 import {ReaderBackground,useReaderBackgrounds} from "./ReaderBackground.tsx";
 import {useReaderFonts} from "./reader-fonts.ts";
 import type {ReaderRow} from "../reader/content-layout.ts";
@@ -63,7 +65,7 @@ export function ReaderBody(props:{
     let lines:NativeBlockLayouts= new Map();
     if(hasCapability("text.layout")){
       const metrics=getDisplayMetrics();
-      const task=requestReaderLayout([block],width,size,metrics.physicalWidth/metrics.logicalWidth,preset,args=>textLayout.layout(args),value=>{lines=value;},error=>console.warn("Imported paragraph layout",String(error)),fonts());
+      const task=requestReaderLayout([block],width,size,metrics.physicalWidth/metrics.logicalWidth,preset,args=>textLayout.layout(args),value=>{lines=value;},error=>logConsole.warn("Imported paragraph layout",String(error)),fonts());
       importedTasks.add(task);try{await task.done;}finally{importedTasks.delete(task);}
     }
     return layoutContent([block],width,size,{},preset,lines);
@@ -81,7 +83,7 @@ export function ReaderBody(props:{
     setNativeLayouts(new Map());
     if(!hasCapability("text.layout"))return;
     const metrics=getDisplayMetrics(),pixelScale=metrics.physicalWidth/metrics.logicalWidth;
-    const task=requestReaderLayout(blocks,width,size,pixelScale,preset,args=>textLayout.layout(args),setNativeLayouts,error=>console.warn("Reader paragraph layout",String(error)),fonts());
+    const task=requestReaderLayout(blocks,width,size,pixelScale,preset,args=>textLayout.layout(args),setNativeLayouts,error=>logConsole.warn("Reader paragraph layout",String(error)),fonts());
     onCleanup(()=>task.cancel());
   });
   const layout=createMemo(()=>{importedRevision();return imported?.layout()??layoutContent(props.blocks,props.width-28,props.fontSize,ratios(),props.preset,nativeLayouts());});

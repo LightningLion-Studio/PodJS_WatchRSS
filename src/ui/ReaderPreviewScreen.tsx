@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('ReaderPreviewScreen');
 import {ReaderBackground,useReaderBackgrounds} from "./ReaderBackground.tsx";
 import {useReaderTitle} from "./reader-title.ts";
 import {useReaderFonts} from "./reader-fonts.ts";
@@ -31,7 +33,7 @@ export function ReaderPreviewScreen(props:{state:ReaderPreviewState;width:number
  const title=useReaderTitle(()=>READER_PREVIEW_PARAGRAPHS[0][1],()=>props.width-28,preset,visibleFonts,"preview");
  const blocks=createMemo<ContentBlock[]>(()=>{const state=visible();if(!state)return [];return READER_PREVIEW_PARAGRAPHS.map(([style,text])=>({type:'text',style,text:style==='title'?title().join('\n'):text}));});
  const [native,setNative]=createSignal<NativeBlockLayouts>(new Map());const layOut=createContentLayouter((text,slot)=>getOps().measureText(text,slot),undefined,getFontMetrics);
- createEffect(()=>{const content=blocks(),current=preset();setNative(new Map());if(!content.length||!hasCapability('text.layout'))return;const metrics=getDisplayMetrics(),task=requestReaderLayout(content,props.width-28,current.body.fontSizeSp,metrics.physicalWidth/metrics.logicalWidth,current,args=>textLayout.layout(args),setNative,error=>console.warn('Reader preview layout',String(error)),visibleFonts(),"preview");onCleanup(()=>task.cancel());});
+ createEffect(()=>{const content=blocks(),current=preset();setNative(new Map());if(!content.length||!hasCapability('text.layout'))return;const metrics=getDisplayMetrics(),task=requestReaderLayout(content,props.width-28,current.body.fontSizeSp,metrics.physicalWidth/metrics.logicalWidth,current,args=>textLayout.layout(args),setNative,error=>logConsole.warn('Reader preview layout',String(error)),visibleFonts(),"preview");onCleanup(()=>task.cancel());});
  const layout=createMemo(()=>layOut(blocks(),props.width-28,preset().body.fontSizeSp,{},preset(),native()));
  const unsupported=()=>{void hostOperation('ui.toast',{message:'预览页面不支持收藏/分享'}).result.catch(()=>{});};
  // Keep two physical coverage pixels below each preview line: native StaticLayout

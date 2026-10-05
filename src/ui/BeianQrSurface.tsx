@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('BeianQrSurface');
 import {MediaSurface} from '@podjs/framework/media-surface';
 import {delay,mediaSurfaces,type HostOperation,type MediaSurfaceState,type MediaSurfaceStyle} from '@podjs/framework/services';
 import {createEffect,createMemo,createSignal,onCleanup,Show} from 'solid-js';
@@ -18,7 +20,7 @@ export function BeianQrSurface(props:BeianQrSurfaceProps){
  onCleanup(()=>{active=false;});
  const fail=(error:unknown)=>{
   if(!active||failed)return;failed=true;
-  console.warn('Beian QR',String(error));props.onError();
+  logConsole.warn('Beian QR',String(error));props.onError();
  };
  createEffect(()=>{
   const source=createBeianQrSource(props.bitmapSize);let current=true;

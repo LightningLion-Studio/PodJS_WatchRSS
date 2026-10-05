@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('NotesScreen');
 import {notePreviewEntries} from './NotePreview.tsx';
 import {noteImageDisplayHeight} from '../notes/presentation.ts';
 import {noteBodyLayoutBlocks} from '../notes/native-layout-input.ts';
@@ -114,12 +116,12 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     },layouts=>{
       const title=layouts.get(titleBlock),subtitle=layouts.get(subtitleBlock);
       if(title?.every(line=>line.height!==undefined)&&subtitle?.every(line=>line.height!==undefined))setNativeHeader({title:title.reduce((sum,line)=>sum+line.height!,0),subtitle:subtitle.reduce((sum,line)=>sum+line.height!,0),titleLines:title,subtitleLines:subtitle});
-    },error=>console.warn('Note header layout',String(error)),resolveFont);
+    },error=>logConsole.warn('Note header layout',String(error)),resolveFont);
     const bodyTask=bodyBlocks.length?requestReaderLayoutBatched(bodyBlocks,width,preset.body.fontSizeSp,scale,preset,args=>textLayout.layoutBatch(args),layouts=>{
       const byText=new Map<string,readonly ParagraphLine[]>();
       for(const block of bodyBlocks){const lines=layouts.get(block);if(lines?.length)byText.set(block.text,lines);}
       setNativeBody(byText);
-    },error=>console.warn('Note body layout',String(error)),resolveFont,{firstBlocks:4,batchBlocks:16}):undefined;
+    },error=>logConsole.warn('Note body layout',String(error)),resolveFont,{firstBlocks:4,batchBlocks:16}):undefined;
     onCleanup(()=>{headerTask.cancel();bodyTask?.cancel();});
   });
   const [editButtonVisible,setEditButtonVisible]=createSignal(true);

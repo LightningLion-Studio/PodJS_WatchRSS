@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('ReaderScreen');
 import { openBrowserUrl } from "../browser/open.ts";
 import { OriginalWebConfirm } from "./OriginalWebConfirm.tsx";
 import { createGesture } from "@pocketjs/framework/gesture";
@@ -96,7 +98,7 @@ export function ReaderScreen(props:{
     setNativeTitle(new Map());
     if(!hasCapability("text.layout"))return;
     const metrics=getDisplayMetrics();
-    const task=requestReaderLayout([block],width,size,metrics.physicalWidth/metrics.logicalWidth,preset,args=>textLayout.layout(args),setNativeTitle,error=>console.warn("Reader title layout",String(error)),fonts());
+    const task=requestReaderLayout([block],width,size,metrics.physicalWidth/metrics.logicalWidth,preset,args=>textLayout.layout(args),setNativeTitle,error=>logConsole.warn("Reader title layout",String(error)),fonts());
     onCleanup(()=>task.cancel());
   });
   const titleLayout=createMemo(()=>layOutTitle([titleBlock()],props.width-28,props.fontSize,{},props.preset,nativeTitle()));

@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {audio,speech,fileChunks,bytesToBase64} from '@podjs/framework/services';
 import type {SpeechPort} from '../reader/speech.ts';
 import type {HttpTransport} from '../cloud/types.ts';
@@ -41,11 +42,12 @@ export class ConfiguredSpeechPort implements SpeechPort {
  private listeners=new Set<(event:{type:string;utteranceId:string;start?:number;end?:number;elapsedMs?:number})=>void>();
  constructor(private readonly store:TtsConfigStore,private readonly transport:HttpTransport,private readonly account:()=>Promise<TtsAccount|null>,private readonly host:CloudSpeechHost=hostCloudSpeech){}
  private emit(type:string,id:string,elapsedMs=0){for(const listener of this.listeners)listener({type,utteranceId:id,elapsedMs});}
- async initialize(){this.config=this.store.read();if(this.config.engine==='local')return this.host.initializeLocal();}
+ async initialize(){appLogger.d('TtsEngine','initialize');this.config=this.store.read();if(this.config.engine==='local')return this.host.initializeLocal();}
  onProgress(listener:(event:{type:string;utteranceId:string;start?:number;end?:number;elapsedMs?:number})=>void){
   this.listeners.add(listener);const removeLocal=this.host.onLocalProgress(listener);return()=>{this.listeners.delete(listener);removeLocal();};
  }
  async speak(text:string,rate:number,id='speech'){
+  appLogger.d('TtsEngine',`synthesis engine=${this.config.engine} chars=${text.length}`);
   const generation=++this.generation;await this.clearFile();this.completed=false;this.utteranceId=id;
   if(this.config.engine==='local')return this.host.speakLocal(text,rate,id);
   const bytes=await synthesizeCloudSpeech(this.transport,{config:this.config,apiKey:await this.store.apiKey(this.config.engine),account:this.config.engine==='backend_default'?await this.account():null,text,rate,requestId:String(Date.now())});
@@ -62,7 +64,7 @@ export class ConfiguredSpeechPort implements SpeechPort {
    await this.host.setSpeed(rate);if(generation!==this.generation)return;
    this.startedAt=Date.now();this.emit('start',id);
   }
-  catch(error){await this.clearFile(path);throw error;}
+  catch(error){appLogger.e('TtsEngine','Audio playback failed',error);await this.clearFile(path);throw error;}
  }
  async state():Promise<{state:string}>{
   if(this.config.engine==='local')return this.host.localState();

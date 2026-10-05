@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('server');
 import type {HttpExportSession} from './exports.ts';
 import type {tcp,byteStreams,HostOperation} from '@podjs/framework/services';
 import {base64ToBytes} from '@podjs/framework/bytes';
@@ -45,7 +47,7 @@ export class RemoteInputServer {
     close:async()=>{await this.ports.streams.close(id);if(this.stream===id)this.stream=undefined;},
    };
    try{if(this.serve)await this.serve(stream,()=>!this.stopped);else await serveRemoteHttp(stream,()=>!this.stopped,url=>{if(!this.stopped&&!this.delivered){this.delivered=true;this.onUrl(url);}},this.exportSession?{...this.exportSession,onComplete:()=>{if(!this.stopped)this.exportSession?.onComplete?.();}}:undefined);}
-   catch(error){if(!this.stopped)console.warn('Remote input connection: '+String(error));}
+   catch(error){if(!this.stopped)logConsole.warn('Remote input connection: '+String(error));}
    finally{await stream.close().catch(()=>{});}
   }}finally{if(this.listener){const id=this.listener;this.listener=undefined;await this.ports.tcp.close(id).catch(()=>{});}}
  }

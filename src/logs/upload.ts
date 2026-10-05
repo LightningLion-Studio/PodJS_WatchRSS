@@ -1,10 +1,10 @@
-import type {SyncDiagnosticLog} from '../sync/diagnostic-log.ts';
+import type {AppLogger} from './app-logger.ts';
 import {encryptLog, type LogCrypto} from './encryption.ts';
 
 export type LogSource=()=>Promise<string|null>;
-/** Deliberately exports only the already-redacted sync timeline, never SQL data. */
-export function diagnosticLogSource(log:Pick<SyncDiagnosticLog,'pull'>):LogSource {
-  return async()=>log.pull(700_000).log||null;
+/** Upload the complete redacted application log; wire pullDebugLog alone is capped. */
+export function diagnosticLogSource(log:Pick<AppLogger,'readLogs'>):LogSource {
+  return ()=>log.readLogs();
 }
 export interface LogRecord {code:string;encryptedAesKey:string;fileSize:number;charCount:number;createdAt:string;userId:string}
 export interface LogBackend {

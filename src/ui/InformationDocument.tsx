@@ -1,3 +1,5 @@
+import {createLogConsole} from '../logs/app-logger.ts';
+const logConsole=createLogConsole('InformationDocument');
 import {For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor} from 'solid-js';
 import {Text, View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
@@ -136,7 +138,7 @@ export function useInformationDocument(props: InformationDocumentProps): Informa
     restoreListAnchor(anchor) { setPendingRestore({kind: 'anchor', anchor: checkedInformationListAnchor(anchor)}); },
   };
   const report = (error: unknown) => {
-    console.warn('Information document layout', String(error));
+    logConsole.warn('Information document layout', String(error));
     untrack(() => props.onLayoutError?.(error));
   };
   createEffect(() => {

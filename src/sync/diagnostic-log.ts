@@ -10,8 +10,9 @@ const safeToken=(value:string)=>/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(value)?valu
 
 /** A bounded, persistent sync timeline. Payloads, peer IDs, URLs and exception messages never enter it. */
 export class SyncDiagnosticLog {
-  constructor(private readonly storage:DiagnosticStorage,private readonly now:()=>Date=()=>new Date()){}
+  constructor(private readonly storage:DiagnosticStorage,private readonly now:()=>Date=()=>new Date(),private readonly sink?:(message:string)=>void){}
   private append(message:string){
+    if(this.sink){this.sink(message);return;}
     const previous=this.storage.get(KEY)??"";
     const next=(previous+`[${this.now().toISOString()}] ${message}\n`).slice(-MAX_STORED_CHARS);
     this.storage.set(KEY,next);
