@@ -38,10 +38,15 @@ describe('AppLogger native persistence and privacy',()=>{
   await new AppLogger(m.file).init('must not duplicate');expect(await log.readLogs()).not.toContain('must not duplicate');
  });
  test('native strict byte threshold and once-per-append 20 percent line trimming',async()=>{
-  const exact=memory('a'.repeat(MAX_LOG_BYTES-1)+'\n'),log=new AppLogger(exact.file);
+  // Keep the timestamp that exposed the flake: its minutes contain the old row marker '0:'.
+  const now=()=>new Date(2026,9,5,2,40,0,404);
+  const exact=memory('a'.repeat(MAX_LOG_BYTES-1)+'\n'),log=new AppLogger(exact.file,now);
   log.d('T','cross');await log.flush();expect(exact.text().startsWith('a'.repeat(100))).toBe(true);expect(exact.writes.length).toBe(1);
   const rows=Array.from({length:10},(_,i)=>`${i}:`+'中'.repeat(180000));const m=memory(rows.join('\n')+'\n');expect(Buffer.byteLength(m.text())).toBeGreaterThan(MAX_LOG_BYTES);
-  const rotated=new AppLogger(m.file);rotated.d('T','new');await rotated.flush();expect(m.text().startsWith('2:')).toBe(true);expect(m.text()).not.toContain('0:');expect(m.writes[0]).toBe(rows.slice(2).join('\n')+'\n');
+  const rotated=new AppLogger(m.file,now);rotated.d('T','new');await rotated.flush();
+  // Compare retained lines, not substrings that can also occur in a valid timestamp.
+  expect(m.text().split('\n')).toEqual([...rows.slice(2),'[2026-10-05 02:40:00.404] [D] [T] new','']);
+  expect(m.writes[0]).toBe(rows.slice(2).join('\n')+'\n');
  });
  test('concurrent producers and read/clear barriers cannot race or lose entries',async()=>{
   const m=memory(),log=new AppLogger(m.file);

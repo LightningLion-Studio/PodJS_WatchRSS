@@ -14,8 +14,9 @@ const parseJava=async(value:string)=>{const url=new URL(value);return {valid:tru
 function phone(frames:JsonObject[],beforeWrite:(frame:JsonObject)=>Promise<void>=async()=>{}){
  const input=frames.map(encodeFrame),decoder=new FrameDecoder(),out:JsonObject[]=[],timeouts:number[]=[];
  let index=0,offset=0,closed=0;
+ // Transport time is controlled independently of CPU scheduling for exact timeout assertions.
  const connection=new StreamFrameConnection({async read(max,timeout){timeouts.push(timeout);const frame=input[index];if(!frame)return null;const bytes=frame.slice(offset,offset+Math.min(max,11));offset+=bytes.length;if(offset===frame.length){index++;offset=0;}return bytes;},
- async write(bytes){for(const frame of decoder.push(bytes)){await beforeWrite(frame);out.push(frame);}},async close(){closed++;}});
+ async write(bytes){for(const frame of decoder.push(bytes)){await beforeWrite(frame);out.push(frame);}},async close(){closed++;}},()=>0);
  return {connection,out,timeouts,consumed:()=>index,closed:()=>closed};
 }
 function repository(){
