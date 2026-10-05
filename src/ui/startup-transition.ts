@@ -1,4 +1,4 @@
-export const STARTUP_EXIT_DURATION_MS = 780;
+export const STARTUP_EXIT_DURATION_MS = 300;
 
 export interface StartupExitFrame {
   opacity: number;
