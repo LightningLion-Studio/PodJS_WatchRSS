@@ -127,7 +127,7 @@ async function load(entry: Entry): Promise<void> {
     entry.sourceWidth=decoded.sourceWidth??decoded.width;entry.sourceHeight=decoded.sourceHeight??decoded.height;
     for (const [node,callbacks] of entry.nodes) {getOps().setImage(node.id, handle);callbacks.onSize?.(entry.sourceWidth,entry.sourceHeight);}
   } catch (error) {
-    if (!entry.cancelled) {entry.error=error;logConsole.warn(`RemoteImage: ${String(error)}`);for(const callbacks of entry.nodes.values())callbacks.onError?.(error);}
+    if (!entry.cancelled) {entry.error=error;logConsole.warn('RemoteImage request failed');for(const callbacks of entry.nodes.values())callbacks.onError?.(error);}
   } finally {
     entry.current = undefined;
     cached?.release();

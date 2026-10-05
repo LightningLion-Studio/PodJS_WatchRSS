@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('server');
 import type {HttpExportSession} from './exports.ts';
@@ -27,11 +28,11 @@ export class RemoteInputServer {
    const result=await operation.result;this.listener=result.id;
    if(this.stopped){await this.ports.tcp.close(result.id);this.listener=undefined;throw new Error('Remote input closed');}
    this.pending=undefined;
-   const {addresses}=await this.ports.tcp.addresses();
+   const {addresses}=await this.ports.tcp.addresses().catch(error=>{appLogger.e('NetworkUtils','Failed to get local IP address');throw error;});
    if(this.stopped)throw new Error('Remote input closed');
    this.running=this.accept();void this.running.catch(error=>{if(!this.stopped)this.onError(error);});
    return {port:result.port,addresses};
-  }catch(error){if(this.listener){const id=this.listener;this.listener=undefined;await this.ports.tcp.close(id).catch(()=>{});}throw error;}
+  }catch(error){if(!this.stopped)appLogger.e('ServerActivity','Failed to start local server');if(this.listener){const id=this.listener;this.listener=undefined;await this.ports.tcp.close(id).catch(()=>{});}throw error;}
   finally{if(this.pending===operation)this.pending=undefined;}
  }
  private async accept(){
@@ -47,7 +48,7 @@ export class RemoteInputServer {
     close:async()=>{await this.ports.streams.close(id);if(this.stream===id)this.stream=undefined;},
    };
    try{if(this.serve)await this.serve(stream,()=>!this.stopped);else await serveRemoteHttp(stream,()=>!this.stopped,url=>{if(!this.stopped&&!this.delivered){this.delivered=true;this.onUrl(url);}},this.exportSession?{...this.exportSession,onComplete:()=>{if(!this.stopped)this.exportSession?.onComplete?.();}}:undefined);}
-   catch(error){if(!this.stopped)logConsole.warn('Remote input connection: '+String(error));}
+   catch(error){if(!this.stopped)logConsole.warn('Remote input connection failed');}
    finally{await stream.close().catch(()=>{});}
   }}finally{if(this.listener){const id=this.listener;this.listener=undefined;await this.ports.tcp.close(id).catch(()=>{});}}
  }

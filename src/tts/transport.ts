@@ -18,7 +18,7 @@ const hostPorts:TtsTransportPorts={
 };
 /** Read JSON/hex, base64 JSON, or raw MP3 through an owned private download file. */
 export function createTtsTransport(ports:TtsTransportPorts=hostPorts):HttpTransport{return {async request(request){
- appLogger.d('Network',`${request.method} ${request.url}`);
+ appLogger.d('Network',`${request.method} TTS request`);
  let path:string|undefined;
  try{
   const temporary=await ports.createTemp('tts');
@@ -38,6 +38,6 @@ export function createTtsTransport(ports:TtsTransportPorts=hostPorts):HttpTransp
   }
   appLogger.i('Network',`response status=${response.status} bytes=${body.length}`);
   return {status:response.status,headers:response.headers,body};
- }catch(error){appLogger.e('Network','Request failed',error);throw error;}finally{if(path!==undefined)await ports.remove(path).catch(()=>{});}
+ }catch(error){appLogger.e('Network','Request failed');throw error;}finally{if(path!==undefined)await ports.remove(path).catch(()=>{});}
 }};}
 export const ttsTransport=createTtsTransport();

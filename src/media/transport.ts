@@ -15,7 +15,7 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
   return {async request(request:HttpRequest):Promise<HttpResponse>{
     if(request.method!=='GET'&&request.method!=='POST')throw new Error('Unsupported media request method');
     // A request path is useful for diagnosis; signed query strings and headers are not.
-    appLogger.d('Network',`${request.method} ${request.url.split(/[?#]/,1)[0]}`);
+    appLogger.d('Network',`${request.method} media request`);
     const path=`media-json/request-${Date.now()}-${++sequence}.json`;
     try{
       const response=await ports.download({url:request.url,path,method:request.method,bodyBase64:request.body?ports.base64(request.body):undefined,headers:request.headers,maxBytes:8*1024*1024,

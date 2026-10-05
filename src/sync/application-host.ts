@@ -1,3 +1,5 @@
+import {loggedSyncSilence} from '../logs/sync-media.ts';
+import {appLogger} from '../logs/app-logger.ts';
 import {debugGate} from '../debug/host.ts';
 import {DebugBluetoothSession} from '../debug/bluetooth.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
@@ -25,6 +27,7 @@ import {acquireIpDescriptor} from './ip-discovery.ts';
 import {buildWatchMediaCapabilities} from './media-capabilities.ts';
 import {hostIpCrypto} from './ip-crypto-host.ts';
 export function startApplicationForegroundSync(){
+ const loggedSilence=loggedSyncSilence(silencePlayback);
  const storage={get:(key:string)=>kv.get<string>(key),set:(key:string,value:string)=>kv.set(key,value)};
  const diagnostics=new SyncDiagnosticLog(storage,undefined,message=>hostAppLogger.d('WatchSync',message));
  const accountTelemetry=usageTelemetry;
@@ -33,17 +36,17 @@ export function startApplicationForegroundSync(){
  diagnostics.state('bluetooth','starting');
  let disposed=false,ip:IpSyncController|undefined;
  const stopLifecycle=onLifecycleChange(state=>ip?.setActive(state==='active'));
- const stopNetwork=hasCapability('net.discovery')?onNetworkChange(()=>ip?.refresh(),error=>logConsole.warn('WatchRSS network observer: '+String(error))):()=>{};
+ const stopNetwork=hasCapability('net.discovery')?onNetworkChange(()=>ip?.refresh(),()=>appLogger.w('WatchRSS_IpSync','默认网络监听注册失败')):()=>{};
  const ipReady=getLibrarySyncRepository().then(repository=>{
   if(disposed||!hasCapability('net.websocket'))return;
   ip=new IpSyncController({repository,acquireDescriptor:hasCapability('net.discovery')?()=>acquireIpDescriptor(discovery,delay):undefined,discover:hasCapability('net.discovery')?port=>{
    const operation=discovery.mdns({serviceType:'_watchrss-sync._tcp.',namePrefix:'WatchRSS-',expectedPort:port,windowMs:1500});
    return {cancel:()=>operation.cancel(),result:operation.result.then(({endpoints})=>endpoints.map(endpoint=>({endpointId:'mdns-'+endpoint.address,address:endpoint.address,family:'ipv4',transportKind:'wifiLan' as const,priority:300})))};
-  }:undefined,sockets:webSockets,streams:byteStreams,crypto:hostIpCrypto,delay,mediaLease:active=>silencePlayback.lease('ip-sync',active),onError:error=>{diagnostics.failure('ip');logConsole.warn('WatchRSS IP sync: '+String(error));},onRoute:route=>{diagnostics.state('ip',route?route.endpoint.transportKind:'closed');logConsole.info('WatchRSS IP route: '+(route?route.endpoint.transportKind:'closed'));}},{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);if(result.request.action==='syncLibrary')notifyLibraryChanged();}});
+  }:undefined,sockets:webSockets,streams:byteStreams,crypto:hostIpCrypto,delay,mediaLease:active=>loggedSilence.lease('ip-sync',active),onError:error=>{diagnostics.failure('ip');logConsole.warn('WatchRSS IP sync: <redacted>');},onRoute:route=>{diagnostics.state('ip',route?route.endpoint.transportKind:'closed');logConsole.info('WatchRSS IP route: '+(route?route.endpoint.transportKind:'closed'));}},{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);if(result.request.action==='syncLibrary')notifyLibraryChanged();}});
   ip.setActive(lifecycle()==='active');return ip;
- });void ipReady.catch(error=>logConsole.warn('WatchRSS IP initialization: '+String(error)));
- const bluetooth=new ApplicationForegroundSync({repository:getLibrarySyncRepository,createListener:createRfcommLibraryListener,lifecycle,onLifecycle:onLifecycleChange,display:displayPower,radio:rfcomm,silence:silencePlayback,delay,
-  onLibraryChanged:notifyLibraryChanged,onState:state=>{diagnostics.state('bluetooth',state);logConsole.info('WatchRSS foreground sync: '+state);},onError:error=>{diagnostics.failure('bluetooth');logConsole.warn('WatchRSS foreground sync: '+String(error));},
+ });void ipReady.catch(error=>logConsole.warn('WatchRSS IP initialization: <redacted>'));
+ const bluetooth=new ApplicationForegroundSync({repository:getLibrarySyncRepository,createListener:createRfcommLibraryListener,lifecycle,onLifecycle:onLifecycleChange,display:displayPower,radio:rfcomm,silence:loggedSilence,delay,
+  onLibraryChanged:notifyLibraryChanged,onState:state=>{diagnostics.state('bluetooth',state);logConsole.info('WatchRSS foreground sync: '+state);},onError:error=>{diagnostics.failure('bluetooth');logConsole.warn('WatchRSS foreground sync: <redacted>');},
  },{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);},offerIpEndpoint:async descriptor=>(await ipReady)?.offer(descriptor)??false});
  const ready=Promise.all([bluetooth.ready,ipReady]);void ready.catch(()=>{});
  let closing:Promise<void>|undefined;

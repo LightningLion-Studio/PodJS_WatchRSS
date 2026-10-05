@@ -17,6 +17,6 @@ export function observeInternet(ports:InternetPorts,listener:(status:InternetSta
  const refresh=()=>{if(stopped)return;dirty=true;if(running)return;running=true;void (async()=>{
   try{while(dirty&&!stopped){dirty=false;try{const snapshot=await ports.snapshot();if(!dirty)emit(internetAvailability(snapshot));}catch{if(!dirty)emit('unavailable');}}}finally{running=false;}
  })();};
- listener('checking');const unsubscribe=ports.subscribe(refresh,()=>emit('unavailable'));refresh();
- return ()=>{if(stopped)return;stopped=true;unsubscribe();};
+ listener('checking');let unsubscribe:()=>void;try{unsubscribe=ports.subscribe(refresh,()=>emit('unavailable'));}catch(error){appLogger.e('InternetAvailabilityMonitor','Failed to register default network callback');throw error;}refresh();
+ return ()=>{if(stopped)return;stopped=true;try{unsubscribe();}catch(error){appLogger.e("InternetAvailabilityMonitor","Failed to unregister default network callback");throw error;}};
 }

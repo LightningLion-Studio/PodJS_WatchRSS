@@ -96,7 +96,7 @@ let downloadSequence = 0;
 let addPreviewSequence=0;
 const pendingAddPreviews=new Map<string,{url:string;xml:string|null;builtin:BuiltinChannel|undefined}>();
 async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string> {
-  appLogger.d('Network',`RSS fetch ${url}`);
+  appLogger.d('Network','RSS fetch');
   const path = `feeds/fetch-${Date.now()}-${++downloadSequence}.xml`;
   try {
     const request=http.download(url,path,8*1024*1024);
@@ -114,7 +114,7 @@ async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string
     }
     appLogger.d('Network',`download bytes=${bytes.length}`);
     return utf8ToString(bytes);
-  } catch(error){appLogger.e('Network','RSS fetch failed',error);throw error;} finally { await fileChunks.remove(path).catch(() => {}); }
+  } catch(error){appLogger.e('Network','RSS fetch failed');throw error;} finally { await fileChunks.remove(path).catch(() => {}); }
 }
 const sourceSync = new SqlSourceSyncStore(db,{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")});
 const repo = new WatchRssRepository(db, fetchFeedText, hydrateStoredContent,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec),async id=>{const device=(await db.query("SELECT device_id FROM sync_local_identity WHERE id=1"))[0];if(!device)throw new Error("同步身份未初始化");return sourceSync.localDeleteStatements(id,String(device.device_id));});

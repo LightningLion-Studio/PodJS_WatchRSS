@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {readRemoteHttpRequest,writeRemoteHttpResponse,type RemoteHttpRequest,type RemoteHttpResponse} from '../remote-input/http.ts';
 import type {SyncByteStream} from '../sync/stream.ts';
 import {ConfigPairingSession,CONFIG_PAIRING_AUTH_HEADER,CONFIG_PAIRING_NONCE_HEADER,CONFIG_PAIRING_PROTOCOL} from './config-pairing.ts';
@@ -19,15 +20,15 @@ export async function routeTtsConfigHttp(request:RemoteHttpRequest,pairing:Confi
  if(!await pairing.authenticate(method,uri,nonce,request.body,proof))return authError();
  if(method==='GET'){
   try{return {status:200,type:'application/json; charset=utf-8',body:await pairing.encryptResponse(method,uri,JSON.stringify({success:true,data:await store.publicConfig()}))};}
-  catch{return json(500,{success:false,data:null});}
+  catch{appLogger.e('LocalHttpServer','handleGetTtsConfig failed');return json(500,{success:false,data:null});}
  }
  if(!request.body||request.body.length>65536)return json(400,{success:false,message:'加密配置正文缺失或过大'});
  let value:unknown;
  try{value=JSON.parse(await pairing.decryptRequest(method,uri,request.body));}
  catch{return json(400,{success:false,message:'无法解密配置正文'});}
- try{await store.validate(value);}catch(error){return json(400,{success:false,message:String(error).replace(/^Error: /,'')});}
+ try{await store.validate(value);}catch(error){appLogger.e('LocalHttpServer','handleSetTtsConfig failed');return json(400,{success:false,message:String(error).replace(/^Error: /,'')});}
  if(!pairing.claimWrite())return authError();
- try{await store.save(value);}catch(error){return json(400,{success:false,message:String(error).replace(/^Error: /,'')});}
+ try{await store.save(value);}catch(error){appLogger.e('LocalHttpServer','handleSetTtsConfig failed');return json(400,{success:false,message:String(error).replace(/^Error: /,'')});}
  return json(200,{success:true,message:'配置已保存'});
 }
 

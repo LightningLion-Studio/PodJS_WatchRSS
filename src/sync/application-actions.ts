@@ -1,3 +1,4 @@
+import type {SyncEventLog} from '../logs/sync-events.ts';
 import {remoteInputUrl} from "../remote-input/inbox.ts";
 import {tokenUsageOptInt} from './token-usage.ts';
 import type {JsonObject} from './protocol.ts';
@@ -8,7 +9,7 @@ import type {AccountSyncTelemetry} from './account-telemetry.ts';
 import type {WatchAccountStore} from '../account/store.ts';
 import {debugLogMaxChars,type DebugLogReply} from './diagnostic-log.ts';
 export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;deviceId():Promise<string>;notesChanged():void;clearLibrary?:()=>Promise<void>;accountStore?:Pick<WatchAccountStore,'save'>;accountUriParse?:AccountUriParse;accountChanged?:()=>void;accountTelemetry?:AccountSyncTelemetry;readSavedLinks?:(type:SavedLinkType)=>Promise<string[]>;readDebugLog?:(maxChars:unknown)=>DebugLogReply|Promise<DebugLogReply>;noteAssets?:{apply(request:JsonObject):Promise<JsonObject>};readTokenUsage?(limit:number):Promise<JsonObject[]>;readerSync?:{apply(request:JsonObject):Promise<JsonObject>};previewReader?(request:JsonObject):JsonObject}){
- const handler=async(request:JsonObject):Promise<JsonObject>=>{
+ const handler=async(request:JsonObject,diagnostic?:SyncEventLog):Promise<JsonObject>=>{
   try{
    if(request.action==='ping')return {success:true,action:'pong',nonce:typeof request.nonce==='string'?request.nonce:''};
    if(request.action==='remoteInput'){if(!remoteInputUrl(request.url))throw new Error('缺少 RSS URL');return {success:true,action:'remoteInput'};}
@@ -22,7 +23,7 @@ export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;d
    if(request.action==='syncNoteAsset'&&ports.noteAssets){const response=await ports.noteAssets.apply(request);if(response.complete)ports.notesChanged();return response;}
    if(request.action==='syncNotes'){const response=await syncNotes(request,ports.notes,ports.deviceId);ports.notesChanged();return response;}
    return {success:false,message:'未知蓝牙同步动作：'+String(request.action??''),errorCode:'unsupported_action'};
-  }catch(error){return {success:false,message:error instanceof Error?error.message:String(error)};}
+  }catch(error){diagnostic?.event("request.handle.failed",{message:"<redacted>"},"E");return {success:false,message:error instanceof Error?error.message:String(error)};}
  };
  return Object.assign(handler,{capabilities:{supportsReaderPresets:!!ports.readerSync,supportsReaderAssets:!!ports.readerSync,supportsResourceChunkAck:!!ports.readerSync,supportsReaderPresetPreview:!!ports.previewReader}});
 }

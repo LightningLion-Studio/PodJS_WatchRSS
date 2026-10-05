@@ -67,7 +67,7 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     setTransform:(value:{rotationDeg?:number;scaleMode?:"standard"|"expanded"|"shrunk";panX?:number;panY?:number})=>usingSessions()?sessionPool!.setTransform(value):video.setTransform(value),
     setVolume:(value:number)=>usingSessions()?sessionPool!.setVolume(value):video.setVolume(value),
   };
-  const failed = (value: unknown) => { appLogger.e('VideoPlayer','Playback failed',value); if (!disposed) { const message = String(value); setError(message); props.onCheckpoint?.("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
+  const failed = (value: unknown) => { appLogger.e('VideoPlayer','Playback failed'); if (!disposed) { const message = String(value); setError(message); props.onCheckpoint?.("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
   const range = () => playerPanRange(mode(), props.width, props.height, state()?.width ?? 0, state()?.height ?? 0, rotation());
   const requestTransform = async () => { if(videoSessionOwner!==sessionOwner)return; if (transformRunning) { transformDirty = true; return; } transformRunning = true; try { do { transformDirty = false; const ownGeneration = generation, r = range(), value = Math.max(-r.range, Math.min(r.range, pan())); if (value !== pan()) setPan(value); await media.setTransform({ rotationDeg: displayRotation(), scaleMode: mode(), ...(r.axis === "x" ? { panX: value } : { panY: value }) }); if (ownGeneration === generation) props.onPanStateChange?.(value, r.range); else transformDirty = true; } while (transformDirty && !disposed); } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } finally { transformRunning = false; } };
   const enforceStartVolume = async (next: ExtendedVideoState, limit: number | null | undefined) => { if (limit == null || next.volume == null) return next; const maximum = Math.max(0, Math.min(1, limit / 100)); return next.volume > maximum ? await media.setVolume(maximum) as ExtendedVideoState : next; };
@@ -82,7 +82,7 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
         if(props.active&&!networkPrompt())untrack(prepare);
       }).catch(value=>{
         if(disposed)return;sessionCapacity="unavailable";setSessionsDisabled(true);
-        appLogger.w("VideoPlayer","videoSessions capabilities failed; using legacy single-player path",value);
+        appLogger.w("VideoPlayer","videoSessions capabilities failed; using legacy single-player path");
         if(props.active&&!networkPrompt())untrack(prepare);
       });
       return;
@@ -120,9 +120,9 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
   const cancelledSessionError=(value:unknown)=>!shouldFallbackFromVideoSessions(value);
   const degradeSessions=async(value:unknown)=>{
     if(!usingSessions()||degradingSessions||disposed)return;
-    degradingSessions=true;appLogger.w("VideoPlayer","videoSessions failed; falling back to legacy video",value);
+    degradingSessions=true;appLogger.w("VideoPlayer","videoSessions failed; falling back to legacy video");
     generation++;prepareOp?.cancel();pollTimer?.cancel();neighborRevision++;
-    try{await sessionPool!.releaseAll();}catch(releaseError){appLogger.w("VideoPlayer","videoSessions cleanup failed",releaseError);}
+    try{await sessionPool!.releaseAll();}catch(releaseError){appLogger.w("VideoPlayer","videoSessions cleanup failed");}
     if(disposed){degradingSessions=false;return;}sessionCapacity="unavailable";setSessionsDisabled(true);preparedSource=undefined;forwardTarget=undefined;setReady(false);setState(null);degradingSessions=false;
     if(props.active&&!networkPrompt())untrack(prepare);
   };

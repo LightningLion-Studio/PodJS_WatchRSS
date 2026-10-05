@@ -47,7 +47,7 @@ export class ReaderSpeech {
         if(state.state==="ready")break;
         if(state.state!=="speaking")throw new Error("朗读引擎未能完成当前段落");
       }
-      } catch(error){appLogger.e('ReadAloudController','Playback failed',error);throw error;} finally {remove?.();}
+      } catch(error){appLogger.e('ReadAloudController','<redacted>');throw error;} finally {remove?.();}
       chunkOffset+=chunk.length;
     }
   }

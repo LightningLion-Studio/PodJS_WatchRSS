@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('browser');
 import type { BrowserAvailability, BrowserSiteDataResult } from '@podjs/framework/services';
@@ -48,6 +49,9 @@ export async function douyinBrowserAvailable(browser: DouyinBrowser, diagnostic:
     record(diagnostic, 'availability capability_missing');
     return true;
   }
-  const result = await browser.availability().result;
-  return result.status === 'available';
+  try {
+    const result = await browser.availability().result;
+    if(result.status !== 'available')appLogger.w('WebViewSupport','No WebView provider available on device');
+    return result.status === 'available';
+  } catch(error){appLogger.e('WebViewSupport','Failed to resolve WebView provider');throw error;}
 }

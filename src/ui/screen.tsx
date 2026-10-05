@@ -1,3 +1,4 @@
+import {ActivityLog} from '../logs/activity.ts';
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
 const HOME_SNAPSHOT_KEY = "watchrss.home.channels.v1";
 function readHomeChannelSnapshot(): Channel[] | undefined {
@@ -437,18 +438,20 @@ export default function WatchRSS(props: {
   createEffect(() => {
     void managedCache
       .configure(settings().cacheLimitMb * 1024 * 1024)
-      .catch((error) => logConsole.warn("Cache maintenance: " + String(error)));
+      .catch((error) => logConsole.warn("Cache maintenance failed"));
   });
   const presetStore = new ReaderPresetStore();
   const [presetState, setPresetState] = createSignal<ReaderPresetState>();
   const [presetRevision, setPresetRevision] = createSignal(0);
   const [foreground, setForeground] = createSignal(lifecycle() === "active");
+  const activityLog = new ActivityLog();
   const telemetrySession = new TelemetryScreenSession(usageTelemetry, () => globalThis.performance?.now?.() ?? Date.now());
   const telemetryReaders = new WeakSet<Entry>();
   const telemetryPlayers = new WeakSet<Entry>();
   createEffect(() => {
     const entries = stack();
     const owner = telemetryScreenOwner(entries);
+    activityLog.update(entries,foreground());
     telemetrySession.update(owner, owner && telemetryScreen(owner), foreground());
     for (const value of entries) {
       if (value.page === "reader" && value.readerArticle && !telemetryReaders.has(value)) {
