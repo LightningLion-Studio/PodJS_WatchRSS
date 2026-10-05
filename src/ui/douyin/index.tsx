@@ -1,3 +1,4 @@
+import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
 import {wireFields} from "../../sync/article-batches.ts";
 import { Image, Text, View } from "@pocketjs/framework/components";
@@ -13,6 +14,7 @@ import type { DouyinClient, DouyinContent, DouyinHistoryEntry, DouyinItem, Douyi
 
 export type DouyinRoute =
   | { name: "entry" }
+  | { name: "channel-info" }
   | { name: "login" }
   | { name: "feed" }
   | { name: "detail"; awemeId: string }
@@ -22,7 +24,7 @@ export type DouyinRoute =
   | { name: "settings" }
   | { name: "player"; awemeId: string };
 
-export interface DouyinPlayRequest { item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
+export interface DouyinPlayRequest { immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
 export type DouyinPlaybackCommand = "toggle" | "previous" | "next" | "replay";
 export interface DouyinSettingsBindings {
   originalContentEnabled: boolean;
@@ -32,6 +34,7 @@ export interface DouyinSettingsBindings {
   onDeleteChannel: () => void | Promise<void>;
 }
 export interface DouyinScreenProps {
+  active?:boolean;
   onShare?:ShareHandler;
   width: number;
   height: number;
@@ -86,27 +89,16 @@ function statusCard(title: string, detail: string): ScrollEntry {
   return { height: 45 + wrapped.length * 14, render: () => <View class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{title}</Text><Text class="absolute left-[12] right-[12] top-[33] text-xs leading-[14] text-[#b6b6b6]">{wrapped.join("\n")}</Text></View> };
 }
 
-function EntryScreen(props: DouyinScreenProps) {
-  const [loggedIn, setLoggedIn] = createSignal<boolean | null>(null);
-  const [items, setItems] = createSignal<DouyinItem[]>([]);
-  const [error, setError] = createSignal("");
-  const [loading, setLoading] = createSignal(false);
-  const refresh = async () => {
-    setLoading(true); setError("");
-    const logged = await props.client.isLoggedIn().catch(() => false); setLoggedIn(logged);
-    if (logged) { const cached = feedSnapshots.get(props.client); if (cached) setItems(cached.items); else { const result = await props.client.fetchFeedPage({ count: 12 }); if (result.ok) { const snapshot = { items: result.data.items, cursor: result.data.nextCursor || undefined, hasMore: result.data.hasMore }; feedSnapshots.set(props.client, snapshot); setItems(snapshot.items); } else setError(messageOf(result, "加载失败")); } }
-    setLoading(false);
-  };
-  createEffect(() => { if (props.route.name === "entry") void refresh(); });
-  const entries = createMemo<ScrollEntry[]>(() => [
-    header("抖音", loading() ? "刷新中..." : items().length ? "向上进入短视频流" : loggedIn() === false ? "登录后获取推荐内容" : "暂无内容，点击刷新重试"),
-    ...(error() ? [statusCard("加载失败", error())] : []),
-    ...(loggedIn() === false ? [button("登录", () => props.onNavigate({ name: "login" }))] : []),
-    ...(items().length ? [button("进入短视频流", () => props.onNavigate({ name: "feed" }))] : [button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void refresh())]),
-    button("播放历史", () => props.onNavigate({ name: "history" })),
-    button("设置", () => props.onNavigate({ name: "settings" }))
+function ChannelInfoScreen(props: DouyinScreenProps) {
+  const [loggedIn,setLoggedIn]=createSignal(false);
+  createEffect(()=>{void props.client.isLoggedIn().then(setLoggedIn);});
+  const entries=createMemo<ScrollEntry[]>(()=>[
+    header("抖音"),statusCard("频道说明",loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
+    statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),
+    ...(!loggedIn()?[button("登录",()=>props.onNavigate({name:"login"}))]:[]),
+    button("设置",()=>props.onNavigate({name:"settings"})),button("播放历史",()=>props.onNavigate({name:"history"})),button("返回",props.onBack)
   ]);
-  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
+  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref}/>;
 }
 
 function LoginScreen(props: DouyinScreenProps) {
@@ -126,9 +118,9 @@ function FeedScreen(props: DouyinScreenProps) {
   const initial = feedSnapshots.get(props.client);
   const [items, setItems] = createSignal<DouyinItem[]>(initial?.items ?? []), [cursor, setCursor] = createSignal<string | undefined>(initial?.cursor), [hasMore, setHasMore] = createSignal(initial?.hasMore ?? true), [loading, setLoading] = createSignal(false), [error, setError] = createSignal("");
   const load = async (append = false) => { if (loading()) return; setLoading(true); setError(""); const result = await props.client.fetchFeedPage({ cursor: append ? cursor() : undefined, count: 12 }); if (result.ok) { const nextItems = (append ? [...items(), ...result.data.items] : result.data.items).slice(-MAX_FEED_SNAPSHOT_ITEMS); const snapshot = { items: nextItems, cursor: result.data.nextCursor || undefined, hasMore: result.data.hasMore }; feedSnapshots.set(props.client, snapshot); setItems(snapshot.items); setCursor(snapshot.cursor); setHasMore(snapshot.hasMore); } else setError(messageOf(result, "加载失败")); setLoading(false); };
-  createEffect(() => { if (props.route.name === "feed" && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
+  createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
   const card = (item: DouyinItem): ScrollEntry => { const titleLines = lines(itemTitle(item), props.width - 60, 17).slice(0, 2), summaryLines = lines(itemSummary(item), props.width - 60, 12).slice(0, 1); return { height: 51 + titleLines.length * 21, render: () => <View onPress={() => props.onNavigate({ name: "detail", awemeId: item.awemeId })} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-[17px] leading-[21] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[10] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; };
-  const entries = createMemo<ScrollEntry[]>(() => [header("抖音", loading() ? "刷新中..." : "推荐内容"), button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void load(false)), ...(error() ? [statusCard("加载失败", error())] : []), ...items().map(card), ...(items().length === 0 && !loading() && !error() ? [statusCard("暂无内容", "刷新以获取推荐内容")] : []), button(loading() ? "加载中..." : hasMore() ? "加载更多" : "没有更多了", !loading() && hasMore() ? () => void load(true) : undefined)]);
+  const entries = createMemo<ScrollEntry[]>(() => [{height:40,render:()=> <View onPress={()=>props.onNavigate({name:"channel-info"})} focusable class="absolute inset-0 items-center"><Text class="text-lg text-white">抖音 ›</Text></View>}, button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void load(false)), ...(error() ? [statusCard("加载失败", error())] : []), ...items().map(card), ...(items().length === 0 && !loading() && !error() ? [statusCard("暂无内容", "刷新以获取推荐内容")] : []), button(loading() ? "加载中..." : hasMore() ? "加载更多" : "没有更多了", !loading() && hasMore() ? () => void load(true) : undefined)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
@@ -168,7 +160,7 @@ function SettingsScreen(props: DouyinScreenProps) {
   const [loggedIn, setLoggedIn] = createSignal<boolean | null>(null), [message, setMessage] = createSignal(""), [confirmDelete, setConfirmDelete] = createSignal(false);
   createEffect(() => { if (props.route.name === "settings") void props.client.isLoggedIn().then(setLoggedIn); });
   const setting = (label: string, enabled: boolean, onToggle: () => void): ScrollEntry => ({ height: 52, render: () => <View onPress={onToggle} focusable class="absolute inset-0 rounded-[26] bg-[#2a2a2a]"><Text class="absolute left-[12] top-[16] text-base leading-[20] text-[#f5f5f5]">{label}</Text><Show when={enabled} fallback={<View class="absolute right-[11] top-[13] w-[40] h-[26] rounded-[13] bg-[#555555]"><View class="absolute left-[3] top-[3] w-[20] h-[20] rounded-full bg-white" /></View>}><View class="absolute right-[11] top-[13] w-[40] h-[26] rounded-[13] bg-[#ff4d67]"><View class="absolute left-[17] top-[3] w-[20] h-[20] rounded-full bg-white" /></View></Show></View> });
-  const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [header("删除频道"), statusCard("确认删除？", "删除后将移除本地缓存"), button("确认删除", async () => { try { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); setConfirmDelete(false); } catch (error) { setMessage(String(error)); setConfirmDelete(false); } }, true), button("取消", () => setConfirmDelete(false))] : [header("设置", loggedIn() ? "已登录" : "未登录"), setting("原文阅读模式", props.settings.originalContentEnabled, () => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#b6b6b6]">刷新时抓取原文正文与图片</Text> }, setting("在后台继续播放", props.settings.continuePlaybackInBackgroundEnabled, () => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)), button("退出登录", loggedIn() ? async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); setMessage("已退出登录"); } catch (e) { setMessage(`退出失败：${String(e)}`); } } : undefined, true), button("删除频道", () => setConfirmDelete(true), true), ...(message() ? [statusCard("状态", message())] : [])]);
+  const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [header("删除频道"), statusCard("确认删除？", "删除后将移除本地缓存"), button("确认删除", async () => { try { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); setConfirmDelete(false); } catch (error) { setMessage(String(error)); setConfirmDelete(false); } }, true), button("取消", () => setConfirmDelete(false))] : [header("设置", loggedIn() ? "已登录" : "未登录"), setting("原文阅读模式", props.settings.originalContentEnabled, () => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#b6b6b6]">开启后进入沉浸短视频流</Text> }, setting("在后台继续播放", props.settings.continuePlaybackInBackgroundEnabled, () => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)), button("退出登录", loggedIn() ? async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); setMessage("已退出登录"); } catch (e) { setMessage(`退出失败：${String(e)}`); } } : undefined, true), button("删除频道", () => setConfirmDelete(true), true), ...(message() ? [statusCard("状态", message())] : [])]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
@@ -182,9 +174,10 @@ function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {
 export function DouyinScreen(props: DouyinScreenProps) {
   return <Show when={props.route} keyed>{route => {
     switch (route.name) {
-      case "entry": return <EntryScreen {...props} />;
+      case "entry": return <Show when={props.settings.originalContentEnabled} fallback={<FeedScreen {...props} />}><ImmersiveEntry {...props} /></Show>;
+      case "channel-info": return <ChannelInfoScreen {...props} />;
       case "login": return <LoginScreen {...props} />;
-      case "feed": return <FeedScreen {...props} />;
+      case "feed": return <Show when={props.settings.originalContentEnabled} fallback={<FeedScreen {...props} />}><ImmersiveEntry {...props} /></Show>;
       case "detail": return <DetailScreen {...props} awemeId={route.awemeId} />;
       case "history": return <HistoryScreen {...props} />;
       case "actions": return <ActionsScreen {...props} awemeId={route.awemeId} />;
