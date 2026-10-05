@@ -1,3 +1,4 @@
+import type {HttpExportSession} from './exports.ts';
 import type {tcp,byteStreams,HostOperation} from '@podjs/framework/services';
 import {base64ToBytes} from '@podjs/framework/bytes';
 import {serveRemoteHttp} from './http.ts';
@@ -15,7 +16,7 @@ export class RemoteInputServer {
  private running:Promise<void>=Promise.resolve();
  constructor(private readonly onUrl:(url:string)=>void,private readonly onError:(error:unknown)=>void,
   private readonly ports:RemoteInputServerPorts,address:'0.0.0.0'|'127.0.0.1'='0.0.0.0',
-  private readonly serve?:(stream:SyncByteStream,isActive:()=>boolean)=>Promise<void>){
+  private readonly serve?:(stream:SyncByteStream,isActive:()=>boolean)=>Promise<void>,private readonly exportSession?:HttpExportSession){
   this.ready=this.start(address);void this.ready.catch(()=>{});
  }
  private async start(address:'0.0.0.0'|'127.0.0.1'){
@@ -43,7 +44,7 @@ export class RemoteInputServer {
     write:async(bytes)=>{const operation=this.ports.streams.write(id,bytes,15000);this.pending=operation;try{await operation.result;}finally{if(this.pending===operation)this.pending=undefined;}},
     close:async()=>{await this.ports.streams.close(id);if(this.stream===id)this.stream=undefined;},
    };
-   try{if(this.serve)await this.serve(stream,()=>!this.stopped);else await serveRemoteHttp(stream,()=>!this.stopped,url=>{if(!this.stopped&&!this.delivered){this.delivered=true;this.onUrl(url);}});}
+   try{if(this.serve)await this.serve(stream,()=>!this.stopped);else await serveRemoteHttp(stream,()=>!this.stopped,url=>{if(!this.stopped&&!this.delivered){this.delivered=true;this.onUrl(url);}},this.exportSession?{...this.exportSession,onComplete:()=>{if(!this.stopped)this.exportSession?.onComplete?.();}}:undefined);}
    catch(error){if(!this.stopped)console.warn('Remote input connection: '+String(error));}
    finally{await stream.close().catch(()=>{});}
   }}finally{if(this.listener){const id=this.listener;this.listener=undefined;await this.ports.tcp.close(id).catch(()=>{});}}
