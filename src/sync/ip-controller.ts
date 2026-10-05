@@ -87,7 +87,7 @@ export class IpSyncController {
   try{while(!this.disposed&&this.route===route){
    // Each nonpersistent action completes a session but retains this WebSocket.
    // This owner always closes the underlying transport on cancellation/failure.
-   const connection={readFrame:async(timeout:number)=>{const frame=await route.connection.readFrame(timeout);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;},writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
+   const connection={setTransferProgress:route.connection.setTransferProgress.bind(route.connection),readFrame:async(timeout:number)=>{const frame=await route.connection.readFrame(timeout);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;},writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
    const session=new LibrarySyncSession(connection,this.ports.repository,{...this.options,initialRequestTimeoutMs:600000,responseAckTimeoutMs:600000});this.session=session;
    const results=await session.run();if(this.session===session)this.session=undefined;this.transferring=false;this.releaseLater();if(!this.active)this.scheduleStop(30000);this.lastAckSeq++;
    if(results.some(r=>r.response.fatalSession===true))throw new Error('IP library exchange failed');

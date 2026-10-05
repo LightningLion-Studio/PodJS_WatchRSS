@@ -7,7 +7,7 @@ import {pullSavedItems,type SavedLinkType} from './saved-links.ts';
 import type {WatchAccountStore} from '../account/store.ts';
 import type {DebugLogReply} from './diagnostic-log.ts';
 export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;deviceId():Promise<string>;notesChanged():void;clearLibrary?:()=>Promise<void>;accountStore?:Pick<WatchAccountStore,'save'>;accountUriParse?:AccountUriParse;accountChanged?:()=>void;readSavedLinks?:(type:SavedLinkType)=>Promise<string[]>;readDebugLog?:(maxChars:unknown)=>DebugLogReply;noteAssets?:{apply(request:JsonObject):Promise<JsonObject>};readTokenUsage?(limit:number):Promise<JsonObject[]>;readerSync?:{apply(request:JsonObject):Promise<JsonObject>};previewReader?(request:JsonObject):JsonObject}){
- return async(request:JsonObject):Promise<JsonObject>=>{
+ const handler=async(request:JsonObject):Promise<JsonObject>=>{
   try{
    if(request.action==='ping')return {success:true,action:'pong',nonce:typeof request.nonce==='string'?request.nonce:''};
    if(request.action==='remoteInput'){if(!remoteInputUrl(request.url))throw new Error('缺少 RSS URL');return {success:true,action:'remoteInput'};}
@@ -23,4 +23,5 @@ export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;d
    return {success:false,message:'未知蓝牙同步动作：'+String(request.action??''),errorCode:'unsupported_action'};
   }catch(error){return {success:false,message:error instanceof Error?error.message:String(error)};}
  };
+ return Object.assign(handler,{capabilities:{supportsReaderPresets:!!ports.readerSync,supportsReaderAssets:!!ports.readerSync,supportsResourceChunkAck:!!ports.readerSync,supportsReaderPresetPreview:!!ports.previewReader}});
 }

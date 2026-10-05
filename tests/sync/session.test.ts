@@ -38,7 +38,7 @@ test('cancel while repository prepare is pending prevents manifest and ACK progr
 test('stream connection respects fragmented reads and frame-wide deadline',async()=>{
  const raw=encodeFrame({version:14,action:'syncLibrary',phase:'probe',unicode:'正文 😀'}),writes:Uint8Array[]=[];let offset=0,clock=0,closes=0;
  const stream={read:async(max:number)=>{clock++;const n=Math.min(max,3,raw.length-offset);if(!n)return null;const b=raw.slice(offset,offset+n);offset+=n;return b;},write:async(b:Uint8Array)=>{writes.push(b.slice());},close:async()=>{closes++;}};
- const connection=new StreamFrameConnection(stream,()=>clock);expect(await connection.readFrame(1000)).toEqual(decodeFrame(raw));await connection.writeFrame({action:'ack',success:true});expect(decodeFrame(writes[0]!)).toEqual({action:'ack',success:true});await connection.close();await connection.close();expect(closes).toBe(1);
+ const connection=new StreamFrameConnection(stream,()=>clock);expect(await connection.readFrame(1000)).toEqual(decodeFrame(raw));await connection.writeFrame({action:'ack',success:true});expect(decodeFrame(Uint8Array.from(writes.flatMap(b=>[...b])))).toEqual({action:'ack',success:true});await connection.close();await connection.close();expect(closes).toBe(1);
  offset=0;clock=0;await expect(new StreamFrameConnection(stream,()=>clock).readFrame(4)).rejects.toThrow('timed out');
 });
 test('manifest batches preserve arrays and reject changed peer identity',()=>{

@@ -1,15 +1,16 @@
 import {test,expect} from 'bun:test';
 import {ipFixture,flush,deferred} from '../helpers/ip-fixture.ts';
 import {IpSyncController} from '../../src/sync/ip-controller.ts';
-import {LibrarySyncSession,type LibrarySessionRepository} from '../../src/sync/session.ts';
+import {FrameDecoder} from '../../src/sync/protocol.ts';
+import {LibrarySyncSession,type TransferByteProgress,type LibrarySessionRepository} from '../../src/sync/session.ts';
 const repository=()=>({deviceId:async()=>'watch'} as LibrarySessionRepository);
 test('IP owner keeps a nonpersistent transport between actions, then honors persistent completion',async()=>{
- const f=ipFixture();await f.sign();const media:boolean[]=[],routes:unknown[]=[],errors:unknown[]=[];
- const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,mediaLease:async on=>{media.push(on);},onRoute:r=>routes.push(r),onError:e=>errors.push(e)});
+ const f=ipFixture();await f.sign();const media:boolean[]=[],routes:unknown[]=[],errors:unknown[]=[],progress:TransferByteProgress[]=[];
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,mediaLease:async on=>{media.push(on);},onRoute:r=>routes.push(r),onError:e=>errors.push(e)},{onTransferProgress:p=>progress.push(p)});
  expect(await controller.offer({...f.descriptor,hmac:'wrong'})).toBe(false);expect(f.opens).toHaveLength(0);
  expect(await controller.offer({...f.descriptor})).toBe(true);await flush();expect(routes).toHaveLength(1);
- f.feed({action:'syncLibrary',phase:'probe',version:14});f.feed({action:'ack',success:true,applied:true});await flush();expect(f.writes).toHaveLength(1);expect(f.closed).toHaveLength(0);expect(media).toEqual([true]);
- f.feed({action:'syncLibrary',phase:'probe',version:14,requestPersistentSession:true,supportsPersistentSession:true});f.feed({action:'ack',success:true,applied:true});f.feed({action:'syncSession',phase:'complete'});f.feed({action:'ack',success:true,applied:true});await flush();expect(f.writes).toHaveLength(3);expect(f.closed).toContain('stream-1');expect(routes.at(-1)).toBeNull();expect(errors).toHaveLength(0);await controller.dispose();expect(media).toEqual([true,false]);
+ const decoder=new FrameDecoder();f.feed({action:'syncLibrary',phase:'probe',version:14});f.feed({action:'ack',success:true,applied:true});await flush();expect(f.writes.flatMap(b=>decoder.push(b))).toHaveLength(1);expect(f.closed).toHaveLength(0);expect(media).toEqual([true]);
+ f.feed({action:'syncLibrary',phase:'probe',version:14,requestPersistentSession:true,supportsPersistentSession:true});f.feed({action:'ack',success:true,applied:true});f.feed({action:'syncSession',phase:'complete'});f.feed({action:'ack',success:true,applied:true});await flush();const allFrames=new FrameDecoder();expect(f.writes.flatMap(b=>allFrames.push(b))).toHaveLength(3);expect(progress.filter(p=>p.direction==='write').reduce((n,p)=>n+p.bytes,0)).toBe(f.writes.reduce((n,b)=>n+b.length,0));expect(progress.some(p=>p.direction==='read'&&p.bytes===4)).toBe(true);expect(f.closed).toContain('stream-1');expect(routes.at(-1)).toBeNull();expect(errors).toHaveLength(0);await controller.dispose();expect(media).toEqual([true,false]);
 });
 test('active IP transfer survives backgrounding and releases transport after the post-transfer grace',async()=>{
  const f=ipFixture();await f.sign();const handled=deferred<Record<string,unknown>>(),controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now},{handleAction:()=>handled.result});

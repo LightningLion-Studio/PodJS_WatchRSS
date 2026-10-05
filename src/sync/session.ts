@@ -4,7 +4,10 @@ import {parseArticleManifest,selectArticleBodyRequests,type ArticleManifest} fro
 import {buildCursorResponse,buildManifestResponse,buildManifestFrames,buildChunkedResponseFrames,combineManifestFrames,manifestBatchCount,parseCursor,parseChangeSequence,parseResponseAck,parseSources,type SyncCursor,type ChangeSequence,type ResponseAck,type SyncedSource} from './library-wire.ts';
 import type {PreparedArticle} from './article-export.ts';
 const {string,trim,bool,optLong}=wireFields;
+/** Byte deltas, including the four-byte prefix; never article/resource counts. */
+export interface TransferByteProgress {direction:'read'|'write';bytes:number}
 export interface SyncFrameConnection {
+ setTransferProgress?(listener:((progress:TransferByteProgress)=>void)|undefined):void;
  readFrame(timeoutMs:number):Promise<JsonObject>;
  writeFrame(frame:JsonObject):Promise<void>;
  close():Promise<void>;
@@ -29,11 +32,13 @@ export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receivi
 export interface SessionActionResult {request:JsonObject;response:JsonObject;ack:ResponseAck|null;libraryApplied:boolean}
 export interface LibrarySessionOptions {
  now?:()=>number;
+ monotonic?:()=>number;
+ onTransferProgress?:(progress:TransferByteProgress)=>void;
  onStatus?:(status:SyncSessionStatus)=>void;
  onActionCompleted?:(result:SessionActionResult)=>void;
  capabilities?:ProbeCapabilities;
  watchCapabilities?:JsonObject;
- handleAction?:(request:JsonObject)=>Promise<JsonObject>;
+ handleAction?:((request:JsonObject)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities};
  offerIpEndpoint?:(descriptor:JsonObject)=>Promise<boolean>;
  initialRequestTimeoutMs?:number;
  responseAckTimeoutMs?:number;
@@ -46,7 +51,8 @@ export class LibrarySyncSession {
  private cancelled:Error|null=null;
  private closed=false;
  private readonly now:()=>number;
- constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.now=options.now??Date.now;}
+ private readonly monotonic:()=>number;
+ constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());this.connection.setTransferProgress?.(options.onTransferProgress);}
  cancel():void {this.cancelled??=new Error('Sync session cancelled');void this.close().catch(()=>{});}
  private check():void {if(this.cancelled)throw this.cancelled;}
  private status(status:SyncSessionStatus):void {this.options.onStatus?.(status);}
@@ -73,6 +79,9 @@ export class LibrarySyncSession {
      const phase=string(request.phase);if(!persistent||!['complete','abort'].includes(phase))throw new Error('Invalid persistent session control');
      const response={version:PROTOCOL_VERSION,action:'syncSession',phase,success:true,...persistentFields};await this.write(response);const ack=await this.ack();results.push({request,response,ack,libraryApplied:false});return results;
     }
+    if(string(request.action)==='previewReader'&&bool(request.stream)){
+     const result=await this.previewStream(request);results.push(result);this.options.onActionCompleted?.(result);this.status({phase:'complete',applied:false});return results;
+    }
     const unsupported=()=>string(request.action)===ACTION_SYNC_LIBRARY&&optLong(request.version)<MIN_SUPPORTED_PHONE_PROTOCOL_VERSION;
     if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='cursor'){
      this.status({phase:'cursor'});const peer=trim(string(request.deviceId))||'phone';const response=buildCursorResponse(localId,await this.repository.cursor(peer),this.now);
@@ -92,7 +101,7 @@ export class LibrarySyncSession {
      else if(string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='probe'){
       let ipUpgradeAccepted=false;const descriptor=wireFields.object(request.ipEndpointDescriptor);
       if(descriptor&&this.options.offerIpEndpoint)try{ipUpgradeAccepted=await this.options.offerIpEndpoint(descriptor);}catch{}
-      response={...buildProbeResponse(localId,{...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),sentAt:this.now(),ipUpgradeAccepted};
+      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),sentAt:this.now(),ipUpgradeAccepted};
      }
      else if(this.options.handleAction)response=await this.options.handleAction(request);
      else response={success:false,version:PROTOCOL_VERSION,action:string(request.action),message:'当前同步操作尚未接入',errorCode:'unsupported_action'};
@@ -105,6 +114,19 @@ export class LibrarySyncSession {
    }
   }catch(error){this.status({phase:'error',message:error instanceof Error?error.message:String(error)});throw error;}
   finally{await this.close();}
+ }
+ /** Preview peers send frames continuously, never response ACKs. Retain only
+  * the final result, so an arbitrarily long stream has bounded bookkeeping. */
+ private async previewStream(initial:JsonObject):Promise<SessionActionResult>{
+  let request=initial,lastAcknowledgedAt:number|undefined;
+  while(true){
+   const response=this.options.handleAction?await this.options.handleAction(request):{success:false,applied:false,message:'当前同步操作尚未接入'};
+   this.check();const phase=string(request.phase),terminal=phase==='stop'||phase==='resourceHandoff',handledAt=this.monotonic();
+   if(lastAcknowledgedAt===undefined||terminal||!bool(response.applied,true)||response.success===false||handledAt-lastAcknowledgedAt>=50){await this.write(response);lastAcknowledgedAt=this.monotonic();}
+   if(terminal)return {request:initial,response,ack:null,libraryApplied:false};
+   request=await this.read(30000);
+   if(string(request.action)!=='previewReader')throw new Error('实时预览连接收到了其他蓝牙动作');
+  }
  }
  private async exchange(request:JsonObject,localId:string,accepted:boolean):Promise<{response:JsonObject;pending:PendingSyncSuccess}>{
   const peer=trim(string(request.deviceId))?string(request.deviceId):'phone',mode=string(request.libraryMode)||'merge';
