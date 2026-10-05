@@ -37,7 +37,7 @@ import {STARTUP_EXIT_DURATION_MS,startupExitFrame} from './startup-transition.ts
 /** Content is a factory so it cannot mount or start foreground work before the
  * native startup version gates have resolved. Storage injection is for isolated
  * fixtures; normal callers use the app's existing KV namespace. */
-export function StartupGate(props:{content:()=>JSX.Element;storage?:OnboardingStorage;legalBaseUrl?:string;onLegalRestorationEvent?:(page:StartupLegalPage,event:InformationRestorationEvent)=>void}){
+export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;storage?:OnboardingStorage;legalBaseUrl?:string;onLegalRestorationEvent?:(page:StartupLegalPage,event:InformationRestorationEvent)=>void}){
  const storage=props.storage??kv,store=new OnboardingStore(storage);
  const [session,setSession]=createSignal<OnboardingSession>();
  const [fatal,setFatal]=createSignal('');
@@ -92,7 +92,7 @@ export function StartupGate(props:{content:()=>JSX.Element;storage?:OnboardingSt
  })().catch(error=>{if(current===generation)setFatal(String(error));});};
  load();
  const destination=createMemo(()=>session()?.destination);
- return <StartupTransition ready={()=>!!fatal()||!!session()} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
+ return <StartupTransition ready={()=>!!fatal()||!!session()} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost onExit={props.onExit} session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
    <StartupContent render={props.content}/>
   </Show></Show>}/>;
 }
@@ -132,7 +132,7 @@ function StartupFailure(props:{message:string;onRetry:()=>void}){
  ]}/></View>;
 }
 
-function OnboardingHost(props:{session:OnboardingSession;controller:OnboardingController;legalBaseUrl?:string;restoreCustomization:()=>CustomizationDraft;saveCustomization:(draft:CustomizationDraft)=>void;restoreLegal:()=>LegalNavigation;saveLegal:(navigation:LegalNavigation)=>void;onLegalRestorationEvent?:(page:StartupLegalPage,event:InformationRestorationEvent)=>void}){
+function OnboardingHost(props:{onExit?:()=>void;session:OnboardingSession;controller:OnboardingController;legalBaseUrl?:string;restoreCustomization:()=>CustomizationDraft;saveCustomization:(draft:CustomizationDraft)=>void;restoreLegal:()=>LegalNavigation;saveLegal:(navigation:LegalNavigation)=>void;onLegalRestorationEvent?:(page:StartupLegalPage,event:InformationRestorationEvent)=>void}){
  const metrics=getDisplayMetrics(),width=metrics.logicalWidth,height=metrics.logicalHeight;
  const presets=new ReaderPresetStore(),settings=new SettingsStore();
  const [presetState,setPresetState]=createSignal<ReaderPresetState>();
@@ -169,7 +169,7 @@ function OnboardingHost(props:{session:OnboardingSession;controller:OnboardingCo
  const openLegal=(page:InformationPage)=>{if(motion.phase!=='idle')return;if(page!=='privacy'&&page!=='useragreement'&&page!=='beian')return;currentLegal()?.scroller?.stop();const entries=[...legal(),{page}];saveLegal(entries);setLegal(entries);};
  const closeLegal=()=>{currentLegal()?.scroller?.stop();const entries=legal().slice(0,-1);saveLegal(entries);setLegal(entries);motion.reset();setOffset(0);};
  const operate=(action:()=>void)=>{try{action();setError('');}catch(error){report(error);}};
- const finish=()=>{void application.finishTask().catch(report);};
+ const finish=()=>{if(props.onExit){props.onExit();return;}void application.finishTask().catch(report);};
  createEffect(()=>{if(destination()==='intro'){let first=true;const restoredNetwork=untrack(()=>props.session.intro.internet!=='checking');onCleanup(observeHostInternet(status=>{const skip=first&&status==='checking'&&restoredNetwork;first=false;if(!skip)props.controller.dispatch({type:'internet',status});}));}});
  createEffect(()=>{if(destination()==='finished')finish();});
  createEffect(()=>setNavigationState({canGoBack:!!error()||legal().length>0||destination()==='intro'&&(props.session.intro.page>0||props.session.intro.offlineWarning),rootSwipeEnabled:false}));

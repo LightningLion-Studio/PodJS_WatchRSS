@@ -1,3 +1,5 @@
+import {debugGate} from '../debug/host.ts';
+import type {DebugBluetoothSession} from '../debug/bluetooth.ts';
 import {usageTelemetry} from '../telemetry/host.ts';
 import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {telemetryScreen,telemetryScreenOwner} from '../telemetry/screens.ts';
@@ -118,6 +120,7 @@ const bg = "#050507",
 const rowHeight = 48;
 
 export default function WatchRSS(props: {
+  createDebugBluetooth?:()=>DebugBluetoothSession;
   services: AppServices;
   bluetoothSync?: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh">;
   announcements?: ReturnType<typeof createAnnouncementServices>;
@@ -164,6 +167,7 @@ export default function WatchRSS(props: {
   const motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
   function setPage(next: Page, data: Partial<Entry> = {}) {
+    if(next==="debug-tools"&&!debugGate.allowed)return;
     if (
       (next === page() && Object.keys(data).length === 0) ||
       motion.phase !== "idle"
@@ -1215,7 +1219,8 @@ export default function WatchRSS(props: {
       });
   });
   const settingsNavigate = (route: SettingsRoute) => {
-    if (route === "reader-presets") {
+    if (route === "debug-tools") {if(debugGate.allowed)setPage("debug-tools");}
+    else if (route === "reader-presets") {
       if (presetState()) setPage("settings-reader-presets");
       else setError("阅读器预设数据无法读取，已保留原数据");
     } else if (route === "llm-usage") setPage("settings-llm-usage");
@@ -1512,6 +1517,7 @@ export default function WatchRSS(props: {
               onDouyinLogoutSuccess={returnHomeAfterDouyinLogout}
             />
             <SettingsRoutes
+              createDebugBluetooth={props.createDebugBluetooth}
               entry={entry}
               page={entryPage}
               active={active}

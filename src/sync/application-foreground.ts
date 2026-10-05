@@ -64,6 +64,13 @@ export class ApplicationForegroundSync {
  private enqueue(action:()=>Promise<unknown>):Promise<void>{this.resources=this.resources.then(action).then(()=>{},error=>{this.report(error);});return this.resources;}
  private keepScreen(active:boolean){if(this.disposed&&active||this.screenDesired===active)return;this.screenDesired=active;void this.enqueue(()=>this.ports.display.keepAwake(OWNER,active));}
  setMediaEnabled(enabled:boolean){if(this.disposed||this.mediaEnabled===enabled)return;this.mediaEnabled=enabled;if(this.controller)void this.enqueue(()=>this.ports.silence.setEnabled(enabled));}
+ async acquireExclusive(){
+  if(this.disposed||this.exclusive)throw Error("Bluetooth listener already owned");
+  this.exclusive=true;
+  try{await this.ready;if(this.disposed)throw Error("Bluetooth disposed");await this.controller?.quiesce();}
+  catch(error){this.exclusive=false;this.apply();throw error;}
+  return ()=>{this.exclusive=false;this.apply();};
+ }
  setExclusive(exclusive:boolean){if(this.disposed)return;this.exclusive=exclusive;this.apply();}
  private async initialize(options:LibrarySessionOptions){
   try{

@@ -55,9 +55,9 @@
 | IP v2、/sync WebSocket、hello HMAC、序号核对 | 已实现 | W/phoneconnection/ip/IpSyncProtocol.kt:159、175、204；P/connection/ip/WatchIpSyncServer.kt；`src/sync/ip-protocol.ts:5、40`、`ip-connection.ts:21–26`。依赖 host net.websocket 能力，本次未实测。 | 高 | S |
 | RFCOMM 升级 IP、BLE 描述符、mDNS、LAN/热点/bridge 回退、冷却与重连 | 已实现 | W/phoneconnection/ip/WatchIpSyncManager.kt:187、293；W/phoneconnection/ip/IpSyncProtocol.kt:163–167；P/connection/ip/IpSyncProtocol.kt；`src/sync/ip-discovery.ts:5`、`application-host.ts:25–33`、`ip-controller.ts:34–99`，有 bonded-only、签名验证、3 候选优先级/10 秒冷却。mDNS 是发现手机服务，广告由手机负责，非手表缺项。 | 高 | S |
 | guided Wi-Fi /pullRemoteInput、token action URL | 缺失 | W/phoneconnection/guided/WatchGuidedWifiClient.kt:98、114；`src/remote-input/http.ts` 是手表 HTTP 服务，`src/sync/ip-*` 是 WebSocket，均非此手机热点客户端；原生声波 debug 路径，非正式手机连接必需。 | 低 | L |
-| DebugBluetoothSyncActivity：超时参数、payload 摘要、生命周期独占 | 缺失 | W/DebugBluetoothSyncActivity.kt:22、74、90、135；PodJS `src/sync/diagnostic-log.ts` 有日志但没有对应诊断 UI/启动参数工具。 | 低 | M |
+| DebugBluetoothSyncActivity：超时参数、payload 摘要、生命周期独占 | **已实现（G1 源码与本地测试；设备 PENDING）** | 原生 W/DebugBluetoothSyncActivity.kt；PodJS `src/debug/bluetooth.ts`、`src/ui/DebugToolsScreen.tsx`、`src/sync/application-foreground.ts`：120000ms 默认/可编辑超时、native 字段摘要、前台监听 quiesce 后独占，后台/退出取消与释放。仅 `application.buildInfo().debugBuild === true` 可达。 | 低 | M |
 
-**本区结论：**实时预览 stream、probe 能力、16 KiB/字节进度、账号 backlog、usage telemetry 与全局日志源均已有源码路径；v13/v14 配对、双向替换、clear 确认、ACK 中断、BLE/mDNS/WebSocket 路由及新增页面仍全部为设备 PENDING。声波/引导 Wi-Fi 与 Debug 蓝牙页属于原生 debug 范围，未迁移。
+**本区结论：**实时预览 stream、probe 能力、16 KiB/字节进度、账号 backlog、usage telemetry 与全局日志源均已有源码路径；v13/v14 配对、双向替换、clear 确认、ACK 中断、BLE/mDNS/WebSocket 路由及新增页面仍全部为设备 PENDING。声波/引导 Wi-Fi 仍未迁移；G1 已补 debug 蓝牙页，本地验证通过，设备 PENDING。
 
 ## 3. 云同步
 
@@ -148,15 +148,15 @@
 
 | 功能点 | 状态 | 当前源码证据及差异 | 用户影响 | 工作量 |
 |---|---|---|---|---|
-| 正式设置不暴露性能/种子测试入口 | 已实现 | W/SettingsActivity.kt:36 明确 showPerformanceTools=false；W/debug/PerfLargeListActivity.kt:21、PerfLargeArticleActivity.kt:23 拒绝非 DEBUG；PodJS `src/main.tsx:7–13`、`ui/screen.tsx:69`、`ui/SettingsScreen.tsx` 无 perf/test route，`pod.config.json:2` 指向正式 src/main。src 未检出 tests/runtime fixture 导入。仅源码入口隔离已确认，未审发布 APK。 | 中 | S |
-| 原生超大列表/超大文章固定场景与指标 | 缺失 | W/debug/PerfEntryActivity.kt:12；W/debug/PerfDataFactory.kt:36、78；W/debug/PerformanceMonitor.kt:29、66；PodJS `src/` 无同等场景或 JankStats 汇总；仓库 tests/runtime-* 独立工程不等于正式 src 中有这些能力，本次未运行。 | 低 | M |
-| 蓝牙/声波 debug Activity 的正式入口隔离 | 已实现 | W/DebugBluetoothSyncActivity.kt:24 检查 FLAG_DEBUGGABLE；W/DebugAcousticConnectionActivity.kt:11 检查 debug；`../Android_WatchRSS/app/src/main/AndroidManifest.xml:207–220` 采用占位 export，`../Android_WatchRSS/app/build.gradle.kts:65、71` 当前 debug/release 均为 false。PodJS `src/ui/screen.tsx` 无对应入口；诊断能力缺失已在协议区列出，不要求把它暴露到产品菜单。 | 低 | S |
-| 抖音 debug alias/广播故障注入、cookie 导入、自动换片 | 缺失 | `../Android_WatchRSS/app/src/debug/AndroidManifest.xml:8、19` 限 debug source set；`../Android_WatchRSS/app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:11`；PodJS `src/` 无等效入口。功能缺失同时意味着 src 未新增对应正式入口，不应把迁移这些工具排到核心用户路径前。 | 低 | M |
-| DebugLogProvider / dump 与性能开关 | 部分实现 | W/debug/DebugLogProvider.kt:33；W/debug/PerformanceMonitor.kt:30、67 受 ENABLE_RUNTIME_PERF_MONITOR 控制；PodJS `src/sync/diagnostic-log.ts` 仅有限日志，不提供 provider/dump/perf 场景；pullDebugLog 是生产协议能力，应保留，不应因名称含 Debug 而整体禁用。 | 低 | M |
+| 正式设置不暴露性能/种子测试入口 | **已实现（G1 release 门控测试通过；设备 PENDING）** | `src/debug/gate.ts`、`src/debug/host.ts` 仅接受框架 buildInfo 的布尔 true；缺失/旧 host/失败均关闭；设置菜单、路由、工具构造及操作检查门控。生产同步 pullDebugLog 保持可用。 | 中 | S |
+| 原生超大列表/超大文章固定场景与指标 | **已实现（G1 源码；设备 PENDING）** | `src/debug/perf.ts` 保留 10000 条、100000+ 字符与图片分布；`src/ui/DebugToolsScreen.tsx` 复用正式 RssFeedScreen/ReaderScreen；框架 `PodDebugPerformance.java` 采集 Android JankStats/FrameMetrics，非 JS 帧间隔，退出汇总、后台暂停、session token 隔离；native 指标需要更新 host。 | 低 | M |
+| 蓝牙/声波 debug Activity 的正式入口隔离 | **已实现（G1 release 门控测试；设备 PENDING）** | 蓝牙工具仅 debug 设置页可达，框架 debugBuild 查询失败时隐藏；未增加 exported Activity 或广播；声波本次未迁移。 | 低 | S |
+| 抖音 debug alias/广播故障注入、cookie 导入、自动换片 | **已实现（G1 等效设置页；设备 PENDING）** | `src/debug/douyin.ts`、`src/ui/DebugToolsScreen.tsx`、`src/ui/routes/media-controller.ts`：下一片/指定 ID 故障 URI、Cookie 安全导入、上下文、单次/定时换片、清除；故障 URL 仅用于播放器输入，不污染缓存。未新增系统广播。 | 低 | M |
+| DebugLogProvider / dump 与性能开关 | 部分实现 | W/debug/DebugLogProvider.kt:33；W/debug/PerformanceMonitor.kt:30、67 受 ENABLE_RUNTIME_PERF_MONITOR 控制；PodJS `src/sync/diagnostic-log.ts` 仅有限日志，不提供 provider/dump；G1 已补原生指标与 perf 场景；pullDebugLog 是生产协议能力，应保留，不应因名称含 Debug 而整体禁用。 | 低 | M |
 | 云同步/声波实验功能维持非正式入口 | 已实现 | W/WatchRssApplication.kt:100、W/AcousticConnectionActivity.kt:98；PodJS `src/main.tsx` 无 cloud 实例化、`ui/screen.tsx` 无声波 route。未来接线需明确构建/能力策略；不能仅因代码文件存在就判断已在产品启用。 | 低 | S |
 
 ## 8. 建议增量任务（按核心路径与影响排序，仅任务建议）
 
 1. **设备验收（高）**：按 `docs/acceptance.md` 与设备 runbook 验证蓝牙/实时预览/替换与清库、Bili 浏览/互动/评论/播放、抖音登录/沉浸拖动/预热/后台恢复、日志上传和应用内 WebView；源码单测与打包均不能替代这些证据。
 2. **版本分发决策（高）**：PodJS 包名不同于原生，且宿主没有 `packageUpdate`；在用户决定下载、目标包校验、安装与回滚策略前，继续保持 `VERSION_ANNOUNCEMENTS_ENABLED=false`。
-3. **debug-only 范围决策（低）**：云同步（release 会 cancel worker）、声波/引导 Wi-Fi、Debug 蓝牙同步页、性能探针、抖音调试注入、TTS 调试设置和重新进入引导均不属于当前原生 release 路径；仅在用户明确需要时迁移。
+3. **debug-only 范围（G1 更新）**：按用户要求已迁移 debug 蓝牙页、性能场景/指标、抖音调试、详细 TTS 与重新进入引导，仅 host debugBuild 开放。云同步、声波/引导 Wi-Fi 不在本次 G1 范围；设备验证全部 PENDING。

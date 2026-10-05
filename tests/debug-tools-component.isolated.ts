@@ -1,0 +1,38 @@
+import {afterEach,expect,mock,test} from 'bun:test';
+import {plugin} from 'bun';
+import {createRequire} from 'node:module';
+import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,mergeProps} from 'solid-js';
+import {DebugGate} from '../src/debug/gate.ts';
+import type {RouteEntry} from '../src/ui/routes/types.ts';
+const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
+plugin({name:'debug-tools-solid',setup(builder){builder.onLoad({filter:/\/ui\/DebugToolsScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+type Node={kind:string;props:Record<string,any>};
+const element=(kind:string,props:Node['props']):Node=>({kind,props});
+let gate=new DebugGate(),calls:string[]=[],life:(state:string)=>void=()=>{};
+mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return gate.allowed;},require:()=>gate.require()}}));
+mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
+mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p)}));
+mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(s:string)=>s.length*7})}));
+mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set:()=>{calls.push('write');}},onLifecycleChange:(fn:typeof life)=>{life=fn;return ()=>{};}}));
+mock.module('@podjs/framework/services',()=>({debugPerformance:{start:async(scenario:string)=>{calls.push(scenario);return {sessionId:7};},stop:async(id:number)=>{calls.push(`stop:${id}`);return {scenario:'test',source:'native',frames:1,jank:0,jankPct:0,avgMs:1,maxMs:1,drop:0,lastFrame:{}};}}}));
+mock.module('../src/tts/config-store.ts',()=>({TtsConfigStore:class{constructor(){calls.push('tts-store');}}}));
+mock.module('../src/debug/tts.ts',()=>({DebugTts:class{},debugTtsEngines:{local:'本地 TTS'}}));
+mock.module('../src/llm/runtime.ts',()=>({summaryAccountStore:{}}));
+mock.module('../src/media-services.ts',()=>({douyinClient:{},mediaTransport:{}}));
+mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{interval:0}}));
+mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(p:Node['props'])=>element('ScrollEntries',{children:createMemo(()=>p.entries.map((entry:any)=>entry.render()))})}));
+mock.module('../src/ui/RssScreens.tsx',()=>({RssFeedScreen:(p:Node['props'])=>{calls.push(`list:${p.items.length}`);expect(p.items).toBe(p.items);return element('Feed',p);}}));
+mock.module('../src/ui/ReaderScreen.tsx',()=>({ReaderScreen:(p:Node['props'])=>{calls.push('article');expect(p.article).toBe(p.article);return element('Reader',p);}}));
+mock.module('../src/reader/preset.ts',()=>({defaultReaderPreset:()=>({})}));
+let onboarding:any;
+mock.module('../src/ui/StartupGate.tsx',()=>({StartupGate:(p:Node['props'])=>{onboarding=p;calls.push('onboarding');return element('Onboarding',p);}}));
+const {DebugToolsScreen}=await import('../src/ui/DebugToolsScreen.tsx');
+const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))stop();});
+const settle=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
+function nodes(v:any):Node[]{if(typeof v==='function')return nodes(v());if(Array.isArray(v))return v.flatMap(nodes);if(!v||typeof v!=='object'||!('props'in v))return [];return [v,...nodes(v.props.children)];}
+function mount(){calls=[];let close=0;const [active,setActive]=createSignal(true);const entry:RouteEntry={page:'debug-tools'};const root=createRoot(stop=>{stops.push(stop);return DebugToolsScreen({width:233,height:233,active,entry,services:{input:async()=>null} as any,createBluetooth:()=>{calls.push('bluetooth');return {run:async()=>new Promise<string>(()=>{}),close:async()=>{close++;}} as any;}});});return {root,entry,setActive,close:()=>close,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(text:string)=>{const node=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&String(c.props.children).includes(text)));expect(node).toBeDefined();node!.props.onPress();}};}
+test('direct release mount returns nothing and creates no tool resources',()=>{gate=new DebugGate();const f=mount();expect(nodes(f.root)).toEqual([]);expect(calls).toEqual([]);expect(f.entry.internalBack).toBeUndefined();});
+test('old host direct mount also has no debug resources',async()=>{gate=new DebugGate();await gate.initialize(async()=>{throw Error('unsupported');});const f=mount();expect(nodes(f.root)).toEqual([]);expect(calls).toEqual([]);});
+test('debug menu constructs only requested perf scene and stops native owner on back',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();expect(f.text()).toContain('蓝牙单次同步');expect(calls).toEqual(['tts-store']);f.press('超大列表');await settle();expect(calls).toContain('list:10000');expect(calls).toContain('perf_large_list');expect(f.entry.internalBack?.()).toBe(true);await settle();expect(calls).toContain('stop:7');expect(f.text()).toContain('frames=1');});
+test('Bluetooth tool relinquishes its session on background and route deactivation',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();f.press('蓝牙单次同步');f.press('等待手机蓝牙连接');await settle();expect(calls).toContain('bluetooth');life('background');await settle();expect(f.close()).toBe(1);f.setActive(false);await settle();expect(f.close()).toBe(1);});
+test('debug onboarding is forced without initially overwriting consent and exits to menu',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();f.press('重新进入新手引导');await settle();expect(onboarding.storage.get('watchrss.onboarding')).toEqual({oobeSeenVersion:0});expect(calls).not.toContain('write');onboarding.onExit();await settle();expect(f.text()).toContain('蓝牙单次同步');});

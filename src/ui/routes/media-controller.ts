@@ -1,3 +1,6 @@
+import {onFrame} from '@pocketjs/framework/lifecycle';
+import {lifecycle} from '@podjs/framework/watch';
+import {douyinDebug} from '../../debug/douyin-host.ts';
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { kv } from "@podjs/framework/watch";
 import { video } from "@podjs/framework/services";
@@ -273,7 +276,7 @@ export function createMediaRouteController(
         immersive: request.immersive,
         awemeId: request.item.awemeId,
         posterUrl: request.item.coverUrl,
-        url: request.playback.playUrl,
+        url: douyinDebug.playbackUrl(request.item.awemeId,request.playback.playUrl),
         title: request.item.description,
         headers,
         ...playbackPreferences(),
@@ -332,7 +335,7 @@ export function createMediaRouteController(
       ...entry.playback!,
       awemeId: result.data.item.awemeId,
       posterUrl: result.data.item.coverUrl,
-      url: result.data.item.playUrl,
+      url: douyinDebug.playbackUrl(result.data.item.awemeId,result.data.item.playUrl,direction==="next"),
       title: result.data.item.description,
       headers,
       webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
@@ -340,6 +343,8 @@ export function createMediaRouteController(
     dependencies.setError("");
     dependencies.setPlayingSource(entry.playback);
   };
+
+  onFrame(()=>{const entry=dependencies.current(),state=entry.queue?.snapshot();douyinDebug.updateContext(state?.item?.awemeId??'',state?.playlist[(state?.index??0)+1]?.awemeId??'',entry.page==='video'&&!!entry.queue);void douyinDebug.tick(Date.now(),lifecycle()==='active'&&entry.page==='video'&&!!entry.queue,()=>changeDouyinVideo(entry,'next')).catch(error=>dependencies.setError(String(error)));});
 
   const prepareDouyinAdjacent = async (
     entry:RouteEntry,
@@ -352,7 +357,7 @@ export function createMediaRouteController(
     if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
     return {key:result.data.item.awemeId,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
-      url:result.data.item.playUrl,title:result.data.item.description,headers,
+      url:douyinDebug.playbackUrl(result.data.item.awemeId,result.data.item.playUrl,direction==="next"),title:result.data.item.description,headers,
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
     }};
   };
@@ -442,7 +447,7 @@ export function createMediaRouteController(
         ...entry.playback!,
         awemeId: result.data.item.awemeId,
         posterUrl: result.data.item.coverUrl,
-        url: result.data.item.playUrl,
+        url: douyinDebug.playbackUrl(result.data.item.awemeId,result.data.item.playUrl),
         title: result.data.item.description,
         headers,
         webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,

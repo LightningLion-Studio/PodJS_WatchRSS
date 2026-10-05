@@ -19,11 +19,11 @@ export class RfcommLibraryListener {
  private listenerId:string|undefined;private stream:HostSyncByteStream|undefined;
  constructor(private readonly repository:LibrarySessionRepository,private readonly ports:RfcommPorts){}
  private check(){if(this.stopped)throw new Error('Bluetooth sync cancelled');}
- async start(options:LibrarySessionOptions & {onListening?:()=>void;onPeer?:(peer:{remoteName:string|null;remoteAddress:string})=>void}={}):Promise<SessionActionResult[]>{
+ async start(options:LibrarySessionOptions & {acceptTimeoutMs?:number;onListening?:()=>void;onPeer?:(peer:{remoteName:string|null;remoteAddress:string})=>void}={}):Promise<SessionActionResult[]>{
   if(this.busy)throw new Error('Bluetooth sync already active');this.busy=true;this.stopped=false;
   try{const status=await this.ports.radio.status();this.check();if(status.permission!=='granted')throw new Error('需要蓝牙连接权限');if(!status.available||!status.enabled)throw new Error('蓝牙未开启或设备不支持蓝牙');
    const listening=this.ports.radio.listen(WATCH_RSS_RFCOMM_NAME,WATCH_RSS_RFCOMM_UUID);this.pending=listening;const listener=await listening.result;this.listenerId=listener.id;this.check();options.onListening?.();this.check();
-   const accepting=this.ports.radio.accept(listener.id,120000);this.pending=accepting;const peer=await accepting.result;this.pending=undefined;this.stream=new HostSyncByteStream(peer.id,this.ports.streams);this.check();
+   const accepting=this.ports.radio.accept(listener.id,options.acceptTimeoutMs??120000);this.pending=accepting;const peer=await accepting.result;this.pending=undefined;this.stream=new HostSyncByteStream(peer.id,this.ports.streams);this.check();
    await this.ports.radio.close(listener.id);this.listenerId=undefined;this.check();options.onPeer?.(peer);this.check();
    this.session=new LibrarySyncSession(new StreamFrameConnection(this.stream),this.repository,options);return await this.session.run();
   }finally{this.pending=undefined;this.session=undefined;try{await this.stream?.close();}finally{this.stream=undefined;try{if(this.listenerId)await this.ports.radio.close(this.listenerId);}finally{this.listenerId=undefined;this.busy=false;}}}

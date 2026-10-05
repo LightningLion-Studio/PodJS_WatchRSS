@@ -65,6 +65,9 @@ export class ForegroundSyncController {
    if(!this.eligible())this.scheduleStop();
   }
  }
+ async quiesce(){
+  this.desired=false;this.stopTimer?.cancel();this.stopTimer=undefined;this.retryTimer?.cancel();this.listenerStopped=true;this.listener?.stop();await this.job;
+ }
  async dispose(){
   if(this.disposed){await this.job;return;}
   this.disposed=true;this.desired=false;this.stopTimer?.cancel();this.stopTimer=undefined;this.releaseTimer?.cancel();this.releaseTimer=undefined;this.retryTimer?.cancel();this.retryTimer=undefined;
