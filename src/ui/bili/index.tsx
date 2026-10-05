@@ -7,7 +7,9 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
 import type { BiliClient, BiliFavoriteFolder, BiliHistoryItem, BiliItem, BiliPlayUrl, BiliSearchResult, BiliSession, QrLoginRequest, QrPollResult } from "../../bili/index.ts";
-import { layoutText } from "../../reader/index.ts";
+import { layoutUiText } from "../../reader/line-break.ts";
+import { measuredLines } from "../../reader/measured-text.ts";
+import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
@@ -45,8 +47,11 @@ export interface BiliScreenProps {
 const num = (value: unknown) => typeof value === "number" ? value : Number(value || 0);
 const fail = (props: BiliScreenProps, error: unknown) => props.onError?.(error instanceof Error ? error.message : String(error));
 const authenticated = (session: BiliSession | null | undefined) => !!(session?.cookies.SESSDATA && session.cookies.bili_jct && session.cookies.DedeUserID);
-const formatCount = (value: unknown) => { const n = num(value); return n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}万` : String(n); };
-const lines = (text: string, width: number, size = 13) => layoutText(text, { width, measure: value => Array.from(value).reduce((sum, ch) => sum + (ch.codePointAt(0)! > 255 ? size : Math.ceil(size * .55)), 0) });
+const formatCount = (value: unknown) => { const n = num(value); return n >= 1e8 ? `${(n / 1e8).toFixed(1)}亿` : n >= 1e4 ? `${(n / 1e4).toFixed(1)}万` : String(n); };
+// Real glyph measurement and native-like UI line breaking (was a fixed-advance estimate).
+const FONT_SLOT: Record<number, number> = { 8: 29, 9: 19, 11: 20, 12: 0, 13: 21, 14: 1, 16: 2, 17: 22, 21: 23, 23: 30 };
+const measureFor = (size: number) => (text: string) => getOps().measureText(text, FONT_SLOT[size] ?? 1);
+const lines = (text: string, width: number, size = 13) => layoutUiText(text, { width, measure: measureFor(size) });
 
 interface AsyncData<T> { value: Accessor<T | undefined>; loading: Accessor<boolean>; error: Accessor<unknown>; refetch: () => void }
 function asyncData<T>(fetcher: () => Promise<T>): AsyncData<T>;
@@ -94,8 +99,14 @@ function FeedScreen(props: BiliScreenProps) {
   }, changed));
   const entries = createMemo<ScrollEntry[]>(() => {
     const values = feed.state().items, loggedIn = authenticated(session.value());
-    const contentWidth = (props.width ?? 233) - 36, titleWidth = 105, iconSize = 16, groupWidth = titleWidth + 4 + iconSize, groupLeft = (contentWidth - groupWidth) / 2;
-    return [{ height: 48, render: () => <View onPress={() => props.onNavigate({ name: "channel-info" })} focusable class="absolute inset-0"><Text style={{ insetL: groupLeft, width: titleWidth }} class="absolute top-[0] text-[21px] leading-[26] text-white text-center">哔哩哔哩</Text><Image src={infoIcon} style={{ insetL: groupLeft + titleWidth + 4, width: iconSize, height: iconSize }} class="absolute top-[5]" /><Text class="absolute left-[0] right-[0] top-[28] text-[9px] leading-[17] text-[#aaa] text-center">{loggedIn ? "已登录" : "未登录"}</Text></View> } as ScrollEntry,
+    // Native BiliFeedHeader: "哔哩哔哩 ⓘ" (19sp bold #BDBDBD hint) then 6dp gap and the 9sp login caption.
+    const contentWidth = (props.width ?? 233) - 36, titleWidth = measureFor(21)("哔哩哔哩"), hintGap = 7, hintBox = 19.2;
+    const groupLeft = (contentWidth - (titleWidth + hintGap + 16)) / 2;
+    return [{ height: 49, render: () => <View onPress={() => props.onNavigate({ name: "channel-info" })} focusable accessibilityRole="button" accessibilityLabel="哔哩哔哩频道信息" class="absolute inset-0">
+      <Text style={{ insetL: groupLeft }} class="absolute top-[1] text-[21px] leading-[26] text-white">哔哩哔哩</Text>
+      <Image src="../assets/icons/info-hint.svg" style={{ insetL: groupLeft + titleWidth + hintGap - 3.6, width: hintBox, height: hintBox }} class="absolute top-[3.9]" />
+      <Text class="absolute left-[0] right-[0] top-[32.5] text-[9px] leading-[17] text-[#b6b6b6] text-center">{loggedIn ? "已登录" : "未登录"}</Text>
+    </View> } as ScrollEntry,
       ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []),
       ...(!session.loading() && loggedIn && !feed.state().loading && !feed.state().error && !values.length ? [messageEntry("暂无内容\n稍后再试或刷新", props.width ?? 233)] : []),
       ...(!session.loading() && !loggedIn ? [messageEntry("需要登录\n登录后获取推荐内容", props.width ?? 233)] : []),
@@ -114,9 +125,25 @@ function ChannelInfoScreen(props: BiliScreenProps) {
   return <Scrolled {...props} entries={entries()} />;
 }
 
-function listVideoEntry(item: BiliItem, subtitle: string, width: number, onPress: () => void): ScrollEntry {
-  const heading = lines(item.title || "哔哩哔哩视频", width - 56, 13).slice(0, 2), summary = lines(subtitle || "哔哩哔哩", width - 56, 11).slice(0, 1), imageWidth = width - 36;
-  return { height: 174, render: () => <View onPress={onPress} focusable class="absolute inset-0 rounded-[16] bg-[#202020] overflow-hidden"><View class="absolute left-[8] right-[8] top-[8] h-[104] rounded-[12] bg-[#303030] overflow-hidden">{item.cover ? <RemoteImage cacheBucket="bili-preview" url={item.cover} width={imageWidth - 16} height={104} class="absolute inset-0" /> : null}</View><Text class="absolute left-[12] right-[12] top-[119] text-[13px] leading-[18] text-white">{heading.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[5] text-[11px] leading-[15] text-[#999]">{summary.join("\n")}</Text></View> };
+/** Native buildFeedSummary: "owner · 播放 N" or "哔哩哔哩推荐". */
+function feedSummary(item: BiliItem): string {
+  const parts = [item.owner?.name, item.stat?.view != null ? `播放 ${formatCount(item.stat.view)}` : undefined].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "哔哩哔哩推荐";
+}
+
+/** Native BiliFeedCard: 100dp cover, background gradient, 8dp padding, 14sp title + 9sp summary at the bottom. */
+function listVideoEntry(item: BiliItem, _subtitle: string, width: number, onPress: () => void): ScrollEntry {
+  const cardWidth = width - 36, padding = 8, textWidth = cardWidth - padding * 2;
+  const title = measuredLines(item.title || "哔哩哔哩视频", textWidth, measureFor(14), 2);
+  const summary = measuredLines(feedSummary(item), textWidth, measureFor(9), 2);
+  const textHeight = title.length * 18 + 2 + summary.length * 9.9;
+  const height = Math.max(100, textHeight + padding * 2), top = height - padding - textHeight;
+  return { height, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={`视频：${item.title ?? ""}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+    {item.cover ? <RemoteImage cacheBucket="bili-preview" url={item.cover} width={cardWidth} height={100} fit="cover" class="absolute left-[0] top-[0]" /> : null}
+    <View class="absolute left-[0] right-[0] top-[0] h-[100] bg-gradient-to-b from-transparent to-[#0b1211b3]" />
+    {title.map((line, index) => <Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{ insetL: padding, insetR: padding, insetT: top + index * 18 }}>{line}</Text>)}
+    <Text class="absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]" style={{ insetL: padding, insetR: padding, insetT: top + 2 + title.length * 18 }}>{summary.join("\n")}</Text>
+  </View> };
 }
 
 function HistoryScreen(props: BiliScreenProps) {
