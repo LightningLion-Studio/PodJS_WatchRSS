@@ -41,7 +41,8 @@
     "net.discovery",
     "display.power",
     "system.share",
-    "host.lifecycle"
+    "host.lifecycle",
+    "debug.acoustic"
   ],
   "resources": {
     "fontRegular": "assets/fonts/watch_sans.ttf",
