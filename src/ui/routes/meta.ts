@@ -3,6 +3,9 @@ import type { Page } from "./types.ts";
 const routeTitles: Record<Page, string> = {
   "add-rss": "添加 RSS",
   "remote-input": "从手机输入",
+  "log-upload": "日志上传",
+  "bluetooth-connection": "蓝牙同步",
+  "phone-connection-unavailable": "暂不可用",
   "tts-config": "配置朗读语音",
   "reader-preview": "预设实时预览",
   "phone-connection": "连接手机",
@@ -42,6 +45,9 @@ const routeTitles: Record<Page, string> = {
 const titledByScreen = new Set<Page>([
   "add-rss",
   "remote-input",
+  "log-upload",
+  "bluetooth-connection",
+  "phone-connection-unavailable",
   "tts-config",
   "reader-preview",
   "phone-connection",
