@@ -153,7 +153,13 @@ export function InformationScreen(props: InformationScreenProps) {
         </Show>
       </Show>
     }>
-      <SafeQrScreen width={props.width ?? 233} height={props.height} title="加入 QQ 群" value={GROUP_URL} status={`群号 ${GROUP_NUMBER}`} actionLabel="链接" onAction={() => open(GROUP_URL)} ref={value => setLegacyScroller(value.scroller)} />
+      <SafeQrScreen width={props.width ?? 233} height={props.height} title="加入 QQ 群" value={GROUP_URL} status={`群号 ${GROUP_NUMBER}`} actionLabel="链接" onAction={() => open(GROUP_URL)}
+        accessibilityLabel={`加群页面。扫描二维码加入QQ群，群号：${GROUP_NUMBER}。`}
+        qrAccessibilityLabel="QQ群二维码，扫描后可在手机上加入群聊"
+        titleAccessibilityLabel="标题：加入 QQ 群"
+        statusAccessibilityLabel={`QQ群号：${GROUP_NUMBER}`}
+        actionAccessibilityLabel="打开加群链接"
+        ref={value => setLegacyScroller(value.scroller)} />
     </Show>
   }><BeianScreen width={props.width ?? 233} height={props.height} active={props.active} /></Show></View>;
 }

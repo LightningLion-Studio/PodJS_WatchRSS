@@ -1,4 +1,4 @@
-import {createSignal,createMemo,onCleanup,For,Show} from "solid-js";
+import {createEffect,createSignal,createMemo,onCleanup,For,Show} from "solid-js";
 import {Text,View,Image} from "@pocketjs/framework/components";
 import {getOps} from "@pocketjs/framework/host";
 import {watchUiLines} from "./text-layout.ts";
@@ -6,10 +6,12 @@ import type {UsageSnapshot} from "../llm/usage.ts";
 import {ScrollEntries,type ScrollEntry} from "./ScrollEntries.tsx";
 import type {Scroller} from "@pocketjs/framework/kinetics";
 import {UsageTrend,UsageBars,UsageDonut,USAGE_COLORS} from "./UsageCharts.tsx";
-interface Props {width:number;height:number;load:()=>Promise<UsageSnapshot>;clear:()=>Promise<void>;onBack:()=>void;onError:(message:string)=>void;ref?:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void}
+interface Props {width:number;height:number;active:()=>boolean;load:()=>Promise<UsageSnapshot>;clear:()=>Promise<void>;subscribe?:(listener:()=>void)=>()=>void;onBack:()=>void;onError:(message:string)=>void;ref?:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void}
 export function LlmUsageScreen(props:Props){
- const [data,setData]=createSignal<UsageSnapshot>(),[confirm,setConfirm]=createSignal(false),[busy,setBusy]=createSignal(false);let alive=true;
- onCleanup(()=>{alive=false;});const reload=async()=>{try{const value=await props.load();if(alive)setData(value);}catch(e){if(alive)props.onError(String(e));}};void reload();
+ const [data,setData]=createSignal<UsageSnapshot>(),[confirm,setConfirm]=createSignal(false),[busy,setBusy]=createSignal(false),[revision,setRevision]=createSignal(0);let alive=true,sequence=0;
+ if(props.subscribe)onCleanup(props.subscribe(()=>setRevision(value=>value+1)));
+ onCleanup(()=>{alive=false;sequence++;});const reload=async()=>{const request=++sequence;try{const value=await props.load();if(alive&&request===sequence)setData(value);}catch(e){if(alive&&request===sequence)props.onError(String(e));}};
+ createEffect(()=>{revision();if(props.active())void reload();});
  const width=props.width-36,wrap=(s:string,font=0)=>watchUiLines(s,{width:width-24,measure:t=>getOps().measureText(t,font)}).join("\n");
  const chip=(title:string,detail:string,provider=false):ScrollEntry=>{const t=wrap(title,provider?1:0),d=wrap(detail);return {height:16+t.split("\n").length*(provider?17:14)+d.split("\n").length*14,render:()=> <View class="absolute inset-0 rounded-[12]" style={{bgColor:provider?"#191b1d":"#121415"}}><Text class={provider?"absolute left-[12] right-[12] top-[8] text-sm leading-[17] text-[#f5f5f5]":"absolute left-[12] right-[12] top-[8] text-xs leading-[14] text-[#f5f5f5]"}>{t}</Text><Text class="absolute left-[12] right-[12] text-xs leading-[14] text-[#b6b6b6]" style={{insetT:8+t.split("\n").length*(provider?17:14),opacity:provider?1:.8}}>{d}</Text></View>};};
  const action=(label:string,icon:string,press:()=>void):ScrollEntry=>({height:48,render:()=> <View onPress={press} focusable class="absolute left-[0] right-[0] top-[5.5] h-[37] rounded-[12] bg-[#4f378b]"><Image src={icon} class="absolute left-[12] top-[10] w-[16] h-[16]"/><Text class="absolute left-[34] top-[10] text-sm leading-[17] text-[#eaddff]">{label}</Text></View>});

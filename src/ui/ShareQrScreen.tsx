@@ -5,8 +5,9 @@ import { createGesture } from "@pocketjs/framework/gesture";
 import { createSignal } from "solid-js";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { QRCode } from "./QRCode.tsx";
+import { shareQrLayout, shareQrPixelSize } from "./share-qr-layout.ts";
 
-export interface ShareQrScreenProps { width: number; height: number; title: string; url: string; topHint?:string; onClose: () => void; onError?: (message: string) => void }
+export interface ShareQrScreenProps { width: number; height: number; title: string; url: string; topHint?:string; qrWidthRatio?:number; onClose: () => void; onError?: (message: string) => void }
 
 function Marquee(props: { text: string; top: number; left: number; width: number; size: 21 | 12 }) {
   const text=()=>props.text.split("\n",1)[0];
@@ -21,13 +22,15 @@ function Marquee(props: { text: string; top: number; left: number; width: number
 /** Android ShareQrScreen structure without blur/entry animation unsupported by PocketJS. */
 export function ShareQrScreen(props: ShareQrScreenProps) {
   const content=()=>shareQrPresentation(props.title,props.url,props.topHint);
+  const layout=()=>shareQrLayout(props.qrWidthRatio);
   let viewport: NodeMirror | undefined;
   createGesture({ region: { node: () => viewport }, axis: "y", onTap: () => props.onClose() });
   const scale = () => Math.min(props.width / 233, props.height / 233), left = () => (props.width - 233 * scale()) / 2, top = () => (props.height - 233 * scale()) / 2;
+  const pixelSize=()=>shareQrPixelSize(layout().qrSize,scale(),getDisplayMetrics().density);
   return <View ref={node => viewport = node} onPress={props.onClose} focusable class="absolute inset-0 bg-black"><View class="absolute" style={{ insetL: left(), insetT: top(), width: 233, height: 233, scale: scale(), originX: 0, originY: 0 }}>
-    <Marquee text={content().title} left={56.5} top={20} width={120} size={21} />
-    <Marquee text={content().subtitle} left={21.5} top={52} width={190} size={12} />
-    <View class="absolute left-[51.5] top-[80] w-[130] h-[130] items-center justify-center"><QRCode nativeWatch pixelSize={Math.max(1,Math.round(130*scale()*getDisplayMetrics().density))} nativeBitmapSize={Math.max(1,Math.round(130*scale()*getDisplayMetrics().density))} value={content().link} size={130} onError={props.onError} /></View>
+    <Marquee text={content().title} left={56.5} top={layout().titleTop} width={120} size={21} />
+    <Marquee text={content().subtitle} left={21.5} top={layout().subtitleTop} width={190} size={12} />
+    <View class="absolute items-center justify-center" style={{insetL:layout().qrLeft,insetT:layout().qrTop,width:layout().qrSize,height:layout().qrSize}}><QRCode nativeWatch pixelSize={pixelSize()} nativeBitmapSize={pixelSize()} value={content().link} size={layout().qrSize} onError={props.onError} /></View>
   </View></View>;
 }
 

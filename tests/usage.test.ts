@@ -1,7 +1,7 @@
 import {test,expect} from "bun:test";
 import {Database} from "bun:sqlite";
 import {SCHEMA} from "../src/core/schema.ts";
-import {normalizeUsage,readUsage,clearUsage} from "../src/llm/usage.ts";
+import {appendUsage,normalizeUsage,readUsage,clearUsage,subscribeUsageChanges} from "../src/llm/usage.ts";
 import type {SqlDatabase} from "../src/core/types.ts";
 test("usage supports canonical provider fields and actual camelCase summary responses without losing totals",()=>{
  expect(normalizeUsage({prompt_tokens:12,completion_tokens:4,total_tokens:16,completion_tokens_details:{reasoning_tokens:2}})).toEqual({aggregate:{prompt:12,completion:4,total:16},record:{prompt:12,completion:4,total:16,reasoning:2}});
@@ -21,4 +21,16 @@ test("usage pages full history, retains newest 200, groups models and UTC days w
  const before=sql.query("SELECT * FROM llm_token_usage ORDER BY id").all();const result=await readUsage(db,now);
  expect(result.statistics).toEqual({calls:305,prompt:608,completion:912,total:1520});expect(result.recent.length).toBe(200);expect(result.recent[0].id).toBe(303);expect(result.providers.length).toBe(2);expect(result.daily.length).toBe(3);expect(result.daily.reduce((n,d)=>n+d.calls,0)).toBe(304);expect(queries.filter(q=>q.includes("LIMIT 100")).length).toBe(4);expect(sql.query("SELECT * FROM llm_token_usage ORDER BY id").all()).toEqual(before);
  await clearUsage(db);expect((await readUsage(db,now)).statistics.calls).toBe(0);sql.close();
+});
+
+test("usage subscribers are notified after committed inserts and clears",async()=>{
+ const sql=new Database(":memory:");for(const q of SCHEMA)sql.run(q);
+ const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as any,execute:async(q,p=[])=>{sql.run(q,p as any[]);},transaction:async()=>{}};
+ let changes=0;const unsubscribe=subscribeUsageChanges(()=>{changes++;});
+ await appendUsage(db,{provider:"WatchRSS",model:"default",requestId:"one",usage:{prompt_tokens:3,total_tokens:3},createdAt:10});
+ expect(changes).toBe(1);expect((await readUsage(db,10)).statistics).toEqual({calls:1,prompt:3,completion:0,total:3});
+ await clearUsage(db);expect(changes).toBe(2);
+ unsubscribe();
+ await appendUsage(db,{provider:"WatchRSS",model:"default",requestId:"two",usage:null,createdAt:20});
+ expect(changes).toBe(2);sql.close();
 });

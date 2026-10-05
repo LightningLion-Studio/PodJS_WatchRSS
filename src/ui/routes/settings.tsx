@@ -59,8 +59,10 @@ export function SettingsRoutes(props: SettingsRoutesProps) {
         <LlmUsageScreen
           width={props.width}
           height={props.height}
+          active={props.active}
           load={() => props.services.readSummaryUsage!()}
           clear={() => props.services.clearSummaryUsage!()}
+          subscribe={props.services.subscribeSummaryUsage}
           onBack={() => props.popPage()}
           onError={props.setError}
           ref={(value) => {

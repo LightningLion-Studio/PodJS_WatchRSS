@@ -69,6 +69,7 @@ export interface AppServices {
   retryOfflineMedia?(id:string):Promise<{available:Record<string,string>;failed:number}>;
   readSummaryUsage?():Promise<import("../llm/usage.ts").UsageSnapshot>;
   clearSummaryUsage?():Promise<void>;
+  subscribeSummaryUsage?(listener:()=>void):()=>void;
   hasSummaryAccount():Promise<boolean>;
   createSummary(id:string,preset:()=>number,changed:(state:import("../llm/summary.ts").SummaryState)=>void):import("../llm/summary.ts").SummarySession;
   listChannels(): Promise<Channel[]>;

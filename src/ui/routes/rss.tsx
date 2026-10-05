@@ -12,6 +12,7 @@ import {
 import { RssActionsScreen, RssFeedScreen } from "../RssScreens.tsx";
 import { RssSearchScreen } from "../RssSearchScreen.tsx";
 import { ShareQrScreen } from "../ShareQrScreen.tsx";
+import { DETAIL_SHARE_QR_WIDTH_RATIO } from "../share-qr-layout.ts";
 import type { AppServices, Article, Channel } from "../service.ts";
 import type { Page, RouteEntry, SetPage } from "./types.ts";
 
@@ -299,6 +300,7 @@ export function RssRoutes(props: RssRoutesProps) {
             height={props.height}
             title={selected().title}
             url={selected().link ?? ""}
+            qrWidthRatio={DETAIL_SHARE_QR_WIDTH_RATIO}
             onClose={() => props.popPage()}
             onError={props.setError}
           />

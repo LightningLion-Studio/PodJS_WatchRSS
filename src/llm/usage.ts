@@ -4,6 +4,10 @@ export interface UsageRecord extends TokenCounts {id:number;provider:string;mode
 export interface UsageGroup extends TokenCounts {provider:string;model:string;calls:number}
 export interface UsageDay extends TokenCounts {dayTimestamp:number;calls:number}
 export interface UsageSnapshot {statistics:TokenCounts&{calls:number};providers:UsageGroup[];daily:UsageDay[];recent:UsageRecord[]}
+export interface UsageWrite {provider:string;model:string;requestId:string;usage:unknown;createdAt:number}
+const usageListeners=new Set<()=>void>();
+function notifyUsageChanged():void {for(const listener of [...usageListeners]){try{listener();}catch(error){console.warn("Token usage listener failed",String(error));}}}
+export function subscribeUsageChanges(listener:()=>void):()=>void {usageListeners.add(listener);return()=>usageListeners.delete(listener);}
 const count=(value:unknown):number|undefined=>{if((typeof value!=="number"&&typeof value!=="string")||(typeof value==="string"&&!value.trim()))return;const n=Number(value);return Number.isFinite(n)&&n>=0&&n<=2147483647?Math.trunc(n):undefined;};
 /** Preserve raw history while accepting OpenAI, Gemini and the actual WatchRSS response fields.
  * Native only normalizes snake_case for aggregate columns; camelCase server summaries were lost there. */
@@ -33,4 +37,8 @@ export async function readUsage(db:SqlDatabase,now=Date.now()):Promise<UsageSnap
  }
  snapshot.providers=[...groups.values()].sort((a,b)=>b.total-a.total);snapshot.daily=[...days.values()].sort((a,b)=>a.dayTimestamp-b.dayTimestamp);return snapshot;
 }
-export async function clearUsage(db:SqlDatabase):Promise<void>{await db.execute("DELETE FROM llm_token_usage");}
+export async function appendUsage(db:SqlDatabase,record:UsageWrite):Promise<void>{
+ await db.execute("INSERT INTO llm_token_usage(provider,model,request_id,usage_json,created_at) VALUES(?,?,?,?,?)",[record.provider,record.model,record.requestId,JSON.stringify(record.usage??null),record.createdAt]);
+ notifyUsageChanged();
+}
+export async function clearUsage(db:SqlDatabase):Promise<void>{await db.execute("DELETE FROM llm_token_usage");notifyUsageChanged();}
