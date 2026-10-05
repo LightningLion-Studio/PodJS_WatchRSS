@@ -1,3 +1,4 @@
+import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
 import {ImportedArticleDeletion} from "./core/imported-article-deletion.ts";
 import {ExternalSavedStore} from "./core/external-saved.ts";
 import {DouyinSavedStore} from "./douyin/saved.ts";
@@ -71,6 +72,7 @@ function init(): Promise<void> { return ready ??= (async()=>{
     }
     kv.delete('media.hidden-channels');
   }
+  await migrateDouyinOriginalMode(db,kv);
   await douyinSavedStore.migrate();
 })().catch(error => { ready = undefined; throw error; }); }
 async function insertBuiltin(builtin:BuiltinChannel,now=Date.now()):Promise<import('./ui/service.ts').Channel>{
