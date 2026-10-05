@@ -13,7 +13,8 @@ export function SpeechPlaybackScreen(props: {
   width: number; height: number; active: boolean; state: SpeechPlaybackState;
   volumeEnabled:boolean; volumeGuard:boolean;
   onToggle: () => void; onPrevious: () => void; onNext: () => void; onStop: () => void;
-  onAutoAdvance: () => void; onRate: (step: -1 | 1) => void; onReturn: () => void;
+  onAutoAdvance: () => void; onRate: (step: -1 | 1) => void;
+  currentArticleActionText: "返回文章" | "查看当前文章"; onOpenCurrentArticle: () => void;
 }) {
   const [volume,setVolume]=createSignal({visible:false,percent:0});
   const volumeController=new CrownVolumeController(mediaVolume,{after:(ms,callback)=>{const timer=delay(ms);void timer.result.then(callback,()=>{});return()=>timer.cancel();}},setVolume,
@@ -54,7 +55,7 @@ export function SpeechPlaybackScreen(props: {
       <Text class="absolute top-[7] w-[42] text-lg leading-[22] text-white text-center" style={{ insetL: inner() - 74 }}>{`${props.state.rate}x`}</Text>
       {button("SpeechFaster", () => "../assets/icons/speech-plus.svg", () => inner() - 32, () => 2, 32, () => props.onRate(1))}
     </View>
-    <View debugName="SpeechReturn" onPress={props.onReturn} focusable class="absolute left-[18] right-[18] h-[34] items-center justify-center" style={{ insetT: controlsTop() + 111 }}><Text class="text-sm leading-[17] text-[#ff6026]" style={{translateY:-4.5}}>返回文章</Text></View>
+    <View debugName="SpeechReturn" onPress={props.onOpenCurrentArticle} focusable class="absolute left-[18] right-[18] h-[34] items-center justify-center" style={{ insetT: controlsTop() + 111 }}><Text class="text-sm leading-[17] text-[#ff6026]" style={{translateY:-4.5}}>{props.currentArticleActionText}</Text></View>
     <Show when={volume().visible}><View debugName="SpeechVolumeOverlay" class="absolute rounded-[9999]" style={{insetL:(props.width-volumeWidth())/2,insetT:(props.height-33)/2,width:volumeWidth(),height:33,bgColor:"#1c1f21db"}}>
       <Image src="../assets/icons/speech-volume-overlay.svg" class="absolute left-[8] w-[18] h-[18]" style={{insetT:7.5}} />
       <Text class="absolute left-[30] top-[6] text-lg leading-[22] text-[#f5f5f5]" style={{width:volumeWidth()-38}}>{volumeText()}</Text>

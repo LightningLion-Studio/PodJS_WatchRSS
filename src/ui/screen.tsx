@@ -65,6 +65,8 @@ import { InformationScreen, type InformationPage } from "./InformationScreens.ts
 import { RecommendationScreen } from "./RecommendationScreen.tsx";
 import type { RecommendedChannel } from "../rss/recommendations.ts";
 import { memoRepository } from "../services.ts";
+import { AppResumeStore, resolveResumeTarget, resumeTargetForStack } from "../navigation/resume-state.ts";
+import type { HomePlatformLoginState } from "./home-extras.ts";
 
 type Page = "add-rss" | "remote-input" | "tts-config" | "reader-preview" | "phone-connection" | "account-status" | "speech-playback" | "settings-reader-presets" | "settings-llm-usage" | "settings-llm-preset" | "channel-detail" | "channel-settings" | "channel-share" | "reader-image" | "settings-auto-scroll" | "reader-scroll-controls" | "settings-speech" | "rss-actions" | "rss-share" | "bili" | "douyin" | "video" | "watch-later" | "home" | "profile" | "articles" | "saved" | "search" | "settings" | "settings-advanced" | "notes" | "note-detail" | "note-actions" | "recommendations" | "information" | "reader";
 const bg = "#050507", panel = "#101014", ink = "#f4f4f6", muted = "#9a9aa5", accent = "#45d6a7", blue = "#3157a4";
@@ -75,6 +77,9 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const width = Math.max(160, metrics.logicalWidth - metrics.safeInsets.left - metrics.safeInsets.right);
   const height = Math.max(180, metrics.logicalHeight - metrics.safeInsets.top - metrics.safeInsets.bottom);
   type Entry = { addUrl?:string;imageUrl?:string;imageFilePath?:string; reader?:ReaderBodyHandle; readerArticle?:Article; readerFromWatchLater?:boolean; page: Page; channelId?:string; biliRoute?:BiliRoute; douyinRoute?:DouyinRoute; playback?:PlaybackSource; checkpoint?:BiliPlaybackCheckpointController; queue?:DouyinPlaybackQueue; noteId?:string; informationPage?:InformationPage; recommendationGroup?:string; list?: Pick<VirtualListHandle, "scroller">; internalBack?:()=>boolean; player?:{onCrown:(delta:number)=>boolean;canSwipeBack?:()=>boolean} };
+  const resumeStore = new AppResumeStore(kv);
+  const startupResume = resumeStore.read();
+  const [resumeReady,setResumeReady]=createSignal(false);
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const [playingSource,setPlayingSource]=createSignal<PlaybackSource>();
   const current = () => stack()[stack().length - 1];
@@ -142,6 +147,7 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const [feedLoadingMore,setFeedLoadingMore]=createSignal(false);
   let feedRequestVersion=0;
   const [speechState,setSpeechState] = createSignal<SpeechPlaybackState>();
+  const [platformLoginState,setPlatformLoginState]=createSignal<HomePlatformLoginState>({bili:false,douyin:false});
   const speechPlayback = new SpeechPlayback(props.services,state=>{const previous=speechState();setSpeechState(state);if(state.phase==="error"&&state.error!==previous?.error&&page()!=="speech-playback")void hostOperation("ui.toast",{message:state.error??"朗读失败"}).result.catch(()=>{});},{now:()=>globalThis.performance?.now?.()??Date.now(),after:(ms,callback)=>{const timer=delay(ms);void timer.result.then(callback,()=>{});return()=>timer.cancel();}},isCurrent=>enforcePlaybackStartVolume(mediaVolume,settings().playbackStartVolumeLimit,isCurrent));
   const settingsStore = new SettingsStore();
   const ttsConfigStore = new TtsConfigStore();
@@ -166,6 +172,18 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const [presetRevision, setPresetRevision] = createSignal(0);
   const [foreground, setForeground] = createSignal(lifecycle() === "active");
   onCleanup(onLifecycleChange(value => setForeground(value === "active")));
+  let platformLoginRefresh=0;
+  const refreshPlatformLoginState=async()=>{
+    const revision=++platformLoginRefresh;
+    const [bili,douyin]=await Promise.all([
+      biliClient.getLoginState().then(state=>state.status==="authenticated").catch(()=>false),
+      douyinClient.isLoggedIn().catch(()=>false),
+    ]);
+    if(revision===platformLoginRefresh)setPlatformLoginState({bili,douyin});
+  };
+  createEffect(()=>{if(page()==="home"&&foreground())void refreshPlatformLoginState();});
+  onCleanup(()=>{platformLoginRefresh++;});
+  createEffect(()=>{const entries=stack();if(resumeReady())resumeStore.save(resumeTargetForStack(entries));});
   try { setPresetState(presetStore.ensureSeeded(true, settings().fontSizeSp)); } catch (error) { setError(String(error)); }
   onCleanup(onReaderPresetsChanged(()=>{try{batch(() => { setPresetState(presetStore.load()); setPresetRevision(value => value + 1); });}catch(error){setError(String(error));}}));
   const [previewState,setPreviewState]=createSignal(readerPreviewSession.state());
@@ -225,6 +243,32 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
       batch(()=>{setArticles(window.items);setFeedVisibleCount(limit);setFeedHasMore(window.hasMore);currentQuery={channelId,page:0};});
     } catch(e) {if(version===feedRequestVersion)setError(String(e));}
     finally {if(version===feedRequestVersion){if(initial)setLoading(false);setFeedLoadingMore(false);}}
+  }
+  async function restoreStartupNavigation(){
+    try{
+      await loadChannels();
+      const target=await resolveResumeTarget(startupResume,{
+        hasChannel:id=>channels().some(channel=>channel.id===id),
+        getArticle:id=>props.services.getArticle(id),
+      });
+      if(target.kind==="home")return;
+      if(target.kind==="articles"){
+        setStack([{page:"home"},{page:"articles",channelId:target.channelId}]);
+        await loadFeedArticles(target.channelId,12,true);
+        return;
+      }
+      if(target.kind==="reader"){
+        batch(()=>{setArticle(target.article);setStack([{page:"home"},{page:"reader",readerArticle:target.article}]);});
+        return;
+      }
+      if(target.kind==="bili"){
+        setStack([{page:"home"},{page:"bili",biliRoute:target.route as BiliRoute}]);
+        return;
+      }
+      setStack([{page:"home"},{page:"douyin",douyinRoute:target.route as DouyinRoute}]);
+    }catch(error){
+      setStack([{page:"home"}]);setError(`无法恢复上次内容：${String(error)}`);
+    }finally{setResumeReady(true);}
   }
   function loadMoreFeedArticles(){
     const channelId=current().channelId;
@@ -345,7 +389,7 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
       if(event.kind==="refresh"||event.kind==="library")void props.services.listChannels().then(setChannels).catch(e=>setError(String(e)));
       pendingFeedUpdates.add(event.id);updateFeedWhenSettled();
     });
-    onCleanup(unsubscribe);void go(page());
+    onCleanup(unsubscribe);void restoreStartupNavigation();
   });
   createEffect(() => setNavigationState({ canGoBack: stack().length > 1 }));
   const removeHostEvent = __onHostEvent(event => {
@@ -458,6 +502,14 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const renderPage = (entry: Entry) => {
     const page = () => entry.page;
     const active = () => current() === entry;
+    const speechReturnsToArticle=()=>{
+      const previous=stack()[stack().indexOf(entry)-1],currentArticle=speechState()?.article;
+      return previous?.page==="reader"&&!!currentArticle&&previous.readerArticle?.id===currentArticle.id;
+    };
+    const openCurrentSpeechArticle=()=>{
+      if(speechReturnsToArticle()){popPage();return;}
+      const currentArticle=speechState()?.article;if(currentArticle)void openArticle(currentArticle);
+    };
     const title = () => ({"add-rss":"添加 RSS","remote-input":"从手机输入","tts-config":"配置朗读语音","reader-preview":"预设实时预览","phone-connection":"连接手机","account-status":"账号","speech-playback":"朗读播控","settings-reader-presets":"阅读器预设","settings-llm-usage":"Token 消耗","settings-llm-preset":"提示词预设","channel-detail":"频道详情","channel-settings":"频道设置","channel-share":"分享频道","reader-image":"图片","settings-auto-scroll":"自动滚动控制","reader-scroll-controls":"自动滚动控制", "rss-actions":"操作","rss-share":"分享",bili:"哔哩哔哩",douyin:"抖音",video:"播放",home: "", profile: "我的", articles: "文章", saved: "收藏", "watch-later":"稍后再看", search: "搜索", "settings-speech":"朗读语速", settings: "设置", "settings-advanced":"高级", notes: "备忘录", "note-detail":"备忘录", "note-actions":"笔记操作", recommendations:"RSS推荐", information:"信息", reader: "阅读" }[page()]);
     const selfTitled=()=>["add-rss","remote-input","tts-config","reader-preview","phone-connection","account-status","speech-playback","settings-reader-presets","settings-llm-usage","settings-llm-preset","reader","channel-detail","channel-settings","channel-share","reader-image","settings-auto-scroll","reader-scroll-controls","rss-actions","rss-share","articles","saved","watch-later","search","bili","douyin","video","home","profile","settings","settings-speech","settings-advanced","notes","note-detail","note-actions","recommendations","information"].includes(page());
     return <View class={page()==="video" ? (metrics.shape === "round" && active() && backOffset() > 0 ? "absolute inset-0 overflow-hidden rounded-[9999]" : "absolute inset-0 overflow-hidden") : (metrics.shape === "round" && active() && backOffset() > 0 ? "absolute inset-0 overflow-hidden rounded-[9999] bg-[#000000]" : "absolute inset-0 overflow-hidden bg-[#000000]")} style={{ translateX: active() ? backOffset() : current().page === "video" ? -2 * width : 0, opacity: current().page==="video" && !active() ? 0 : (stack().indexOf(entry) >= stack().length - 2 ? 1 : 0) }}>
@@ -466,7 +518,7 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     <Show when={busy()}><Text class="absolute right-[14] top-[18] text-xs text-[#45d6a7]">处理中</Text></Show>
     <View class={page()==="video" ? "absolute left-[0] right-[0] bottom-[0] overflow-hidden" : "absolute left-[0] right-[0] bottom-[0] overflow-hidden bg-[#000000]"} style={{insetT:selfTitled()?0:42}}>
       <Show when={!active() || !loading() || page()==="saved" || page()==="watch-later"} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#9aa9c4]">加载中…</Text></View>}>
-        <Show when={page() === "home"}><HomeScreen width={width} channels={channels()} notesPlacement={notesHomePlacement} height={height} refreshing={homeRefreshing()} busy={busy()} onRefresh={()=>void refresh()} onProfile={() => void go("profile")} onNotes={() => void go("notes")} onRecommend={() => void go("recommendations")} onAdd={() => void doAdd()} onChannel={channel => { if(channel.url==="builtin:bili")void biliNavigate({name:"entry"});else if(channel.url==="builtin:douyin")douyinNavigate({name:"entry"}); else { setFeedVisibleCount(12);setFeedHasMore(false);setPage("articles",{channelId:channel.id});void loadFeedArticles(channel.id,12,true); } }} onMoveChannelToTop={channel=>channelAction(channel.id,"move")} onToggleChannelPinned={channel=>channelAction(channel.id,"pin")} onMarkChannelRead={channel=>channelAction(channel.id,"read")} onDeleteChannel={channel=>channelAction(channel.id,"delete")} onBeian={() => informationNavigate("beian")} ref={v => entry.list = v} /></Show>
+        <Show when={page() === "home"}><HomeScreen width={width} channels={channels()} notesPlacement={notesHomePlacement} height={height} refreshing={homeRefreshing()} busy={busy()} platformLoginState={platformLoginState()} speechState={speechState()} onSpeech={()=>setPage("speech-playback")} onRefresh={()=>void refresh()} onProfile={() => void go("profile")} onNotes={() => void go("notes")} onRecommend={() => void go("recommendations")} onAdd={() => void doAdd()} onChannel={channel => { if(channel.url==="builtin:bili")void biliNavigate({name:"entry"});else if(channel.url==="builtin:douyin")douyinNavigate({name:"entry"}); else { setFeedVisibleCount(12);setFeedHasMore(false);setPage("articles",{channelId:channel.id});void loadFeedArticles(channel.id,12,true); } }} onMoveChannelToTop={channel=>channelAction(channel.id,"move")} onToggleChannelPinned={channel=>channelAction(channel.id,"pin")} onMarkChannelRead={channel=>channelAction(channel.id,"read")} onDeleteChannel={channel=>channelAction(channel.id,"delete")} onBeian={() => informationNavigate("beian")} ref={v => entry.list = v} /></Show>
         <Show when={page() === "add-rss"}><AddRssScreen width={width} height={height} active={active()} initialUrl={entry.addUrl??""} preview={props.services.previewChannel} confirm={props.services.confirmAddChannel} input={props.services.input} openInlineInput={props.services.openInlineInput} onAdded={channel=>void openAddedChannel(channel).catch(error=>setError(String(error)))} onExisting={channel=>void openAddedChannel(channel).catch(error=>setError(String(error)))} ref={value=>{entry.list=value;entry.internalBack=value.onRootBack;}}/></Show>
         <Show when={page() === "profile"}><ProfileScreen height={height} onSelect={i => { if (i === 0) void go("account-status"); else if (i === 1) void go("saved"); else if (i === 2) void go("watch-later"); else if (i === 3) void go("phone-connection"); else if (i === 4) void go("settings"); else if(i===5) informationNavigate("about"); else if(i===6) informationNavigate("contact-developer"); else setError("此页面尚未迁移"); }} onBeian={() => informationNavigate("beian")} ref={v => entry.list = v} /></Show>
         <Show when={page() === "account-status"}><AccountStatusScreen width={width} height={height} active={active} load={props.services.readAccountStatus} subscribe={props.services.subscribeAccountStatus} onError={setError} ref={value=>{entry.list=value;entry.internalBack=value.onRootBack;}}/></Show>
@@ -500,7 +552,7 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
         <Show when={page() === "information"}><InformationScreen width={width} height={height} preset={readerPreset()} fonts={informationFonts()} backgroundSnapshot={informationBackground()} active={() => active() && foreground()} page={entry.informationPage??"about"} onNavigate={informationNavigate} onOpenUrl={url=>void openUrl(url)} legalBaseUrl="https://sly-data-plane.watchrss.cn" ref={v=>entry.list=v}/></Show>
       </Show>
         <Show when={page()==="reader-image"&&entry.imageUrl}><ImagePreviewScreen url={entry.imageUrl!} filePath={entry.imageFilePath} width={width} height={height} density={metrics.density} active={active()} onExit={()=>popPage()} onError={setError} onBackGesture={(phase,dx,velocity)=>{if(phase==="start"){motion.begin(dx);setBackOffset(motion.offset);}else if(phase==="move"){motion.move(dx);setBackOffset(motion.offset);}else if(motion.phase==="dragging")motion.release(velocity,Date.now(),phase==="cancel");}}/></Show>
-        <Show when={page()==="speech-playback"}><SpeechPlaybackScreen volumeEnabled={settings().mediaVolumeControl} volumeGuard={settings().mediaVolumeGuard} width={width} height={height} active={active()} state={speechState()??speechPlayback.state} onToggle={()=>void speechPlayback.toggle()} onPrevious={()=>void speechPlayback.previous()} onNext={()=>void speechPlayback.next()} onStop={()=>{void speechPlayback.stop();popPage();}} onAutoAdvance={()=>speechPlayback.toggleAutoAdvance()} onRate={step=>void speechPlayback.changeRate(step)} onReturn={()=>popPage()}/></Show>
+        <Show when={page()==="speech-playback"}><SpeechPlaybackScreen volumeEnabled={settings().mediaVolumeControl} volumeGuard={settings().mediaVolumeGuard} width={width} height={height} active={active()} state={speechState()??speechPlayback.state} onToggle={()=>void speechPlayback.toggle()} onPrevious={()=>void speechPlayback.previous()} onNext={()=>void speechPlayback.next()} onStop={()=>{void speechPlayback.stop();popPage();}} onAutoAdvance={()=>speechPlayback.toggleAutoAdvance()} onRate={step=>void speechPlayback.changeRate(step)} currentArticleActionText={speechReturnsToArticle()?"返回文章":"查看当前文章"} onOpenCurrentArticle={openCurrentSpeechArticle}/></Show>
         <Show when={page()==='reader-preview'&&previewState()}>{state=><ReaderPreviewScreen state={state()} width={width} height={height} active={active()&&motion.phase==='idle'} ref={value=>{entry.list=value;}}/>}</Show>
         <Show when={page() === "reader" && entry.readerArticle}>{rss => <ReaderScreen mediaCacheMode={settings().mediaCacheMode} highlight={speechState()?.highlight} llmEnabled={settings().llmEnabled} llmAutoSummarize={settings().llmAutoSummarize} llmPromptPreset={settings().llmPromptPreset} llmShowTokenUsage={settings().llmShowTokenUsage} article={rss()} services={props.services} width={width} height={height} preset={readerPreset()} fontSize={readerPreset().body.fontSizeSp} lineHeight={readerLineHeight()} active={active()&&motion.phase==="idle"} autoStart={settings().readerAutoStart} speed={settings().readerScrollSpeed} favorite={(article()?.id===rss().id?article():rss())?.saved??false} speaking={speechState()?.playing===true&&speechState()?.article?.id===rss().id} busy={busy()} onFavorite={()=>{const selected=article()?.id===rss().id?article()!:rss();setArticle(selected);void saveArticleState("favorite",!selected.saved,false);}} onShare={()=>{const selected=article()?.id===rss().id?article()!:rss();share({origin:"detail",title:selected.title,link:selected.link},()=>{setArticle(selected);setPage("rss-share");});}} onSpeak={a=>{void speechPlayback.start(a);void hostToast("已开始朗读，长按文章可打开朗读页面");}} onSpeechControls={(a,anchor)=>{if(speechState()?.phase==="idle"||!speechState()||speechState()?.article?.id!==a.id)void speechPlayback.start(a,speechPlayback.state.rate,anchor);setPage("speech-playback");}} onMedia={(a,block)=>{if(block.type==="video")void openRssVideo(a,block.url).catch(e=>setError(String(e)));else setPage("reader-image",{imageUrl:resolveUrl(block.url,a.link)??block.url,imageFilePath:a.offlineMedia?.[block.url]});}} onControls={reader=>setPage("reader-scroll-controls",{reader})} onError={setError} ref={v=>{entry.list=v;entry.reader=v;}}/>}</Show>
     </View>
