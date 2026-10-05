@@ -27,6 +27,7 @@ export async function stableArticleId(value:string,uri:SyncTextPort['parseUri'],
 type Row=Record<string,unknown>;
 const str=(v:unknown)=>v==null?'':String(v),nullable=(v:unknown)=>v==null?null:String(v),num=(v:unknown)=>Number(v??0);
 const ROW_SELECT=`SELECT a.id,a.channel_id,a.title,a.link,a.guid,a.pub_date,a.image_url,a.audio_url,a.video_url,a.is_read,a.is_saved,a.reading_progress,a.dedup_key,a.fetched_at,
+ (SELECT article_id FROM sync_article_ids WHERE item_id=a.id) AS bound_id,(SELECT url FROM sync_article_ids WHERE item_id=a.id) AS bound_url,
  ch.url AS channel_url,ch.title AS channel_title,ch.is_pinned AS channel_pinned,ch.sort_order AS channel_sort,ch.created_at AS channel_created,p.summary,p.image_url AS preview_image,
  COALESCE(NULLIF(c.body_hash,''),n.body_hash,'') AS cached_body_hash,n.body_hash AS native_body_hash,c.body_hash AS encoded_body_hash,c.body_bytes,c.chunk_size,c.chunk_hashes,e.body_hash AS local_encoded_body_hash,
  r.progress,r.changed_at AS position_changed_at,r.position_bytes,r.position_hash,
@@ -82,6 +83,15 @@ export class LocalArticleManifestStore {
   if(this.migrateReadingMany)await this.migrateReadingMany(migrationIds);
   else for(const id of migrationIds)await this.migrateReading(id);
  }
+ /** Ordinary read RSS rows are absent from saved-article snapshots. */
+ async cloudReadingStates():Promise<ExportedArticle[]>{
+  const device=String((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id??'');
+  const rows=await querySyncPages(this.db,ROW_SELECT+" WHERE (a.is_read=1 OR a.reading_progress>0 OR r.progress>0) AND (ch.url LIKE 'http://%' OR ch.url LIKE 'https://%') ORDER BY a.id",[],100);
+  const out:ExportedArticle[]=[];
+  for(const r of rows){if(isImportedContentUrl(str(r.channel_url)))continue;const url=str(r.link)||str(r.dedup_key);
+   out.push({articleId:await this.stableId(url),sourceDeviceId:device,url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:str(r.cached_body_hash)||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url),rssSourceTitle:str(r.channel_title),independentSaved:false,independentChangedAt:0,independentSortOrder:0,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:num(r.progress??r.reading_progress),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)});
+  }return out;
+ }
  async snapshot(readingPrepared=false):Promise<PreparedArticle[]> {
   this.bodySourceIds.clear();
   const identity=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!identity)throw new Error('Initialize sync identity first');const device=str(identity.device_id);
@@ -101,7 +111,7 @@ export class LocalArticleManifestStore {
   };
   const neededIds=new Set<number>([...saves.map(row=>num(row.article_id)),...persisted.filter(row=>row.item_id!=null).map(row=>num(row.item_id)),
    ...rows.filter(row=>str(row.channel_url)==='watchrss://phone-imports'||isImportedContentUrl(str(row.channel_url))).map(row=>num(row.id))]);
-  const ids=new Map<number,string>();for(const id of neededIds){const row=byItem.get(id);if(row)ids.set(id,await this.stableId(row.link==null?str(row.dedup_key):str(row.link)));}
+  const ids=new Map<number,string>();for(const id of neededIds){const row=byItem.get(id);if(row)ids.set(id,row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link)));}
   const states=new Map<string,State>();
   const put=(s:State)=>{const key=s.articleId+'\0'+s.type,old=states.get(key);if(!old||s.changedAt>old.changedAt||(s.changedAt===old.changedAt&&s.device>old.device))states.set(key,s);};
   for(const s of saves){if(num(s.saved))continue;const r=byItem.get(num(s.article_id));if(r)put({articleId:ids.get(num(s.article_id))!,type:str(s.save_type),url:str(r.link),saved:!!num(s.saved),changedAt:num(s.changed_at),sortOrder:-num(s.sort_order),device});}
@@ -237,7 +247,7 @@ export class LocalArticleManifestStore {
   else await this.hydrateRow(r);
   const {available,contentHtml,contentText}=cached?{available:true,contentHtml:null,contentText:''}:await this.bodyFromRow(r);
   const channel=str(r.channel_url),independent=channel==='watchrss://phone-imports',source=saved?(/^https?:\/\//i.test(nativeTrim(channel))?channel:null):independent?null:channel;
-  const url=saved?str(r.link):blank(nullable(r.link))?str(r.dedup_key):str(r.link),imported=saved?.savedAt??num(r.fetched_at);
+  const url=r.link==null&&r.bound_id?str(r.bound_url):saved?str(r.link):blank(nullable(r.link))?str(r.dedup_key):str(r.link),imported=saved?.savedAt??num(r.fetched_at);
   const article:ExportedArticle={articleId:id,sourceDeviceId:device,url,title:saved?str(r.title):blank(str(r.title))?url:str(r.title),siteName:str(r.channel_title),excerpt:r.summary==null?str(r.description):str(r.summary),contentHtml,contentText,imageUrl:nullable(r.preview_image??r.image_url),contentHash:blank(str(r.cached_body_hash))?await hashJavaText(!available?url:contentHtml??(blank(contentText)?url:contentText),this.codec):str(r.cached_body_hash),importedAt:imported,updatedAt:saved?Math.max(num(r.fetched_at),imported,saved.favoriteChanged,saved.laterChanged):num(r.fetched_at),independentSaved:independent,independentChangedAt:independent?imported:0,independentSortOrder:independent?imported:0,rssSourceUrl:source,rssSourceTitle:source===null?null:str(r.channel_title),favoriteSaved:saved?.favorite??false,favoriteChangedAt:saved?.favoriteChanged??0,favoriteSortOrder:saved?.favoriteOrder??0,watchLaterSaved:saved?.later??false,watchLaterChangedAt:saved?.laterChanged??0,watchLaterSortOrder:saved?.laterOrder??0,deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)};
   return cached?prepareCachedArticle(article,this.codec,cached):prepareArticle(article,this.codec,available);
  }

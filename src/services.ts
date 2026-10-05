@@ -1,3 +1,4 @@
+import {notifyLibrarySqlCommit} from './core/library-mutations';
 import {startupMark,startupStep} from "./core/startup-trace.ts";
 import {appLogger} from './logs/app-logger.ts';
 import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
@@ -21,6 +22,7 @@ import {readUsage,clearUsage,subscribeUsageChanges} from "./llm/usage.ts";
 import { ImportedTextStore, importedTextFileName } from "./reader/imported-text.ts";
 import { importedSpeechSource, importedReaderHandle } from "./reader/imported-speech.ts";
 import {createSummarySession,summaryAccountStore} from "./llm/runtime.ts";
+import {readCloudAccountStatus,subscribeCloudAccountStatus} from './cloud/status';
 import {accountStatusSnapshot} from "./account/status.ts";
 import { buildArticleBlocks } from "./reader/media.ts";
 import {readOfflineMedia,retryOfflineMedia as retryStoredOfflineMedia} from "./reader/offline-media.ts";
@@ -48,9 +50,9 @@ export async function getSavedLinksForSync(type:SavedLinkType):Promise<string[]>
 
 export const db: SqlDatabase = {
   query: (sql, params) => sqlite.query(sql, params as (string | number | null)[]),
-  execute: (sql, params) => sqlite.execute(sql, params as (string | number | null)[]),
-  transaction: statements => sqlite.transaction(statements as { sql: string; params?: (string | number | null)[] }[]),
-  transactionChanges: statements => sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]),
+  execute: async (sql, params) => {await sqlite.execute(sql, params as (string | number | null)[]);notifyLibrarySqlCommit([{sql}]);},
+  transaction: async statements => {await sqlite.transaction(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements);},
+  transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);if(changes.some(n=>n>0))notifyLibrarySqlCommit(statements);return changes;},
 };
 const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
 const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
@@ -141,8 +143,8 @@ function mapNote(row: Record<string, unknown>): Note {
 const readerSpeech = new ReaderSpeech(new ConfiguredSpeechPort(new TtsConfigStore(),ttsTransport,()=>summaryAccountStore.read()),()=>delay(200).result);
 const sqlReadingProgress = new SqlReadingProgressStore({query:async(q,p)=>{await init();return db.query(q,p);},execute:async(q,p)=>{await init();return db.execute(q,p);},transaction:async(s)=>{await init();return db.transaction(s);}},new ReadingProgressStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);}}));
 export const services: AppServices = {
-  async readAccountStatus(){return accountStatusSnapshot(await summaryAccountStore.read());},
-  subscribeAccountStatus(listener){return summaryAccountStore.subscribe(listener);},
+  async readAccountStatus(){return accountStatusSnapshot(await summaryAccountStore.read(),Date.now(),readCloudAccountStatus());},
+  subscribeAccountStatus(listener){const account=summaryAccountStore.subscribe(listener),cloud=subscribeCloudAccountStatus(listener);return ()=>{account();cloud();};},
   readingProgress: sqlReadingProgress,
   async retryOfflineMedia(id){await init();return retryStoredOfflineMedia(db,{stat:path=>fileChunks.stat(path),download:async(url,path,maxBytes)=>{await http.download(url,path,maxBytes).result;},remove:path=>fileChunks.remove(path)},Number(id));},
   loadImportedTextChunk(handle,index) {return importedTextStore.chunk(handle,index);},

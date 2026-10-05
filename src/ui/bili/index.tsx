@@ -7,10 +7,20 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
 import type { BiliClient, BiliFavoriteFolder, BiliHistoryItem, BiliItem, BiliPlayUrl, BiliSearchResult, BiliSession, QrLoginRequest, QrPollResult } from "../../bili/index.ts";
-import { layoutText } from "../../reader/index.ts";
+import { layoutUiText } from "../../reader/line-break.ts";
+import { measuredLines } from "../../reader/measured-text.ts";
+import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
+import { WatchSwitch } from "../AutoScrollSettingsScreen.tsx";
+import { DeleteConfirmDialog } from "../DeleteConfirmDialog.tsx";
+import { DownloadPhoneAppDialog } from "../DownloadPhoneAppDialog.tsx";
+import { ReaderBackground, useReaderBackgrounds } from "../ReaderBackground.tsx";
+import { WatchProgressIndicator } from "../WatchProgressIndicator.tsx";
+import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
+import { presetContentFont, readerTextClass } from "../../reader/content-layout.ts";
+import { readerChrome } from "../../reader/chrome.ts";
 import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
 
 const infoIcon = "../assets/icons/info.svg";
@@ -35,7 +45,7 @@ export interface BiliScreenRef { scroller?: Scroller; onRootBack?: () => boolean
 export interface BiliScreenProps {
   onShare?:ShareHandler;
   loadLocalDetail?: (target: DetailTarget) => Promise<import("../../bili/types.ts").BiliVideoDetail | undefined>;
-  height: number; width?: number; route: BiliRoute; client: BiliClient;
+  height: number; width?: number; route: BiliRoute; client: BiliClient; preset?: ReaderPreset; active?: boolean;
   onNavigate: (route: BiliRoute) => void; onBack: () => void;
   input?: BiliInput; onOpenUrl?: (url: string) => void; onError?: (message: string) => void;
   settings?: { showOriginalContent?: boolean; originalContentEnabled?: boolean; onOriginalContentChange?: (enabled: boolean) => void; showContinuePlaybackInBackground?: boolean; continuePlaybackInBackgroundEnabled?: boolean; onContinuePlaybackInBackgroundChange?: (enabled: boolean) => void; onSyncWatchRecords?: () => void; deleteEnabled?: boolean; onDeleteChannel?: () => void | Promise<void> };
@@ -45,8 +55,11 @@ export interface BiliScreenProps {
 const num = (value: unknown) => typeof value === "number" ? value : Number(value || 0);
 const fail = (props: BiliScreenProps, error: unknown) => props.onError?.(error instanceof Error ? error.message : String(error));
 const authenticated = (session: BiliSession | null | undefined) => !!(session?.cookies.SESSDATA && session.cookies.bili_jct && session.cookies.DedeUserID);
-const formatCount = (value: unknown) => { const n = num(value); return n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}万` : String(n); };
-const lines = (text: string, width: number, size = 13) => layoutText(text, { width, measure: value => Array.from(value).reduce((sum, ch) => sum + (ch.codePointAt(0)! > 255 ? size : Math.ceil(size * .55)), 0) });
+const formatCount = (value: unknown) => { const n = num(value); return n >= 1e8 ? `${(n / 1e8).toFixed(1)}亿` : n >= 1e4 ? `${(n / 1e4).toFixed(1)}万` : String(n); };
+// Real glyph measurement and native-like UI line breaking (was a fixed-advance estimate).
+const FONT_SLOT: Record<number, number> = { 8: 29, 9: 19, 11: 20, 12: 0, 13: 21, 14: 1, 16: 2, 17: 22, 21: 23, 23: 30 };
+const measureFor = (size: number) => (text: string) => getOps().measureText(text, FONT_SLOT[size] ?? 1);
+const lines = (text: string, width: number, size = 13) => layoutUiText(text, { width, measure: measureFor(size) });
 
 interface AsyncData<T> { value: Accessor<T | undefined>; loading: Accessor<boolean>; error: Accessor<unknown>; refetch: () => void }
 function asyncData<T>(fetcher: () => Promise<T>): AsyncData<T>;
@@ -80,11 +93,6 @@ function pagedData<T>(source: () => unknown, factory: (changed: (state: BrowseSt
   onCleanup(() => pager?.dispose());
   return { state, refetch: () => { void pager?.refresh(); }, more: () => { void pager?.loadMore(); } };
 }
-function pagingEntries<T>(page: ReturnType<typeof pagedData<T>>, width: number): ScrollEntry[] {
-  return [...(page.state().error ? [messageEntry(String(page.state().error), width)] : []),
-    ...(page.state().loading ? [messageEntry("加载中…", width)] : page.state().canLoadMore ? [buttonEntry(page.state().error ? "重试加载" : "加载更多", page.more)] : []),
-    buttonEntry("刷新", page.refetch)];
-}
 
 function FeedScreen(props: BiliScreenProps) {
   const session = asyncData(() => props.client.getSession());
@@ -94,55 +102,136 @@ function FeedScreen(props: BiliScreenProps) {
   }, changed));
   const entries = createMemo<ScrollEntry[]>(() => {
     const values = feed.state().items, loggedIn = authenticated(session.value());
-    const contentWidth = (props.width ?? 233) - 36, titleWidth = 105, iconSize = 16, groupWidth = titleWidth + 4 + iconSize, groupLeft = (contentWidth - groupWidth) / 2;
-    return [{ height: 48, render: () => <View onPress={() => props.onNavigate({ name: "channel-info" })} focusable class="absolute inset-0"><Text style={{ insetL: groupLeft, width: titleWidth }} class="absolute top-[0] text-[21px] leading-[26] text-white text-center">哔哩哔哩</Text><Image src={infoIcon} style={{ insetL: groupLeft + titleWidth + 4, width: iconSize, height: iconSize }} class="absolute top-[5]" /><Text class="absolute left-[0] right-[0] top-[28] text-[9px] leading-[17] text-[#aaa] text-center">{loggedIn ? "已登录" : "未登录"}</Text></View> } as ScrollEntry,
+    // Native BiliFeedHeader: "哔哩哔哩 ⓘ" (19sp bold #BDBDBD hint) then 6dp gap and the 9sp login caption.
+    const contentWidth = (props.width ?? 233) - 36, titleWidth = measureFor(21)("哔哩哔哩"), hintGap = 7, hintBox = 19.2;
+    const groupLeft = (contentWidth - (titleWidth + hintGap + 16)) / 2;
+    return [{ height: 49, render: () => <View onPress={() => props.onNavigate({ name: "channel-info" })} focusable accessibilityRole="button" accessibilityLabel="哔哩哔哩频道信息" class="absolute inset-0">
+      <Text style={{ insetL: groupLeft }} class="absolute top-[1] text-[21px] leading-[26] text-white">哔哩哔哩</Text>
+      <Image src="../assets/icons/info-hint.svg" style={{ insetL: groupLeft + titleWidth + hintGap - 3.6, width: hintBox, height: hintBox }} class="absolute top-[3.9]" />
+      <Text class="absolute left-[0] right-[0] top-[32.5] text-[9px] leading-[17] text-[#b6b6b6] text-center">{loggedIn ? "已登录" : "未登录"}</Text>
+    </View> } as ScrollEntry,
       ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []),
-      ...(!session.loading() && loggedIn && !feed.state().loading && !feed.state().error && !values.length ? [messageEntry("暂无内容\n稍后再试或刷新", props.width ?? 233)] : []),
-      ...(!session.loading() && !loggedIn ? [messageEntry("需要登录\n登录后获取推荐内容", props.width ?? 233)] : []),
+      ...(!session.loading() && loggedIn && !feed.state().loading && !values.length ? [emptyStateEntry("暂无内容", feed.state().error ? String(feed.state().error instanceof Error ? (feed.state().error as Error).message : feed.state().error) : "稍后再试或刷新", props.width ?? 233)] : []),
+      ...(!session.loading() && !loggedIn ? [emptyStateEntry("需要登录", "登录后获取推荐内容", props.width ?? 233)] : []),
       ...values.map(item => {
         const open = () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid });
-        return (props.settings?.originalContentEnabled ?? true) ? listVideoEntry(item, item.owner?.name ?? "", props.width ?? 233, open) : rssFeedEntry(item, props.width ?? 233, open);
+        return (props.settings?.originalContentEnabled ?? true) ? listVideoEntry(item, undefined, props.width ?? 233, open) : rssFeedEntry(item, props.width ?? 233, open);
       }),
-      ...(loggedIn ? pagingEntries(feed, props.width ?? 233) : [])];
+      ...(loggedIn && feed.state().loading && values.length ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">加载中...</Text> }] : [])];
   });
-  return <Scrolled {...props} entries={entries()} onRefresh={feed.refetch} />;
+  // Native loads more once the last visible item is within 3 of the end.
+  const settled = (_first: number, last: number) => { const state = feed.state(); if (last >= entries().length - 4 && state.canLoadMore && !state.loading && state.items.length) feed.more(); };
+  return <ScrollEntries onRefresh={feed.refetch} height={props.height} entries={entries()} gap={8} onSettledRange={settled} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />;
 }
 
+/** Native ActionButton (watch_action_button 160x48dp, pill #2A2A2A, 17/23sp, disabled 60% text). */
+function pillEntry(label: string, width: number, onPress?: () => void, gapBelow = 4): ScrollEntry {
+  const pill = Math.min(160, width - 36 - 18);
+  return { height: 48 + gapBelow, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center" style={{ insetL: (width - 36 - pill) / 2, width: pill }}>
+    <Text class={onPress ? "text-[17px] leading-[23] text-[#f5f5f5]" : "text-[17px] leading-[23] text-[#f5f5f599]"}>{label}</Text>
+  </View> };
+}
+
+/** Native BiliChannelInfoScreen: centred 17sp title, three 12/14sp info lines, then action pills. */
 function ChannelInfoScreen(props: BiliScreenProps) {
   const session = asyncData(() => props.client.getSession());
-  const entries = createMemo<ScrollEntry[]>(() => { const loggedIn = authenticated(session.value()); return [titleEntry("哔哩哔哩"), messageEntry(`${loggedIn ? "进入以获取推荐内容" : "未登录，登录后获取推荐内容"}\nhttps://www.bilibili.com\n更新：${loggedIn ? "实时" : "--"}`, props.width ?? 233), buttonEntry("设置", () => props.onNavigate({ name: "settings" })), ...(!loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []), buttonEntry("搜索", loggedIn ? () => props.onNavigate({ name: "search" }) : undefined), buttonEntry("稍后再看", loggedIn ? () => props.onNavigate({ name: "watch-later" }) : undefined), buttonEntry("历史记录", loggedIn ? () => props.onNavigate({ name: "history" }) : undefined), buttonEntry("收藏夹", loggedIn ? () => props.onNavigate({ name: "favorites" }) : undefined)]; });
-  return <Scrolled {...props} entries={entries()} />;
+  const entries = createMemo<ScrollEntry[]>(() => {
+    const loggedIn = authenticated(session.value()), width = props.width ?? 233;
+    const info = (text: string, color: string, gapBelow: number): ScrollEntry => ({ height: 14 + gapBelow, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-xs leading-[14] text-center" style={{ textColor: color }}>{text}</Text> });
+    const go = (route: BiliRoute) => loggedIn ? () => props.onNavigate(route) : undefined;
+    return [
+      { height: 26, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[20] text-[#f5f5f5] text-center">哔哩哔哩</Text> },
+      info(loggedIn ? "进入以获取推荐内容" : "未登录，登录后获取推荐内容", "#b6b6b6", 4),
+      info("https://www.bilibili.com", "#f5f5f5", 4),
+      info(loggedIn ? "更新：实时" : "更新: --", "#b6b6b6", 8),
+      pillEntry("设置", width, () => props.onNavigate({ name: "settings" })),
+      ...(!loggedIn ? [pillEntry("登录", width, () => props.onNavigate({ name: "login" }))] : []),
+      pillEntry("搜索", width, go({ name: "search" })),
+      pillEntry("稍后再看", width, go({ name: "watch-later" })),
+      pillEntry("历史记录", width, go({ name: "history" })),
+      pillEntry("收藏夹", width, go({ name: "favorites" }), 0),
+    ];
+  });
+  return <ScrollEntries height={props.height} entries={entries()} gap={0} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />;
 }
 
-function listVideoEntry(item: BiliItem, subtitle: string, width: number, onPress: () => void): ScrollEntry {
-  const heading = lines(item.title || "哔哩哔哩视频", width - 56, 13).slice(0, 2), summary = lines(subtitle || "哔哩哔哩", width - 56, 11).slice(0, 1), imageWidth = width - 36;
-  return { height: 174, render: () => <View onPress={onPress} focusable class="absolute inset-0 rounded-[16] bg-[#202020] overflow-hidden"><View class="absolute left-[8] right-[8] top-[8] h-[104] rounded-[12] bg-[#303030] overflow-hidden">{item.cover ? <RemoteImage cacheBucket="bili-preview" url={item.cover} width={imageWidth - 16} height={104} class="absolute inset-0" /> : null}</View><Text class="absolute left-[12] right-[12] top-[119] text-[13px] leading-[18] text-white">{heading.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[5] text-[11px] leading-[15] text-[#999]">{summary.join("\n")}</Text></View> };
+/** Native buildFeedSummary: "owner · 播放 N" or "哔哩哔哩推荐". */
+function feedSummary(item: BiliItem): string {
+  const parts = [item.owner?.name, item.stat?.view != null ? `播放 ${formatCount(item.stat.view)}` : undefined].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "哔哩哔哩推荐";
+}
+
+/** Native BiliFeedCard: 100dp cover, background gradient, 8dp padding, 14sp title + 9sp summary at the bottom. */
+function listVideoEntry(item: BiliItem, summaryText: string | undefined, width: number, onPress: () => void): ScrollEntry {
+  const cardWidth = width - 36, padding = 8, textWidth = cardWidth - padding * 2;
+  const title = measuredLines(item.title || "哔哩哔哩视频", textWidth, measureFor(14), 2);
+  const summary = measuredLines(summaryText ?? feedSummary(item), textWidth, measureFor(9), 2);
+  const textHeight = title.length * 18 + 2 + summary.length * 9.9;
+  const height = Math.max(100, textHeight + padding * 2), top = height - padding - textHeight;
+  return { height, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={`视频：${item.title ?? ""}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+    {item.cover ? <RemoteImage cacheBucket="bili-preview" url={item.cover} width={cardWidth} height={100} fit="cover" class="absolute left-[0] top-[0]" /> : null}
+    <View class="absolute left-[0] right-[0] top-[0] h-[100] bg-gradient-to-b from-transparent to-[#0b1211b3]" />
+    {title.map((line, index) => <Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{ insetL: padding, insetR: padding, insetT: top + index * 18 }}>{line}</Text>)}
+    <Text class="absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]" style={{ insetL: padding, insetR: padding, insetT: top + 2 + title.length * 18 }}>{summary.join("\n")}</Text>
+  </View> };
+}
+
+/** Native buildListSummary: "UP 主 · mm:ss", or 哔哩哔哩. */
+function listSummary(owner?: string, seconds?: number) { const parts = [owner?.trim() || undefined, seconds && seconds > 0 ? durationText(seconds) : undefined].filter(Boolean); return parts.length ? parts.join(" · ") : "哔哩哔哩"; }
+function durationText(seconds: number) { const minutes = Math.floor(seconds / 60), remain = Math.floor(seconds % 60); return `${String(minutes).padStart(2, "0")}:${String(remain).padStart(2, "0")}`; }
+
+/** Native EmptyStateCard: 14dp radius surface, 12/10dp padding, titleMedium 21/26 + bodySmall 12/14. */
+function emptyStateEntry(title: string, subtitle: string, width: number): ScrollEntry {
+  const lines = measuredLines(subtitle, width - 36 - 24, measureFor(12));
+  return { height: 10 + 26 + 4 + lines.length * 14 + 10, render: () => <View class="absolute inset-0 rounded-[14] bg-[#1c1f21]">
+    <Text class="absolute left-[12] right-[12] top-[10] text-[21px] leading-[26] text-[#f5f5f5]">{title}</Text>
+    <Text class="absolute left-[12] right-[12] top-[40] text-xs leading-[14] text-[#b6b6b6]">{lines.join("\n")}</Text>
+  </View> };
+}
+
+/** Native BiliListScreen: 21sp title + 9sp 下拉刷新 header, BiliFeedCard items 8dp apart, auto load-more near the end. */
+function BiliListPage(props: BiliScreenProps & { title: string; items: ScrollEntry[]; loading: boolean; error?: unknown; canLoadMore?: boolean; onRefresh: () => void; onMore?: () => void }) {
+  const width = () => props.width ?? 233;
+  const entries = createMemo<ScrollEntry[]>(() => [
+    { height: 48, render: () => <View class="absolute inset-0">
+      <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[25] text-center text-[#f5f5f5]">{props.title}</Text>
+      <Text class="absolute left-[0] right-[0] top-[31] text-[9px] leading-[17] text-center text-[#b6b6b6]">下拉刷新</Text>
+    </View> },
+    ...(!props.items.length && !props.loading ? [props.error ? emptyStateEntry("加载失败", String(props.error instanceof Error ? props.error.message : props.error), width()) : emptyStateEntry("暂无内容", "稍后再试", width())] : []),
+    ...props.items,
+    ...(props.loading && props.items.length ? [{ height: 21, render: () => <Text class="absolute left-[0] top-[0] text-[17px] leading-[21] text-[#b6b6b6]">加载中...</Text> }] : []),
+    { height: 40, render: () => null },
+  ]);
+  const settled = (_first: number, last: number) => { if (last >= entries().length - 4 && props.canLoadMore && !props.loading && props.items.length) props.onMore?.(); };
+  return <ScrollEntries onRefresh={props.onRefresh} height={props.height} entries={entries()} gap={8} onSettledRange={settled} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />;
 }
 
 function HistoryScreen(props: BiliScreenProps) {
   const page = pagedData<BiliHistoryItem>(() => props.client, changed => historyPager(props.client, changed));
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("历史记录"), ...page.state().items.map(item => historyEntry(item, props.width ?? 233, props)), ...(!page.state().loading && !page.state().error && !page.state().items.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), ...pagingEntries(page, props.width ?? 233)]);
-  return <Scrolled {...props} entries={entries()} onRefresh={page.refetch} />;
+  const items = createMemo(() => page.state().items.map(item => historyEntry(item, props.width ?? 233, props)));
+  return <BiliListPage {...props} title="历史记录" items={items()} loading={page.state().loading} error={page.state().error} canLoadMore={page.state().canLoadMore} onRefresh={page.refetch} onMore={page.more} />;
 }
-function historyEntry(item: BiliHistoryItem, width: number, props: BiliScreenProps) { const video: BiliItem = { aid: item.history?.oid, bvid: item.history?.bvid, cid: item.history?.cid, title: item.title, cover: item.cover, duration: item.duration, owner: { name: item.authorName } }; const progress = item.progress != null && item.duration ? `已看 ${Math.min(100, Math.round(item.progress / item.duration * 100))}%` : ""; return listVideoEntry(video, [item.authorName, progress].filter(Boolean).join(" · "), width, () => props.onNavigate({ name: "detail", aid: video.aid, bvid: video.bvid, cid: video.cid })); }
+function historyEntry(item: BiliHistoryItem, width: number, props: BiliScreenProps) { const video: BiliItem = { aid: item.history?.oid, bvid: item.history?.bvid, cid: item.history?.cid, title: item.title, cover: item.cover, duration: item.duration, owner: { name: item.authorName } }; return listVideoEntry(video, listSummary(item.authorName, item.duration), width, () => props.onNavigate({ name: "detail", aid: video.aid, bvid: video.bvid, cid: video.cid })); }
 
 function WatchLaterScreen(props: BiliScreenProps) {
   const page = asyncData(() => props.client.toView());
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("稍后再看", "下拉刷新"), ...(page.loading() ? [messageEntry("加载中…", props.width ?? 233)] : []), ...(page.error() ? [messageEntry(String(page.error()), props.width ?? 233)] : []), ...(page.value()?.items ?? []).map(item => listVideoEntry(item, [item.owner?.name, item.duration ? durationText(item.duration) : ""].filter(Boolean).join(" · "), props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))), ...(!page.loading() && !page.error() && !page.value()?.items.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), buttonEntry("刷新", page.refetch)]);
-  return <Scrolled {...props} entries={entries()} />;
+  const items = createMemo(() => (page.value()?.items ?? []).map(item => listVideoEntry(item, listSummary(item.owner?.name, item.duration), props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))));
+  return <BiliListPage {...props} title="稍后再看" items={items()} loading={page.loading()} error={page.error()} onRefresh={page.refetch} />;
 }
-function durationText(seconds: number) { const minutes = Math.floor(seconds / 60), remain = Math.floor(seconds % 60); return `${String(minutes).padStart(2, "0")}:${String(remain).padStart(2, "0")}`; }
 
+/** Native FAVORITE list opens the first favorite folder directly. */
 function FavoritesScreen(props: BiliScreenProps) {
   const folders = asyncData(() => props.client.favoriteFolders());
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("收藏夹", "下拉刷新"), ...(folders.loading() ? [messageEntry("加载中…", props.width ?? 233)] : []), ...(folders.error() ? [messageEntry(String(folders.error()), props.width ?? 233)] : []), ...(folders.value() ?? []).map(folder => { const mediaId = folder.id ?? folder.fid; return buttonEntry(`${folder.title || "未命名收藏夹"}${folder.mediaCount != null ? ` · ${folder.mediaCount}` : ""}`, mediaId ? () => props.onNavigate({ name: "favorite-folder", mediaId, title: folder.title }) : undefined); }), ...(!folders.loading() && !folders.error() && !folders.value()?.length ? [messageEntry("暂无收藏夹", props.width ?? 233)] : []), buttonEntry("刷新", folders.refetch)]);
-  return <Scrolled {...props} entries={entries()} />;
+  const mediaId = createMemo(() => { const first = folders.value()?.[0]; return first ? first.id ?? first.fid : undefined; });
+  return <Show when={mediaId()} keyed fallback={<BiliListPage {...props} title="收藏夹" items={[]} loading={folders.loading()} error={folders.error()} onRefresh={folders.refetch} />}>
+    {id => <FavoriteFolderScreen {...props} route={{ name: "favorite-folder", mediaId: id, title: "收藏夹" }} />}
+  </Show>;
 }
 
 function FavoriteFolderScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "favorite-folder" }> }) {
   const page = pagedData<BiliItem>(() => props.route.mediaId, changed => favoritePager(props.client, props.route.mediaId, changed));
-  const entries = createMemo<ScrollEntry[]>(() => [wrappedTitleEntry(props.route.title || "收藏夹", props.width ?? 233), ...page.state().items.map(item => listVideoEntry(item, item.owner?.name ?? "", props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))), ...(!page.state().loading && !page.state().error && !page.state().items.length ? [messageEntry("暂无内容\n稍后再试", props.width ?? 233)] : []), ...pagingEntries(page, props.width ?? 233)]);
-  return <Scrolled {...props} entries={entries()} onRefresh={page.refetch} />;
+  const items = createMemo(() => page.state().items.map(item => listVideoEntry(item, listSummary(item.owner?.name, item.duration), props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))));
+  return <BiliListPage {...props} title={props.route.title || "收藏夹"} items={items()} loading={page.state().loading} error={page.state().error} canLoadMore={page.state().canLoadMore} onRefresh={page.refetch} onMore={page.more} />;
 }
 
 function LoginScreen(props: BiliScreenProps) {
@@ -156,31 +245,212 @@ function LoginScreen(props: BiliScreenProps) {
 }
 function statusText(value: QrPollResult) { if (value.status === "scanned") return "已扫码，请在手机确认"; if (value.status === "expired") return "二维码已过期"; if (value.status === "success") return "登录成功"; if (value.status === "error") return "登录失败"; return "等待扫码"; }
 
+/** Native SearchInputBar: 56dp outlined field (30dp radius, 1dp #2C3135), 17sp text, trailing search icon. */
+function searchBarEntry(keyword: string, width: number, onPress: () => void): ScrollEntry {
+  const text = keyword ? measuredLines(keyword, width - 36 - 56, measureFor(17), 1).join("") : "搜索";
+  return { height: 56, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={keyword ? `搜索关键词：${keyword}` : "输入关键词开始搜索"} class="absolute inset-0 rounded-[30]" style={{ borderWidth: 1, borderColor: "#2c3135" }}>
+    <Text class={keyword ? "absolute left-[16] right-[40] top-[17.5] text-[17px] leading-[21] text-[#f5f5f5]" : "absolute left-[16] right-[40] top-[17.5] text-[17px] leading-[21] text-[#b6b6b6b3]"}>{text}</Text>
+    <Image src="../assets/icons/search.svg" class="absolute right-[14] top-[16] w-[24] h-[24]" />
+  </View> };
+}
+const searchTitleEntry: ScrollEntry = { height: 20, render: () => <Text accessibilityRole="header" class="absolute left-[0] right-[0] top-[1] text-[17px] leading-[20] text-center text-[#f5f5f5]">搜索</Text> };
+/** Material3 SuggestionChip rows (32dp, 8dp radius, 1dp outline, 14sp label, 8dp gaps), laid out like FlowRow. */
+function chipFlowEntry(labels: { label: string; onPress: () => void }[], width: number): ScrollEntry {
+  const max = width - 36, measure = measureFor(14);
+  const placed: { label: string; onPress: () => void; left: number; top: number; w: number }[] = [];
+  let left = 0, top = 0;
+  for (const chip of labels) {
+    const text = measuredLines(chip.label, max - 16, measure, 1).join(""), w = Math.min(max, measure(text) + 16);
+    if (left > 0 && left + w > max) { left = 0; top += 40; }
+    placed.push({ ...chip, label: text, left, top, w }); left += w + 8;
+  }
+  return { height: placed.length ? top + 32 : 0, render: () => <View class="absolute inset-0">
+    {placed.map(chip => <View onPress={chip.onPress} focusable accessibilityRole="button" accessibilityLabel={chip.label} class="absolute h-[32] rounded-[8] items-center justify-center" style={{ insetL: chip.left, insetT: chip.top, width: chip.w, borderWidth: 1, borderColor: "#2c3135" }}><Text class="text-sm leading-[20] text-[#f5f5f5]">{chip.label}</Text></View>)}
+  </View> };
+}
+
+/** Native BiliSearchScreen: 搜索 title, SearchInputBar, 搜索历史 chips (+清空), 热门搜索 chips; 6dp spacing. */
 function SearchScreen(props: BiliScreenProps) {
   const hot = asyncData(() => props.client.hotSearch()), history = new BiliSearchHistory(kv);
   const [historyItems, setHistoryItems] = createSignal(history.read());
   function submit(query: string) { try { const target = history.submit(query); setHistoryItems(history.read()); if (target) props.onNavigate(target); } catch (error) { fail(props, error); } }
   async function search() { if (!props.input) return fail(props, new Error("当前运行时未接入文字输入")); const query = await props.input("搜索哔哩哔哩"); if (query != null) submit(query); }
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("搜索"), buttonEntry("输入关键词 / AV / BV", () => void search(), true),
-    ...(historyItems().length ? [titleEntry("搜索历史"), ...historyItems().map(query => buttonEntry(query, () => submit(query))), buttonEntry("清空历史", () => { try { history.clear(); setHistoryItems([]); } catch (error) { fail(props, error); } })] : []),
-    ...(hot.value() ?? []).slice(0, 10).map(word => buttonEntry(word.showName || word.keyword, () => submit(word.keyword))), ...(hot.loading() ? [messageEntry("正在加载热门搜索…", props.width ?? 233)] : []), ...(hot.error() ? [messageEntry(String(hot.error()), props.width ?? 233)] : [])]);
-  return <Scrolled {...props} entries={entries()} />;
+  const entries = createMemo<ScrollEntry[]>(() => {
+    const width = props.width ?? 233, hotWords = hot.value() ?? [];
+    return [searchTitleEntry, searchBarEntry("", width, () => void search()),
+      ...(historyItems().length ? [{ height: 40, render: () => <View class="absolute inset-0">
+        <Text class="absolute left-[0] top-[10] text-sm leading-[20] text-white">搜索历史</Text>
+        <View onPress={() => { try { history.clear(); setHistoryItems([]); } catch (error) { fail(props, error); } }} focusable accessibilityRole="button" accessibilityLabel="清空搜索历史" class="absolute right-[0] top-[0] h-[40] w-[56] items-center justify-center"><Text class="text-sm leading-[20] text-[#ff6026]">清空</Text></View>
+      </View> } as ScrollEntry, chipFlowEntry(historyItems().map(query => ({ label: query, onPress: () => submit(query) })), width)] : []),
+      ...(hotWords.length ? [{ height: 34, render: () => <Text class="absolute left-[0] top-[0] text-[21px] leading-[26] text-[#f5f5f5]">热门搜索</Text> } as ScrollEntry, chipFlowEntry(hotWords.slice(0, 20).map(word => ({ label: word.showName || word.keyword, onPress: () => submit(word.keyword) })), width)] : []),
+      { height: 26, render: () => null }];
+  });
+  return <ScrollEntries height={props.height} entries={entries()} gap={6} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />;
 }
 
+function searchSummary(item: Extract<BiliSearchResult, { kind: "video" }>) {
+  const author = (item.author ?? "").replace(/<[^>]+>/g, "").trim();
+  const parts = [author || undefined, item.play != null ? `播放 ${formatCount(item.play)}` : undefined, item.danmaku != null ? `弹幕 ${formatCount(item.danmaku)}` : undefined].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "哔哩哔哩视频";
+}
+
+/** Native BiliSearchResultScreen: same header/bar, BiliFeedCard results, 32dp spinner while loading, auto load-more. */
 function ResultsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "results" }> }) {
   const results = pagedData<Extract<BiliSearchResult, { kind: "video" }>>(() => props.route.query, changed => searchPager(props.client, props.route.query, changed));
   async function revise() { const query = await props.input?.("搜索哔哩哔哩", props.route.query); if (query != null) { try { const target = new BiliSearchHistory(kv).submit(query); if (target) props.onNavigate(target); } catch (error) { fail(props, error); } } }
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("搜索", props.route.query), buttonEntry("修改关键词", props.input ? () => void revise() : undefined), ...results.state().items.map(item => searchResultEntry(item, props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid }))), ...(!results.state().loading && !results.state().error && !results.state().items.length ? [messageEntry("没有找到相关结果", props.width ?? 233)] : []), ...pagingEntries(results, props.width ?? 233)]);
-  return <Scrolled {...props} entries={entries()} onRefresh={results.refetch} />;
+  const spinner: ScrollEntry = { height: 64, render: () => <View class="absolute inset-0 items-center justify-center"><WatchProgressIndicator size={32} active={() => props.active ?? true} accessibilityLabel="加载中" /></View> };
+  const hint = (text: string): ScrollEntry => ({ height: 14, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-xs leading-[14] text-center text-[#b6b6b6]">{text}</Text> });
+  const entries = createMemo<ScrollEntry[]>(() => {
+    const width = props.width ?? 233, state = results.state(), items = state.items;
+    const error = state.error ? (state.error instanceof Error ? state.error.message : String(state.error)) : "";
+    const failure: ScrollEntry = { height: 52, render: () => <View class="absolute inset-0 items-center justify-center"><Text class="text-sm leading-[17] text-center text-[#ffb4ab]">{`加载失败: ${error}`}</Text></View> };
+    return [searchTitleEntry, searchBarEntry(props.route.query, width, () => void revise()),
+      ...(!props.route.query.trim() ? [hint("输入关键词开始搜索")]
+        : !items.length ? (state.loading ? [spinner] : error ? [failure] : [hint("没有找到相关结果")])
+        : [...items.map(item => listVideoEntry({ aid: item.aid, bvid: item.bvid, title: (item.title || "").replace(/<[^>]+>/g, ""), cover: item.pic }, searchSummary(item), width, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid }))),
+           ...(state.loading ? [spinner] : error ? [failure] : [])]),
+      { height: 26, render: () => null }];
+  });
+  const settled = (_first: number, last: number) => { const state = results.state(); if (last >= entries().length - 4 && state.canLoadMore && !state.loading && !state.error && state.items.length) results.more(); };
+  return <ScrollEntries onRefresh={results.refetch} height={props.height} entries={entries()} gap={6} onSettledRange={settled} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />;
 }
 
-function searchResultEntry(item: Extract<BiliSearchResult, { kind: "video" }>, width: number, onPress: () => void): ScrollEntry {
-  const heading = (item.title || "未命名结果").replace(/<[^>]+>/g, ""), summary = [item.author, item.play != null ? `播放 ${formatCount(item.play)}` : "", item.danmaku != null ? `弹幕 ${formatCount(item.danmaku)}` : ""].filter(Boolean).join(" · ");
-  const titleLines = lines(heading, width - 56, 13).slice(0, 2), summaryLines = lines(summary, width - 56, 11).slice(0, 1), imageWidth = width - 36;
-  return { height: 174, render: () => <View onPress={onPress} focusable class="absolute inset-0 rounded-[16] bg-[#202020] overflow-hidden"><View class="absolute left-[8] right-[8] top-[8] h-[104] rounded-[12] bg-[#303030] overflow-hidden">{item.pic ? <RemoteImage cacheBucket="bili-preview" url={item.pic} width={imageWidth - 16} height={104} class="absolute inset-0" /> : null}<View class="absolute left-[77] top-[33] w-[38] h-[38] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} style={{ width: 28, height: 28 }} /></View></View><Text class="absolute left-[12] right-[12] top-[119] text-[13px] leading-[18] text-white">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[5] text-[11px] leading-[15] text-[#999]">{summaryLines.join("\n")}</Text></View> };
+// Native BiliDetailScreen.kt (original-content mode): reader background, 18dp side padding,
+// 6dp item spacing, 3:2 cover, meta card, four 44dp action circles, 分P, 简介.
+/** Native WatchDark/WatchLight colorScheme, chosen by the reader preset's background luminance. */
+interface DetailPalette { dark: boolean; background: string; surface: string; surfaceVariant: string; onSurface: string; onSurfaceVariant: string; overlay: string; scrim: string }
+function detailPalette(dark: boolean): DetailPalette {
+  return dark
+    ? { dark, background: "#0b1211", surface: "#1c1f21", surfaceVariant: "#23272a", onSurface: "#f5f5f5", onSurfaceVariant: "#b6b6b6", overlay: "#0b1211b3", scrim: "#0b121199" }
+    : { dark, background: "#f7f4f0", surface: "#ffffff", surfaceVariant: "#ede6de", onSurface: "#1c1b1f", onSurfaceVariant: "#4a4a4a", overlay: "#f7f4f0b3", scrim: "#f7f4f099" };
 }
+// Native passes showCommentEntry = false; the 评论 section is kept but hidden like native.
+const SHOW_COMMENT_ENTRY = false;
+
+function sectionTitle(pal: DetailPalette, title: string, trailing?: string): ScrollEntry {
+  return { height: 20, render: () => <View class="absolute inset-0">
+    <Text class="absolute left-[0] top-[0.75] text-[17px] leading-[20]" style={{ textColor: pal.onSurfaceVariant }}>{title}</Text>
+    {trailing ? <Text class="absolute right-[0] top-[2] text-[9px] leading-[17]" style={{ textColor: pal.onSurfaceVariant }}>{trailing}</Text> : null}
+  </View> };
+}
+
+function surfaceCard(pal: DetailPalette, text: string, width: number, color = pal.onSurfaceVariant, onPress?: () => void): ScrollEntry {
+  const wrapped = measuredLines(text, width - 12, measureFor(17));
+  return { height: 12 + wrapped.length * 21, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={text} class="absolute inset-0 rounded-[16]" style={{ bgColor: pal.surface }}>
+    <Text class="absolute left-[6] right-[6] top-[6] text-[17px] leading-[21] text-center" style={{ textColor: color }}>{wrapped.join("\n")}</Text>
+  </View> };
+}
+
+function detailDuration(seconds?: number) { if (!seconds || seconds <= 0) return undefined; return durationText(seconds); }
 
 function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
+  const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
+  let controller: BiliDetailController;
+  createEffect(() => {
+    const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: num(props.route.cid) || undefined };
+    controller = new BiliDetailController(props.client, kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
+    const own = controller; setState(own.state); void own.load(); onCleanup(() => own.dispose());
+  });
+  const [busy, setBusy] = createSignal("");
+  const [expanded, setExpanded] = createSignal(false);
+  let disposed = false; onCleanup(() => { disposed = true; });
+  async function play() {
+    if (busy()) return;
+    const data = state().detail, actual = controller.selectedCid(), own = controller;
+    if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
+    try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true });
+      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+    } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
+  }
+  function share() {
+    const it = state().detail?.item, title = biliActionTitle(it?.title, it?.bvid, it?.aid);
+    const qr = () => props.onNavigate({ name: "share", aid: it?.aid, bvid: it?.bvid, title });
+    if (props.onShare) props.onShare({ origin: "bili-detail", title, link: biliShareLink(it?.bvid, it?.aid) }, qr); else qr();
+  }
+  const preset = () => props.preset ?? defaultReaderPreset();
+  const backgrounds = useReaderBackgrounds();
+  const entries = createMemo<ScrollEntry[]>(() => {
+    // Cards follow the preset's light/dark scheme; the reader TITLE/BODY colours then sit on a
+    // matching surface (native kept a dark card even on light presets: dark-on-dark text).
+    const pal = detailPalette(readerChrome(preset()).dark);
+    const width = props.width ?? 233, cardWidth = width - 36, inner = cardWidth - 12;
+    const data = state().detail, it = data?.item, st = state();
+    const titleFont = presetContentFont(preset(), "title"), bodyFont = presetContentFont(preset(), "body");
+    const measureScaled = (font: typeof titleFont) => (text: string) => getOps().measureText(text, font.fontSlot) * font.scale;
+    const fontText = (font: typeof titleFont, text: string, top: number, w: number) => <Text class={readerTextClass(font.fontSlot)} style={{ insetT: top, width: w / font.scale, fontSlot: font.fontSlot, scale: font.scale, originX: -.5, originY: -.5, lineHeight: font.lineHeight / font.scale, textColor: font.color, tracking: (font.tracking ?? 0) / font.scale, textAlign: 0 }}>{text}</Text>;
+    const cover: ScrollEntry = { height: cardWidth * 2 / 3, render: () => <View onPress={() => void play()} focusable accessibilityRole="button" accessibilityLabel="播放" class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
+      {it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={cardWidth} height={cardWidth * 2 / 3} fit="cover" class="absolute left-[0] top-[0]" /> : null}
+      <View class={pal.dark ? "absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" : "absolute inset-0 bg-gradient-to-b from-transparent to-[#f7f4f0b3]"} />
+      <View class="absolute w-[36] h-[36] rounded-full items-center justify-center" style={{ bgColor: pal.scrim, insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={pal.dark ? "../assets/icons/bili-action-play-circle.svg" : "../assets/icons/bili-action-play-circle-dark.svg"} style={{ width: 32, height: 32 }} /></View>
+    </View> };
+    const title = measuredLines(it?.title?.trim() || "加载中...", inner, measureScaled(titleFont), 3);
+    const owner = it?.owner?.name?.trim();
+    const chips = [it?.stat?.view != null ? `播放 ${formatCount(it.stat.view)}` : "", it?.stat?.like != null ? `点赞 ${formatCount(it.stat.like)}` : "", it?.stat?.danmaku != null ? `弹幕 ${formatCount(it.stat.danmaku)}` : ""].filter(Boolean);
+    const titleHeight = title.length * titleFont.lineHeight;
+    const ownerTop = 6 + titleHeight + 6, chipsTop = ownerTop + (owner ? 17 + 6 : 0);
+    const metaHeight = chipsTop + (chips.length ? 21 + 6 : 0);
+    let chipLeft = 6;
+    const chipBoxes = chips.map(text => { const w = getOps().measureText(text, FONT_SLOT[9]) + 8, left = chipLeft; chipLeft += w + 4; return { text, left, w }; });
+    const meta: ScrollEntry = { height: metaHeight, render: () => <View accessibilityLabel={[it?.title, owner && `UP 主：${owner}`, ...chips].filter(Boolean).join("，")} class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
+      {title.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * titleFont.lineHeight, width: inner, height: titleFont.lineHeight }}>{fontText(titleFont, line, 1, inner)}</View>)}
+      {owner ? <Text class="absolute left-[6] text-[9px] leading-[17]" style={{ insetT: ownerTop + 1, textColor: pal.onSurfaceVariant }}>{`UP 主：${owner}`}</Text> : null}
+      {chipBoxes.filter(chip => chip.left + chip.w <= cardWidth - 6).map(chip => <View class="absolute h-[21] rounded-[10.5]" style={{ insetL: chip.left, insetT: chipsTop, width: chip.w, bgColor: pal.surfaceVariant }}><Text class="absolute left-[4] top-[2] text-[9px] leading-[17]" style={{ textColor: pal.onSurfaceVariant }}>{chip.text}</Text></View>)}
+    </View> };
+    const size = Math.max(36, Math.min(44, (cardWidth - 18) / 4)), rowLeft = (cardWidth - size * 4 - 18) / 2;
+    const locked = st.busy || st.loading || !data;
+    const actionButtons = [
+      { icon: pal.dark ? "../assets/icons/bili-action-bili-thumb-up.svg" : "../assets/icons/bili-action-bili-thumb-up-dark.svg", label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
+      { icon: pal.dark ? "../assets/icons/bili-action-bili-coin.svg" : "../assets/icons/bili-action-bili-coin-dark.svg", label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
+      { icon: pal.dark ? "../assets/icons/bili-action-star.svg" : "../assets/icons/bili-action-star-dark.svg", label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
+      { icon: pal.dark ? "../assets/icons/bili-action-share.svg" : "../assets/icons/bili-action-share-dark.svg", label: "转发", selected: false, onPress: share },
+    ];
+    const iconSize = Math.min(24, Math.max(18, size * .55));
+    const actions: ScrollEntry = { height: size, render: () => <View class="absolute inset-0">
+      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center" style={{ bgColor: button.selected ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
+        <Image src={button.icon} style={{ width: iconSize * 32 / 24, height: iconSize * 32 / 24 }} />
+      </View>)}
+    </View> };
+    const pages = data?.pages ?? [];
+    const pageEntries = pages.map((page, index): ScrollEntry => {
+      const selected = st.selected === index, duration = detailDuration(page.duration);
+      const textWidth = inner - (duration ? getOps().measureText(duration, FONT_SLOT[9]) + 6 : 0);
+      const label = page.part?.trim() || `第${page.page ?? 1}集`, wrapped = measuredLines(label, textWidth, measureFor(17), 2);
+      const height = 14.5 + wrapped.length * 17;
+      return { height, render: () => <View onPress={busy() ? undefined : () => controller.select(index)} focusable accessibilityRole="button" accessibilityLabel={`${label}${duration ? `，${duration}` : ""}`}
+        class={selected ? "absolute inset-0 rounded-[16] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16]"} style={{ bgColor: selected ? pal.surfaceVariant : pal.surface }}>
+        <Text class="absolute left-[6] top-[7.75] text-[17px] leading-[17]" style={{ width: textWidth, textColor: pal.onSurface }}>{wrapped.join("\n")}</Text>
+        {duration ? <Text class="absolute right-[6] text-[9px] leading-[17]" style={{ insetT: (height - 17) / 2 + .5, textColor: pal.onSurfaceVariant }}>{duration}</Text> : null}
+      </View> };
+    });
+    const desc = data?.desc?.trim();
+    const description = (): ScrollEntry[] => {
+      if (!desc) return [];
+      const measure = measureScaled(bodyFont), arrow = 17;
+      const all = measuredLines(desc, inner, measure), canExpand = all.length > 3;
+      const shown = expanded() || !canExpand ? all : measuredLines(desc, inner - arrow, measure, 3);
+      const height = 12 + shown.length * bodyFont.lineHeight;
+      return [sectionTitle(pal, "简介"), { height, render: () => <View onPress={canExpand ? () => setExpanded(value => !value) : undefined} focusable={canExpand} accessibilityRole={canExpand ? "button" : undefined} accessibilityLabel={desc} class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
+        {shown.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * bodyFont.lineHeight, width: inner, height: bodyFont.lineHeight }}>{fontText(bodyFont, line, 0, inner)}</View>)}
+        {canExpand && !expanded() ? <Text class="absolute right-[6] text-[17px] leading-[21]" style={{ insetT: height - 6 - 21, textColor: pal.onSurface }}>▼</Text> : null}
+      </View> }];
+    };
+    const message = st.error ? String(st.error) : busy() || st.message || (st.offline ? "本地已保存详情" : "");
+    return [
+      cover, meta, actions,
+      ...(pages.length ? [sectionTitle(pal, "分P", `${pages.length} 个`), ...pageEntries] : []),
+      ...description(),
+      ...(SHOW_COMMENT_ENTRY && it?.aid ? [sectionTitle(pal, "评论"), surfaceCard(pal, "查看评论", cardWidth, pal.onSurface, () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
+      ...(message ? [surfaceCard(pal, message, cardWidth)] : []),
+      { height: 50, render: () => <View class="absolute inset-0" /> },
+    ];
+  });
+  return <View class="absolute inset-0 bg-[#000000]">
+    <ReaderBackground background={preset().background} snapshot={backgrounds()} width={props.width ?? 233} height={props.height} active={props.active ?? true} />
+    <ScrollEntries onRefresh={() => void controller.load()} height={props.height} entries={entries()} gap={6} verticalPadding={0} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />
+  </View>;
+}
+
+function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
   const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
   let controller: BiliDetailController;
   createEffect(() => {
@@ -231,16 +501,55 @@ function ShareScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name
   return <SharedShareQrScreen width={props.width ?? 233} height={props.height} title={props.route.title || "扫码分享"} url={url} onClose={props.onBack} onError={message => fail(props, new Error(message))} />;
 }
 
-function settingEntry(label: string, enabled: boolean, onPress?: () => void): ScrollEntry { return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[24] bg-[#292929]"><Text class="absolute left-[14] top-[14] text-[17px] leading-[21] text-white">{label}</Text><View class={enabled ? "absolute right-[10] top-[10] w-[42] h-[28] rounded-[20] bg-[#fb7299] items-center justify-center" : "absolute right-[10] top-[10] w-[42] h-[28] rounded-[20] bg-[#4a4a4a] items-center justify-center"}><Text class="text-[11px] leading-[15] text-white">{enabled ? "开" : "关"}</Text></View></View> }; }
+const spacerEntry = (height: number): ScrollEntry => ({ height, render: () => null });
+/** Native SettingsPillRow: 52dp pill, 10dp start / 15dp end padding, bodyLarge 17/21 label + WatchSwitch. */
+function switchRow(label: string, checked: boolean, onChange?: () => void): ScrollEntry {
+  return { height: 52, render: () => <View class="absolute inset-0 rounded-[47] bg-[#2a2a2a]">
+    <Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
+    <View class="absolute right-[15] top-[17.25]"><WatchSwitch checked={checked} onChange={() => onChange?.()} accessibilityLabel={label} /></View>
+  </View> };
+}
+/** Native SettingsDangerRow: danger red label + 30dp trailing icon, 60% when disabled. */
+function dangerEntry(label: string, icon: string, onPress?: () => void): ScrollEntry {
+  return { height: 52, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute inset-0 rounded-[47] bg-[#2a2a2a]">
+    <Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#e54d4d]" style={{ opacity: onPress ? 1 : .6 }}>{label}</Text>
+    <Image src={icon} class="absolute right-[10] top-[11] w-[30] h-[30]" style={{ opacity: onPress ? 1 : .6 }} />
+  </View> };
+}
+
+/** Native BiliSettingsScreen geometry (OWW242): title 21/26, status 12/14, 7.5dp section gap, 8dp entry gaps. */
 function SettingsScreen(props: BiliScreenProps) {
-  const session = asyncData(() => props.client.getSession()), [original, setOriginal] = createSignal(props.settings?.originalContentEnabled ?? true), [background, setBackground] = createSignal(props.settings?.continuePlaybackInBackgroundEnabled ?? false), [confirmDelete, setConfirmDelete] = createSignal(false);
+  const session = asyncData(() => props.client.getSession()), [original, setOriginal] = createSignal(props.settings?.originalContentEnabled ?? true), [background, setBackground] = createSignal(props.settings?.continuePlaybackInBackgroundEnabled ?? false);
+  const [confirmDelete, setConfirmDelete] = createSignal(false), [download, setDownload] = createSignal(false), [deleting, setDeleting] = createSignal(false);
   createEffect(() => { const value = props.settings?.originalContentEnabled; if (typeof value === "boolean" && value !== original()) setOriginal(value); });
   createEffect(() => { const value = props.settings?.continuePlaybackInBackgroundEnabled; if (typeof value === "boolean" && value !== background()) setBackground(value); });
   function toggleOriginal() { const value = !original(); props.settings?.onOriginalContentChange?.(value); }
   function toggleBackground() { if (!props.settings?.onContinuePlaybackInBackgroundChange) return; const value = !background(); setBackground(value); props.settings.onContinuePlaybackInBackgroundChange(value); }
-  const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [titleEntry("删除频道"), messageEntry("删除后将移除本地缓存", props.width ?? 233), buttonEntry("确认删除", async () => { try { await props.settings?.onDeleteChannel?.(); setConfirmDelete(false); } catch(error) { fail(props,error); } }), buttonEntry("取消", () => setConfirmDelete(false))] : [titleEntry("设置", session.loading() ? "加载中…" : authenticated(session.value()) ? "已登录" : "未登录"), ...(props.settings?.showOriginalContent ? [settingEntry("原文阅读模式", original(), toggleOriginal), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#999]">刷新时抓取原文正文与图片</Text> } as ScrollEntry] : []), ...(props.settings?.showContinuePlaybackInBackground ? [settingEntry("在后台继续播放", background(), props.settings.onContinuePlaybackInBackgroundChange ? toggleBackground : undefined)] : []), ...(props.settings?.onSyncWatchRecords ? [buttonEntry("开始同步B站观看记录", props.settings.onSyncWatchRecords)] : []), buttonEntry("退出登录", authenticated(session.value()) ? async () => { try { await props.client.logout(); props.onNavigate({ name: "feed" }); } catch (error) { fail(props, error); } } : undefined), buttonEntry("删除频道", props.settings?.deleteEnabled && props.settings.onDeleteChannel ? () => setConfirmDelete(true) : undefined)]);
-  const rootBack = () => { if (!confirmDelete()) return false; setConfirmDelete(false); return true; };
-  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: rootBack })} />;
+  const entries = createMemo<ScrollEntry[]>(() => {
+    const width = props.width ?? 233, loggedIn = authenticated(session.value());
+    const prompt = measuredLines("下载手机端app以在手机上编辑和同步内容", width - 36 - 20, measureFor(17), 2).join("\n");
+    return [
+      { height: 32, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[26] text-center text-[#f5f5f5]">设置</Text> },
+      { height: 14, render: () => <Text class="absolute left-[0] right-[0] top-[-1.5] text-xs leading-[14] text-center text-[#b6b6b6]">{session.loading() ? "" : loggedIn ? "已登录" : "未登录"}</Text> },
+      ...(props.settings?.showOriginalContent
+        ? [spacerEntry(7.5), switchRow("原文阅读模式", original(), toggleOriginal),
+           { height: 18, render: () => <Text class="absolute left-[10] right-[0] top-[4] text-xs leading-[14] text-[#b6b6b6]">刷新时抓取原文正文与图片</Text> }, spacerEntry(8)]
+        : [spacerEntry(4)]),
+      ...(props.settings?.showContinuePlaybackInBackground ? [switchRow("在后台继续播放", background(), props.settings.onContinuePlaybackInBackgroundChange ? toggleBackground : undefined), spacerEntry(8)] : []),
+      { height: 65, render: () => <View onPress={() => setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] top-[0] h-[57] rounded-[16] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[8.5] text-[17px] leading-[20] text-[#f5f5f5]">{prompt}</Text></View> },
+      dangerEntry("退出登录", "../assets/icons/exit-to-app.svg", loggedIn ? async () => { try { await props.client.logout(); props.onNavigate({ name: "feed" }); } catch (error) { fail(props, error); } } : undefined),
+      spacerEntry(4),
+      dangerEntry("删除频道", "../assets/icons/delete-outline.svg", props.settings?.deleteEnabled && props.settings.onDeleteChannel ? () => setConfirmDelete(true) : undefined),
+      spacerEntry(20),
+    ];
+  });
+  const rootBack = () => { if (download()) { setDownload(false); return true; } if (!confirmDelete()) return false; setConfirmDelete(false); return true; };
+  const width = () => props.width ?? 233;
+  return <>
+    <ScrollEntries height={props.height} entries={entries()} gap={0} inputActive={() => !confirmDelete() && !download()} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: rootBack })} />
+    <Show when={download()}><DownloadPhoneAppDialog width={width()} height={props.height} operation="同步B站观看记录" onDismiss={() => setDownload(false)} onError={message => fail(props, new Error(message))} /></Show>
+    <Show when={confirmDelete()}><DeleteConfirmDialog width={width()} height={props.height} title="删除频道" message="删除后将移除本地缓存" busy={deleting()} onCancel={() => setConfirmDelete(false)} onConfirm={() => { setDeleting(true); void Promise.resolve(props.settings?.onDeleteChannel?.()).catch(error => fail(props, error)).finally(() => { setDeleting(false); setConfirmDelete(false); }); }} /></Show>
+  </>;
 }
 function PlayerScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "player" }> }) { const entries = [titleEntry("播放", props.route.title), messageEntry("播放器路由应由宿主接管，当前页面未取得原生播放边界。", props.width ?? 233), buttonEntry("返回", props.onBack)]; return <Scrolled {...props} entries={entries} />; }
 
@@ -249,7 +558,7 @@ export function BiliScreen(props: BiliScreenProps) {
   return <Show when={route().name !== "entry" && route().name !== "feed"} fallback={<FeedScreen {...props} />}>
     <Show when={route().name !== "channel-info"} fallback={<ChannelInfoScreen {...props} />}><Show when={route().name !== "history"} fallback={<HistoryScreen {...props} />}><Show when={route().name !== "watch-later"} fallback={<WatchLaterScreen {...props} />}><Show when={route().name !== "favorites"} fallback={<FavoritesScreen {...props} />}><Show when={route().name !== "favorite-folder"} fallback={<FavoriteFolderScreen {...props} route={route() as Extract<BiliRoute, { name: "favorite-folder" }>} />}><Show when={route().name !== "login"} fallback={<LoginScreen {...props} />}><Show when={route().name !== "search"} fallback={<SearchScreen {...props} />}>
       <Show when={route().name !== "results"} fallback={<ResultsScreen {...props} route={route() as Extract<BiliRoute, { name: "results" }>} />}>
-        <Show when={route().name !== "detail"} fallback={<DetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} />}>
+        <Show when={route().name !== "detail"} fallback={(props.settings?.originalContentEnabled ?? true) ? <DetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} /> : <RssDetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} />}>
           <Show when={route().name !== "comments" && route().name !== "replies"} fallback={<CommentScreen {...props} route={route() as Extract<BiliRoute, { name: "comments" | "replies" }>} />}>
             <Show when={route().name !== "actions"} fallback={<ActionsScreen {...props} route={route() as Extract<BiliRoute, { name: "actions" }>} />}><Show when={route().name !== "share"} fallback={<ShareScreen {...props} route={route() as Extract<BiliRoute, { name: "share" }>} />}><Show when={route().name !== "settings"} fallback={<SettingsScreen {...props} />}><PlayerScreen {...props} route={route() as Extract<BiliRoute, { name: "player" }>} /></Show></Show></Show>
           </Show>

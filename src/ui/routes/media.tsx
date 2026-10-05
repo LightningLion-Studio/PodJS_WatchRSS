@@ -81,6 +81,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
     <>
       <Show when={props.page() === "bili"}>
         <BiliScreen
+          preset={props.preset()}
+          active={props.active()}
           loadLocalDetail={loadLocalBiliDetail}
           onShare={props.share}
           width={props.width}

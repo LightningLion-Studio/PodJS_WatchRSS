@@ -43,7 +43,14 @@ export class SyncArticleReceiver {
   if(!(await this.db.query("SELECT device_id FROM sync_local_identity WHERE id=1")).length)throw new Error("Initialize sync identity first");
   const source=article.rssSourceUrl&&/^https?:\/\//i.test(article.rssSourceUrl.trim())?article.rssSourceUrl:null;
   const channelUrl=source??"watchrss://phone-imports",imported=isImportedContentUrl(channelUrl);
-  const existing=(await this.db.query(`SELECT a.id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE ch.url=? AND a.dedup_key=?`,[channelUrl,article.articleId]))[0];
+  // A schema migration may have folded the SHA materialization into its RSS
+  // row. Reuse only that durable binding in the same source and at the same URL.
+  const existing=(await this.db.query(`SELECT a.id,a.dedup_key,a.guid FROM articles a JOIN channels ch ON ch.id=a.channel_id
+   WHERE ch.url=? AND (a.dedup_key=? OR ((a.link=? OR (a.link IS NULL AND EXISTS(SELECT 1 FROM sync_article_ids m WHERE m.item_id=a.id AND m.article_id=? AND m.url=?))) AND
+    (a.dedup_key LIKE 'guid:%' OR a.dedup_key LIKE 'link:%' OR a.dedup_key LIKE 'title:%') AND
+    EXISTS(SELECT 1 FROM sync_article_ids m WHERE m.item_id=a.id AND m.article_id=?)))
+   ORDER BY CASE WHEN a.dedup_key=? THEN 0 ELSE 1 END,a.id LIMIT 1`,[channelUrl,article.articleId,article.url,article.articleId,article.url,article.articleId,article.articleId]))[0];
+  const dedupKey=existing?String(existing.dedup_key):article.articleId;
   let local:SyncArticleBody|null=null,available=false,storedBody=false;
   if(this.resolveLocal){const resolved=await this.resolveLocal(article);local=resolved?.body??null;available=resolved?.available??false;storedBody=resolved?.hasStoredBody??false;}
   else if(existing){
@@ -62,7 +69,7 @@ export class SyncArticleReceiver {
   const title=nonblank(article.title)?article.title:article.url,excerpt=nonblank(article.excerpt)?article.excerpt:null;
   const sourceTitle=source?(nonblank(article.rssSourceTitle??"")?article.rssSourceTitle!:nonblank(article.siteName)?article.siteName:source.replace(/^https?:\/\//i,"").split(/[/:?#]/)[0]!):"独立文章";
   const idSql="(SELECT a.id FROM articles a JOIN channels c ON c.id=a.channel_id WHERE c.url=? AND a.dedup_key=?)";
-  const idParams=[channelUrl,article.articleId];
+  const idParams=[channelUrl,dedupKey];
   const statements:Statement[]=[
    {sql:`UPDATE source_preferences SET use_original_content=1 WHERE channel_id=(SELECT id FROM channels WHERE url=? AND ?=1 AND (title!=? OR description IS NOT ?))`,params:[channelUrl,source?0:1,"独立文章","从手机同步来的独立网页文章"]},
    {sql:`INSERT INTO channels(url,title,description,created_at,sort_order,last_fetched_at) VALUES(?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
@@ -73,7 +80,7 @@ export class SyncArticleReceiver {
    {sql:`INSERT INTO articles(channel_id,title,description,content,link,guid,image_url,dedup_key,fetched_at,is_read,reading_progress)
     SELECT id,?,?,?,?,?,?,?,?,?,? FROM channels WHERE url=? ON CONFLICT(channel_id,dedup_key) DO UPDATE SET
     title=excluded.title,description=excluded.description,content=CASE WHEN ?=1 THEN excluded.content ELSE articles.content END,
-    link=excluded.link,image_url=excluded.image_url,fetched_at=excluded.fetched_at,is_read=CASE WHEN ?=1 THEN excluded.is_read ELSE articles.is_read OR excluded.is_read END`,params:[title,excerpt,stored,article.url,article.articleId,article.imageUrl,article.articleId,fetched,article.isRead?1:0,progress,channelUrl,hasBody?1:0,authoritative?1:0]},
+    link=excluded.link,image_url=excluded.image_url,fetched_at=excluded.fetched_at,is_read=CASE WHEN ?=1 THEN excluded.is_read ELSE articles.is_read OR excluded.is_read END`,params:[title,excerpt,stored,article.url,existing?.guid??article.articleId,article.imageUrl,dedupKey,fetched,article.isRead?1:0,progress,channelUrl,hasBody?1:0,authoritative?1:0]},
   ];
   // SQLite evaluates all SET expressions against the pre-update reading row.
   // Update reading before replacing the content hash used by this decision.

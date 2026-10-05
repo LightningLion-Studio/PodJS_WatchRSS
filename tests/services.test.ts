@@ -316,6 +316,9 @@ test("RSS favorite and watch later are independent and survive schema reopening"
 test("preexisting favorites are backfilled without duplication or resurrection",async()=>{
   const id=(await services.services.listArticles({pageSize:1,page:3}))[0]!.id;
   await sqlite.execute("UPDATE articles SET is_saved=1 WHERE id=?",[Number(id)]);
+  // Installed builds before schema versioning report user_version=0. The first
+  // upgrade performs the legacy backfill; matching-version opens must skip it.
+  await sqlite.execute("PRAGMA user_version=0");
   const {initializeSchema}=await import("../src/core/schema.ts");
   await initializeSchema(sqlite); await initializeSchema(sqlite);
   expect(await sqlite.query("SELECT saved FROM article_saved_states WHERE article_id=? AND save_type='favorite'",[Number(id)])).toEqual([{saved:1}]);

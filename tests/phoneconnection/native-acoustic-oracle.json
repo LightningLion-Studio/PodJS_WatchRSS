@@ -1,0 +1,41 @@
+{
+  "encodedChars": 175,
+  "existing": {
+    "a": "r",
+    "s": "mi108507",
+    "t": "TOKEN123",
+    "h": "192.168.31.234",
+    "k": "g",
+    "o": 8080
+  },
+  "gzipBase64": "H4sIAAAAAAAA/w2KSwqAIBBA7zKLVqXUMpCOEpYTSZrijKREd8/l+7xw2dvADDEnXCnkBj3ozTrLtelH834moiGhD4yDvWPmduTkWj2ZI81SYtE+OhR78PJANKJ4txQ1dlVN8P0b2cXTZAAAAA==",
+  "compact": {
+    "p": "ABCDEFGH",
+    "a": "r",
+    "s": "W123",
+    "t": "TOKEN123",
+    "h": "192.168.43.1",
+    "k": "g",
+    "o": 8080
+  },
+  "legacyAbility": "REMOTE_INPUT",
+  "nativeRoundtrip": "{\"kind\":\"pure_sound\",\"ability\":\"watchrss-remote-input\",\"url\":\"https://example.com/feed.xml?x=1&y=2\"}",
+  "compressedBytes": 109,
+  "durationMs": 18000,
+  "payload": "{\"kind\":\"pure_sound\",\"ability\":\"watchrss-remote-input\",\"url\":\"https://example.com/feed.xml?x=1&y=2\"}",
+  "nativePcmSha256": "412b37fd6d04e9cb051eb3a6ce269e561922ae3d25fa3d09b67ca889031d98e4",
+  "sourceSha256": {
+    "phoneconnection/acoustic/AcousticCodec.kt": "0e446258c842098f2164aec86e15f596b3f2a3feb4b8216490d00bf37640a831",
+    "phoneconnection/AcousticConnectionProtocol.kt": "10497c9776a6401cb591c9e7e7874517ce76fe41c3aea3b973ecd1b278dc4c4a",
+    "phoneconnection/PhoneConnectionAbility.kt": "cafffb9e05bd5d54c1630c98e2de51b0e14e5f221a9b4ee1fa8f4b74cb45ddb6",
+    "phoneconnection/SavedItemsSyncPayload.kt": "a219f0029d43b144f9d600e7850bf5913af60817776faae1bb179db168ed222c"
+  },
+  "jsPcmSha256": "412b37fd6d04e9cb051eb3a6ce269e561922ae3d25fa3d09b67ca889031d98e4",
+  "highCrcInterop": {
+    "payload": "{\"kind\":\"pure_sound\",\"ability\":\"SYNC_FAVORITES\",\"items\":[{\"link\":\"https://example.com/0\"}]}",
+    "nativeGzipBase64": "H4sIAAAAAAAA/6tWys7MS1GyUiooLUqNL84vBXJ0lBKTMnMySyqBwsGRfs7xbo5h/kGeIa7BQKnMktTcYiWr6GqlnMy8bKCKjJKSgmIrff3UisTcgpxUveT8XH0DpdrYWgBexgkPWwAAAA==",
+    "nativeOriginalRejected": true,
+    "jsReceivesNative": true,
+    "nativeReceivesJsCompatibleHeader": true
+  }
+}

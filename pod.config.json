@@ -4,6 +4,10 @@
   "versionName": "0.1.0-dev",
   "versionCode": 1,
   "name": "腕上RSS · PodJS",
+  "android": {
+    "resources": "android/res",
+    "theme": "@style/Theme.WatchRSS.PodJS.Splash"
+  },
   "capabilities": [
     "input.touch",
     "input.rotary",
@@ -37,7 +41,8 @@
     "net.discovery",
     "display.power",
     "system.share",
-    "host.lifecycle"
+    "host.lifecycle",
+    "debug.acoustic"
   ],
   "resources": {
     "fontRegular": "assets/fonts/watch_sans.ttf",
@@ -79,5 +84,12 @@
     "assets": {
       "fonts/watch-sans.ttf": "assets/fonts/watch_sans.ttf"
     }
-  }
+  },
+  "background": {
+    "watchrss-cloud-sync": "src/cloud/background.ts"
+  },
+  "backgroundServices": [
+    "debug.cloudHost",
+    "kv.get"
+  ]
 }

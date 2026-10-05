@@ -29,8 +29,10 @@ export class AppLogger {
  private queue:Promise<unknown>=Promise.resolve();
  constructor(private readonly file:LogFile,private readonly now=()=>new Date(),private readonly output:(level:LogLevel,line:string)=>void=()=>{}){}
  private serial<T>(work:()=>Promise<T>):Promise<T>{const next=this.queue.then(work);this.queue=next.catch(()=>{});return next;}
- init(legacyTimeline?:string):Promise<void>{
-  const ready=this.serial(async()=>{const raw=await this.file.read();if(raw){const safe=redactSensitiveLogContent(raw);if(safe!==raw)await this.file.replace(safe);}else if(legacyTimeline){await this.file.replace(redactSensitiveLogContent(legacyTimeline));}});
+ /** `scanExisting=false` skips the one-time full-file redaction of logs written by older builds
+  * (every new line is already redacted in write()). */
+ init(legacyTimeline?:string,scanExisting=true):Promise<void>{
+  const ready=this.serial(async()=>{const raw=scanExisting?await this.file.read():(legacyTimeline&&await this.file.size()>0?'present':null);if(raw){if(scanExisting){const safe=redactSensitiveLogContent(raw);if(safe!==raw)await this.file.replace(safe);}}else if(legacyTimeline){await this.file.replace(redactSensitiveLogContent(legacyTimeline));}});
   this.d('AppLogger','日志系统初始化完成');
   return ready;
  }

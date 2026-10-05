@@ -127,6 +127,27 @@ function pump(): void {
   }
 }
 
+/** Released-but-finished textures, oldest first, bounded by decoded bytes. */
+const RETAINED_BYTES = 8 * 1024 * 1024;
+const retained: Entry[] = [];
+function textureBytes(entry: Entry) { return entry.maxDimension * entry.maxDimension * 4; }
+function dispose(entry: Entry): void {
+  entries.delete(entry.key);
+  entry.cancelled = true;
+  entry.current?.cancel();
+  if (entry.handle >= 0) getOps().freeTexture?.(entry.handle);
+  removeFile(entry.inputPath);
+  removeFile(entry.outputPath);
+}
+function retain(entry: Entry): void {
+  retained.push(entry);
+  let total = retained.reduce((sum, item) => sum + textureBytes(item), 0);
+  while (total > RETAINED_BYTES && retained.length > 1) { const oldest = retained.shift()!; total -= textureBytes(oldest); dispose(oldest); }
+}
+/** Free every retained texture (memory pressure, tests). */
+export function releaseRetainedRemoteImages(): void { while (retained.length) dispose(retained.shift()!); }
+function revive(entry: Entry): void { const index = retained.indexOf(entry); if (index >= 0) retained.splice(index, 1); }
+
 export function bindRemoteImage(props: RemoteImageProps, node: NodeMirror, onSize?: (width:number,height:number)=>void): () => void {
   // Decode at device pixels (logical × scale), like native Coil sizing to the view; capped by the 512px texture budget.
   const metrics = getDisplayMetrics(), pixelScale = metrics.logicalWidth > 0 ? metrics.physicalWidth / metrics.logicalWidth : 1;
@@ -143,6 +164,7 @@ export function bindRemoteImage(props: RemoteImageProps, node: NodeMirror, onSiz
     queue.push(entry);
     pump();
   }
+  if (entry.refs === 0) revive(entry);
   entry.refs++;
   entry.nodes.set(node,{onSize,onError:props.onError});
   if(entry.error!==undefined)props.onError?.(entry.error);
@@ -151,12 +173,10 @@ export function bindRemoteImage(props: RemoteImageProps, node: NodeMirror, onSiz
     entry!.nodes.delete(node);
     getOps().setImage(node.id, -1);
     if (--entry!.refs > 0) return;
-    entries.delete(entry!.key);
-    entry!.cancelled = true;
-    entry!.current?.cancel();
-    if (entry!.handle >= 0) getOps().freeTexture?.(entry!.handle);
-    removeFile(entry!.inputPath);
-    removeFile(entry!.outputPath);
+    // Virtualized rows unbind on scroll-out; keep finished textures briefly so scrolling back
+    // does not re-run download/decode/read/upload (native Coil keeps a memory cache too).
+    if (entry!.handle >= 0) { retain(entry!); return; }
+    dispose(entry!);
   };
 }
 

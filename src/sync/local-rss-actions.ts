@@ -74,14 +74,14 @@ export class SqlLocalRssActions {
   }
 
   async markChannelRead(id: number): Promise<void> {
-    const rows = await this.db.query("SELECT id,link,dedup_key FROM articles WHERE channel_id=? AND is_read=0 ORDER BY id", [id]);
+    const rows = await this.db.query("SELECT id,link,dedup_key,(SELECT article_id FROM sync_article_aliases WHERE item_id=articles.id) AS bound_id FROM articles WHERE channel_id=? AND is_read=0 ORDER BY id", [id]);
     if (!rows.length) return;
     const deviceId = await this.identity(), at = this.now();
     if (!Number.isSafeInteger(at)) throw new Error("Invalid article read clock");
     const statements: {sql: string; params?: SqlParams}[] = [];
     for (const row of rows) {
       const itemId = number(row.id), link = row.link == null ? "" : string(row.link), dedupKey = string(row.dedup_key);
-      const articleId = await stableArticleId(nativeTrim(link) ? link : dedupKey, this.text.parseUri, this.codec);
+      const articleId = !nativeTrim(link) && row.bound_id ? string(row.bound_id) : await stableArticleId(nativeTrim(link) ? link : dedupKey, this.text.parseUri, this.codec);
       statements.push({
         sql: `INSERT INTO sync_article_aliases(item_id,article_id)
           SELECT id,? FROM articles WHERE id=? AND channel_id=?

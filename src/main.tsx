@@ -7,6 +7,7 @@ import { mount } from "@pocketjs/framework/solid";
 import {onCleanup,createSignal,Show} from "solid-js";
 import WatchRSS from "./ui/screen.tsx";
 import { services } from "./services.ts";
+import {startApplicationCloudSync,stopApplicationCloudSync,applyCloudBuildPolicy} from './cloud/application';
 import {startApplicationForegroundSync} from "./sync/application-host.ts";
 import {StartupGate} from "./ui/StartupGate.tsx";
 import {createAnnouncementServices} from "./announcement/host.ts";
@@ -18,7 +19,7 @@ function deferredForegroundSync(){
  const unsubscribers=new Map<unknown,()=>void>();
  void afterFirstScreen().then(()=>{
   if(disposed)return;
-  inner=startApplicationForegroundSync();startupMark('sync.started');
+  inner=startApplicationForegroundSync();startApplicationCloudSync();startupMark('sync.started');
   if(mediaEnabled!==undefined)inner.setMediaEnabled(mediaEnabled);
   for(const observer of observers)unsubscribers.set(observer,inner.bluetooth.subscribe(observer));
  });
@@ -31,7 +32,7 @@ function deferredForegroundSync(){
   bluetooth,
   createDebugBluetooth:(()=>{if(!inner)throw Error('蓝牙同步尚未启动');return inner.createDebugBluetooth();}) as Sync['createDebugBluetooth'],
   setMediaEnabled:(enabled:boolean)=>{mediaEnabled=enabled;inner?.setMediaEnabled(enabled);},
-  dispose:async()=>{disposed=true;await inner?.dispose();},
+  dispose:async()=>{disposed=true;stopApplicationCloudSync();await inner?.dispose();},
  };
 }
 function ContentApp(){
@@ -40,8 +41,8 @@ function ContentApp(){
  onCleanup(()=>{void sync.dispose();});
  return <WatchRSS services={services} createDebugBluetooth={sync.createDebugBluetooth} bluetoothSync={sync.bluetooth} announcements={createAnnouncementServices()} onSyncMediaKeepAliveChange={enabled=>sync.setMediaEnabled(enabled)} />;
 }
-function App(){const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(()=>{startupMark('debugBuild.ready');setReady(true);});return <Show when={ready()}><StartupGate content={()=> <ContentApp/>}/></Show>;}
-startAppLogger();
+function App(){const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(()=>{void applyCloudBuildPolicy().catch(()=>{});startupMark('debugBuild.ready');setReady(true);});return <Show when={ready()}><StartupGate content={()=> <ContentApp/>}/></Show>;}
+startAppLogger(afterFirstScreen(5000));
 setTelemetryDeviceId(async()=>{await afterFirstScreen();return (await getLibrarySyncRepository()).deviceId();});
 usageTelemetry.recordAppLaunch();
 mount(App);

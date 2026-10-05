@@ -9,7 +9,8 @@ import {SqlLibrarySequenceStore} from './sequence-store.ts';
 import {migrateLocalDeletionJournal} from './deletion-journal.ts';
 import {reconcileSnapshotLog} from './snapshot-log.ts';
 import {libraryRevision,revisionGuard} from './revision.ts';
-import type {PreparedArticle} from './article-export.ts';
+import {prepareArticle,bodyForRequest,type PreparedArticle,type ExportedArticle} from './article-export.ts';
+import {isImportedContentUrl} from '../core/imported-content.ts';
 import type {LibrarySessionRepository,LibraryWindow,PendingSyncSuccess} from './session.ts';
 import type {ReceivedArticle,RequestedArticleBody} from './article-batches.ts';
 import type {SyncedSource} from './library-wire.ts';
@@ -74,6 +75,29 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  exportSources(){return this.run(()=>this.snapshot(async(_a,sources)=>sources));}
  receiveArticle(entry:ReceivedArticle,remote:string,authoritative:boolean){return this.run(async()=>{await this.migrate();return entry.article.deleted?this.deletion.receive(entry.article,entry.body,remote,authoritative):this.receiver.receiveWithStats(entry.article,entry.body,remote,authoritative);});}
  exportRequested(requests:readonly RequestedArticleBody[]){return this.run(async()=>{try{if(requests.length===0)return [];return await this.snapshot(async articles=>{const ids=new Set(requests.map(r=>r.articleId));const selected=articles.filter(a=>ids.has(a.article.articleId)&&a.manifest.bodyAvailable);const outgoing:PreparedArticle[]=[];for(const article of selected)outgoing.push(await this.local.materializeRequested(article));return outgoing;});}finally{this.snapshotCache=undefined;}});}
+ /** Cloud uses the same serialization lane and transactional entity merge as phone sync. */
+ cloudSnapshot(full:boolean){return this.run(()=>this.snapshot(async(articles,sources)=>{
+  const exported:ExportedArticle[]=[];
+  for(const item of articles){const a=item.article,privateBody=isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim();
+   exported.push(full&&privateBody?(await this.local.materializeRequested(item)).article:{...a,contentHtml:null,contentText:''});}
+  const states=new Map(exported.map(a=>[a.articleId,a]));
+  for(const a of await this.local.cloudReadingStates())if(!states.has(a.articleId))states.set(a.articleId,a);
+  return {articles:exported,sources,stateArticles:[...states.values()]};
+ }));}
+ mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string){return this.run(async()=>{
+  const id=await this.migrate();let changed=await this.sources.merge(sources,remote,id,false);
+  for(const incoming of articles){
+   let article=incoming;
+   if(remote==='cloud-rss-inventory'){
+    const existing=(await this.db.query('SELECT fetched_at FROM articles a JOIN channels c ON c.id=a.channel_id WHERE c.url=? AND a.dedup_key=?',[incoming.rssSourceUrl,incoming.articleId]))[0];
+    const at=existing?Number(existing.fetched_at):this.now();article={...incoming,importedAt:at,updatedAt:at};
+   }
+   const prepared=await prepareArticle(article,this.ports.codec,true);
+   const body=bodyForRequest(prepared,{articleId:article.articleId,bodyHash:'',metadataOnly:false,chunkIndexes:[]});
+   changed+=article.deleted?await this.deletion.receive(article,body,remote,false):await this.receiver.receiveWithStats(article,body,remote,false);
+  }
+  this.snapshotCache=undefined;return changed;
+ });}
  resetPeerState(){return this.run(()=>this.sequence.reset());}
  markSuccess(pending:PendingSyncSuccess){return this.run(()=>this.sequence.markSuccess(pending));}
  /** Phone clearLibrary removes the RSS library and sync cursors while keeping
