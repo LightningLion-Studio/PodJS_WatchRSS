@@ -1,3 +1,4 @@
+import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
 import {debugGate} from '../debug/host.ts';
 import type {DebugBluetoothSession} from '../debug/bluetooth.ts';
 import {usageTelemetry} from '../telemetry/host.ts';
@@ -609,6 +610,8 @@ export default function WatchRSS(props: {
     setError("");
     try {
       setChannels(await props.services.listChannels());
+      startupMark("channels.loaded");
+      startupFirstScreen();
     } catch (e) {
       setError(String(e));
     } finally {

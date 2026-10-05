@@ -1,3 +1,4 @@
+import {startupMark} from '../core/startup-trace.ts';
 import {usageTelemetry,recordHostReleaseOobeOpened} from '../telemetry/host.ts';
 import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
@@ -61,7 +62,7 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
    legalWriter?.save(empty);
    activityState=captureLegalNavigation(activityState,empty);
   }
-  saveActivityState();setSession(value);
+  saveActivityState();startupMark('startup.session');setSession(value);
  };
  const load=()=>{const current=++generation;legalWriter?.close();setFatal('');setSession(undefined);void(async()=>{
   const restored=await application.activityState.read();if(current!==generation)return;

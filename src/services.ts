@@ -1,3 +1,4 @@
+import {startupMark,startupStep} from "./core/startup-trace.ts";
 import {appLogger} from './logs/app-logger.ts';
 import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
 import {ImportedArticleDeletion} from "./core/imported-article-deletion.ts";
@@ -58,11 +59,11 @@ export async function getDouyinSavedStore(){await init();return douyinSavedStore
 export const memoRepository = new MemoRepository(db, "podjs-watch");
 let ready: Promise<void> | undefined;
 function init(): Promise<void> { return ready ??= (async()=>{
-  const fresh=!(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")).length;
-  await initializeSchema(db,{seedBuiltinChannels:fresh});
-  await ensureSyncDevice(db,async()=>base64ToBytes((await hostOperation<{bytesBase64:string}>("crypto.random",{bytes:16}).result).bytesBase64));
+  const fresh=await startupStep('init.probe',async()=>!(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")).length);
+  await startupStep('init.schema',()=>initializeSchema(db,{seedBuiltinChannels:fresh}));
+  await startupStep('init.syncDevice',()=>ensureSyncDevice(db,async()=>base64ToBytes((await hostOperation<{bytesBase64:string}>("crypto.random",{bytes:16}).result).bytesBase64)));
   // Retry committed deletions after process interruption; keep failed work queued.
-  await new ImportedArticleDeletion(db,hostSyncText,hostArticleBodyCodec,fileChunks,itemId=>originalCache.cancelItems([String(itemId)])).cleanupPending().catch(()=>{});
+  await startupStep('init.deletionCleanup',()=>new ImportedArticleDeletion(db,hostSyncText,hostArticleBodyCodec,fileChunks,itemId=>originalCache.cancelItems([String(itemId)])).cleanupPending().catch(()=>{}));
   // Native seeds only on database creation. Never revive a channel deleted from an existing library.
   const legacyHidden=kv.get<unknown>('media.hidden-channels');
   if(Array.isArray(legacyHidden)){
@@ -73,8 +74,9 @@ function init(): Promise<void> { return ready ??= (async()=>{
     }
     kv.delete('media.hidden-channels');
   }
-  await migrateDouyinOriginalMode(db,kv);
-  await douyinSavedStore.migrate();
+  await startupStep('init.douyinMode',()=>migrateDouyinOriginalMode(db,kv));
+  await startupStep('init.douyinSaved',()=>douyinSavedStore.migrate());
+  startupMark('services.ready');
 })().catch(error => { ready = undefined; throw error; }); }
 async function insertBuiltin(builtin:BuiltinChannel,now=Date.now()):Promise<import('./ui/service.ts').Channel>{
   const existing=(await db.query("SELECT id,url,title,description FROM channels WHERE url=?",[builtin.url]))[0];
