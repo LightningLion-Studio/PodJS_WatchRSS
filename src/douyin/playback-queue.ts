@@ -15,7 +15,7 @@ export class DouyinPlaybackQueue {
   private persistence:Promise<void>=Promise.resolve();
   private readonly limit:number;
   constructor(private readonly client:DouyinClient,options:DouyinPlaybackQueueOptions){
-    this.limit=Math.max(1,Math.min(40,Math.floor(options.limit??40)));
+    this.limit=Math.max(1,Math.min(200,Math.floor(options.limit??(options.hasMore === false ? 200 : 40))));
     const items=this.unique(options.items),selected=options.selectedAwemeId.trim(),index=Math.max(0,items.findIndex(x=>x.awemeId===selected));
     this.items=items.slice(Math.max(0,index-this.limit+1),Math.max(this.limit,index+1));
     this.index=Math.max(0,this.items.findIndex(x=>x.awemeId===selected));
@@ -23,10 +23,11 @@ export class DouyinPlaybackQueue {
   }
   snapshot():Omit<DouyinPlaybackQueueState,"item">&{item:DouyinItem|null}{return {item:this.items[this.index]??null,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore};}
   cancel(){this.generation++;}
-  /** Only a prepared foreground player records history, never speculative resolution. */
+  /** Playback records on foreground preparation, never speculative resolution.
+   * Native list/history detail-entry writes separately update the same deduplicated store. */
   async settled():Promise<void>{
     const state=this.snapshot();if(!state.item)return;const item=state.item;
-    const write=this.persistence.catch(()=>{}).then(async()=>{await this.client.recordHistory(item);await this.client.saveRecentWindow(state.playlist,item.awemeId,state.cursor,state.hasMore);});
+    const write=this.persistence.catch(()=>{}).then(async()=>{await this.client.recordHistory(item);await this.client.saveRecentWindow(state.playlist,item.awemeId,state.cursor,state.hasMore);await this.client.savePlaybackQueue(state.playlist,item.awemeId,state.cursor,state.hasMore);});
     this.persistence=write;await write;
   }
   async prefetch():Promise<void>{const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId);}}

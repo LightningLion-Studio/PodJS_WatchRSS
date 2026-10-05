@@ -13,7 +13,7 @@ export function ImmersiveEntry(props: DouyinScreenProps) {
     if(busy())return;setBusy(true);setError("");
     try{
       const signed=await props.client.isLoggedIn();if(disposed)return;setLogged(signed);if(!signed)return;
-      if(!refresh){const cached=await props.client.restoreFeed();if(disposed)return;setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;if(cached.items.length){void props.client.resolvePlayback(anchor??cached.items[0].awemeId).catch(()=>{});return;}}
+      if(!refresh){const feed=await props.client.restoreFeed(),queue=await props.client.restorePlaybackQueue(),cached=queue.items.length?queue:feed;if(disposed)return;setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;if(cached.items.length){void props.client.resolvePlayback(anchor??cached.items[0].awemeId).catch(()=>{});return;}}
       const result=await props.client.fetchFeedPage({count:12});if(disposed)return;
       if(result.ok){setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;}else setError(result.message);
     }catch(e){if(!disposed)setError(String(e));}finally{if(!disposed)setBusy(false);}
@@ -24,7 +24,7 @@ export function ImmersiveEntry(props: DouyinScreenProps) {
     try{const index=Math.max(0,items().findIndex(item=>item.awemeId===anchor)),candidates=items().slice(index),failed=new Set<string>();for(const item of candidates){
       const result=await props.client.resolvePlayback(item.awemeId);if(!active())return;
       if(!result.ok){setError(result.message);if(result.code==="NOT_LOGGED_IN"){setLogged(false);return;}failed.add(item.awemeId);continue;}
-      props.onPlay({item:result.data,playback:result.data,playlist:candidates.filter(candidate=>!failed.has(candidate.awemeId)),cursor:cursor??undefined,hasMore,immersive:true});props.onNavigate({name:"player",awemeId:item.awemeId});return;
+      props.onPlay({item:result.data,playback:result.data,playlist:items().filter(candidate=>!failed.has(candidate.awemeId)),cursor:cursor??undefined,hasMore,immersive:true});props.onNavigate({name:"player",awemeId:item.awemeId});return;
     }}catch(e){if(active())setError(String(e));}finally{if(!disposed)setBusy(false);}
   };
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});

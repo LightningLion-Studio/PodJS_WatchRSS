@@ -1367,6 +1367,7 @@ export default function WatchRSS(props: {
               setError={setError}
             />
             <MediaRoutes
+              preset={readerPreset}
               entry={entry}
               page={entryPage}
               active={active}
