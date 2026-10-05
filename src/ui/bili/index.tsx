@@ -1,3 +1,4 @@
+import { CommentScreen } from "./CommentScreen.tsx";
 import { BiliDetailController, type DetailState, type DetailTarget } from "../../bili/detail.ts";
 import { BiliFeedBrowser, BiliSearchHistory, favoritePager, historyPager, searchPager, type BrowseState } from "../../bili/browse.ts";
 import {biliShareLink,biliActionTitle,type ShareHandler} from "../../sharing/policy.ts";
@@ -5,7 +6,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
-import type { BiliClient, BiliComment, BiliFavoriteFolder, BiliHistoryItem, BiliItem, BiliPlayUrl, BiliSearchResult, BiliSession, QrLoginRequest, QrPollResult } from "../../bili/index.ts";
+import type { BiliClient, BiliFavoriteFolder, BiliHistoryItem, BiliItem, BiliPlayUrl, BiliSearchResult, BiliSession, QrLoginRequest, QrPollResult } from "../../bili/index.ts";
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RemoteImage } from "../RemoteImage.tsx";
@@ -215,14 +216,6 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     ];
   });
   return <Scrolled {...props} entries={entries()} onRefresh={detail.refetch} />;
-}
-
-function CommentScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "comments" | "replies" }> }) {
-  const oid = typeof props.route.oid === "number" ? props.route.oid : Number(props.route.oid);
-  const comments = asyncData(async () => props.route.name === "replies" ? props.client.replies({ oid, root: typeof props.route.root === "number" ? props.route.root : Number(props.route.root) }) : props.client.comments({ oid }));
-  const values = () => { const page = comments.value(); return page ? ("topReplies" in page ? [...page.topReplies, ...page.replies] : [page.root, ...page.replies].filter((value): value is BiliComment => !!value)) : []; };
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry(props.route.name === "replies" ? "回复详情" : "评论"), ...(comments.loading() ? [messageEntry("正在加载评论…", props.width ?? 233)] : []), ...(comments.error() ? [messageEntry(String(comments.error()), props.width ?? 233)] : []), ...values().map(comment => { const body = comment.content?.message || ""; const wrapped = lines(body, (props.width ?? 233) - 70).slice(0, 6); const root = comment.root || comment.rpid; return { height: Math.max(70, wrapped.length * 18 + 34), render: () => <View onPress={props.route.name === "comments" && root ? () => props.onNavigate({ name: "replies", oid: props.route.oid, root, uploaderMid: props.route.uploaderMid }) : undefined} focusable={props.route.name === "comments" && !!root} class="absolute inset-0 rounded-[16] bg-[#202020] overflow-hidden">{comment.member?.avatar ? <View class="absolute left-[8] top-[8] w-[28] h-[28] rounded-full overflow-hidden"><RemoteImage cacheBucket="bili-preview" url={comment.member.avatar} width={28} height={28} class="absolute inset-0" /></View> : null}<Text class="absolute left-[43] right-[10] top-[8] text-[11px] leading-[15] text-[#fb7299]">{comment.member?.name || "哔哩哔哩用户"}</Text><Text class="absolute left-[43] right-[10] top-[27] text-[13px] leading-[18] text-white">{wrapped.join("\n")}</Text></View> } as ScrollEntry; }), ...(!comments.loading() && !comments.error() && !values().length ? [messageEntry("暂无评论", props.width ?? 233)] : [])]);
-  return <Scrolled {...props} entries={entries()} />;
 }
 
 function ActionsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "actions" }> }) {
