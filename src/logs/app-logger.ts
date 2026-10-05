@@ -4,7 +4,7 @@ import {debugLogReply} from '../sync/diagnostic-log.ts';
 export const APP_LOG_FILE='app_log.txt';
 export const MAX_LOG_BYTES=5*1024*1024;
 export type LogLevel='V'|'D'|'I'|'W'|'E';
-const sensitive='access_token|api_key|apiKey|appRefreshToken|bili_jct|csrf_session_id|DedeUserID|DedeUserID__ckMd5|msToken|n_mh|odin_tt|passport_csrf_token|passport_csrf_token_default|refresh_token|refreshToken|SESSDATA|sessionid|sessionid_ss|sid|sid_guard|sid_tt|sid_ucp_v1|s_v_web_id|ssid_ucp_v1|ttwid|uid_tt|uid_tt_ss|watchrss_pair|[A-Za-z0-9_-]*token|password|secret';
+const sensitive='access_token|api_key|apiKey|appRefreshToken|bili_jct|csrf_session_id|DedeUserID|DedeUserID__ckMd5|msToken|n_mh|odin_tt|passport_csrf_token|passport_csrf_token_default|refresh_token|refreshToken|SESSDATA|sessionid|sessionid_ss|sid|sid_guard|sid_tt|sid_ucp_v1|s_v_web_id|ssid_ucp_v1|ttwid|uid_tt|uid_tt_ss|watchrss_pair|[A-Za-z0-9_-]*token|password|secret|signature|sign|a_bogus|x_bogus|X-Bogus|w_rid';
 /** Native header/Bearer/cookie rules, extended to JSON credentials and all URL queries. */
 export function redactSensitiveLogContent(raw:string):string {
  return raw
@@ -66,7 +66,7 @@ export class AppLogger {
 }
 // Host-free facade lets domain modules log without importing platform services.
 let active:AppLogger|undefined;
-export function installAppLogger(logger:AppLogger){active=logger;}
+export function installAppLogger(logger:AppLogger|undefined){active=logger;}
 export const appLogger={
  v:(tag:string,message:string)=>active?.v(tag,message),
  d:(tag:string,message:string)=>active?.d(tag,message),
@@ -75,10 +75,11 @@ export const appLogger={
  e:(tag:string,message:string,error?:unknown)=>active?.e(tag,message,error),
 };
 
-/** Preserve existing diagnostic arguments (including Error stacks) through the same redaction boundary. */
+/** Compatibility diagnostics keep their fixed first message. Error details may contain
+ * body/user input without a credential key, so warn/error never serialize extra args. */
 export function createLogConsole(tag:string){
  const emit=(level:LogLevel,args:unknown[])=>{
-  try{const message=args.map(value=>value instanceof Error?value.stack||String(value):String(value)).join(' ');
+  try{const message=(level==='W'||level==='E')?(typeof args[0]==='string'?args[0]:'<redacted>'):args.map(String).join(' ');
    if(level==='E')appLogger.e(tag,message);else if(level==='W')appLogger.w(tag,message);else if(level==='I')appLogger.i(tag,message);else appLogger.d(tag,message);
   }catch{}
  };

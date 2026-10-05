@@ -1,7 +1,7 @@
 import {kv} from '@podjs/framework/watch';
 import {fileChunks} from '@podjs/framework/services';
 import {base64ToBytes,bytesToBase64,stringToUtf8,utf8ToString} from '@podjs/framework/bytes';
-import {AppLogger,APP_LOG_FILE,installAppLogger,type LogFile} from './app-logger.ts';
+import {AppLogger,APP_LOG_FILE,installAppLogger,appLogger,type LogFile} from './app-logger.ts';
 
 /** All transfers stay under the host's 64 KiB bridge chunk limit. */
 export function createHostLogFile(files= fileChunks):LogFile {
@@ -31,6 +31,8 @@ export const hostAppLogger=new AppLogger(createHostLogFile(),()=>new Date(),(lev
 let started=false;
 export function startAppLogger(deferInit?:Promise<void>){
  if(started)return;started=true;installAppLogger(hostAppLogger);
+ const launched=new Date(),pad=(n:number)=>String(n).padStart(2,"0");
+ appLogger.d("Application",`应用启动 - ${launched.getFullYear()}-${pad(launched.getMonth()+1)}-${pad(launched.getDate())} ${pad(launched.getHours())}:${pad(launched.getMinutes())}:${pad(launched.getSeconds())}`);
  let legacy:string|undefined;try{legacy=kv.get<string>('watchrss.sync.diagnostics.v1');}catch{}
  // The full-file redaction scan reads the whole log (hundreds of KB through file.read);
  // run it after the first screen so it never delays startup. Appends still work meanwhile.

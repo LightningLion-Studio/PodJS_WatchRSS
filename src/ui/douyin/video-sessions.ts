@@ -1,3 +1,5 @@
+import {appLogger} from '../../logs/app-logger.ts';
+import {logPlatformId} from '../../logs/fields.ts';
 import {
   videoSessions,
   hostOperation,
@@ -121,6 +123,7 @@ export class DouyinVideoSessionPool {
     if(source.key===this.activeKey)return this.state();
     if(this.standby?.key===source.key&&this.standbyReady)return this.port.state(this.standbyId).then(state);
     const own=++this.generation;
+    appLogger.d("DouyinImmersive",`TEST_EVENT lookahead_prewarm_start awemeId=${logPlatformId(source.source.awemeId)} slot=${this.standbyId.endsWith("a")?"Primary":"Secondary"}`);
     this.standbyPrepare?.cancel();this.standby=source;this.standbyReady=false;
     // The host silences every prewarm internally while retaining this audible
     // volume for promotion. Passing muted=true would make the promoted slot
@@ -155,6 +158,7 @@ export class DouyinVideoSessionPool {
     await this.transition(1,direction,bounds);
     const promoted=await this.port.promote(this.standbyId,{replaceSessionId:this.activeId,bounds,autoplay});
     [this.activeId,this.standbyId]=[this.standbyId,this.activeId];
+    appLogger.d("DouyinImmersive",`promote slot=${this.activeId.endsWith("a")?"Primary":"Secondary"} awemeId=${logPlatformId(target.source.awemeId)}`);
     this.activeKey=target.key;this.standby=undefined;this.standbyReady=false;this.generation++;
     return {source:target,state:state(promoted)};
   }

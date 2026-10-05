@@ -1,3 +1,5 @@
+import {appLogger} from '../logs/app-logger.ts';
+import {logPlatformId} from '../logs/fields.ts';
 import type { DouyinFeedSnapshot, DouyinItem, DouyinSecureStorage } from "./types.ts";
 
 export interface RecentFeed extends DouyinFeedSnapshot { anchorAwemeId: string | null; savedAtMillis: number; resolved: Record<string, number> }
@@ -23,6 +25,7 @@ export class DouyinFeedStore {
     const ordered=normalizeItems([...recent.items,...feed.items]).map(item=>freshest.get(item.awemeId)!);
     const anchor=Math.max(0,ordered.findIndex(item=>item.awemeId===recent.anchorAwemeId));
     const items=ordered.slice(anchor,anchor+40);
+    appLogger.d("DouyinFeedVM",`read bootstrap pinned=0 feed=${feed.items.length} recent=${recent.items.length} merged=${ordered.length} restored=${items.length} anchor=${logPlatformId(recent.anchorAwemeId)}`);
     return { ...(recent.items.length ? recent : feed), items, anchorAwemeId: recent.anchorAwemeId, resolved };
   }
   save(key: string, snapshot: RecentFeed): Promise<void> {

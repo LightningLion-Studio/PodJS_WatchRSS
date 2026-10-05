@@ -1,3 +1,4 @@
+import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure} from './errors.ts';
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems } from "./feed-store.ts";
@@ -77,6 +78,7 @@ export class DouyinClient {
     const bootstrap=normalized.slice(index,index+40),window=bootstrap.slice(0,4);
     const snapshot={anchorAwemeId,cursor,hasMore,savedAtMillis:this.now(),resolved:Object.fromEntries(bootstrap.map(item=>[item.awemeId,this.feedCache.get(item.awemeId)?.resolvedAtMillis??0]))};
     await this.feedStore.save(RECENT_KEY,{...snapshot,items:window});
+    appLogger.d("DouyinFeedVM",`persist recent window reason=playback anchor=${logPlatformId(anchorAwemeId)} items=${window.length}`);
     await this.feedStore.save(FEED_KEY,{...snapshot,items:bootstrap});
   }
 

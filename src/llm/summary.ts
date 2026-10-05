@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {utf8Encode,utf8Decode,type HttpTransport} from "../cloud/types.ts";
 import type {WatchAccountState} from "../account/types.ts";
 import {watchAppVersion} from '../core/app-version.ts';
@@ -80,6 +81,6 @@ export class SummarySession {
    data=JSON.parse(raw);if(!data||typeof data!=="object"||Array.isArray(data))throw new Error("总结响应格式错误");
    await this.deps.recordUsage(typeof data.model==="string"&&data.model.trim()?data.model:"server-managed",data.usage).catch(()=>{});if(!this.alive)return;
    this.publish({status:"done",text:typeof data.text==="string"&&data.text.trim()?data.text:"（无内容）",inputTokens:positive(data.usage?.inputTokens),outputTokens:positive(data.usage?.outputTokens),totalTokens:positive(data.usage?.totalTokens)});
-  }catch(error){this.publish({status:"error",text:"",error:error instanceof Error?error.message:String(error)});}
+  }catch(error){if(this.alive)appLogger.e("LlmSummaryVM","Summary generation failed");this.publish({status:"error",text:"",error:error instanceof Error?error.message:String(error)});}
  }
 }

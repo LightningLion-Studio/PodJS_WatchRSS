@@ -42,7 +42,7 @@ export class ConfiguredSpeechPort implements SpeechPort {
  private listeners=new Set<(event:{type:string;utteranceId:string;start?:number;end?:number;elapsedMs?:number})=>void>();
  constructor(private readonly store:TtsConfigStore,private readonly transport:HttpTransport,private readonly account:()=>Promise<TtsAccount|null>,private readonly host:CloudSpeechHost=hostCloudSpeech){}
  private emit(type:string,id:string,elapsedMs=0){for(const listener of this.listeners)listener({type,utteranceId:id,elapsedMs});}
- async initialize(){appLogger.d('TtsEngine','initialize');this.config=this.store.read();if(this.config.engine==='local')return this.host.initializeLocal();}
+ async initialize(){appLogger.d('TtsEngine','initialize');this.config=this.store.read();if(this.config.engine==='local'){try{return await this.host.initializeLocal();}catch(error){appLogger.e('LocalTtsEngine','TTS prepare failed');throw error;}}}
  onProgress(listener:(event:{type:string;utteranceId:string;start?:number;end?:number;elapsedMs?:number})=>void){
   this.listeners.add(listener);const removeLocal=this.host.onLocalProgress(listener);return()=>{this.listeners.delete(listener);removeLocal();};
  }
@@ -64,7 +64,7 @@ export class ConfiguredSpeechPort implements SpeechPort {
    await this.host.setSpeed(rate);if(generation!==this.generation)return;
    this.startedAt=Date.now();this.emit('start',id);
   }
-  catch(error){appLogger.e('TtsEngine','Audio playback failed',error);await this.clearFile(path);throw error;}
+  catch(error){appLogger.e('ExoPlayerTtsAudioPlayer','ExoPlayer error');await this.clearFile(path);throw error;}
  }
  async state():Promise<{state:string}>{
   if(this.config.engine==='local')return this.host.localState();

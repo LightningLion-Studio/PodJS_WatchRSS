@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {EXPORT_ABILITIES,historyPayload,playbackPayload,historyFailure,type HttpExportSession} from './exports.ts';
 import {nativeTrim} from '../sync/local-manifest.ts';
 import {wireFields} from "../sync/article-batches.ts";
@@ -69,17 +70,17 @@ export async function routeRemoteExportHttp(request:RemoteHttpRequest,session:Ht
    const max=long(parameter(query,'max')),viewAt=long(parameter(query,'view_at'))??long(parameter(query,'viewAt')),business=nativeTrim(parameter(query,'business'))||undefined;
    const cursor=max===undefined&&viewAt===undefined&&business===undefined?undefined:{max,viewAt,business};
    let page;
-   try{page=await session.source.history(cursor);}catch(error){return json(200,historyFailure(error));}
+   try{page=await session.source.history(cursor);}catch(error){appLogger.e("LocalHttpServer","handleGetBiliWatchHistory failed");return json(200,historyFailure(error));}
    data=historyPayload(page);
   }else data=playbackPayload(await session.source.playbackProgress());
   session.onComplete?.();
   return json(200,{success:true,data});
- }catch(error){return json(500,{success:false,message:error instanceof Error?error.message:'Unknown error',...(history||progress?{data:null}:{})});}
+ }catch(error){appLogger.e('LocalHttpServer',savedType==='favorite'?'handleGetFavorites failed':savedType==='watchLater'?'handleGetWatchLater failed':history?'handleGetBiliWatchHistory failed':'handleGetBiliPlaybackProgress failed');return json(500,{success:false,message:error instanceof Error?error.message:'Unknown error',...(history||progress?{data:null}:{})});}
 }
 export async function serveRemoteHttp(stream:SyncByteStream,isActive:()=>boolean,onUrl:(url:string)=>void,exportSession?:HttpExportSession):Promise<void> {
  let response:RemoteHttpResponse;
  try{const request=await readRemoteHttpRequest(stream);response=exportSession?await routeRemoteExportHttp(request,exportSession):routeRemoteHttp(request);}
- catch{response=json(400,{success:false,message:'请求正文无效或过大'});}
+ catch{if(!exportSession)appLogger.e('LocalHttpServer','handleRemoteInput failed');response=json(400,{success:false,message:'请求正文无效或过大'});}
  try{
   if(!isActive())return;
   await writeRemoteHttpResponse(stream,isActive,response);

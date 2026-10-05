@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('speech-playback');
 import { fallbackDurationMs, fallbackHighlightOffsets, calibratedSpeechUnits, segmentHighlight, type SpeechHighlight, type SpeechProgress } from "./speech-highlight.ts";
@@ -59,7 +60,7 @@ export class SpeechPlayback {
     return { generation, stopped };
   }
   private failed(generation: number, error: unknown) {
-    if (generation === this.generation) this.cancelHighlight();
+    if (generation === this.generation) {this.cancelHighlight();appLogger.e("ReadAloudController","<redacted>");}
     if (generation === this.generation) this.update({ phase: "error", playing: false, highlight:undefined, error: String(error instanceof Error ? error.message : error) });
   }
   async start(article: Article, rate = this.state.rate, anchor?: SpeechAnchor): Promise<void> {
@@ -78,7 +79,7 @@ export class SpeechPlayback {
       this.index = this.queue.findIndex(item => item.id === article.id);
       // Native applies the start limit once per new queue; failures must not block speech.
       try { await this.prepareNewSession?.(() => generation === this.generation); }
-      catch (error) { logConsole.warn("朗读静音开播音量限制失败", error); }
+      catch (error) { appLogger.e("ReadAloudController","朗读静音开播音量限制失败"); }
       if (generation !== this.generation) return;
       await this.prepare(generation, article, anchor);
     } catch (error) { this.failed(generation, error); }

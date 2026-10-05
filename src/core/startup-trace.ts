@@ -9,14 +9,14 @@ const seen = new Set<string>();
 export function startupMark(phase: string): void {
   if (seen.has(phase)) return;
   seen.add(phase);
-  appLogger.i("Startup", `${phase} +${Math.round(now() - origin)}ms`);
+  appLogger.d("Startup", `${phase} +${Math.round(now() - origin)}ms`);
 }
 
 /** Times one awaited startup step. */
 export async function startupStep<T>(phase: string, run: () => Promise<T>): Promise<T> {
   const began = now();
   try { return await run(); }
-  finally { appLogger.i("Startup", `${phase} took ${Math.round(now() - began)}ms (+${Math.round(now() - origin)}ms)`); }
+  finally { appLogger.d("Startup", `${phase} took ${Math.round(now() - began)}ms (+${Math.round(now() - origin)}ms)`); }
 }
 
 let firstScreenResolve: (() => void) | undefined;

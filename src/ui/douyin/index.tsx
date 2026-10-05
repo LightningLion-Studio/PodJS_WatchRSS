@@ -1,3 +1,5 @@
+import {appLogger} from '../../logs/app-logger.ts';
+import {DouyinLoginLog} from '../../logs/douyin-login.ts';
 import { ReaderBody } from "../ReaderBody.tsx";
 import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
 import { loadDouyinDetail, douyinDetailBlocks } from "../../douyin/detail.ts";
@@ -109,6 +111,7 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
 }
 
 function LoginScreen(props: DouyinScreenProps) {
+  const loginLog=new DouyinLoginLog();
   const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal(props.loginQrImage ? "请使用抖音手机客户端扫码登录" : "打开抖音官方登录页，完成登录后点“完成”返回手表。");
   const [authStatus, setAuthStatus] = createSignal(initialLoginStatus());
   const [statusMode, setStatusMode] = createSignal(false);
@@ -122,7 +125,7 @@ function LoginScreen(props: DouyinScreenProps) {
     setInternet(status);
     if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setAuthStatus(initialLoginStatus()); setBusy(false); }
   })));
-  onCleanup(() => { disposed = true; generation++; authorization?.cancel(); });
+  onCleanup(() => { loginLog.dispose(); disposed = true; generation++; authorization?.cancel(); });
   const openLogin = async () => {
     if (gate() || busy()) return;
     const current = ++generation;
@@ -137,6 +140,7 @@ function LoginScreen(props: DouyinScreenProps) {
       if (!available) { setBrowserAvailable(false); return; }
       authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
         if (disposed || current !== generation || !acceptingStatus) return;
+        loginLog.status(event);
         setAuthStatus(state => updateLoginStatus(state, event));
         setMessage(loginStatusMessage(authStatus()));
       }} : {}),requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});
@@ -146,11 +150,12 @@ function LoginScreen(props: DouyinScreenProps) {
       setAuthStatus(initialLoginStatus());
       const saved = await props.client.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);
+      loginLog.completed();
       if (!disposed && current === generation) { feedSnapshots.delete(props.client); props.onNavigate({name:"entry"}); }
     } catch (error) {
       acceptingStatus = false;
       if (!disposed && current === generation) setAuthStatus(initialLoginStatus());
-      if (!disposed && current === generation) { const failure = loginError(error); setMessage(failure.message); if (failure.unavailable) setBrowserAvailable(false); }
+      if (!disposed && current === generation) { const failure = loginError(error); if(failure.unavailable)appLogger.e("DouyinLoginScreen","Failed to initialize WebView"); setMessage(failure.message); if (failure.unavailable) setBrowserAvailable(false); }
     } finally { if (!disposed && current === generation) { authorization = undefined; setBusy(false); } }
   };
   const inputCookie = async () => {
