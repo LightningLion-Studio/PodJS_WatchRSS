@@ -6,15 +6,13 @@ import {Text,View,Image} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {getDisplayMetrics,getFontMetrics,hasCapability} from '@podjs/framework/watch';
 import {textLayout,hostOperation} from '@podjs/framework/services';
-import {SystemTextLine} from '@podjs/framework/text';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
 import type {VirtualListHandle} from '@pocketjs/framework/virtual-list';
 import type {ReaderPreviewState} from '../reader/preview-session.ts';
-import {resolvedReaderStyle} from '../reader/preset.ts';
 import {createContentLayouter,readerColor,type NativeBlockLayouts} from '../reader/content-layout.ts';
 import {requestReaderLayout} from '../reader/platform-layout.ts';
-import {systemTextOptions} from '../reader/system-text.ts';
 import type {ContentBlock} from '../reader/content.ts';
+import {ReaderTextRow} from './ReaderTextRow.tsx';
 export const READER_PREVIEW_PARAGRAPHS=[
  ['title','阅读，让时间慢下来'],['subtitle','标题、副标题与正文会分别使用分类样式'],
  ['body','这是手表端的实时正文预览。你在手机上调整字体、字号、颜色、排版或背景后，这里会自动更新。'],
@@ -39,9 +37,9 @@ export function ReaderPreviewScreen(props:{state:ReaderPreviewState;width:number
  // Keep two physical coverage pixels below each preview line: native StaticLayout
  // can draw antialiased descenders past its line box. Row height and baseline stay unchanged.
  const entries=createMemo<ScrollEntry[]>(()=>{
-  const p=preset(),width=props.width-28,metrics=getDisplayMetrics(),pixelScale=metrics.physicalWidth/metrics.logicalWidth;
-  return [{height:22,render:()=>null},...layout().rows.flatMap(row=>{if(row.kind!=='text')return [];const block=blocks()[row.blockIndex];if(block?.type!=='text')return [];const style=block.style==='body'?p.body:resolvedReaderStyle(p,block.style),align=block.style==='title'?1:(row.textAlign??0),textRow={...row,textAlign:align};
-   return [{height:row.height,render:()=>{const fallback=<Text class="absolute" style={{insetL:0,insetT:row.textOffsetY??0,width:width/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color,textAlign:align}}>{row.text}</Text>;const textWidth=Math.min(width,getOps().measureText(row.text,row.fontSlot)*row.scale),left=align===1?(width-textWidth)/2:0;return <View class="absolute" style={{insetL:0,insetT:row.gap,width,height:row.lineHeight}}>{hasCapability('text.raster')?<SystemTextLine options={{...systemTextOptions(textRow,block.style,p.body.fontSizeSp,width,pixelScale,p,getFontMetrics(row.fontSlot),visibleFonts(),"preview"),heightPx:Math.min(1024,Math.ceil(row.lineHeight*pixelScale)+(row.nativeParagraph&&row.nativeParagraph.lineIndex+1<(native().get(block)?.length??0)?0:2))}} pixelScale={pixelScale} fallback={fallback}/>:fallback}{!hasCapability('text.raster')&&style.underline&&<View class="absolute" style={{insetL:left,insetT:(row.nativeBaseline??row.lineHeight*.8)+2,width:textWidth,height:1,bgColor:row.color}}/>}{!hasCapability('text.raster')&&style.strikethrough&&<View class="absolute" style={{insetL:left,insetT:(row.nativeBaseline??row.lineHeight*.8)-style.fontSizeSp*.3,width:textWidth,height:1,bgColor:row.color}}/>}</View>;}}];}),
+  const p=preset(),width=props.width-28;
+  return [{height:22,render:()=>null},...layout().rows.flatMap(row=>{if(row.kind!=='text')return [];const block=blocks()[row.blockIndex];if(block?.type!=='text')return [];const align=block.style==='title'?1:(row.textAlign??0);
+   return [{height:row.height,render:()=> <View class="absolute" style={{insetL:0,insetT:row.gap,width,height:row.lineHeight}}><ReaderTextRow row={row} style={block.style} fontSize={p.body.fontSizeSp} width={width} preset={p} fonts={visibleFonts()} profile="preview" textAlign={align} rasterHeightExtraPx={row.nativeParagraph&&row.nativeParagraph.lineIndex+1<(native().get(block)?.length??0)?0:2}/></View>}];}),
    {height:15,render:()=>null},{height:32,render:()=> <View class="absolute" style={{insetL:(width-76)/2,insetT:0,width:76,height:32}}>{[0,1].map(index=><View onPress={unsupported} accessibilityLabel={index?'分享':'收藏'} focusable class="absolute rounded-[999] items-center justify-center bg-[#23272a]" style={{insetL:index*44,insetT:0,width:32,height:32}}><Image src={index?'../assets/icons/share.svg':'../assets/icons/favorite-border.svg'} style={{width:20,height:20}}/></View>)}</View>},{height:15,render:()=>null}];
  });
  return <View class="absolute inset-0" style={{bgColor:readerColor(preset().background.colorArgb)}}><ReaderBackground background={preset().background} snapshot={visibleBackgrounds()} width={props.width} height={props.height} active={props.active}/><View class="absolute" style={{insetL:14,insetT:0,width:props.width-28,height:props.height}}><ScrollEntries entries={entries()} height={props.height} padding={0} verticalPadding={0} gap={0} inputActive={()=>props.active} ref={props.ref}/></View><View class="absolute rounded-[50] items-center justify-center" style={{insetT:2,insetL:(props.width-100)/2,width:100,height:17,bgColor:'#23272ae0'}}><Text class="text-[11px]" style={{fontSlot:20,scale:1,lineHeight:13,textColor:'#f2f2f2'}}>{props.state.resourceTransferInProgress?'资源文件传输中':'预设实时预览'}</Text></View></View>;

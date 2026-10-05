@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 正文分块排版、标题与图片/视频入口、RSS/原文切换、离线媒体失败重试 | **已实现** | 原生 `ui/screen/rss/DetailScreen.kt:144-210`；PodJS `src/ui/ReaderScreen.tsx`、`src/ui/ReaderBody.tsx`、`src/reader/original-cache.ts`、`src/reader/offline-media.ts` | 高 | S |
 | 阅读位置持久化、正文字符锚点与导入长文分块恢复，布局变化保持阅读位置 | **已实现**：已有保存/恢复路径；退出落盘保证另列 | 原生 `ui/screen/rss/DetailScreen.kt:316-338,796-844`；PodJS `src/ui/ReaderBody.tsx`、`src/reader/progress.ts`、`src/reader/sql-progress.ts`、`src/reader/imported-document.ts` | 高 | S |
-| 返回或进入后台时确保最后阅读进度写入完成 | **部分实现**：PodJS 每秒、失活和清理时触发保存，但用 `void store.save`，返回栈不等待写入；原生返回及生命周期保存使用 `runBlocking`，进程紧接退出时的最后进度保证不同 | 原生 `ui/screen/rss/DetailScreen.kt:1026-1055`；PodJS `src/ui/ReaderBody.tsx`、`src/ui/screen.tsx`、`src/reader/sql-progress.ts` | 中 | M |
+| 返回或进入后台时确保最后阅读进度写入完成 | **已实现（源码级）**：PodJS 保留每秒保存，在失活/后台/清理时将最后位置加入串行队列；离开阅读页会等待队尾，写入成功、失败或等待满 2.5 秒后均继续返回并对异常写诊断日志，避免存储故障困住用户。2.5 秒取原生 800ms 布局取样上限的三倍以上，为桥接/数据库留出余量；与原生相同，若系统未派发生命周期回调便直接终止进程，无法承诺最后瞬间位置 | 原生 `ui/screen/rss/DetailScreen.kt:1026-1055`、`ui/screen/rss/DetailBehaviorSupport.kt:220-241`；PodJS `src/ui/ReaderBody.tsx`、`src/ui/screen.tsx`、`src/reader/progress-write-queue.ts`、`src/navigation/reader-exit.ts` | 中 | S |
 | 收藏、稍后再看、分享及取消；读到底后返回稍后再看列表时自动移除 | **已实现** | 原生 `ItemActionsActivity.kt:55-110`、`DetailActivity.kt:119-135`；PodJS `src/ui/RssScreens.tsx`、`src/ui/ReaderScreen.tsx`、`src/ui/screen.tsx`、`src/reader/watch-later-completion.ts` | 高 | S |
 | 本地导入内容的单篇删除及确认，并从后续同步中移除 | **缺失**：PodJS 条目操作只有收藏、稍后再看、分享、取消；清空频道不能代替单篇删除 | 原生 `ItemActionsActivity.kt:98-129`、`ui/viewmodel/ItemActionsViewModel.kt:30-53`；PodJS `src/ui/RssScreens.tsx`、`src/ui/screen.tsx` | 高 | M |
 | 图片单击退出、双击缩放、双指缩放/平移/惯性、横向边界与返回手势仲裁、缺图提示 | **已实现（源码级）**：手势常数及物理体验仍需设备验收 | 原生 `ImagePreviewActivity.kt:18-46`、`ui/screen/rss/ImagePreviewScreen.kt:65-73,198-225,266-379`；PodJS `src/ui/ImagePreviewScreen.tsx`、`src/ui/image-preview.ts`、`src/ui/TiledImage.tsx` | 高 | S |
@@ -22,7 +22,7 @@
 | 朗读播控的“返回文章”与“查看当前文章”两种入口语义 | **部分实现**：从文章进入后的返回已实现；PodJS 固定 `popPage()`，没有原生非文章入口按当前朗读 article.id 打开文章的分支（与首页朗读入口缺口相关） | 原生 `ReadAloudPlaybackActivity.kt:45-61`；PodJS `src/ui/SpeechPlaybackScreen.tsx`、`src/ui/screen.tsx` | 中 | S |
 | 自动滚动控制：阅读会话播放/暂停、返回文章、自动开始开关、0.5–10 行/秒调速与持久化；手动滚动/后台暂停 | **已实现** | 原生 `AutoScrollControlActivity.kt:25-69`、`ui/screen/rss/DetailScreen.kt:215-218`；PodJS `src/ui/AutoScrollSettingsScreen.tsx`、`src/ui/ReaderBody.tsx`、`src/reader/autoscroll.ts`、`src/settings/store.ts` | 高 | S |
 
-本区域结论：核心阅读与媒体交互已有对应路径；优先补单篇导入内容删除和 RSS 抖音播放地址失效恢复。阅读位置退出持久化保证、非文章入口的“查看当前文章”需要进一步对齐。AI 总结集中列入设置与账号区域。
+本区域结论：核心阅读与媒体交互已有对应路径；优先补单篇导入内容删除和 RSS 抖音播放地址失效恢复。非文章入口的“查看当前文章”需要进一步对齐。AI 总结集中列入设置与账号区域。
 
 ## 4. 阅读预设
 
@@ -30,12 +30,12 @@
 |---|---|---|---|---|
 | 深色/浅色/自动主题、浅色与深色预设选择、深色跟随浅色、展示当前预设与手机下载引导 | **已实现** | 原生 `ReaderPresetActivity.kt:140-215,299-348`；PodJS `src/ui/ReaderPresetScreen.tsx`、`src/reader/preset-store.ts`、`src/ui/screen.tsx` | 高 | S |
 | 自动主题固定时间切换、时间选择器、按当前位置日出日落切换、定位权限/失败提示 | **已实现（源码级）**：通过宿主 location/timeInput 接口接入，真机定位未验证 | 原生 `ReaderPresetActivity.kt:101-134,220-289,380-427`；PodJS `src/ui/ReaderPresetScreen.tsx`、`src/reader/theme-schedule.ts`、`src/reader/preset-store.ts` | 中 | S |
-| 预设选择菜单中以该预设的真实正文样式和背景展示单行预览 | **部分实现**：PodJS 菜单仅用字号映射的内置字体、文字颜色和纯色背景；没有使用该预设的字体资源、完整正文样式或图片/视频背景 | 原生 `ReaderPresetActivity.kt:352-375`；PodJS `src/ui/ReaderPresetScreen.tsx`（menuItems/render）、`src/ui/ReaderBackground.tsx` | 中 | M |
+| 预设选择菜单中以该预设的真实正文样式和背景展示单行预览 | **已实现（源码级）**：菜单与文章正文/完整预览共用 `ReaderTextRow`，并直接复用 `ReaderBackground` 展示该预设的字体资源、BODY 样式及纯色/图片/视频背景；真机视觉待验收 | 原生 `ReaderPresetActivity.kt:352-375`；PodJS `src/ui/ReaderPresetScreen.tsx`、`src/ui/ReaderPresetSingleLinePreview.tsx`、`src/ui/ReaderTextRow.tsx`、`src/ui/ReaderBackground.tsx` | 中 | S |
 | 预设记录、字体/背景资源同步与选择持久化，实际阅读应用对应字体和背景 | **已实现（源码级）**：不据此声称手机互通或所有字体视觉一致 | 原生 `data/reader/ReaderPresetRepository.kt:123-175,330-380`、`ReaderPresetActivity.kt:200-211`；PodJS `src/reader/preset-store.ts`、`src/reader/font-assets.ts`、`src/reader/background-assets.ts`、`src/sync/reader-actions.ts`、`src/sync/reader-resources.ts`、`src/ui/ReaderBody.tsx`、`src/ui/ReaderScreen.tsx` | 高 | S |
 | 手机实时预览会话：完整更新/增量、序号去重、心跳、停止、20 秒超时、33ms 合并发布、资源传输延长至 120 秒 | **已实现（源码级）** | 原生 `data/reader/WatchReaderPresetPreviewSession.kt:37-173`；PodJS `src/reader/preview-session.ts`、`src/sync/reader-preview.ts`、`src/sync/application-actions.ts` | 高 | S |
 | 独立预览页展示多种文本角色及背景，资源传输时保留旧画面、结束/超时退出、可见期间保持亮屏；预览不覆盖正式预设 | **已实现（源码级）** | 原生 `ReaderPresetPreviewActivity.kt:74-138,169-211`；PodJS `src/ui/ReaderPreviewScreen.tsx`、`src/reader/preview-host.ts`、`src/ui/screen.tsx`、`src/reader/preview-session.ts` | 高 | S |
 
-本区域结论：预设选择、定时主题和手机实时预览均已有源码路径；明确差距在选择菜单的缩略预览未使用完整预设渲染。独立预览页已有系统排版/栅格接口，不能把菜单差距扩大为整个预览能力缺失。
+本区域结论：预设选择、定时主题、选择菜单真实样式缩略预览和手机实时预览均已有源码路径；选择菜单与独立预览页共用阅读排版/背景渲染路径，真机视觉仍待验收。
 
 ## 5. 设置与账号
 
@@ -72,4 +72,4 @@
 1. **导入文章单篇删除（M）**：补条目操作按钮与确认，串通本地正文/分块/资源清理和同步删除语义；保证普通 RSS 文章不误显示入口。
 2. **备忘录保存身份边界（M）**：明确已有 ID、墓碑和真正不存在记录的区别，对齐原生保存行为，避免墓碑导致草稿无法保存/关闭，保留文件夹、置顶与 base 字段；后续验证编辑中远端删除及保存交错场景。
 3. **RSS 抖音媒体错误恢复（M）**：播放器错误/重试接回地址解析，使用新地址重建播放源；验证过期 URL、重新解析失败和后台续播设置。
-4. **补齐已有设置和返回入口的展示行为（M）**：接通总结 Token 展示与持久错误说明、账号云状态/配额，并在补首页朗读入口时实现“查看当前文章”；预设菜单的完整样式预览和退出进度写入保证作为后续独立增量。
+4. **补齐已有设置和返回入口的展示行为（M）**：接通总结 Token 展示与持久错误说明、账号云状态/配额，并在补首页朗读入口时实现“查看当前文章”。
