@@ -1,0 +1,3286 @@
+{
+  "app/src/main/java/com/lightningstudio/watchrss/BaseWatchActivity.kt:64": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "主应用路由用既有 Activity 名映射，创建/回到路由/恢复前台触发；OOBE/宿主 Activity 创建不在该 JS owner 中。",
+    "locations": [
+      {
+        "file": "src/logs/activity.ts",
+        "anchor": "update(entries:",
+        "line": 11
+      },
+      {
+        "file": "src/ui/screen.tsx",
+        "anchor": "activityLog.update",
+        "line": 454
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/BaseWatchActivity.kt:78": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "主应用路由用既有 Activity 名映射，创建/回到路由/恢复前台触发；OOBE/宿主 Activity 创建不在该 JS owner 中。",
+    "locations": [
+      {
+        "file": "src/logs/activity.ts",
+        "anchor": "update(entries:",
+        "line": 11
+      },
+      {
+        "file": "src/ui/screen.tsx",
+        "anchor": "activityLog.update",
+        "line": 454
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/BaseWatchActivity.kt:428": {
+    "status": "无对应事件",
+    "before": "宿主手势",
+    "note": "vendor 系统右滑退出开关不在 JS；不把应用内 back motion 当成该失败。",
+    "locations": [
+      {
+        "file": "src/ui/screen.tsx",
+        "anchor": "const motion =",
+        "line": 179
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/BaseWatchActivity.kt:464": {
+    "status": "无对应事件",
+    "before": "宿主输入",
+    "note": "PodJS 只收到 system-back 语义事件，没有原生 KeyEvent keyCodeToString；不伪造硬件键名。",
+    "locations": [
+      {
+        "file": "src/ui/screen.tsx",
+        "anchor": "onSystemBack",
+        "line": 73
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/BaseWatchActivity.kt:564": {
+    "status": "无对应事件",
+    "before": "导航模型不同",
+    "note": "原生拦截 startActivity 连续调用；JS setPage 是单 Activity 内栈，存在 motion 抑制但不是 startActivity 事件。",
+    "locations": [
+      {
+        "file": "src/ui/screen.tsx",
+        "anchor": "function setPage",
+        "line": 181
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/HomeFeedListActivity.kt:430": {
+    "status": "无对应事件",
+    "before": "仅 metadata 恢复",
+    "note": "PodJS restoreFeed / restorePlaybackQueue 不是原生 pinned preview byte cache / 批量 playURL refresh coordinator；不伪造该事件或 ID 列表。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async restoreFeed",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/HomeFeedListActivity.kt:471": {
+    "status": "无对应事件",
+    "before": "仅 metadata 恢复",
+    "note": "PodJS restoreFeed / restorePlaybackQueue 不是原生 pinned preview byte cache / 批量 playURL refresh coordinator；不伪造该事件或 ID 列表。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async restoreFeed",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/HomeFeedListActivity.kt:566": {
+    "status": "无对应事件",
+    "before": "仅 metadata 恢复",
+    "note": "PodJS restoreFeed / restorePlaybackQueue 不是原生 pinned preview byte cache / 批量 playURL refresh coordinator；不伪造该事件或 ID 列表。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async restoreFeed",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/HomeFeedListActivity.kt:588": {
+    "status": "无对应事件",
+    "before": "仅 metadata 恢复",
+    "note": "PodJS restoreFeed / restorePlaybackQueue 不是原生 pinned preview byte cache / 批量 playURL refresh coordinator；不伪造该事件或 ID 列表。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async restoreFeed",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ServerActivity.kt:91": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "本地服务器 start 拒绝且非主动关闭时记录；原异常仍向调用者传播。",
+    "locations": [
+      {
+        "file": "src/remote-input/server.ts",
+        "anchor": "Failed to start local server",
+        "line": 35
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/WatchRssApplication.kt:85": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "应用 logger 安装后记录本地 yyyy-MM-dd HH:mm:ss；不等同于 Android Application 进程创建时间。",
+    "locations": [
+      {
+        "file": "src/logs/logger-host.ts",
+        "anchor": "应用启动 -",
+        "line": 35
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/WebViewActivity.kt:137": {
+    "status": "无对应事件",
+    "before": "宿主打开浏览器",
+    "note": "openBrowserUrl 将打开交给宿主；JS 没有 WebView factory 与 loadUrl 两个独立失败回调，不能将一次泛化 open 错误冒充其中之一。",
+    "locations": [
+      {
+        "file": "src/browser/open.ts",
+        "anchor": "async function openBrowserUrl",
+        "line": 32
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/bili/search/SearchPagingSource.kt:17": {
+    "status": "已补",
+    "before": "仅 BiliClient 请求概况",
+    "note": "对应分页请求/结果/API 失败/null 数据/条目计数/异常；keyword、server message、异常全文遮蔽，页码和条目计数来自实际值。",
+    "locations": [
+      {
+        "file": "src/bili/client.ts",
+        "anchor": "async search(",
+        "line": 42
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/bili/search/SearchPagingSource.kt:21": {
+    "status": "已补",
+    "before": "仅 BiliClient 请求概况",
+    "note": "对应分页请求/结果/API 失败/null 数据/条目计数/异常；keyword、server message、异常全文遮蔽，页码和条目计数来自实际值。",
+    "locations": [
+      {
+        "file": "src/bili/client.ts",
+        "anchor": "async search(",
+        "line": 42
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/bili/search/SearchPagingSource.kt:24": {
+    "status": "已补",
+    "before": "仅 BiliClient 请求概况",
+    "note": "对应分页请求/结果/API 失败/null 数据/条目计数/异常；keyword、server message、异常全文遮蔽，页码和条目计数来自实际值。",
+    "locations": [
+      {
+        "file": "src/bili/client.ts",
+        "anchor": "async search(",
+        "line": 42
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/bili/search/SearchPagingSource.kt:30": {
+    "status": "已补",
+    "before": "仅 BiliClient 请求概况",
+    "note": "对应分页请求/结果/API 失败/null 数据/条目计数/异常；keyword、server message、异常全文遮蔽，页码和条目计数来自实际值。",
+    "locations": [
+      {
+        "file": "src/bili/client.ts",
+        "anchor": "async search(",
+        "line": 42
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/bili/search/SearchPagingSource.kt:41": {
+    "status": "已补",
+    "before": "仅 BiliClient 请求概况",
+    "note": "对应分页请求/结果/API 失败/null 数据/条目计数/异常；keyword、server message、异常全文遮蔽，页码和条目计数来自实际值。",
+    "locations": [
+      {
+        "file": "src/bili/client.ts",
+        "anchor": "async search(",
+        "line": 42
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/bili/search/SearchPagingSource.kt:49": {
+    "status": "已补",
+    "before": "仅 BiliClient 请求概况",
+    "note": "对应分页请求/结果/API 失败/null 数据/条目计数/异常；keyword、server message、异常全文遮蔽，页码和条目计数来自实际值。",
+    "locations": [
+      {
+        "file": "src/bili/client.ts",
+        "anchor": "async search(",
+        "line": 42
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinCodecRuntimePolicy.kt:51": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:526": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:556": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:580": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:587": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:614": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:627": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:673": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:691": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1187": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1239": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1330": {
+    "status": "热路径排除",
+    "before": "无对应日志",
+    "note": "原生缓存数据源读取/预取进度属高频路径；不在 JS download/stream 循环照搬。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1355": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1360": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1377": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1394": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:1529": {
+    "status": "热路径排除",
+    "before": "无对应日志",
+    "note": "原生缓存数据源读取/预取进度属高频路径；不在 JS download/stream 循环照搬。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:2044": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:2050": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:2063": {
+    "status": "热路径排除",
+    "before": "无对应日志",
+    "note": "原生缓存数据源读取/预取进度属高频路径；不在 JS download/stream 循环照搬。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:2158": {
+    "status": "热路径排除",
+    "before": "无对应日志",
+    "note": "原生缓存数据源读取/预取进度属高频路径；不在 JS download/stream 循环照搬。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt:2192": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackSourceCoordinator.kt:122": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackSourceCoordinator.kt:137": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackSourceCoordinator.kt:174": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackTransport.kt:78": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPreloadManager.kt:146": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPreloadManager.kt:228": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPreloadManager.kt:280": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPreloadManager.kt:286": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPreloadManager.kt:290": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinRecentWindowCacheCoordinator.kt:40": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinRecentWindowCacheCoordinator.kt:55": {
+    "status": "无对应事件",
+    "before": "无原生专用 coordinator",
+    "note": "当前 JS 只有 feed/queue metadata 缓存和 detail resolve；没有 native RAM proxy/pinned bytes/full-file preloader/codec policy/source-refresh eventId 协调器。通用下载成功不能作为该原生事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async resolvePlayback",
+        "line": 73
+      },
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "class DouyinFeedStore",
+        "line": 13
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/media/MediaPlaybackStartVolumeLimiter.kt:31": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "开播 state / setIndex 边界使用原生模板；fixed/舍入后无变化都用相同 Float target 计算真实 skipped 字段；limit=null 保持原有 fast path，不额外查询状态，因此该分支不记录 current。",
+    "locations": [
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/media/MediaPlaybackStartVolumeLimiter.kt:44": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "开播 state / setIndex 边界使用原生模板；fixed/舍入后无变化都用相同 Float target 计算真实 skipped 字段；limit=null 保持原有 fast path，不额外查询状态，因此该分支不记录 current。",
+    "locations": [
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/media/MediaPlaybackStartVolumeLimiter.kt:47": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "开播 state / setIndex 边界使用原生模板；fixed/舍入后无变化都用相同 Float target 计算真实 skipped 字段；limit=null 保持原有 fast path，不额外查询状态，因此该分支不记录 current。",
+    "locations": [
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/network/InternetAvailabilityMonitor.kt:77": {
+    "status": "已补",
+    "before": "只有状态变化 I",
+    "note": "默认网络订阅注册/卸载失败使用原生 E 文案，原有 throw 行为不变。",
+    "locations": [
+      {
+        "file": "src/onboarding/network.ts",
+        "anchor": "Failed to register default network callback",
+        "line": 20
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/network/InternetAvailabilityMonitor.kt:92": {
+    "status": "无对应事件",
+    "before": "无 JS ContentObserver",
+    "note": "原生 Settings.Global debug 网络覆盖 observer/status，JS observeInternet 无此接口；debug gate 不授权伪造 override。",
+    "locations": [
+      {
+        "file": "src/onboarding/network.ts",
+        "anchor": "function observeInternet",
+        "line": 14
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/network/InternetAvailabilityMonitor.kt:107": {
+    "status": "无对应事件",
+    "before": "无 JS ContentObserver",
+    "note": "原生 Settings.Global debug 网络覆盖 observer/status，JS observeInternet 无此接口；debug gate 不授权伪造 override。",
+    "locations": [
+      {
+        "file": "src/onboarding/network.ts",
+        "anchor": "function observeInternet",
+        "line": 14
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/network/InternetAvailabilityMonitor.kt:118": {
+    "status": "已补",
+    "before": "只有状态变化 I",
+    "note": "默认网络订阅注册/卸载失败使用原生 E 文案，原有 throw 行为不变。",
+    "locations": [
+      {
+        "file": "src/onboarding/network.ts",
+        "anchor": "Failed to unregister default network callback",
+        "line": 21
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/network/InternetAvailabilityMonitor.kt:130": {
+    "status": "无对应事件",
+    "before": "无 JS ContentObserver",
+    "note": "原生 Settings.Global debug 网络覆盖 observer/status，JS observeInternet 无此接口；debug gate 不授权伪造 override。",
+    "locations": [
+      {
+        "file": "src/onboarding/network.ts",
+        "anchor": "function observeInternet",
+        "line": 14
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:199": {
+    "status": "无对应事件",
+    "before": "宿主 TTS",
+    "note": "ConfiguredSpeechPort 没有 PCM sampleRate/audioFormat/channelCount 开始回调；不把普通 speak 当作 PCM 开始。",
+    "locations": [
+      {
+        "file": "src/tts/speech-port.ts",
+        "anchor": "async speak(",
+        "line": 49
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:288": {
+    "status": "无对应事件",
+    "before": "设置已常驻内存",
+    "note": "JS 开播读取已加载的 settings signal，无原生 DataStore 单独读取失败点。",
+    "locations": [
+      {
+        "file": "src/ui/screen.tsx",
+        "anchor": "enforcePlaybackStartVolume(",
+        "line": 382
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:296": {
+    "status": "已补",
+    "before": "speech-playback W",
+    "note": "改为 ReadAloudController E 原生固定文案；失败继续朗读不变。",
+    "locations": [
+      {
+        "file": "src/reader/speech-playback.ts",
+        "anchor": "朗读静音开播音量限制失败",
+        "line": 82
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:599": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "PCM FFT/分段时序校准是连续计算路径，不加入日志。",
+    "locations": [
+      {
+        "file": "src/reader/speech-playback.ts",
+        "anchor": "private update(",
+        "line": 54
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:609": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "PCM FFT/分段时序校准是连续计算路径，不加入日志。",
+    "locations": [
+      {
+        "file": "src/reader/speech-playback.ts",
+        "anchor": "private update(",
+        "line": 54
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:680": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "PCM FFT/分段时序校准是连续计算路径，不加入日志。",
+    "locations": [
+      {
+        "file": "src/reader/speech-playback.ts",
+        "anchor": "private update(",
+        "line": 54
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/ReadAloudController.kt:1058": {
+    "status": "部分",
+    "before": "通用 Playback failed",
+    "note": "原生 message 常来自 error.message，按隐私规则整段遮蔽；ReadAloudController / E 保留。",
+    "locations": [
+      {
+        "file": "src/reader/speech-playback.ts",
+        "anchor": "appLogger.e(\"ReadAloudController\",\"<redacted>\")",
+        "line": 63
+      },
+      {
+        "file": "src/reader/speech.ts",
+        "anchor": "'ReadAloudController','<redacted>'",
+        "line": 50
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/engine/ExoPlayerTtsAudioPlayer.kt:34": {
+    "status": "部分",
+    "before": "TtsEngine / Audio playback failed",
+    "note": "沿用原生 tag/消息对齐云音频播放拒绝；底层是 PodJS audio host，JS 没有独立 ExoPlayer onPlayerError 回调。",
+    "locations": [
+      {
+        "file": "src/tts/speech-port.ts",
+        "anchor": "ExoPlayer error",
+        "line": 67
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/data/tts/engine/LocalTtsEngine.kt:71": {
+    "status": "已补",
+    "before": "仅 TtsEngine initialize",
+    "note": "本地 TTS 初始化拒绝，原生 E / LocalTtsEngine / TTS prepare failed。",
+    "locations": [
+      {
+        "file": "src/tts/speech-port.ts",
+        "anchor": "TTS prepare failed",
+        "line": 45
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugController.kt:80": {
+    "status": "无对应事件",
+    "before": "行为不同",
+    "note": "当前 debug armNext 无 next 时保留 poisonNext 意图，不是 native ignored；日志任务不能改该行为或谎报 ignored。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "armNext()",
+        "line": 10
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugController.kt:87": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "显式调试命令在 gate.require 之后记录；source=debug_ui；平台 ID 白名单，不在 updateContext/tick 记录。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "armNext()",
+        "line": 10
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugController.kt:96": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "显式调试命令在 gate.require 之后记录；source=debug_ui；平台 ID 白名单，不在 updateContext/tick 记录。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "requestAdvance()",
+        "line": 9
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/debug/StartupDurationTracker.kt:96": {
+    "status": "部分",
+    "before": "Startup I / JS 耗时",
+    "note": "级别改原生 D；保留已有 JS phase 耗时，缺 Android process/session clock，未伪造 processMs/activityMs。",
+    "locations": [
+      {
+        "file": "src/core/startup-trace.ts",
+        "anchor": "appLogger.d(\"Startup\"",
+        "line": 12
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:571": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/remote-input/http.ts",
+        "anchor": "handleRemoteInput failed",
+        "line": 83
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:610": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/remote-input/http.ts",
+        "anchor": "handleGetFavorites failed",
+        "line": 78
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:649": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/remote-input/http.ts",
+        "anchor": "handleGetWatchLater failed",
+        "line": 78
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:698": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/remote-input/http.ts",
+        "anchor": "handleGetBiliWatchHistory failed",
+        "line": 73
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:734": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/remote-input/http.ts",
+        "anchor": "handleGetBiliPlaybackProgress failed",
+        "line": 78
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:809": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/tts/config-http.ts",
+        "anchor": "handleGetTtsConfig failed",
+        "line": 23
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/LocalHttpServer.kt:876": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "对应 HTTP 分支失败保留原有 status/response；不记录请求正文、URL、配置或异常全文。",
+    "locations": [
+      {
+        "file": "src/tts/config-http.ts",
+        "anchor": "handleSetTtsConfig failed",
+        "line": 29
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothDebugLog.kt:22": {
+    "status": "部分",
+    "before": "WatchSync 时间线",
+    "note": "新增 BtSyncDebug 原生 event/session 框架及 I/W/E，字段白名单；不传原生任意 map/异常/peer 信息。",
+    "locations": [
+      {
+        "file": "src/logs/sync-events.ts",
+        "anchor": "event(event:string",
+        "line": 14
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothDebugLog.kt:31": {
+    "status": "部分",
+    "before": "WatchSync 时间线",
+    "note": "新增 BtSyncDebug 原生 event/session 框架及 I/W/E，字段白名单；不传原生任意 map/异常/peer 信息。",
+    "locations": [
+      {
+        "file": "src/logs/sync-events.ts",
+        "anchor": "event(event:string",
+        "line": 14
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothDebugLog.kt:40": {
+    "status": "部分",
+    "before": "WatchSync 时间线",
+    "note": "新增 BtSyncDebug 原生 event/session 框架及 I/W/E，字段白名单；不传原生任意 map/异常/peer 信息。",
+    "locations": [
+      {
+        "file": "src/logs/sync-events.ts",
+        "anchor": "event(event:string",
+        "line": 14
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:203": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.acceptOnce.start 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/rfcomm.ts",
+        "anchor": "server.acceptOnce.start",
+        "line": 24
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:226": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.listen.success 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/rfcomm.ts",
+        "anchor": "server.listen.success",
+        "line": 26
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:233": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.accept.start 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/rfcomm.ts",
+        "anchor": "server.accept.start",
+        "line": 27
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:239": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.accept.success 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/rfcomm.ts",
+        "anchor": "server.accept.success",
+        "line": 27
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:256": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.acceptOnce.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/rfcomm.ts",
+        "anchor": "server.acceptOnce.failed",
+        "line": 30
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:289": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.ip.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "server.ip.failed",
+        "line": 99
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:311": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.client.accepted 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/rfcomm.ts",
+        "anchor": "server.client.accepted",
+        "line": 27
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:334": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.session.accepted 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "server.session.accepted",
+        "line": 82
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:350": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.session.complete 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "server.session.complete",
+        "line": 85
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:412": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.exchange.abort.close.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "server.exchange.abort.close.failed",
+        "line": 63
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:423": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.exchange.aborted 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "server.exchange.aborted",
+        "line": 102
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:443": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 server.exchange.complete 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "server.exchange.complete",
+        "line": 127
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:469": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.cursor.exchanged 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.cursor.exchanged",
+        "line": 93
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:496": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.manifest.handle.start 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.manifest.handle.start",
+        "line": 98
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:517": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.manifest.parsed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.manifest.parsed",
+        "line": 153
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:536": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.sources.merged 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.sources.merged",
+        "line": 155
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:563": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.local.exported 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.local.exported",
+        "line": 159
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:656": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.articles.parsed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.articles.parsed",
+        "line": 165
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:694": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.articles.merged 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.articles.merged",
+        "line": 165
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:711": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.response.articles.exported 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.response.articles.exported",
+        "line": 169
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:731": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.response.frames.built 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.response.frames.built",
+        "line": 171
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:753": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.response.frames.built 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.response.frames.built",
+        "line": 171
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:774": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.manifest.handle.complete 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.manifest.handle.complete",
+        "line": 176
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:810": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.manifest.handle.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.manifest.handle.failed",
+        "line": 101
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:831": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.errorResponse.write.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.errorResponse.write.failed",
+        "line": 102
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1039": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 ack.read.start 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "ack.read.start",
+        "line": 67
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1052": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 ack.received.waitApplied 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "ack.received.waitApplied",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1069": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 ack.read.success 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "ack.read.success",
+        "line": 71
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1080": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 ack.read.missing 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "ack.read.missing",
+        "line": 71
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1101": {
+    "status": "无对应事件",
+    "before": "无独立关闭确认",
+    "note": "原生 timeout job 主动 close 成功回调；JS read 接口只收到拒绝，无法证明远端/宿主已经关闭，不记录 timeout.closed。",
+    "locations": [
+      {
+        "file": "src/sync/stream.ts",
+        "anchor": "async readFrame(",
+        "line": 20
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1116": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 ack.read.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "ack.read.failed",
+        "line": 68
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1139": {
+    "status": "无对应事件",
+    "before": "无独立关闭确认",
+    "note": "原生 timeout job 主动 close 成功回调；JS read 接口只收到拒绝，无法证明远端/宿主已经关闭，不记录 timeout.closed。",
+    "locations": [
+      {
+        "file": "src/sync/stream.ts",
+        "anchor": "async readFrame(",
+        "line": 20
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1164": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.peerState.mark.skipped 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.peerState.mark.skipped",
+        "line": 126
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1191": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.peerState.mark.success 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.peerState.mark.success",
+        "line": 125
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1207": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 library.peerState.mark.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "library.peerState.mark.failed",
+        "line": 125
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1225": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.handle.start 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.handle.start",
+        "line": 105
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1268": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.pullSavedItems.built 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.pullSavedItems.built",
+        "line": 116
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1291": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.syncAccount.saved 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.syncAccount.saved",
+        "line": 117
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1364": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.syncLlmTokenUsage.built 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.syncLlmTokenUsage.built",
+        "line": 118
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1409": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.syncLibrary.probe 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.syncLibrary.probe",
+        "line": 110
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1438": {
+    "status": "无对应事件",
+    "before": "v3 协议不支持",
+    "note": "当前 receiver 拒绝旧非 chunked 协议，不能记录 v3 合并成功。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "Chunked article protocol required",
+        "line": 151
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1474": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.handle.complete 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.handle.complete",
+        "line": 122
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1482": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 request.handle.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "request.handle.failed",
+        "line": 114
+      },
+      {
+        "file": "src/sync/application-actions.ts",
+        "anchor": "request.handle.failed",
+        "line": 26
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1535": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "preview.stream.stats 属于传输帧/实时预览高频路径，按任务不加逐帧日志；失败和会话边界已覆盖。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async read(",
+        "line": 64
+      },
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async previewStream",
+        "line": 136
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1575": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "frame.read.start 属于传输帧/实时预览高频路径，按任务不加逐帧日志；失败和会话边界已覆盖。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async read(",
+        "line": 64
+      },
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async previewStream",
+        "line": 136
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1582": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "frame.read.success 属于传输帧/实时预览高频路径，按任务不加逐帧日志；失败和会话边界已覆盖。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async read(",
+        "line": 64
+      },
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async previewStream",
+        "line": 136
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1590": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 frame.read.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "frame.read.failed",
+        "line": 64
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1613": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "frame.write.start 属于传输帧/实时预览高频路径，按任务不加逐帧日志；失败和会话边界已覆盖。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async read(",
+        "line": 64
+      },
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async previewStream",
+        "line": 136
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1620": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "frame.write.success 属于传输帧/实时预览高频路径，按任务不加逐帧日志；失败和会话边界已覆盖。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async read(",
+        "line": 64
+      },
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "private async previewStream",
+        "line": 136
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt:1626": {
+    "status": "部分",
+    "before": "WatchSync 简要时间线",
+    "note": "边界事件 frame.write.failed 的原生 tag/级别已对应；只包含实际可得的数值/布尔字段，字符串遮蔽，原生特有字段省略；流式接收在事务完成边界汇总。",
+    "locations": [
+      {
+        "file": "src/sync/session.ts",
+        "anchor": "frame.write.failed",
+        "line": 65
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/SyncMediaKeepAlive.kt:89": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "基于真实 host SilenceState.playing 转换，多个 lease 不重复；启动失败 W，原异常仍传播。",
+    "locations": [
+      {
+        "file": "src/logs/sync-media.ts",
+        "anchor": "function loggedSyncSilence",
+        "line": 4
+      },
+      {
+        "file": "src/sync/application-host.ts",
+        "anchor": "loggedSyncSilence(silencePlayback)",
+        "line": 30
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/SyncMediaKeepAlive.kt:93": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "基于真实 host SilenceState.playing 转换，多个 lease 不重复；启动失败 W，原异常仍传播。",
+    "locations": [
+      {
+        "file": "src/logs/sync-media.ts",
+        "anchor": "function loggedSyncSilence",
+        "line": 4
+      },
+      {
+        "file": "src/sync/application-host.ts",
+        "anchor": "loggedSyncSilence(silencePlayback)",
+        "line": 30
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/SyncMediaKeepAlive.kt:102": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "基于真实 host SilenceState.playing 转换，多个 lease 不重复；启动失败 W，原异常仍传播。",
+    "locations": [
+      {
+        "file": "src/logs/sync-media.ts",
+        "anchor": "function loggedSyncSilence",
+        "line": 4
+      },
+      {
+        "file": "src/sync/application-host.ts",
+        "anchor": "loggedSyncSilence(silencePlayback)",
+        "line": 30
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:78": {
+    "status": "已补",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/application-host.ts",
+        "anchor": "默认网络监听注册失败",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:87": {
+    "status": "无对应事件",
+    "before": "统一宿主网络事件",
+    "note": "JS 只订阅 onNetworkChange，无单独 local-WiFi listener 注册失败；默认网络 observer 错误另列。",
+    "locations": [
+      {
+        "file": "src/sync/application-host.ts",
+        "anchor": "const stopNetwork=",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:97": {
+    "status": "部分",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP endpoint accepted from RFCOMM bootstrap endpoints=",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:142": {
+    "status": "部分",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP route refresh deferred during active sync reason=",
+        "line": 41
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:151": {
+    "status": "已补",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "BLE 端点发现失败，保留已有通道",
+        "line": 50
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:195": {
+    "status": "部分",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP candidate failed kind=",
+        "line": 72
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:206": {
+    "status": "已补",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP route switch deferred after probe because sync started",
+        "line": 74
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:217": {
+    "status": "部分",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP route ready reason=",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:286": {
+    "status": "已补",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP 同步数据通道失败",
+        "line": 99
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/WatchIpSyncManager.kt:300": {
+    "status": "部分",
+    "before": "WatchSync/通用 console",
+    "note": "使用 WatchRSS_IpSync 原生级别与固定模板；reason 只有 JS 实际 bootstrap/refresh，endpoint/phase 遮蔽，不附加异常。",
+    "locations": [
+      {
+        "file": "src/sync/ip-controller.ts",
+        "anchor": "IP sync session closed phase=",
+        "line": 97
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:58": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:113": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:139": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:145": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:166": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:180": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/components/PlayerVolumeOverlay.kt:183": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/input/DigitalCrownInput.kt:120": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "音量旋钮 samples、每次 adjust、连续系统音量观察属于滚动/高频输入路径；开播限制另有一次性日志。",
+    "locations": [
+      {
+        "file": "src/media/crown-volume.ts",
+        "anchor": "private async pump(",
+        "line": 52
+      },
+      {
+        "file": "src/media/start-volume.ts",
+        "anchor": "async function enforcePlaybackStartVolume",
+        "line": 39
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/LogUploadScreen.kt:82": {
+    "status": "无对应事件",
+    "before": "无 WebView 上传页",
+    "note": "PodJS LogUploadController 使用原生 TS 上传逻辑，未初始化 WebView，因此不记录假的 WebView 失败。",
+    "locations": [
+      {
+        "file": "src/logs/upload.ts",
+        "anchor": "class LogUploadController",
+        "line": 34
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/WebViewScreen.kt:109": {
+    "status": "无对应事件",
+    "before": "宿主打开浏览器",
+    "note": "openBrowserUrl 将打开交给宿主；JS 没有 WebView factory 与 loadUrl 两个独立失败回调，不能将一次泛化 open 错误冒充其中之一。",
+    "locations": [
+      {
+        "file": "src/browser/open.ts",
+        "anchor": "async function openBrowserUrl",
+        "line": 32
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:289": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:324": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:345": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:354": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:361": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:837": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:891": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:916": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:949": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "一次实际 host prewarm 调用前记录公开平台 ID、稳定 Primary/Secondary 槽；未在 transition/frame 循环日志。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "TEST_EVENT lookahead_prewarm_start",
+        "line": 126
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:984": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1123": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1165": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1174": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1295": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1357": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1413": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1452": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1537": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1557": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1597": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1608": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1624": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1656": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1756": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1794": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1808": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1901": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1935": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1970": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:1983": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2031": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2071": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2137": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2158": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2254": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2275": {
+    "status": "无对应事件",
+    "before": "只有通用 VideoPlayer 日志",
+    "note": "原生 pooled ExoPlayer/poster/codec fallback/quarantine/source refresh/标题预热细分状态不等于 PodJS host session 返回；JS 不具备该原生分支完整数据，不伪造 TEST_EVENT 或 header signature。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "class DouyinVideoSessionPool",
+        "line": 89
+      },
+      {
+        "file": "src/ui/VideoPlayerScreen.tsx",
+        "anchor": "const failed =",
+        "line": 70
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2414": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "实际 host promote 成功后记录交换后的槽与目标 ID。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "promote slot=",
+        "line": 161
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2498": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2515": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2532": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2539": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2545": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinImmersiveScreen.kt:2584": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "原生 Pager 帧/settle/autoplay 调度日志不照搬到 PodJS 的滚动或每帧路径；一次 promote 边界另列。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/video-sessions.ts",
+        "anchor": "async transition(",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:116": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "host 状态变化/二维码种类变化/完成/销毁触发；重复轮询去重，只记录时长和固定状态，不记录二维码。WebView 不返回 pageState 的旧 host 不伪造时长。",
+    "locations": [
+      {
+        "file": "src/logs/douyin-login.ts",
+        "anchor": "class DouyinLoginLog",
+        "line": 5
+      },
+      {
+        "file": "src/ui/douyin/index.tsx",
+        "anchor": "loginLog.status",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:180": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "host 状态变化/二维码种类变化/完成/销毁触发；重复轮询去重，只记录时长和固定状态，不记录二维码。WebView 不返回 pageState 的旧 host 不伪造时长。",
+    "locations": [
+      {
+        "file": "src/logs/douyin-login.ts",
+        "anchor": "class DouyinLoginLog",
+        "line": 5
+      },
+      {
+        "file": "src/ui/douyin/index.tsx",
+        "anchor": "loginLog.status",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:235": {
+    "status": "无对应事件",
+    "before": "宿主处理检测/解码",
+    "note": "JS 授权接口没有独立 JS-evaluation/二维码解码/WebResourceError 细分事件；不把泛化登录失败冒充各日志点。",
+    "locations": [
+      {
+        "file": "src/media/browser-auth.ts",
+        "anchor": "function authorizeInBrowser",
+        "line": 19
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:254": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "host 状态变化/二维码种类变化/完成/销毁触发；重复轮询去重，只记录时长和固定状态，不记录二维码。WebView 不返回 pageState 的旧 host 不伪造时长。",
+    "locations": [
+      {
+        "file": "src/logs/douyin-login.ts",
+        "anchor": "class DouyinLoginLog",
+        "line": 5
+      },
+      {
+        "file": "src/ui/douyin/index.tsx",
+        "anchor": "loginLog.status",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:261": {
+    "status": "无对应事件",
+    "before": "宿主处理检测/解码",
+    "note": "JS 授权接口没有独立 JS-evaluation/二维码解码/WebResourceError 细分事件；不把泛化登录失败冒充各日志点。",
+    "locations": [
+      {
+        "file": "src/media/browser-auth.ts",
+        "anchor": "function authorizeInBrowser",
+        "line": 19
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:274": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "host 状态变化/二维码种类变化/完成/销毁触发；重复轮询去重，只记录时长和固定状态，不记录二维码。WebView 不返回 pageState 的旧 host 不伪造时长。",
+    "locations": [
+      {
+        "file": "src/logs/douyin-login.ts",
+        "anchor": "class DouyinLoginLog",
+        "line": 5
+      },
+      {
+        "file": "src/ui/douyin/index.tsx",
+        "anchor": "loginLog.status",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:281": {
+    "status": "无对应事件",
+    "before": "宿主处理检测/解码",
+    "note": "JS 授权接口没有独立 JS-evaluation/二维码解码/WebResourceError 细分事件；不把泛化登录失败冒充各日志点。",
+    "locations": [
+      {
+        "file": "src/media/browser-auth.ts",
+        "anchor": "function authorizeInBrowser",
+        "line": 19
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:412": {
+    "status": "无对应事件",
+    "before": "宿主处理检测/解码",
+    "note": "JS 授权接口没有独立 JS-evaluation/二维码解码/WebResourceError 细分事件；不把泛化登录失败冒充各日志点。",
+    "locations": [
+      {
+        "file": "src/media/browser-auth.ts",
+        "anchor": "function authorizeInBrowser",
+        "line": 19
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:457": {
+    "status": "已补",
+    "before": "仅 UI 错误状态",
+    "note": "授权失败且 loginError 识别 unavailable 时记录原生 E；取消不记初始化失败。",
+    "locations": [
+      {
+        "file": "src/ui/douyin/index.tsx",
+        "anchor": "Failed to initialize WebView",
+        "line": 158
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:542": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "host 状态变化/二维码种类变化/完成/销毁触发；重复轮询去重，只记录时长和固定状态，不记录二维码。WebView 不返回 pageState 的旧 host 不伪造时长。",
+    "locations": [
+      {
+        "file": "src/logs/douyin-login.ts",
+        "anchor": "class DouyinLoginLog",
+        "line": 5
+      },
+      {
+        "file": "src/ui/douyin/index.tsx",
+        "anchor": "loginLog.status",
+        "line": 143
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/douyin/DouyinLoginScreen.kt:667": {
+    "status": "无对应事件",
+    "before": "宿主处理检测/解码",
+    "note": "JS 授权接口没有独立 JS-evaluation/二维码解码/WebResourceError 细分事件；不把泛化登录失败冒充各日志点。",
+    "locations": [
+      {
+        "file": "src/media/browser-auth.ts",
+        "anchor": "function authorizeInBrowser",
+        "line": 19
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt:821": {
+    "status": "热路径排除",
+    "before": "未记录",
+    "note": "ReaderBody.save 由每帧驱动的 1s 自动保存触发；不往滚动/自动保存热路径加入日志。",
+    "locations": [
+      {
+        "file": "src/ui/ReaderBody.tsx",
+        "anchor": "if(now-lastSave>=1000)",
+        "line": 207
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt:904": {
+    "status": "无对应事件",
+    "before": "布局模型不同",
+    "note": "PodJS ImportedReaderDocument 不存在 native LazyList firstIndex/fallbackFirstIndex/offsetPx 的双阶段恢复；不填造这些布局字段。",
+    "locations": [
+      {
+        "file": "src/ui/ReaderBody.tsx",
+        "anchor": "const target=importedByteTarget",
+        "line": 178
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt:963": {
+    "status": "无对应事件",
+    "before": "布局模型不同",
+    "note": "PodJS ImportedReaderDocument 不存在 native LazyList firstIndex/fallbackFirstIndex/offsetPx 的双阶段恢复；不填造这些布局字段。",
+    "locations": [
+      {
+        "file": "src/ui/ReaderBody.tsx",
+        "anchor": "const target=importedByteTarget",
+        "line": 178
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt:1444": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "长按有有效 anchor 时记录原生 tag/级别及块/位置/偏移，text 固定遮蔽；坐标是 PodJS 视口坐标。无效 anchor 不编造块索引。",
+    "locations": [
+      {
+        "file": "src/ui/ReaderBody.tsx",
+        "anchor": "appLogger.d(\"ReadAloudTouch\"",
+        "line": 217
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/screen/rss/DetailScreen.kt:1520": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "长按有有效 anchor 时记录原生 tag/级别及块/位置/偏移，text 固定遮蔽；坐标是 PodJS 视口坐标。无效 anchor 不编造块索引。",
+    "locations": [
+      {
+        "file": "src/ui/ReaderBody.tsx",
+        "anchor": "appLogger.d(\"ReadAloudTouch\"",
+        "line": 217
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/util/WebViewSupport.kt:16": {
+    "status": "已补",
+    "before": "只有 browser availability 通用诊断",
+    "note": "真实 availability probe 的 unavailable/rejection 分别对应 W/E；旧 host 缺 capability 时保留原 fallback，不假称无 WebView。",
+    "locations": [
+      {
+        "file": "src/douyin/browser.ts",
+        "anchor": "No WebView provider available",
+        "line": 54
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/util/WebViewSupport.kt:22": {
+    "status": "已补",
+    "before": "只有 browser availability 通用诊断",
+    "note": "真实 availability probe 的 unavailable/rejection 分别对应 W/E；旧 host 缺 capability 时保留原 fallback，不假称无 WebView。",
+    "locations": [
+      {
+        "file": "src/douyin/browser.ts",
+        "anchor": "Failed to resolve WebView provider",
+        "line": 56
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/DouyinFeedViewModel.kt:539": {
+    "status": "无对应事件",
+    "before": "恢复与预载模型不同",
+    "note": "JS 没有 native showTitlePage/bootstrap target-page resume VM 或 proxy-fullfile 切换分支；现有 restore 不等于该事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async restoreFeed",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/DouyinFeedViewModel.kt:626": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "记录真实 feed/recent/merged/restored 数量；JS 没有 pinned-byte snapshot，pinned=0；anchor 仅允许公开数字 ID。",
+    "locations": [
+      {
+        "file": "src/douyin/feed-store.ts",
+        "anchor": "read bootstrap pinned=0",
+        "line": 28
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/DouyinFeedViewModel.kt:867": {
+    "status": "无对应事件",
+    "before": "恢复与预载模型不同",
+    "note": "JS 没有 native showTitlePage/bootstrap target-page resume VM 或 proxy-fullfile 切换分支；现有 restore 不等于该事件。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "async restoreFeed",
+        "line": 75
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/DouyinFeedViewModel.kt:973": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "实际 RECENT_KEY 保存成功后记录，reason=playback（唯一 JS 调用边界），不输出 URL/描述。",
+    "locations": [
+      {
+        "file": "src/douyin/client.ts",
+        "anchor": "persist recent window",
+        "line": 81
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/LlmSummaryViewModel.kt:220": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "仅活跃 summary session 失败时记录；不输出 title/content/prompt/账户/服务端异常。",
+    "locations": [
+      {
+        "file": "src/llm/summary.ts",
+        "anchor": "Summary generation failed",
+        "line": 84
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/TtsSettingsViewModel.kt:166": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "DebugTts 对应默认引擎选择/云 TTS 测试失败；全部沿用现有 host debug gate，原异常仍抛给 UI。",
+    "locations": [
+      {
+        "file": "src/debug/tts.ts",
+        "anchor": "Apply default voice failed",
+        "line": 10
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/TtsSettingsViewModel.kt:315": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "DebugTts 对应默认引擎选择/云 TTS 测试失败；全部沿用现有 host debug gate，原异常仍抛给 UI。",
+    "locations": [
+      {
+        "file": "src/debug/tts.ts",
+        "anchor": "TTS test failed",
+        "line": 12
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/TtsSettingsViewModel.kt:375": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "DebugTts 对应默认引擎选择/云 TTS 测试失败；全部沿用现有 host debug gate，原异常仍抛给 UI。",
+    "locations": [
+      {
+        "file": "src/debug/tts.ts",
+        "anchor": "TTS test failed",
+        "line": 12
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/TtsSettingsViewModel.kt:433": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "DebugTts 对应默认引擎选择/云 TTS 测试失败；全部沿用现有 host debug gate，原异常仍抛给 UI。",
+    "locations": [
+      {
+        "file": "src/debug/tts.ts",
+        "anchor": "TTS test failed",
+        "line": 12
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/ui/viewmodel/TtsSettingsViewModel.kt:498": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "DebugTts 对应默认引擎选择/云 TTS 测试失败；全部沿用现有 host debug gate，原异常仍抛给 UI。",
+    "locations": [
+      {
+        "file": "src/debug/tts.ts",
+        "anchor": "TTS test failed",
+        "line": 12
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/util/AppLogger.kt:90": {
+    "status": "已有",
+    "before": "已有",
+    "note": "持久队列 init / clear 原生 D 级模板。",
+    "locations": [
+      {
+        "file": "src/logs/app-logger.ts",
+        "anchor": "日志系统初始化完成",
+        "line": 36
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/util/AppLogger.kt:241": {
+    "status": "已有",
+    "before": "已有",
+    "note": "持久队列 init / clear 原生 D 级模板。",
+    "locations": [
+      {
+        "file": "src/logs/app-logger.ts",
+        "anchor": "日志已清空",
+        "line": 64
+      }
+    ]
+  },
+  "app/src/main/java/com/lightningstudio/watchrss/util/NetworkUtils.kt:44": {
+    "status": "已补",
+    "before": "缺失",
+    "note": "地址枚举失败；不输出网络地址或异常。",
+    "locations": [
+      {
+        "file": "src/remote-input/server.ts",
+        "anchor": "Failed to get local IP address",
+        "line": 31
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:20": {
+    "status": "无对应事件",
+    "before": "无应用 broadcast receiver",
+    "note": "PodJS 调试 UI 无 native Android broadcast action/receiver；不能声称 broadcast accepted/ignored/report context。显式 controller 操作另列。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "class DouyinDebugController",
+        "line": 4
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:22": {
+    "status": "无对应事件",
+    "before": "无应用 broadcast receiver",
+    "note": "PodJS 调试 UI 无 native Android broadcast action/receiver；不能声称 broadcast accepted/ignored/report context。显式 controller 操作另列。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "class DouyinDebugController",
+        "line": 4
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:34": {
+    "status": "无对应事件",
+    "before": "无应用 broadcast receiver",
+    "note": "PodJS 调试 UI 无 native Android broadcast action/receiver；不能声称 broadcast accepted/ignored/report context。显式 controller 操作另列。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "class DouyinDebugController",
+        "line": 4
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:36": {
+    "status": "无对应事件",
+    "before": "无应用 broadcast receiver",
+    "note": "PodJS 调试 UI 无 native Android broadcast action/receiver；不能声称 broadcast accepted/ignored/report context。显式 controller 操作另列。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "class DouyinDebugController",
+        "line": 4
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:44": {
+    "status": "无对应事件",
+    "before": "无应用 broadcast receiver",
+    "note": "PodJS 调试 UI 无 native Android broadcast action/receiver；不能声称 broadcast accepted/ignored/report context。显式 controller 操作另列。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "class DouyinDebugController",
+        "line": 4
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:53": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "同 cookie 导入命令的空/成功/失败使用原生模板；入口为 JS debug UI（没有 broadcast receiver），cookie 仅记录长度，失败 message 遮蔽。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "async importCookie(",
+        "line": 17
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:63": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "同 cookie 导入命令的空/成功/失败使用原生模板；入口为 JS debug UI（没有 broadcast receiver），cookie 仅记录长度，失败 message 遮蔽。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "async importCookie(",
+        "line": 17
+      }
+    ]
+  },
+  "app/src/debug/java/com/lightningstudio/watchrss/debug/DouyinPlaybackDebugReceiver.kt:68": {
+    "status": "部分",
+    "before": "缺失",
+    "note": "同 cookie 导入命令的空/成功/失败使用原生模板；入口为 JS debug UI（没有 broadcast receiver），cookie 仅记录长度，失败 message 遮蔽。",
+    "locations": [
+      {
+        "file": "src/debug/douyin.ts",
+        "anchor": "async importCookie(",
+        "line": 17
+      }
+    ]
+  }
+}
