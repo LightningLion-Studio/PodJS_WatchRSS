@@ -103,9 +103,15 @@ export interface AppServices {
   listNotes(articleId?: string): Promise<Note[]>;
   saveNote(note: { articleId?: string; title: string; body: string }): Promise<Note>;
   /** Native text input (keyboard/IME). Resolves null when cancelled. */
-  input(prompt: string, value?: string): Promise<string | null>;
+  input(prompt: string, value?: string, options?:ModalInputOptions): Promise<string | null>;
+  inputRecovery?:ModalInputRecovery;
   /** A live Android IME field aligned with an app-drawn search field. */
   openInlineInput?(value:string,bounds:{x:number;y:number;width:number;height:number},onChange:(value:string)=>void,onSubmit:()=>void,options?:{hint?:string;fontSizeSp?:number;inputType?:"text"|"uri"}):Promise<{close():Promise<void>}>;
   speak(text: string, rate?: number, started?: () => void, progress?: (event:import("../reader/speech-highlight.ts").SpeechProgress)=>void): Promise<void>;
   stopSpeech(): Promise<void>;
 }
+
+/** Host drafts are configuration-only. Identity is scoped to a restored route. */
+export interface ModalInputOptions {restorationKey:string}
+export interface ModalInputRecovery {pending(key:string):Promise<boolean>;dismiss(key:string):Promise<void>}
+export type ModalInput=(title:string,value?:string,options?:ModalInputOptions)=>Promise<string|null>;

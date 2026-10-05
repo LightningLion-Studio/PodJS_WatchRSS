@@ -1,7 +1,10 @@
+import {modalInputKey} from './modal-input.ts';
+import {restoredSignal,booleanState} from './route-activity.tsx';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('NotesScreen');
 import {notePreviewEntries} from './NotePreview.tsx';
 import {noteImageDisplayHeight} from '../notes/presentation.ts';
+import type {ModalInput,ModalInputRecovery} from './service.ts';
 import {noteBodyLayoutBlocks} from '../notes/native-layout-input.ts';
 import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup, on } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
@@ -28,7 +31,7 @@ import { SystemTextLine } from "@podjs/framework/text";
 import { resolvedReaderStyle, type ReaderPreset } from "../reader/preset.ts";
 import type { ReaderBackgroundSnapshot } from "../reader/background-assets.ts";
 
-export type NotesInput = (title: string, value?: string) => Promise<string | null>;
+export type NotesInput = ModalInput;
 interface BaseProps { repository: MemoRepository; height:number; width:number; onError?:(message:string)=>void }
 const fail = (props: BaseProps, error: unknown) => props.onError?.(error instanceof Error ? error.message : String(error));
 function preview(note: MemoNote): string { const lines=note.plainText.split("\n").map(v=>v.trim()).filter(Boolean); if(lines[0]===note.title.trim()) lines.shift(); return lines.join(" ").slice(0,120)||"暂无摘要"; }
@@ -89,10 +92,11 @@ export function NotesListScreen(props: NotesListScreenProps) {
 }
 
 export interface NoteDetailHandle { scroller?:Scroller; goBack:()=>boolean }
-export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; onImage?:(path:string)=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
+export interface NoteDetailScreenProps extends BaseProps { onNoteIdentity?:(id:string)=>void; noteId?:string; refreshKey?:number; input:NotesInput; inputRecovery?:ModalInputRecovery; onImage?:(path:string)=>void; onBack:()=>void; preset?:ReaderPreset; backgroundSnapshot?:ReaderBackgroundSnapshot; active?:boolean; ref?:(value:NoteDetailHandle)=>void }
 interface NoteHeaderLayout {title:number;subtitle:number;titleLines:readonly ParagraphLine[];subtitleLines:readonly ParagraphLine[]}
 export function NoteDetailScreen(props: NoteDetailScreenProps) {
-  const createdHere=!props.noteId;
+  const [createMode,setCreateMode]=restoredSignal('retained','note-create-mode',!props.noteId,booleanState);
+  const createdHere=createMode(),inputKey=modalInputKey("note");
   const [note,setNote]=createSignal<MemoNote|null>(null), [loaded,setLoaded]=createSignal(!props.noteId), [editing,setEditing]=createSignal(!props.noteId),[editorSeed,setEditorSeed]=createSignal<MemoNote|null>(null);
   const [download,setDownload]=createSignal(false);
   const [imageHeights,setImageHeights]=createSignal<ReadonlyMap<string,number>>(new Map());
@@ -139,7 +143,15 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   async function reload(id:string){const version=++readVersion;try{const value=await props.repository.get(id);if(!disposed&&version===readVersion)setNote(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}}
   const edit=()=>{const current=note();setEditorSeed(current);setEditorAnchor(current?noteEditorAnchor(entries(),current.markdown,readerScroller.offset(),props.width,props.height,(text,slot)=>getOps().measureText(text,slot),{top:22,gap:0,horizontalInset:14}):undefined);setEditing(true);};
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
-  onMount(async()=>{try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
+  onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
+  let modalRecoveryChecked=false;
+  createEffect(()=>{
+    if(!loaded()||editing()||props.active===false||!note()||!inputKey||!props.inputRecovery||modalRecoveryChecked)return;
+    modalRecoveryChecked=true;
+    void Promise.all(['title','body'].map(part=>props.inputRecovery!.pending(`${inputKey}:${part}`))).then(pending=>{
+      if(!disposed&&props.active!==false&&!editing()&&note()&&pending.some(Boolean)){setEditorSeed(note());setEditing(true);}
+    }).catch(()=>{});
+  });
   createEffect(on(()=>props.refreshKey,()=>{if(!editing()&&props.noteId)void reload(props.noteId);},{defer:true}));
   const entries=createMemo<ScrollEntry[]>(()=>{ const n=note(); if(!n)return[]; const titleStyle=titleFont(),subtitleStyle=subtitleFont(),contentWidth=props.width-28,titleWidth=Math.min(190,contentWidth);const titleLines=watchTitleLines(n.title||"未命名笔记",contentWidth,value=>getOps().measureText(value,titleStyle.fontSlot)*titleStyle.scale);const measured=nativeHeader(),titleHeight=Math.max(32,measured?.title??titleLines.length*titleStyle.lineHeight),subtitleHeight=Math.max(22,measured?.subtitle??subtitleStyle.lineHeight),pixelScale=getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth;return [
     {height:titleHeight,render:()=>measured?.titleLines.length&&hasCapability('text.raster')?<View class="absolute top-[0] bottom-[0]" style={{insetL:(contentWidth-titleWidth)/2,width:titleWidth}}>{measured.titleLines.map((line,index)=>{const text=titleLines.join('\n').slice(line.start,line.visibleEnd),top=measured.titleLines.slice(0,index).reduce((sum,value)=>sum+(value.height??0),0),height=line.height??titleStyle.lineHeight;return <View class="absolute left-[0] right-[0]" style={{insetT:top,height}}><SystemTextLine pixelScale={pixelScale} options={{...line.paragraph,text,widthPx:Math.ceil(titleWidth*pixelScale),heightPx:Math.ceil(height*pixelScale),baselinePx:Math.ceil((line.baseline??height*.8)*pixelScale),fontSizePx:line.paragraph?.fontSizePx??titleStyle.scale*21.7*pixelScale,align:'center',paragraph:line.paragraph}} fallback={<Text class="absolute text-center" style={{width:titleWidth/titleStyle.scale,height:height/titleStyle.scale,fontSlot:titleStyle.fontSlot,scale:titleStyle.scale,originX:-.5,originY:-.5,lineHeight:height/titleStyle.scale,textColor:titleColor()}}>{text}</Text>}/></View>;})}</View>:<Text class={getDisplayMetrics().shape==="round"?"absolute text-center":"absolute"} style={{insetL:(contentWidth-titleWidth)/2,width:titleWidth/titleStyle.scale,height:titleHeight/titleStyle.scale,fontSlot:titleStyle.fontSlot,scale:titleStyle.scale,originX:-.5,originY:-.5,lineHeight:titleStyle.lineHeight/titleStyle.scale,textColor:titleColor()}}>{titleLines.join("\n")}</Text>},
@@ -155,7 +167,7 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   ]; });
   const readerScroller=createScroller({max:()=>Math.max(0,44+entries().reduce((sum,row)=>sum+row.height,0)-props.height)});
   return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries()} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack})}/><Show when={editButtonVisible()}><View class="absolute left-[0] right-[0] bottom-[0] h-[56] items-center justify-center"><View onPress={edit} focusable accessibilityRole="button" accessibilityLabel="编辑备忘录" class="h-[32] w-[44] rounded-[47] items-center justify-center" style={{bgColor:editBackground()}}><Text class="text-sm" style={{textColor:bodyColor()}}>编辑</Text></View></View></Show><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
-    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} fallbackInput={props.input} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack});}}/>
+    <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack});}}/>
   </Show></Show>;
 }
 

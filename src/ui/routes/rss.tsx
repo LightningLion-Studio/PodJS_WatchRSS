@@ -1,3 +1,4 @@
+import {useModalInput} from '../modal-input.ts';
 import { Show } from "solid-js";
 import {
   CHANNEL_SHARE_QR_HINT,
@@ -77,6 +78,7 @@ interface RssRoutesProps {
 }
 
 export function RssRoutes(props: RssRoutesProps) {
+  const searchInput=useModalInput({key:'rss-search',title:'搜索文章',value:props.query,input:props.services.input,recovery:props.services.inputRecovery,active:()=>props.active()&&props.page()==='search',onValue:value=>{if(props.entry.channelId)void props.searchChannelArticles(props.entry.channelId,value);},onError:error=>props.setError(String(error))});
   const channel = () =>
     props.channels().find((item) => item.id === props.entry.channelId);
 
@@ -91,6 +93,7 @@ export function RssRoutes(props: RssRoutesProps) {
           preview={props.services.previewChannel}
           confirm={props.services.confirmAddChannel}
           input={props.services.input}
+          inputRecovery={props.services.inputRecovery}
           openInlineInput={props.services.openInlineInput}
           onAdded={(value) =>
             void props
@@ -116,19 +119,7 @@ export function RssRoutes(props: RssRoutesProps) {
           keyword={props.query()}
           results={props.searchResults()}
           loading={props.searchLoading()}
-          onInput={() => {
-            void props.services
-              .input("搜索文章", props.query())
-              .then((value) => {
-                if (value !== null && props.entry.channelId) {
-                  void props.searchChannelArticles(
-                    props.entry.channelId,
-                    value,
-                  );
-                }
-              })
-              .catch((error) => props.setError(String(error)));
-          }}
+          onInput={() => void searchInput()}
           onKeywordChange={(value) => {
             if (props.entry.channelId) {
               props.updateSearchKeyword(props.entry.channelId, value);

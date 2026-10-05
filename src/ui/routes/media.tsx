@@ -110,7 +110,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
               .catch((error) => props.setError(String(error)))
           }
           onBack={() => props.popPage()}
-          input={(title, value) => props.services.input(title, value)}
+          input={(title, value, options) => props.services.input(title, value, options)}
+          inputRecovery={props.services.inputRecovery}
           onError={props.setError}
           onOpenUrl={(url) => void props.openUrl(url, "bili")}
           ref={(value) => {

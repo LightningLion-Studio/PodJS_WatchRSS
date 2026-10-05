@@ -1,3 +1,5 @@
+import {useModalInput} from '../modal-input.ts';
+import type {ModalInput,ModalInputRecovery} from '../service.ts';
 import {restoredSignal,booleanState,stringState} from '../route-activity.tsx';
 import { CommentScreen } from "./CommentScreen.tsx";
 import { BiliDetailController, type DetailState, type DetailTarget } from "../../bili/detail.ts";
@@ -45,14 +47,14 @@ export type BiliRoute =
   | { name: "settings" }
   | { name: "player"; aid?: Id; bvid?: string; cid: Id; source?: BiliPlayUrl; title?: string };
 
-export type BiliInput = (title: string, value?: string) => Promise<string | null>;
+export type BiliInput = ModalInput;
 export interface BiliScreenRef { scroller?: Scroller; onRootBack?: () => boolean }
 export interface BiliScreenProps {
   onShare?:ShareHandler;
   loadLocalDetail?: (target: DetailTarget) => Promise<import("../../bili/types.ts").BiliVideoDetail | undefined>;
   height: number; width?: number; route: BiliRoute; client: BiliClient; preset?: ReaderPreset; active?: boolean;
   onNavigate: (route: BiliRoute) => void; onBack: () => void;
-  input?: BiliInput; onOpenUrl?: (url: string) => void; onError?: (message: string) => void;
+  input?: BiliInput; inputRecovery?:ModalInputRecovery; onOpenUrl?: (url: string) => void; onError?: (message: string) => void;
   settings?: { showOriginalContent?: boolean; originalContentEnabled?: boolean; onOriginalContentChange?: (enabled: boolean) => void; showContinuePlaybackInBackground?: boolean; continuePlaybackInBackgroundEnabled?: boolean; onContinuePlaybackInBackgroundChange?: (enabled: boolean) => void; onSyncWatchRecords?: () => void; deleteEnabled?: boolean; onDeleteChannel?: () => void | Promise<void> };
   ref?: (value: BiliScreenRef) => void;
 }
@@ -327,7 +329,7 @@ function SearchScreen(props: BiliScreenProps) {
   const [historyItems, setHistoryItems] = createSignal(history.read());
   const [draft,setDraft]=restoredSignal('retained','bili-search-query','',stringState);
   function submit(query: string) { try { const target = history.submit(query); setHistoryItems(history.read()); if (target) props.onNavigate(target); } catch (error) { fail(props, error); } }
-  async function search() { if (!props.input) return fail(props, new Error("当前运行时未接入文字输入")); const query = await props.input("搜索哔哩哔哩",draft()); if (query != null) {setDraft(query);submit(query);} }
+  const search=useModalInput({key:'bili-search',title:'搜索哔哩哔哩',value:draft,input:props.input,recovery:props.inputRecovery,active:()=>props.active!==false,onValue:query=>{setDraft(query);submit(query);},onError:error=>fail(props,error)});
   const entries = createMemo<ScrollEntry[]>(() => {
     const width = props.width ?? 233, hotWords = hot.value() ?? [];
     return [searchTitleEntry, searchBarEntry(draft(), width, () => void search()),

@@ -67,7 +67,8 @@ export function NotesRoutes(props: NotesRoutesProps) {
               imageFilePath: source.filePath,
             });
           }}
-          input={(title, value) => props.services.input(title, value)}
+          input={(title, value, options) => props.services.input(title, value, options)}
+          inputRecovery={props.services.inputRecovery}
           onBack={finishEditing}
           onError={props.setError}
           ref={(value) => {

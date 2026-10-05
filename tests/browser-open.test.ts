@@ -6,7 +6,7 @@ import type { BrowserOpenOptions } from '@podjs/framework/services';
 function fixture(available = true, error?: Error) {
   const calls: { url: string; options?: BrowserOpenOptions }[] = [];
   const port: BrowserPort = {
-    hasCapability: name => { expect(name).toBe('system.browser.inApp'); return available; },
+    hasCapability: name => { expect(['system.browser.inApp','system.browser.inApp.state']).toContain(name); return name==='system.browser.inApp'&&available; },
     open: (url, options) => { calls.push({ url, options }); return { result: error ? Promise.reject(error) : Promise.resolve() }; },
   };
   return { calls, port };
@@ -75,4 +75,11 @@ test('production framework host requests match the browser contract', async () =
   const child = Bun.spawn([Bun.which('bun')!, 'test', `${import.meta.dir}/browser-open.isolated.ts`], { stdout: 'pipe', stderr: 'pipe' });
   const [exit, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
   expect(exit, stdout + stderr).toBe(0);
+});
+
+test('owned browser restore flag is enabled only when the host advertises state support',async()=>{
+ const f=fixture();f.port.hasCapability=()=>true;
+ await openBrowserUrl('https://example.com','article',defaultReaderPreset(),f.port);
+ expect(f.calls).toEqual([{url:'https://example.com',options:readerBrowserOptions(defaultReaderPreset(),true)}]);
+ expect(f.calls[0]!.options!.restoreActivity).toBe(true);
 });
