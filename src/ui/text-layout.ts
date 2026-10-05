@@ -1,5 +1,6 @@
 import type {LayoutOptions} from "../reader/types.ts";
-const forbiddenStart=/^[\p{Mark}\u200d\ufe0f，。！？：；、）》】」』”’…％%.,!?;:)/\]}]/u;
+import {lazyRegExpTest} from "../core/lazy-regexp.ts";
+const forbiddenStart=lazyRegExpTest("^[\\p{Mark}\\u200d\\ufe0f，。！？：；、）》】」』”’…％%.,!?;:)/\\]}]","u");
 const forbiddenEnd=/^[（《【「『“‘(\[{]$/u;
 const word=/^[A-Za-z0-9]$/;
 /** Android-style UI wrapping: keep closing punctuation off the next line and Latin words together. */
@@ -10,7 +11,7 @@ export function watchUiLines(text:string,options:LayoutOptions):string[]{
   for(let start=0;start<chars.length;){let end=start;
    while(end<chars.length&&(end===start||options.measure(chars.slice(start,end+1).join(""))<=options.width))end++;
    if(end<chars.length){
-    while(end>start+1&&(forbiddenStart.test(chars[end])||forbiddenEnd.test(chars[end-1])))end--;
+    while(end>start+1&&(forbiddenStart(chars[end])||forbiddenEnd.test(chars[end-1])))end--;
     if(word.test(chars[end-1])&&word.test(chars[end])){let boundary=end-1;while(boundary>start&&word.test(chars[boundary-1]))boundary--;if(boundary>start)end=boundary;}
    }
    lines.push(chars.slice(start,end).join("").trimEnd());start=end;while(start<chars.length&&/[ \t]/.test(chars[start]))start++;

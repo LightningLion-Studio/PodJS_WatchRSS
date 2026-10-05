@@ -1,4 +1,5 @@
 import { layoutUiText as layoutText } from "./line-break.ts";
+import {lazyRegExpTest} from "../core/lazy-regexp.ts";
 
 export type TextMeasurer = (text:string)=>number;
 /** Truncate only after wrapping with the same font provider used to paint. */
@@ -16,7 +17,7 @@ export function measuredLines(text:string,width:number,measure:TextMeasurer,maxL
   result[result.length-1]=last.join("")+"…";
   return result;
 }
-const cjk=(ch:string)=>/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch);
+const cjk=lazyRegExpTest('[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}]','u');
 const mostlyCjk=(text:string)=>{const chars=Array.from(text.replace(/\s/g,""));const count=chars.filter(cjk).length;return count>=4&&count*2>=chars.length;};
 export function normalizeWatchTitle(title:string):string {
   const normalized=title.replace(/\s+/g," ").trim();
