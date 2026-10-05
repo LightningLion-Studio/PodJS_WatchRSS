@@ -1,7 +1,7 @@
 import {appLogger} from '../logs/app-logger.ts';
 import { observeHostInternet } from "../onboarding/network-host.ts";
 import type { InternetStatus } from "../onboarding/state.ts";
-import { douyinPlayerNetwork } from "./douyin/player-network.ts";
+import { douyinPlayerNetwork, douyinSourceNeedsInternet, douyinNetworkFailure } from "./douyin/player-network.ts";
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
@@ -19,7 +19,7 @@ let videoSessionOwner:symbol|undefined;
 
 type ExtendedVideoState = VideoState & { volume?: number; buffered?: boolean; isBuffering?: boolean };
 
-export interface PlaybackSource { immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
+export interface PlaybackSource { detailPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
 export interface VideoPlayerHandle { onCrown(delta: number): boolean; canSwipeBack(): boolean }
 
 function PlayerButton(props: { left: number; top: number; size: number; icon: "fullscreen" | "panorama" | "fullscreen-exit" | "rotate" | "rewind" | "forward" | "play" | "pause"; iconSize: number; enabled?: boolean; onPress: () => void; onHold?: (elapsedMs: number) => void }) {
@@ -43,12 +43,13 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
   const [displayRotation, setDisplayRotation] = createSignal(0), [pan, setPan] = createSignal(0), [volumeVisible, setVolumeVisible] = createSignal(false), [loadingRotation, setLoadingRotation] = createSignal(0);
   const [internet, setInternet] = createSignal<InternetStatus>("checking");
   const [allowBluetooth, setAllowBluetooth] = createSignal(false);
+  const [networkFailure, setNetworkFailure] = createSignal(false);
   const [sessionsDisabled,setSessionsDisabled]=createSignal(false),[dragProgress,setDragProgress]=createSignal(0),[dragPoster,setDragPoster]=createSignal<{url:string;direction:DouyinPagerDirection}|null>(null);
   const sessionCapable=shouldUseDouyinVideoSessions(props.source,hasCapability("media.video.sessions"));
   const sessionPool=sessionCapable?new DouyinVideoSessionPool():undefined;
   const usingSessions=()=>!!sessionPool&&!sessionsDisabled();
   const sessionSource=(source:PlaybackSource):DouyinPreparedSource=>({key:source.awemeId??source.url??source.videoUrl??"current",source});
-  const networkPrompt = () => props.source.platform === "douyin" ? douyinPlayerNetwork(internet(), state()?.state === "playing" && !error(), allowBluetooth()) : null;
+  const networkPrompt = () => props.source.platform === "douyin" ? douyinPlayerNetwork(internet(), state()?.state === "playing" && !error(), allowBluetooth(), douyinSourceNeedsInternet(props.source.url ?? props.source.videoUrl), networkFailure(), props.source.immersive ? {hasRenderedFirstFrame:state()?.hasRenderedFirstFrame,buffering:state()?.state === "buffering" || state()?.isBuffering === true,hasError:!!error()} : undefined) : null;
   onMount(() => { if (props.source.platform === "douyin") onCleanup(observeHostInternet(setInternet)); });
   const sessionOwner=Symbol("video-screen");
   let preparedSource:PlaybackSource|undefined;
@@ -67,13 +68,13 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     setTransform:(value:{rotationDeg?:number;scaleMode?:"standard"|"expanded"|"shrunk";panX?:number;panY?:number})=>usingSessions()?sessionPool!.setTransform(value):video.setTransform(value),
     setVolume:(value:number)=>usingSessions()?sessionPool!.setVolume(value):video.setVolume(value),
   };
-  const failed = (value: unknown) => { appLogger.e('VideoPlayer','Playback failed'); if (!disposed) { const message = String(value); setError(message); props.onCheckpoint?.("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
+  const failed = (value: unknown) => { appLogger.e('VideoPlayer','Playback failed'); if (!disposed) { const message = String(value); setNetworkFailure(douyinNetworkFailure(value)); setError(message); props.onCheckpoint?.("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
   const range = () => playerPanRange(mode(), props.width, props.height, state()?.width ?? 0, state()?.height ?? 0, rotation());
   const requestTransform = async () => { if(videoSessionOwner!==sessionOwner)return; if (transformRunning) { transformDirty = true; return; } transformRunning = true; try { do { transformDirty = false; const ownGeneration = generation, r = range(), value = Math.max(-r.range, Math.min(r.range, pan())); if (value !== pan()) setPan(value); await media.setTransform({ rotationDeg: displayRotation(), scaleMode: mode(), ...(r.axis === "x" ? { panX: value } : { panY: value }) }); if (ownGeneration === generation) props.onPanStateChange?.(value, r.range); else transformDirty = true; } while (transformDirty && !disposed); } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } finally { transformRunning = false; } };
   const enforceStartVolume = async (next: ExtendedVideoState, limit: number | null | undefined) => { if (limit == null || next.volume == null) return next; const maximum = Math.max(0, Math.min(1, limit / 100)); return next.volume > maximum ? await media.setVolume(maximum) as ExtendedVideoState : next; };
-  const poll = async (ownGeneration: number) => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(!props.active||videoSessionOwner!==sessionOwner){pollTimer=delay(400);void pollTimer.result.then(()=>void poll(ownGeneration)).catch(()=>{});return;} try { const next = await media.state(); if (ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if (next.state === "error") { if (lastPlaybackState !== "error") { failed("播放失败"); if (!networkPrompt()) props.onPlaybackFailure?.(); } lastPlaybackState = "error"; return; } setState(next); if (!volumeRunning) virtualVolume = next.volume; checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; props.onProgress?.(next.positionMs, next.durationMs); if (next.state === "ended" && lastPlaybackState !== "ended") props.onCheckpoint?.("ended", next.positionMs, next.durationMs); lastPlaybackState = next.state; } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } if (!disposed && ownGeneration === generation && lastPlaybackState !== "error") { pollTimer = delay(400); void pollTimer.result.then(() => void poll(ownGeneration)).catch(() => {}); } };
-  const prepare = () => {
-    appLogger.d('VideoPlayer',`prepare platform=${props.source.platform??'rss'}`);if(networkPrompt())return;
+  const poll = async (ownGeneration: number) => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(!props.active||videoSessionOwner!==sessionOwner){pollTimer=delay(400);void pollTimer.result.then(()=>void poll(ownGeneration)).catch(()=>{});return;} try { const next = await media.state(); if (ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if (next.state === "error") { if (lastPlaybackState !== "error") { failed({code:next.errorCode}); if (!networkPrompt() && (props.source.platform!=="douyin" || props.source.immersive || props.source.detailPlayback)) props.onPlaybackFailure?.(); } lastPlaybackState = "error"; return; } setState(next); if (!volumeRunning) virtualVolume = next.volume; checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; props.onProgress?.(next.positionMs, next.durationMs); if (next.state === "ended" && lastPlaybackState !== "ended") props.onCheckpoint?.("ended", next.positionMs, next.durationMs); lastPlaybackState = next.state; } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } if (!disposed && ownGeneration === generation && lastPlaybackState !== "error") { pollTimer = delay(400); void pollTimer.result.then(() => void poll(ownGeneration)).catch(() => {}); } };
+  const prepare = (retryNetwork = false) => {
+    appLogger.d('VideoPlayer',`prepare platform=${props.source.platform??'rss'}`);if(networkPrompt()&&!retryNetwork)return;
     if(sessionPool&&sessionCapacity==="unchecked"){
       sessionCapacity="checking";
       void sessionPool.supportsPrewarm(props.source).then(supported=>{
@@ -88,12 +89,15 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
       return;
     }
     if(sessionPool&&sessionCapacity==="checking")return;
-    const previous=state(),sameSource=preparedSource===props.source;const source=sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&(usingSessions()?lifecycle()==="active":source.backgroundPlayback===true||lifecycle()==="active");props.onError?.("");if(ready()&&previous)props.onCheckpoint?.("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;prepareOp?.cancel();pollTimer?.cancel();setMode("standard");setRotation(0);setDisplayRotation(0);setPan(0);rotationStarted=0;panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;setError("");setReady(false);setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;const op=media.prepare({...source,loop:source.immersive===true,bounds:bounds(),autoplay:false} as VideoPrepare);prepareOp=op;void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt())prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);setReady(true);setState(prepared);virtualVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;props.onCheckpoint?.("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void warmForward();void poll(ownGeneration);}).catch(value=>{if(ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value);else{failed(value);if(!networkPrompt())props.onPlaybackFailure?.();}}});
+    networkPaused=false;const previous=state(),sameSource=preparedSource===props.source;const source=sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&(usingSessions()?lifecycle()==="active":source.backgroundPlayback===true||lifecycle()==="active");props.onError?.("");if(ready()&&previous)props.onCheckpoint?.("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;prepareOp?.cancel();pollTimer?.cancel();setMode("standard");setRotation(0);setDisplayRotation(0);setPan(0);rotationStarted=0;panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;setError("");setReady(false);setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;const op=media.prepare({...source,loop:source.immersive===true,bounds:bounds(),autoplay:false} as VideoPrepare);prepareOp=op;void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt())prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);setReady(true);setState(prepared);virtualVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;props.onCheckpoint?.("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void warmForward();void poll(ownGeneration);}).catch(value=>{if(ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value);else{failed(value);if(!networkPrompt() && (props.source.platform!=="douyin" || props.source.immersive || props.source.detailPlayback))props.onPlaybackFailure?.();}}});
   };
   let retrying = false;
   const retry = async () => {
-    if (retrying || networkPrompt()) return;
-    if (!props.onRetry) { prepare(); return; }
+    if (retrying) return;
+    // Native onRetry recreates this source; do not resolve/discard a queue item on network retry.
+    const retryNetwork = !!networkPrompt();
+    setNetworkFailure(false);
+    if (retryNetwork || !props.onRetry || props.source.platform === "douyin" && !props.source.immersive && !props.source.detailPlayback) { prepare(true); return; }
     appLogger.w('VideoPlayer','Retry playback');
     retrying = true;
     try { await props.onRetry(checkpointPosition); } catch (value) { if (!disposed) failed(value); } finally { retrying = false; }
@@ -108,6 +112,21 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     }else if(ready())void media.pause().then(value=>{if(disposed)return;setState(value);checkpointPosition=value.positionMs;checkpointDuration=value.durationMs;props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);}).catch(failed);
   });
   createEffect(() => { const source=props.source;if(props.active&&!networkPrompt()&&source!==preparedSource)untrack(prepare); });
+  // Immersive native stopForegroundPlayback pauses buffering; it preserves the selected item.
+  let networkPaused = false;
+  createEffect(() => {
+    const blocked = !!networkPrompt(), status = internet();
+    if (!props.source.immersive || !props.active || videoSessionOwner !== sessionOwner) return;
+    if (blocked && untrack(ready) && !untrack(error) && !networkPaused) {
+      networkPaused = true; autoplayAllowed = false;
+      const ownGeneration = generation;
+      void media.pause().then(value => { if (!disposed && ownGeneration === generation) setState(value); }).catch(failed);
+    } else if (networkPaused && !blocked && (status === "available" || status === "bluetooth" && allowBluetooth()) && !untrack(error)) {
+      networkPaused = false; autoplayAllowed = true;
+      const ownGeneration = generation;
+      void media.play().then(value => { if (!disposed && ownGeneration === generation) setState(value); }).catch(failed);
+    }
+  });
   let updating = false, dirty = false;
   const syncBounds = async () => { if (updating) { dirty = true; return; } updating = true; try { do { dirty = false; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } finally { updating = false; } };
   createEffect(() => { props.offset; props.active; if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner) void syncBounds(); });
@@ -247,8 +266,12 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     <Show when={networkPrompt()}>{prompt => <View class="absolute inset-0 bg-[#000000ee] items-center justify-center">
       <Text class="text-sm text-white">{prompt().title}</Text><Text class="text-xs text-[#b6b6b6]">{prompt().detail}</Text>
       <View class="w-[80] h-[36] rounded-[18] bg-[#2a2a2a] items-center justify-center" focusable onPress={() => {
-        if (internet() === "bluetooth") { setAllowBluetooth(true); if (!ready()) prepare(); else void retry(); }
-        else void retry();
+        if (prompt().action === "继续") {
+          const resumeByNetwork = networkPaused;
+          setAllowBluetooth(true);
+          if (!ready()) { if (preparedSource !== props.source || error()) prepare(); }
+          else if (!resumeByNetwork) void media.play().then(setState).catch(failed);
+        } else void retry();
       }}><Text class="text-sm text-white">{prompt().action}</Text></View>
     </View>}</Show>
     <Show when={volumeVisible()}><View class="absolute left-[72] right-[72] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-[21px] leading-[26] text-white">{Math.round((state()?.volume ?? .5) * 100)}%</Text></View></Show>

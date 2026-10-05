@@ -56,7 +56,7 @@ interface MediaRoutesProps {
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
-  recoverDouyinVideo: (entry: RouteEntry) => Promise<void>;
+  recoverDouyinVideo: (entry: RouteEntry, manual?: boolean) => Promise<void>;
   recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean) => Promise<void>;
   douyinReady: (entry: RouteEntry) => void;
   douyinActions: (entry: RouteEntry) => void;
@@ -189,7 +189,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
             props.entry.retryPlayback
               ? props.entry.retryPlayback
               : props.entry.queue
-                ? () => props.recoverDouyinVideo(props.entry)
+                ? () => props.recoverDouyinVideo(props.entry, true)
                 : props.entry.rssDouyinRecovery
                   ? () => props.recoverRssDouyinVideo(props.entry, true)
                   : undefined

@@ -6,6 +6,7 @@ import { kv } from "@podjs/framework/watch";
 import { video } from "@podjs/framework/services";
 import { createBiliPlaybackCheckpoint } from "../../bili/playback.ts";
 import { originalContentEnabled } from "../../bili/browse.ts";
+import { restoreDouyinQueue } from "../../douyin/resume.ts";
 import { DouyinPlaybackQueue } from "../../douyin/playback-queue.ts";
 import { douyinOriginalContentEnabled } from "../../douyin/original-mode.ts";
 import { DouyinRssRecovery } from "../../douyin/rss-recovery.ts";
@@ -265,15 +266,17 @@ export function createMediaRouteController(
   let pendingDouyinQueue: DouyinPlaybackQueue | undefined;
   const douyinPlay = (request: DouyinPlayRequest) => {
     pendingDouyinQueue = new DouyinPlaybackQueue(douyinClient, {
-      items: request.playlist ?? [request.item],
+      items: (request.playlist ?? [request.item]).map(item => item.awemeId === request.item.awemeId ? request.playback : item),
       selectedAwemeId: request.item.awemeId,
       cursor: request.cursor,
       hasMore: request.hasMore,
+      fixedSources: request.immersive !== true,
     });
     pendingDouyinPlayback = douyinClient
       .buildPlaybackHeaders()
       .then((headers) => ({
         immersive: request.immersive,
+        detailPlayback: request.detailPlayback,
         awemeId: request.item.awemeId,
         posterUrl: request.item.coverUrl,
         url: douyinDebug.playbackUrl(request.item.awemeId,request.playback.playUrl),
@@ -290,9 +293,9 @@ export function createMediaRouteController(
   const douyinNavigate = async (route: DouyinRoute) => {
     if (route.name === "player" && pendingDouyinPlayback) {
       try {
-        await openVideo(await pendingDouyinPlayback, {
-          queue: pendingDouyinQueue,
-        });
+        const source = await pendingDouyinPlayback, queue = pendingDouyinQueue;
+        await queue?.persist();
+        await openVideo(source, { queue });
       } catch (error) {
         dependencies.setError(String(error));
       } finally {
@@ -302,6 +305,22 @@ export function createMediaRouteController(
     } else {
       dependencies.setPage("douyin", { douyinRoute: route });
     }
+  };
+
+  const restoreDouyinPlayer = async (route: Record<string, unknown>): Promise<boolean> => {
+    const restored = await restoreDouyinQueue(douyinClient, route.awemeId, route.immersive === true);
+    if (!restored) return false;
+    const { item, queue } = restored;
+    const source: PlaybackSource = {
+      platform: "douyin", immersive: route.immersive === true, detailPlayback: route.detailPlayback === true, awemeId: item.awemeId,
+      url: item.playUrl, posterUrl: item.coverUrl, title: item.description,
+      ...douyinDecoderProfile(item), ...playbackPreferences(),
+      headers: await douyinClient.buildPlaybackHeaders(), backgroundPlayback: douyinBackground(),
+      webUrl: `https://www.douyin.com/video/${item.awemeId}`,
+    };
+    dependencies.setPlayingSource(source);
+    dependencies.setStack([{ page: "home" }, { page: "douyin", douyinRoute: { name: "entry" } }, { page: "video", playback: source, queue }]);
+    return true;
   };
 
   const changeDouyinVideo = async (
@@ -344,6 +363,8 @@ export function createMediaRouteController(
     };
     dependencies.setError("");
     dependencies.setPlayingSource(entry.playback);
+    await entry.queue.persist();
+    if (dependencies.current() === entry) dependencies.setStack(entries => [...entries]);
   };
 
   onFrame(()=>{const entry=dependencies.current(),state=entry.queue?.snapshot();douyinDebug.updateContext(state?.item?.awemeId??'',state?.playlist[(state?.index??0)+1]?.awemeId??'',entry.page==='video'&&!!entry.queue);void douyinDebug.tick(Date.now(),lifecycle()==='active'&&entry.page==='video'&&!!entry.queue,()=>changeDouyinVideo(entry,'next')).catch(error=>dependencies.setError(String(error)));});
@@ -373,6 +394,8 @@ export function createMediaRouteController(
     const result=entry.queue.commitPreview(prepared.key);
     if(!result.ok||dependencies.current()!==entry)return false;
     entry.playback=prepared.source;dependencies.setError("");dependencies.setPlayingSource(prepared.source);
+    await entry.queue.persist();
+    if(dependencies.current()===entry)dependencies.setStack(entries=>[...entries]);
     return true;
   };
 
@@ -407,7 +430,7 @@ export function createMediaRouteController(
     }
   };
 
-  const recoverDouyinVideo = async (entry: RouteEntry) => {
+  const recoverDouyinVideo = async (entry: RouteEntry, manual = false) => {
     if (
       !entry.queue ||
       dependencies.current() !== entry ||
@@ -419,6 +442,18 @@ export function createMediaRouteController(
     try {
       const id = entry.queue.snapshot().item?.awemeId;
       if (!id) return;
+      if (entry.playback?.detailPlayback) {
+        entry.rssDouyinRecovery ??= new DouyinRssRecovery(douyinClient, id);
+        const source = await entry.rssDouyinRecovery.recover(entry.playback, () => dependencies.current() === entry, manual);
+        if (!source || dependencies.current() !== entry) return;
+        entry.queue.updateCurrentUrl(source.url ?? "");
+        await entry.queue.persist();
+        if (dependencies.current() !== entry) return;
+        entry.playback = source;
+        dependencies.setError(""); dependencies.setPlayingSource(source);
+        dependencies.setStack(entries => [...entries]);
+        return;
+      }
       const failures = (entry.douyinFailures ??= new Set<string>());
       const skip = failures.has(id);
       failures.add(id);
@@ -568,6 +603,7 @@ export function createMediaRouteController(
     biliNavigate,
     douyinLogin,
     douyinPlay,
+    restoreDouyinPlayer,
     douyinNavigate,
     changeDouyinVideo,
     prepareDouyinAdjacent,

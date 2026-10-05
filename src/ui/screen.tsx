@@ -724,6 +724,11 @@ export default function WatchRSS(props: {
         ]);
         return;
       }
+      if (target.route.name === "player" && target.route.savedQueue === true) {
+        if (await restoreDouyinPlayer(target.route)) return;
+        setStack([{ page: "home" }, { page: "douyin", douyinRoute: { name: "entry" } }]);
+        return;
+      }
       setStack([
         { page: "home" },
         { page: "douyin", douyinRoute: target.route as DouyinRoute },
@@ -1269,6 +1274,7 @@ export default function WatchRSS(props: {
     biliNavigate,
     douyinLogin,
     douyinPlay,
+    restoreDouyinPlayer,
     douyinNavigate,
     changeDouyinVideo,
     prepareDouyinAdjacent,
