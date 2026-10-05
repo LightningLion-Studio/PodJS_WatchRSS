@@ -1,3 +1,6 @@
+import { openBrowserUrl } from "../browser/open.ts";
+import { OriginalWebConfirm } from "./OriginalWebConfirm.tsx";
+import { createGesture } from "@pocketjs/framework/gesture";
 import {managedCache} from "../cache/host.ts";
 import {prefetchInlineImages} from "../cache/prefetch.ts";
 import {useReaderTitle} from "./reader-title.ts";
@@ -16,8 +19,8 @@ import {onFrame} from "@pocketjs/framework/lifecycle";
 import {hostOperation,textLayout} from "@podjs/framework/services";
 import {measuredLines} from "../reader/measured-text.ts";
 import {summaryDisplayText,summaryTokenUsageText,type SummaryState} from "../llm/summary.ts";
-import {createMemo,createSignal,createEffect,onCleanup} from "solid-js";
-import {Image,Text,View} from "@pocketjs/framework/components";
+import {createMemo,createSignal,createEffect,onCleanup,Show} from "solid-js";
+import {Image,Text,View,type NodeMirror} from "@pocketjs/framework/components";
 import {getOps} from "@pocketjs/framework/host";
 import {ReaderBody,type ReaderBodyHandle} from "./ReaderBody.tsx";
 import {ArticleSource} from "./ArticleSource.tsx";
@@ -39,6 +42,7 @@ export function ReaderScreen(props:{
  onControls:(handle:ReaderBodyHandle)=>void;onError:(message:string)=>void;ref:(handle:ReaderBodyHandle)=>void;
 }){
  const fonts=useReaderFonts();
+ const [webWarning,setWebWarning]=createSignal(false);
  const chrome=()=>readerChrome(props.preset);
  const [handle,setHandle]=createSignal<ReaderBodyHandle>();
  const [summary,setSummary]=createSignal<SummaryState>({status:"idle",text:""});
@@ -69,6 +73,15 @@ export function ReaderScreen(props:{
  const bodyFont=()=>presetContentFont(props.preset,"body");
  const imported=()=>isImportedContentUrl(props.article.link);
  return <ArticleSource article={props.article} services={props.services}>{(article,source)=>{
+  let originalButton:NodeMirror|undefined;
+  let originalGesture:ReturnType<typeof createGesture>|undefined;
+  const bindOriginalButton=(node:NodeMirror)=>{
+   originalButton=node;
+   originalGesture?.dispose();
+   // Register after the enclosing ScrollEntries so this button owns its long press.
+   originalGesture=createGesture({region:{node:()=>props.active&&!webWarning()?originalButton:undefined},onTap:()=>source.toggle(),onLongPress:()=>{handle()?.pause();setWebWarning(true);}});
+  };
+  onCleanup(()=>originalGesture?.dispose());
   createEffect(()=>{
    if(!props.active||article().importedText)return;
    const task=prefetchInlineImages(managedCache,article().contentBlocks??[],article().link,props.mediaCacheMode??'前 4 项');
@@ -95,7 +108,7 @@ export function ReaderScreen(props:{
   const highlightColor=()=>readerColor(props.preset.accentColorArgb).slice(0,7)+(chrome().dark?"57":"38");
   const actionLineHeight=()=>props.fontSize*17/14;
   const actionsHeight=()=>Math.max(38,actionLineHeight()+12);
-  const pill=(label:()=>string,right:boolean,press:()=>void)=> <View onPress={press} focusable class="absolute rounded-[20] items-center justify-center" style={{...(right?{insetR:0}:{insetL:0}),bgColor:right?chrome().activeAction:chrome().action,borderWidth:chrome().dark?0:1,borderColor:right?chrome().activeBorder:chrome().border,insetT:(actionsHeight()-(actionLineHeight()+12))/2,width:Math.min((props.width-28-38)/2,getOps().measureText(label(),bodyFont().fontSlot)*bodyFont().scale+18),height:actionLineHeight()+12}}><Text style={{fontSlot:bodyFont().fontSlot,scale:bodyFont().scale,lineHeight:actionLineHeight()/bodyFont().scale,textColor:right?readerColor(props.preset.accentColorArgb):readerColor(props.preset.body.colorArgb)}}>{label()}</Text></View>;
+  const pill=(label:()=>string,right:boolean,press:()=>void)=> <View ref={node=>{if(!right)bindOriginalButton(node);}} onPress={press} focusable class="absolute rounded-[20] items-center justify-center" style={{...(right?{insetR:0}:{insetL:0}),bgColor:right?chrome().activeAction:chrome().action,borderWidth:chrome().dark?0:1,borderColor:right?chrome().activeBorder:chrome().border,insetT:(actionsHeight()-(actionLineHeight()+12))/2,width:Math.min((props.width-28-38)/2,getOps().measureText(label(),bodyFont().fontSlot)*bodyFont().scale+18),height:actionLineHeight()+12}}><Text style={{fontSlot:bodyFont().fontSlot,scale:bodyFont().scale,lineHeight:actionLineHeight()/bodyFont().scale,textColor:right?readerColor(props.preset.accentColorArgb):readerColor(props.preset.body.colorArgb)}}>{label()}</Text></View>;
   const header=createMemo<ScrollEntry[]>(()=>[
    spacer(22),
    {height:titleLayout().height,render:()=> <View onPress={()=>handle()?.tap()} class="absolute inset-0">{titleRects().map(rect=><View debugName="SpeechTitleHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:highlightColor()}}/>)}{titleRows().map(row=><View class="absolute left-[0] right-[0]" style={{insetT:row.top,height:row.lineHeight}}>{requiresReaderSystemText(row.text,props.preset,"title")&&hasCapability("text.raster")?<SystemTextLine pixelScale={getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth} options={systemTextOptions({...row,textAlign:1},"title",props.fontSize,props.width-28,getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth,props.preset,getFontMetrics(row.fontSlot),fonts())} onCarets={positions=>setTitleCarets(previous=>{const next=new Map(previous);if(positions)next.set(row,positions);else next.delete(row);return next;})} fallback={<Text class="absolute text-center text-lg font-bold" style={{insetL:0,insetT:row.textOffsetY??0,width:(props.width-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color}}>{row.text}</Text>}/>:<Text class="absolute text-center text-lg font-bold" style={{insetL:0,insetT:row.textOffsetY??0,width:(props.width-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color}}>{row.text}</Text>}</View>)}</View>},
@@ -111,6 +124,6 @@ export function ReaderScreen(props:{
     <View onPress={()=>{const value=handle();if(value)value.setPlaying(!value.playing());}} focusable class="absolute left-[88] top-[0] w-[32] h-[32] rounded-[16] items-center justify-center" style={{bgColor:chrome().action,borderWidth:chrome().dark?0:1,borderColor:chrome().border}}><Image src={handle()?.playing()?(chrome().dark?"../assets/icons/reader-pause.svg":"../assets/icons/reader-pause-light.svg"):(chrome().dark?"../assets/icons/reader-play.svg":"../assets/icons/reader-play-light.svg")} class="w-[20] h-[20]"/></View>
    </View>},spacer(15)
   ]);
-  return <ReaderBody progressStore={props.services.readingProgress} imported={article().importedText&&props.services.loadImportedTextChunk?{handle:article().importedText!,read:index=>props.services.loadImportedTextChunk!(article().importedText!,index)}:undefined} highlight={activeHighlight()} speechPlaying={props.speaking} speechTitleCenter={titleRects().length?22+highlightCenter(titleRects())!:undefined} highlightColor={highlightColor()} onSpeechControls={anchor=>props.onSpeechControls(speechArticle(),anchor)} preset={props.preset} articleId={props.article.id} text={article().content} blocks={article().contentBlocks??[{type:"text",text:article().content,style:"body"}]} offlineMedia={offlineMedia()} baseUrl={article().link} width={props.width} height={props.height} top={0} fontSize={props.fontSize} lineHeight={props.lineHeight} active={props.active} autoStart={props.autoStart} speed={props.speed} header={header()} footer={footer()} onMedia={block=>props.onMedia({...article(),offlineMedia:offlineMedia()},block)} onControls={props.onControls} onError={props.onError} ref={value=>{setHandle(value);props.ref(value);}}/>;
+  return <><ReaderBody progressStore={props.services.readingProgress} imported={article().importedText&&props.services.loadImportedTextChunk?{handle:article().importedText!,read:index=>props.services.loadImportedTextChunk!(article().importedText!,index)}:undefined} highlight={activeHighlight()} speechPlaying={props.speaking} speechTitleCenter={titleRects().length?22+highlightCenter(titleRects())!:undefined} highlightColor={highlightColor()} onSpeechControls={anchor=>props.onSpeechControls(speechArticle(),anchor)} preset={props.preset} articleId={props.article.id} text={article().content} blocks={article().contentBlocks??[{type:"text",text:article().content,style:"body"}]} offlineMedia={offlineMedia()} baseUrl={article().link} width={props.width} height={props.height} top={0} fontSize={props.fontSize} lineHeight={props.lineHeight} active={props.active&&!webWarning()} autoStart={props.autoStart} speed={props.speed} header={header()} footer={footer()} onMedia={block=>props.onMedia({...article(),offlineMedia:offlineMedia()},block)} onControls={props.onControls} onError={props.onError} ref={value=>{setHandle(value);props.ref(value);}}/><Show when={webWarning()}><OriginalWebConfirm width={props.width} height={props.height} onCancel={()=>setWebWarning(false)} onConfirm={()=>{setWebWarning(false);void openBrowserUrl(props.article.link??"","article",props.preset).catch(error=>props.onError(String(error)));}}/></Show></>;
  }}</ArticleSource>;
 }

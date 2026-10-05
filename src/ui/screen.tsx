@@ -1,3 +1,4 @@
+import { openBrowserUrl, type BrowserOrigin } from "../browser/open.ts";
 import { supportsSystemShare, openSystemShare } from "../sharing/host.ts";
 import { routeShare, type ShareHandler } from "../sharing/policy.ts";
 import { managedCache } from "../cache/host.ts";
@@ -57,7 +58,6 @@ import {
   type ReaderProgressFlushOutcome,
 } from "../navigation/reader-exit.ts";
 import {
-  browser,
   video,
   mediaVolume,
   hostOperation,
@@ -1091,9 +1091,9 @@ export default function WatchRSS(props: {
   const doAdd = async (prefill = "") => {
     setPage("add-rss", { addUrl: prefill });
   };
-  const openUrl = async (url: string) => {
+  const openUrl = async (url: string, origin: BrowserOrigin = "information") => {
     try {
-      await browser.open(url).result;
+      await openBrowserUrl(url, origin, readerPreset());
     } catch (e) {
       setError(String(e));
     }

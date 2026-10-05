@@ -17,6 +17,7 @@
     "net.download",
     "data.files.chunks",
     "system.browser",
+    "system.browser.inApp",
     "data.secure",
     "media.video",
     "media.tts",
