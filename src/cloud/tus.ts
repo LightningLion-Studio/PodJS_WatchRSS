@@ -11,7 +11,7 @@ function b64(bytes: Uint8Array): string {
   return out;
 }
 function h(response: HttpResponse, name: string): string | undefined { const n = name.toLowerCase(); return Object.keys(response.headers).find(k => k.toLowerCase() === n) !== undefined ? response.headers[Object.keys(response.headers).find(k => k.toLowerCase() === n)!] : undefined; }
-function error(response: HttpResponse): Error { return new Error(`TUS HTTP ${response.status}: ${utf8Decode(response.body)}`); }
+function error(response: HttpResponse): Error { return new Error(`TUS HTTP ${response.status}`); }
 function resolveLocation(location: string, base: string): string {
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(location)) return location;
   const origin = base.match(/^[a-z][a-z\d+.-]*:\/\/[^/]+/i)?.[0];
@@ -62,7 +62,10 @@ export class SupabaseTusUploader {
     if (r.status < 200 || r.status >= 300) throw error(r);
     const location = h(r, "Location");
     if (!location) throw new Error("TUS服务端未返回上传地址");
-    return resolveLocation(location, target.tusEndpoint);
+    const resolved=resolveLocation(location, target.tusEndpoint);
+    const origin=(url:string)=>/^https:\/\/[^/@?#\\\s]+/i.exec(url)?.[0].toLowerCase();
+    if(!origin(resolved)||origin(resolved)!==origin(target.tusEndpoint))throw Error("TUS上传地址来源不符");
+    return resolved;
   }
   private async offset(url: string, token: string): Promise<number> {
     const r = await this.http.request({ method: "HEAD", url, headers: { "Tus-Resumable": TUS_VERSION, "x-signature": token } });

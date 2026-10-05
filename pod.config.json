@@ -79,5 +79,12 @@
     "assets": {
       "fonts/watch-sans.ttf": "assets/fonts/watch_sans.ttf"
     }
-  }
+  },
+  "background": {
+    "watchrss-cloud-sync": "src/cloud/background.ts"
+  },
+  "backgroundServices": [
+    "debug.cloudHost",
+    "kv.get"
+  ]
 }
