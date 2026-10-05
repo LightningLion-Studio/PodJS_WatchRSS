@@ -1,15 +1,20 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import type { Channel } from "./service.ts";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog.tsx";
 import { homeChannelAtLongPress, movableHomeEntries, shouldShowHomeEmptyState, type HomeHitEntry, type NotesHomePlacement } from "./home-model.ts";
+import { homeChannelSummary, homeSpeechCard, type HomePlatformLoginState } from "./home-extras.ts";
+import type { SpeechPlaybackState } from "../reader/speech-playback.ts";
 
 export interface HomeScreenProps {
   channels: Channel[]; notesPlacement: NotesHomePlacement; height: number; width: number;
   refreshing: boolean; busy: boolean;
+  platformLoginState: HomePlatformLoginState;
+  speechState?: SpeechPlaybackState; speechSpectrum?: readonly number[];
   onProfile: () => void; onNotes: () => void; onRecommend: () => void;
+  onSpeech: () => void;
   onAdd: () => void; onChannel: (channel: Channel) => void; onBeian: () => void;
   onRefresh: () => void; onMoveChannelToTop: (channel: Channel) => Promise<void>;
   onToggleChannelPinned: (channel: Channel) => Promise<void>;
@@ -59,11 +64,20 @@ export default function HomeScreen(props: HomeScreenProps) {
     </View>
   });
   const channelCard=(channel:Channel):ScrollEntry=>{
-    const builtin=channel.url.startsWith("builtin:");
-    const summary=builtin
-      ? `${channel.description||"进入后登录获取推荐内容"}\n更新: ${channel.lastFetchedAt?formatTime(channel.lastFetchedAt):"未更新"}`
-      : `${channel.isPinned ? "置顶 · " : ""}${channel.description || channel.url}\n${channel.unreadCount ? `未读 ${channel.unreadCount} · ` : ""}更新: ${channel.lastFetchedAt ? formatTime(channel.lastFetchedAt) : "未更新"}`;
+    const summary=homeChannelSummary(channel,props.platformLoginState,formatTime);
     return card(channel.title,summary,()=>props.onChannel(channel),true,!!channel.isPinned);
+  };
+  const speechCard=():ScrollEntry|undefined=>{
+    const model=homeSpeechCard(props.speechState);
+    if(!model)return undefined;
+    const levels=()=>props.speechSpectrum?.slice(0,5)??[];
+    return {height:84,render:()=> <View debugName="HomeSpeechCard" onPress={props.onSpeech} focusable accessibilityRole="button" accessibilityLabel={model.title} class="absolute inset-0 rounded-[16] bg-[#252a2d] border-[#ff6026] border-[1]">
+      <Text class="absolute left-[14] right-[58] top-[13] h-[21] overflow-hidden text-[17px] leading-[21] text-[#f5f5f5]">{model.title}</Text>
+      <Text class="absolute left-[14] right-[58] top-[32.5] h-[38] overflow-hidden text-sm leading-[19] text-[#b6b6b6]">{model.summary}</Text>
+      <View debugName="HomeSpeechSpectrum" class="absolute right-[12] top-[25] w-[38] h-[34]">
+        <For each={levels()}>{(level,index)=>{const height=Math.max(0,Math.min(1,level))*30;return <View class="absolute w-[4] rounded-[2] bg-[#ff6026]" style={{insetL:index()*8,insetT:(34-height)/2,height}}/>;}}</For>
+      </View>
+    </View>};
   };
   const rows=createMemo<Array<{entry:ScrollEntry;channel?:Channel}>>(()=>[
     {entry:{height: 73, render: () => <View class="absolute inset-0 items-center">
@@ -72,6 +86,7 @@ export default function HomeScreen(props: HomeScreenProps) {
       </View>
       <View class="absolute top-[52] left-[0] right-[0] items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">点击进入我的</Text></View>
     </View>}},
+    ...(speechCard()?[{entry:speechCard()!}]:[]),
     ...movableHomeEntries(props.channels,props.notesPlacement).map(item=>item.kind==="notes"
       ? {entry:card("备忘录", "纯文本编辑 · 手机同步", props.onNotes, false, item.isPinned, "text-base")}
       : {entry:channelCard(item.channel),channel:item.channel}),

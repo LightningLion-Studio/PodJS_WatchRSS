@@ -91,7 +91,16 @@ export function StartupGate(props:{content:()=>JSX.Element;storage?:OnboardingSt
  </Show></Show>;
 }
 
-function StartupLoading(){setNavigationState({canGoBack:false,rootSwipeEnabled:false});onCleanup(()=>setNavigationState({canGoBack:false}));return <View class="absolute inset-0 bg-black"/>;}
+function StartupLoading(){
+ setNavigationState({canGoBack:false,rootSwipeEnabled:false});onCleanup(()=>setNavigationState({canGoBack:false}));
+ const metrics=getDisplayMetrics(),badge=82;
+ return <View debugName="WatchRssLaunchOverlay" class="absolute inset-0 bg-[#030506]">
+  <View class="absolute w-[126] h-[126] rounded-[9999] bg-[#15211f]" style={{insetL:(metrics.logicalWidth-126)/2,insetT:(metrics.logicalHeight-126)/2-20}}/>
+  <View class="absolute rounded-[9999] bg-[#111719] border-[#ff6026] border-[1] items-center justify-center" style={{insetL:(metrics.logicalWidth-badge)/2,insetT:(metrics.logicalHeight-badge)/2-20,width:badge,height:badge}}><Text class="text-[21px] leading-[26] text-[#ff7845]">RSS</Text></View>
+  <Text class="absolute left-[18] right-[18] text-lg leading-[22] text-[#f5f5f5] text-center" style={{insetT:metrics.logicalHeight/2+35}}>腕上RSS</Text>
+  <Text class="absolute left-[18] right-[18] text-xs leading-[14] text-[#b6b6b6] text-center" style={{insetT:metrics.logicalHeight/2+62}}>抬腕即读，轻巧聚合</Text>
+ </View>;
+}
 
 function StartupContent(props:{render:()=>JSX.Element}){return props.render();}
 
