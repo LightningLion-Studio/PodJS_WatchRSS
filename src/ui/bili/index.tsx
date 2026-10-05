@@ -25,11 +25,7 @@ import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
 
 const infoIcon = "../assets/icons/info.svg";
 const playIcon = "../assets/icons/play-circle.svg";
-const playIconDark = "../assets/icons/play-circle-dark.svg";
 const starIcon = "../assets/icons/star.svg";
-const thumbIcon = "../assets/icons/bili-thumb-up.svg";
-const coinIcon = "../assets/icons/bili-coin.svg";
-const shareIcon = "../assets/icons/share.svg";
 
 type Id = number | string;
 export type BiliRoute =
@@ -385,7 +381,7 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     const cover: ScrollEntry = { height: cardWidth * 2 / 3, render: () => <View onPress={() => void play()} focusable accessibilityRole="button" accessibilityLabel="播放" class="absolute inset-0 rounded-[16] overflow-hidden" style={{ bgColor: pal.surface }}>
       {it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={cardWidth} height={cardWidth * 2 / 3} fit="cover" class="absolute left-[0] top-[0]" /> : null}
       <View class={pal.dark ? "absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" : "absolute inset-0 bg-gradient-to-b from-transparent to-[#f7f4f0b3]"} />
-      <View class="absolute w-[36] h-[36] rounded-full items-center justify-center" style={{ bgColor: pal.scrim, insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={pal.dark ? playIcon : playIconDark} style={{ width: 24, height: 24 }} /></View>
+      <View class="absolute w-[36] h-[36] rounded-full items-center justify-center" style={{ bgColor: pal.scrim, insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={pal.dark ? "../assets/icons/bili-action-play-circle.svg" : "../assets/icons/bili-action-play-circle-dark.svg"} style={{ width: 32, height: 32 }} /></View>
     </View> };
     const title = measuredLines(it?.title?.trim() || "加载中...", inner, measureScaled(titleFont), 3);
     const owner = it?.owner?.name?.trim();
@@ -403,15 +399,15 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     const size = Math.max(36, Math.min(44, (cardWidth - 18) / 4)), rowLeft = (cardWidth - size * 4 - 18) / 2;
     const locked = st.busy || st.loading || !data;
     const actionButtons = [
-      { icon: pal.dark ? thumbIcon : "../assets/icons/bili-thumb-up-dark.svg", label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
-      { icon: pal.dark ? coinIcon : "../assets/icons/bili-coin-dark.svg", label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
-      { icon: pal.dark ? starIcon : "../assets/icons/star-dark.svg", label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
-      { icon: pal.dark ? shareIcon : "../assets/icons/share-dark.svg", label: "转发", selected: false, onPress: share },
+      { icon: pal.dark ? "../assets/icons/bili-action-bili-thumb-up.svg" : "../assets/icons/bili-action-bili-thumb-up-dark.svg", label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
+      { icon: pal.dark ? "../assets/icons/bili-action-bili-coin.svg" : "../assets/icons/bili-action-bili-coin-dark.svg", label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
+      { icon: pal.dark ? "../assets/icons/bili-action-star.svg" : "../assets/icons/bili-action-star-dark.svg", label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
+      { icon: pal.dark ? "../assets/icons/bili-action-share.svg" : "../assets/icons/bili-action-share-dark.svg", label: "转发", selected: false, onPress: share },
     ];
     const iconSize = Math.min(24, Math.max(18, size * .55));
     const actions: ScrollEntry = { height: size, render: () => <View class="absolute inset-0">
       {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center" style={{ bgColor: button.selected ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
-        <Image src={button.icon} style={{ width: iconSize, height: iconSize }} />
+        <Image src={button.icon} style={{ width: iconSize * 32 / 24, height: iconSize * 32 / 24 }} />
       </View>)}
     </View> };
     const pages = data?.pages ?? [];
