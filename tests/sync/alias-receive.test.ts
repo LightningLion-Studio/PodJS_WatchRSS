@@ -41,3 +41,25 @@ test('device UUID is durable and a first local RSS save journals its canonical a
 test('a URL changed during alias preparation rolls back the save and creation time',async()=>{const f=database();try{await initializeSchema(f.db);await new SyncSavedStateStore(f.db).initializeDevice('local');await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(1,'feed','Feed',1)");await f.db.execute("INSERT INTO articles(id,channel_id,title,link,dedup_key,fetched_at) VALUES(1,1,'RSS','https://example.com/alias','feed-guid',1)");
  const repo=new WatchRssRepository(f.db,async()=>'',files.hydrate,async item=>{const statements=await prepareLocalSaveAlias(f.db,item,text,codec);await f.db.execute("UPDATE articles SET link='https://example.com/changed' WHERE id=1");return statements;});await expect(repo.setSaved(1,true)).rejects.toThrow();expect(await f.db.query('SELECT * FROM sync_article_aliases')).toEqual([]);expect(await f.db.query('SELECT * FROM article_saved_states')).toEqual([]);expect(await f.db.query('SELECT * FROM article_saved_entry_times')).toEqual([]);
  }finally{f.sql.close();}});
+
+test('dedup migration preserves the installed identity of a GUID-only saved article',async()=>{
+ const f=database();try{
+  await initializeSchema(f.db);await new SyncSavedStateStore(f.db).initializeDevice('watch');
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(1,'https://feed.test','Feed',1)");
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,content,guid,dedup_key,fetched_at,is_saved) VALUES(1,1,'A','body','old-guid','old-guid',1,1)");
+  const {stableArticleId}=await import('../../src/sync/local-manifest.ts');
+  const id=await stableArticleId('old-guid',text.parseUri,codec);
+  await f.db.execute('INSERT INTO sync_article_ids VALUES(?,1,?)',[id,'old-guid']);
+  await f.db.execute('INSERT INTO sync_article_aliases VALUES(1,?)',[id]);
+  await f.db.execute("INSERT INTO article_saved_states VALUES(1,'favorite',1,1,-1)");
+  await f.db.execute('PRAGMA user_version=1');await initializeSchema(f.db);
+  expect(await f.db.query('SELECT dedup_key FROM articles')).toEqual([{dedup_key:'guid:old-guid'}]);
+  const repo=new WatchRssRepository(f.db,async()=>'',files.hydrate,item=>prepareLocalSaveAlias(f.db,item,text,codec));
+  await repo.setSaved(1,true);
+  const {SqlLocalRssActions}=await import('../../src/sync/local-rss-actions.ts');
+  await new SqlLocalRssActions(f.db,text,codec,()=>100).markChannelRead(1);
+  const snapshot=await new LocalArticleManifestStore(f.db,codec,text,files,async()=>{}).snapshot();
+  expect(snapshot.map(p=>({id:p.article.articleId,url:p.article.url}))).toEqual([{id,url:'old-guid'}]);
+  expect(await f.db.query('SELECT entity_id FROM sync_change_log WHERE reason=?',['dedupMigration'])).toEqual([{entity_id:id}]);
+ }finally{f.sql.close();}
+});

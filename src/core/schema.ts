@@ -1,4 +1,5 @@
 import {BUILTIN_CHANNELS} from './builtin-channels.ts';
+import {dedupKeyMigration,type SchemaStatement} from './dedup-migration.ts';
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`,
@@ -51,15 +52,36 @@ export const SCHEMA = [
   ...['articles','channels','article_body_chunks','article_original_chunks','article_previews','article_original_previews','article_original_meta','article_saved_states','article_saved_entry_times','sync_saved_states','sync_article_ids','sync_article_aliases','sync_local_identity','local_article_deletions','sync_source_states','sync_article_deletions','article_reading_state'].flatMap(table=>['INSERT','UPDATE','DELETE'].map(operation=>
     `CREATE TRIGGER IF NOT EXISTS sync_revision_${table}_${operation.toLowerCase()} AFTER ${operation} ON ${table} BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END`)),
 ];
-export async function initializeSchema(db: { execute(sql: string): Promise<void>; transaction?(statements:{sql:string}[]):Promise<void> },options:{seedBuiltinChannels?:boolean}={}) {
-  const statements=SCHEMA.map(sql=>({sql}));
-  if(options.seedBuiltinChannels){
-    const now=Date.now();
-    for(const [index,builtin] of BUILTIN_CHANNELS.entries()){
+export const SCHEMA_VERSION=2;
+
+function pragmaVersion(row:Record<string,unknown>|undefined):number{
+  const value=row?.user_version??(row?Object.values(row)[0]:undefined),version=Number(value);
+  if(!Number.isSafeInteger(version)||version<0)throw new Error('Invalid SQLite schema version');
+  return version;
+}
+
+interface SchemaDatabase {
+  query(sql:string,params?:readonly (string|number|null)[]):Promise<Record<string,unknown>[]>;
+  transaction(statements:SchemaStatement[]):Promise<void>;
+}
+
+export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinChannels?:boolean;now?:()=>number}={}) {
+  const current=pragmaVersion((await db.query('PRAGMA user_version'))[0]);
+  if(current===SCHEMA_VERSION)return;
+  if(current>SCHEMA_VERSION)throw new Error(`Database schema ${current} is newer than supported ${SCHEMA_VERSION}`);
+  const now=(options.now??Date.now)(),statements:SchemaStatement[]=[];
+  if(current<1){
+    statements.push(...SCHEMA.map(sql=>({sql})));
+    if(options.seedBuiltinChannels)for(const [index,builtin] of BUILTIN_CHANNELS.entries()){
       const timestamp=now-index;
-      statements.push({sql:`INSERT OR IGNORE INTO channels(url,title,description,created_at,sort_order,is_pinned) VALUES('${builtin.url}','${builtin.title}','${builtin.description}',${timestamp},${timestamp},0)`});
-      statements.push({sql:`INSERT OR IGNORE INTO source_preferences(channel_id,use_original_content) SELECT id,1 FROM channels WHERE url='${builtin.url}'`});
+      statements.push({sql:`INSERT OR IGNORE INTO channels(url,title,description,created_at,sort_order,is_pinned) VALUES(?,?,?,?,?,0)`,params:[builtin.url,builtin.title,builtin.description,timestamp,timestamp]});
+      statements.push({sql:`INSERT OR IGNORE INTO source_preferences(channel_id,use_original_content) SELECT id,1 FROM channels WHERE url=?`,params:[builtin.url]});
     }
+    statements.push({sql:'PRAGMA user_version=1'});
   }
-  if(db.transaction)await db.transaction(statements);else for(const {sql} of statements)await db.execute(sql);
+  if(current<2){
+    statements.push(...dedupKeyMigration(now));
+    statements.push({sql:`PRAGMA user_version=${SCHEMA_VERSION}`});
+  }
+  await db.transaction(statements);
 }

@@ -1,0 +1,11 @@
+{
+  "source": "Android_WatchRSS RssDedupKeyTest and RssParseService",
+  "cases": [
+    {"name":"guid wins","guid":"g1","link":"l1","title":"t1","pubDate":"2026-01-01","expected":"guid:g1"},
+    {"name":"blank guid uses link","guid":"   ","link":"l1","title":"t1","pubDate":"2026-01-02","expected":"link:l1"},
+    {"name":"blank link uses title","guid":null,"link":" ","title":"title","pubDate":"2026-01-03","expected":"title:title"},
+    {"name":"case is preserved","guid":null,"link":"HTTPS://WWW.Example.COM/Path?Q=Upper","title":"ignored","pubDate":null,"expected":"link:HTTPS://WWW.Example.COM/Path?Q=Upper"},
+    {"name":"date does not change title fallback","guid":null,"link":null,"title":"same","pubDate":"2099-12-31","expected":"title:same"},
+    {"name":"non-ascii whitespace is blank","guid":"　 ","link":"https://example.test","title":"ignored","pubDate":null,"expected":"link:https://example.test"}
+  ]
+}

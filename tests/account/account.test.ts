@@ -8,9 +8,14 @@ const state: WatchAccountState = { userId: "u", phoneMasked: "1****", installId:
 const ok = (value: unknown): HttpResponse => ({ status: 200, headers: {}, body: utf8Encode(JSON.stringify(value)) });
 
 test("concurrent refresh calls share one request", async () => {
-  let calls = 0; const transport: HttpTransport = { async request() { calls++; await new Promise(r => setTimeout(r, 1)); return ok({ watchAccessToken: "new", accessTokenExpiresAt: 100000, watchRefreshToken: "next", refreshTokenExpiresAt: 200000, entitlement: { plan: "member", active: true, expiresAt: 3, features: ["cloud"] } }); } };
+  let release!: () => void, started!: () => void;
+  const response = new Promise<void>(resolve => { release = resolve; });
+  const requestStarted = new Promise<void>(resolve => { started = resolve; });
+  let calls = 0; const transport: HttpTransport = { async request() { calls++; started(); await response; return ok({ watchAccessToken: "new", accessTokenExpiresAt: 100000, watchRefreshToken: "next", refreshTokenExpiresAt: 200000, entitlement: { plan: "member", active: true, expiresAt: 3, features: ["cloud"] } }); } };
   const store = new WatchAccountStore(new MemoryStorage()); await store.save(state); const manager = new WatchTokenManager(store, { backendBaseUrl: "https://cloud.test", transport }, () => 0);
-  const result = await Promise.all([manager.freshAccessToken(), manager.freshAccessToken()]); expect(result).toEqual(["new", "new"]); expect(calls).toBe(1);
+  const requests = [manager.freshAccessToken(), manager.freshAccessToken()];
+  await requestStarted; expect(calls).toBe(1); release();
+  const result = await Promise.all(requests); expect(result).toEqual(["new", "new"]); expect(calls).toBe(1);
 });
 
 test("transient refresh failure keeps the good session", async () => {

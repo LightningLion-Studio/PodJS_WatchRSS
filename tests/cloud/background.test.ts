@@ -58,7 +58,7 @@ test('headless handler uses actual SQLite/codec/coordinator: registers and uploa
   }
  };
  try{
-  await initializeSchema({execute:async q=>{sql.exec(q);},transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.exec(s.sql);})();}},{seedBuiltinChannels:false});
+  await initializeSchema({query:async q=>sql.query(q).all() as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
   expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('debug.cloudHost');return request(a.method,a.args);}})).toBe('success');

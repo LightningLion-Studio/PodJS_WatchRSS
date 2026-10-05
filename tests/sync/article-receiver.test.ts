@@ -116,3 +116,20 @@ test("local reading action can replace a future remote clock and queued local ac
   const s=await f.progress.load(id);expect(s.progress).toBe(Math.fround(.6));expect(s.textAnchor?.character).toBe(6);expect(s.updatedAt).toBeLessThan(future);
  }finally{f.sql.close();}
 });
+
+test('a migrated RSS binding receives phone updates without recreating a SHA row',async()=>{
+ const f=await setup();try{
+  const hash='a'.repeat(64),source='https://feed.test/rss',url='https://article/a';
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(1,?,'Feed',1)",[source]);
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,guid,link,dedup_key,fetched_at) VALUES(10,1,'RSS','tag:one',?,'guid:tag:one',1)",[url]);
+  const p={...await payload(),articleId:hash},article=incoming({articleId:hash,rssSourceUrl:source,url});
+  // Receive once under the old materialization rule, then migrate the pair.
+  await f.receiver.receive(article,p,'phone');
+  await f.db.execute('PRAGMA user_version=1');await initializeSchema(f.db);
+  expect(await f.db.query('SELECT id,dedup_key FROM articles')).toEqual([{id:10,dedup_key:'guid:tag:one'}]);
+  await f.receiver.receive({...article,title:'phone update',favoriteChangedAt:101},p,'phone');
+  expect(await f.db.query('SELECT id,title,guid,dedup_key FROM articles')).toEqual([{id:10,title:'phone update',guid:'tag:one',dedup_key:'guid:tag:one'}]);
+  await f.repo.refreshChannel(1,'<rss><channel><title>Feed</title><item><guid>tag:one</guid><title>RSS update</title><link>https://article/a</link></item></channel></rss>');
+  expect(await f.db.query('SELECT id,is_saved,dedup_key FROM articles')).toEqual([{id:10,is_saved:1,dedup_key:'guid:tag:one'}]);
+ }finally{f.sql.close();}
+});

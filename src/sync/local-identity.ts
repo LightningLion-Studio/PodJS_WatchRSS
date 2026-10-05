@@ -11,8 +11,8 @@ export async function ensureSyncDevice(db:SqlDatabase,randomBytes:()=>Promise<Ui
 }
 /** These statements must commit with the UI save and its sync journal update. */
 export async function prepareLocalSaveAlias(db:SqlDatabase,itemId:number,text:Pick<SyncTextPort,'parseUri'>,codec:Pick<SyncBodyCodec,'sha256'>):Promise<{sql:string;params:SqlParams}[]>{
- const item=(await db.query('SELECT id,link,dedup_key FROM articles WHERE id=?',[itemId]))[0];if(!item)return [];
- const url=item.link==null?'':String(item.link),id=await stableArticleId(nativeTrim(url)?url:String(item.dedup_key),text.parseUri,codec);
+ const item=(await db.query('SELECT id,link,dedup_key,(SELECT article_id FROM sync_article_aliases WHERE item_id=articles.id) AS bound_id FROM articles WHERE id=?',[itemId]))[0];if(!item)return [];
+ const url=item.link==null?'':String(item.link),id=!nativeTrim(url)&&item.bound_id?String(item.bound_id):await stableArticleId(nativeTrim(url)?url:String(item.dedup_key),text.parseUri,codec);
  return [{sql:`INSERT INTO sync_article_aliases(item_id,article_id)
   SELECT id,CASE WHEN link IS ? AND dedup_key=? THEN ? ELSE NULL END FROM articles WHERE id=?
   ON CONFLICT(item_id) DO UPDATE SET article_id=excluded.article_id`,params:[item.link,item.dedup_key,id,itemId]}];
