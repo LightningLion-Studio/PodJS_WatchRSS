@@ -13,11 +13,18 @@ import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
+import { ReaderBackground, useReaderBackgrounds } from "../ReaderBackground.tsx";
+import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
+import { presetContentFont, readerTextClass } from "../../reader/content-layout.ts";
+import { readerChrome } from "../../reader/chrome.ts";
 import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
 
 const infoIcon = "../assets/icons/info.svg";
 const playIcon = "../assets/icons/play-circle.svg";
 const starIcon = "../assets/icons/star.svg";
+const thumbIcon = "../assets/icons/bili-thumb-up.svg";
+const coinIcon = "../assets/icons/bili-coin.svg";
+const shareIcon = "../assets/icons/share.svg";
 
 type Id = number | string;
 export type BiliRoute =
@@ -37,7 +44,7 @@ export interface BiliScreenRef { scroller?: Scroller; onRootBack?: () => boolean
 export interface BiliScreenProps {
   onShare?:ShareHandler;
   loadLocalDetail?: (target: DetailTarget) => Promise<import("../../bili/types.ts").BiliVideoDetail | undefined>;
-  height: number; width?: number; route: BiliRoute; client: BiliClient;
+  height: number; width?: number; route: BiliRoute; client: BiliClient; preset?: ReaderPreset; active?: boolean;
   onNavigate: (route: BiliRoute) => void; onBack: () => void;
   input?: BiliInput; onOpenUrl?: (url: string) => void; onError?: (message: string) => void;
   settings?: { showOriginalContent?: boolean; originalContentEnabled?: boolean; onOriginalContentChange?: (enabled: boolean) => void; showContinuePlaybackInBackground?: boolean; continuePlaybackInBackgroundEnabled?: boolean; onContinuePlaybackInBackgroundChange?: (enabled: boolean) => void; onSyncWatchRecords?: () => void; deleteEnabled?: boolean; onDeleteChannel?: () => void | Promise<void> };
@@ -207,7 +214,136 @@ function searchResultEntry(item: Extract<BiliSearchResult, { kind: "video" }>, w
   return { height: 174, render: () => <View onPress={onPress} focusable class="absolute inset-0 rounded-[16] bg-[#202020] overflow-hidden"><View class="absolute left-[8] right-[8] top-[8] h-[104] rounded-[12] bg-[#303030] overflow-hidden">{item.pic ? <RemoteImage cacheBucket="bili-preview" url={item.pic} width={imageWidth - 16} height={104} class="absolute inset-0" /> : null}<View class="absolute left-[77] top-[33] w-[38] h-[38] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} style={{ width: 28, height: 28 }} /></View></View><Text class="absolute left-[12] right-[12] top-[119] text-[13px] leading-[18] text-white">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[5] text-[11px] leading-[15] text-[#999]">{summaryLines.join("\n")}</Text></View> };
 }
 
+// Native BiliDetailScreen.kt (original-content mode): reader background, 18dp side padding,
+// 6dp item spacing, 3:2 cover, meta card, four 44dp action circles, 分P, 简介.
+const ON_SURFACE = "#f5f5f5", ON_SURFACE_VARIANT = "#b6b6b6";
+// Native passes showCommentEntry = false; the 评论 section is kept but hidden like native.
+const SHOW_COMMENT_ENTRY = false;
+
+function sectionTitle(title: string, trailing?: string): ScrollEntry {
+  return { height: 20, render: () => <View class="absolute inset-0">
+    <Text class="absolute left-[0] top-[0.75] text-[17px] leading-[20] text-[#b6b6b6]">{title}</Text>
+    {trailing ? <Text class="absolute right-[0] top-[2] text-[9px] leading-[17] text-[#b6b6b6]">{trailing}</Text> : null}
+  </View> };
+}
+
+function surfaceCard(text: string, width: number, color = ON_SURFACE_VARIANT, onPress?: () => void): ScrollEntry {
+  const wrapped = measuredLines(text, width - 12, measureFor(17));
+  return { height: 12 + wrapped.length * 21, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={text} class="absolute inset-0 rounded-[16] bg-[#1c1f21]">
+    <Text class="absolute left-[6] right-[6] top-[6] text-[17px] leading-[21] text-center" style={{ textColor: color }}>{wrapped.join("\n")}</Text>
+  </View> };
+}
+
+function detailDuration(seconds?: number) { if (!seconds || seconds <= 0) return undefined; return durationText(seconds); }
+
 function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
+  const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
+  let controller: BiliDetailController;
+  createEffect(() => {
+    const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: num(props.route.cid) || undefined };
+    controller = new BiliDetailController(props.client, kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
+    const own = controller; setState(own.state); void own.load(); onCleanup(() => own.dispose());
+  });
+  const [busy, setBusy] = createSignal("");
+  const [expanded, setExpanded] = createSignal(false);
+  let disposed = false; onCleanup(() => { disposed = true; });
+  async function play() {
+    if (busy()) return;
+    const data = state().detail, actual = controller.selectedCid(), own = controller;
+    if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
+    try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true });
+      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+    } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
+  }
+  function share() {
+    const it = state().detail?.item, title = biliActionTitle(it?.title, it?.bvid, it?.aid);
+    const qr = () => props.onNavigate({ name: "share", aid: it?.aid, bvid: it?.bvid, title });
+    if (props.onShare) props.onShare({ origin: "bili-detail", title, link: biliShareLink(it?.bvid, it?.aid) }, qr); else qr();
+  }
+  const preset = () => props.preset ?? defaultReaderPreset();
+  const backgrounds = useReaderBackgrounds();
+  // Native draws reader TITLE/BODY colours on the dark surface card; on light presets that is
+  // dark-on-dark, so the card keeps onSurface text there.
+  const cardText = (color: string) => readerChrome(preset()).dark ? color : ON_SURFACE;
+  const entries = createMemo<ScrollEntry[]>(() => {
+    const width = props.width ?? 233, cardWidth = width - 36, inner = cardWidth - 12;
+    const data = state().detail, it = data?.item, st = state();
+    const titleFont = presetContentFont(preset(), "title"), bodyFont = presetContentFont(preset(), "body");
+    const measureScaled = (font: typeof titleFont) => (text: string) => getOps().measureText(text, font.fontSlot) * font.scale;
+    const fontText = (font: typeof titleFont, text: string, top: number, w: number) => <Text class={readerTextClass(font.fontSlot)} style={{ insetT: top, width: w / font.scale, fontSlot: font.fontSlot, scale: font.scale, originX: -.5, originY: -.5, lineHeight: font.lineHeight / font.scale, textColor: cardText(font.color), tracking: (font.tracking ?? 0) / font.scale, textAlign: 0 }}>{text}</Text>;
+    const cover: ScrollEntry = { height: cardWidth * 2 / 3, render: () => <View onPress={() => void play()} focusable accessibilityRole="button" accessibilityLabel="播放" class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+      {it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={cardWidth} height={cardWidth * 2 / 3} fit="cover" class="absolute left-[0] top-[0]" /> : null}
+      <View class="absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" />
+      <View class="absolute w-[36] h-[36] rounded-full bg-[#0b121199] items-center justify-center" style={{ insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={playIcon} style={{ width: 24, height: 24 }} /></View>
+    </View> };
+    const title = measuredLines(it?.title?.trim() || "加载中...", inner, measureScaled(titleFont), 3);
+    const owner = it?.owner?.name?.trim();
+    const chips = [it?.stat?.view != null ? `播放 ${formatCount(it.stat.view)}` : "", it?.stat?.like != null ? `点赞 ${formatCount(it.stat.like)}` : "", it?.stat?.danmaku != null ? `弹幕 ${formatCount(it.stat.danmaku)}` : ""].filter(Boolean);
+    const titleHeight = title.length * titleFont.lineHeight;
+    const ownerTop = 6 + titleHeight + 6, chipsTop = ownerTop + (owner ? 17 + 6 : 0);
+    const metaHeight = chipsTop + (chips.length ? 21 + 6 : 0);
+    let chipLeft = 6;
+    const chipBoxes = chips.map(text => { const w = getOps().measureText(text, FONT_SLOT[9]) + 8, left = chipLeft; chipLeft += w + 4; return { text, left, w }; });
+    const meta: ScrollEntry = { height: metaHeight, render: () => <View accessibilityLabel={[it?.title, owner && `UP 主：${owner}`, ...chips].filter(Boolean).join("，")} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+      {title.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * titleFont.lineHeight, width: inner, height: titleFont.lineHeight }}>{fontText(titleFont, line, 1, inner)}</View>)}
+      {owner ? <Text class="absolute left-[6] text-[9px] leading-[17] text-[#b6b6b6]" style={{ insetT: ownerTop + 1 }}>{`UP 主：${owner}`}</Text> : null}
+      {chipBoxes.filter(chip => chip.left + chip.w <= cardWidth - 6).map(chip => <View class="absolute h-[21] rounded-[10.5] bg-[#23272a]" style={{ insetL: chip.left, insetT: chipsTop, width: chip.w }}><Text class="absolute left-[4] top-[2] text-[9px] leading-[17] text-[#b6b6b6]">{chip.text}</Text></View>)}
+    </View> };
+    const size = Math.max(36, Math.min(44, (cardWidth - 18) / 4)), rowLeft = (cardWidth - size * 4 - 18) / 2;
+    const locked = st.busy || st.loading || !data;
+    const actionButtons = [
+      { icon: thumbIcon, label: "点赞", selected: !!st.interaction.like, onPress: locked ? undefined : () => void controller.act("like") },
+      { icon: coinIcon, label: "投币", selected: !!st.interaction.coin, onPress: locked || st.interaction.coin ? undefined : () => void controller.act("coin") },
+      { icon: starIcon, label: "收藏", selected: !!st.interaction.favorite, onPress: locked ? undefined : () => void controller.act("favorite") },
+      { icon: shareIcon, label: "转发", selected: false, onPress: share },
+    ];
+    const iconSize = Math.min(24, Math.max(18, size * .55));
+    const actions: ScrollEntry = { height: size, render: () => <View class="absolute inset-0">
+      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class={button.selected ? "absolute bg-[#ff6026] items-center justify-center" : "absolute bg-[#23272a] items-center justify-center"} style={{ insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
+        <Image src={button.icon} style={{ width: iconSize, height: iconSize }} />
+      </View>)}
+    </View> };
+    const pages = data?.pages ?? [];
+    const pageEntries = pages.map((page, index): ScrollEntry => {
+      const selected = st.selected === index, duration = detailDuration(page.duration);
+      const textWidth = inner - (duration ? getOps().measureText(duration, FONT_SLOT[9]) + 6 : 0);
+      const label = page.part?.trim() || `第${page.page ?? 1}集`, wrapped = measuredLines(label, textWidth, measureFor(17), 2);
+      const height = 14.5 + wrapped.length * 17;
+      return { height, render: () => <View onPress={busy() ? undefined : () => controller.select(index)} focusable accessibilityRole="button" accessibilityLabel={`${label}${duration ? `，${duration}` : ""}`}
+        class={selected ? "absolute inset-0 rounded-[16] bg-[#23272a] border-[#ff6026] border-[1]" : "absolute inset-0 rounded-[16] bg-[#1c1f21]"}>
+        <Text class="absolute left-[6] top-[7.75] text-[17px] leading-[17] text-[#f5f5f5]" style={{ width: textWidth }}>{wrapped.join("\n")}</Text>
+        {duration ? <Text class="absolute right-[6] text-[9px] leading-[17] text-[#b6b6b6]" style={{ insetT: (height - 17) / 2 + .5 }}>{duration}</Text> : null}
+      </View> };
+    });
+    const desc = data?.desc?.trim();
+    const description = (): ScrollEntry[] => {
+      if (!desc) return [];
+      const measure = measureScaled(bodyFont), arrow = 17;
+      const all = measuredLines(desc, inner, measure), canExpand = all.length > 3;
+      const shown = expanded() || !canExpand ? all : measuredLines(desc, inner - arrow, measure, 3);
+      const height = 12 + shown.length * bodyFont.lineHeight;
+      return [sectionTitle("简介"), { height, render: () => <View onPress={canExpand ? () => setExpanded(value => !value) : undefined} focusable={canExpand} accessibilityRole={canExpand ? "button" : undefined} accessibilityLabel={desc} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">
+        {shown.map((line, index) => <View class="absolute" style={{ insetL: 6, insetT: 6 + index * bodyFont.lineHeight, width: inner, height: bodyFont.lineHeight }}>{fontText(bodyFont, line, 0, inner)}</View>)}
+        {canExpand && !expanded() ? <Text class="absolute right-[6] text-[17px] leading-[21] text-[#f5f5f5]" style={{ insetT: height - 6 - 21 }}>▼</Text> : null}
+      </View> }];
+    };
+    const message = st.error ? String(st.error) : busy() || st.message || (st.offline ? "本地已保存详情" : "");
+    return [
+      cover, meta, actions,
+      ...(pages.length ? [sectionTitle("分P", `${pages.length} 个`), ...pageEntries] : []),
+      ...description(),
+      ...(SHOW_COMMENT_ENTRY && it?.aid ? [sectionTitle("评论"), surfaceCard("查看评论", cardWidth, ON_SURFACE, () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
+      ...(message ? [surfaceCard(message, cardWidth)] : []),
+      { height: 50, render: () => <View class="absolute inset-0" /> },
+    ];
+  });
+  return <View class="absolute inset-0 bg-[#000000]">
+    <ReaderBackground background={preset().background} snapshot={backgrounds()} width={props.width ?? 233} height={props.height} active={props.active ?? true} />
+    <ScrollEntries onRefresh={() => void controller.load()} height={props.height} entries={entries()} gap={6} verticalPadding={0} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />
+  </View>;
+}
+
+function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
   const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
   let controller: BiliDetailController;
   createEffect(() => {
@@ -276,7 +412,7 @@ export function BiliScreen(props: BiliScreenProps) {
   return <Show when={route().name !== "entry" && route().name !== "feed"} fallback={<FeedScreen {...props} />}>
     <Show when={route().name !== "channel-info"} fallback={<ChannelInfoScreen {...props} />}><Show when={route().name !== "history"} fallback={<HistoryScreen {...props} />}><Show when={route().name !== "watch-later"} fallback={<WatchLaterScreen {...props} />}><Show when={route().name !== "favorites"} fallback={<FavoritesScreen {...props} />}><Show when={route().name !== "favorite-folder"} fallback={<FavoriteFolderScreen {...props} route={route() as Extract<BiliRoute, { name: "favorite-folder" }>} />}><Show when={route().name !== "login"} fallback={<LoginScreen {...props} />}><Show when={route().name !== "search"} fallback={<SearchScreen {...props} />}>
       <Show when={route().name !== "results"} fallback={<ResultsScreen {...props} route={route() as Extract<BiliRoute, { name: "results" }>} />}>
-        <Show when={route().name !== "detail"} fallback={<DetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} />}>
+        <Show when={route().name !== "detail"} fallback={(props.settings?.originalContentEnabled ?? true) ? <DetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} /> : <RssDetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} />}>
           <Show when={route().name !== "comments" && route().name !== "replies"} fallback={<CommentScreen {...props} route={route() as Extract<BiliRoute, { name: "comments" | "replies" }>} />}>
             <Show when={route().name !== "actions"} fallback={<ActionsScreen {...props} route={route() as Extract<BiliRoute, { name: "actions" }>} />}><Show when={route().name !== "share"} fallback={<ShareScreen {...props} route={route() as Extract<BiliRoute, { name: "share" }>} />}><Show when={route().name !== "settings"} fallback={<SettingsScreen {...props} />}><PlayerScreen {...props} route={route() as Extract<BiliRoute, { name: "player" }>} /></Show></Show></Show>
           </Show>
