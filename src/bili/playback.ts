@@ -23,3 +23,6 @@ export class BiliPlaybackCheckpointController {
 }
 
 export function createBiliPlaybackCheckpoint(options:BiliPlaybackCheckpointOptions){return new BiliPlaybackCheckpointController(options)}
+
+/** Read the same normalized, newest-first records used for local resume. */
+export async function readBiliPlaybackProgress(storage:Pick<BiliPlaybackKv,"get">):Promise<BiliPlaybackProgress[]>{return parse(await storage.get("watchrss.bili.playback-progress.v1"));}

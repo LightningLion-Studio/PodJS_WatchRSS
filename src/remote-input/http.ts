@@ -1,3 +1,5 @@
+import {EXPORT_ABILITIES,historyPayload,playbackPayload,historyFailure,type HttpExportSession} from './exports.ts';
+import {nativeTrim} from '../sync/local-manifest.ts';
 import {wireFields} from "../sync/article-batches.ts";
 import { stringToUtf8, utf8ToString } from '@podjs/framework/bytes';
 import type { SyncByteStream } from '../sync/stream.ts';
@@ -34,14 +36,15 @@ export async function readRemoteHttpRequest(stream:SyncByteStream,now=Date.now):
 }
 const json=(status:number,value:unknown,url?:string):RemoteHttpResponse=>{const body=JSON.stringify(value);return {status,type:/[^\x00-\x7f]/.test(body)?'application/json; charset=UTF-8':'application/json',body,url};};
 function parameter(query:string,key:string):string {for(const pair of query.split('&')){const at=pair.indexOf('=');const decode=(s:string)=>decodeURIComponent(s.replace(/\+/g,' '));if(decode(at<0?pair:pair.slice(0,at))===key)return decode(at<0?'':pair.slice(at+1));}return '';}
-export function routeRemoteHttp(request:RemoteHttpRequest):RemoteHttpResponse {
+export function routeRemoteHttp(request:RemoteHttpRequest,exportSession?:HttpExportSession):RemoteHttpResponse {
+ const ability=exportSession?EXPORT_ABILITIES[exportSession.mode]:REMOTE_INPUT_ABILITY;
  const split=request.target.indexOf('?'),path=split<0?request.target:request.target.slice(0,split),query=split<0?'':request.target.slice(split+1);
  if(path==='/')return {status:200,type:'text/html; charset=utf-8',body:remoteInputLanding};
  if(path==='/health')return json(200,{status:'ok'});
- if(path==='/getCurrentActivationAbility')return json(200,REMOTE_INPUT_ABILITY);
- if(path==='/getAbilities')return json(200,{status:'ok',abilities:[REMOTE_INPUT_ABILITY]});
+ if(path==='/getCurrentActivationAbility')return json(200,ability);
+ if(path==='/getAbilities')return json(200,{status:'ok',abilities:[ability]});
  if(path==='/getLLMSummaryConfig'||path==='/setLLMSummaryConfig')return json(410,{success:false,message:'LLM BYOK configuration is no longer supported'});
- if(path!=='/remoteEnterRSSURL')return {status:404,type:'text/plain',body:'Not Found'};
+ if(exportSession||path!=='/remoteEnterRSSURL')return {status:404,type:'text/plain',body:'Not Found'};
  let url='';
  if(request.headers['content-type']?.split(';',1)[0].trim().toLowerCase()==='application/x-www-form-urlencoded')url=parameter(request.body,'url')||parameter(query,'url');
  else if(wireFields.trim(request.body)){
@@ -50,9 +53,32 @@ export function routeRemoteHttp(request:RemoteHttpRequest):RemoteHttpResponse {
  }else url=parameter(query,'url');
  return wireFields.trim(url)?json(200,{success:true,message:'操作成功'},url):json(400,{success:false,message:'URL is required'});
 }
-export async function serveRemoteHttp(stream:SyncByteStream,isActive:()=>boolean,onUrl:(url:string)=>void):Promise<void> {
+/** Native export servers are isolated by ability and do not use TTS pairing tokens. */
+export async function routeRemoteExportHttp(request:RemoteHttpRequest,session:HttpExportSession):Promise<RemoteHttpResponse>{
+ const [path,query='']=request.target.split('?',2);
+ const savedType=path==='/getFavorites'&&session.mode==='favorite'?'favorite':path==='/getWatchlaterList'&&session.mode==='watchLater'?'watchLater':undefined;
+ const history=path==='/getBiliWatchHistory'&&session.mode==='bili';
+ const progress=path==='/getBiliPlaybackProgress'&&session.mode==='bili';
+ if(!savedType&&!history&&!progress)return routeRemoteHttp(request,session);
+ try{
+  let data:unknown;
+  if(savedType)data=(await session.source.readSavedLinks(savedType)).map(nativeTrim).filter(Boolean).map(link=>({link}));
+  else if(history){
+   // Kotlin toLongOrNull rejects whitespace, decimals and overflow; first query value wins.
+   const long=(value:string)=>{if(!/^[+-]?[0-9]+$/.test(value))return undefined;const n=BigInt(value);return n< -9223372036854775808n||n>9223372036854775807n?undefined:Number(n);};
+   const max=long(parameter(query,'max')),viewAt=long(parameter(query,'view_at'))??long(parameter(query,'viewAt')),business=nativeTrim(parameter(query,'business'))||undefined;
+   const cursor=max===undefined&&viewAt===undefined&&business===undefined?undefined:{max,viewAt,business};
+   let page;
+   try{page=await session.source.history(cursor);}catch(error){return json(200,historyFailure(error));}
+   data=historyPayload(page);
+  }else data=playbackPayload(await session.source.playbackProgress());
+  session.onComplete?.();
+  return json(200,{success:true,data});
+ }catch(error){return json(500,{success:false,message:error instanceof Error?error.message:'Unknown error',...(history||progress?{data:null}:{})});}
+}
+export async function serveRemoteHttp(stream:SyncByteStream,isActive:()=>boolean,onUrl:(url:string)=>void,exportSession?:HttpExportSession):Promise<void> {
  let response:RemoteHttpResponse;
- try{response=routeRemoteHttp(await readRemoteHttpRequest(stream));}
+ try{const request=await readRemoteHttpRequest(stream);response=exportSession?await routeRemoteExportHttp(request,exportSession):routeRemoteHttp(request);}
  catch{response=json(400,{success:false,message:'请求正文无效或过大'});}
  try{
   if(!isActive())return;
