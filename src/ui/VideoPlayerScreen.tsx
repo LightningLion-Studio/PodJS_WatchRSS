@@ -8,16 +8,18 @@ import { createGesture } from "@pocketjs/framework/gesture";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
-import { lifecycle, onLifecycleChange, normalizedRelativeAxisStep } from "@podjs/framework/watch";
+import { hasCapability, lifecycle, onLifecycleChange, normalizedRelativeAxisStep } from "@podjs/framework/watch";
 import { video, delay, type HostOperation, type VideoPrepare, type VideoState } from "@podjs/framework/services";
 import { formatPlayerTime, guardedCrownVolume, nextScaleMode, playerPanRange, progressWidth, seekHoldStep, type CrownVolumeGuardState, type PlayerScaleMode } from "./video-player.ts";
+import { DouyinVideoSessionPool, douyinPagerProgress, douyinPagerSettleProgress, shouldFallbackFromVideoSessions, shouldSettleDouyinPager, shouldUseDouyinVideoSessions, type DouyinPagerDirection, type DouyinPreparedSource } from "./douyin/video-sessions.ts";
+import { RemoteImage } from "./RemoteImage.tsx";
 
 // The host exposes one session, even when navigation retains several screens.
 let videoSessionOwner:symbol|undefined;
 
 type ExtendedVideoState = VideoState & { volume?: number; buffered?: boolean; isBuffering?: boolean };
 
-export interface PlaybackSource { immersive?:boolean; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
+export interface PlaybackSource { immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
 export interface VideoPlayerHandle { onCrown(delta: number): boolean; canSwipeBack(): boolean }
 
 function PlayerButton(props: { left: number; top: number; size: number; icon: "fullscreen" | "panorama" | "fullscreen-exit" | "rotate" | "rewind" | "forward" | "play" | "pause"; iconSize: number; enabled?: boolean; onPress: () => void; onHold?: (elapsedMs: number) => void }) {
@@ -34,13 +36,18 @@ function PlayerButton(props: { left: number; top: number; size: number; icon: "f
   </View>;
 }
 
-export function VideoPlayerScreen(props: { source: PlaybackSource; width: number; height: number; active: boolean; offset: number; round: boolean; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onActions?:()=>void; onHeader?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:()=>void; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
+export function VideoPlayerScreen(props: { source: PlaybackSource; width: number; height: number; active: boolean; offset: number; round: boolean; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onPrepareAdjacent?:(direction:"next"|"previous")=>Promise<DouyinPreparedSource|undefined>; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onHeader?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:()=>void; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
   const [state, setState] = createSignal<ExtendedVideoState | null>(null), [error, setError] = createSignal("");
   const [ready, setReady] = createSignal(false), [controlsVisible, setControlsVisible] = createSignal(true);
   const [mode, setMode] = createSignal<PlayerScaleMode>("standard"), [rotation, setRotation] = createSignal(0);
   const [displayRotation, setDisplayRotation] = createSignal(0), [pan, setPan] = createSignal(0), [volumeVisible, setVolumeVisible] = createSignal(false), [loadingRotation, setLoadingRotation] = createSignal(0);
   const [internet, setInternet] = createSignal<InternetStatus>("checking");
   const [allowBluetooth, setAllowBluetooth] = createSignal(false);
+  const [sessionsDisabled,setSessionsDisabled]=createSignal(false),[dragProgress,setDragProgress]=createSignal(0),[dragPoster,setDragPoster]=createSignal<{url:string;direction:DouyinPagerDirection}|null>(null);
+  const sessionCapable=shouldUseDouyinVideoSessions(props.source,hasCapability("media.video.sessions"));
+  const sessionPool=sessionCapable?new DouyinVideoSessionPool():undefined;
+  const usingSessions=()=>!!sessionPool&&!sessionsDisabled();
+  const sessionSource=(source:PlaybackSource):DouyinPreparedSource=>({key:source.awemeId??source.url??source.videoUrl??"current",source});
   const networkPrompt = () => props.source.platform === "douyin" ? douyinPlayerNetwork(internet(), state()?.state === "playing" && !error(), allowBluetooth()) : null;
   onMount(() => { if (props.source.platform === "douyin") onCleanup(observeHostInternet(setInternet)); });
   const sessionOwner=Symbol("video-screen");
@@ -50,12 +57,21 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
   let surface: NodeMirror | undefined, rotationFrom = 0, rotationTo = 0, rotationStarted = 0, panningStart = 0, panVelocity = 0, panFrameAt = Date.now();
   let transformRunning = false, transformDirty = false, seekRunning = false, desiredSeek = 0, volumeRunning = false, volumeDirty = false, virtualVolume: number | undefined, crownGuard: CrownVolumeGuardState = { lastEventMs: Number.NEGATIVE_INFINITY };
   const bounds = () => ({ x: 0, y: 0, width: props.width, height: props.height, translateX: props.offset, visible: props.active, roundClip: props.round ? { cx: props.width / 2, cy: props.height / 2, radius: Math.min(props.width, props.height) / 2 } : undefined });
+  const media={
+    prepare:(options:VideoPrepare)=>usingSessions()?sessionPool!.prepare(sessionSource(props.source),options):video.prepare(options),
+    play:()=>usingSessions()?sessionPool!.play():video.play(),pause:()=>usingSessions()?sessionPool!.pause():video.pause(),
+    seek:(positionMs:number)=>usingSessions()?sessionPool!.seek(positionMs):video.seek(positionMs),
+    stop:()=>usingSessions()?sessionPool!.stop():video.stop(),state:()=>usingSessions()?sessionPool!.state():video.state(),
+    setBounds:(value:ReturnType<typeof bounds>)=>usingSessions()?sessionPool!.setBounds(value):video.setBounds(value),
+    setTransform:(value:{rotationDeg?:number;scaleMode?:"standard"|"expanded"|"shrunk";panX?:number;panY?:number})=>usingSessions()?sessionPool!.setTransform(value):video.setTransform(value),
+    setVolume:(value:number)=>usingSessions()?sessionPool!.setVolume(value):video.setVolume(value),
+  };
   const failed = (value: unknown) => { appLogger.e('VideoPlayer','Playback failed',value); if (!disposed) { const message = String(value); setError(message); props.onCheckpoint?.("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
   const range = () => playerPanRange(mode(), props.width, props.height, state()?.width ?? 0, state()?.height ?? 0, rotation());
-  const requestTransform = async () => { if(videoSessionOwner!==sessionOwner)return; if (transformRunning) { transformDirty = true; return; } transformRunning = true; try { do { transformDirty = false; const ownGeneration = generation, r = range(), value = Math.max(-r.range, Math.min(r.range, pan())); if (value !== pan()) setPan(value); await video.setTransform({ rotationDeg: displayRotation(), scaleMode: mode(), ...(r.axis === "x" ? { panX: value } : { panY: value }) }); if (ownGeneration === generation) props.onPanStateChange?.(value, r.range); else transformDirty = true; } while (transformDirty && !disposed); } catch (value) { failed(value); } finally { transformRunning = false; } };
-  const enforceStartVolume = async (next: ExtendedVideoState, limit: number | null | undefined) => { if (limit == null || next.volume == null) return next; const maximum = Math.max(0, Math.min(1, limit / 100)); return next.volume > maximum ? await video.setVolume(maximum) as ExtendedVideoState : next; };
-  const poll = async (ownGeneration: number) => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(!props.active||videoSessionOwner!==sessionOwner){pollTimer=delay(400);void pollTimer.result.then(()=>void poll(ownGeneration)).catch(()=>{});return;} try { const next = await video.state(); if (ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if (next.state === "error") { if (lastPlaybackState !== "error") { failed("播放失败"); if (!networkPrompt()) props.onPlaybackFailure?.(); } lastPlaybackState = "error"; return; } setState(next); if (!volumeRunning) virtualVolume = next.volume; checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; props.onProgress?.(next.positionMs, next.durationMs); if (next.state === "ended" && lastPlaybackState !== "ended") props.onCheckpoint?.("ended", next.positionMs, next.durationMs); lastPlaybackState = next.state; } catch (value) { failed(value); } if (!disposed && ownGeneration === generation && lastPlaybackState !== "error") { pollTimer = delay(400); void pollTimer.result.then(() => void poll(ownGeneration)).catch(() => {}); } };
-  const prepare = () => { appLogger.d('VideoPlayer',`prepare platform=${props.source.platform??'rss'}`); if (networkPrompt()) return; const previous=state(),sameSource=preparedSource===props.source; const source=sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&(source.backgroundPlayback===true||lifecycle()==="active");props.onError?.(""); if (ready() && previous) props.onCheckpoint?.("pause_or_exit", previous.positionMs, previous.durationMs); const ownGeneration = ++generation; prepareOp?.cancel(); pollTimer?.cancel(); setMode("standard"); setRotation(0); setDisplayRotation(0); setPan(0); rotationStarted = 0; panVelocity = 0; crownGuard = { lastEventMs: Number.NEGATIVE_INFINITY }; virtualVolume = undefined; setError(""); setReady(false); setState(null); lastPlaybackState = ""; checkpointPosition = source.resumePositionMs ?? 0; checkpointDuration = 0; const op = video.prepare({ ...source, loop:source.immersive===true, bounds: bounds(), autoplay: false } as VideoPrepare); prepareOp = op; void op.result.then(async next => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; let prepared: ExtendedVideoState = next; if ((source.resumePositionMs ?? 0) > 0) { prepared = await video.seek(source.resumePositionMs!) as ExtendedVideoState; if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; } prepared = await enforceStartVolume(prepared, source.startVolumeLimit); if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(autoplayAllowed && !networkPrompt())prepared = await video.play() as ExtendedVideoState; if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`); setReady(true); setState(prepared); virtualVolume = prepared.volume; checkpointPosition = prepared.positionMs; checkpointDuration = prepared.durationMs; props.onCheckpoint?.("ready", prepared.positionMs, prepared.durationMs); await requestTransform(); if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; void poll(ownGeneration); }).catch(value => { if (ownGeneration === generation&&videoSessionOwner===sessionOwner) { failed(value); if (!networkPrompt()) props.onPlaybackFailure?.(); } }); };
+  const requestTransform = async () => { if(videoSessionOwner!==sessionOwner)return; if (transformRunning) { transformDirty = true; return; } transformRunning = true; try { do { transformDirty = false; const ownGeneration = generation, r = range(), value = Math.max(-r.range, Math.min(r.range, pan())); if (value !== pan()) setPan(value); await media.setTransform({ rotationDeg: displayRotation(), scaleMode: mode(), ...(r.axis === "x" ? { panX: value } : { panY: value }) }); if (ownGeneration === generation) props.onPanStateChange?.(value, r.range); else transformDirty = true; } while (transformDirty && !disposed); } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } finally { transformRunning = false; } };
+  const enforceStartVolume = async (next: ExtendedVideoState, limit: number | null | undefined) => { if (limit == null || next.volume == null) return next; const maximum = Math.max(0, Math.min(1, limit / 100)); return next.volume > maximum ? await media.setVolume(maximum) as ExtendedVideoState : next; };
+  const poll = async (ownGeneration: number) => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(!props.active||videoSessionOwner!==sessionOwner){pollTimer=delay(400);void pollTimer.result.then(()=>void poll(ownGeneration)).catch(()=>{});return;} try { const next = await media.state(); if (ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if (next.state === "error") { if (lastPlaybackState !== "error") { failed("播放失败"); if (!networkPrompt()) props.onPlaybackFailure?.(); } lastPlaybackState = "error"; return; } setState(next); if (!volumeRunning) virtualVolume = next.volume; checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; props.onProgress?.(next.positionMs, next.durationMs); if (next.state === "ended" && lastPlaybackState !== "ended") props.onCheckpoint?.("ended", next.positionMs, next.durationMs); lastPlaybackState = next.state; } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } if (!disposed && ownGeneration === generation && lastPlaybackState !== "error") { pollTimer = delay(400); void pollTimer.result.then(() => void poll(ownGeneration)).catch(() => {}); } };
+  const prepare = () => { appLogger.d('VideoPlayer',`prepare platform=${props.source.platform??'rss'}`); if (networkPrompt()) return; const previous=state(),sameSource=preparedSource===props.source; const source=sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&(usingSessions()?lifecycle()==="active":source.backgroundPlayback===true||lifecycle()==="active");props.onError?.(""); if (ready() && previous) props.onCheckpoint?.("pause_or_exit", previous.positionMs, previous.durationMs); const ownGeneration = ++generation; prepareOp?.cancel(); pollTimer?.cancel(); setMode("standard"); setRotation(0); setDisplayRotation(0); setPan(0); rotationStarted = 0; panVelocity = 0; crownGuard = { lastEventMs: Number.NEGATIVE_INFINITY }; virtualVolume = undefined; setError(""); setReady(false); setState(null); lastPlaybackState = ""; checkpointPosition = source.resumePositionMs ?? 0; checkpointDuration = 0; const op = media.prepare({ ...source, loop:source.immersive===true, bounds: bounds(), autoplay: false } as VideoPrepare); prepareOp = op; void op.result.then(async next => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; let prepared: ExtendedVideoState = next; if ((source.resumePositionMs ?? 0) > 0) { prepared = await media.seek(source.resumePositionMs!) as ExtendedVideoState; if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; } prepared = await enforceStartVolume(prepared, source.startVolumeLimit); if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(autoplayAllowed && !networkPrompt())prepared = await media.play() as ExtendedVideoState; if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`); setReady(true); setState(prepared); virtualVolume = prepared.volume; checkpointPosition = prepared.positionMs; checkpointDuration = prepared.durationMs; props.onCheckpoint?.("ready", prepared.positionMs, prepared.durationMs); await requestTransform(); if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; void warmForward();void poll(ownGeneration); }).catch(value => { if (ownGeneration === generation&&videoSessionOwner===sessionOwner) { if(usingSessions())void degradeSessions(value);else{failed(value);if (!networkPrompt()) props.onPlaybackFailure?.();} } }); };
   let retrying = false;
   const retry = async () => {
     if (retrying || networkPrompt()) return;
@@ -65,43 +81,131 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     try { await props.onRetry(checkpointPosition); } catch (value) { if (!disposed) failed(value); } finally { retrying = false; }
   };
   const removeLifecycle=onLifecycleChange(next=>{
-    if(next==="active"||props.source.backgroundPlayback||videoSessionOwner!==sessionOwner)return;
+    if(next==="active"){if(usingSessions()&&props.active&&!ready())untrack(prepare);return;}
+    if((!usingSessions()&&props.source.backgroundPlayback)||videoSessionOwner!==sessionOwner)return;
     autoplayAllowed=false;
-    if(ready())void video.pause().then(value=>{if(disposed)return;setState(value);checkpointPosition=value.positionMs;checkpointDuration=value.durationMs;props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);}).catch(failed);
+    if(usingSessions()){
+      const value=state();if(value)props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);
+      preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});
+    }else if(ready())void media.pause().then(value=>{if(disposed)return;setState(value);checkpointPosition=value.positionMs;checkpointDuration=value.durationMs;props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);}).catch(failed);
   });
   createEffect(() => { const source=props.source;if(props.active&&!networkPrompt()&&source!==preparedSource)untrack(prepare); });
   let updating = false, dirty = false;
-  const syncBounds = async () => { if (updating) { dirty = true; return; } updating = true; try { do { dirty = false; await video.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { failed(value); } finally { updating = false; } };
+  const syncBounds = async () => { if (updating) { dirty = true; return; } updating = true; try { do { dirty = false; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } finally { updating = false; } };
   createEffect(() => { props.offset; props.active; if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner) void syncBounds(); });
-  const toggle = async () => { try { const pausing = state()?.state === "playing", next = await (pausing ? video.pause() : video.play()); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) props.onCheckpoint?.("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
-  const seekTo = async (delta: number) => { const current = state(); if (!current) return; if (!seekRunning) desiredSeek = current.positionMs; desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta)); if (seekRunning) return; seekRunning = true; try { do { const target = desiredSeek, next = await video.seek(target); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (target === desiredSeek) break; } while (!disposed); } catch (value) { failed(value); } finally { seekRunning = false; } };
+  const toggle = async () => { try { const pausing = state()?.state === "playing", next = await (pausing ? media.pause() : media.play()); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) props.onCheckpoint?.("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
+  const seekTo = async (delta: number) => { const current = state(); if (!current) return; if (!seekRunning) desiredSeek = current.positionMs; desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta)); if (seekRunning) return; seekRunning = true; try { do { const target = desiredSeek, next = await media.seek(target); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (target === desiredSeek) break; } while (!disposed); } catch (value) { failed(value); } finally { seekRunning = false; } };
   const rotate = () => { rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now(); };
   const changeMode = () => { panVelocity = 0; setMode(nextScaleMode(mode())); setPan(0); void requestTransform(); };
   const backgroundTap = () => { if (tapTimer) { tapTimer.cancel(); tapTimer = undefined; void toggle(); return; } tapTimer = delay(280); void tapTimer.result.then(() => { tapTimer = undefined; setControlsVisible(value => !value); }).catch(() => {}); };
+  let degradingSessions=false,neighborRevision=0,forwardWarm:Promise<DouyinPreparedSource|undefined>|undefined,forwardTarget:DouyinPreparedSource|undefined;
+  const cancelledSessionError=(value:unknown)=>!shouldFallbackFromVideoSessions(value);
+  const degradeSessions=async(value:unknown)=>{
+    if(!usingSessions()||degradingSessions||disposed)return;
+    degradingSessions=true;appLogger.w("VideoPlayer","videoSessions failed; falling back to legacy video",value);
+    generation++;prepareOp?.cancel();pollTimer?.cancel();neighborRevision++;await sessionPool!.releaseAll();
+    if(disposed)return;setSessionsDisabled(true);preparedSource=undefined;forwardTarget=undefined;setReady(false);setState(null);setDragPoster(null);setDragProgress(0);degradingSessions=false;
+    if(props.active&&!networkPrompt())untrack(prepare);
+  };
+  const prepareAdjacent=async(direction:"next"|"previous",revision:number,revealPoster=false):Promise<DouyinPreparedSource|undefined>=>{
+    if(!usingSessions()||!props.onPrepareAdjacent)return;
+    const target=await props.onPrepareAdjacent(direction);
+    if(!target||revision!==neighborRevision||!usingSessions()||disposed)return;
+    if(revealPoster&&target.source.posterUrl)setDragPoster({url:target.source.posterUrl,direction:direction==="next"?"up":"down"});
+    try{
+      await sessionPool!.prewarm(target,{...target.source,bounds:bounds(),loop:true,autoplay:false,muted:true} as VideoPrepare);
+      return revision===neighborRevision&&usingSessions()?target:undefined;
+    }catch(value){if(revision===neighborRevision&&!cancelledSessionError(value))void degradeSessions(value);return;}
+  };
+  const warmForward=():Promise<DouyinPreparedSource|undefined>=>{
+    if(!usingSessions()||!props.onPrepareAdjacent)return Promise.resolve(undefined);
+    if(forwardTarget&&sessionPool!.hasStandby(forwardTarget.key))return Promise.resolve(forwardTarget);
+    if(forwardWarm)return forwardWarm;
+    const revision=neighborRevision;
+    forwardWarm=prepareAdjacent("next",revision).then(target=>{if(target)forwardTarget=target;return target;}).finally(()=>{forwardWarm=undefined;});return forwardWarm;
+  };
+  let dragRevision=0,dragDirection:DouyinPagerDirection|undefined,dragTarget:DouyinPreparedSource|undefined,dragTargetPromise:Promise<DouyinPreparedSource|undefined>|undefined,dragSettling=false;
+  const clearDrag=()=>{dragDirection=undefined;dragTarget=undefined;dragTargetPromise=undefined;dragSettling=false;setDragPoster(null);setDragProgress(0);};
+  const ensureDragTarget=(direction:DouyinPagerDirection,revision:number)=>{
+    const queueDirection:"next"|"previous"=direction==="up"?"next":"previous";
+    const existing=direction==="up"&&forwardTarget&&sessionPool?.hasStandby(forwardTarget.key)?forwardTarget:undefined;
+    if(existing){dragTarget=existing;return Promise.resolve(existing);}
+    const ownNeighbor=++neighborRevision;
+    return prepareAdjacent(queueDirection,ownNeighbor,true).then(target=>{
+      if(revision!==dragRevision||direction!==dragDirection)return;
+      dragTarget=target;if(target)setDragPoster(null);return target;
+    });
+  };
+  const beginSessionDrag=()=>{
+    if(!usingSessions()||dragSettling)return;
+    dragRevision++;dragDirection=undefined;dragTarget=undefined;dragTargetPromise=undefined;setDragProgress(0);setDragPoster(null);
+    void sessionPool!.pause().then(setState).catch(value=>{if(!cancelledSessionError(value))void degradeSessions(value);});
+  };
+  const moveSessionDrag=(distanceY:number)=>{
+    if(!usingSessions()||dragSettling||distanceY===0)return;
+    const direction:DouyinPagerDirection=distanceY<0?"up":"down",progress=douyinPagerProgress(distanceY,props.height),revision=dragRevision;
+    setDragProgress(progress);
+    if(direction!==dragDirection){dragDirection=direction;dragTarget=undefined;dragTargetPromise=ensureDragTarget(direction,revision);}
+    const targetPromise=dragTarget?Promise.resolve(dragTarget):dragTargetPromise;
+    void targetPromise?.then(target=>{if(target&&revision===dragRevision&&direction===dragDirection)return sessionPool!.transition(progress,direction,bounds());}).catch(value=>{if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);});
+  };
+  const animateSessionTransition=async(revision:number,direction:DouyinPagerDirection,to:0|1)=>{
+    const from=dragProgress(),started=Date.now();
+    while(true){
+      const elapsed=Date.now()-started,next=douyinPagerSettleProgress(from,to,elapsed);setDragProgress(next);
+      await sessionPool!.transition(next,direction,bounds());
+      if(revision!==dragRevision||disposed||!usingSessions())return false;
+      if(elapsed>=220)break;await delay(16).result;
+    }
+    return true;
+  };
+  const finishSessionDrag=async(velocityY:number,forceCancel=false)=>{
+    if(!usingSessions()||dragSettling)return;
+    const revision=dragRevision,direction=dragDirection,progress=dragProgress();if(!direction){void media.play().then(setState).catch(failed);clearDrag();return;}
+    dragSettling=true;const wantsSettle=!forceCancel&&shouldSettleDouyinPager(progress,velocityY,direction);
+    const target=dragTarget??await dragTargetPromise;
+    if(revision!==dragRevision||disposed||!usingSessions())return;
+    if(!target){
+      await media.play().then(setState).catch(failed);clearDrag();
+      if(wantsSettle){const move=direction==="up"?props.onNext:props.onPrevious;if(move)await Promise.resolve(move());}
+      return;
+    }
+    try{
+      if(!await animateSessionTransition(revision,direction,wantsSettle?1:0))return;
+      if(!wantsSettle){await sessionPool!.play().then(setState);clearDrag();neighborRevision++;void warmForward();return;}
+      const promoted=await sessionPool!.promote(direction,bounds(),props.active&&lifecycle()==="active");
+      if(!await props.onPromoteAdjacent?.(promoted.source))throw new Error("video session queue promotion was cancelled");
+      forwardTarget=undefined;
+      preparedSource=promoted.source.source;setState(promoted.state);setReady(true);setError("");checkpointPosition=promoted.state.positionMs;checkpointDuration=promoted.state.durationMs;virtualVolume=promoted.state.volume;
+      props.onCheckpoint?.("ready",promoted.state.positionMs,promoted.state.durationMs);clearDrag();neighborRevision++;void requestTransform();void warmForward();
+    }catch(value){if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);}
+  };
   let resumeAfterOverlay=false;
-  createEffect(()=>{const active=props.active;if(!active){resumeAfterOverlay=autoplayAllowed&&untrack(()=>!ready()||state()?.state==="playing");autoplayAllowed=false;if(untrack(ready)&&videoSessionOwner===sessionOwner)void video.pause().catch(()=>{});}else if(videoSessionOwner!==sessionOwner){untrack(prepare);}else if(resumeAfterOverlay){resumeAfterOverlay=false;autoplayAllowed=lifecycle()==="active"||props.source.backgroundPlayback===true;if(autoplayAllowed&&untrack(ready))void video.play().then(setState).catch(failed);}});
+  createEffect(()=>{const active=props.active;if(!active){resumeAfterOverlay=autoplayAllowed&&untrack(()=>!ready()||state()?.state==="playing");autoplayAllowed=false;if(usingSessions()){const value=untrack(state);if(value)props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});}else if(untrack(ready)&&videoSessionOwner===sessionOwner)void media.pause().catch(()=>{});}else if(videoSessionOwner!==sessionOwner||usingSessions()&&!untrack(ready)){untrack(prepare);}else if(resumeAfterOverlay){resumeAfterOverlay=false;autoplayAllowed=lifecycle()==="active"||props.source.backgroundPlayback===true;if(autoplayAllowed&&untrack(ready))void media.play().then(setState).catch(failed);}});
   const surfaceGesture = createGesture({ region: { node: () => surface, rect: () => props.active && props.offset === 0 ? { x: 0, y: 0, w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
     onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
-    onDown: () => { panVelocity = 0; }, onPanStart: () => { panningStart = pan(); }, onPanMove: contact => { const r = range(); if (props.source.platform === "douyin" || r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
-    onPanEnd: contact => { if (networkPrompt()) return; if (props.source.platform === "douyin" && Math.abs(contact.dy) > 50) { const move = contact.dy < 0 ? props.onNext : props.onPrevious; if (move) void Promise.resolve(move()).catch(failed); } else if (props.source.platform !== "douyin" && range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now(); } props.onPanStateChange?.(pan(), range().range); }
+    onDown: () => { panVelocity = 0; }, onPanStart: () => { panningStart = pan();if(usingSessions())beginSessionDrag(); }, onPanMove: contact => { if(usingSessions()){moveSessionDrag(contact.dy);return;}const r = range(); if (props.source.platform === "douyin" || r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
+    onPanEnd: contact => { if (networkPrompt()) return;if(usingSessions()){void finishSessionDrag(contact.vy);return;} if (props.source.platform === "douyin" && Math.abs(contact.dy) > 50) { const move = contact.dy < 0 ? props.onNext : props.onPrevious; if (move) void Promise.resolve(move()).catch(failed); } else if (props.source.platform !== "douyin" && range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now(); } props.onPanStateChange?.(pan(), range().range); },
+    onCancel:()=>{if(usingSessions())void finishSessionDrag(0,true);}
   });
   const actionGesture=createGesture({region:{rect:()=>props.active&&!networkPrompt()&&props.onActions?{x:0,y:0,w:props.width,h:props.height}:null},axis:"x",panSlop:8,onPanEnd:contact=>{if(Math.abs(contact.dx)>50)props.onActions?.();}});
   const horizontalPanGesture = createGesture({ region: { rect: () => { const r = range(); return props.active && props.source.platform !== "douyin" && r.axis === "x" && r.range > 0 && pan() < r.range - 1 ? { x: 0, y: 0, w: props.width, h: props.height } : null; } }, axis: "x", panSlop: 8,
     onDown: () => { panVelocity = 0; }, onPanStart: () => { panningStart = pan(); }, onPanMove: contact => { const r = range(); setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dx))); void requestTransform(); }, onPanEnd: contact => { panVelocity = contact.vx; panFrameAt = Date.now(); props.onPanStateChange?.(pan(), range().range); }
   });
   onFrame(() => { const now = Date.now(); if (panVelocity !== 0) { const elapsed = Math.min(50, Math.max(0, now - panFrameAt)), r = range(), next = Math.max(-r.range, Math.min(r.range, pan() + panVelocity * elapsed / 1000)); setPan(next); panVelocity *= Math.exp(-5 * elapsed / 1000); if (Math.abs(panVelocity) < 5 || next === -r.range || next === r.range) panVelocity = 0; panFrameAt = now; void requestTransform(); } if (!state() || buffering()) setLoadingRotation(value => (value + 6) % 360); if (!rotationStarted) return; const elapsed = now - rotationStarted, t = Math.min(1, elapsed / 300), eased = 1 - Math.pow(1 - t, 3); setDisplayRotation(rotationFrom + (rotationTo - rotationFrom) * eased); void requestTransform(); if (t >= 1) rotationStarted = 0; });
-  const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await video.setVolume(target); if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
+  const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await media.setVolume(target); if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
   const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; setVolumeVisible(true); volumeTimer?.cancel(); void submitVolume(); volumeTimer = delay(900); void volumeTimer.result.then(() => setVolumeVisible(false)).catch(() => {}); return true; };
   props.ref?.({ onCrown: adjustVolume, canSwipeBack: () => { if(props.onActions)return false; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; } });
-  onCleanup(() => { removeLifecycle();disposed = true; generation++; const current = state(); if (ready() && current) props.onCheckpoint?.("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); actionGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); if(videoSessionOwner===sessionOwner){videoSessionOwner=undefined;void video.stop().catch(() => {});} });
+  onCleanup(() => { removeLifecycle();disposed = true; generation++; const current = state(); if (ready() && current) props.onCheckpoint?.("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); actionGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); if(videoSessionOwner===sessionOwner){videoSessionOwner=undefined;if(sessionPool)void sessionPool.releaseAll();else void video.stop().catch(() => {});} });
   const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233) / 2, uiTop = () => (props.height - 233) / 2;
   const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
   const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));
   const barWidth = () => Math.max(20, 181 - startWidth() - endWidth() - 11);
   const buffering = () => state()?.state === "buffering" || state()?.buffered === false || state()?.isBuffering === true;
   const prepared = () => ready() && !!state()?.durationMs;
-  return <View ref={value => surface = value} class="absolute inset-0"><Show when={(!state() || buffering()) && !error() && !networkPrompt()}><View class="absolute left-[96.5] top-[96.5] w-[40] h-[40] rounded-[20] bg-[#00000099] items-center justify-center"><Image src="../assets/icons/player-loading.svg" class="w-[28] h-[28]" style={{ rotate: loadingRotation() }} /></View></Show>
+  const dragPosterOffset=()=>{const poster=dragPoster();if(!poster)return 0;const remaining=(1-dragProgress())*props.height;return poster.direction==="up"?remaining:-remaining;};
+  return <View ref={value => surface = value} class="absolute inset-0"><Show when={usingSessions()&&!ready()&&props.source.posterUrl}><RemoteImage url={props.source.posterUrl!} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></Show><Show when={dragPoster()}>{poster=><View class="absolute inset-0" style={{translateY:dragPosterOffset()}}><RemoteImage url={poster().url} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></View>}</Show><Show when={(!state() || buffering()) && !error() && !networkPrompt()}><View class="absolute left-[96.5] top-[96.5] w-[40] h-[40] rounded-[20] bg-[#00000099] items-center justify-center"><Image src="../assets/icons/player-loading.svg" class="w-[28] h-[28]" style={{ rotate: loadingRotation() }} /></View></Show>
     <Show when={error() && !networkPrompt()}><View class="absolute left-[31] right-[31] top-[72] h-[90] rounded-[24] bg-[#000000cc] items-center"><Text class="absolute left-[8] right-[8] top-[10] text-xs leading-[14] text-[#b6b6b6] text-center">播放失败</Text><View class="absolute left-[4] top-[42] w-[72] h-[32] rounded-[16] bg-[#2a2a2a] items-center justify-center" onPress={() => void retry()} focusable><Text class="text-xs text-white">重试</Text></View><Show when={props.onOpenWeb}><View class="absolute right-[4] top-[42] w-[86] h-[32] rounded-[16] bg-[#2a2a2a] items-center justify-center" onPress={props.onOpenWeb} focusable><Text class="text-xs text-white">浏览器打开</Text></View></Show></View></Show>
     <Show when={!error() && !networkPrompt() && controlsVisible()}><View class="absolute" style={{ insetL: uiLeft(), insetT: uiTop(), width: 233, height: 233, scale: uiScale(), rotate: displayRotation(), originX: 0, originY: 0 }}>
       <View class="absolute left-[0] right-[0] top-[0] h-[62] bg-gradient-to-b from-[#000000cc] to-transparent" />
