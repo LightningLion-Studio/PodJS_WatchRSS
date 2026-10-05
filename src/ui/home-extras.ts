@@ -38,3 +38,20 @@ export function homeChannelSummary(
   const update = realtime ? "更新：实时" : `更新: ${channel.lastFetchedAt ? formatTime(channel.lastFetchedAt) : "未更新"}`;
   return `${pin}${summary}\n${unread}${update}`;
 }
+
+/** HomeReadAloudSpectrumView.onDraw, in the native 38 x 34 dp slot.
+ * Input levels have already passed through the native gain/attack/release model. */
+export function homeSpeechSpectrumBars(levels: readonly number[] | undefined, playing: boolean) {
+  const width = 38, height = 34, count = 5;
+  const gap = width / (count * 1.9), barWidth = (width - gap * (count - 1)) / count;
+  return Array.from({length: count}, (_, index) => {
+    const raw = levels?.[index] ?? 0;
+    const level = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
+    const barHeight = Math.max(height * level, height * .16);
+    return {
+      insetL: index * (barWidth + gap), insetT: (height - barHeight) / 2,
+      width: barWidth, height: barHeight,
+      opacity: level <= .005 ? 0 : Math.floor((.32 + level * .58) * (playing ? 1 : .52) * 255) / 255,
+    };
+  });
+}
