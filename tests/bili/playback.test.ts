@@ -13,3 +13,23 @@ test("MP4 playback uses the first durl segment, matching the native watch player
  const source=biliPlaybackSource({acceptQuality:[],acceptDescription:[],dash:{video:[{baseUrl:"https://example.com/dash.m4s",backupUrl:[]}],audio:[]},durl:[{url:" https://example.com/first.mp4 ",backupUrl:[]},{url:"https://example.com/second.mp4",backupUrl:[]}]},"Title",{Referer:"https://www.bilibili.com/"});
  expect(source).toEqual({url:"https://example.com/first.mp4",title:"Title",headers:{Referer:"https://www.bilibili.com/"}});
 });
+
+test('retry consumes MP4 backup, re-resolves expired source, and rejects a repeated failed source',async()=>{
+ const {createBiliPlaybackRetry}=await import('../../src/playback.ts');let resolves=0;
+ const make=(url:string,backupUrl:string[]=[])=>({acceptQuality:[],acceptDescription:[],durl:[{url,backupUrl}]});
+ const retry=createBiliPlaybackRetry(make('primary',['primary','backup']),async()=>{resolves++;return make('fresh')},'Title',{Cookie:'session'});
+ expect(await retry()).toMatchObject({url:'backup',headers:{Cookie:'session'}});expect(resolves).toBe(0);
+ expect((await retry()).url).toBe('fresh');expect(resolves).toBe(1);
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(resolves).toBe(2);
+});
+test('DASH retry covers video and audio backups and retains muxed MP4 segment semantics',async()=>{
+ const {biliPlaybackCandidates}=await import('../../src/playback.ts');
+ const candidates=biliPlaybackCandidates({acceptQuality:[],acceptDescription:[],durl:[],dash:{video:[{baseUrl:'v',backupUrl:['vb'],codecId:7,bandwidth:1},{baseUrl:'unsupported',backupUrl:[],codecId:12}],audio:[{baseUrl:'a',backupUrl:['ab']}] }},'Title',{});
+ expect(candidates.map(v=>[v.videoUrl,v.audioUrl])).toEqual([['v','a'],['v','ab'],['vb','a'],['vb','ab']]);
+});
+test('failed refresh is retryable and backup-only streams are playable',async()=>{
+ const {createBiliPlaybackRetry,biliPlaybackCandidates}=await import('../../src/playback.ts');let calls=0;
+ const source={acceptQuality:[],acceptDescription:[],durl:[{backupUrl:['backup-only']}]};expect(biliPlaybackCandidates(source,'',{})[0]?.url).toBe('backup-only');
+ const retry=createBiliPlaybackRetry(source,async()=>{if(++calls===1)throw Error('offline');return {...source,durl:[{url:'fresh',backupUrl:[]}]};},'',{});
+ await expect(retry()).rejects.toThrow('offline');expect((await retry()).url).toBe('fresh');
+});

@@ -125,3 +125,27 @@ test('local platform actions after phone merge retain clocks on no-op and stamp 
   expect((await f.handle({action:'pullSavedItems',type:'favorite'})).count).toBe(1);
  }finally{f.sql.close();}
 });
+
+test('B4 detail favorite/unfavorite uses B2 SQL and restores offline metadata without a parallel saved store',async()=>{
+ const {BiliDetailController}=await import('../../src/bili/detail.ts');
+ const {readLocalBiliDetail}=await import('../../src/bili/local-detail.ts');
+ const f=await setup();try{
+  let saved=false,fail=false;const requests:string[]=[];
+  const client=new BiliClient({secureStore:{get:async()=>JSON.stringify({cookies:{SESSDATA:'s',bili_jct:'csrf',DedeUserID:'42'},updatedAt:0}),set:async()=>{},delete:async()=>{}},transport:{request:async request=>{
+   requests.push(request.url);const path=new URL(request.url).pathname;
+   let data:any={};if(path.includes('list-all'))data={list:[{id:2,fav_state:saved?1:0}]};
+   if(path.includes('resource/deal')&&!fail)saved=new TextDecoder().decode(request.body).includes('add_media_ids=2');
+   return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify({code:fail?-1:0,message:'failed',data}))};
+  }},onSaved:async(item,type,saved)=>f.external.sync(biliExternalItem(item),type,saved)});
+  const values=new Map<string,any>();const store={get:<T>(key:string)=>values.get(key) as T,set:(key:string,value:unknown)=>{values.set(key,value);}};
+  const c=new BiliDetailController({detail:async()=>({item:{aid:7,bvid:'BV7',title:'离线标题',cover:'https://cover',owner:{name:'作者'}},pages:[{cid:10},{cid:20}]}),getSession:()=>client.getSession(),relation:()=>client.relation({aid:7}),like:x=>client.like(x),coin:x=>client.coin(x),favoriteFolders:x=>client.favoriteFolders(x),favorite:x=>client.favorite(x)},store,{aid:7},target=>readLocalBiliDetail(f.db,target));
+  await c.load();c.select(1);await c.act('favorite');
+  expect(await f.db.query("SELECT saved FROM article_saved_states WHERE save_type='favorite'")).toEqual([{saved:1}]);
+  expect(await readLocalBiliDetail(f.db,{bvid:'BV7'})).toMatchObject({item:{title:'离线标题',cid:20,cover:'https://cover',owner:{name:'作者'}}});
+  expect(await readLocalBiliDetail(f.db,{bvid:'BV70'})).toBeUndefined();
+  fail=true;await c.act('favorite');expect(c.state.interaction.favorite).toBe(true);expect(await f.db.query("SELECT saved FROM article_saved_states WHERE save_type='favorite'")).toEqual([{saved:1}]);
+  fail=false;await c.act('favorite');expect(c.state.interaction.favorite).toBe(false);expect(await f.db.query("SELECT saved FROM article_saved_states WHERE save_type='favorite'")).toEqual([{saved:0}]);
+  expect(await f.db.query("SELECT saved FROM sync_saved_states WHERE save_type='favorite'")).toEqual([{saved:0}]);
+  expect(requests.some(url=>url.includes('resource/deal'))).toBe(true);
+ }finally{f.sql.close();}
+});
