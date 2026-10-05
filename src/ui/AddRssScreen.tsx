@@ -1,4 +1,5 @@
-import {createEffect,createMemo,createSignal,onCleanup} from "solid-js";
+import {restoredSignal,stringState,booleanState} from './route-activity.tsx';
+import {createEffect,createMemo,createSignal,onCleanup,onMount} from "solid-js";
 import {Text,View} from "@pocketjs/framework/components";
 import {ScrollEntries,type ScrollEntry} from "./ScrollEntries.tsx";
 import type {Scroller} from "@pocketjs/framework/kinetics";
@@ -8,9 +9,10 @@ const SAFE=18,GAP=8;
 type Inline=(value:string,bounds:{x:number;y:number;width:number;height:number},onChange:(value:string)=>void,onSubmit:()=>void,options?:{hint?:string;fontSizeSp?:number;inputType?:"text"|"uri"})=>Promise<{close():Promise<void>}>;
 
 export function AddRssScreen(props:{width:number;height:number;active:boolean;initialUrl:string;initialPreview?:AddChannelPreview;initialError?:string;preview?:(url:string)=>Promise<AddChannelPreview>;confirm?:(token:string)=>Promise<Channel>;input:(title:string,value:string)=>Promise<string|null>;openInlineInput?:Inline;onAdded:(channel:Channel)=>void;onExisting:(channel:Channel)=>void;ref?:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void}){
-  const [url,setUrl]=createSignal(props.initialUrl),[step,setStep]=createSignal<"input"|"preview"|"existing">(props.initialPreview?.kind==="ready"?"preview":props.initialPreview?.kind==="existing"?"existing":"input");
+  const [url,setUrl]=restoredSignal('retained','add-url',props.initialUrl,stringState),[step,setStep]=createSignal<"input"|"preview"|"existing">(props.initialPreview?.kind==="ready"?"preview":props.initialPreview?.kind==="existing"?"existing":"input");
   const [preview,setPreview]=createSignal<AddChannelPreview|undefined>(props.initialPreview);
-  const [loading,setLoading]=createSignal(false),[submitting,setSubmitting]=createSignal(false),[error,setError]=createSignal(props.initialError??"");
+  const [loading,setLoading]=createSignal(false),[submitting,setSubmitting]=createSignal(false),[error,setError]=restoredSignal('retained','add-error',props.initialError??'',stringState);
+  const [restorePreview,setRestorePreview]=restoredSignal('retained','add-preview',false,booleanState);
   const [editing,setEditing]=createSignal(false);
   let editingPadding=SAFE;
   const verticalPadding=()=>editing()?editingPadding:step()==="preview"?26:step()==="existing"?52:!url().length&&!error()?40:error()?16:SAFE;
@@ -18,7 +20,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
   const inputTop=()=>verticalPadding()+30+GAP+2+GAP;
   let scroller:Scroller|undefined,session:{close():Promise<void>}|undefined,editVersion=0,previewVersion=0,disposed=false;
   const closeInput=()=>{editVersion++;setEditing(false);const old=session;session=undefined;if(old)void old.close().catch(()=>{});};
-  const backToInput=()=>{previewVersion++;closeInput();setPreview(undefined);setStep("input");setError("");setLoading(false);setSubmitting(false);scroller?.scrollTo(0,{immediate:true});};
+  const backToInput=()=>{setRestorePreview(false);previewVersion++;closeInput();setPreview(undefined);setStep("input");setError("");setLoading(false);setSubmitting(false);scroller?.scrollTo(0,{immediate:true});};
   const onRootBack=()=>false;
   const changeUrl=(value:string)=>{setUrl(value);setError("");};
   const clearError=()=>setError("");
@@ -48,7 +50,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
     try{
       const result=await props.preview(url());
       if(disposed||current!==previewVersion)return;
-      setPreview(result);setStep(result.kind==="ready"?"preview":"existing");scroller?.scrollTo(0,{immediate:true});
+      setRestorePreview(true);setPreview(result);setStep(result.kind==="ready"?"preview":"existing");scroller?.scrollTo(0,{immediate:true});
     }catch(cause){if(!disposed&&current===previewVersion)setError(cause instanceof Error?cause.message:String(cause));}
     finally{if(!disposed&&current===previewVersion)setLoading(false);}
   };
@@ -60,6 +62,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
     catch(cause){if(!disposed&&current===previewVersion)setError(cause instanceof Error?cause.message:String(cause));}
     finally{if(!disposed&&current===previewVersion)setSubmitting(false);}
   };
+  onMount(()=>{if(restorePreview()&&!props.initialPreview&&url().trim())void submit();});
   createEffect(()=>{if(!props.active&&editing())closeInput();});
   onCleanup(()=>{disposed=true;previewVersion++;closeInput();});
   const heading=(label:string):ScrollEntry=>({height:step()==="input"?30:18,render:()=> <View class="absolute inset-0 items-center justify-center" style={{translateY:step()==="input"?2:0}}><Text accessibilityRole="header" class={step()==="input"?"text-2xl leading-[26] text-[#f5f5f5]":"text-xs leading-[17] text-[#f5f5f5]"}>{label}</Text></View>});

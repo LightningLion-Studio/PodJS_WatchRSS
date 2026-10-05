@@ -10,6 +10,7 @@ mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},lifecycle:()=> 'active'}));
 mock.module('@podjs/framework/services',()=>({video:{captureBackdrop:async()=>{},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{}}));
+const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
@@ -33,9 +34,9 @@ test('D2 controller persists before opening and restores exact source and curren
  expect(f.source().url).toBe('https://fresh/b');
  await f.controller.changeDouyinVideo(f.stack().at(-1)!,'next');
  expect((await client.restorePlaybackQueue()).anchorAwemeId).toBe('c');expect(f.requests()).toBe(0);
- expect(await f.controller.restoreDouyinPlayer({awemeId:'c',savedQueue:true})).toBe(true);
+ expect(await f.controller.restoreDouyinVideo('c')).toBe(true);
  expect(f.stack().at(-1)?.queue?.snapshot().index).toBe(2);expect(f.source().url).toBe('https://video/c');expect(f.requests()).toBe(0);
- expect(await f.controller.restoreDouyinPlayer({awemeId:'missing',savedQueue:true})).toBe(false);
+ expect(await f.controller.restoreDouyinVideo('missing')).toBe(false);
 });
 test('D2 history single-item recovery failure preserves selection and manual success persists refreshed URL',async()=>{
  const f=fixture(),selected=item('history');
@@ -46,4 +47,40 @@ test('D2 history single-item recovery failure preserves selection and manual suc
  await f.controller.recoverDouyinVideo(entry);expect(resolutions).toBe(1);
  await f.controller.recoverDouyinVideo(entry,true);expect(f.source().url).toBe('https://refreshed/history');expect(entry.queue?.snapshot().item?.awemeId).toBe('history');
  expect((await client.restorePlaybackQueue()).items[0]?.playUrl).toBe('https://refreshed/history');expect(f.error()).toBe('');
+});
+
+test('M1 activity memory and D2 secure queue restore together without leaking source credentials',async()=>{
+ const f=fixture(),items=[item('a'),item('b'),item('c')];
+ await client.savePlaybackQueue(items,'b','7',false);
+ const snapshot=captureActivityNavigation({saved:{},retained:{}},[{page:'home'},{page:'douyin',douyinRoute:{name:'history'}},{page:'video',videoTarget:{kind:'douyin',awemeId:'b',immersive:true,detailPlayback:true},memory:{id:'r999',saved:{'player-bluetooth':true,'player-scale':'expanded'},retained:{}},playback:{title:'b',platform:'douyin',awemeId:'b',url:'SIGNED_SECRET',headers:{Cookie:'SECRET'}}}]);
+ expect(JSON.stringify(snapshot)).not.toContain('SECRET');
+ const restored=restoreActivityNavigation({saved:snapshot.saved,retained:{}})!.at(-1)!;
+ expect(restored.videoTarget).toEqual({kind:'douyin',awemeId:'b',immersive:true,detailPlayback:true});
+ expect(await f.controller.restoreDouyinVideo('b',true,restored.memory,true)).toBe(true);
+ expect(f.stack().map(e=>e.page)).toEqual(['home','douyin','video']);
+ expect(f.stack().at(-1)!.memory).toBe(restored.memory);
+ expect(f.stack().at(-1)!.memory!.saved['player-bluetooth']).toBe(true);
+ expect(f.stack().at(-1)!.queue!.snapshot().index).toBe(1);
+ expect(f.source()).toMatchObject({url:'https://video/b',detailPlayback:true,immersive:true});
+ expect(f.requests()).toBe(0);
+});
+test('late credential lookup cannot reopen the restored player after navigation changes',async()=>{
+ const f=fixture();await client.savePlaybackQueue([item('a')],'a','0',false);
+ let release!:(headers:Record<string,string>)=>void,entered!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ client.buildPlaybackHeaders=()=>{entered();return new Promise(resolve=>{release=resolve;});};
+ const pending=f.controller.restoreDouyinVideo('a');await started;
+ await f.controller.douyinNavigate({name:'entry'});
+ release({Cookie:'current'});
+ expect(await pending).toBe(false);expect(f.stack().at(-1)!.page).toBe('douyin');expect(f.source()).toBeUndefined();
+});
+
+test('immersive same-item recovery persists refreshed queue before activity checkpoint',async()=>{
+ const f=fixture(),selected=item('recover');
+ f.controller.douyinPlay({item:selected,playback:selected,playlist:[selected],hasMore:true,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+ client.resolvePlayback=async()=>({ok:true,data:{...selected,playUrl:'https://new/recover'}});
+ await f.controller.recoverDouyinVideo(f.stack().at(-1)!);
+ expect(f.source().url).toBe('https://new/recover');
+ expect((await client.restorePlaybackQueue()).items[0]?.playUrl).toBe('https://new/recover');
 });
