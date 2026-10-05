@@ -1,3 +1,5 @@
+import { browser } from "@podjs/framework/services";
+import { douyinBrowserAvailable } from "../../douyin/browser.ts";
 import { hasCapability } from "@podjs/framework/watch";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
@@ -124,6 +126,9 @@ function LoginScreen(props: DouyinScreenProps) {
     const current = ++generation;
     setBusy(true);
     try {
+      const available = await douyinBrowserAvailable({ ...browser, hasCapability });
+      if (disposed || current !== generation || gate()) return;
+      if (!available) { setBrowserAvailable(false); return; }
       authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});
       const result = await authorization.result;
       if (disposed || current !== generation || gate()) return;

@@ -3,11 +3,11 @@ import { managedCache } from "./cache/host.ts";
 import { readLocalBiliDetail } from "./bili/local-detail.ts";
 import {getExternalSavedStore,getDouyinSavedStore} from "./services.ts";
 import {biliExternalItem} from "./core/external-saved.ts";
-import { rsaOaepSha256, bytesToBase64, delay, hostOperation, fileChunks, base64ToBytes, secureStorage, type DownloadResult } from "@podjs/framework/services";
+import { browser, rsaOaepSha256, bytesToBase64, delay, hostOperation, fileChunks, base64ToBytes, secureStorage, type DownloadResult } from "@podjs/framework/services";
 import { createBiliClient } from "./bili/index.ts";
 import { DouyinClient } from "./douyin/index.ts";
 import type { HttpRequest, HttpResponse, HttpTransport } from "./cloud/types.ts";
-import { kv } from "@podjs/framework/watch";
+import { hasCapability, kv } from "@podjs/framework/watch";
 
 let sequence=0;
 /** GET and POST responses stream to private files with a bounded 8 MiB JSON read. */
@@ -30,7 +30,7 @@ export const mediaTransport: HttpTransport = {
 const secure={get:async(key:string)=>(await secureStorage.get(key))??null,set:secureStorage.set,delete:secureStorage.delete};
 export const biliClient=createBiliClient({onLogout:()=>clearBiliLogoutData(kv,managedCache),transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
 export const douyinClient=new DouyinClient({
- onLogout:()=>clearDouyinLogoutData(managedCache),
+ onLogout:()=>clearDouyinLogoutData(managedCache, { ...browser, hasCapability }),
  transport:mediaTransport,
  savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
  secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
