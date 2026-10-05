@@ -1,10 +1,14 @@
+import {lazyRegExpTest} from '../core/lazy-regexp.ts';
+
+const addChannelHost=lazyRegExpTest('^[\\p{L}\\p{N}.-]+$','u');
+
 /** Matches the URL normalization used by native AddRssViewModel's repository. */
 export function normalizeAddChannelUrl(value:string):string {
   const input=value.trim();
   if(!input||/^https?:\/\//i.test(input)||input.includes('://'))return input;
   if(input.startsWith('/')||/\s/.test(input))return input;
   const host=input.split(/[/?#]/,1)[0]?.split(':',1)[0]??'';
-  if(host.toLowerCase()==='localhost'||host.includes('.')&&!host.startsWith('.')&&!host.endsWith('.')&&/^[\p{L}\p{N}.-]+$/u.test(host))return `http://${input}`;
+  if(host.toLowerCase()==='localhost'||host.includes('.')&&!host.startsWith('.')&&!host.endsWith('.')&&addChannelHost(host))return `http://${input}`;
   return input;
 }
 

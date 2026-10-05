@@ -1,4 +1,5 @@
 import { speechSourceOffset, type SpeechSegment } from "./speech-segments.ts";
+import {lazyRegExpTest} from "../core/lazy-regexp.ts";
 
 export interface SpeechProgress { type: "start" | "range" | "done" | "stop"; start?: number; end?: number; elapsedMs?: number }
 export interface SpeechHighlight {
@@ -7,8 +8,8 @@ export interface SpeechHighlight {
   isFallback: boolean; isTitle: boolean; contentBlockIndex?: number; importedChunkIndex?: number;
 }
 const whitespace = (char: string) => /[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.test(char);
-const digit = (char: string) => /\p{Decimal_Number}/u.test(char);
-const alphanumeric = (char: string) => /[\p{Letter}\p{Decimal_Number}]/u.test(char);
+const digit = lazyRegExpTest('\\p{Decimal_Number}','u');
+const alphanumeric = lazyRegExpTest('[\\p{Letter}\\p{Decimal_Number}]','u');
 const cjk = (char: string) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/.test(char);
 const stopChars = "，,。.;；：:！!？?、";
 const skipChars = stopChars + "()[]{}/\\-+_";

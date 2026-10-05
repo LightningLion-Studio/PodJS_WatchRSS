@@ -4,8 +4,10 @@ import type {SyncedSource} from './library-wire.ts';
 import {nativeTrim,type SyncTextPort} from './local-manifest.ts';
 import {libraryRevision,revisionGuard} from './revision.ts';
 import {deviceOrder} from './saved-state.ts';
+import {lazyRegExpTest} from '../core/lazy-regexp.ts';
 export interface SourceUriPort {parseUri:SyncTextPort['parseUri'];parseAndroid:SyncTextPort['parseUri']}
 const whitespace=/[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
+const sourceHostCharacter=lazyRegExpTest('[\\p{L}\\p{Nd}.-]','u');
 const n=(v:unknown)=>Number(v??0),s=(v:unknown)=>v==null?'':String(v),nullable=(v:unknown)=>v==null?null:String(v);
 export function isSyncedSourceUrl(value:string):boolean {const u=nativeTrim(value).toLowerCase();return (u.startsWith('http://')||u.startsWith('https://'))&&u!=='https://watchrss.local/import-content';}
 /** Repository source normalization differs from stable-article-id normalization. */
@@ -16,7 +18,7 @@ export function normalizeSourceUrl(value:string):string {
  if(host.toLowerCase()==='localhost')return 'http://'+t;
  if(!host||host.startsWith('.')||host.endsWith('.')||!host.includes('.'))return t;
  // Kotlin Char iteration rejects a supplementary letter's surrogate halves.
- for(let i=0;i<host.length;i++)if(!/[\p{L}\p{Nd}.-]/u.test(host[i]!))return t;
+ for(let i=0;i<host.length;i++)if(!sourceHostCharacter(host[i]!))return t;
  return 'http://'+t;
 }
 const stateSql=`INSERT OR REPLACE INTO sync_source_states(url,source_device_id,title,description,site_url,image_url,created_at,updated_at,sort_order,is_pinned,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`;

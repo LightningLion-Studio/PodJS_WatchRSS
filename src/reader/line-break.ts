@@ -1,16 +1,17 @@
 import type { LayoutOptions } from "./types";
+import {lazyRegExpTest} from "../core/lazy-regexp.ts";
 
 // Android StaticLayout-like line breaking for UI text (cards, titles, dialogs):
 // Latin words stay whole, CJK breaks between characters, closing punctuation
 // never starts a line, opening punctuation never ends one, and URLs may break
 // before "/". A unit wider than the line falls back to grapheme splitting.
 
-const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿＀-￯]/u;
+const CJK = lazyRegExpTest('[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}　-〿＀-￯]','u');
 /** Characters that must not begin a line (they attach to the preceding unit). */
 const NO_START = new Set(Array.from("）〕］｝〉》」』】〙〗〟’”｠»、。，．：；？！…‥・ー々〻ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ%％)]},.:;?!"));
 /** Characters that must not end a line (they attach to the following unit). */
 const NO_END = new Set(Array.from("（〔［｛〈《「『【〘〖〝‘“｟«([{"));
-const WORD = /[\p{L}\p{N}\p{M}'’\-_.@#&=+~*$^|\\]/u;
+const WORD = lazyRegExpTest("[\\p{L}\\p{N}\\p{M}'’\\-_.@#&=+~*$^|\\\\]",'u');
 
 function graphemes(value: string): string[] {
   const out: string[] = [];
@@ -29,10 +30,10 @@ export function breakUnits(paragraph: string): string[] {
   let word = "";
   const flush = () => { if (word) { units.push(word); word = ""; } };
   for (const g of graphemes(paragraph)) {
-    if (/^\s+$/u.test(g) && !CJK.test(g)) { flush(); units.push(g); continue; }
-    if (CJK.test(g) && !NO_START.has(g) && !NO_END.has(g)) { flush(); units.push(g); continue; }
+    if (/^\s+$/u.test(g) && !CJK(g)) { flush(); units.push(g); continue; }
+    if (CJK(g) && !NO_START.has(g) && !NO_END.has(g)) { flush(); units.push(g); continue; }
     if (g === "/") { flush(); word = g; continue; } // break opportunity before a slash
-    if (WORD.test(g) && !NO_START.has(g)) { word += g; continue; }
+    if (WORD(g) && !NO_START.has(g)) { word += g; continue; }
     flush(); units.push(g);
   }
   flush();
