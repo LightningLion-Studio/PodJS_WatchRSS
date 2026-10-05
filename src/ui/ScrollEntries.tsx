@@ -2,6 +2,7 @@ import {routeActivity} from './route-activity.tsx';
 import {routeMemory} from '../navigation/activity-navigation.ts';
 import {ScrollRestoration,validScrollSnapshot} from '../navigation/scroll-restoration.ts';
 import { visibleEntryRange } from "./visible-range.ts";
+import { createWindowRows } from "./windowed-rows.ts";
 import { For, createMemo, onCleanup, type JSX } from "solid-js";
 import { View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture, type GestureContact } from "@pocketjs/framework/gesture";
@@ -9,9 +10,9 @@ import { createScroller, bindDpadScroll, type Scroller } from "@pocketjs/framewo
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { pressNode, hitNode } from "@pocketjs/framework/input";
 
-export interface ScrollEntry { height: number; render: () => JSX.Element }
+export interface ScrollEntry { height: number; render: () => JSX.Element; retain?:boolean }
 /** Variable-height, windowed column; the clipping viewport never translates. */
-export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; gap?: number; padding?: number; verticalPadding?: number; fixed?: boolean; controller?: Scroller; inputActive?: () => boolean; accessibilityLabel?:string; onRefresh?: () => void; onManualScroll?:()=>void; onTap?:(contact:GestureContact)=>boolean|void; onLongPress?: (contact: GestureContact) => void; onScrollStateChange?:(scrolling:boolean)=>void; onOffsetChange?:(previous:number,current:number)=>void; onSettledRange?:(first:number,last:number)=>void; settleKey?:unknown; ref?: (handle: {scroller: Scroller}) => void }) {
+export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; gap?: number; padding?: number; verticalPadding?: number; retainRows?:number; fixed?: boolean; controller?: Scroller; inputActive?: () => boolean; accessibilityLabel?:string; onRefresh?: () => void; onManualScroll?:()=>void; onTap?:(contact:GestureContact)=>boolean|void; onLongPress?: (contact: GestureContact) => void; onScrollStateChange?:(scrolling:boolean)=>void; onOffsetChange?:(previous:number,current:number)=>void; onSettledRange?:(first:number,last:number)=>void; settleKey?:unknown; ref?: (handle: {scroller: Scroller}) => void }) {
   let viewport: NodeMirror | undefined;
   const rows = createMemo(() => {
     let top = props.verticalPadding ?? props.padding ?? 18;
@@ -32,12 +33,8 @@ export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; g
   const checkpoint=()=>{if(scrollKey)memory!.saved[scrollKey]=restoration.snapshot(scroller.offset(),rows());};
   if(memory){activity!.checkpoints.add(checkpoint);onCleanup(()=>{checkpoint();activity!.checkpoints.delete(checkpoint);activity!.scrollSlots.delete(scrollSlot);});}
   const takeScroll=()=>restoration.cancel();
-  const visible = createMemo(() => {
-    const list=rows(),lower=scroller.offset()-80,upper=scroller.offset()+props.height+80;
-    let lo=0,hi=list.length;while(lo<hi){const mid=(lo+hi)>>>1;if(list[mid].top+list[mid].height<lower)lo=mid+1;else hi=mid;}
-    const first=lo;hi=list.length;while(lo<hi){const mid=(lo+hi)>>>1;if(list[mid].top<=upper)lo=mid+1;else hi=mid;}
-    return list.slice(first,lo);
-  });
+  const windowRows=createWindowRows<ReturnType<typeof rows>[number]>(props.retainRows);
+  const visible = createMemo(() => windowRows(rows(),scroller.offset()-80,scroller.offset()+props.height+80));
   const active=()=>props.inputActive?.()??true;
   let refreshEligible=false,pullDistance=0;
   createGesture({ region: {node: () => viewport}, axis: "y",
