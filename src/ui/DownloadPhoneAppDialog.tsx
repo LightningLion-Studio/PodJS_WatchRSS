@@ -1,6 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
-import { browser } from "@podjs/framework/services";
+import { openBrowserUrl } from "../browser/open.ts";
 import { QRCode } from "./QRCode.tsx";
 
 export const PHONE_APP_DOWNLOAD_URL = "https://m.malink.cn/s/U7zQBr";
@@ -22,7 +22,7 @@ export function DownloadPhoneAppDialog(props: { width: number; height: number; o
         </Show>
       </View>
       <View onPress={props.onDismiss} focusable class="absolute rounded-[9999] bg-[#23272a] items-center justify-center" style={{ insetL: 57 * scale(), insetT: buttonsTop(), width: 104 * scale(), height: 104 * scale() }}><Image src="../assets/icons/close.svg" style={{ width: 48 * scale(), height: 48 * scale() }} /></View>
-      <View onPress={() => { void browser.open(PHONE_APP_DOWNLOAD_URL).result.catch(error => props.onError(String(error))); }} focusable class="absolute rounded-[9999] bg-[#2a2a2a] items-center justify-center" style={{ insetL: 177 * scale(), insetT: buttonsTop(), width: 232 * scale(), height: 104 * scale() }}><Text class="text-[#f5f5f5]" style={{ fontSlot: 0, scale: 22 / 12 * scale() }}>浏览器打开下载页</Text></View>
+      <View onPress={() => { void openBrowserUrl(PHONE_APP_DOWNLOAD_URL, "phone-download").catch(error => props.onError(String(error))); }} focusable class="absolute rounded-[9999] bg-[#2a2a2a] items-center justify-center" style={{ insetL: 177 * scale(), insetT: buttonsTop(), width: 232 * scale(), height: 104 * scale() }}><Text class="text-[#f5f5f5]" style={{ fontSlot: 0, scale: 22 / 12 * scale() }}>浏览器打开下载页</Text></View>
     </View>
   </View>;
 }

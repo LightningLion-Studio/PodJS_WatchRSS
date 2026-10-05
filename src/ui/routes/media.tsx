@@ -1,3 +1,4 @@
+import type { BrowserOrigin } from "../../browser/open.ts";
 import { Show } from "solid-js";
 import type { ShareHandler } from "../../sharing/policy.ts";
 import {
@@ -48,7 +49,7 @@ interface MediaRoutesProps {
   openDouyin: (route: DouyinRoute) => Promise<void>;
   playDouyin: (request: DouyinPlayRequest) => void;
   loginDouyin: () => Promise<void>;
-  openUrl: (url: string) => Promise<void>;
+  openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
   recoverDouyinVideo: (entry: RouteEntry) => Promise<void>;
@@ -100,7 +101,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onBack={() => props.popPage()}
           input={(title, value) => props.services.input(title, value)}
           onError={props.setError}
-          onOpenUrl={(url) => void props.openUrl(url)}
+          onOpenUrl={(url) => void props.openUrl(url, "bili")}
           ref={(value) => {
             if (value.scroller) {
               props.entry.list = { scroller: value.scroller };
@@ -150,6 +151,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onOpenWeb={() =>
             void props.openUrl(
               (props.playingSource() ?? props.entry.playback)?.webUrl ?? "",
+              (props.playingSource() ?? props.entry.playback)?.platform ?? "rss",
             )
           }
           onProgress={(position, duration) =>

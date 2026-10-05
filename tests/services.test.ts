@@ -31,6 +31,7 @@ mock.module("@podjs/framework/services", () => ({
   sqlite,
   uri:{parse:async(value:string)=>{try{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};}catch{return {valid:false,scheme:null,host:null,rawPath:null,rawQuery:null};}}},
   secureStorage:{get:async()=>null,set:async()=>{},delete:async()=>{}},
+  browser:{open:()=>({result:Promise.resolve()})},
   bytesToBase64:(value:Uint8Array)=>Buffer.from(value).toString("base64"),
   stringToUtf8:(value:string)=>new TextEncoder().encode(value),
   hostOperation: (method:string,args:Record<string,unknown>)=>{
