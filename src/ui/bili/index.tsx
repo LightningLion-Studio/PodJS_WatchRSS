@@ -1,3 +1,4 @@
+import { BiliDetailController, type DetailState, type DetailTarget } from "../../bili/detail.ts";
 import { BiliFeedBrowser, BiliSearchHistory, favoritePager, historyPager, searchPager, type BrowseState } from "../../bili/browse.ts";
 import {biliShareLink,biliActionTitle,type ShareHandler} from "../../sharing/policy.ts";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
@@ -32,6 +33,7 @@ export type BiliInput = (title: string, value?: string) => Promise<string | null
 export interface BiliScreenRef { scroller?: Scroller; onRootBack?: () => boolean }
 export interface BiliScreenProps {
   onShare?:ShareHandler;
+  loadLocalDetail?: (target: DetailTarget) => Promise<import("../../bili/types.ts").BiliVideoDetail | undefined>;
   height: number; width?: number; route: BiliRoute; client: BiliClient;
   onNavigate: (route: BiliRoute) => void; onBack: () => void;
   input?: BiliInput; onOpenUrl?: (url: string) => void; onError?: (message: string) => void;
@@ -178,22 +180,41 @@ function searchResultEntry(item: Extract<BiliSearchResult, { kind: "video" }>, w
 }
 
 function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
-  const detail = asyncData(() => ({ aid: typeof props.route.aid === "number" ? props.route.aid : undefined, bvid: props.route.bvid }), ids => props.client.detail(ids));
+  const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
+  let controller: BiliDetailController;
+  createEffect(() => {
+    const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: num(props.route.cid) || undefined };
+    controller = new BiliDetailController(props.client, kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
+    const own = controller; setState(own.state); void own.load(); onCleanup(() => own.dispose());
+  });
+  const detail = { value: () => state().detail, loading: () => state().loading, error: () => state().error, refetch: () => void controller.load() };
   const [busy, setBusy] = createSignal("");
-  async function play(cid?: number) { const data = detail.value(), actual = cid ?? (typeof props.route.cid === "number" ? props.route.cid : undefined) ?? data?.pages[0]?.cid; if (!actual) return fail(props, new Error("视频没有可播放的分 P")); try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true }); props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title }); } catch (error) { fail(props, error); } finally { setBusy(""); } }
+  let disposed = false; onCleanup(() => { disposed = true; });
+  async function play() {
+    if (busy()) return;
+    const data = detail.value(), actual = controller.selectedCid(), own = controller;
+    if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
+    try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true });
+      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+    } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
+  }
   const original = () => props.settings?.originalContentEnabled ?? true;
   const entries = createMemo<ScrollEntry[]>(() => { const data = detail.value(), it = data?.item, title = it?.title?.trim() || (it?.bvid ? `BV号 ${it.bvid}` : it?.aid ? `av${it.aid}` : "哔哩哔哩视频"), owner = it?.owner?.name?.trim() || "未知作者", desc = data?.desc?.trim() || "暂无简介", titleLines = lines(title, (props.width ?? 233) - 36, 21), authorLines = lines(`作者：${owner}`, (props.width ?? 233) - 36, 13), descLines = lines(`简介：${desc}`, (props.width ?? 233) - 36, 13); const textEntries = data ? [{ height: Math.max(32, titleLines.length * 25), render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[25] text-white text-center">{titleLines.join("\n")}</Text> }, { height: Math.max(20, authorLines.length * 18), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#aaa]">{authorLines.join("\n")}</Text> }, { height: Math.max(20, descLines.length * 18), render: () => <Text class="absolute inset-0 text-[13px] leading-[18] text-[#e8e8e8]">{descLines.join("\n")}</Text> }] as ScrollEntry[] : [];
-    const [preview, ...actions] = data ? [{ height: 126, render: () => <View onPress={() => void play()} focusable class="absolute inset-0 rounded-[16] bg-[#242424] overflow-hidden items-center justify-center">{it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={(props.width ?? 233) - 36} height={126} class="absolute inset-0" /> : null}<View style={{ insetL: ((props.width ?? 233) - 36 - 48) / 2 }} class="absolute top-[39] w-[48] h-[48] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} style={{ width: 34, height: 34 }} /></View></View> } as ScrollEntry, { height: 40, render: () => <View class="absolute inset-0"><View onPress={() => props.onNavigate({ name: "actions", aid: it?.aid, bvid: it?.bvid, cid: props.route.cid, title, owner:it?.owner?.name, cover:it?.cover })} focusable class="absolute left-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Image src={starIcon} style={{ width: 21, height: 21 }} /></View><View onPress={() => {const qr=()=>props.onNavigate({ name:"share",aid:it?.aid,bvid:it?.bvid,title });if(props.onShare)props.onShare({origin:"bili-detail",title,link:biliShareLink(it?.bvid,it?.aid)},qr);else qr();}} focusable class="absolute right-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Text class="text-[9px] leading-[13] text-white">分享</Text></View></View> } as ScrollEntry] : [];
+    const [preview, ...actions] = data ? [{ height: 126, render: () => <View onPress={() => void play()} focusable class="absolute inset-0 rounded-[16] bg-[#242424] overflow-hidden items-center justify-center">{it?.cover ? <RemoteImage cacheBucket="bili-preview" url={it.cover} width={(props.width ?? 233) - 36} height={126} class="absolute inset-0" /> : null}<View style={{ insetL: ((props.width ?? 233) - 36 - 48) / 2 }} class="absolute top-[39] w-[48] h-[48] rounded-full bg-[#000000aa] items-center justify-center"><Image src={playIcon} style={{ width: 34, height: 34 }} /></View></View> } as ScrollEntry, { height: 40, render: () => <View class="absolute inset-0"><View onPress={() => props.onNavigate({ name: "actions", aid: it?.aid, bvid: it?.bvid, cid: controller.selectedCid(), title, owner:it?.owner?.name, cover:it?.cover })} focusable class="absolute left-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Image src={starIcon} style={{ width: 21, height: 21 }} /></View><View onPress={() => {const qr=()=>props.onNavigate({ name:"share",aid:it?.aid,bvid:it?.bvid,title });if(props.onShare)props.onShare({origin:"bili-detail",title,link:biliShareLink(it?.bvid,it?.aid)},qr);else qr();}} focusable class="absolute right-[63] top-[4] w-[32] h-[32] rounded-full bg-[#292929] items-center justify-center"><Text class="text-[9px] leading-[13] text-white">分享</Text></View></View> } as ScrollEntry] : [];
     return [
       ...(detail.loading() ? [messageEntry("正在加载视频详情…", props.width ?? 233)] : []),
       ...(detail.error() ? [messageEntry(String(detail.error()), props.width ?? 233), buttonEntry("重试", detail.refetch)] : []),
       ...(original() && preview ? [preview] : []), ...textEntries,
       ...(!original() && preview ? [preview] : []), ...actions,
+      ...(data && data.pages.length > 1 ? data.pages.map((page, index) => buttonEntry(`${index === state().selected ? "✓ " : ""}P${page.page ?? index + 1} ${page.part ?? ""}`, busy() ? undefined : () => controller.select(index), index === state().selected)) : []),
+      ...(data ? [buttonEntry(state().interaction.like ? "已点赞 · 取消点赞" : "点赞", state().busy || state().loading ? undefined : () => void controller.act("like")), buttonEntry(state().interaction.coin ? "已投币" : "投币", state().busy || state().loading || state().interaction.coin ? undefined : () => void controller.act("coin")), buttonEntry(state().interaction.favorite ? "取消收藏" : "收藏", state().busy || state().loading ? undefined : () => void controller.act("favorite"))] : []),
       ...(original() && it?.aid ? [buttonEntry("评论", () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
+      ...(state().offline ? [messageEntry("本地已保存详情", props.width ?? 233)] : []),
+      ...(state().message ? [messageEntry(state().message!, props.width ?? 233)] : []),
       ...(busy() ? [messageEntry(busy(), props.width ?? 233)] : []),
     ];
   });
-  return <Scrolled {...props} entries={entries()} />;
+  return <Scrolled {...props} entries={entries()} onRefresh={detail.refetch} />;
 }
 
 function CommentScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "comments" | "replies" }> }) {

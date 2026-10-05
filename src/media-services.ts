@@ -1,3 +1,4 @@
+import { readLocalBiliDetail } from "./bili/local-detail.ts";
 import {getExternalSavedStore,getDouyinSavedStore} from "./services.ts";
 import {biliExternalItem} from "./core/external-saved.ts";
 import { rsaOaepSha256, bytesToBase64, delay, hostOperation, fileChunks, base64ToBytes, secureStorage, type DownloadResult } from "@podjs/framework/services";
@@ -32,3 +33,7 @@ export const douyinClient=new DouyinClient({
  secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
  historyStorage:{get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}}
 });
+
+export async function loadLocalBiliDetail(target: import('./bili/detail.ts').DetailTarget) {
+ return readLocalBiliDetail((await getExternalSavedStore()).db, target);
+}
