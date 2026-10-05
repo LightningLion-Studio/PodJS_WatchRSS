@@ -32,3 +32,8 @@ Your context may get compacted during long tasks. To survive that:
 - Write findings and progress to the task's output file **as you go** (append each section the moment it is finished). Do not hold everything in memory until the end.
 - Keep `.codex-tmp/<your-agent-name>-progress.md` updated with: the current task (copied verbatim from Claude's prompt), what is done, and what is next.
 - If you find yourself without a task after compaction, re-read this brief and your progress file, then continue. Never reply just "tell me what to do".
+
+## Package build is mandatory (added after a broken build slipped through)
+Unit tests do not cover asset packing. Before reporting any app task, run in your worktree:
+`bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts build --target=android-watch --project=<your worktree path>`
+It must succeed. Image assets must rasterize to power-of-two sizes ≤ 512 (SVG width/height × 2; use 32 or 64 like the existing icons).
