@@ -49,6 +49,7 @@ import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, on
 import { Text, View } from "@pocketjs/framework/components";
 import type { VirtualListHandle } from "@pocketjs/framework/virtual-list";
 import { RelativeAxis, RelativeAxisUnits, lifecycle, onLifecycleChange, getDisplayMetrics, kv, onAxisDelta, onSystemBack, setNavigationState, __onHostEvent } from "@podjs/framework/watch";
+import { ReaderExitGuard, type ReaderProgressFlushOutcome } from "../navigation/reader-exit.ts";
 import { browser, video, mediaVolume, hostOperation, delay } from "@podjs/framework/services";
 import { layoutText } from "../reader/index.ts";
 import type { AppServices, Article, Channel, ArticleQuery } from "./service.ts";
@@ -85,6 +86,13 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const [playingSource,setPlayingSource]=createSignal<PlaybackSource>();
   const current = () => stack()[stack().length - 1];
   const page = () => current().page;
+  const readerFlushTimer = (milliseconds:number) => delay(milliseconds);
+  const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
+  const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
+  const logReaderProgressFlush = (context:"exit"|"background",outcome:ReaderProgressFlushOutcome) => {
+    if(outcome.status==="failed")console.warn(`Reader progress ${context} flush failed; continuing`,outcome.error);
+    else if(outcome.status==="timed-out")console.warn(`Reader progress ${context} flush timed out after ${outcome.timeoutMs}ms; continuing`);
+  };
   const motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
   function setPage(next: Page, data:Partial<Entry>={}) {
@@ -92,10 +100,8 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     current().list?.scroller.stop();
     setStack(entries => [...entries, { page: next, ...data }]);
   }
-  function popPage(skipInternal=false) {
-    if (stack().length <= 1) return false;
-    if(!skipInternal && current().internalBack?.()) { setBackOffset(0); motion.reset(); return true; }
-    const leaving=current();
+  function finishPopPage(leaving: Entry) {
+    if (current() !== leaving || stack().length <= 1) return false;
     const latestArticle=article()?.id===leaving.readerArticle?.id?article():leaving.readerArticle;
     const autoRemoveItem=leaving.page==="reader"&&stack().at(-2)?.page==="watch-later"&&shouldAutoRemoveWatchLater(!!leaving.readerFromWatchLater,leaving.reader?.reachedBottom()??false,!!latestArticle?.watchLater)?savedEntries().find(item=>item.kind==="rss"&&item.articleId===leaving.readerArticle?.id):undefined;
     current().queue?.cancel();
@@ -106,6 +112,18 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
     if(leaving.page==="search"&&leaving.channelId)void loadFeedArticles(leaving.channelId,feedVisibleCount());
     if(autoRemoveItem)void removeSaved(autoRemoveItem);
     else if(page()==="saved"||page()==="watch-later")void loadSaved(page()==="saved"?"favorite":"watchLater");
+    return true;
+  }
+  function popPage(skipInternal=false) {
+    if (stack().length <= 1) return false;
+    if(!skipInternal && current().internalBack?.()) { setBackOffset(0); motion.reset(); return true; }
+    const leaving=current();
+    if(leaving.page!=="reader"||!leaving.reader)return finishPopPage(leaving);
+    leaving.list?.scroller.stop();
+    readerExit.begin(leaving,()=>leaving.reader!.flushProgress(),outcome=>{
+      logReaderProgressFlush("exit",outcome);
+      if(current()===leaving)finishPopPage(leaving);
+    });
     return true;
   }
   createGesture({
@@ -172,7 +190,11 @@ export default function WatchRSS(props: { services: AppServices; onSyncMediaKeep
   const [presetState, setPresetState] = createSignal<ReaderPresetState>();
   const [presetRevision, setPresetRevision] = createSignal(0);
   const [foreground, setForeground] = createSignal(lifecycle() === "active");
-  onCleanup(onLifecycleChange(value => setForeground(value === "active")));
+  onCleanup(onLifecycleChange(value => {
+    setForeground(value === "active");
+    const entry=current();
+    if(value!=="active"&&entry.page==="reader"&&entry.reader)backgroundReaderFlush.begin(entry,()=>entry.reader!.flushProgress(),outcome=>logReaderProgressFlush("background",outcome));
+  }));
   let platformLoginRefresh=0;
   const refreshPlatformLoginState=async()=>{
     const revision=++platformLoginRefresh;

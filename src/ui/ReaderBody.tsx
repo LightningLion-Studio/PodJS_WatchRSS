@@ -1,14 +1,12 @@
 import {ReaderBackground,useReaderBackgrounds} from "./ReaderBackground.tsx";
 import {useReaderFonts} from "./reader-fonts.ts";
-import {SystemTextLine} from "@podjs/framework/text";
-import {requiresReaderSystemText,systemTextOptions} from "../reader/system-text.ts";
 import type {ReaderRow} from "../reader/content-layout.ts";
 import { ImportedReaderDocument, importedByteTarget, importedCharForByte } from "../reader/imported-document.ts";
 import type { ImportedTextHandle } from "../reader/imported-text.ts";
 import type {SpeechHighlight} from "../reader/speech-highlight.ts";
 import {contentHighlightRects,highlightCenter} from "../reader/speech-highlight-layout.ts";
 import type { ReaderPreset } from "../reader/preset.ts";
-import { readerColor, readerTextClass } from "../reader/content-layout.ts";
+import { readerColor } from "../reader/content-layout.ts";
 import { requestReaderLayout } from "../reader/platform-layout.ts";
 import type { NativeBlockLayouts } from "../reader/content-layout.ts";
 import { delay, textLayout } from "@podjs/framework/services";
@@ -27,6 +25,8 @@ import { kv, __onHostEvent, getDisplayMetrics, getFontMetrics, hasCapability } f
 import { AutoScrollController, ReadingProgressStore } from "../reader/index.ts";
 import { pressedSpeechAnchor, type SpeechAnchor } from "../reader/speech-segments.ts";
 import {readerReachedBottom} from "../reader/watch-later-completion.ts";
+import {ReadingProgressWriteQueue} from "../reader/progress-write-queue.ts";
+import {ReaderTextRow} from "./ReaderTextRow.tsx";
 
 
 export interface ReaderBodyHandle {
@@ -37,6 +37,7 @@ export interface ReaderBodyHandle {
   pause:()=>void;
   manualScroll:()=>void;
   reachedBottom:()=>boolean;
+  flushProgress:()=>Promise<void>;
 }
 export function ReaderBody(props:{
   progressStore?:Pick<ReadingProgressStore,"load"|"save">;
@@ -93,25 +94,29 @@ export function ReaderBody(props:{
   const controller=new AutoScrollController(0,offset=>scroller.scrollTo(offset,{immediate:true}));
   const [playing,setPlayingState]=createSignal(false),[restored,setRestored]=createSignal(false),[feedback,setFeedback]=createSignal("");
   const store=props.progressStore??new ReadingProgressStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);}});
+  const writes=new ReadingProgressWriteQueue();
   const [lastManualScroll,setLastManualScroll]=createSignal(-Infinity);
   let followingSpeech=false;
   const manualScroll=()=>{followingSpeech=false;setLastManualScroll(Date.now());handle.pause();};
   let disposed=false,foreground=true,lastFrame=0,lastSave=0,lastOffset=-1;
   let tapTimer:(()=>void)|undefined,feedbackTimer:(()=>void)|undefined;
   const schedule=(milliseconds:number,callback:()=>void)=>{const timer=delay(Math.max(1,milliseconds));void timer.result.then(callback,()=>{});return ()=>timer.cancel();};
-  const save=()=>{
-    if(!restored()||disposed)return;
+  const save=():Promise<void>=>{
+    if(!restored()||disposed)return writes.flush();
     const offset=scroller.offset();
-    if(offset===lastOffset)return;
+    if(offset===lastOffset)return writes.flush();
     if(imported){
-      const anchor=imported.anchor(offset,headerHeight());if(!anchor)return;
+      const anchor=imported.anchor(offset,headerHeight());if(!anchor)return writes.flush();
+      const progress=imported.progress(anchor);
       lastOffset=offset;lastSave=Date.now();
-      void store.save(Number(props.articleId),offset,imported.progress(anchor),undefined,anchor).catch(error=>{lastOffset=-1;if(!disposed)props.onError(String(error));});return;
+      const task=writes.enqueue(()=>store.save(Number(props.articleId),offset,progress,undefined,anchor));
+      void task.catch(error=>{if(lastOffset===offset)lastOffset=-1;if(!disposed)props.onError(String(error));});return task;
     }
     const anchor=documentAnchorAt(layout(),offset,headerHeight());
     const progress=Math.min(1,anchor.character/Math.max(1,props.text.replace(/\r\n?/g,"\n").length));
     lastOffset=offset;lastSave=Date.now();
-    void store.save(Number(props.articleId),offset,progress,anchor).catch(error=>{lastOffset=-1;if(!disposed)props.onError(String(error));});
+    const task=writes.enqueue(()=>store.save(Number(props.articleId),offset,progress,anchor));
+    void task.catch(error=>{if(lastOffset===offset)lastOffset=-1;if(!disposed)props.onError(String(error));});return task;
   };
   const setPlaying=(value:boolean,notify=true)=>{
     if(value){const offset=scroller.offset();controller.setBounds(max());controller.setOffset(offset);controller.start();}
@@ -123,7 +128,7 @@ export function ReaderBody(props:{
       feedbackTimer=schedule(1500,()=>setFeedback(""));
     }
   };
-  const handle:ReaderBodyHandle={manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset())};
+  const handle:ReaderBodyHandle={manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset()),flushProgress:save};
   props.ref(handle);
   const tap=()=>{
     if(!props.active||!restored())return;
@@ -196,17 +201,17 @@ export function ReaderBody(props:{
       if(!controller.isRequested())setPlayingState(false);
     }
     lastFrame=now;
-    if(now-lastSave>=1000)save();
+    if(now-lastSave>=1000)void save();
   });
   const removeLifecycle=__onHostEvent(event=>{
     if(event.t!=="lifecycle")return;
     foreground=event.state==="active";lastFrame=0;controller.setBackground(!foreground||!props.active);
-    if(!foreground)save();
+    if(!foreground)void save();
   });
-  onCleanup(()=>{save();disposed=true;imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  onCleanup(()=>{void save();disposed=true;imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
   return <View debugName="ReaderViewport" class="absolute left-[0] right-[0]" style={{insetT:props.top??40,height:props.height,bgColor:props.preset?readerColor(props.preset.background.colorArgb):"#000000"}}>
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
-    <ScrollEntries onManualScroll={manualScroll} onScrollStateChange={scrolling=>{if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={[...(props.header??[]),...layout().rows.map(row=>({height:row.height,render:()=>row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(row);return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}{requiresReaderSystemText(row.text,props.preset,blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body")&&hasCapability("text.raster")?<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><SystemTextLine pixelScale={getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth} options={systemTextOptions(row,blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body",props.fontSize,props.width-28,getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth,props.preset,getFontMetrics(row.fontSlot),fonts())} onCarets={positions=>setSystemCarets(previous=>{const next=new Map(previous);if(positions)next.set(row,positions);else next.delete(row);return next;})} fallback={<Text class={readerTextClass(row.fontSlot)} style={{insetT:row.textOffsetY??0,width:(props.width-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color,tracking:(row.tracking??0)/row.scale,textAlign:row.textAlign??0}}>{row.text}</Text>}/></View>:<Text class={readerTextClass(row.fontSlot)} style={{insetT:row.gap+(row.textOffsetY??0),width:(props.width-28)/row.scale,fontSlot:row.fontSlot,scale:row.scale,originX:-.5,originY:-.5,lineHeight:row.lineHeight/row.scale,textColor:row.color,tracking:(row.tracking??0)/row.scale,textAlign:row.textAlign??0}}>{row.text}</Text>}</View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
+    <ScrollEntries onManualScroll={manualScroll} onScrollStateChange={scrolling=>{if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={[...(props.header??[]),...layout().rows.map(row=>({height:row.height,render:()=>row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(row);return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>{const next=new Map(previous);if(positions)next.set(row,positions);else next.delete(row);return next;})}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>})),...(props.footer??[])]}/>
 

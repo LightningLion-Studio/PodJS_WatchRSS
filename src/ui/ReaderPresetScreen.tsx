@@ -5,13 +5,16 @@ import { onFrame } from "@pocketjs/framework/lifecycle";
 import { location, timeInput, type HostOperation } from "@podjs/framework/services";
 import { activeReaderPreset, availableReaderPresets, type ReaderPresetState, type ReaderThemeMode } from "../reader/preset-store.ts";
 import { formatScheduleMinutes, sunTimes, type ReaderThemeSchedule } from "../reader/theme-schedule.ts";
-import { contentFont, readerColor } from "../reader/content-layout.ts";
+import { contentFont, presetContentFont } from "../reader/content-layout.ts";
 import { watchUiLines } from "./text-layout.ts";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { DownloadPhoneAppDialog } from "./DownloadPhoneAppDialog.tsx";
 import type { Scroller } from "@pocketjs/framework/kinetics";
+import type { ReaderPreset } from "../reader/preset.ts";
+import { useReaderBackgrounds } from "./ReaderBackground.tsx";
+import { useReaderFonts } from "./reader-fonts.ts";
+import { ReaderPresetSingleLinePreview } from "./ReaderPresetSingleLinePreview.tsx";
 
-const argbColor = readerColor;
 export interface ReaderPresetScreenProps {
   width: number; height: number; state: ReaderPresetState; active: () => boolean;
   onMode: (mode: ReaderThemeMode) => void; onSelect: (kind: "light" | "dark", id: string | null) => void;
@@ -21,6 +24,7 @@ export interface ReaderPresetScreenProps {
 
 /** Native watch selector: choosing is supported here, editing belongs to the phone. */
 export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
+  const fonts = useReaderFonts(), backgrounds = useReaderBackgrounds();
   const [menu, setMenu] = createSignal<{ kind: "light" | "dark"; top: number }>();
   const [download, setDownload] = createSignal(false), [message, setMessage] = createSignal("");
   const [locating, setLocating] = createSignal(false), [pickingTime, setPickingTime] = createSignal(false);
@@ -102,14 +106,19 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
     rows.push({ height: 6, render: () => null });
     return rows;
   });
-  const menuItems = () => [...(menu()?.kind === "dark" ? [{ id: null, name: "跟随浅色", background: "#211f26", color: "#f5f5f5", size: 14, lineHeight: 17, height: 48 }] : []), ...presets().map(preset => ({ id: preset.id, name: `${preset.name} · 正文预览`, background: argbColor(preset.background.colorArgb), color: argbColor(preset.body.colorArgb), size: preset.body.fontSizeSp, lineHeight: preset.body.fontSizeSp * preset.body.lineHeightEm, height: 52 }))];
+  type MenuItem = { id: string | null; name: string; height: number; preset?: ReaderPreset };
+  const menuItems = (): MenuItem[] => [...(menu()?.kind === "dark" ? [{ id: null, name: "跟随浅色", height: 48 }] : []), ...presets().map(preset => ({ id: preset.id, name: `${preset.name} · 正文预览`, height: 52, preset }))];
   const menuHeight = () => Math.min(props.height - 16, menuItems().reduce((sum, item) => sum + item.height, 16));
-  const menuWidth = () => Math.min(props.width - 36, Math.max(112, ...menuItems().map(item => getOps().measureText(item.name, contentFont(item.size, "body").fontSlot) * contentFont(item.size, "body").scale + (item.id === null ? 24 : 40))));
+  const menuWidth = () => Math.min(props.width - 36, Math.max(112, ...menuItems().map(item => { const font = item.preset ? presetContentFont(item.preset, "body") : contentFont(14, "body"); return getOps().measureText(item.name, font.fontSlot) * font.scale + (item.id === null ? 24 : 40); })));
   return <View class="absolute inset-0 bg-black">
     <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={26} gap={10} inputActive={() => props.active() && !download() && !menu()} ref={value => { scroller = value.scroller; props.ref({ ...value, goBack }); }} />
     <Show when={menu()}>{selection => <View class="absolute inset-0" onPress={() => setMenu(undefined)}>
       <View class="absolute left-[18] rounded-[4] bg-[#211f26] overflow-hidden" style={{ insetT: (props.height - menuHeight()) / 2, width: menuWidth(), height: menuHeight() }}>
-        <ScrollEntries height={menuHeight()} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: item.background }}><Text class="absolute" style={{ insetL:item.id===null?0:8,insetT:(item.height-item.lineHeight)/2,fontSlot: contentFont(item.size, "body").fontSlot, scale: contentFont(item.size, "body").scale, textColor: item.color, lineHeight: item.lineHeight/contentFont(item.size,"body").scale }}>{item.name}</Text></View> }))} />
+        <ScrollEntries height={menuHeight()} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: "#211f26" }}>
+          {item.preset
+            ? <ReaderPresetSingleLinePreview preset={item.preset} snapshot={backgrounds()} fonts={fonts()} width={menuWidth() - 24} height={item.height} active={props.active() && !!menu()}/>
+            : <Text class="absolute left-[0] right-[0] text-sm leading-[17] text-[#f5f5f5]" style={{ insetT: (item.height - 17) / 2 }}>{item.name}</Text>}
+        </View> }))} />
       </View>
     </View>}</Show>
     <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步阅读器预设" onDismiss={() => setDownload(false)} onError={props.onError} /></Show>
