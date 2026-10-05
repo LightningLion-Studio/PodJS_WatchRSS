@@ -43,3 +43,18 @@ test('disabled radio and exclusive ownership gate listeners and refresh can rest
 test('resource failure is reported without preventing later cleanup commands',async()=>{
  const f=fixture();f.ports.silence.setEnabled=async on=>{f.resources.push('enabled:'+on);if(on)throw new Error('audio unavailable');};f.runtime.setMediaEnabled(true);f.repository.resolve(f.repo);await f.runtime.ready;expect(f.errors.map(String)).toContain('Error: audio unavailable');f.peer();await flush();await f.runtime.dispose();expect(f.resources.at(-1)).toBe('enabled:false');expect(f.subscriptions()).toBe(0);
 });
+test('read-only observers see scalar results and errors without affecting application ownership',async()=>{
+ const f=fixture(),events:import('../../src/sync/application-foreground.ts').ApplicationSyncEvent[]=[];
+ const stop=f.runtime.subscribe(event=>events.push(event));
+ f.runtime.subscribe(()=>{throw Error('broken page');});
+ f.repository.resolve(f.repo);await f.runtime.ready;
+ expect(events).toContainEqual({type:'state',state:'listening'});
+ const result:SessionActionResult={request:{action:'syncLibrary',articles:[{},{}]},response:{success:true,stats:{applied:3}},ack:null,libraryApplied:true};
+ f.sessions[0]!.options.onActionCompleted?.(result);
+ expect(events.at(-1)).toEqual({type:'completed',action:'syncLibrary',success:true,message:'',count:0,received:2,applied:3});
+ expect(Object.isFrozen(events.at(-1))).toBe(true);expect(f.changes()).toBe(1);expect(f.sessions).toHaveLength(1);
+ f.sessions[0]!.done.reject(Error('peer gone'));await flush();
+ expect(events).toContainEqual({type:'error',message:'peer gone'});expect(f.errors).toHaveLength(1);
+ const length=events.length;stop();await f.clock.advance(500);expect(events).toHaveLength(length);
+ expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
+});

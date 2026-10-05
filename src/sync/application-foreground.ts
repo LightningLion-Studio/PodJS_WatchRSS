@@ -1,5 +1,5 @@
 import {ForegroundSyncController,type ForegroundListener,type ForegroundTimer} from './foreground.ts';
-import type {LibrarySessionOptions,LibrarySessionRepository} from './session.ts';
+import type {LibrarySessionOptions,LibrarySessionRepository,SessionActionResult} from './session.ts';
 import type {DisplayPowerState} from '@podjs/framework/services';
 export interface ApplicationSyncListener extends ForegroundListener {
  start(options:LibrarySessionOptions & {onListening?:()=>void;onPeer?:(peer:{remoteName:string|null;remoteAddress:string})=>void}):ReturnType<ForegroundListener['start']>;
@@ -18,6 +18,12 @@ export interface ApplicationForegroundPorts {
  onError?(error:unknown):void;
 }
 export type ApplicationSyncState='initializing'|'idle'|'starting'|'listening'|'transferring'|'failed'|'disposed';
+/** Scalar snapshots only: subscribers cannot mutate a protocol request/response. */
+export type ApplicationSyncEvent = Readonly<
+ | {type:'state';state:ApplicationSyncState}
+ | {type:'error';message:string}
+ | {type:'completed';action:string;success:boolean;message:string;count:number;received:number;applied:number}
+>;
 const OWNER='rfcomm-bootstrap';
 /** Application lifetime binding. UI navigation does not own the native listener. */
 export class ApplicationForegroundSync {
@@ -41,9 +47,20 @@ export class ApplicationForegroundSync {
   this.subscriptions.push(ports.display.onChange(value=>{const wake=value.interactive&&!this.display?.interactive;this.display=value;this.apply();if(wake)void this.refresh();}));
   this.ready=this.initialize(options);void this.ready.catch(()=>{});
  }
+ private observers=new Set<(event:ApplicationSyncEvent)=>void>();
+ /** Observation only; does not start, stop, or claim the application listener. */
+ subscribe(observer:(event:ApplicationSyncEvent)=>void):()=>void {
+  if(this.disposed)return ()=>{};
+  this.observers.add(observer);return ()=>{this.observers.delete(observer);};
+ }
+ private emit(event:ApplicationSyncEvent){if(this.disposed&&!(event.type==='state'&&event.state==='disposed'))return;Object.freeze(event);for(const observer of [...this.observers])try{observer(event);}catch{}}
+ private completed(result:SessionActionResult){
+  const {request,response}=result,stats=response.stats;
+  this.emit({type:'completed',action:String(request.action??''),success:response.success===true,message:typeof response.message==='string'?response.message:'',count:Number(response.count)||0,received:Array.isArray(request.articles)?request.articles.length:0,applied:stats&&typeof stats==='object'&&!Array.isArray(stats)?Number((stats as Record<string,unknown>).applied)||0:0});
+ }
  get state(){return this.currentState;}
- private status(state:ApplicationSyncState){if(this.disposed&&state!=='disposed')return;this.currentState=state;try{this.ports.onState?.(state);}catch{}}
- private report(error:unknown){try{this.ports.onError?.(error);}catch{}}
+ private status(state:ApplicationSyncState){if(this.disposed&&state!=='disposed')return;this.currentState=state;try{this.ports.onState?.(state);}catch{}this.emit({type:'state',state});}
+ private report(error:unknown){try{this.ports.onError?.(error);}catch{}this.emit({type:'error',message:error instanceof Error?error.message:String(error)});}
  private enqueue(action:()=>Promise<unknown>):Promise<void>{this.resources=this.resources.then(action).then(()=>{},error=>{this.report(error);});return this.resources;}
  private keepScreen(active:boolean){if(this.disposed&&active||this.screenDesired===active)return;this.screenDesired=active;void this.enqueue(()=>this.ports.display.keepAwake(OWNER,active));}
  setMediaEnabled(enabled:boolean){if(this.disposed||this.mediaEnabled===enabled)return;this.mediaEnabled=enabled;if(this.controller)void this.enqueue(()=>this.ports.silence.setEnabled(enabled));}
@@ -67,7 +84,7 @@ export class ApplicationForegroundSync {
     acquireMedia:owner=>{if(!this.disposed)void this.enqueue(()=>this.ports.silence.lease(owner,true));},
     releaseMedia:owner=>{void this.enqueue(()=>this.ports.silence.lease(owner,false));},
     onError:error=>{this.status('failed');this.report(error);},
-   },{...options,onActionCompleted:result=>{options.onActionCompleted?.(result);if(result.request.action==='syncLibrary')this.ports.onLibraryChanged?.();}});
+   },{...options,onActionCompleted:result=>{options.onActionCompleted?.(result);if(result.request.action==='syncLibrary')this.ports.onLibraryChanged?.();this.completed(result);}});
    await this.enqueue(()=>this.ports.silence.setEnabled(this.mediaEnabled));if(this.disposed)return;
    this.status('idle');await this.refresh();
   }catch(error){this.status('failed');this.report(error);throw error;}
@@ -83,6 +100,6 @@ export class ApplicationForegroundSync {
   this.disposed=true;this.refreshVersion++;for(const stop of this.subscriptions)stop();this.subscriptions=[];
   await this.ready.catch(()=>{});await this.controller?.dispose();
   await this.enqueue(async()=>{try{await this.ports.display.keepAwake(OWNER,false);}finally{try{await this.ports.silence.lease(OWNER,false);}finally{await this.ports.silence.setEnabled(false);}}});
-  this.status('disposed');
+  this.status('disposed');this.observers.clear();
  }
 }
