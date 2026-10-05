@@ -1,3 +1,4 @@
+import type {AccountSyncTelemetry} from './account-telemetry.ts';
 import type {WatchAccountState} from '../account/types.ts';
 import type {WatchAccountStore} from '../account/store.ts';
 import {uri} from '@podjs/framework/services';
@@ -60,7 +61,7 @@ export async function parseAccountSyncRequest(request: JsonObject, parseJava?:Ac
     backendBaseUrl:await secureAccountBackend(optString(account,'backendBaseUrl'),parseJava),
     posthogHost:nativeTrim(optString(account,'posthogHost')),
     posthogProjectApiKey:nativeTrim(optString(account,'posthogProjectApiKey')),
-    entitlement:{plan:nativeTrim(optString(entitlement,'plan')) || 'free',
+    entitlement:{plan:nativeTrim(optString(entitlement,'plan')) ? optString(entitlement,'plan') : 'free',
       active:optBoolean(entitlement,'active',true),expiresAtMillis:optLong(entitlement,'expiresAt'),features},
     telemetryConfig:{anonymousEnabled:optBoolean(telemetry,'anonymousEnabled',true),
       diagnosticsEnabled:optBoolean(telemetry,'diagnosticsEnabled',false),
@@ -74,11 +75,12 @@ export async function parseAccountSyncRequest(request: JsonObject, parseJava?:Ac
 
 /** A successful response means the secure-store write has completed. */
 export async function syncAccount(request: JsonObject, store: Pick<WatchAccountStore,'save'>,
-  deviceId: () => Promise<string>, parseJava?:AccountUriParse, onSaved?: () => void): Promise<JsonObject> {
+  deviceId: () => Promise<string>, parseJava?:AccountUriParse, onSaved?: () => void, telemetry?:AccountSyncTelemetry): Promise<JsonObject> {
   const localDeviceId = await deviceId();
   const state = await parseAccountSyncRequest(request,parseJava);
   await store.save(state);
+  await telemetry?.recordSyncAccount();
   onSaved?.();
   return {success:true,version:1,action:'syncAccount',deviceId:localDeviceId,
-    boundUserId:state.userId,telemetryBacklog:0};
+    boundUserId:state.userId,telemetryBacklog:await telemetry?.backlogCount()??0};
 }

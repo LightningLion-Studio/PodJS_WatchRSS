@@ -1,3 +1,5 @@
+import {tokenUsageOptInt} from './token-usage.ts';
+import type {JsonObject} from './protocol.ts';
 export interface DiagnosticStorage {get(key:string):string|undefined;set(key:string,value:string):void}
 export interface DebugLogReply { [key:string]:unknown;success:true;action:"pullDebugLog";log:string;truncated:boolean;totalChars:number}
 
@@ -18,10 +20,17 @@ export class SyncDiagnosticLog {
   action(action:string,success:boolean){this.append(`action=${allowedActions.has(action)?action:"unknown"} success=${success}`);}
   failure(source:"bluetooth"|"ip"){this.append(`${source} failure`);}
   pull(requested:unknown):DebugLogReply {
-    const number=typeof requested==="number"?requested:typeof requested==="string"&&requested.trim()?Number(requested):NaN;
-    const maxChars=Number.isFinite(number)?Math.max(1,Math.min(700_000,Math.trunc(number))):700_000;
-    const raw=this.storage.get(KEY)??"";
-    const log=raw.slice(-maxChars);
-    return {success:true,action:"pullDebugLog",log,truncated:log.length<raw.length,totalChars:raw.length};
+    return debugLogReply(this.storage.get(KEY), {maxChars:requested});
   }
+}
+
+/** Normalize on the original wire object: JSONObject distinguishes Long from Double. */
+export function debugLogMaxChars(request:JsonObject):number {
+  return Math.max(1,Math.min(700_000,tokenUsageOptInt(request,'maxChars',700_000)));
+}
+
+/** Count the complete source before truncating, in UTF-16 code units (Kotlin String). */
+export function debugLogReply(raw:string|null|undefined,request:JsonObject):DebugLogReply {
+  const text=raw??'',log=text.slice(-debugLogMaxChars(request));
+  return {success:true,action:'pullDebugLog',log,truncated:log.length<text.length,totalChars:text.length};
 }

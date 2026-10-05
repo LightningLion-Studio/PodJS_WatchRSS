@@ -1,0 +1,466 @@
+{
+  "source": "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/phoneconnection/bluetooth/WatchBluetoothSyncServer.kt",
+  "sourceSha256": "65c35f4c26e84a5b728c5dde2998b248fd3c7666418d735f172799e67710724f",
+  "runtime": "Desktop JVM; native pullDebugLog branch, source injected as a String; Android 36 org.json. Not device evidence.",
+  "cases": [
+    {
+      "raw": "{}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":null}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":true}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":[]}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":{}}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":0}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":-1}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":1.9}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":-0.9}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":2147483648}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":4294967297}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":9007199254740993}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":9223372036854775807}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":9223372036854775808}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":-9223372036854775808}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":9007199254740993.0}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":1e30}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"NaN\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"Infinity\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"-Infinity\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 1,
+        "tailCodeUnits": [
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"3.9\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 3,
+        "tailCodeUnits": [
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\" 4 \"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 4,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"0x10\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"0x1.8p2\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 6,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"3f\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 3,
+        "tailCodeUnits": [
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"+2D\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 2,
+        "tailCodeUnits": [
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"\\u00a04\\u00a0\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":\"bad\"}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":700000}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    },
+    {
+      "raw": "{\"maxChars\":700001}",
+      "expected": {
+        "success": true,
+        "action": "pullDebugLog",
+        "truncated": true,
+        "totalChars": 700008,
+        "logLength": 700000,
+        "tailCodeUnits": [
+          120,
+          20013,
+          55357,
+          56832
+        ]
+      }
+    }
+  ]
+}

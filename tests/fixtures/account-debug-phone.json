@@ -1,0 +1,209 @@
+{
+  "provenance": "Source-derived synthetic phone frames, not device captures. PhoneAccountRepository.buildAccountSyncRequest (action version 1), PhoneBluetoothSyncClient.writeResponseAck; library probe versions 13/14. Tokens are test-only placeholders.",
+  "cases": [
+    {
+      "phoneProtocolVersion": 13,
+      "frames": [
+        {
+          "action": "syncLibrary",
+          "phase": "probe",
+          "version": 13,
+          "deviceId": "fixture-phone",
+          "requestPersistentSession": true,
+          "supportsPersistentSession": true
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        },
+        {
+          "version": 1,
+          "action": "syncAccount",
+          "deviceId": "fixture-phone",
+          "account": {
+            "userId": " user-1 ",
+            "phoneMasked": "138****1234",
+            "installId": "fixture-install",
+            "watchDeviceToken": "fixture-old",
+            "watchAccessToken": "fixture-access",
+            "tokenExpiresAt": 10,
+            "accessTokenExpiresAt": 1700000000000,
+            "watchRefreshToken": "fixture-refresh",
+            "refreshTokenExpiresAt": 1800000000000,
+            "backendBaseUrl": "https://api.example.com/",
+            "posthogHost": "",
+            "posthogProjectApiKey": ""
+          },
+          "entitlement": {
+            "plan": " member ",
+            "active": true,
+            "expiresAt": 1800000000000,
+            "features": [
+              " cloud ",
+              "summary"
+            ]
+          },
+          "telemetry": {
+            "anonymousEnabled": true,
+            "diagnosticsEnabled": false,
+            "sampleRate": 1
+          }
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        },
+        {
+          "action": "pullDebugLog",
+          "maxChars": 3
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        },
+        {
+          "action": "syncSession",
+          "phase": "complete"
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        }
+      ]
+    },
+    {
+      "phoneProtocolVersion": 14,
+      "frames": [
+        {
+          "action": "syncLibrary",
+          "phase": "probe",
+          "version": 14,
+          "deviceId": "fixture-phone",
+          "requestPersistentSession": true,
+          "supportsPersistentSession": true
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        },
+        {
+          "version": 1,
+          "action": "syncAccount",
+          "deviceId": "fixture-phone",
+          "account": {
+            "userId": " user-1 ",
+            "phoneMasked": "138****1234",
+            "installId": "fixture-install",
+            "watchDeviceToken": "fixture-old",
+            "watchAccessToken": "fixture-access",
+            "tokenExpiresAt": 10,
+            "accessTokenExpiresAt": 1700000000000,
+            "watchRefreshToken": "fixture-refresh",
+            "refreshTokenExpiresAt": 1800000000000,
+            "backendBaseUrl": "https://api.example.com/",
+            "posthogHost": "",
+            "posthogProjectApiKey": ""
+          },
+          "entitlement": {
+            "plan": " member ",
+            "active": true,
+            "expiresAt": 1800000000000,
+            "features": [
+              " cloud ",
+              "summary"
+            ]
+          },
+          "telemetry": {
+            "anonymousEnabled": true,
+            "diagnosticsEnabled": false,
+            "sampleRate": 1
+          }
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        },
+        {
+          "action": "pullDebugLog",
+          "maxChars": 3
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        },
+        {
+          "action": "syncSession",
+          "phase": "complete"
+        },
+        {
+          "action": "ack",
+          "phase": "received",
+          "success": true,
+          "applied": false
+        },
+        {
+          "action": "ack",
+          "phase": "applied",
+          "success": true,
+          "applied": true
+        }
+      ]
+    }
+  ]
+}
