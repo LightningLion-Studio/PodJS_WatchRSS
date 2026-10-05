@@ -1,3 +1,6 @@
+import {debugGate} from '../../debug/host.ts';
+import type {DebugBluetoothSession} from '../../debug/bluetooth.ts';
+import {DebugToolsScreen} from '../DebugToolsScreen.tsx';
 import { Show } from "solid-js";
 import { enqueueRemoteInput } from "../../remote-input/inbox.ts";
 import type { ReaderPresetState } from "../../reader/preset-store.ts";
@@ -34,6 +37,7 @@ interface PresetActions {
 type ReaderPresetScreenProps = Parameters<typeof ReaderPresetScreen>[0];
 
 interface SettingsRoutesProps {
+  createDebugBluetooth?:()=>DebugBluetoothSession;
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
@@ -55,6 +59,7 @@ interface SettingsRoutesProps {
 export function SettingsRoutes(props: SettingsRoutesProps) {
   return (
     <>
+      <Show when={props.page()==="debug-tools"&&debugGate.allowed}><DebugToolsScreen width={props.width} height={props.height} active={props.active} services={props.services} entry={props.entry} createBluetooth={props.createDebugBluetooth}/></Show>
       <Show when={props.page() === "settings-llm-usage"}>
         <LlmUsageScreen
           width={props.width}

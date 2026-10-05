@@ -1,3 +1,5 @@
+import {debugGate} from '../debug/host.ts';
+import {DebugBluetoothSession} from '../debug/bluetooth.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('application-host');
 import {hostAppLogger} from '../logs/logger-host.ts';
@@ -45,5 +47,5 @@ export function startApplicationForegroundSync(){
  },{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);},offerIpEndpoint:async descriptor=>(await ipReady)?.offer(descriptor)??false});
  const ready=Promise.all([bluetooth.ready,ipReady]);void ready.catch(()=>{});
  let closing:Promise<void>|undefined;
- return {ready,bluetooth:{get state(){return bluetooth.state;},subscribe:(observer:Parameters<ApplicationForegroundSync['subscribe']>[0])=>bluetooth.subscribe(observer),refresh:()=>bluetooth.refresh()},setMediaEnabled:(enabled:boolean)=>bluetooth.setMediaEnabled(enabled),refresh:()=>{ip?.refresh();return bluetooth.refresh();},dispose:()=>closing??=(async()=>{disposed=true;clearRemoteInput();stopNetwork();stopLifecycle();await ipReady.catch(()=>{});await Promise.all([ip?.dispose(),bluetooth.dispose(),disposeReaderPreview()]);})()};
+ return {ready,createDebugBluetooth:()=>{debugGate.require();return new DebugBluetoothSession(debugGate,{acquire:()=>bluetooth.acquireExclusive(),listener:()=>{let inner:ReturnType<typeof createRfcommLibraryListener>|undefined,stopped=false;return {start:async options=>{const repository=await getLibrarySyncRepository();if(stopped)throw Error('Bluetooth sync cancelled');inner=createRfcommLibraryListener(repository);return inner.start({...options,handleAction,watchCapabilities,onActionCompleted:result=>{if(result.request.action==='syncLibrary')notifyLibraryChanged();}});},stop:()=>{stopped=true;inner?.stop();}};},keepAwake:active=>displayPower.keepAwake('debug-bt-sync',active)});},bluetooth:{get state(){return bluetooth.state;},subscribe:(observer:Parameters<ApplicationForegroundSync['subscribe']>[0])=>bluetooth.subscribe(observer),refresh:()=>bluetooth.refresh()},setMediaEnabled:(enabled:boolean)=>bluetooth.setMediaEnabled(enabled),refresh:()=>{ip?.refresh();return bluetooth.refresh();},dispose:()=>closing??=(async()=>{disposed=true;clearRemoteInput();stopNetwork();stopLifecycle();await ipReady.catch(()=>{});await Promise.all([ip?.dispose(),bluetooth.dispose(),disposeReaderPreview()]);})()};
 }

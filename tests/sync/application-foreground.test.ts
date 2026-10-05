@@ -58,3 +58,10 @@ test('read-only observers see scalar results and errors without affecting applic
  const length=events.length;stop();await f.clock.advance(500);expect(events).toHaveLength(length);
  expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
 });
+test('debug exclusive ownership waits for foreground stop and resumes only after release',async()=>{
+ const f=fixture();f.repository.resolve(f.repo);await f.runtime.ready;f.peer();
+ const release=await f.runtime.acquireExclusive();expect(f.sessions[0].stops).toBe(1);
+ await expect(f.runtime.acquireExclusive()).rejects.toThrow('owned');
+ f.lifecycle('background');f.lifecycle('active');await flush();await f.clock.advance(5000);expect(f.sessions).toHaveLength(1);
+ release();await flush();expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
+});

@@ -46,8 +46,8 @@
 | 滚轮音量开关、防干扰、静音开播音量上限及播放器接线 | **已实现（源码级）** | 原生 `ui/settings/MainSettingsCatalog.kt:19-31`、`RssPlayerActivity.kt:49-89`；PodJS `src/ui/media-volume-settings.tsx`、`src/ui/VideoPlayerScreen.tsx`、`src/ui/SpeechPlaybackScreen.tsx`、`src/media/start-volume.ts` | 高 | S |
 | 高级设置：缓存用量和上限、正文图片预取档位、同步无声音频保活、按设备能力显示系统分享开关 | **已实现（源码级）**：设置已接入缓存维护、正文预取和同步运行时；熄屏保活效果未验证 | 原生 `AdvancedSettingsActivity.kt:22-32`、`ui/screen/rss/SettingsScreen.kt:199-230,705-718`；PodJS `src/ui/advanced-cache-settings.tsx`、`src/ui/SettingsScreen.tsx`、`src/ui/screen.tsx`、`src/main.tsx`、`src/cache/managed.ts` | 高 | S |
 | 正式版朗读语速页、手机扫码配置语音源/API Key 并保存配置 | **已实现（源码级）**：有独立语速存储与配置传输；本任务未试听 | 原生 `TtsSettingsActivity.kt:25-37`、`ui/screen/rss/TtsSettingsScreen.kt:99-109,285-295`；PodJS `src/ui/SettingsScreen.tsx`、`src/ui/TtsConfigScreen.tsx`、`src/tts/config-store.ts`、`src/tts/config-http.ts`、`src/tts/speech-port.ts` | 高 | S |
-| debug 版手表端详细 TTS 配置：选择引擎、本地/后端默认、状态信息与连通性测试 | **缺失（仅 debug 能力）**：PodJS 手表 UI 只有语速和手机配置入口；已有配置数据和合成能力不能代替详细设置/测试界面 | 原生 `ui/screen/rss/TtsSettingsScreen.kt:113-278,341-342`、`ui/viewmodel/TtsSettingsViewModel.kt:104-149,238-283`；PodJS `src/ui/SettingsScreen.tsx`、`src/ui/TtsConfigScreen.tsx` | 低 | M |
-| debug 设置内重新进入新手引导及大列表/大文章性能工具入口 | **缺失（仅 debug 能力）**：PodJS 设置未提供这些入口；不是正式版主流程缺口 | 原生 `SettingsActivity.kt:59-76`、`ui/screen/rss/SettingsScreen.kt:538-550,657-684`；PodJS `src/ui/SettingsScreen.tsx`、`src/ui/screen.tsx` | 低 | S |
+| debug 版手表端详细 TTS 配置：选择引擎、本地/后端默认、状态信息与连通性测试 | **已实现（G1 源码/本地测试；设备 PENDING）** | 原生 TtsSettingsScreen/TtsSettingsViewModel/TtsProviderCatalog；PodJS `src/debug/tts.ts`、`src/ui/DebugToolsScreen.tsx`、`src/tts/config-store.ts`：五种引擎/原生默认值、后端账号校验、语速、配置状态、真实合成连通测试；本地测试与原生一样仅确认本地启用。严格 host debugBuild 门控。 | 低 | M |
+| debug 设置内重新进入新手引导及大列表/大文章性能工具入口 | **已实现（G1 源码/本地测试；设备 PENDING）** | `src/ui/DebugToolsScreen.tsx`、`src/ui/StartupGate.tsx`：强制进入引导不预先覆盖同意记录，完成/退出回调试页；原生规模数据复用正式 Feed/Reader 组件；框架 JankStats/FrameMetrics 指标。release/旧 host 无入口、直接工具挂载无副作用。 | 低 | S |
 | AI 总结启用/自动总结、四种提示词名称和说明、选中状态与持久化 | **已实现** | 原生 `LlmPromptPresetActivity.kt:23-33`、`ui/viewmodel/LlmSummaryViewModel.kt:63-71`；PodJS `src/ui/LlmPromptPresetScreen.tsx`、`src/ui/SettingsScreen.tsx`、`src/settings/store.ts` | 中 | S |
 | AI 总结等待原文、正文截取与清理、调用后端默认模型、授权刷新重试、失败重试与消耗记录 | **已实现（源码级）**：PodJS 通过阅读页内联卡片展示总结；不因没有同名 Activity 判定整个总结功能缺失 | 原生 `DetailActivity.kt:151-161`、`ui/viewmodel/LlmSummaryViewModel.kt:126-204,227-311`；PodJS `src/ui/ReaderScreen.tsx`、`src/llm/source.ts`、`src/llm/summary.ts`、`src/llm/runtime.ts` | 高 | S |
 | 总结结果按“显示 Token 用量”设置展示本次输入/输出/总 Token；完整错误原因可回看 | **已实现（源码级，设备待验）**（`454b542`，合并 `79d417f`） | 原生 `LlmSummaryActivity.kt:31-37`、`ui/screen/rss/LlmSummaryScreen.kt:163-185,214-276`；PodJS `src/ui/SettingsScreen.tsx`、`src/ui/ReaderScreen.tsx`、`src/llm/summary.ts` 已消费 `llmShowTokenUsage` 并显示输入/输出/总 Token，失败原因持久保留且可重试 | 中 | M |
@@ -70,4 +70,4 @@
 ## 建议增量（按优先级）
 
 1. **设备验收（高）**：验证导入文章删除及同步墓碑、阅读页返回/后台最终进度、RSS 抖音失效源恢复、首页进入当前朗读文章、预设单行真实画面和 Token/账号状态展示；源码测试和打包不能代替这些证据。
-2. **debug-only 范围决策（低）**：仅在用户明确需要迁移原生 debug 产品面时，再排入详细 TTS 设置、重新进入引导和性能工具；这些不是当前 release 对齐阻塞。
+2. **debug-only 范围（G1 更新）**：用户已要求迁移；详细 TTS、重新引导、性能入口现已接入 host debugBuild 门控。本地测试不代替真机视听/手势/蓝牙/性能验证，全部设备 PENDING。

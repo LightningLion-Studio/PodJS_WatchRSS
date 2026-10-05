@@ -14,6 +14,7 @@ import type { VirtualListHandle } from "@pocketjs/framework/virtual-list";
 import type { HttpExportMode } from "../../remote-input/exports.ts";
 
 export type Page =
+  | "debug-tools"
   | "add-rss"
   | "remote-input"
   | "log-upload"
