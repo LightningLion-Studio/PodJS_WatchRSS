@@ -166,6 +166,7 @@ export default function WatchRSS(props: {
   const saveActivity=()=>untrack(()=>{
     if(!resumeReady())return;
     for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();
+    resumeStore.save(resumeTargetForStack(stack()));
     const next=captureActivityNavigation(activityStateHub.read(),stack());
     void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
   });
@@ -738,10 +739,10 @@ export default function WatchRSS(props: {
         const playback=entries.at(-1);
         if(playback?.page==='video'&&playback.videoTarget){
           const target=playback.videoTarget;
-          // Re-resolve signed URLs/headers from current credentials, never restore them from a Bundle.
+          // Restore identities from Activity memory; Douyin URLs come from the secure queue, headers from current credentials.
           owned=entries.slice(0,-1);setStack(owned);
           if(target.kind==='bili')await biliNavigate({...target,name:'player'},playback.memory);
-          else if(target.kind==='douyin')await restoreDouyinVideo(target.awemeId,target.immersive,playback.memory);
+          else if(target.kind==='douyin')await restoreDouyinVideo(target.awemeId,target.immersive,playback.memory,target.detailPlayback);
           else {const rss=await props.services.getArticle(target.articleId);if(rss&&stack()===owned)await openRssVideo(rss,target.url,playback.memory);}
         }
         return;
@@ -775,6 +776,11 @@ export default function WatchRSS(props: {
           { page: "home" },
           { page: "bili", biliRoute: target.route as BiliRoute },
         ]);
+        return;
+      }
+      if (target.route.name === "player" && target.route.savedQueue === true) {
+        owned=[{ page: "home" }, { page: "douyin", douyinRoute: { name: "entry" } }];setStack(owned);
+        await restoreDouyinVideo(String(target.route.awemeId),target.route.immersive===true,undefined,target.route.detailPlayback===true);
         return;
       }
       setStack([

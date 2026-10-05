@@ -8,7 +8,7 @@ export const CONTENT_ACTIVITY_KEY='watchrss.content-activity';
 export interface RouteMemory {id:string;saved:Record<string,unknown>;retained:Record<string,unknown>}
 export type ActivityRoute=RouteEntry&{memory?:RouteMemory;articleId?:string;videoTarget?:VideoTarget};
 export type VideoTarget={kind:'bili';aid?:number|string;bvid?:string;cid:number|string;title?:string}
- |{kind:'douyin';awemeId:string;immersive?:boolean}|{kind:'rss';articleId:string;url:string};
+ |{kind:'douyin';awemeId:string;immersive?:boolean;detailPlayback?:boolean}|{kind:'rss';articleId:string;url:string};
 interface Descriptor {page:Page;id:string;args:Record<string,unknown>;ui:Record<string,unknown>}
 let sequence=0;
 export function routeMemory(entry:ActivityRoute):RouteMemory{return entry.memory??=( {id:`r${++sequence}`,saved:{},retained:{}} );}
@@ -28,7 +28,7 @@ function argsFor(entry:ActivityRoute):Record<string,unknown>{
  if(entry.videoTarget){
   const t=entry.videoTarget;
   const identity=t.kind==='bili'?{kind:t.kind,aid:t.aid,bvid:t.bvid,cid:t.cid,title:t.title}
-   :t.kind==='douyin'?{kind:t.kind,awemeId:entry.playback?.awemeId??t.awemeId,immersive:t.immersive}
+   :t.kind==='douyin'?{kind:t.kind,awemeId:entry.playback?.awemeId??t.awemeId,immersive:t.immersive,...(t.detailPlayback?{detailPlayback:true}:{})}
    :{kind:t.kind,articleId:t.articleId,url:t.url};
   args.videoTarget=JSON.parse(JSON.stringify(identity));
  }
@@ -64,7 +64,7 @@ function decodedRoute(raw:Descriptor,retained:unknown,debug:boolean):ActivityRou
    const target=validateResumeTarget({version:1,kind:'bili',route:{...t,name:'detail'}});
    if(target?.kind!=='bili'||!(typeof t.cid==='number'&&Number.isFinite(t.cid)||identifier(t.cid)))return null;
    entry.videoTarget={kind:'bili',...target.route,cid:t.cid} as VideoTarget;
-  }else if(t.kind==='douyin'&&identifier(t.awemeId))entry.videoTarget={kind:'douyin',awemeId:t.awemeId,immersive:t.immersive===true};
+  }else if(t.kind==='douyin'&&identifier(t.awemeId))entry.videoTarget={kind:'douyin',awemeId:t.awemeId,immersive:t.immersive===true,...(t.detailPlayback===true?{detailPlayback:true}:{})};
   else if(t.kind==='rss'&&identifier(t.articleId)&&text(t.url)&&!!t.url)entry.videoTarget={kind:'rss',articleId:t.articleId,url:t.url};
   else return null;
  }

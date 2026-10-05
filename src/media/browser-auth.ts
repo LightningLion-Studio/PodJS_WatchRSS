@@ -8,6 +8,7 @@ export interface BrowserAuthorizationOptions {
   /** Optional page-owned script returning a QR data image or null. */
   qrExtractionScript?: string
   onStatus?: (status: BrowserAuthStatus) => void
+  completeOnLoginPanelHidden?: boolean
 }
 
 export interface BrowserAuthorizationResult {

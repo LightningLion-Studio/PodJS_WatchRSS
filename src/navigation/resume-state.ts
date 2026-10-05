@@ -23,6 +23,8 @@ export interface ResumeStackEntry {
   readerArticle?: { id?: string };
   biliRoute?: Record<string, unknown>;
   douyinRoute?: Record<string, unknown>;
+  playback?: { platform?: string; immersive?: boolean; detailPlayback?: boolean };
+  queue?: { snapshot(): { item: { awemeId: string } | null } };
 }
 
 const biliRoutes = new Set([
@@ -67,6 +69,9 @@ function sanitizedDouyinRoute(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const originalName = text(raw.name);
+  if (originalName === "player" && raw.savedQueue === true && text(raw.awemeId)) {
+    return { name: "player", awemeId: text(raw.awemeId)!, savedQueue: true, immersive: raw.immersive === true, detailPlayback: raw.detailPlayback === true };
+  }
   const name = originalName === "player" ? "detail" : originalName;
   if (!name || !douyinRoutes.has(name)) return null;
   const route: Record<string, unknown> = { name };
@@ -105,6 +110,12 @@ const NATIVE_RESUMABLE_DOUYIN = new Set(["entry", "feed", "detail", "history"]);
 export function resumeTargetForStack(entries: readonly ResumeStackEntry[]): ResumeTarget {
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index]!;
+    if (entry.page === "video" && entry.playback?.platform === "douyin") {
+      const awemeId = text(entry.queue?.snapshot().item?.awemeId);
+      if (awemeId) return { version: 1, kind: "douyin", route: {
+        name: "player", awemeId, savedQueue: true, immersive: entry.playback.immersive === true, detailPlayback: entry.playback.detailPlayback === true,
+      } };
+    }
     if (entry.page === "reader") {
       const articleId = text(entry.readerArticle?.id);
       if (articleId) return { version: 1, kind: "reader", articleId };

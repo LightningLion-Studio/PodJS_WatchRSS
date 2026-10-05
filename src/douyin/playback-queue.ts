@@ -2,7 +2,7 @@ import type { DouyinClient } from "./client.ts";
 import type { DouyinItem, DouyinResult } from "./types.ts";
 
 export interface DouyinPlaybackQueueState { item: DouyinItem; playlist: DouyinItem[]; index: number; cursor: string | null; hasMore: boolean; }
-export interface DouyinPlaybackQueueOptions { items: DouyinItem[]; selectedAwemeId: string; cursor?: string | null; hasMore?: boolean; limit?: number; }
+export interface DouyinPlaybackQueueOptions { items: DouyinItem[]; selectedAwemeId: string; cursor?: string | null; hasMore?: boolean; limit?: number; fixedSources?: boolean; }
 const cancelled=<T>():DouyinResult<T>=>({ok:false,code:"CANCELLED",message:"播放队列操作已被更新的导航取消"});
 
 export class DouyinPlaybackQueue {
@@ -15,23 +15,32 @@ export class DouyinPlaybackQueue {
   private quarantined=new Set<string>();
   private persistence:Promise<void>=Promise.resolve();
   private readonly limit:number;
+  private readonly fixedSources:boolean;
   constructor(private readonly client:DouyinClient,options:DouyinPlaybackQueueOptions){
+    this.fixedSources=options.fixedSources===true;
     this.limit=Math.max(1,Math.min(200,Math.floor(options.limit??(options.hasMore === false ? 200 : 40))));
     const items=this.unique(options.items),selected=options.selectedAwemeId.trim(),index=Math.max(0,items.findIndex(x=>x.awemeId===selected));
     this.items=items.slice(Math.max(0,index-this.limit+1),Math.max(this.limit,index+1));
     this.index=Math.max(0,this.items.findIndex(x=>x.awemeId===selected));
-    this.cursor=options.cursor?.trim()||null;this.hasMore=options.hasMore===true;
+    this.cursor=options.cursor?.trim()||null;this.hasMore=!this.fixedSources&&options.hasMore===true;
   }
   snapshot():Omit<DouyinPlaybackQueueState,"item">&{item:DouyinItem|null}{return {item:this.items[this.index]??null,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore};}
+  updateCurrentUrl(url:string){const current=this.items[this.index];if(current&&url.trim())this.items[this.index]={...current,playUrl:url};}
   cancel(){this.generation++;this.previewGeneration++;}
   /** Playback records on foreground preparation, never speculative resolution.
    * Native list/history detail-entry writes separately update the same deduplicated store. */
+  /** Save the current pager before playback succeeds, as native buildResumeIntent does. */
+  async persist():Promise<void>{
+    const state=this.snapshot();if(!state.item)return;
+    const write=this.persistence.catch(()=>{}).then(()=>this.client.savePlaybackQueue(state.playlist,state.item!.awemeId,state.cursor,state.hasMore));
+    this.persistence=write;await write;
+  }
   async settled():Promise<void>{
     const state=this.snapshot();if(!state.item)return;const item=state.item;
     const write=this.persistence.catch(()=>{}).then(async()=>{await this.client.recordHistory(item);await this.client.saveRecentWindow(state.playlist,item.awemeId,state.cursor,state.hasMore);await this.client.savePlaybackQueue(state.playlist,item.awemeId,state.cursor,state.hasMore);});
     this.persistence=write;await write;
   }
-  async prefetch():Promise<void>{const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId);}}
+  async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId);}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
   async preview(direction:"next"|"previous"):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const op=++this.previewGeneration,current=this.index;
@@ -67,6 +76,7 @@ export class DouyinPlaybackQueue {
     return {ok:true,data:{item,playlist:[...this.items],index:target,cursor:this.cursor,hasMore:this.hasMore},source:"feed-cache"};
   }
   async recover():Promise<DouyinResult<DouyinPlaybackQueueState>>{
+    if(this.fixedSources)return this.current();
     this.previewGeneration++;const op=++this.generation;const result=await this.resolveAt(this.index,op,true);
     if(op!==this.generation)return cancelled();if(result.ok)return result;return this.discard();
   }
@@ -101,14 +111,14 @@ export class DouyinPlaybackQueue {
   }
   private async resolveAt(target:number,op:number,forceRefresh=false):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const candidate=this.items[target];if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
-    const resolved=await this.client.resolvePlayback(candidate.awemeId,{forceRefresh});
+    const resolved:DouyinResult<DouyinItem>=this.fixedSources?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId,{forceRefresh});
     if(op!==this.generation)return cancelled();if(!resolved.ok)return resolved;
     this.items[target]=resolved.data;this.index=target;
     return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};
   }
   private async resolvePreviewAt(target:number,op:number):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const candidate=this.items[target];if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
-    const resolved=await this.client.resolvePlayback(candidate.awemeId);
+    const resolved:DouyinResult<DouyinItem>=this.fixedSources?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId);
     if(op!==this.previewGeneration||target<0||target>=this.items.length)return cancelled();if(!resolved.ok)return resolved;
     this.items[target]=resolved.data;
     return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:target,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};

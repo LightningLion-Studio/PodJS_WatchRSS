@@ -134,7 +134,7 @@ test('production immersive player keeps restored mode through prepare and next s
 
 
 let resolveCurrent!:(id:string)=>Promise<any>,queueSnapshot:any;
-mock.module('../src/media-services.ts',()=>({biliClient:{},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>queueSnapshot,buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
+mock.module('../src/media-services.ts',()=>({biliClient:{},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:()=>{throw Error('unexpected login');}}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
@@ -147,11 +147,11 @@ function mediaController(){
 const item=(id:string)=>({awemeId:id,description:'fixture '+id,playUrl:'CURRENT-STREAM-'+id,authorId:'author',authorName:'fixture',createdAtSeconds:1,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:100000,variants:[]});
 
 test('production media restoration cancels late resolution after new navigation and gives memory only to its own video',async()=>{
- let release!:(value:any)=>void;resolveCurrent=()=>new Promise(resolve=>release=resolve);queueSnapshot=null;
+ let release!:(value:any)=>void;resolveCurrent=async()=>{throw Error('restore must not fetch detail');};queueSnapshot=new Promise(resolve=>release=resolve);
  const cancelled=mediaController(),memory={id:'r500',saved:{'player-scale':'expanded'},retained:{}};
- const pending=cancelled.controller.restoreDouyinVideo('fixture-a',true,memory);cancelled.navigate();release({ok:true,data:item('fixture-a')});await pending;
+ const pending=cancelled.controller.restoreDouyinVideo('fixture-a',true,memory);cancelled.navigate();release({anchorAwemeId:'fixture-a',items:[item('fixture-a')],cursor:null,hasMore:false});await pending;
  expect(cancelled.navigations).toEqual([]);expect(cancelled.errors).toEqual([]);
- resolveCurrent=async id=>({ok:true,data:item(id)});queueSnapshot={anchorAwemeId:'fixture-a',items:[item('fixture-a'),item('fixture-b')],cursor:'actual fixture cursor',hasMore:true};
+ queueSnapshot={anchorAwemeId:'fixture-a',items:[item('fixture-a'),item('fixture-b')],cursor:'actual fixture cursor',hasMore:true};
  const restored=mediaController();await restored.controller.restoreDouyinVideo('fixture-a',true,memory);
  const video=restored.navigations[0];expect(video.memory).toBe(memory);expect(video.videoTarget).toEqual({kind:'douyin',awemeId:'fixture-a',immersive:true});expect(video.playback.url).toBe('CURRENT-STREAM-fixture-a');expect(video.queue.snapshot().playlist).toHaveLength(2);
  const state=captureActivityNavigation({saved:{},retained:{}},[{page:'home'},video]);expect(JSON.stringify(state)).not.toContain('CURRENT-STREAM');expect(JSON.stringify(state)).not.toContain('CURRENT-CREDENTIAL');

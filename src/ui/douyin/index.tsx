@@ -1,3 +1,4 @@
+import { douyinVideoTarget } from "../../reader/media.ts";
 import {appLogger} from '../../logs/app-logger.ts';
 import {DouyinLoginLog} from '../../logs/douyin-login.ts';
 import { ReaderBody } from "../ReaderBody.tsx";
@@ -38,7 +39,7 @@ export type DouyinRoute =
   | { name: "settings" }
   | { name: "player"; awemeId: string };
 
-export interface DouyinPlayRequest { immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
+export interface DouyinPlayRequest { detailPlayback?:boolean; immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
 export type DouyinPlaybackCommand = "toggle" | "previous" | "next" | "replay";
 export interface DouyinSettingsBindings {
   originalContentEnabled: boolean;
@@ -138,7 +139,7 @@ function LoginScreen(props: DouyinScreenProps) {
       const available = await douyinBrowserAvailable({ ...browser, hasCapability });
       if (disposed || current !== generation || gate()) return;
       if (!available) { setBrowserAvailable(false); return; }
-      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
+      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
         if (disposed || current !== generation || !acceptingStatus) return;
         loginLog.status(event);
         setAuthStatus(state => updateLoginStatus(state, event));
@@ -238,11 +239,11 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
     const current = item(); if (!current) return;
     try {
       const result = await props.client.resolvePlayback(current.awemeId);
-      if (!result.ok) { setError(result.message); return; }
-      const route = props.route, historyQueue = route.name === "detail" ? route.playlist : undefined;
-      const snapshot = props.client.feedSnapshot();
-      const playlist = historyQueue ?? (snapshot.items.some(entry => entry.awemeId === current.awemeId) ? snapshot.items : [current, ...snapshot.items]);
-      props.onPlay({ item: current, playback: result.data, playlist, cursor: historyQueue ? undefined : snapshot.cursor ?? undefined, hasMore: historyQueue ? false : snapshot.hasMore });
+      // RssPlayerViewModel allows the stored direct URL when initial refresh fails.
+      const playback = result.ok ? result.data : current.playUrl.trim() && !douyinVideoTarget(current.playUrl) ? current : null;
+      if (!playback) { setError(result.ok ? "播放地址为空" : result.message); return; }
+      // Native history/detail uses a single RssPlayerActivity, never the history/feed list.
+      props.onPlay({ item: current, playback, playlist: [playback], hasMore: false, detailPlayback: true });
       props.onNavigate({ name: "player", awemeId: current.awemeId });
     } catch (error) { setError(String(error)); }
   };
@@ -279,7 +280,7 @@ function HistoryScreen(props: DouyinScreenProps) {
   const refresh = async () => { try { setHistory(await props.client.listHistory()); } catch (e) { setError(String(e)); } };
   const openDetail = detailNavigation(props, refresh);
   createEffect(() => { if (props.route.name === "history") void refresh(); });
-  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => void openDetail(item, history().map(entry => entry.item)).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
+  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 

@@ -76,13 +76,13 @@ test('detail passes selected reader preset and offline metadata to the common re
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,preset,route:{name:'detail',awemeId:'1',item,playlist},client,onPlay:(value:any)=>request=value,onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
   await settle();expect(readerProps.preset).toBe(preset);expect(readerProps.fontSize).toBe(23);expect(readerProps.title).toBe('title 1');
   readerProps.onMedia({type:'video'});await settle();
-  expect(request.playlist).toEqual(playlist);expect(request.hasMore).toBe(false);expect(request.cursor).toBeUndefined();expect(destination).toEqual({name:'player',awemeId:'1'});
+  expect(request.playlist).toEqual([item]);expect(request.hasMore).toBe(false);expect(request.cursor).toBeUndefined();expect(destination).toEqual({name:'player',awemeId:'1'});
 });
-test('history row marks before navigation and retains the pre-write ordered queue', async () => {
+test('history row marks before navigation without passing a history playback queue', async () => {
   const history=[sample('3'),sample('2'),sample('1')].map(item=>({item,watchedAtMillis:1}));let destination:any;const writes:any[]=[];let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
   const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'history'},client:{listHistory:async()=>history,recordHistory:async(item:any)=>{writes.push(item);await gate;}},onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
   await settle();const row=nodes(root).find(n=>n.props.onPress&&nodes(n).some(child=>child.kind==='Text'&&String(child.props.children).includes('title 2')))!;
-  row.props.onPress();row.props.onPress();expect(writes).toEqual([sample('2')]);expect(destination).toBeUndefined();release();await settle();expect(destination.item).toEqual(sample('2'));expect(destination.playlist).toEqual(history.map(e=>e.item));
+  row.props.onPress();row.props.onPress();expect(writes).toEqual([sample('2')]);expect(destination).toBeUndefined();release();await settle();expect(destination.item).toEqual(sample('2'));expect(destination.playlist).toBeUndefined();
 });
 
 test('feed row marks watched even without playback before opening offline detail', async () => {
@@ -103,6 +103,7 @@ test('saved detail metadata lookup does not create Douyin watched history on rea
 test('M4 renders PNG login and JPEG verification, clears QR and reports webpage state', async () => {
   probe = async () => ({status:'available'}); const f=mount(); await settle(); f.press(); await settle();
   expect(authOptions.qrExtractionScript).toBe('framework-status-script');
+  expect(authOptions.completeOnLoginPanelHidden).toBe(true);
   expect(authOptions.userAgent).toBe('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0');
   const emit=authOptions.onStatus;
   emit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'});
@@ -132,4 +133,47 @@ for (const cause of ['network','dispose'] as const) test(`M4 ignores status afte
   if(cause==='network') network('bluetooth'); else stops.pop()!();
   const before=f.text();emit({type:'qr',kind:'secondVerify',mime:'image/jpeg',imageBase64:'AAAA'});
   expect(f.text()).toBe(before);expect(calls).toContain('cancel');
+});
+
+
+test('D2 verifying suppresses late login and second-step QR until verification ends', async()=>{
+  probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
+  const emit=authOptions.onStatus;
+  emit({type:'verifying',active:true});
+  for(const kind of ['login','secondVerify'])emit({type:'qr',kind,mime:'image/png',imageBase64:'AAAA'});
+  expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+  expect(f.text().replaceAll('\n','')).toContain('请在网页中完成二步验证');
+  emit({type:'verifying',active:false});
+  emit({type:'qr',kind:'secondVerify',mime:'image/jpeg',imageBase64:'BBBB'});
+  expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toBe('data:image/jpeg;base64,BBBB');
+});
+test('D2 network ban cancels login, WiFi return allows fresh attempt and rejects old success',async()=>{
+  probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
+  const oldFinish=finishAuth,oldEmit=authOptions.onStatus;
+  network('bluetooth');expect(f.text().replaceAll('\n','')).toContain('当前为蓝牙网络');
+  network('unavailable');expect(f.text().replaceAll('\n','')).toContain('未检测到可用互联网');
+  network('checking');expect(f.text().replaceAll('\n','')).toContain('正在检测互联网');
+  network('available');await settle();f.press();await settle();
+  oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'OLD'});oldFinish({cookie:'sessionid=old'});await settle();
+  expect(calls.filter(c=>c==='authorize')).toHaveLength(2);
+  expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+  rejectAuth({code:'cancelled'});await settle();
+});
+test('D2 failed authorization clears QR and can retry without exposing raw exception',async()=>{
+  probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
+  const oldEmit=authOptions.onStatus;
+  oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'});
+  rejectAuth(new Error('SECRET-cookie-input'));await settle();
+  expect(f.text().replaceAll('\n','')).toContain('加载失败，请重试');expect(f.text()).not.toContain('SECRET');
+  expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+  f.press();await settle();oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'OLD'});
+  expect(calls.filter(c=>c==='authorize')).toHaveLength(2);expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+});
+
+test('D2 history detail initial refresh failure retains the native direct-URL fallback as a single item',async()=>{
+ const item=sample('stored');let request:any;
+ const client={resolvePlayback:async()=>({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'})};
+ createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:item.awemeId,item},client,onPlay:(value:any)=>request=value,onNavigate(){},settings:{}} as unknown as DouyinScreenProps);});
+ await settle();readerProps.onMedia({type:'video'});await settle();
+ expect(request).toMatchObject({playback:item,playlist:[item],hasMore:false,detailPlayback:true});
 });

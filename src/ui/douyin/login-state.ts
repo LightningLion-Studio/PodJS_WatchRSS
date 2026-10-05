@@ -8,12 +8,23 @@ export function loginGate(status: InternetStatus, browserAvailable: boolean) {
   return null;
 }
 
+const WEBVIEW_ERRORS: Record<string, string> = {
+  '-1': '加载失败，请重试', '-2': '无法找到服务器，请检查网络连接',
+  '-3': '不支持的认证方式', '-4': '身份验证失败', '-5': '代理认证失败',
+  '-6': '连接服务器失败，请稍后重试', '-7': '网络读写失败，请重试',
+  '-8': '连接超时，请检查网络后重试', '-9': '页面重定向次数过多',
+  '-10': '不支持的链接协议', '-11': '安全连接失败，请检查网络环境',
+  '-12': '网址格式错误', '-13': '文件访问错误', '-14': '文件不存在',
+  '-15': '请求过于频繁，请稍后重试', '-16': '页面存在安全风险，已被拦截',
+};
 export function loginError(error: unknown): { unavailable: boolean; message: string } {
   const code = (error as { code?: string } | null)?.code;
   if (code === 'webview_unavailable' || code === 'unsupported' || code === 'unavailable')
     return { unavailable: true, message: '当前设备无法初始化 WebView，无法打开登录页' };
+  if (typeof code === 'string' && code.startsWith('webview_load_'))
+    return { unavailable: false, message: WEBVIEW_ERRORS[code.slice('webview_load_'.length)] ?? '加载失败，请重试' };
   if (code === 'cancelled') return { unavailable: false, message: '已取消登录' };
-  return { unavailable: false, message: `登录失败：${String(error)}` };
+  return { unavailable: false, message: '加载失败，请重试' };
 }
 
 
@@ -28,7 +39,7 @@ export const initialLoginStatus = (): LoginStatusState => ({ loading: true, veri
 export function updateLoginStatus(state: LoginStatusState, event: import('@podjs/framework/services').BrowserAuthStatus): LoginStatusState {
   if (state.cancelled) return state;
   switch (event.type) {
-    case 'qr': return { ...state, qr: event, verifying: false, loading: false };
+    case 'qr': if (state.verifying) return state; return { ...state, qr: event, verifying: false, loading: false };
     case 'qrCleared': return { ...state, qr: undefined };
     case 'verifying': return { ...state, verifying: event.active, ...(event.active ? { qr: undefined } : {}) };
     case 'pageState': return { ...state, loading: event.loading, loginPanelVisible: event.loginPanelVisible };

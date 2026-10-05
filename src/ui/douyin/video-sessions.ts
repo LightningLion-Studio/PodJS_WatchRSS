@@ -82,6 +82,7 @@ let nextPoolId=1;
 const state=(value:VideoSessionState):VideoState=>({
   ok:value.ok,state:value.state,positionMs:value.positionMs,durationMs:value.durationMs,
   width:value.width,height:value.height,volume:value.volume,volumeMax:15,
+  errorCode:value.errorCode,hasRenderedFirstFrame:value.hasRenderedFirstFrame,
 });
 
 /** Two fixed host slots. Promotion swaps their roles, then the retired slot is
