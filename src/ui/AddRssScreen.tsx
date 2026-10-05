@@ -1,3 +1,5 @@
+import {useModalInput} from './modal-input.ts';
+import type {ModalInput,ModalInputRecovery} from './service.ts';
 import {restoredSignal,stringState,booleanState} from './route-activity.tsx';
 import {createEffect,createMemo,createSignal,onCleanup,onMount} from "solid-js";
 import {Text,View} from "@pocketjs/framework/components";
@@ -8,7 +10,7 @@ import type {AddChannelPreview,Channel} from "./service.ts";
 const SAFE=18,GAP=8;
 type Inline=(value:string,bounds:{x:number;y:number;width:number;height:number},onChange:(value:string)=>void,onSubmit:()=>void,options?:{hint?:string;fontSizeSp?:number;inputType?:"text"|"uri"})=>Promise<{close():Promise<void>}>;
 
-export function AddRssScreen(props:{width:number;height:number;active:boolean;initialUrl:string;initialPreview?:AddChannelPreview;initialError?:string;preview?:(url:string)=>Promise<AddChannelPreview>;confirm?:(token:string)=>Promise<Channel>;input:(title:string,value:string)=>Promise<string|null>;openInlineInput?:Inline;onAdded:(channel:Channel)=>void;onExisting:(channel:Channel)=>void;ref?:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void}){
+export function AddRssScreen(props:{width:number;height:number;active:boolean;initialUrl:string;initialPreview?:AddChannelPreview;initialError?:string;preview?:(url:string)=>Promise<AddChannelPreview>;confirm?:(token:string)=>Promise<Channel>;input:ModalInput;inputRecovery?:ModalInputRecovery;openInlineInput?:Inline;onAdded:(channel:Channel)=>void;onExisting:(channel:Channel)=>void;ref?:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void}){
   const [url,setUrl]=restoredSignal('retained','add-url',props.initialUrl,stringState),[step,setStep]=createSignal<"input"|"preview"|"existing">(props.initialPreview?.kind==="ready"?"preview":props.initialPreview?.kind==="existing"?"existing":"input");
   const [preview,setPreview]=createSignal<AddChannelPreview|undefined>(props.initialPreview);
   const [loading,setLoading]=createSignal(false),[submitting,setSubmitting]=createSignal(false),[error,setError]=restoredSignal('retained','add-error',props.initialError??'',stringState);
@@ -24,9 +26,10 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
   const onRootBack=()=>false;
   const changeUrl=(value:string)=>{setUrl(value);setError("");};
   const clearError=()=>setError("");
+  const modalInput=useModalInput({key:'add-rss',title:'添加 RSS 地址',value:url,input:props.input,recovery:props.inputRecovery,active:()=>props.active&&step()==='input',onValue:changeUrl,onError:error=>setError(String(error))});
   const openInput=async()=>{
     if(editing())return;
-    if(!props.openInlineInput){const value=await props.input("添加 RSS 地址",url());if(value!==null&&!disposed)changeUrl(value);return;}
+    if(!props.openInlineInput){await modalInput();return;}
     scroller?.scrollTo(0,{immediate:true});editingPadding=verticalPadding();setEditing(true);const current=++editVersion;
     try{
       const opened=await props.openInlineInput(url(),{x:SAFE-4,y:inputTop(),width:props.width-2*SAFE+8,height:56},
@@ -37,8 +40,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
     }catch{
       if(disposed||current!==editVersion)return;
       setEditing(false);
-      const value=await props.input("添加 RSS 地址",url());
-      if(value!==null&&!disposed)changeUrl(value);
+      await modalInput();
     }
   };
   const submit=async()=>{

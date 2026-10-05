@@ -1,4 +1,6 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
+import {modalInputKey} from "./modal-input.ts";
+import type {ModalInput,ModalInputRecovery} from "./service.ts";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Image, View } from "@pocketjs/framework/components";
 import { textInput } from "@podjs/framework/services";
 import { onLifecycleChange } from "@podjs/framework/watch";
@@ -11,7 +13,7 @@ import type { MemoRepository } from "../notes/repository.ts";
 
 type InputSession={close():Promise<void>;setValue(value:string):Promise<void>};
 export interface NoteInlineEditorHandle { close:()=>void }
-export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;initial:MemoNote|null;initialSelection?:number;fallbackInput:(title:string,value?:string)=>Promise<string|null>;onSaved:(note:MemoNote)=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
+export function NoteInlineEditor(props:{width:number;height:number;repository:MemoRepository;initial:MemoNote|null;initialSelection?:number;active?:boolean;fallbackInput:ModalInput;inputRecovery?:ModalInputRecovery;onSaved:(note:MemoNote)=>void;onClose:(note:MemoNote|null)=>void;onError:(message:string)=>void;ref?:(handle:NoteInlineEditorHandle)=>void}){
   const [status,setStatus]=createSignal<NoteDraftSaveState>(props.initial?"saved":"empty");
   const draft=new NoteDraftAutosave(props.repository,props.initial,setStatus,props.onSaved,error=>props.onError(String(error)));
   const history=new RawTextHistory(draft.markdown);
@@ -36,27 +38,48 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
     catch(error){closing=false;if(!disposed)props.onError(String(error));}
   };
   props.ref?.({close:()=>void close()});
+  const inputKey=modalInputKey("note");
+  const modalOptions=(part:string)=>inputKey&&props.inputRecovery?{restorationKey:`${inputKey}:${part}`}:undefined;
+  const live=()=>!disposed&&props.active!==false;
+  const fallback=async(skipTitle=false)=>{
+    if(!live())return;
+    if(!skipTitle){
+      const title=await props.fallbackInput("备忘录标题",draft.title,modalOptions('title'));
+      if(!live())return;
+      if(title!==null){draft.setTitle(title);try{await draft.flush();}catch(saveError){if(live())props.onError(String(saveError));return;}}
+    }
+    if(!live())return;
+    const markdown=await props.fallbackInput("备忘录正文",draft.markdown,modalOptions('body'));
+    if(!live())return;
+    if(markdown!==null)changeMarkdown(markdown);
+    await close();
+  };
   onMount(async()=>{
     const inset=14,fieldWidth=props.width-2*inset,bodyTop=props.initial?108:80.5;
     const documentId="note-editor";
     const viewportHeight=Math.max(56,props.height-42-56);
     try{
+      if(inputKey&&props.inputRecovery){
+        const [titlePending,bodyPending]=await Promise.all([props.inputRecovery.pending(`${inputKey}:title`),props.inputRecovery.pending(`${inputKey}:body`)]);
+        if(!live())return;
+        if(titlePending||bodyPending){await fallback(bodyPending);return;}
+      }
       titleInput=await textInput.openInline(draft.title,{x:inset,y:42.5,width:fieldWidth,height:29.3},value=>draft.setTitle(value),undefined,{hint:props.initial?"未命名笔记":"新建备忘录",fontSizeSp:21.7,fontWeight:700,includeFontPadding:false,textAlign:"center",autoFocus:false,document:{id:documentId,role:"title",viewportHeight,viewportOverhangDp:1,metadata:props.initial?noteMetadata(props.initial):undefined}});
       if(disposed){await closeInputs();return;}
       bodyInput=await textInput.openInline(draft.markdown,{x:inset,y:bodyTop,width:fieldWidth,height:Math.max(56,props.height-bodyTop-56)},changeMarkdown,undefined,{hint:"直接输入原始文本",fontSizeSp:17,fontAsset:"fonts/watch-sans.ttf",fontWeight:400,includeFontPadding:false,multiline:true,keepExisting:true,selectionStart:props.initialSelection,horizontalPaddingDp:0,verticalPaddingDp:0,autoFocus:false,document:{id:documentId,role:"body",viewportHeight,unfocusedCaretColor:"#ff6026"}});
       if(disposed)await closeInputs();
     }catch(error){
       await closeInputs().catch(()=>{});
-      if(disposed)return;
+      if(!live())return;
       // Other hosts without inline fields retain a functional, serialized editor.
-      const title=await props.fallbackInput("备忘录标题",draft.title);
-      if(title!==null){draft.setTitle(title);try{await draft.flush();}catch(saveError){props.onError(String(saveError));return;}}
-      const markdown=await props.fallbackInput("备忘录正文",draft.markdown);
-      if(markdown!==null)changeMarkdown(markdown);
-      await close();
+      await fallback();
     }
   });
-  onCleanup(()=>{disposed=true;removeLifecycle();draft.dispose();void closeInputs();});
+  createEffect(()=>{
+    if(props.active===false&&inputKey&&props.inputRecovery)for(const part of ['title','body'])void props.inputRecovery.dismiss(`${inputKey}:${part}`).catch(()=>{});
+  });
+  onCleanup(()=>{disposed=true;
+    if(inputKey&&props.inputRecovery)for(const part of ['title','body'])void props.inputRecovery.dismiss(`${inputKey}:${part}`).catch(()=>{});removeLifecycle();draft.dispose();void closeInputs();});
   const statusText=()=>({empty:"未填写",pending:"待保存",saving:"保存中…",saved:"已保存",error:"保存失败，请重试"}[status()]);
   return <View class="absolute inset-0 bg-black">
     <View class="absolute top-[0] left-[0] right-[0] h-[56] bg-gradient-to-b from-[#000000] via-[#000000e6] to-transparent items-start justify-center flex-row">

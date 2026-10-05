@@ -24,7 +24,7 @@ M1前：StartupGate有startup saved/retained及大正文文件恢复，主要内
 | BiliLoginActivity | `bili/login` | ScrollState saved；登录请求/二维码VM生命周期，账号凭据持久 | 保存login route/list anchor；重新向真实host/client查登录，不保存二维码/cookie/登录op句柄 | `BiliLoginActivity.kt` / BiliLoginScreen |
 | BiliPlayerActivity | `video/bili` | 目标 Intent/SavedStateHandle；播放记录仓库；控制显隐/缩放普通 remember | 保存 aid/bvid/cid，当前凭据重新解析 playback；不持久化普通 remember 控件，已有播放 checkpoint不改 | `BiliPlayerActivity.kt` / BiliPlayerScreen |
 | BiliReplyDetailActivity | `bili/replies` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；普通remember临时控件重建 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `BiliReplyDetailActivity.kt` / BiliReplyDetailScreen |
-| BiliSearchActivity | `bili/search / results` | NavController saved；draftQuery/activeQuery/分页为 ViewModel retained；LazyListState saved | 完成的查询是 route 身份；已交回 guest 的搜索词 retained；模态输入仍在编辑的草稿见宿主缺口 | `BiliSearchActivity.kt` / BiliSearchScreen, BiliSearchResultScreen |
+| BiliSearchActivity | `bili/search / results` | NavController saved；draftQuery/activeQuery/分页为 ViewModel retained；LazyListState saved | 完成的查询是 route 身份；已交回 guest 的搜索词 retained；M2 keyed modal text/selection 为宿主 retained，新guest重绑确认，process重置 | `BiliSearchActivity.kt` / BiliSearchScreen, BiliSearchResultScreen |
 | BiliSettingsActivity | `bili/settings` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；ViewModel业务数据配置保留、进程重读 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `BiliSettingsActivity.kt` / BiliSettingsScreen |
 | BiliVideoActionsActivity | `bili/actions / share` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；普通remember临时控件重建 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `BiliVideoActionsActivity.kt` / ActionDialogScreen |
 | BluetoothConnectionActivity | `bluetooth-connection` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；普通remember临时控件重建 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `BluetoothConnectionActivity.kt` / BluetoothConnectionScreen |
@@ -40,7 +40,7 @@ M1前：StartupGate有startup saved/retained及大正文文件恢复，主要内
 | DouyinDetailActivity | `douyin/detail` | 无直接识别到saveable滚动（从该Activity/同名screen）；目标Intent；普通remember临时控件重建 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `DouyinDetailActivity.kt` / DetailContent |
 | DouyinEntryActivity | `douyin/entry / feed；video immersive` | immersive pager/entry index/controls/scale/Bluetooth/start-volume flag saveable；recent IDs saveable仅供debug trace；decoder slot内部身份 | saved 当前 aweme与控件、缩放、Bluetooth、音量限制已消耗；读取真实持久queue并重新resolve；decoder句柄重建，debug recent-trace列表未补 | `DouyinEntryActivity.kt` / DouyinLoginScreen, DouyinImmersiveScreen, DouyinRssFeedScreen |
 | DouyinHistoryActivity | `douyin/history` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；普通remember临时控件重建 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `DouyinHistoryActivity.kt` / DouyinHistoryScreen |
-| DouyinLoginActivity | `douyin/login` | 登录checking/banned/2-step来自实际client；刷新token/QR非Bundle状态 | 保存login route/list anchor；重建读取实际授权状态，host模态WebView恢复未补 | `DouyinLoginActivity.kt` / DouyinLoginCheckingScreen, DouyinLoginBannedScreen, DouyinLoginScreen |
+| DouyinLoginActivity | `douyin/login` | 登录checking/banned/2-step来自实际client；刷新token/QR非Bundle状态 | 保存login route/list anchor；重建读取实际授权状态，授权WebView重新依据实际登录状态；一次性验证/QR不作为普通浏览器快照 | `DouyinLoginActivity.kt` / DouyinLoginCheckingScreen, DouyinLoginBannedScreen, DouyinLoginScreen |
 | DouyinPlayerActivity | `video/douyin（非 immersive）` | 目标 Intent，非 immersive BiliPlayerScreen 控件普通 remember | 保存 aweme 身份并重解析，普通控件仍重置；不伪造播放器实例恢复 | `DouyinPlayerActivity.kt` / PlatformEntryScreen, BiliPlayerScreen |
 | DouyinSettingsActivity | `douyin/settings` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；ViewModel业务数据配置保留、进程重读 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `DouyinSettingsActivity.kt` / BiliSettingsScreen |
 | DouyinVideoActionsActivity | `douyin/actions / share` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；普通remember临时控件重建 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `DouyinVideoActionsActivity.kt` / ActionDialogScreen |
@@ -76,7 +76,7 @@ M1前：StartupGate有startup saved/retained及大正文文件恢复，主要内
 | SettingsActivity | `settings（各子页作为 route）` | currentPage rememberSaveable；各 ScrollState saved；设置实时持久化 | 恢复settings/subpage route和列表anchor；设置值仍从现有真实SettingsStore读取 | `SettingsActivity.kt` |
 | ShareQrActivity | `rss-share / channel-share / bili/share / douyin/share` | 目标Intent；QR bitmap/动画普通remember | 仅保存逻辑目标参数；QR重新生成，现有固定QR布局无scroll状态 | `ShareQrActivity.kt` / ShareQrScreen |
 | TtsSettingsActivity | `settings-speech / tts-config` | ScrollState/LazyListState保存滚动（对应screen）；目标Intent；ViewModel业务数据配置保留、进程重读 | 恢复逻辑route/args + ScrollEntries的saved item anchor（实际使用该adapter的页面）；业务数据仍从原有源重读，不保存IO/确认弹窗句柄 | `TtsSettingsActivity.kt` / TtsSettingsScreen |
-| WebViewActivity | `host browser Dialog（不是 guest route）` | EXTRA_URL Intent；KEY_SCALE_MODE + rememberSaveable saved；不调用WebView.saveState | 未补：host Dialog没有缩放/路由snapshot API，Activity销毁后无法从guest读回；需框架followup | `WebViewActivity.kt` / WebViewScreen |
+| WebViewActivity | `host browser Dialog（不是 guest route）` | EXTRA_URL Intent；KEY_SCALE_MODE + rememberSaveable saved；不调用WebView.saveState | M2 opt-in host saved当前URL、scale mode、zoom与scroll；boot后GET重载并恢复位置，DOM/form/history不序列化；设备PENDING | `WebViewActivity.kt` / WebViewScreen |
 | PerfLargeArticleActivity | `debug-tools/perf + 实际 fixture reader` | debug性能fixture +阅读state | 只恢复debug gate后的工具/实际fixture；未新增独立Perf Activity task descriptor | `debug/PerfLargeArticleActivity.kt` / DetailContent |
 | PerfLargeListActivity | `debug-tools/perf + 实际 fixture list` | debug fixture +LazyListState saved | 同上，生产列表ScrollEntries逻辑接线不等于原生独立Perf Activity恢复 | `debug/PerfLargeListActivity.kt` / FeedScreen |
 
@@ -90,10 +90,14 @@ M1前：StartupGate有startup saved/retained及大正文文件恢复，主要内
 
 ## 明确未补齐的边界
 
-1. **WebView独立Dialog**：原生saved缩放/URL路由与当前guest页面栈不同。host `PodInAppBrowser`没有读取/订阅缩放/重建Dialog的API；应用侧不能可靠保存用户在host中切换的模式。
-2. **模态文字输入仍未提交的草稿**：`input.text`只在确认后向guest返回。M1保存已交回guest的Bili搜索词、真实inline AddRSS草稿；不能读到Bili/其他模态框中未确认的字符。需host draft/state接口；不能假称已覆盖此窗口。
+1. **WebView独立Dialog（M2已补源码）**：`system.browser.inApp.state` + `restoreActivity`使宿主直接快照自身实际URL/mode/zoom/scroll，独立于guest state namespace。配置和Bundle重建后在成功boot时重开；网页重新GET加载，不保存DOM/form/history或授权验证页面。
+2. **未确认模态草稿（M2已补源码）**：`input.text.state`提供恢复身份/pending/dismiss；宿主保留真实text/selection，仅config retained。Bili/RSS搜索、AddRSS fallback和notes title/body fallback通过稳定route ID重绑确认；note父页先读真实实体再恢复相应editor阶段。process按原生retained语义重置，Cookie/授权输入不opt-in；旧host普通路径安全降级。
 3. **临时预览/独立debug Activity与UI结构差异**：无live preview安全退出到prefix，不伪造preview数据。独立LlmSummary/Perf活动和固定QR布局的滚动状态不能用普通adapter单测声称native parity；不是本轮布局改造。
 4. **运行资源**：视频解码、TTS、输入session、网络/声学/蓝牙operation和native内部slot不入Bundle；正常重建从真实服务状态或仓库重新获取。Douyin recentVisited saveable字段在原生仅用于debug trace，本轮没有新增对应debug列表。
 5. **设备验证 PENDING**：本轮未执行ADB或修改安装包。必须由设备所有者验证真实Bundle时序、配置重建、后台进程回收、滚动锚点/IME/视频/host Dialog差异。
 
 应用页面状态接线与离线测试完成后，不得把本审计表整体标为“所有Activity恢复一致”。上述host/UI边界需独立任务和设备验收。
+
+## M2 host follow-up evidence
+
+M2源码与离线回归见 `state-retention-host.md`。这里的M2条目不代表所有Android Activity已通过设备测试；原有独立UI/debug/preview边界仍按其实际机制记录。没有调整UI样式、布局或文案。

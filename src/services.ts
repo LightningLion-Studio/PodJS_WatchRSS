@@ -17,6 +17,7 @@ import {ensureSyncDevice,prepareLocalSaveAlias} from "./sync/local-identity.ts";
 import {hostArticleBodyCodec,hostSyncText} from "./sync/article-body-host.ts";
 import {SqlReadingProgressStore} from "./reader/sql-progress.ts";
 import {ReadingProgressStore} from "./reader/progress.ts";
+import {hasCapability} from "@podjs/framework/watch";
 import {kv} from "@podjs/framework/watch";
 import {readUsage,clearUsage,subscribeUsageChanges} from "./llm/usage.ts";
 import { ImportedTextStore, importedTextFileName } from "./reader/imported-text.ts";
@@ -310,7 +311,11 @@ export const services: AppServices = {
   async saveNote(note) { await init(); if(!note.articleId) throw new Error("请从文章页面创建笔记"); await repo.saveNote(Number(note.articleId),note.body); const rows=await db.query("SELECT n.*,a.title FROM notes n JOIN articles a ON a.id=n.article_id WHERE n.article_id=? ORDER BY n.id DESC LIMIT 1",[Number(note.articleId)]); return mapNote(rows[0]); },
   async speak(text: string, rate=1, started?:()=>void, progress?:(event:import("./reader/speech-highlight.ts").SpeechProgress)=>void) { await readerSpeech.speak(text,rate,started,progress); },
   async stopSpeech() { await readerSpeech.stop(); },
-  input(title,value) { return textInput.prompt(title,value).result; },
+  input(title,value,options) { return textInput.prompt(title,value,options && hasCapability('input.text.state')?options:undefined).result; },
+  inputRecovery:{
+    pending:key=>hasCapability('input.text.state')?textInput.pending(key).result:Promise.resolve(false),
+    dismiss:key=>hasCapability('input.text.state')?textInput.dismiss(key).result:Promise.resolve(),
+  },
   openInlineInput(value,bounds,onChange,onSubmit,options) { return textInput.openInline(value,bounds,onChange,onSubmit,options); },
 };
 

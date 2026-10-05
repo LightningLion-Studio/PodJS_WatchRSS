@@ -16,9 +16,9 @@ export function usesInAppBrowser(origin: BrowserOrigin, url: string): boolean {
     (origin === 'rss' && /^http/i.test(url));
 }
 
-export function readerBrowserOptions(preset: ReaderPreset): BrowserOpenOptions {
+export function readerBrowserOptions(preset: ReaderPreset, restoreActivity=false): BrowserOpenOptions {
   return {
-    mode: 'inApp', scaleMode: 'standard',
+    mode: 'inApp', scaleMode: 'standard',...(restoreActivity?{restoreActivity:true}:{}),
     theme: {
       dark: readerChrome(preset).dark,
       // Android wants AARRGGBB, not the renderer's RRGGBBAA color convention.
@@ -33,7 +33,7 @@ export async function openBrowserUrl(url: string, origin: BrowserOrigin, preset?
   if (usesInAppBrowser(origin, url) && port.hasCapability('system.browser.inApp')) {
     if (!url.trim()) return; // WebViewActivity.open ignores blank URLs.
     if (!preset) throw new Error('In-app browser requires the current reader preset');
-    await port.open(url, readerBrowserOptions(preset)).result;
+    await port.open(url, readerBrowserOptions(preset,port.hasCapability('system.browser.inApp.state'))).result;
   } else {
     await port.open(url).result;
   }

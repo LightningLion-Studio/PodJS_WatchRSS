@@ -5,7 +5,7 @@ import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,me
 import {createScrollerWith} from '/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs/framework/src/kinetics-core.ts';
 import {captureActivityNavigation,restoreActivityNavigation,routeMemory,type ActivityRoute} from '../src/navigation/activity-navigation.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'activity-recreation-solid',setup(builder){builder.onLoad({filter:/\/ui\/(route-activity|ScrollEntries|AddRssScreen|VideoPlayerScreen)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'activity-recreation-solid',setup(builder){builder.onLoad({filter:/\/ui\/(route-activity|ScrollEntries|AddRssScreen|VideoPlayerScreen|NoteInlineEditor|NotesScreen)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 // Keep the production Solid owner/effect graph and scroller state machine.
 // Only native rendering and hardware registration are replaced at their boundaries.
 type Node={kind:string;props:Record<string,any>};
@@ -102,12 +102,13 @@ test('production list keeps the visible item when earlier row heights change aft
 const transforms:any[]=[],volumes:number[]=[];
 let internet='wifi';
 const videoState=()=>({state:'playing',positionMs:0,durationMs:100000,width:466,height:466,volume:.8});
-mock.module('@podjs/framework/watch',()=>({hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
+mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:466,logicalWidth:233,logicalHeight:233,shape:'round',density:2}),hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string)=>t.length*6})}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:element('RemoteImage')}));
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(listener:any)=>{listener(internet);return ()=>{};}}));
-mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
-mock.module('@podjs/framework/services',()=>({video:{
+mock.module('../src/logs/app-logger.ts',()=>({createLogConsole:()=>({warn(){},error(){}}),appLogger:{d(){},i(){},w(){},e(){}}}));
+let inlineCalls=0;
+mock.module('@podjs/framework/services',()=>({textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
  captureBackdrop:async()=>{},prepare:()=>({result:Promise.resolve(videoState()),cancel(){}}),
  play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
  setBounds:async()=>{},setTransform:async(value:any)=>{transforms.push(value);},setVolume:async(value:number)=>{volumes.push(value);return {...videoState(),volume:value};},
@@ -158,4 +159,69 @@ test('production media restoration cancels late resolution after new navigation 
  // A subsequent ordinary user video receives no restoration bag.
  restored.controller.douyinPlay({item:item('fixture-c'),playback:item('fixture-c'),immersive:true});await restored.controller.douyinNavigate({name:'player',awemeId:'fixture-c'});
  expect(restored.navigations[1].memory).toBeUndefined();expect(restored.errors.filter(Boolean)).toEqual([]);
+});
+
+
+const {useModalInput}=await import('../src/ui/modal-input.ts');
+test('unconfirmed modal rebinds its new owner; late replies, process reset and route changes cannot submit',async()=>{
+ type Pending={key:string;text:string;title:string};
+ function host(restored?:Pending){
+  let current:Pending|undefined=restored,settle:((value:string|null)=>void)|undefined;
+  const calls:Pending[]=[],dismissed:string[]=[];
+  return {calls,dismissed,edit:(text:string)=>{current!.text=text;},snapshot:()=>current?clone(current):undefined,
+   input:async(title:string,value='',options?:{restorationKey:string})=>{const key=options?.restorationKey||'fresh';current=current?.key===key?current:{key,title,text:value};calls.push(clone(current));return new Promise<string|null>(resolve=>settle=resolve);},
+   recovery:{pending:async(key:string)=>current?.key===key,dismiss:async(key:string)=>{dismissed.push(key);if(current?.key===key){current=undefined;settle?.(null);}}},
+   confirm:(value:string)=>{current=undefined;settle?.(value);},late:(value:string)=>settle?.(value),
+  };
+ }
+ const submitted:string[]=[],errors:unknown[]=[],entry:ActivityRoute={page:'bili',biliRoute:{name:'search'}};
+ const original=host();let open!:()=>Promise<void>;
+ const first=mount(entry,()=>{open=useModalInput({key:'search',title:'search',value:()=>'',input:original.input,recovery:original.recovery,active:()=>true,onValue:v=>{submitted.push(v);},onError:e=>errors.push(e)});return null;});
+ const oldRequest=open();await turn();original.edit('未确认 draft🙂');const snapshot=original.snapshot(),route=recreate(entry);first.dispose();await oldRequest;
+ const restored=host(snapshot);
+ mount(route,()=>{open=useModalInput({key:'search',title:'search',value:()=>'',input:restored.input,recovery:restored.recovery,active:()=>true,onValue:v=>{submitted.push(v);},onError:e=>errors.push(e)});return null;});
+ await turn();expect(restored.calls).toHaveLength(1);expect(restored.calls[0]!.text).toBe('未确认 draft🙂');expect(submitted).toEqual([]);
+ original.late('old reply');restored.confirm('confirmed once');await turn();expect(submitted).toEqual(['confirmed once']);expect(errors).toEqual([]);
+ const process=host();mount(recreate(entry,true),()=>{useModalInput({key:'search',title:'search',value:()=>'',input:process.input,recovery:process.recovery,active:()=>true,onValue:v=>{submitted.push(v);},onError:e=>errors.push(e)});return null;});await turn();expect(process.calls).toHaveLength(0);
+ const other=host(snapshot);mount({page:'bili',biliRoute:{name:'search'}},()=>{useModalInput({key:'search',title:'search',value:()=>'',input:other.input,recovery:other.recovery,active:()=>true,onValue:v=>{submitted.push(v);},onError:e=>errors.push(e)});return null;});await turn();expect(other.calls).toHaveLength(0);
+});
+test('inactive page invalidates a delayed recovery probe and ordinary unsupported host input stays usable',async()=>{
+ const [active,setActive]=createSignal(true),values:string[]=[];let probe!:(v:boolean)=>void,asked=0,dismissed=0,open!:()=>Promise<void>;
+ const f=mount({page:'search',channelId:'1'},()=>{open=useModalInput({key:'search',title:'search',value:()=>'',active,input:async()=>{asked++;return 'query';},recovery:{pending:()=>new Promise<boolean>(r=>probe=r),dismiss:async()=>{dismissed++;}},onValue:v=>{values.push(v);},onError:()=>{}});return null;});
+ setActive(false);probe(true);await turn();expect(asked).toBe(0);expect(dismissed).toBe(1);f.dispose();
+ mount({page:'search',channelId:'1'},()=>{open=useModalInput({key:'search',title:'search',value:()=>'',active:()=>true,input:async(_title,_value,opts)=>{expect(opts).toBeUndefined();return 'query';},onValue:v=>{values.push(v);},onError:()=>{}});return null;});await open();expect(values).toEqual(['query']);
+});
+
+
+mock.module('../src/ui/DownloadPhoneAppDialog.tsx',()=>({DownloadPhoneAppDialog:element('Download')}));
+mock.module('../src/ui/DeleteConfirmDialog.tsx',()=>({DeleteConfirmDialog:element('Delete')}));
+mock.module('../src/ui/ReaderBackground.tsx',()=>({ReaderBackground:element('Background')}));
+mock.module('../src/ui/NotePreview.tsx',()=>({notePreviewEntries:()=>[]}));
+mock.module('../src/ui/reader-fonts.ts',()=>({useReaderFonts:()=>()=>undefined}));
+mock.module('@podjs/framework/text',()=>({SystemTextLine:element('SystemText')}));
+const {NoteDetailScreen}=await import('../src/ui/NotesScreen.tsx');
+const memo=()=>({noteId:'note-fixture',folderId:null,title:'persisted title',markdown:'persisted body',plainText:'persisted body',contentHash:'hash',baseContentHash:'hash',baseMarkdown:'persisted body',pinned:false,createdAt:1,updatedAt:1,modifiedBy:'fixture',deleted:false,deletedAt:0});
+test('real note reader remount enters its pending body modal, saves only on confirmation and skips prior title step',async()=>{
+ inlineCalls=0;const entry:ActivityRoute={page:'note-detail',noteId:'note-fixture'},key=`watchrss:${routeMemory(entry).id}:note:body`;
+ const [active,setActive]=createSignal(true);const calls:any[]=[],saves:any[]=[],errors:string[]=[];let confirm!:(v:string|null)=>void,closed=0,saved=memo();
+ const f=mount(entry,()=>createComponent(NoteDetailScreen,{width:233,height:233,noteId:'note-fixture',get active(){return active();},repository:{get:async()=>saved,save:async(input:any)=>{saves.push(input);saved={...saved,title:input.title,markdown:input.markdown};return saved;}} as never,
+  input:async(title,value,opts)=>{calls.push({title,value,opts});return new Promise<string|null>(r=>confirm=r);},inputRecovery:{pending:async requested=>requested===key,dismiss:async()=>{}},onBack:()=>closed++,onError:e=>errors.push(e)}));
+ await turn();await turn();expect(calls).toHaveLength(1);expect(calls[0]).toMatchObject({title:'备忘录正文',value:'persisted body',opts:{restorationKey:key}});expect(inlineCalls).toBe(0);expect(saves).toEqual([]);
+ confirm('confirmed body');await turn();expect(saves).toHaveLength(1);expect(saves[0]).toMatchObject({noteId:'note-fixture',title:'persisted title',markdown:'confirmed body'});expect(closed).toBe(0);expect(errors).toEqual([]);
+ f.dispose();
+});
+test('destroyed pending note editor never opens its next modal or writes a late title result',async()=>{
+ inlineCalls=0;const entry:ActivityRoute={page:'note-detail',noteId:'note-fixture'},key=`watchrss:${routeMemory(entry).id}:note:title`;
+ const calls:string[]=[],saves:any[]=[],dismissed:string[]=[];let settle!:(value:string|null)=>void;
+ const f=mount(entry,()=>createComponent(NoteDetailScreen,{width:233,height:233,noteId:'note-fixture',active:true,repository:{get:async()=>memo(),save:async(input:any)=>{saves.push(input);return memo();}} as never,input:async(title)=>{calls.push(title);return new Promise<string|null>(r=>settle=r);},inputRecovery:{pending:async requested=>requested===key,dismiss:async requested=>{dismissed.push(requested);}},onBack:()=>{},onError:()=>{}}));
+ await turn();await turn();expect(calls).toEqual(['备忘录标题']);f.dispose();settle('late title');await turn();expect(calls).toEqual(['备忘录标题']);expect(saves).toEqual([]);expect(dismissed).toContain(key);
+});
+
+test('configuration recovery of a newly created note keeps its original close destination after identity autosave',async()=>{
+ const original:ActivityRoute={page:'note-detail',noteId:'note-fixture'};routeMemory(original).retained['note-create-mode']=true;
+ const entry=recreate(original),key=`watchrss:${routeMemory(entry).id}:note:body`;let finish!:(value:string|null)=>void,closed=0;
+ const current=memo();
+ mount(entry,()=>createComponent(NoteDetailScreen,{width:233,height:233,noteId:'note-fixture',active:true,repository:{get:async()=>current,save:async(input:any)=>({...current,title:input.title,markdown:input.markdown})} as never,input:async()=>new Promise<string|null>(r=>finish=r),inputRecovery:{pending:async requested=>requested===key,dismiss:async()=>{}},onBack:()=>closed++,onError:()=>{}}));
+ await turn();await turn();finish('confirmed');await turn();expect(closed).toBe(1);
+ const process=recreate(original,true);expect(routeMemory(process).retained['note-create-mode']).toBeUndefined();expect(process.noteId).toBe('note-fixture');
 });
