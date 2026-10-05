@@ -18,7 +18,6 @@ import dev.podjs.runtime.PodRuntimeView;
 
 import androidx.test.platform.app.InstrumentationRegistry;
 
-import org.junit.Assume;
 import org.junit.Test;
 
 import java.io.File;
@@ -36,6 +35,12 @@ import static org.junit.Assert.assertTrue;
 /** Renderer-level smoke check for the externally packaged WatchRSS application. */
 public final class WatchRssSmokeTest {
     private static final long TIMEOUT_MS = 20_000L;
+    private static final String ISOLATED_ACCEPTANCE_PACKAGE = "com.lightningstudio.watchrss.podjs.acceptance";
+
+    private static void assertIsolatedAcceptancePackage(Context target) {
+        assertEquals("WatchRssSmokeTest must never target the formal package",
+                ISOLATED_ACCEPTANCE_PACKAGE, target.getPackageName());
+    }
 
     /** Scripted engine for controller/UI integration only. Never delegates synthesis to a real engine. */
     private static final class SilentSpeechEngine extends android.speech.tts.TextToSpeech {
@@ -77,7 +82,7 @@ public final class WatchRssSmokeTest {
     @Test public void disabledSpeechCrownDoesNotAdjustVolume() throws Exception { runSpeechPlayback(true,false); }
     private void runSpeechPlayback(boolean crownTest,boolean volumeEnabled) throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject prior=readerKv(target);Object settingsBackup=prior.opt("watchrss.settings"),presetBackup=prior.opt("watchrss.reader-presets");prior.put("watchrss.settings",new org.json.JSONObject().put("fontSizeSp",14).put("mediaVolumeControl",volumeEnabled).put("mediaVolumeGuard",crownTest).put("playbackStartVolumeLimit",10).put("cacheLimitMb",512).put("mediaCacheMode","前 4 项").put("syncMediaKeepAlive",false).put("shareUseSystem",false));prior.remove("watchrss.reader-presets");writeReaderKv(target,prior);
         Activity activity=null;long channelId=0,firstId=0,secondId=0;String marker="codex-speech-"+SystemClock.uptimeMillis();
         try {
@@ -175,7 +180,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void speechRangesHighlightAndFollowReaderWithManualGrace() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject prior=readerKv(target);Object settingsBackup=prior.opt("watchrss.settings"),presetBackup=prior.opt("watchrss.reader-presets");prior.remove("watchrss.settings");prior.remove("watchrss.reader-presets");writeReaderKv(target,prior);
         Activity activity=null;long channelId=0,articleId=0;String marker="codex-highlight-"+SystemClock.uptimeMillis();
         try {
@@ -230,7 +235,7 @@ public final class WatchRssSmokeTest {
     private void runImportedSpeech(boolean fromBody,boolean composed) throws Exception {
         final String sourceText=composed?"汉😀导入正文。 👩‍💻 🇨🇳 👍🏽":"汉😀导入正文。";
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject prior=readerKv(target);Object settingsBackup=prior.opt("watchrss.settings"),presetBackup=prior.opt("watchrss.reader-presets");prior.remove("watchrss.settings");prior.remove("watchrss.reader-presets");writeReaderKv(target,prior);
         String key="codex-imported-"+SystemClock.uptimeMillis();File file=new File(target.getFilesDir(),"podjs/files/article_content/"+key+".txt");
         Activity activity=null;long channelId=0,articleId=0;
@@ -275,7 +280,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void importedTextRestoresMiddleChunkAcrossReopen() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object settingsBackup=originalKv.opt("watchrss.settings"),presetBackup=originalKv.opt("watchrss.reader-presets");originalKv.remove("watchrss.settings");originalKv.remove("watchrss.reader-presets");writeReaderKv(target,originalKv);
         String key="codex-imported-position-"+SystemClock.uptimeMillis();File file=new File(target.getFilesDir(),"podjs/files/article_content/"+key+".txt");
         Activity activity=null;long articleId=0,channelId=0;Bitmap before=null,after=null;
@@ -316,7 +321,7 @@ public final class WatchRssSmokeTest {
     @Test public void launchesRendersAndInitializesChannelsDatabase() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("external WatchRSS package required", "com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
 
         Intent intent = new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -384,7 +389,7 @@ public final class WatchRssSmokeTest {
     @Test public void pauseResumeKeepsRenderedSurfaceAndFinishDestroysHost() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("external WatchRSS package required", "com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Intent intent = new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity = registry.startActivitySync(intent);
@@ -446,7 +451,7 @@ public final class WatchRssSmokeTest {
     @Test public void activityRecreationCreatesFreshRenderedHost() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Activity original = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         TextureView oldTexture = awaitTextureView(original);
@@ -490,7 +495,7 @@ public final class WatchRssSmokeTest {
     @Test public void avatarBorderKeepsShapeDuringSlowDrag() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         final Activity activity = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try {
@@ -526,7 +531,7 @@ public final class WatchRssSmokeTest {
     @Test public void profileHorizontalBackFollowsFingerAndHonorsCancelCommit() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Activity activity = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try {
@@ -628,7 +633,7 @@ public final class WatchRssSmokeTest {
     @Test public void rotaryScrollDirectionMatchesPhysicalWheel() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Activity activity = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try {
@@ -657,7 +662,7 @@ public final class WatchRssSmokeTest {
     @Test public void rootFallbackBackWaitsForReleaseAndHonorsCancel() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         MainActivity activity = (MainActivity) registry.startActivitySync(new Intent().setClassName(
                 target.getPackageName(), "dev.podjs.androidwatch.MainActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -711,7 +716,7 @@ public final class WatchRssSmokeTest {
     @Test public void roundBackClipsWholeMovingPageToCircle() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Activity activity = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         Bitmap home = null, profile = null, held = null;
@@ -759,7 +764,7 @@ public final class WatchRssSmokeTest {
     @Test public void migratedRoutesReturnToHomeRoot() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Activity activity = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try {
@@ -968,7 +973,7 @@ public final class WatchRssSmokeTest {
     @Test public void rssWatchLaterAndFavoriteStayIndependent() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();
         Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object hiddenBackup=originalKv.opt("media.hidden-channels"),settingsBackup=originalKv.opt("watchrss.settings");
         originalKv.put("media.hidden-channels",new org.json.JSONArray().put("bili").put("douyin"));originalKv.remove("watchrss.settings");writeReaderKv(target,originalKv);
         Activity activity=registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
@@ -1098,7 +1103,7 @@ public final class WatchRssSmokeTest {
     @Test public void readerImageZoomResolvesOriginalPixelDetail() throws Exception {exerciseReaderImage(true);}
     private void exerciseReaderImage(boolean detailed) throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object settingsBackup=originalKv.opt("watchrss.settings");originalKv.remove("watchrss.settings");writeReaderKv(target,originalKv);
         Activity activity=null;long articleId=0,channelId=0;String marker="codex-reader-image-"+SystemClock.uptimeMillis();
         try(ReaderImageServer server=new ReaderImageServer(detailed)) {
@@ -1240,7 +1245,7 @@ public final class WatchRssSmokeTest {
     }
     @Test public void rssVideoEnclosureAndChannelBackgroundPlaybackFollowLifecycle() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object hiddenBackup=originalKv.opt("media.hidden-channels"),settingsBackup=originalKv.opt("watchrss.settings");
         originalKv.put("media.hidden-channels",new org.json.JSONArray().put("bili").put("douyin"));originalKv.remove("watchrss.settings");writeReaderKv(target,originalKv);
         Activity activity=null;long channelId=0,articleId=0;String sourceUrl="";String marker="codex-rss-media-"+SystemClock.uptimeMillis();org.json.JSONArray receipt=new org.json.JSONArray();
@@ -1307,7 +1312,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void localImportClearRequiresConfirmationAndPreservesChannel() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object hiddenBackup=originalKv.opt("media.hidden-channels");
         originalKv.put("media.hidden-channels",new org.json.JSONArray().put("bili").put("douyin"));writeReaderKv(target,originalKv);
         Activity activity=null;long channelId=0;String marker="codex-channel-"+SystemClock.uptimeMillis();
@@ -1383,7 +1388,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void channelSettingsPersistsAndDeleteRequiresConfirmation() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object hiddenBackup=originalKv.opt("media.hidden-channels");
         originalKv.put("media.hidden-channels",new org.json.JSONArray().put("bili").put("douyin"));writeReaderKv(target,originalKv);
         Activity activity=null;long channelId=0;String marker="codex-channel-"+SystemClock.uptimeMillis();
@@ -1430,7 +1435,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void feedOriginalPrefetchWaitsForSettledVisibilityAndUsesBackgroundRefresh() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object hiddenBackup=originalKv.opt("media.hidden-channels");
         originalKv.put("media.hidden-channels",new org.json.JSONArray().put("bili").put("douyin"));writeReaderKv(target,originalKv);
         Activity activity=null;long channelId=0;String marker="codex-prefetch-"+SystemClock.uptimeMillis();String sourceUrl="";
@@ -1571,7 +1576,7 @@ public final class WatchRssSmokeTest {
     }
     @Test public void readerPresetsSelectPersistScheduleAndRenderLightTheme() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject old=readerKv(target);Object presetBackup=old.opt("watchrss.reader-presets"),settingsBackup=old.opt("watchrss.settings");old.remove("watchrss.reader-presets");old.remove("watchrss.settings");writeReaderKv(target,old);
         Activity activity=null;long articleId=0,channelId=0;String marker="reader-presets-"+SystemClock.uptimeMillis();
         try {
@@ -1609,7 +1614,7 @@ public final class WatchRssSmokeTest {
     }
     @Test public void aiSettingsPersistPresetAndUsageClearRequiresConfirmation() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject kv=readerKv(target);Object settingsBackup=kv.opt("watchrss.settings");kv.remove("watchrss.settings");writeReaderKv(target,kv);
         dev.podjs.runtime.PodDeviceServices secure=new dev.podjs.runtime.PodDeviceServices(target);org.json.JSONObject key=new org.json.JSONObject().put("key","state_json"),accountBackup=secure.execute("secure.get",key);
         secure.execute("secure.set",new org.json.JSONObject().put("key","state_json").put("value",new org.json.JSONObject().put("userId","settings-fixture").put("watchDeviceToken","settings-fixture-token").toString()));
@@ -1645,7 +1650,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void readerSummaryRefreshesRetriesFoldsAndPreservesData() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject oldKv=readerKv(target);Object settingsBackup=oldKv.opt("watchrss.settings");oldKv.remove("watchrss.settings");writeReaderKv(target,oldKv);
         dev.podjs.runtime.PodDeviceServices secure=new dev.podjs.runtime.PodDeviceServices(target);org.json.JSONObject key=new org.json.JSONObject().put("key","state_json"),accountBackup=secure.execute("secure.get",key);secure.execute("secure.delete",key);
         Activity activity=null;long articleId=0,channelId=0;String marker="codex-summary-"+SystemClock.uptimeMillis();
@@ -1684,7 +1689,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void readerOriginalRetriesCachesAndHonorsChannelDefault() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object settingsBackup=originalKv.opt("watchrss.settings");originalKv.remove("watchrss.settings");writeReaderKv(target,originalKv);
         Activity activity=null;long articleId=0,channelId=0;String marker="codex-original-"+SystemClock.uptimeMillis();
         try(ReaderImageServer server=new ReaderImageServer()){
@@ -1725,7 +1730,7 @@ public final class WatchRssSmokeTest {
 
     @Test public void readerAutoScrollPausesAndRestoresPersistentTextPosition() throws Exception {
         Instrumentation registry=InstrumentationRegistry.getInstrumentation();Context target=registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         org.json.JSONObject originalKv=readerKv(target);Object settingsBackup=originalKv.opt("watchrss.settings");
         originalKv.remove("watchrss.settings");writeReaderKv(target,originalKv);
         Activity activity=null;long articleId=0,channelId=0;String marker="codex-reader-"+SystemClock.uptimeMillis();
@@ -1776,7 +1781,7 @@ public final class WatchRssSmokeTest {
     @Test public void memoCrudPersistsAcrossRestartAndCleansOnlyTestRow() throws Exception {
         final Instrumentation registry = InstrumentationRegistry.getInstrumentation();
         final Context target = registry.getTargetContext();
-        Assume.assumeTrue("com.lightningstudio.watchrss.podjs".equals(target.getPackageName()));
+        assertIsolatedAcceptancePackage(target);
         Activity activity = registry.startActivitySync(new Intent().setClassName(target.getPackageName(),
                 "dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         final String marker = "codex-memo-" + SystemClock.uptimeMillis();
