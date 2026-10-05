@@ -26,6 +26,7 @@ mock.module('../src/ui/ReaderScreen.tsx',()=>({ReaderScreen:(p:Node['props'])=>{
 mock.module('../src/reader/preset.ts',()=>({defaultReaderPreset:()=>({})}));
 let onboarding:any;
 mock.module('../src/ui/StartupGate.tsx',()=>({StartupGate:(p:Node['props'])=>{onboarding=p;calls.push('onboarding');return element('Onboarding',p);}}));
+mock.module('../src/ui/AcousticConnectionScreen.tsx',()=>({AcousticConnectionScreen:()=>{calls.push('acoustic');return element('Acoustic',{});}}));
 const {DebugToolsScreen}=await import('../src/ui/DebugToolsScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))stop();});
 const settle=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
@@ -36,3 +37,5 @@ test('old host direct mount also has no debug resources',async()=>{gate=new Debu
 test('debug menu constructs only requested perf scene and stops native owner on back',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();expect(f.text()).toContain('蓝牙单次同步');expect(calls).toEqual(['tts-store']);f.press('超大列表');await settle();expect(calls).toContain('list:10000');expect(calls).toContain('perf_large_list');expect(f.entry.internalBack?.()).toBe(true);await settle();expect(calls).toContain('stop:7');expect(f.text()).toContain('frames=1');});
 test('Bluetooth tool relinquishes its session on background and route deactivation',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();f.press('蓝牙单次同步');f.press('等待手机蓝牙连接');await settle();expect(calls).toContain('bluetooth');life('background');await settle();expect(f.close()).toBe(1);f.setActive(false);await settle();expect(f.close()).toBe(1);});
 test('debug onboarding is forced without initially overwriting consent and exits to menu',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();f.press('重新进入新手引导');await settle();expect(onboarding.storage.get('watchrss.onboarding')).toEqual({oobeSeenVersion:0});expect(calls).not.toContain('write');onboarding.onExit();await settle();expect(f.text()).toContain('蓝牙单次同步');});
+
+test('acoustic page is created only on debug menu selection and exits on back',async()=>{gate=new DebugGate();await gate.initialize(async()=>({debugBuild:true}));const f=mount();expect(calls).not.toContain('acoustic');f.press('声波连接');await settle();expect(calls).toContain('acoustic');expect(f.entry.internalBack?.()).toBe(true);await settle();expect(f.text()).toContain('声波连接');});

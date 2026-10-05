@@ -1,3 +1,4 @@
+import {AcousticConnectionScreen} from "./AcousticConnectionScreen.tsx";
 import {getOps} from '@pocketjs/framework/host';
 import {watchUiLines} from './text-layout.ts';
 import {Show,createSignal,createEffect,onCleanup,onMount} from 'solid-js';
@@ -21,8 +22,8 @@ import {ONBOARDING_KEY} from '../onboarding/store.ts';
 import type {AppServices} from './service.ts';
 import type {RouteEntry} from './routes/types.ts';
 
-type Tool='menu'|'bluetooth'|'tts'|'douyin'|'list'|'article'|'onboarding';
-export function DebugToolsScreen(props:{width:number;height:number;active:()=>boolean;services:AppServices;entry:RouteEntry;createBluetooth?:()=>DebugBluetoothSession}){
+type Tool='acoustic'|'menu'|'bluetooth'|'tts'|'douyin'|'list'|'article'|'onboarding';
+export function DebugToolsScreen(props:{width:number;height:number;active:()=>boolean;services:AppServices;entry:RouteEntry;createBluetooth?:()=>DebugBluetoothSession;onAcousticUrl?:(url:string)=>void}){
  if(!debugGate.allowed)return null;
  const [tool,setTool]=createSignal<Tool>('menu'),[status,setStatus]=createSignal(''),[timeout,setTimeout]=createSignal(120000),[busy,setBusy]=createSignal(false);
  const [auto,setAuto]=createSignal(douyinDebug.interval);
@@ -40,7 +41,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
  const entries=():ScrollEntry[]=>{
   const list:ScrollEntry[]=[row('调试工具 · '+tool())];
   if(tool()==='menu')list.push(...([
-   ['bluetooth','蓝牙单次同步'],['onboarding','重新进入新手引导'],['list','性能测试：超大列表'],['article','性能测试：超大文章'],['tts','详细 TTS 配置'],['douyin','抖音调试'],
+   ['acoustic','声波连接 / 引导式 WiFi'],['bluetooth','蓝牙单次同步'],['onboarding','重新进入新手引导'],['list','性能测试：超大列表'],['article','性能测试：超大文章'],['tts','详细 TTS 配置'],['douyin','抖音调试'],
   ] as [Tool,string][]).map(([target,label])=>row(label,()=>open(target))));
   if(tool()==='bluetooth')list.push(row(`超时 ${timeout()} ms`,()=>void run(async()=>{const raw=await input('蓝牙超时（毫秒）',String(timeout()));if(raw===null)return '';const value=Number(raw);if(!Number.isSafeInteger(value)||value<=0)throw Error('超时必须为正整数毫秒');setTimeout(value);return '超时已设置';})),row('等待手机蓝牙连接',()=>void run(async current=>{if(!props.createBluetooth)throw Error('调试蓝牙监听不可用');await closeBluetooth();if(!current())return '';bluetooth=props.createBluetooth();return bluetooth.run(timeout());})));
   if(tool()==='tts')list.push(...Object.entries(debugTtsEngines).map(([engine,label])=>row('选择 '+label,()=>void run(async()=>{await tts.select(engine as TtsEngine);return tts.status();}))),row('语速设置',()=>void run(async()=>{const store=new TtsConfigStore(),raw=await input('语速（0.5–2.0）',String(store.read().speed));if(raw===null)return '';store.setSpeed(Number(raw));return `语速 ${store.read().speed}x`;})),row('刷新配置状态',()=>void run(()=>tts.status())),row('测试连接',()=>void run(()=>tts.test())));
@@ -49,7 +50,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
   if(status())for(const line of status().split('\n'))list.push(row(line));
   return list;
  };
- return <Show when={debugGate.allowed}><Show when={tool()!=='list'&&tool()!=='article'&&tool()!=='onboarding'} fallback={<Show when={tool()==='onboarding'} fallback={<DebugPerfScreen kind={tool()==='list'?'list':'article'} {...props} onStats={setStatus}/>}><DebugOnboarding onFinish={()=>open('menu')}/></Show>}><ScrollEntries height={props.height} entries={entries()} inputActive={props.active} ref={value=>{props.entry.list=value;}}/></Show></Show>;
+ return <Show when={debugGate.allowed}><Show when={tool()!=='acoustic'} fallback={<AcousticConnectionScreen {...props} onUrl={props.onAcousticUrl}/>}><Show when={tool()!=='list'&&tool()!=='article'&&tool()!=='onboarding'} fallback={<Show when={tool()==='onboarding'} fallback={<DebugPerfScreen kind={tool()==='list'?'list':'article'} {...props} onStats={setStatus}/>}><DebugOnboarding onFinish={()=>open('menu')}/></Show>}><ScrollEntries height={props.height} entries={entries()} inputActive={props.active} ref={value=>{props.entry.list=value;}}/></Show></Show></Show>;
 }
 function DebugOnboarding(props:{onFinish:()=>void}){
  debugGate.require();let completed=false;
