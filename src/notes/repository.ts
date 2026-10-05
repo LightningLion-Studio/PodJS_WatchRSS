@@ -62,7 +62,10 @@ export class MemoRepository {
   async get(noteId: string): Promise<MemoNote | null> { const row=(await this.db.query(`SELECT * FROM memo_notes WHERE note_id=? AND deleted=0 LIMIT 1`,[noteId]))[0]; return row?note(row):null; }
   async listFolders(): Promise<MemoFolder[]> { return (await this.db.query(`SELECT * FROM memo_folders WHERE deleted=0 ORDER BY sort_order,name`)).map(folder); }
   async save(input: {noteId?:string;title?:string;markdown:string}): Promise<MemoNote> {
-    const markdown=normalizeMarkdown(input.markdown), old=input.noteId ? await this.get(input.noteId) : null;
+    // Like native dao.get, saving must include tombstones: an open draft restores
+    // the same record with its metadata and sync baseline intact.
+    const row=input.noteId ? (await this.db.query(`SELECT * FROM memo_notes WHERE note_id=? LIMIT 1`,[input.noteId]))[0] : undefined;
+    const markdown=normalizeMarkdown(input.markdown), old=row ? note(row) : null;
     if (input.noteId && !old) throw new Error("笔记不存在");
     if (!old && !markdown.trim() && !input.title?.trim()) throw new Error("新建备忘录不能为空");
     const now=this.clock(), hash=sha256(markdown), noteId=old?.noteId ?? this.idFactory();
