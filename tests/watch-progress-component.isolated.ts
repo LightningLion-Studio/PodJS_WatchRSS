@@ -1,6 +1,7 @@
 import {afterEach, expect, mock, spyOn, test} from "bun:test";
 import {plugin} from "bun";
 import {createRequire} from "node:module";
+import {dirname, join} from "node:path";
 import * as solid from "solid-js";
 import {createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps} from "solid-js";
 import type {IntroAction, IntroState} from "../src/onboarding/state.ts";
@@ -32,8 +33,9 @@ mock.module("@pocketjs/framework/host", () => ({getOps: () => ({measureText: (te
 mock.module("../src/ui/OnboardingCustomizationScreen.tsx", () => ({OnboardingCustomizationScreen: () => null}));
 // The SDK checkout has its own node_modules. Production bundles one Solid
 // runtime; keep this test's component and real frame hook on that same owner.
-mock.module(Bun.resolveSync("solid-js", "/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs/framework/src/frame.ts"), () => solid);
-const {resetFrameHooks, runFrameHooks} = await import("/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs/framework/src/frame.ts");
+const framePath = join(dirname(Bun.resolveSync("@pocketjs/framework/lifecycle", import.meta.dir)), "frame.ts");
+mock.module(Bun.resolveSync("solid-js", framePath), () => solid);
+const {resetFrameHooks, runFrameHooks} = await import(framePath);
 const {WatchProgressIndicator} = await import("../src/ui/WatchProgressIndicator.tsx");
 const {OnboardingScreen} = await import("../src/ui/OnboardingScreen.tsx");
 const disposers: Array<() => void> = [];
