@@ -39,5 +39,5 @@ export function startApplicationForegroundSync(){
  },{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);},offerIpEndpoint:async descriptor=>(await ipReady)?.offer(descriptor)??false});
  const ready=Promise.all([bluetooth.ready,ipReady]);void ready.catch(()=>{});
  let closing:Promise<void>|undefined;
- return {ready,setMediaEnabled:(enabled:boolean)=>bluetooth.setMediaEnabled(enabled),refresh:()=>{ip?.refresh();return bluetooth.refresh();},dispose:()=>closing??=(async()=>{disposed=true;clearRemoteInput();stopNetwork();stopLifecycle();await ipReady.catch(()=>{});await Promise.all([ip?.dispose(),bluetooth.dispose(),disposeReaderPreview()]);})()};
+ return {ready,bluetooth:{get state(){return bluetooth.state;},subscribe:(observer:Parameters<ApplicationForegroundSync['subscribe']>[0])=>bluetooth.subscribe(observer),refresh:()=>bluetooth.refresh()},setMediaEnabled:(enabled:boolean)=>bluetooth.setMediaEnabled(enabled),refresh:()=>{ip?.refresh();return bluetooth.refresh();},dispose:()=>closing??=(async()=>{disposed=true;clearRemoteInput();stopNetwork();stopLifecycle();await ipReady.catch(()=>{});await Promise.all([ip?.dispose(),bluetooth.dispose(),disposeReaderPreview()]);})()};
 }
