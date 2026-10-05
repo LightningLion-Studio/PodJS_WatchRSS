@@ -154,12 +154,19 @@ def write(root, name, value):
     (root / name).write_text(json.dumps(value, indent=2) + '\n')
 
 
+def sample_phase(samples, state, elapsed_ms):
+    phase = state.get('phase', '')
+    if phase in PHASES + ['PAUSED', 'BLOCKED'] and (not samples or samples[-1]['phase'] != phase):
+        samples.append({'phase': phase, 'elapsedMs': max(0, int(elapsed_ms))})
+
+
 def launch(adb, root, label, timeout):
     # Capture before launch; scoped tag holds fixed phase names only. Filter launch PID.
     log = root / (label + '-phases.log')
     with log.open('wb') as output:
         proc = subprocess.Popen(adb + ['logcat', '-T', '1', '-v', 'brief', 'PodTakeoverPhase:I', '*:S'], stdout=output, stderr=subprocess.DEVNULL)
         try:
+            started = time.monotonic()
             result = command(adb + ['shell', 'am', 'start', '-n', REHEARSAL + '/dev.podjs.androidwatch.MainActivity'])
             if b'Starting: Intent' not in result or b'Error:' in result:
                 raise ValueError('launch_failed')
@@ -176,12 +183,16 @@ def launch(adb, root, label, timeout):
                 raise ValueError('ambiguous_process')
             end = time.monotonic() + timeout
             state = {}
+            samples = []
+            elapsed_ms = 0
             while time.monotonic() < end:
                 try:
                     raw = command(adb + ['exec-out', 'run-as', REHEARSAL, 'cat', 'files/package-takeover/journal']).decode('iso-8859-1')
                     state = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line and not line.startswith('#'))
                 except ValueError:
                     pass
+                elapsed_ms = (time.monotonic() - started) * 1000
+                sample_phase(samples, state, elapsed_ms)
                 if state.get('phase') in ('ACTIVE', 'BLOCKED', 'PAUSED'):
                     break
                 time.sleep(0.25)
@@ -197,7 +208,8 @@ def launch(adb, root, label, timeout):
     log.unlink()
     reason = state.get('reason', '')
     return {'phase': state.get('phase', 'TIMEOUT'), 'phases': phases,
-            'reason': reason if re.fullmatch(r'[a-z0-9_]{0,96}', reason) else 'redacted'}
+            'reason': reason if re.fullmatch(r'[a-z0-9_]{0,96}', reason) else 'redacted',
+            'elapsedMs': int(elapsed_ms), 'phaseSamples': samples}
 
 
 def dry_plan(a):

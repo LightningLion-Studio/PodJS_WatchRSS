@@ -11,6 +11,14 @@ import takeover_rehearsal as r
 
 
 class RehearsalTest(unittest.TestCase):
+    def test_phase_samples_are_fixed_deduplicated_and_monotonic_safe(self):
+        samples=[]
+        r.sample_phase(samples, {'phase':'COPYING'}, -5)
+        r.sample_phase(samples, {'phase':'COPYING'}, 10)
+        r.sample_phase(samples, {'phase':'SECRET_VALUE'}, 20)
+        r.sample_phase(samples, {'phase':'VERIFYING'}, 30.9)
+        self.assertEqual(samples,[{'phase':'COPYING','elapsedMs':0},{'phase':'VERIFYING','elapsedMs':30}])
+
     def test_dry_run_has_no_io(self):
         with patch.object(r.subprocess, 'run', side_effect=AssertionError('device I/O')), patch.object(r.tempfile, 'mkdtemp', side_effect=AssertionError('write')):
             r.rehearse(SimpleNamespace(dry_run=True, serial='synthetic'))
