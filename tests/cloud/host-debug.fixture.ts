@@ -23,6 +23,8 @@ async function execute(method:string,a:any):Promise<any>{
   case 'crypto.random':return {bytesBase64:encode(randomBytes(a.bytes))};
   case 'crypto.hash':return {digestBase64:encode(createHash('sha256').update(decode(a.dataBase64)).digest())};
   case 'crypto.hkdfSha256':return {keyBase64:encode(new Uint8Array(hkdfSync('sha256',decode(a.inputBase64),decode(a.saltBase64),decode(a.infoBase64),32)))};
+  case 'file.gzip':return resultFile(new Uint8Array(gzipSync(files.get(a.path)!)));
+  case 'file.gunzip':return resultFile(new Uint8Array(gunzipSync(files.get(a.path)!,{maxOutputLength:Math.max(1,a.maxOutputBytes)})));
   case 'crypto.gzip':return resultFile(new Uint8Array(gzipSync(files.get(a.inputPath)!)));
   case 'crypto.gunzip':return resultFile(new Uint8Array(gunzipSync(files.get(a.inputPath)!,{maxOutputLength:Math.max(1,a.maxBytes)})));
   case 'crypto.largeAesGcmEncrypt':{const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',decode(a.keyBase64),nonce);cipher.setAAD(decode(a.aadBase64));return {...resultFile(new Uint8Array(Buffer.concat([cipher.update(files.get(a.inputPath)!),cipher.final(),cipher.getAuthTag()]))),nonceBase64:encode(nonce)};}

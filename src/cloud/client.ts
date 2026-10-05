@@ -12,7 +12,7 @@ function header(headers: Record<string, string>, name: string): string | undefin
   return undefined;
 }
 function requireOk(response: HttpResponse): any {
-  if (response.status < 200 || response.status >= 300) throw new Error(`HTTP ${response.status}: ${text(response.body)}`);
+  if (response.status < 200 || response.status >= 300) throw new Error(`Cloud HTTP ${response.status}`);
   return parse(response);
 }
 function member(v: any) { return { plan: v.plan || "free", active: !!v.active, writable: !!v.writable, readable: !!v.readable, quotaBytes: Number(v.quotaBytes || 0), usedBytes: Number(v.usedBytes || 0), reservedBytes: Number(v.reservedBytes || 0), retentionDays: v.retentionDays == null ? null : Number(v.retentionDays), readOnlyAt: v.readOnlyAt == null ? null : String(v.readOnlyAt), deleteAfter: v.deleteAfter == null ? null : String(v.deleteAfter) }; }
@@ -22,12 +22,16 @@ export class WatchCloudClient {
   constructor(private readonly http: HttpTransport, private readonly options: CloudClientOptions, private readonly crypto: CloudCrypto, private readonly guard: CloudGuard = cloudDisabled) {}
   private async request(method: string, path: string, body?: unknown): Promise<HttpResponse> {
     this.guard.require();
-    const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${this.options.accessToken}` };
+    const token=this.options.refreshToken?await this.options.refreshToken(false):this.options.accessToken;
+    const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${token}` };
     if (this.options.apikey) headers.apikey = this.options.apikey;
     if (this.options.deviceAccessToken) headers["x-watchrss-device-authorization"] = `Bearer ${this.options.deviceAccessToken}`;
     if (this.options.appVersion) headers["X-WatchRSS-App-Version"] = this.options.appVersion;
     if (body !== undefined) headers["content-type"] = "application/json; charset=utf-8";
-    return this.http.request({ method, url: this.options.baseUrl.replace(/\/$/, "") + path, headers, body: body === undefined ? undefined : jsonBytes(body) });
+    const request={ method, url: this.options.baseUrl.replace(/\/$/, "") + path, headers, body: body === undefined ? undefined : jsonBytes(body) };
+    let response=await this.http.request(request);
+    if(response.status===401&&this.options.refreshToken){this.guard.require();headers.authorization=`Bearer ${await this.options.refreshToken(true)}`;response=await this.http.request(request);}
+    return response;
   }
   async bootstrap(): Promise<CloudBootstrap> { const j = requireOk(await this.request("POST", "/functions/v1/cloud/bootstrap", {})); return { member: member(j.member), devices: (j.devices || []).map((v: any): RegisteredCloudDevice => ({ deviceId: String(v.deviceId), platform: String(v.platform), displayName: String(v.displayName || ""), publicKeySpki: String(v.publicKeySpki || ""), keyVersion: Number(v.keyVersion || 1), lastSequence: Number(v.lastSequence || 0), revokedAt: v.revokedAt == null ? null : String(v.revokedAt) })), keyEnvelopes: (j.keyEnvelopes || []).map((v: any) => ({ id: String(v.id), recipientType: String(v.recipientType), recipientDeviceId: v.recipientDeviceId == null ? null : String(v.recipientDeviceId), envelope: { algorithm: String(v.algorithm), keyVersion: Number(v.keyVersion), wrappedKeyBase64: String(v.wrappedKeyBase64), nonceBase64: String(v.nonceBase64), ephemeralPublicKeySpki: v.ephemeralPublicKeySpki == null ? null : String(v.ephemeralPublicKeySpki) } })) }; }
   async registerDevice(deviceId: string, displayName: string, publicKeySpki: string, keyVersion: number): Promise<void> { requireOk(await this.request("POST", "/functions/v1/cloud/devices/register", { deviceId, platform: "watch", displayName, publicKeySpki, keyVersion, capabilities: { snapshotSchema: 2, cloudRelay: true, rtosProtocolReserved: true } })); }

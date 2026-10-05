@@ -56,6 +56,7 @@ export interface CloudClientOptions {
   apikey?: string;
   deviceAccessToken?: string;
   appVersion?: string;
+  refreshToken?: (force:boolean)=>Promise<string>;
 }
 
 export interface CloudMemberState { plan: string; active: boolean; writable: boolean; readable: boolean; quotaBytes: number; usedBytes: number; reservedBytes: number; retentionDays: number | null; readOnlyAt: string | null; deleteAfter: string | null; }
