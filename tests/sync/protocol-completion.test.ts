@@ -16,7 +16,7 @@ function phone(frames:JsonObject[],times:number[]=[],fragment=Infinity){
   async read(max,timeout){reads.push(max);timeouts.push(timeout);if(frame>=input.length)return null;if(!offset)time=times[frame]??time;
    const raw=input[frame]!,end=Math.min(raw.length,offset+max,offset+fragment),bytes=raw.slice(offset,end);offset=end;if(offset===raw.length){frame++;offset=0;}return bytes;},
   async write(bytes){writes.push(bytes.length);out.push(...decoder.push(bytes));},async close(){closed++;}
- });
+ },()=>time); // Use the same explicit clock for frame deadlines and preview timing.
  return {connection,out,writes,reads,timeouts,clock:()=>time,closed:()=>closed,consumed:()=>frame};
 }
 function repository(){
@@ -83,6 +83,6 @@ test('interrupted writes count only completed chunks and close once',async()=>{
 });
 test('truncated body reports prefix and actual bytes without a completed frame',async()=>{
  const raw=encodeFrame({text:'x'.repeat(40000)}).slice(0,17000),progress:TransferByteProgress[]=[];let offset=0,closed=0;
- const c=new StreamFrameConnection({read:async max=>{if(offset===raw.length)return null;const bytes=raw.slice(offset,offset+max);offset+=bytes.length;return bytes;},write:async()=>{},close:async()=>{closed++;}});c.setTransferProgress(p=>progress.push(p));
+ const c=new StreamFrameConnection({read:async max=>{if(offset===raw.length)return null;const bytes=raw.slice(offset,offset+max);offset+=bytes.length;return bytes;},write:async()=>{},close:async()=>{closed++;}},()=>0);c.setTransferProgress(p=>progress.push(p));
  await expect(c.readFrame(1000)).rejects.toThrow('Truncated');expect(progress.map(p=>p.bytes)).toEqual([4,16384,612]);expect(closed).toBe(1);
 });
