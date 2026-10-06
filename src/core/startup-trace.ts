@@ -21,8 +21,9 @@ export async function startupStep<T>(phase: string, run: () => Promise<T>): Prom
 
 let firstScreenResolve: (() => void) | undefined;
 const firstScreen = new Promise<void>(resolve => { firstScreenResolve = resolve; });
+void firstScreen.then(() => startupMark("firstScreen.resolved"));
 /** Marks the first content screen as loaded; deferred startup work may begin. */
-export function startupFirstScreen(): void { firstScreenResolve?.(); firstScreenResolve = undefined; }
+export function startupFirstScreen(): void { startupMark(firstScreenResolve ? "firstScreen.delivered" : "firstScreen.alreadyDelivered"); firstScreenResolve?.(); firstScreenResolve = undefined; }
 /** Resolves after the first content screen loaded, or after `maxMs` as a fallback. */
 export function afterFirstScreen(maxMs = 3000): Promise<void> {
   // QuickJS setTimeout is a zero-delay microtask polyfill; use the host timer.

@@ -70,7 +70,10 @@ const built=await Bun.build({entrypoints:[resolve(import.meta.dir,"reader-scroll
   }
   if(args.path.endsWith("/frame.ts"))source=source.replace("callbacks.add(callback);",`const wrapped = (buttons: number) => { globalThis.__readerProfile.count("onFrameCallbacks"); return globalThis.__readerProfile.time("onFrame", () => callback(buttons)); }; callbacks.add(wrapped);`).replace("callbacks.delete(callback)","callbacks.delete(wrapped)");
   const isTs=/\.tsx?$/.test(args.path);
-  const result=transformSync(source,{filename:args.path,babelrc:false,configFile:false,plugins:[instrument],presets:[...(args.path.endsWith(".tsx")?[[require("babel-preset-solid"),{generate:"universal",moduleName:"@pocketjs/framework/renderer"}]]:[]),...(isTs?[[require("@babel/preset-typescript"),{isTSX:args.path.endsWith(".tsx"),allExtensions:true}]]:[])]});
+  // Strip types before the profiler moves bodies into wrapper functions.
+  // Otherwise copied non-null assertions can escape the TypeScript visitor.
+  const stripped=isTs?transformSync(source,{filename:args.path,babelrc:false,configFile:false,presets:[[require("@babel/preset-typescript"),{isTSX:args.path.endsWith(".tsx"),allExtensions:true}]]}).code:source;
+  const result=transformSync(stripped,{filename:args.path,babelrc:false,configFile:false,plugins:[instrument],presets:[...(args.path.endsWith(".tsx")?[[require("babel-preset-solid"),{generate:"universal",moduleName:"@pocketjs/framework/renderer"}]]:[])]});
   return {contents:result.code,loader:"js"};
  });
 }}]});

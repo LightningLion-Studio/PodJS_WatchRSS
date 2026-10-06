@@ -4,16 +4,7 @@ import {captureActivityNavigation,restoreActivityNavigation,resolveActivityNavig
 import {InformationActivity} from '../navigation/information-activity.ts';
 import {RouteActivityProvider} from './route-activity.tsx';
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
-const HOME_SNAPSHOT_KEY = "watchrss.home.channels.v1";
-function readHomeChannelSnapshot(): Channel[] | undefined {
-  try {
-    const value = kv.get<Channel[]>(HOME_SNAPSHOT_KEY);
-    return Array.isArray(value) && value.length && value.every(item => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.url === "string") ? value : undefined;
-  } catch { return undefined; }
-}
-function writeHomeChannelSnapshot(list: Channel[]): void {
-  try { kv.set(HOME_SNAPSHOT_KEY, list); } catch { /* snapshot is only a startup hint */ }
-}
+import {readHomeChannelSnapshot,writeHomeChannelSnapshot} from "./home-snapshot.ts";
 import {debugGate} from '../debug/host.ts';
 import type {DebugBluetoothSession} from '../debug/bluetooth.ts';
 import {usageTelemetry} from '../telemetry/host.ts';
@@ -316,7 +307,7 @@ export default function WatchRSS(props: {
   // Cold start renders the home list from the last snapshot (synchronous KV) so the first screen
   // does not wait for database setup; the live list replaces it a moment later. Only used when
   // the app resumes to home, otherwise the snapshot would flash before the restored page.
-  const homeSnapshot = startupResume || (activityEntries?.length??0)>1 ? undefined : readHomeChannelSnapshot();
+  const homeSnapshot = (activityEntries?.length??0)>1 ? undefined : readHomeChannelSnapshot(kv, startupResume);
   const [channels, setChannels] = createSignal<Channel[]>(homeSnapshot ?? []);
   const notesPlacementStore = new HomeEntryPlacementStore();
   const [notesHomePlacement, setNotesHomePlacement] = createSignal(notesPlacementStore.read());
@@ -655,7 +646,7 @@ export default function WatchRSS(props: {
     try {
       const list = await props.services.listChannels();
       setChannels(list);
-      writeHomeChannelSnapshot(list);
+      writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
       startupFirstScreen();
     } catch (e) {
