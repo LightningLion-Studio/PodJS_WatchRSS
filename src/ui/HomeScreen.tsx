@@ -76,16 +76,18 @@ export default function HomeScreen(props: HomeScreenProps) {
   const card = (opts: {title: string; summary: string; onPress?: () => void; summaryLines: 1 | 2; pinned?: boolean; titleSize: 16 | 17; dot?: boolean}): ScrollEntry => {
     const columnWidth = cardWidth() - 14 - 6 - (opts.dot ? 10 : 0);
     const titleSlot = opts.titleSize === 16 ? 2 : 22;
-    const title = measuredLines(opts.title, columnWidth, text => getOps().measureText(text, titleSlot), 1).join("\n");
-    const summary = measuredLines(opts.summary, columnWidth, text => getOps().measureText(text, 1), opts.summaryLines).join("\n");
     const height = 14.5 * 2 + 19 + 17 * opts.summaryLines;
-    return {height, render: () => <View onPress={opts.onPress} focusable={!!opts.onPress} accessibilityRole={opts.onPress ? "button" : undefined}
+    return {height, render: () => {
+      // Heights are fixed by maxLines; offscreen cards do not need text wrapping.
+      const title = measuredLines(opts.title, columnWidth, text => getOps().measureText(text, titleSlot), 1).join("\n");
+      const summary = measuredLines(opts.summary, columnWidth, text => getOps().measureText(text, 1), opts.summaryLines).join("\n");
+      return <View onPress={opts.onPress} focusable={!!opts.onPress} accessibilityRole={opts.onPress ? "button" : undefined}
       accessibilityLabel={`${opts.title}，${opts.summary.replace("\n", "，")}`}
       class={opts.pinned ? "absolute inset-0 rounded-[16] bg-[#23272a]" : "absolute inset-0 rounded-[16] bg-[#1c1f21]"}>
       <Text style={{fontSlot: titleSlot, width: columnWidth}} class={opts.titleSize === 16 ? "absolute left-[14] top-[14.5] h-[19] overflow-hidden text-base leading-[19] text-[#f5f5f5]" : "absolute left-[14] top-[14.5] h-[19] overflow-hidden text-[17px] leading-[19] text-[#f5f5f5]"}>{title}</Text>
       <Text style={{width: columnWidth, height: 17 * opts.summaryLines}} class="absolute left-[14] top-[33.5] overflow-hidden text-sm leading-[17] text-[#b6b6b6]">{summary}</Text>
       <Show when={opts.dot}><View class="absolute w-[6] h-[6] rounded-full bg-[#ff6026]" style={{insetL: cardWidth() - 10 - 6, insetT: (height - 6) / 2}}/></Show>
-    </View>};
+    </View>;}};
   };
   const channelCard=(channel:Channel):ScrollEntry=>{
     const builtin=channel.url==="builtin:bili"||channel.url==="builtin:douyin";
