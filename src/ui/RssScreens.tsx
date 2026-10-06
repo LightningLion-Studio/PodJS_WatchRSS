@@ -11,9 +11,26 @@ import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { SwipeCard } from "./SwipeCard.tsx";
 import type { Article } from "./service.ts";
 
-const measureFor=(size:number)=>(text:string)=>getOps().measureText(text,size===21?23:size===14?1:size===9?19:20);
+const measureFor=(size:number)=>(text:string)=>getOps().measureText(text,size===21?23:size===14?1:size===9?19:size===12?0:20);
 function lines(text:string,width:number,size:number,max:number) {return measuredLines(text,width,measureFor(size),max);}
-export function RssFeedScreen(props:{width:number;height:number;title:string;active?:boolean;originalEnabled?:boolean;onOriginalPaused?:(paused:boolean)=>void;onOriginalContents?:(ids:string[])=>void;onInfo?:()=>void;items:Article[];refreshing:boolean;loadingMore:boolean;canNext:boolean;onOpen:(article:Article)=>void;onActions:(article:Article)=>void;onFavorite:(article:Article)=>void;onWatchLater:(article:Article)=>void;onRefresh:()=>void;onNext:()=>void;ref?:(value:{scroller:Scroller})=>void}) {
+/** Native EmptyStateCard: 14dp surface card, titleLarge 21/26 + bodySmall 12/14 subtitle. */
+export function feedEmptyStateEntry(title:string,subtitle:string,width:number):ScrollEntry {
+  const wrapped=measuredLines(subtitle,width-36-24,measureFor(12));
+  return {height:10+26+4+wrapped.length*14+10,render:()=> <View class="absolute inset-0 rounded-[14] bg-[#1c1f21]">
+    <Text class="absolute left-[12] right-[12] top-[10] text-[21px] leading-[26] text-[#f5f5f5]">{title}</Text>
+    <Text class="absolute left-[12] right-[12] top-[40] text-xs leading-[14] text-[#b6b6b6]">{wrapped.join("\n")}</Text>
+  </View>};
+}
+/** Native FeedPillButton: 17sp, 9dp horizontal padding, 44dp tall surfaceVariant pill; 0.5 alpha disabled. */
+export function feedPillEntry(label:string,width:number,onPress?:()=>void):ScrollEntry {
+  return {height:52,render:()=>{
+    const buttonWidth=Math.min(width-44,getOps().measureText(label,22)+18);
+    return <View class="absolute inset-0"><View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center" style={{insetL:(width-36-buttonWidth)/2,width:buttonWidth,opacity:onPress?1:.5}}>
+      <Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
+    </View></View>;
+  }};
+}
+export function RssFeedScreen(props:{width:number;height:number;title:string;active?:boolean;originalEnabled?:boolean;onOriginalPaused?:(paused:boolean)=>void;onOriginalContents?:(ids:string[])=>void;onInfo?:()=>void;items:Article[];refreshing:boolean;loadingMore:boolean;canNext:boolean;onOpen:(article:Article)=>void;onActions:(article:Article)=>void;onFavorite:(article:Article)=>void;onWatchLater:(article:Article)=>void;onRefresh:()=>void;onNext:()=>void;leading?:ScrollEntry[];empty?:ScrollEntry[];ref?:(value:{scroller:Scroller})=>void}) {
   const requested=new Set<string>();
   const [openSwipeId,setOpenSwipeId]=createSignal<string|null>(null);
   const [scrolling,setScrolling]=createSignal(false);
@@ -35,6 +52,7 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
     {height:18+header().length*27+16,render:()=> <View onPress={()=>{if(openSwipeId())setOpenSwipeId(null);else props.onInfo?.();}} focusable={!!props.onInfo} class="absolute inset-0 items-center"><For each={header()}>{(line,index)=>{const text=headerText(line),icon=line.endsWith("ⓘ"),width=()=>measureFor(21)(text)+(icon?INFO_ADVANCE:0),left=()=>(props.width-36-width())/2;
         return icon?<><Text class="absolute top-[0] text-[21px] leading-[27] text-[#f5f5f5]" style={{insetL:left(),insetT:9.5+index()*27}}>{text}</Text><Image src="../assets/icons/info-hint.svg" class="absolute w-[18.6] h-[18.6]" style={{insetL:left()+measureFor(21)(text)-0.6,insetT:9.5+index()*27+4.65}}/></>
           :<Text class="absolute left-[0] right-[0] text-[21px] leading-[27] text-center text-[#f5f5f5]" style={{insetT:9.5+index()*27}}>{text}</Text>;}}</For><Text class="absolute left-[0] right-[0] text-[9px] leading-[12] text-center text-[#b6b6b6]" style={{insetT:11+header().length*27}}>{props.refreshing?"正在刷新中...":"下拉刷新"}</Text></View>},
+    ...(props.leading??[]),
     ...props.items.map(a=>{
       const image=!!a.imageUrl;
       const padding=image?8:9;
@@ -54,7 +72,7 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
         <Text class={image?"absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]":"absolute text-[9px] leading-[9.9] text-[#b6b6b6b3]"} style={{insetL:padding,insetR:padding,insetT:top+2+title.length*18}}>{summary.join("\n")}</Text>
       </SwipeCard>};
     }),
-    ...(!props.items.length?[{height:48,render:()=> <Text class="text-sm text-center text-[#b6b6b6]">暂无内容</Text>}]:[]),
+    ...(!props.items.length?props.empty??[{height:48,render:()=> <Text class="text-sm text-center text-[#b6b6b6]">暂无内容</Text>}]:[]),
     ...(props.items.length?[{height:52,render:()=> {
       const label=props.loadingMore?"加载中...":props.canNext?"加载更多":"没有更多";
       const enabled=props.canNext&&!props.loadingMore;
@@ -69,7 +87,7 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
   ]);
   return <ScrollEntries height={props.height} entries={entries()} verticalPadding={12} gap={8} inputActive={()=>props.active??true} settleKey={props.originalEnabled} onSettledRange={(first,last)=>{
     requestVisible(first,last);
-    if(props.canNext&&!props.loadingMore&&last>=props.items.length&&lastAutoLoadCount!==props.items.length){lastAutoLoadCount=props.items.length;props.onNext();}
+    if(props.canNext&&!props.loadingMore&&last>=props.items.length+(props.leading?.length??0)&&lastAutoLoadCount!==props.items.length){lastAutoLoadCount=props.items.length;props.onNext();}
   }} onScrollStateChange={value=>{setScrolling(value);if(value)setOpenSwipeId(null);props.onOriginalPaused?.(value);}} onRefresh={props.onRefresh} ref={props.ref}/>;
 }
 export function RssActionsScreen(props:{width:number;height:number;article:Article;channelUrl?:string;onDelete:()=>void;systemShare?:boolean;busy:boolean;onSave:(type:"favorite"|"watchLater",saved:boolean)=>void;onShare:()=>void;onBack:()=>void;ref?:(value:{scroller:Scroller;goBack:()=>boolean})=>void}) {

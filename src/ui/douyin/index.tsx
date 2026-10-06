@@ -7,7 +7,7 @@ import {DouyinLoginLog} from '../../logs/douyin-login.ts';
 import { ReaderBody } from "../ReaderBody.tsx";
 import { defaultReaderPreset, type ReaderPreset } from "../../reader/preset.ts";
 import { loadDouyinDetail, douyinDetailBlocks } from "../../douyin/detail.ts";
-import { browser, DOUYIN_AUTH_STATUS_SCRIPT } from "@podjs/framework/services";
+import { browser, DOUYIN_AUTH_STATUS_SCRIPT, hostOperation } from "@podjs/framework/services";
 import { douyinBrowserAvailable } from "../../douyin/browser.ts";
 import { hasCapability } from "@podjs/framework/watch";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
@@ -26,6 +26,9 @@ import type { Scroller } from "@pocketjs/framework/kinetics";
 import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack } from "solid-js";
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
+import { RssFeedScreen, feedEmptyStateEntry, feedPillEntry } from "../RssScreens.tsx";
+import { PlatformSettingsScreen } from "../PlatformSettingsScreen.tsx";
+import type { Article } from "../service.ts";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
 import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
 import type { DouyinClient, DouyinContent, DouyinHistoryEntry, DouyinItem, DouyinResult } from "../../douyin/index.ts";
@@ -221,13 +224,30 @@ function FeedScreen(props: DouyinScreenProps) {
   const controller = new DouyinRssFeedController(props.client, initial, state => setFeed(state), snapshot => feedSnapshots.set(props.client, snapshot));
   const [feed, setFeed] = createSignal(controller.state), [error, setError] = createSignal("");
   const items = () => feed().items, hasMore = () => feed().hasMore, loading = () => feed().loading;
-  const load = (append = false) => { setError(""); return append ? controller.loadMore() : controller.refresh(); };
+  const [refreshing, setRefreshing] = createSignal(false);
+  const load = (append = false) => { setError(""); if (append) return controller.loadMore(); setRefreshing(true); return controller.refresh().finally(() => setRefreshing(false)); };
   createEffect(() => setError(feed().error));
   onCleanup(() => controller.dispose());
   createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
-  const card = (item: DouyinItem): ScrollEntry => { const titleLines = lines(itemTitle(item), props.width - 60, 17).slice(0, 2), summaryLines = lines(itemSummary(item), props.width - 60, 12).slice(0, 1); return { height: 51 + titleLines.length * 21, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-[17px] leading-[21] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[10] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; };
-  const entries = createMemo<ScrollEntry[]>(() => [{height:40,render:()=> <View onPress={()=>props.onNavigate({name:"channel-info"})} focusable class="absolute inset-0 items-center"><Text class="text-lg text-white">抖音 ›</Text></View>}, button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void load(false)), ...(error() ? [statusCard("加载失败", error())] : []), ...(resume()?.anchorAwemeId ? [button("继续上次播放", () => void continuePlayback())] : []), ...items().map(card), ...(items().length === 0 && !loading() && !error() ? [statusCard("暂无内容", "刷新以获取推荐内容")] : []), button(loading() ? "加载中..." : hasMore() ? "加载更多" : "没有更多了", !loading() && hasMore() ? () => void load(true) : undefined)]);
-  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
+  // Native DouyinRssFeedScreen reuses FeedHeader / FeedItemEntry / FeedActions: swipe reveals 收藏 / 稍后再看
+  // (toggle + toast), long press opens the actions page with the item, pull refresh and auto load near the end.
+  const [loggedIn, setLoggedIn] = createSignal<boolean | null>(null);
+  createEffect(() => { if (props.route.name === "feed" || props.route.name === "entry") void Promise.resolve().then(() => props.client.isLoggedIn()).then(setLoggedIn, () => setLoggedIn(null)); });
+  const toast = (message: string) => { void hostOperation("ui.toast", { message }).result.catch(() => {}); };
+  const byId = createMemo(() => new Map(items().map(item => [item.awemeId, item])));
+  const articles = createMemo<Article[]>(() => loggedIn() === false ? [] : items().map(item => ({ id: item.awemeId, title: itemTitle(item), excerpt: itemSummary(item), content: "", read: true })));
+  const withItem = (article: Article, run: (item: DouyinItem) => void) => { const item = byId().get(article.id); if (item) run(item); };
+  const toggleSaved = (item: DouyinItem, kind: "favorite" | "watchLater") => void props.client.toggleSaved(item, kind).then(saved => toast(kind === "favorite" ? saved ? "已收藏" : "已取消收藏" : saved ? "已加入稍后再看" : "已从稍后再看移除"), error => toast(error instanceof Error ? error.message : String(error)));
+  const leading = createMemo<ScrollEntry[]>(() => loggedIn() === false
+    ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => props.onNavigate({ name: "login" }))]
+    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : []);
+  const empty = createMemo<ScrollEntry[]>(() => loggedIn() === false || (loading() && !error()) ? [] : [feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width)]);
+  return <RssFeedScreen width={props.width} height={props.height} title="抖音" active={props.active !== false} onInfo={() => props.onNavigate({ name: "channel-info" })}
+    items={articles()} refreshing={refreshing() || (loading() && !items().length)} loadingMore={loading() && !refreshing() && items().length > 0} canNext={hasMore() && loggedIn() !== false}
+    onOpen={article => withItem(article, item => void openDetail(item).catch(error => setError(String(error))))}
+    onActions={article => withItem(article, item => props.onNavigate({ name: "actions", awemeId: item.awemeId, item }))}
+    onFavorite={article => withItem(article, item => toggleSaved(item, "favorite"))} onWatchLater={article => withItem(article, item => toggleSaved(item, "watchLater"))}
+    onRefresh={() => void load(false)} onNext={() => void load(true)} leading={leading()} empty={empty()} ref={props.ref} />;
 }
 
 function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
@@ -291,13 +311,15 @@ function HistoryScreen(props: DouyinScreenProps) {
 
 function ActionsScreen(props: DouyinScreenProps & { awemeId: string }) {
   const supplied = props.route.name === "actions" ? props.route.item : undefined;
-  const controller = new DouyinActionsController(props.client, props.awemeId, supplied, next => setState(next), kind => props.onDone?.(kind));
+  // Native DouyinVideoActionsActivity: a successful save toasts and finishes; share dispatch also finishes.
+  const done = (kind: DouyinActionDone) => { if (kind !== "share" && state().message) void hostOperation("ui.toast", { message: state().message }).result.catch(() => {}); if (props.onDone) props.onDone(kind); else props.onBack(); };
+  const controller = new DouyinActionsController(props.client, props.awemeId, supplied, next => setState(next), done);
   const [state, setState] = createSignal(controller.state);
   const item = () => state().item, favorite = () => state().favorite, watchLater = () => state().watchLater, message = () => state().message;
   onMount(() => void controller.load());
   onCleanup(() => controller.dispose());
   const toggle = (kind: "favorite" | "watchLater") => controller.toggle(kind);
-  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr,props.onDone ? () => controller.shared() : undefined);else {qr();controller.shared();}}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack)]);
+  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr);else qr();}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} padding={22} ref={props.ref} />;
 }
 
@@ -308,12 +330,17 @@ function ShareScreen(props: DouyinScreenProps & { awemeId: string }) {
   return <SharedShareQrScreen width={props.width} height={props.height} title={title()} url={url} onClose={props.onBack} onError={message => props.onUnsupported?.(`二维码生成失败：${message}`)} />;
 }
 
+/** Native DouyinSettingsActivity renders BiliSettingsScreen + DeleteConfirmDialog; messages toast. */
 function SettingsScreen(props: DouyinScreenProps) {
-  const [loggedIn, setLoggedIn] = createSignal<boolean | null>(null), [message, setMessage] = createSignal(""), [confirmDelete, setConfirmDelete] = createSignal(false);
-  createEffect(() => { if (props.route.name === "settings") void props.client.isLoggedIn().then(setLoggedIn); });
-  const setting = (label: string, enabled: boolean, onToggle: () => void): ScrollEntry => ({ height: 52, render: () => <View onPress={onToggle} focusable class="absolute inset-0 rounded-[26] bg-[#2a2a2a]"><Text class="absolute left-[12] top-[16] text-base leading-[20] text-[#f5f5f5]">{label}</Text><Show when={enabled} fallback={<View class="absolute right-[11] top-[13] w-[40] h-[26] rounded-[13] bg-[#555555]"><View class="absolute left-[3] top-[3] w-[20] h-[20] rounded-full bg-white" /></View>}><View class="absolute right-[11] top-[13] w-[40] h-[26] rounded-[13] bg-[#ff4d67]"><View class="absolute left-[17] top-[3] w-[20] h-[20] rounded-full bg-white" /></View></Show></View> });
-  const entries = createMemo<ScrollEntry[]>(() => confirmDelete() ? [header("删除频道"), statusCard("确认删除？", "删除后将移除本地缓存"), button("确认删除", async () => { try { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); setConfirmDelete(false); } catch (error) { setMessage(String(error)); setConfirmDelete(false); } }, true), button("取消", () => setConfirmDelete(false))] : [header("设置", loggedIn() ? "已登录" : "未登录"), setting("原文阅读模式", props.settings.originalContentEnabled, () => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)), { height: 24, render: () => <Text class="absolute left-[10] right-[10] top-[0] text-[11px] leading-[15] text-[#b6b6b6]">开启后进入沉浸短视频流</Text> }, setting("在后台继续播放", props.settings.continuePlaybackInBackgroundEnabled, () => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)), button("退出登录", loggedIn() ? async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); props.onLogoutSuccess?.(); } catch (e) { setMessage(`退出失败：${String(e)}`); } } : undefined, true), button("删除频道", () => setConfirmDelete(true), true), ...(message() ? [statusCard("状态", message())] : [])]);
-  return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
+  const [loggedIn, setLoggedIn] = createSignal<boolean | undefined>(undefined);
+  createEffect(() => { if (props.route.name === "settings") void Promise.resolve().then(() => props.client.isLoggedIn()).then(setLoggedIn, () => setLoggedIn(false)); });
+  const toast = (message: string) => { void hostOperation("ui.toast", { message }).result.catch(() => {}); };
+  return <PlatformSettingsScreen width={props.width} height={props.height} loggedIn={loggedIn}
+    showOriginalContent originalContentEnabled={props.settings.originalContentEnabled} onToggleOriginal={() => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)}
+    showContinuePlaybackInBackground continuePlaybackInBackgroundEnabled={props.settings.continuePlaybackInBackgroundEnabled} onToggleContinuePlaybackInBackground={() => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)}
+    deleteEnabled onDelete={async () => { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); }}
+    onLogout={async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); props.onLogoutSuccess?.(); } catch (error) { toast(`退出失败：${String(error)}`); } }}
+    onError={error => toast(error instanceof Error ? error.message : String(error))} ref={props.ref} />;
 }
 
 function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {

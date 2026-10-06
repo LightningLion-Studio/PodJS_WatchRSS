@@ -6,7 +6,7 @@ import type { BrowserAvailability } from '@podjs/framework/services';
 import type { InternetStatus } from '../src/onboarding/state.ts';
 import type { DouyinScreenProps } from '../src/ui/douyin/index.tsx';
 const require = createRequire(import.meta.url), { transformSync } = require('@babel/core');
-plugin({ name: 'douyin-login-solid', setup(builder) { builder.onLoad({ filter: /\/ui\/douyin\/index\.tsx$/ }, async args => ({ contents: transformSync(await Bun.file(args.path).text(), { filename: args.path, babelrc: false, configFile: false, presets: [[require('babel-preset-solid'), { generate: 'universal', moduleName: '@pocketjs/framework/renderer' }], [require('@babel/preset-typescript'), { isTSX: true, allExtensions: true }]] }).code, loader: 'js' })); } });
+plugin({ name: 'douyin-login-solid', setup(builder) { builder.onLoad({ filter: /\/ui\/(douyin\/index|PlatformSettingsScreen|AutoScrollSettingsScreen|DeleteConfirmDialog|DownloadPhoneAppDialog)\.tsx$/ }, async args => ({ contents: transformSync(await Bun.file(args.path).text(), { filename: args.path, babelrc: false, configFile: false, presets: [[require('babel-preset-solid'), { generate: 'universal', moduleName: '@pocketjs/framework/renderer' }], [require('@babel/preset-typescript'), { isTSX: true, allExtensions: true }]] }).code, loader: 'js' })); } });
 type Node = { kind: string; props: Record<string, any> };
 function element(kind: string, props: Node['props']): Node { const rendered = Object.create(props); Object.defineProperty(rendered, 'children', { get: () => props.children }); return { kind, props: rendered }; }
 let authOptions: any, finishAuth: (value: any) => void, rejectAuth: (error: any) => void;
@@ -23,6 +23,13 @@ mock.module('../src/onboarding/network-host.ts', () => ({ observeHostInternet: (
 mock.module('../src/ui/ScrollEntries.tsx', () => ({ ScrollEntries: (p: Node['props']) => element('ScrollEntries', { children: createMemo(() => p.entries.map((entry: any) => entry.render())) }) }));
 for (const [path, name] of [['../src/ui/douyin/ImmersiveEntry.tsx', 'ImmersiveEntry'], ['../src/ui/RemoteImage.tsx', 'RemoteImage'], ['../src/ui/SafeQrScreen.tsx', 'SafeQrScreen'], ['../src/ui/ShareQrScreen.tsx', 'ShareQrScreen']] as const) mock.module(path, () => ({ [name]: () => null }));
 let readerProps: any;
+const realHost = await import('@pocketjs/framework/host');
+mock.module('@pocketjs/framework/host', () => ({ ...realHost, getOps: () => ({ measureText: (text: string) => text.length * 12 }) }));
+mock.module('../src/ui/RssScreens.tsx', () => ({
+  RssFeedScreen: (p: any) => element('RssFeedScreen', { children: createMemo(() => p.items.map((a: any) => element('View', { onPress: () => p.onOpen(a), children: element('Text', { children: a.title }) }))) }),
+  feedEmptyStateEntry: (title: string) => ({ height: 48, render: () => element('Text', { children: title }) }),
+  feedPillEntry: (label: string, _width: number, onPress?: () => void) => ({ height: 52, render: () => element('View', { onPress, children: element('Text', { children: label }) }) }),
+}));
 mock.module('../src/ui/ReaderBody.tsx', () => ({ReaderBody: (p: any) => {readerProps=p;return element('ReaderBody',p);}}));
 // Douyin detail renders through the shared reader-styled MediaReaderDetail (title row + blocks).
 mock.module('../src/ui/MediaReaderDetail.tsx', () => ({MediaReaderDetail: (p: any) => {readerProps={...p,fontSize:p.preset.body.fontSizeSp,onMedia:()=>p.onPlay()};return element('MediaReaderDetail',p);}}));
