@@ -14,8 +14,8 @@ import { managedCache } from "../../cache/host.ts";
 import { resolveUrl } from "../../core/parser.ts";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
-import { biliClient, douyinClient } from "../../media-services.ts";
-import { biliPlaybackSource, createBiliPlaybackRetry } from "../../playback.ts";
+import { biliClient, biliPreviewCache, douyinClient } from "../../media-services.ts";
+import { resolveBiliPlaybackWithPreview, createBiliPlaybackRetry } from "../../playback.ts";
 import { biliVideoTarget, douyinVideoTarget } from "../../reader/media.ts";
 import type { SettingsState } from "../../settings/index.ts";
 import type { BiliRoute } from "../bili/index.tsx";
@@ -88,8 +88,15 @@ export function createMediaRouteController(
     try {
       const bili = biliVideoTarget(rawUrl) ?? biliVideoTarget(article.link);
       if (bili) {
-        const detail = bili.cid ? undefined : await biliClient.detail(bili);
-        const cid = bili.cid ?? detail?.pages[0]?.cid;
+        let cid = bili.cid;
+        if (!cid) {
+          try { cid = (await biliClient.detail(bili)).pages[0]?.cid; }
+          catch (error) {
+            cid = (await biliPreviewCache.lookup(bili))?.cid;
+            if (!cid) throw error;
+          }
+        }
+        if (!cid) cid = (await biliPreviewCache.lookup(bili))?.cid;
         if (!cid) throw new Error("视频没有可播放的分 P");
         if (dependencies.current() !== origin) return;
         await biliNavigate({
@@ -159,14 +166,6 @@ export function createMediaRouteController(
     const origin = dependencies.current();
     dependencies.setBusy(true);
     try {
-      const source =
-        route.source ??
-        (await biliClient.resolvePlayback({
-          aid: Number(route.aid) || undefined,
-          bvid: route.bvid,
-          cid: Number(route.cid),
-          preferMp4: true,
-        }));
       const session = await biliClient.getSession();
       const headers: Record<string, string> = {
         Referer: "https://www.bilibili.com/",
@@ -177,6 +176,14 @@ export function createMediaRouteController(
           .map(([key, value]) => `${key}=${value}`)
           .join("; ");
       }
+      const localPreview = async (): Promise<PlaybackSource | undefined> => {
+        const cached = await biliPreviewCache.lookup({aid: Number(route.aid) || undefined,bvid: route.bvid,cid: Number(route.cid)});
+        return cached ? {url: cached.path,type: 'video/mp4',headers: {},title: route.title ?? "哔哩哔哩"} : undefined;
+      };
+      const {remote: source,source: initialSource} = await resolveBiliPlaybackWithPreview(
+        () => route.source ? Promise.resolve(route.source) : biliClient.resolvePlayback({aid: Number(route.aid) || undefined,bvid: route.bvid,cid: Number(route.cid),preferMp4: true}),
+        localPreview,route.title ?? "哔哩哔哩",headers,
+      );
       const checkpoint = createBiliPlaybackCheckpoint({
         storage: {
           get: async (key) => kv.get<string>(key),
@@ -207,6 +214,8 @@ export function createMediaRouteController(
           }),
         route.title ?? "哔哩哔哩",
         headers,
+        localPreview,
+        initialSource,
       );
       const retryPlayback = async (positionMs: number) => {
         const entry = dependencies.current();
@@ -220,16 +229,16 @@ export function createMediaRouteController(
           videoUrl: undefined,
           audioUrl: undefined,
           ...next,
-          resumePositionMs: positionMs,
+          resumePositionMs: next.url?.startsWith("managed-cache/bili-preview/") ? 0 : positionMs,
         };
         entry.playback = updated;
         dependencies.setPlayingSource(updated);
       };
       await openVideo(
         {
-          ...biliPlaybackSource(source, route.title ?? "哔哩哔哩", headers),
+          ...initialSource,
           ...playbackPreferences(),
-          resumePositionMs: resume?.positionMs,
+          resumePositionMs: initialSource.url?.startsWith("managed-cache/bili-preview/") ? 0 : resume?.positionMs,
           platform: "bili",
           backgroundPlayback: biliBackground(),
           webUrl: route.bvid

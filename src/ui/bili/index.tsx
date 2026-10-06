@@ -414,8 +414,9 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     if (busy()) return;
     const data = state().detail, actual = controller.selectedCid(), own = controller;
     if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
-    try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true });
-      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+    try { setBusy("正在解析播放地址…");
+      // The playback controller owns remote resolution and offline preview fallback.
+      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, title: data?.item.title });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }
   function share() {
@@ -522,8 +523,9 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
     if (busy()) return;
     const data = state().detail, actual = controller.selectedCid(), own = controller;
     if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
-    try { setBusy("正在解析播放地址…"); const source = await props.client.resolvePlayback({ cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, preferMp4: true });
-      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+    try { setBusy("正在解析播放地址…");
+      // The playback controller owns remote resolution and offline preview fallback.
+      if (!disposed && controller === own) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, title: data?.item.title });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }
   const preset = () => props.preset ?? defaultReaderPreset();

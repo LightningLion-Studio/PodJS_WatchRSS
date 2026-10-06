@@ -135,7 +135,7 @@ test('production immersive player keeps restored mode through prepare and next s
 
 
 let resolveCurrent!:(id:string)=>Promise<any>,queueSnapshot:any;
-mock.module('../src/media-services.ts',()=>({biliClient:{},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
+mock.module('../src/media-services.ts',()=>({biliClient:{},biliPreviewCache:{lookup:async()=>undefined},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:()=>{throw Error('unexpected login');}}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
