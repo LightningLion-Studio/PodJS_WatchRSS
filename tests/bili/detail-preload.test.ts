@@ -21,3 +21,9 @@ test('in-flight playback coalesces, selection cancellation discards old cache re
 test('warmup failure is silent and a click retries',async()=>{
  let calls=0;const f=fixture(async()=>{if(++calls===1)throw Error('offline');return source;});f.preload.select(a);await f.advance(750);expect(await f.preload.resolve(a)).toBe(source);expect(calls).toBe(2);f.preload.dispose();
 });
+
+test('default clock constructs without an injected clock (production path)', () => {
+  const preload = new BiliDetailPreload({ resolvePlayback: async () => { throw new Error('unused'); } });
+  expect(preload.warm({ aid: 1, cid: 2 })).toBeUndefined();
+  preload.dispose();
+});

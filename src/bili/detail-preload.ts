@@ -6,7 +6,7 @@ export interface DetailPreloadClock {
   now(): number;
   schedule(callback: () => void, delay: number): () => void;
 }
-const clock: DetailPreloadClock = { now: Date.now, schedule(callback, delay) { const timer = setTimeout(callback, delay); return () => clearTimeout(timer); } };
+const defaultClock: DetailPreloadClock = { now: Date.now, schedule(callback, delay) { const timer = setTimeout(callback, delay); return () => clearTimeout(timer); } };
 const key = (target: Target) => `${target.aid ?? ''}:${target.bvid?.toLowerCase() ?? ''}:${target.cid}`;
 /** Native timing: 750 ms delay, five minute source TTL. Cancellation discards in-flight results. */
 export class BiliDetailPreload {
@@ -16,7 +16,7 @@ export class BiliDetailPreload {
   private selected?: string;
   private cache = new Map<string, { source: BiliPlayUrl; expires: number }>();
   private pending?: { key: string; promise: Promise<BiliPlayUrl> };
-  constructor(private client: Pick<BiliClient, 'resolvePlayback'>, private clock: DetailPreloadClock = clock) {}
+  constructor(private client: Pick<BiliClient, 'resolvePlayback'>, private clock: DetailPreloadClock = defaultClock) {}
   select(target?: Target) {
     if (this.disposed) return;
     const next = target && key(target);
@@ -45,6 +45,13 @@ export class BiliDetailPreload {
     }).finally(() => { if (this.pending?.promise === promise) this.pending = undefined; });
     this.pending = { key: id, promise };
     return promise;
+  }
+  /** Already-warm source only (fresh cache or in-flight); never starts a request. */
+  warm(target: Target): Promise<BiliPlayUrl> | undefined {
+    if (this.disposed) return undefined;
+    const id = key(target), cached = this.cache.get(id);
+    if (cached && this.clock.now() < cached.expires) return Promise.resolve(cached.source);
+    return this.pending?.key === id ? this.pending.promise : undefined;
   }
   dispose() { this.disposed = true; this.generation++; this.cancelTimer?.(); this.pending = undefined; this.cache.clear(); }
 }

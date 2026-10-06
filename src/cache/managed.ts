@@ -7,9 +7,13 @@ export interface CachePorts {
  digest(value:string):Promise<string>;
  download(url:string,path:string,headers:Record<string,string>):{result:Promise<unknown>;cancel():void};
 }
+export interface CacheProducer { pins():ReadonlySet<string>; clear():Promise<void>; cleared?():void }
 export interface CachedImage {path:string;release():void}
 type Work={path:string;url:string;headers:Record<string,string>;refs:number;started:boolean;cancelled:boolean;current?:{cancel():void};promise:Promise<void>;resolve():void;reject(error:unknown):void};
 export class ManagedCache {
+ private producers=new Map<CacheBucket,CacheProducer>();
+ get limitBytes(){return this.limit;}
+ registerProducer(bucket:CacheBucket,producer:CacheProducer):void {if(this.producers.has(bucket))throw Error('cache_producer_exists');this.producers.set(bucket,producer);}
  private limit=512*1024*1024;
  private serial:Promise<unknown>=Promise.resolve();
  private jobs=new Map<string,Work>();private queue:Work[]=[];private active=0;
@@ -27,11 +31,11 @@ export class ManagedCache {
      if(!entry.path.startsWith(directory+'/')||entry.path.slice(directory.length+1).includes('/')||entry.path.split('/').includes('..'))throw Error('缓存目录路径无效');
      if(entry.directory){if(bucket==='rss-offline'&&entry.path.split('/').length<16)directories.push(entry.path);continue;}
      if(!entry.file)continue;
-     const staged=/^([a-f0-9]{64}\.(?:inline\.img|img|mp4))\.download-[0-9]+$/.exec(entry.path.slice(directory.length+1));
-     if(cleanup&&bucket!=='rss-offline'&&staged&&!this.jobs.has(directory+'/'+staged[1])){await this.ports.remove(entry.path);continue;}
+     const staged=/^([a-f0-9]{64}\.(?:inline\.img|img|mp4(?:\.chunk)?))\.download-[0-9]+$/.exec(entry.path.slice(directory.length+1));
+     if(cleanup&&bucket!=='rss-offline'&&staged&&!this.jobs.has(directory+'/'+staged[1])&&!this.producers.get(bucket)?.pins().has(directory+'/'+staged[1])){await this.ports.remove(entry.path);continue;}
      if(!Number.isSafeInteger(entry.size)||entry.size<0||!Number.isFinite(entry.modified))throw Error('缓存文件信息无效');
-     // Only committed files are automatic eviction candidates. Temporary writes are owned by their download.
-     if(bucket!=='rss-offline'&&!/^[a-f0-9]{64}\.(inline\.img|img|mp4)$/.test(entry.path.slice(directory.length+1)))continue;
+     // Include producer partial files in usage/eviction. In-flight files are pinned below.
+     if(bucket!=='rss-offline'&&!/^[a-f0-9]{64}\.(inline\.img|img|mp4(?:\.part|\.chunk)?)$/.test(entry.path.slice(directory.length+1)))continue;
      files.push({...entry,bucket});if(files.length>50000)throw Error('缓存文件过多');
     }
    }
@@ -42,6 +46,7 @@ export class ManagedCache {
  inspect():Promise<number>{return this.locked(async()=>this.publish(await this.scan()));}
  maintain():Promise<number>{return this.locked(async()=>{
   const files=await this.scan(true),pinned=new Set([...this.jobs.values()].filter(j=>j.refs>0||j.started).map(j=>j.path));
+  for(const producer of this.producers.values())for(const path of producer.pins())pinned.add(path);
   // Inline images also have the native Coil 128 MiB ceiling, independently of the managed total.
   const images=files.filter(f=>f.bucket==='images'&&f.path.endsWith('.inline.img'));const candidates=[...cacheEvictionOrder(images,Math.min(this.limit,128*1024*1024),pinned)];
   const chosen=new Set(candidates.map(f=>f.path));candidates.push(...cacheEvictionOrder(files.filter(f=>!chosen.has(f.path)),this.limit,pinned));
@@ -50,6 +55,9 @@ export class ManagedCache {
  });}
  /** Native channel removal clears the provider's own flat cache bucket. */
  clearBucket(bucket:'bili-preview'|'douyin-preload'):Promise<number>{return this.locked(async()=>{
+  const producer=this.producers.get(bucket);
+  try {
+  await producer?.clear();
   const root=`${CACHE_ROOT}/${bucket}`,prefix=root+'/';
   const jobs=[...this.jobs.values()].filter(job=>job.path.startsWith(prefix));
   for(const job of jobs){job.cancelled=true;job.current?.cancel();if(!job.started){this.queue=this.queue.filter(item=>item!==job);this.jobs.delete(job.path);job.reject(Error('图片缓存请求已取消'));}}
@@ -61,6 +69,7 @@ export class ManagedCache {
    if((await this.ports.stat(entry.path)).exists)throw Error('缓存文件无法删除');
   }
   return this.publish(await this.scan());
+  } finally {producer?.cleared?.();}
  });}
  /** Reserve a shared download synchronously after hashing; release never deletes a completed cache file. */
  acquire(url:string,headers:Record<string,string>={},inline=false,bucket:'images'|'bili-preview'='images'):{result:Promise<CachedImage>;cancel():void}{

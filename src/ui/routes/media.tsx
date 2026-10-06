@@ -168,13 +168,16 @@ export function MediaRoutes(props: MediaRoutesProps) {
               (props.playingSource() ?? props.entry.playback)?.platform ?? "rss",
             )
           }
-          onProgress={(position, duration) =>
+          onProgress={(position, duration) => {
+            // A preview prefix must not overwrite full-video resume/history state.
+            if (props.entry.playback?.url?.startsWith("managed-cache/bili-preview/")) return;
             void props.entry.checkpoint
               ?.onProgress(position, duration)
-              .catch((error) => props.setError(String(error)))
-          }
+              .catch((error) => props.setError(String(error)));
+          }}
           onCheckpoint={(type, position, duration) => {
             if (type === "ready") props.douyinReady(props.entry);
+            if (props.entry.playback?.url?.startsWith("managed-cache/bili-preview/")) return;
             void props.entry.checkpoint
               ?.onCheckpoint(type, position, duration)
               .catch((error) => props.setError(String(error)));
@@ -184,7 +187,9 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ? () => void props.recoverDouyinVideo(props.entry)
               : props.entry.rssDouyinRecovery
                 ? () => void props.recoverRssDouyinVideo(props.entry)
-                : undefined
+                : props.entry.playback?.platform === "bili" && props.entry.retryPlayback
+                  ? position => void props.entry.retryPlayback!(position).catch(error => props.setError(String(error)))
+                  : undefined
           }
           onRetry={
             props.entry.retryPlayback

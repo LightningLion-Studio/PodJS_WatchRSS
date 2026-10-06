@@ -69,6 +69,8 @@ export class BiliDetailController {
     if (!target || !this.preload) return Promise.reject(new Error('missing_playback_target'));
     return this.preload.resolve(target);
   }
+  /** Warm C07 source for the selected part, if any; the playback controller resolves otherwise. */
+  warmPlayback() { const target = this.playbackTarget(); return target ? this.preload?.warm(target) : undefined; }
   savedItem(): BiliItem { return { ...this.id(), cid: this.selectedCid() }; }
   async act(kind: 'like' | 'coin' | 'favorite') {
     if (this.disposed || this.state.busy || this.state.loading || !this.id().aid || kind === 'coin' && this.state.interaction.coin) return;

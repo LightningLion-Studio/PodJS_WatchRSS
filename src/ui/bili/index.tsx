@@ -415,7 +415,10 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     if (busy()) return;
     const data = state().detail, actual = controller.selectedCid(), own = controller;
     if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
-    try { setBusy("正在解析播放地址…"); const source = await own.resolvePlayback();
+    try { setBusy("正在解析播放地址…");
+      // Reuse a warm C07 source if one exists; otherwise the playback controller resolves remotely
+      // and falls back to the cached offline preview (M3). Never start a fresh resolve here.
+      const source = await own.warmPlayback()?.catch(() => undefined);
       if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }
@@ -523,7 +526,10 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
     if (busy()) return;
     const data = state().detail, actual = controller.selectedCid(), own = controller;
     if (!actual) return fail(props, new Error("视频没有可播放的分 P"));
-    try { setBusy("正在解析播放地址…"); const source = await own.resolvePlayback();
+    try { setBusy("正在解析播放地址…");
+      // Reuse a warm C07 source if one exists; otherwise the playback controller resolves remotely
+      // and falls back to the cached offline preview (M3). Never start a fresh resolve here.
+      const source = await own.warmPlayback()?.catch(() => undefined);
       if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }

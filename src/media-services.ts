@@ -1,3 +1,5 @@
+import {createHostBiliPreview} from './bili/preview-host.ts';
+import {appLogger} from './logs/app-logger.ts';
 import {createMediaTransport} from './media/transport.ts';
 import { clearBiliLogoutData, clearDouyinLogoutData } from "./media/logout.ts";
 import { managedCache } from "./cache/host.ts";
@@ -16,7 +18,11 @@ export const mediaTransport=createMediaTransport({
  base64:bytesToBase64,
 });
 const secure={get:async(key:string)=>(await secureStorage.get(key))??null,set:secureStorage.set,delete:secureStorage.delete};
-export const biliClient=createBiliClient({onLogout:()=>clearBiliLogoutData(kv,managedCache),transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
+export const biliClient=createBiliClient({onLogout:()=>clearBiliLogoutData(kv,managedCache),transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);
+ // Cache failures never turn a successful remote/local save into a failed save.
+ if(saved)void biliPreviewCache.enqueue(item).result.catch(()=>appLogger.w('BiliPreview','preview download failed'));
+ else await biliPreviewCache.remove(item).catch(()=>appLogger.w('BiliPreview','preview removal failed'));},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
+export const biliPreviewCache=createHostBiliPreview(biliClient);
 export const douyinClient=new DouyinClient({
  onLogout:()=>clearDouyinLogoutData(managedCache, { ...browser, hasCapability }),
  transport:mediaTransport,
