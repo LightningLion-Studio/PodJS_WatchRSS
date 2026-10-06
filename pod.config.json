@@ -46,6 +46,7 @@
     "debug.acoustic"
   ],
   "resources": {
+    "glyphCache": { "preseedScanned": true, "warmCharsFile": "assets/fonts/glyph_warm_chars.txt", "warmChars": "◆◇戤搏栉桀氧洮炸猝盏裰郝镧陶顿麟腕上RSS备忘录纯文本编辑手机同步还没有频道点击下方添加你的第一个订阅源推荐一键加入官方支持频道个人中心关注收藏未读正在刷新全部设置阅读关于帮助网络连接加载失败返回确定取消删除标记已读置顶移动到顶部" },
     "fontRegular": "assets/fonts/watch_sans.ttf",
     "fontBold": "assets/fonts/reader_default_bold.ttf",
     "extraCharsFile": "assets/fonts/charset.txt",
