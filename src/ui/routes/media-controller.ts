@@ -293,6 +293,11 @@ export function createMediaRouteController(
   };
 
   const douyinNavigate = async (route: DouyinRoute,memory?:RouteEntry["memory"]) => {
+    if ((route.name === "actions" || route.name === "share") && !route.item) {
+      const current = dependencies.current(), origin = current.douyinRoute;
+      const item = origin && "item" in origin ? origin.item : current.queue?.snapshot().item;
+      if (item?.awemeId === route.awemeId) route = { ...route, item };
+    }
     if (route.name === "player" && pendingDouyinPlayback) {
       try {
         const source = await pendingDouyinPlayback, queue = pendingDouyinQueue;
@@ -520,8 +525,8 @@ export function createMediaRouteController(
   };
 
   const douyinActions = (entry: RouteEntry) => {
-    const id = entry.queue?.snapshot().item?.awemeId;
-    if (id) void douyinNavigate({ name: "actions", awemeId: id });
+    const item = entry.queue?.snapshot().item;
+    if (item) void douyinNavigate({ name: "actions", awemeId: item.awemeId, item });
   };
 
   const douyinOriginal = () =>

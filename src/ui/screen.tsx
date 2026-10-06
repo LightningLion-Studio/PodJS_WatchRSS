@@ -419,7 +419,7 @@ export default function WatchRSS(props: {
   void shareEnvironment.then((value) => {
     if (shareAlive) setSystemShareAvailable(value);
   });
-  const share: ShareHandler = (input, qr) => {
+  const share: ShareHandler = (input, qr, onDone) => {
     const source = current();
     const finishSource =
       source.page === "rss-actions" ||
@@ -429,14 +429,15 @@ export default function WatchRSS(props: {
       .then(async (supported) => {
         if (!shareAlive || current() !== source || motion.phase !== "idle")
           return;
-        await routeShare(input, settings().shareUseSystem && supported, {
+        const outcome = await routeShare(input, settings().shareUseSystem && supported, {
           text: openSystemShare,
           qr,
           unavailable: () => {
             void hostToast("暂无可分享链接");
           },
         });
-        if (shareAlive && finishSource) {
+        if (shareAlive && onDone && outcome !== "none") onDone();
+        else if (shareAlive && finishSource) {
           source.list?.scroller.stop();
           setStack((entries) =>
             entries.length > 1

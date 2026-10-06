@@ -16,7 +16,7 @@ export function douyinShareLink(id:string):string|null {const value=wireFields.t
 export function shareActionEnabled(title:string,link:string|null|undefined,useSystem:boolean):boolean {
  return !!wireFields.trim(link??'')||(useSystem&&!!wireFields.trim(title));
 }
-export type ShareHandler=(input:ShareInput,showQr:()=>void)=>void;
+export type ShareHandler=(input:ShareInput,showQr:()=>void,onDone?:()=>void)=>void;
 export async function routeShare(input:ShareInput,useSystem:boolean,ports:{text:(text:string)=>Promise<unknown>;qr:()=>void;unavailable?:()=>void}):Promise<'system'|'qr'|'none'>{
  if(useSystem){const text=nativeShareText(input);if(text===null)return 'none';await ports.text(text);return 'system';}
  if(!qrShareInput(input)){ports.unavailable?.();return 'none';}ports.qr();return 'qr';

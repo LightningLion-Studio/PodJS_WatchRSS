@@ -1,3 +1,6 @@
+import { DouyinFavoriteController } from '../../douyin/favorite.ts';
+import { DouyinRssFeedController, type DouyinRssFeedSnapshot } from '../../douyin/rss-feed.ts';
+import { DouyinActionsController, type DouyinActionDone } from '../../douyin/actions.ts';
 import { douyinVideoTarget } from "../../reader/media.ts";
 import {appLogger} from '../../logs/app-logger.ts';
 import {DouyinLoginLog} from '../../logs/douyin-login.ts';
@@ -34,8 +37,8 @@ export type DouyinRoute =
   | { name: "feed" }
   | { name: "detail"; awemeId: string; item?: DouyinItem; playlist?: DouyinItem[] }
   | { name: "history" }
-  | { name: "actions"; awemeId: string }
-  | { name: "share"; awemeId: string }
+  | { name: "actions"; awemeId: string; item?: DouyinItem }
+  | { name: "share"; awemeId: string; item?: DouyinItem }
   | { name: "settings" }
   | { name: "player"; awemeId: string };
 
@@ -52,6 +55,7 @@ export interface DouyinScreenProps {
   preset?: ReaderPreset;
   active?:boolean;
   onShare?:ShareHandler;
+  onDone?: (kind: DouyinActionDone) => void;
   width: number;
   height: number;
   route: DouyinRoute;
@@ -70,10 +74,8 @@ export interface DouyinScreenProps {
   ref?: (value: { scroller: Scroller }) => void;
 }
 
-interface FeedSnapshot { items: DouyinItem[]; cursor?: string; hasMore: boolean }
-/** One bounded feed window per client/session; route changes do not trigger requests. */
-const feedSnapshots = new WeakMap<DouyinClient, FeedSnapshot>();
-const MAX_FEED_SNAPSHOT_ITEMS = 40;
+/** Session data is retained in full; ScrollEntries virtualizes rendered entries. */
+const feedSnapshots = new WeakMap<DouyinClient, DouyinRssFeedSnapshot>();
 
 function lines(text: string, width: number, size = 13): string[] {
   const cjk = size, latin = Math.ceil(size / 2);
@@ -216,8 +218,12 @@ function FeedScreen(props: DouyinScreenProps) {
     } catch (error) { setError(String(error)); }
   };
   const initial = feedSnapshots.get(props.client);
-  const [items, setItems] = createSignal<DouyinItem[]>(initial?.items ?? []), [cursor, setCursor] = createSignal<string | undefined>(initial?.cursor), [hasMore, setHasMore] = createSignal(initial?.hasMore ?? true), [loading, setLoading] = createSignal(false), [error, setError] = createSignal("");
-  const load = async (append = false) => { if (loading()) return; setLoading(true); setError(""); const result = await props.client.fetchFeedPage({ cursor: append ? cursor() : undefined, count: 12 }); if (result.ok) { const nextItems = (append ? [...items(), ...result.data.items] : result.data.items).slice(-MAX_FEED_SNAPSHOT_ITEMS); const snapshot = { items: nextItems, cursor: result.data.nextCursor || undefined, hasMore: result.data.hasMore }; feedSnapshots.set(props.client, snapshot); setItems(snapshot.items); setCursor(snapshot.cursor); setHasMore(snapshot.hasMore); } else setError(messageOf(result, "加载失败")); setLoading(false); };
+  const controller = new DouyinRssFeedController(props.client, initial, state => setFeed(state), snapshot => feedSnapshots.set(props.client, snapshot));
+  const [feed, setFeed] = createSignal(controller.state), [error, setError] = createSignal("");
+  const items = () => feed().items, hasMore = () => feed().hasMore, loading = () => feed().loading;
+  const load = (append = false) => { setError(""); return append ? controller.loadMore() : controller.refresh(); };
+  createEffect(() => setError(feed().error));
+  onCleanup(() => controller.dispose());
   createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
   const card = (item: DouyinItem): ScrollEntry => { const titleLines = lines(itemTitle(item), props.width - 60, 17).slice(0, 2), summaryLines = lines(itemSummary(item), props.width - 60, 12).slice(0, 1); return { height: 51 + titleLines.length * 21, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-[17px] leading-[21] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] bottom-[10] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; };
   const entries = createMemo<ScrollEntry[]>(() => [{height:40,render:()=> <View onPress={()=>props.onNavigate({name:"channel-info"})} focusable class="absolute inset-0 items-center"><Text class="text-lg text-white">抖音 ›</Text></View>}, button(loading() ? "刷新中..." : "刷新", loading() ? undefined : () => void load(false)), ...(error() ? [statusCard("加载失败", error())] : []), ...(resume()?.anchorAwemeId ? [button("继续上次播放", () => void continuePlayback())] : []), ...items().map(card), ...(items().length === 0 && !loading() && !error() ? [statusCard("暂无内容", "刷新以获取推荐内容")] : []), button(loading() ? "加载中..." : hasMore() ? "加载更多" : "没有更多了", !loading() && hasMore() ? () => void load(true) : undefined)]);
@@ -250,13 +256,12 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
   const preset = () => props.preset ?? defaultReaderPreset();
   // Native DouyinDetailActivity renders the article DetailContent: reader title, then the blocks,
   // then the reader's favorite / share circles. Favorite uses the persistent local saved store.
-  const [favorite, setFavorite] = createSignal(false), [notice, setNotice] = createSignal("");
-  createEffect(() => { const id = props.awemeId; void Promise.resolve(props.client.getSavedState?.(id)).then(saved => setFavorite(!!saved?.favorite)).catch(() => {}); });
-  const toggleFavorite = async () => {
-    const current = item(); if (!current) return;
-    try { const saved = await props.client.toggleSaved(current, "favorite"); setFavorite(saved); setNotice(saved ? "已收藏" : "已取消收藏"); }
-    catch (error) { setError(String(error)); }
-  };
+  const favoriteController = new DouyinFavoriteController(props.client, props.awemeId, next => setSaved(next));
+  const [saved, setSaved] = createSignal(favoriteController.state);
+  const favorite = () => saved().favorite, notice = () => saved().message;
+  createEffect(() => { if (props.active !== false) void favoriteController.refresh(); });
+  onCleanup(() => favoriteController.dispose());
+  const toggleFavorite = async () => { const current = item(); if (current) await favoriteController.toggle(current); };
   const share = () => {
     const title = wireFields.trim(item()?.description ?? "") || "抖音视频", qr = () => props.onNavigate({ name: "share", awemeId: props.awemeId });
     if (props.onShare) props.onShare({ origin: "detail", title, link: douyinShareLink(props.awemeId) }, qr); else qr();
@@ -285,17 +290,21 @@ function HistoryScreen(props: DouyinScreenProps) {
 }
 
 function ActionsScreen(props: DouyinScreenProps & { awemeId: string }) {
-  const [item, setItem] = createSignal<DouyinItem | null>(null), [favorite, setFavorite] = createSignal(false), [watchLater, setWatchLater] = createSignal(false), [message, setMessage] = createSignal("正在读取状态...");
-  createEffect(() => { const id = props.awemeId; void Promise.all([props.client.fetchDetail(id), props.client.getSavedState(id)]).then(([detail, saved]) => { if (!detail.ok) { setMessage(detail.message); return; } if (detail.data.kind !== "video") { setMessage("图文内容暂不支持加入本地收藏"); return; } setItem(detail.data.item); setFavorite(saved.favorite); setWatchLater(saved.watchLater); setMessage(""); }).catch(error => setMessage(String(error))); });
-  const toggle = async (kind: "favorite" | "watchLater") => { const current = item(); if (!current) return; try { const saved = await props.client.toggleSaved(current, kind); if (kind === "favorite") setFavorite(saved); else setWatchLater(saved); setMessage(saved ? (kind === "favorite" ? "已收藏" : "已加入稍后再看") : (kind === "favorite" ? "已取消收藏" : "已从稍后再看移除")); } catch (error) { setMessage(String(error)); } };
-  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr);else qr();}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack)]);
+  const supplied = props.route.name === "actions" ? props.route.item : undefined;
+  const controller = new DouyinActionsController(props.client, props.awemeId, supplied, next => setState(next), kind => props.onDone?.(kind));
+  const [state, setState] = createSignal(controller.state);
+  const item = () => state().item, favorite = () => state().favorite, watchLater = () => state().watchLater, message = () => state().message;
+  onMount(() => void controller.load());
+  onCleanup(() => controller.dispose());
+  const toggle = (kind: "favorite" | "watchLater") => controller.toggle(kind);
+  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr,props.onDone ? () => controller.shared() : undefined);else {qr();controller.shared();}}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} padding={22} ref={props.ref} />;
 }
 
 function ShareScreen(props: DouyinScreenProps & { awemeId: string }) {
   const url = douyinShareLink(props.awemeId)??"";
-  const [title, setTitle] = createSignal("抖音视频");
-  createEffect(() => { void props.client.fetchDetail(props.awemeId).then(result => { if (result.ok) setTitle(result.data.kind === "video" ? itemTitle(result.data.item) : result.data.description.trim() || "抖音图文"); }); });
+  const [title, setTitle] = createSignal(itemTitle(props.route.name === "share" ? props.route.item : undefined));
+  createEffect(() => { void props.client.fetchDetail(props.awemeId).then(result => { if (result.ok) setTitle(result.data.kind === "video" ? itemTitle(result.data.item) : result.data.description.trim() || "抖音图文"); }).catch(() => {}); });
   return <SharedShareQrScreen width={props.width} height={props.height} title={title()} url={url} onClose={props.onBack} onError={message => props.onUnsupported?.(`二维码生成失败：${message}`)} />;
 }
 

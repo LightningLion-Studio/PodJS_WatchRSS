@@ -1,3 +1,4 @@
+import { douyinActionItem } from '../douyin/action-item.ts';
 const RESUME_KEY = "watchrss.resume-state.v1";
 
 export type ResumeTarget =
@@ -76,7 +77,11 @@ function sanitizedDouyinRoute(value: unknown): Record<string, unknown> | null {
   if (!name || !douyinRoutes.has(name)) return null;
   const route: Record<string, unknown> = { name };
   const awemeId = text(raw.awemeId);
-  if (awemeId) route.awemeId = awemeId;
+  if (awemeId) {
+    route.awemeId = awemeId;
+    const item = douyinActionItem(raw.item, awemeId);
+    if (item && JSON.stringify(item).length <= 4096 && ["detail", "actions", "share"].includes(name)) route.item = { ...item, playUrl: "" };
+  }
   if (["detail", "actions", "share"].includes(name) && !awemeId) return null;
   return route;
 }
