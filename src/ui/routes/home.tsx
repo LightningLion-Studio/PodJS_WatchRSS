@@ -12,7 +12,7 @@ import type { Page, RouteEntry } from "./types.ts";
 
 type ChannelAction = (
   id: string,
-  action: "move" | "pin" | "read" | "delete",
+  action: "move" | "pin" | "read" | "delete" | "clear",
 ) => Promise<void>;
 
 interface HomeRoutesProps {
@@ -37,6 +37,8 @@ interface HomeRoutesProps {
   openDouyin: (route: DouyinRoute) => Promise<void>;
   openFeed: (channel: Channel) => void;
   channelAction: ChannelAction;
+  moveNotesToTop: () => void;
+  toggleNotesPinned: () => void;
   openInformation: (page: "about" | "contact-developer" | "beian") => void;
   setError: (message: string) => void;
 }
@@ -95,6 +97,11 @@ export function HomeRoutes(props: HomeRoutesProps) {
           onDeleteChannel={(channel) =>
             props.channelAction(channel.id, "delete")
           }
+          onClearChannel={(channel) =>
+            props.channelAction(channel.id, "clear")
+          }
+          onMoveNotesToTop={props.moveNotesToTop}
+          onToggleNotesPinned={props.toggleNotesPinned}
           onBeian={() => props.openInformation("beian")}
           ref={(value) => (props.entry.list = value)}
         />

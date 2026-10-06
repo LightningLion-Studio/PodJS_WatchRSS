@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { homeChannelAtLongPress, movableHomeEntries, shouldShowHomeEmptyState, type HomeHitEntry } from "../src/ui/home-model.ts";
+import { homeChannelAtLongPress, homeEntryAtLongPress, movableHomeEntries, shouldShowHomeEmptyState, type HomeHitEntry } from "../src/ui/home-model.ts";
 import type { Channel } from "../src/ui/service.ts";
 
 const channel=(id:string,sortOrder:number,isPinned=false):Channel=>({id,title:id,url:`https://example.test/${id}`,sortOrder,isPinned});
@@ -20,6 +20,15 @@ test("home long press resolves only channel cards with scroll offset and native 
   expect(homeChannelAtLongPress(entries,100,18+73+6+65+6+84,233,0)).toBeNull();
   expect(homeChannelAtLongPress(entries,100,18+73+6+65+6,233,90)).toBe(second);
   expect(homeChannelAtLongPress(entries,17,200,233,0)).toBeNull();
+});
+
+test("home long press also resolves the movable notes entry like native ChannelActions",()=>{
+  const first=channel("first",10);
+  const entries:HomeHitEntry[]=[{height:73},{height:65,notes:true},{height:84,channel:first},{height:65}];
+  expect(homeEntryAtLongPress(entries,100,18+73+6,233,0)).toEqual({kind:"notes"});
+  expect(homeEntryAtLongPress(entries,100,18+73+6+65+6,233,0)).toEqual({kind:"channel",channel:first});
+  expect(homeEntryAtLongPress(entries,100,18,233,0)).toBeNull();
+  expect(homeEntryAtLongPress(entries,17,120,233,0)).toBeNull();
 });
 
 test("home empty state appears only after the loaded channel collection is empty",()=>{

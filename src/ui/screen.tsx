@@ -318,7 +318,8 @@ export default function WatchRSS(props: {
   // the app resumes to home, otherwise the snapshot would flash before the restored page.
   const homeSnapshot = startupResume || (activityEntries?.length??0)>1 ? undefined : readHomeChannelSnapshot();
   const [channels, setChannels] = createSignal<Channel[]>(homeSnapshot ?? []);
-  const notesHomePlacement = new HomeEntryPlacementStore().read();
+  const notesPlacementStore = new HomeEntryPlacementStore();
+  const [notesHomePlacement, setNotesHomePlacement] = createSignal(notesPlacementStore.read());
   const [articles, setArticles] = createSignal<Article[]>([]);
   const [article, setArticle] = createSignal<Article | null>(null);
   const [loading, setLoading] = createSignal(!homeSnapshot),
@@ -1484,7 +1485,9 @@ export default function WatchRSS(props: {
               width={width}
               height={height}
               channels={channels}
-              notesPlacement={notesHomePlacement}
+              notesPlacement={notesHomePlacement()}
+              moveNotesToTop={() => setNotesHomePlacement(notesPlacementStore.moveNotesToTop())}
+              toggleNotesPinned={() => setNotesHomePlacement(notesPlacementStore.setNotesPinned(!notesHomePlacement().isPinned))}
               refreshing={homeRefreshing}
               busy={busy}
               platformLoginState={platformLoginState}
