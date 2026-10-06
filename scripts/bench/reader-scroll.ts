@@ -50,15 +50,16 @@ for(const [key,value] of Object.entries(pkg.exports) as [string,any][]){
  const file=typeof value==="string"?value:value.import??value.default;
  if(typeof file==="string")aliases[`@pocketjs/framework/${key.slice(2)}`]=resolve(pocket,file);
 }
-for(const name of ["watch","services","text","media-surface"])aliases[`@podjs/framework/${name}`]=resolve(framework,`packages/framework/src/${name}.${["text","media-surface"].includes(name)?"tsx":"ts"}`);
-const output=resolve(arg("out","/tmp/reader-scroll.js"));
+for(const name of ["watch","services","text","media-surface","debug-memory"])aliases[`@podjs/framework/${name}`]=resolve(framework,`packages/framework/src/${name}.${["text","media-surface"].includes(name)?"tsx":"ts"}`);
+const native=arg("runtime","bun")==="quickjs";
+const output=resolve(arg("out",native?"/tmp/reader-memory.js":"/tmp/reader-scroll.js"));
 const sourceRef=arg("source-ref","");
 const retainRows=arg("retain-rows","");
 const appRoot=resolve(import.meta.dir,"../..");
-const built=await Bun.build({entrypoints:[resolve(import.meta.dir,"reader-scroll-runner.ts")],outdir:dirname(output),naming:output.split("/").at(-1),target:"bun",conditions:["browser"],alias:aliases,minify:false,plugins:[{name:"reader-scroll-production-solid",setup(builder){
+const built=await Bun.build({entrypoints:[resolve(import.meta.dir,native?"reader-memory-runner.tsx":"reader-scroll-runner.ts")],outdir:dirname(output),naming:output.split("/").at(-1),target:native?"browser":"bun",format:native?"iife":"esm",conditions:["browser"],alias:aliases,minify:false,plugins:[{name:"reader-scroll-production-solid",setup(builder){
  builder.onResolve({filter:/.*/},args=>aliases[args.path]?{path:realpathSync(aliases[args.path])}:undefined);
  builder.onLoad({filter:/\.(tsx|ts|js)$/},async args=>{
-  if(!args.path.includes("/src/")&&!args.path.endsWith("/solid.js"))return;
+  if(!args.path.includes("/src/")&&!args.path.endsWith("/solid.js")&&!(native&&args.path===resolve(import.meta.dir,"reader-memory-runner.tsx")))return;
   let source=await Bun.file(args.path).text();
   if(sourceRef&&["ScrollEntries.tsx","ReaderBody.tsx"].some(name=>args.path===resolve(appRoot,"src/ui",name))){
    const original=Bun.spawnSync(["git","show",`${sourceRef}:src/ui/${args.path.split("/").at(-1)}`],{cwd:appRoot});
@@ -68,14 +69,14 @@ const built=await Bun.build({entrypoints:[resolve(import.meta.dir,"reader-scroll
    if(!/^\d+$/.test(retainRows))throw new Error("retain-rows must be a nonnegative integer");
    source=source.replace("retainRows={24}",`retainRows={${retainRows}}`);
   }
-  if(args.path.endsWith("/frame.ts"))source=source.replace("callbacks.add(callback);",`const wrapped = (buttons: number) => { globalThis.__readerProfile.count("onFrameCallbacks"); return globalThis.__readerProfile.time("onFrame", () => callback(buttons)); }; callbacks.add(wrapped);`).replace("callbacks.delete(callback)","callbacks.delete(wrapped)");
+  if(!native&&args.path.endsWith("/frame.ts"))source=source.replace("callbacks.add(callback);",`const wrapped = (buttons: number) => { globalThis.__readerProfile.count("onFrameCallbacks"); return globalThis.__readerProfile.time("onFrame", () => callback(buttons)); }; callbacks.add(wrapped);`).replace("callbacks.delete(callback)","callbacks.delete(wrapped)");
   const isTs=/\.tsx?$/.test(args.path);
   // Strip types before the profiler moves bodies into wrapper functions.
   // Otherwise copied non-null assertions can escape the TypeScript visitor.
   const stripped=isTs?transformSync(source,{filename:args.path,babelrc:false,configFile:false,presets:[[require("@babel/preset-typescript"),{isTSX:args.path.endsWith(".tsx"),allExtensions:true}]]}).code:source;
-  const result=transformSync(stripped,{filename:args.path,babelrc:false,configFile:false,plugins:[instrument],presets:[...(args.path.endsWith(".tsx")?[[require("babel-preset-solid"),{generate:"universal",moduleName:"@pocketjs/framework/renderer"}]]:[])]});
+  const result=transformSync(stripped,{filename:args.path,babelrc:false,configFile:false,plugins:native?[]:[instrument],presets:[...(args.path.endsWith(".tsx")?[[require("babel-preset-solid"),{generate:"universal",moduleName:"@pocketjs/framework/renderer"}]]:[])]});
   return {contents:result.code,loader:"js"};
  });
 }}]});
 if(!built.success)throw new Error(built.logs.join("\n"));
-console.log(`Built instrumented actual ReaderBody/PocketJS/Solid/SystemTextLine: ${output}`);
+console.log(`Built ${native?"QuickJS ownership":"instrumented Bun"} ReaderBody/PocketJS/Solid/SystemTextLine: ${output}`);
