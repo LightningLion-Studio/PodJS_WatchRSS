@@ -18,7 +18,7 @@ import { RemoteImage } from "../RemoteImage.tsx";
 import { SwipeCard } from "../SwipeCard.tsx";
 import { BiliSideMenu } from "./BiliSideMenu.tsx";
 import { MediaReaderDetail } from "../MediaReaderDetail.tsx";
-import { delay } from "@podjs/framework/services";
+import { delay, hostOperation } from "@podjs/framework/services";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
 import { WatchSwitch } from "../AutoScrollSettingsScreen.tsx";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog.tsx";
@@ -549,11 +549,35 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
   </Show>;
 }
 
+/** Native BiliVideoActionsActivity: ActionDialog with 收藏 (default folder) / 稍后再看 / 分享 / 取消;
+ * success shows a system toast and closes, failure toasts and stays. */
 function ActionsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "actions" }> }) {
-  const aid = typeof props.route.aid === "number" ? props.route.aid : Number(props.route.aid || 0), folders = asyncData(() => props.client.favoriteFolders({ rid: aid })); const [message, setMessage] = createSignal("");
-  async function add(folder: BiliFavoriteFolder) { const id = folder.id ?? folder.fid; if (!id || !aid) return; try { await props.client.favorite({ aid, bvid: props.route.bvid, addMediaIds: [id], savedItem: {aid, bvid:props.route.bvid, cid: typeof props.route.cid==="number"?props.route.cid:undefined, title:props.route.title,owner:{name:props.route.owner},cover:props.route.cover} }); setMessage("已收藏"); } catch (error) { fail(props, error); } }
-  async function watchLater() { try { await props.client.addToView({ aid: aid || undefined, bvid: props.route.bvid, savedItem: {aid:aid||undefined,bvid:props.route.bvid,cid:typeof props.route.cid==="number"?props.route.cid:undefined,title:props.route.title,owner:{name:props.route.owner},cover:props.route.cover} }); setMessage("已加入稍后再看"); } catch (error) { fail(props, error); } }
-  const entries = createMemo<ScrollEntry[]>(() => [titleEntry("视频操作"), buttonEntry("稍后再看", () => void watchLater()), buttonEntry("分享", () => {const title=biliActionTitle(props.route.title,props.route.bvid,props.route.aid),qr=()=>props.onNavigate({name:"share",aid:props.route.aid,bvid:props.route.bvid,title});if(props.onShare)props.onShare({origin:"detail",title,link:biliShareLink(props.route.bvid,props.route.aid)},qr);else qr();}), titleEntry("收藏到"), ...(folders.loading() ? [messageEntry("正在加载收藏夹…", props.width ?? 233)] : []), ...(folders.error() ? [messageEntry(String(folders.error()), props.width ?? 233)] : []), ...(folders.value() ?? []).map(folder => buttonEntry(folder.title || "未命名收藏夹", () => void add(folder))), ...(message() ? [messageEntry(message(), props.width ?? 233)] : []), buttonEntry("取消", props.onBack)]);
+  const aid = typeof props.route.aid === "number" ? props.route.aid : Number(props.route.aid || 0);
+  const [busy, setBusy] = createSignal(false);
+  const savedItem = (): BiliItem => ({ aid: aid || undefined, bvid: props.route.bvid, cid: typeof props.route.cid === "number" ? props.route.cid : undefined, title: props.route.title, owner: { name: props.route.owner }, cover: props.route.cover });
+  const title = () => biliActionTitle(props.route.title, props.route.bvid, props.route.aid);
+  const toast = (message: string) => { void hostOperation("ui.toast", { message }).result.catch(() => {}); };
+  async function run(action: () => Promise<void>, success: string, failure: string) {
+    if (busy()) return; setBusy(true);
+    try { await action(); toast(success); props.onBack(); }
+    catch (error) { toast(error instanceof Error && error.message ? error.message : `${title()} ${failure}`); }
+    finally { setBusy(false); }
+  }
+  const favorite = () => run(async () => {
+    const folders = await props.client.favoriteFolders({ rid: aid, type: 2 });
+    const id = folders[0]?.id ?? folders[0]?.fid; if (!id) throw new Error("没有可用的收藏夹");
+    await props.client.favorite({ aid, bvid: props.route.bvid, addMediaIds: [id], savedItem: savedItem() });
+  }, "已收藏", "收藏失败");
+  const watchLater = () => run(() => props.client.addToView({ aid: aid || undefined, bvid: props.route.bvid, savedItem: savedItem() }).then(() => {}), "已加入稍后再看", "加入稍后再看失败");
+  const share = () => { const qr = () => props.onNavigate({ name: "share", aid: props.route.aid, bvid: props.route.bvid, title: title() }); if (props.onShare) props.onShare({ origin: "detail", title: title(), link: biliShareLink(props.route.bvid, props.route.aid) }, qr); else qr(); };
+  const width = props.width ?? 233;
+  const entries = createMemo<ScrollEntry[]>(() => [
+    spacerEntry(4),
+    pillEntry("收藏", width, aid && !busy() ? () => void favorite() : undefined, 8),
+    pillEntry("稍后再看", width, (aid || props.route.bvid) && !busy() ? () => void watchLater() : undefined, 8),
+    pillEntry("分享", width, biliShareLink(props.route.bvid, props.route.aid) && !busy() ? share : undefined, 8),
+    pillEntry("取消", width, busy() ? undefined : props.onBack, 8),
+  ]);
   return <Scrolled {...props} entries={entries()} />;
 }
 
