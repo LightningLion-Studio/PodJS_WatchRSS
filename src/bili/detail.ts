@@ -1,3 +1,4 @@
+import { BiliDetailPreload } from './detail-preload.ts';
 import type { BiliClient } from './client.ts';
 import type { BiliInteraction, BiliItem, BiliVideoDetail } from './types.ts';
 import type { BrowseStore } from './browse.ts';
@@ -19,16 +20,19 @@ export function localBiliDetail(row: { title: string; link?: string | null; desc
   return { item: { ...parsed, ...target, cid: target.cid ?? parsed.cid, title: row.title, cover: row.imageUrl ?? undefined, owner: owner ? { name: owner } : undefined }, desc: row.content?.trim() || (owner ? undefined : description), pages: [] };
 }
 export interface DetailState { detail?: BiliVideoDetail; selected: number; interaction: BiliInteraction; loading: boolean; busy: boolean; message?: string; error?: unknown; offline: boolean }
-type Client = Pick<BiliClient, 'detail' | 'getSession' | 'relation' | 'like' | 'coin' | 'favoriteFolders' | 'favorite'>;
+type Client = Pick<BiliClient, 'detail' | 'getSession' | 'relation' | 'like' | 'coin' | 'favoriteFolders' | 'favorite'> & Partial<Pick<BiliClient, 'resolvePlayback'>>;
 /** Owns one detail route; late responses never replace a different route's state. */
 export class BiliDetailController {
   state: DetailState = { selected: 0, interaction: {}, loading: true, busy: false, offline: false };
   private generation = 0;
   private disposed = false;
   private userSelected = false;
-  constructor(private client: Client, private store: BrowseStore, private target: DetailTarget, private local: (target: DetailTarget) => Promise<BiliVideoDetail | undefined>, private changed: (state: DetailState) => void = () => {}) {}
+  private preload?: BiliDetailPreload;
+  constructor(private client: Client, private store: BrowseStore, private target: DetailTarget, private local: (target: DetailTarget) => Promise<BiliVideoDetail | undefined>, private changed: (state: DetailState) => void = () => {}) {
+    if (client.resolvePlayback) this.preload = new BiliDetailPreload({ resolvePlayback: input => client.resolvePlayback!(input) });
+  }
   private publish(patch: Partial<DetailState>) { if (!this.disposed) { this.state = { ...this.state, ...patch }; this.changed(this.state); } }
-  dispose() { this.disposed = true; this.generation++; }
+  dispose() { this.disposed = true; this.generation++; this.preload?.dispose(); }
   private records(): Array<DetailTarget & BiliInteraction> { const rows = this.store.get<unknown>(INTERACTIONS); return Array.isArray(rows) ? rows.filter(r => r && typeof r === 'object') : []; }
   private id() { return { ...this.target, ...this.state.detail?.item }; }
   private persist(interaction: BiliInteraction) { const id = this.id(); this.store.set(INTERACTIONS, [{ aid: id.aid, bvid: id.bvid, ...interaction }, ...this.records().filter(r => !sameVideo(r, id))].slice(0, 200)); }
@@ -45,6 +49,7 @@ export class BiliDetailController {
       const detail = await this.client.detail({ aid: this.target.aid, bvid: this.target.bvid });
       if (!current()) return;
       this.publish({ detail, offline: false, selected: this.userSelected ? Math.min(this.state.selected, Math.max(0, detail.pages.length - 1)) : initialPage(detail, this.target.cid, latestCid(this.store, detail.item)) });
+      this.schedulePreload();
       const session = await this.client.getSession();
       const loggedIn = !!session?.cookies.SESSDATA;
       const remote = loggedIn ? await this.client.relation({ aid: detail.item.aid, bvid: detail.item.bvid }).catch(() => undefined) : undefined;
@@ -55,8 +60,15 @@ export class BiliDetailController {
     } catch (error) { if (current()) this.publish({ error }); }
     finally { if (current()) this.publish({ loading: false }); }
   }
-  select(index: number) { if (!Number.isInteger(index) || !this.state.detail?.pages[index]) return; this.userSelected = true; this.publish({ selected: index }); }
+  select(index: number) { if (!Number.isInteger(index) || !this.state.detail?.pages[index]) return; this.userSelected = true; this.publish({ selected: index }); this.schedulePreload(); }
   selectedCid() { return this.state.detail?.pages[this.state.selected]?.cid ?? this.target.cid ?? this.state.detail?.item.cid; }
+  private playbackTarget() { const item = this.savedItem(), cid = this.selectedCid(); return cid ? { aid: item.aid, bvid: item.bvid, cid } : undefined; }
+  private schedulePreload() { this.preload?.select(this.playbackTarget()); }
+  resolvePlayback() {
+    const target = this.playbackTarget();
+    if (!target || !this.preload) return Promise.reject(new Error('missing_playback_target'));
+    return this.preload.resolve(target);
+  }
   savedItem(): BiliItem { return { ...this.id(), cid: this.selectedCid() }; }
   async act(kind: 'like' | 'coin' | 'favorite') {
     if (this.disposed || this.state.busy || this.state.loading || !this.id().aid || kind === 'coin' && this.state.interaction.coin) return;

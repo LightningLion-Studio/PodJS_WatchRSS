@@ -149,3 +149,26 @@ test('B4 detail favorite/unfavorite uses B2 SQL and restores offline metadata wi
   expect(requests.some(url=>url.includes('resource/deal'))).toBe(true);
  }finally{f.sql.close();}
 });
+
+test('C12 detail star persists to global SQL favorites, reopens, cancels via C04 and synchronizes tombstone',async()=>{
+ const {DouyinFavoriteController}=await import('../../src/douyin/favorite.ts');
+ const {DouyinActionsController}=await import('../../src/douyin/actions.ts');
+ const {DouyinClient}=await import('../../src/douyin/client.ts');
+ const dir=mkdtempSync(tmpdir()+'/wrss-c12-'),path=dir+'/test.db';let f=await setup(path);
+ const client=()=>new DouyinClient({secureStorage:f.kv,savedStore:f.douyin,transport:{request:async()=>{throw Error('offline');}}});
+ try {
+  let detail=new DouyinFavoriteController(client(),'7');await detail.refresh();expect(detail.state.favorite).toBe(false);
+  await detail.toggle(video);expect(detail.state.favorite).toBe(true);
+  expect((await f.handle({action:'pullSavedItems',type:'favorite'})).items).toEqual([{link:'https://www.douyin.com/video/7'}]);
+  expect(await f.db.query("SELECT a.title,a.guid,a.image_url,a.video_url,s.saved FROM articles a JOIN article_saved_states s ON s.article_id=a.id WHERE s.save_type='favorite'")).toEqual([{title:video.description,guid:'douyin:7',image_url:video.coverUrl,video_url:video.playUrl,saved:1}]);
+  detail.dispose();f.sql.close();f=await setup(path);detail=new DouyinFavoriteController(client(),'7');await detail.refresh();expect(detail.state.favorite).toBe(true);
+  f.setNow(2000);const actions=new DouyinActionsController(client(),'7',video);await actions.load();await actions.toggle('favorite');
+  await detail.refresh();expect(detail.state.favorite).toBe(false);expect((await f.handle({action:'pullSavedItems',type:'favorite'})).count).toBe(0);
+  expect((await f.manifest.snapshot())[0]!.article).toMatchObject({favoriteSaved:false,favoriteChangedAt:2000});
+  f.setNow(3000);await detail.toggle(video);f.setNow(4000);await detail.toggle(video);expect(detail.state.favorite).toBe(false);
+  const exported=(await f.manifest.snapshot())[0]!;expect(exported.article).toMatchObject({favoriteSaved:false,favoriteChangedAt:4000});
+  expect(await f.db.query('SELECT count(*) AS n FROM articles')).toEqual([{n:1}]);
+  const receiver=await setup();try{await receiver.douyin.set(video,'favorite',true);await exchange(receiver,'merge',[await f.manifest.materializeRequested(exported)]);expect(await receiver.db.query("SELECT saved,changed_at FROM sync_saved_states WHERE save_type='favorite'")).toEqual([{saved:0,changed_at:4000}]);expect(await receiver.douyin.state('7')).toMatchObject({favorite:false});}finally{receiver.sql.close();}
+  detail.dispose();actions.dispose();f.sql.close();f=await setup(path);expect(await f.douyin.state('7')).toEqual({favorite:false,watchLater:false});
+ }finally{f.sql.close();rmSync(dir,{recursive:true,force:true});}
+});
