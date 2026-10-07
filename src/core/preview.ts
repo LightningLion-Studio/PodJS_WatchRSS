@@ -1,8 +1,11 @@
+import {htmlTextPreview} from "@podjs/framework/html";
 import { decodeHtml, htmlToText } from "./html.ts";
 import { resolveUrl } from "./parser.ts";
 
 export function articlePreview(content:string|null|undefined,description:string|null|undefined,imageUrl:string|null|undefined,link:string|null|undefined):{summary:string|null;imageUrl:string|null} {
   const raw=content?.trim()?content:description??"";
+  const native=htmlTextPreview(raw,60);
+  if(native){const summary=native.units>60?native.prefix.trimEnd()+"...":native.prefix||null;const source=imageUrl?.trim()||native.imageSource.trim();const resolved=source?resolveUrl(source,link??undefined):null;return {summary,imageUrl:resolved&&/^https?:\/\//i.test(resolved)?resolved:null};}
   const plain=htmlToText(raw).replace(/\s+/g," ").trim();
   const summary=plain.length>60?plain.slice(0,60).replace(/[\uD800-\uDBFF]$/u,"").trimEnd()+"...":plain||null;
   const safe=raw.replace(/<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,"");

@@ -239,3 +239,8 @@ test('dedup migration handles prefix-shaped GUIDs, link/title fallbacks and leav
   expect(raw.query('PRAGMA foreign_key_check').all()).toEqual([]);
  }finally{raw.close();}
 });
+
+test('cancelled refresh closes sliced work before its atomic database transaction',async()=>{
+ const db=new FakeDb();const repo=new WatchRssRepository(db,async()=>'<rss><channel><title>F</title><item><title>A</title></item></channel></rss>');let cancelled=false;
+ const work=repo.refreshChannel(1,undefined,()=>cancelled);cancelled=true;await expect(work).rejects.toThrow('刷新已取消');expect(db.executed).toHaveLength(0);
+});

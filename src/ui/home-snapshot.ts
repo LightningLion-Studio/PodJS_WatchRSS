@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import type {Channel} from "./service.ts";
 import type {ResumeTarget,ResumeStorage} from "../navigation/resume-state.ts";
 const HOME_SNAPSHOT_KEY="watchrss.home.channels.v1";
@@ -10,5 +11,5 @@ export function readHomeChannelSnapshot(storage:Pick<ResumeStorage,"get">,resume
  }catch{return undefined;}
 }
 export function writeHomeChannelSnapshot(storage:Pick<ResumeStorage,"set">,list:Channel[]):void {
- try{storage.set(HOME_SNAPSHOT_KEY,list);}catch{/* Snapshot is only a startup hint. */}
+ try{traceServiceWork("home.snapshot",()=>storage.set(HOME_SNAPSHOT_KEY,list));}catch{/* Snapshot is only a startup hint. */}
 }

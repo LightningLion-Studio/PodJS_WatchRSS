@@ -1,3 +1,4 @@
+import {decodeUtf8Async} from "@podjs/framework/bytes";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {notifyLibrarySqlCommit} from './core/library-mutations';
 import {startupMark,startupStep} from "./core/startup-trace.ts";
@@ -110,12 +111,12 @@ async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string
     while(offset < bytes.length) {
       if(job?.cancelled)throw new Error("刷新已取消");
       const chunk = await fileChunks.read(path,offset);
-      const value = base64ToBytes(chunk.dataBase64);
+      const value = traceServiceWork("refresh.base64",()=>base64ToBytes(chunk.dataBase64));
       if(!value.length) throw new Error("订阅下载不完整");
       bytes.set(value,offset); offset += value.length;
     }
     appLogger.d('Network',`download bytes=${bytes.length}`);
-    return utf8ToString(bytes);
+    return decodeUtf8Async(bytes,{cancelled:()=>job?.cancelled??false,yield:()=>delay(1).result});
   } catch(error){appLogger.e('Network','RSS fetch failed');throw error;} finally { await fileChunks.remove(path).catch(() => {}); }
 }
 const sourceSync = new SqlSourceSyncStore(db,{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")});
@@ -187,7 +188,7 @@ export const services: AppServices = {
     (SELECT COUNT(*) FROM articles a WHERE a.channel_id=c.id AND a.is_read=0) unread_count
     FROM channels c LEFT JOIN source_preferences p ON p.channel_id=c.id
     LEFT JOIN sync_source_states s ON s.url=c.url AND s.deleted=0
-    ORDER BY c.is_pinned DESC,logical_sort_order DESC,c.created_at DESC`)).map(r => ({ id:String(r.id),title:String(r.title),url:String(r.url),description:r.description == null ? null : String(r.description),imageUrl:r.image_url == null ? null : String(r.image_url),isPinned:Boolean(Number(r.is_pinned)),sortOrder:Number(r.logical_sort_order),createdAt:Number(r.created_at),useOriginalContent:Boolean(Number(r.use_original_content)),lastFetchedAt:r.last_fetched_at == null ? null : Number(r.last_fetched_at),unreadCount:Number(r.unread_count) })); },
+    ORDER BY c.is_pinned DESC,logical_sort_order DESC,c.created_at DESC`,[],"home.channels")).map(r => ({ id:String(r.id),title:String(r.title),url:String(r.url),description:r.description == null ? null : String(r.description),imageUrl:r.image_url == null ? null : String(r.image_url),isPinned:Boolean(Number(r.is_pinned)),sortOrder:Number(r.logical_sort_order),createdAt:Number(r.created_at),useOriginalContent:Boolean(Number(r.use_original_content)),lastFetchedAt:r.last_fetched_at == null ? null : Number(r.last_fetched_at),unreadCount:Number(r.unread_count) })); },
   async listArticles(query: ArticleQuery = {}) {
     await init();
     const conditions: string[] = [], params: unknown[] = [];
@@ -338,7 +339,7 @@ function refreshChannel(id:string,replace=false):Promise<void> {
     const xml=await fetchFeedText(url,job);if(job.cancelled)return;
     const current=(await db.query("SELECT url FROM channels WHERE id=?",[Number(id)]))[0];
     if(job.cancelled||String(current?.url??"")!==url)return;
-    await repo.refreshChannel(Number(id),xml);if(!job.cancelled)emitChannel({id,kind:"refresh"});
+    await repo.refreshChannel(Number(id),xml,()=>job.cancelled);if(!job.cancelled)emitChannel({id,kind:"refresh"});
   })().catch(error=>{if(!job.cancelled)throw error;}).finally(()=>{if(refreshJobs.get(id)===job)refreshJobs.delete(id);});
   return job.promise;
 }
@@ -351,7 +352,7 @@ const originalCache=new OriginalContentCache(db,async(sourceUrl,job)=>{
     const bytes=new Uint8Array(response.size);let offset=0;
     while(offset<bytes.length){if(job.cancelled)throw new Error("原文请求已取消");const chunk=await fileChunks.read(path,offset);const data=base64ToBytes(chunk.dataBase64);if(!data.length||data.length>bytes.length-offset||chunk.size!==bytes.length)throw new Error("原文下载不完整");bytes.set(data,offset);offset+=data.length;}
     appLogger.d('Network',`download bytes=${bytes.length}`);
-    return utf8ToString(bytes);
+    return decodeUtf8Async(bytes,{cancelled:()=>job.cancelled,yield:()=>delay(1).result});
   }finally{await fileChunks.remove(path).catch(()=>{});}
 },2,id=>emitChannel({id,kind:"original"}));
 const originalRequests=new Map<string,Promise<Article>>();

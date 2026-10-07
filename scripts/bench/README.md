@@ -89,3 +89,28 @@ For a conditional device estimate, add `(scale-1)*rawCpuBeforeBodyMs` to modeled
 elapsed time and anchor title appearance to a recorded device title upper bound.
 This is a conservative scheduling scenario, not a calibrated armv7 emulator;
 its complete-document estimate may overpredict actual device latency.
+
+K21 refresh-all replay uses a read-only local SQLite snapshot and a temporary
+copy for the exact production SQL. RSS/Atom documents are reconstructed from
+actual stored article shapes, not asserted to be upstream response captures.
+Network/Android SQL worker, UI/KV and GPU timing are not modeled. All private
+fixtures/bundles stay outside source control:
+
+```sh
+bun scripts/bench/refresh-all.ts --db=<snapshot> --framework=<framework> --out=<private>/refresh.js
+cargo run -p podjs-runtime --example service-bench -- <private>/refresh.js
+bun scripts/bench/refresh-differential.ts --framework=<framework> --fixture=<private>/refresh.js.fixture.json --out=<private>/diff.js
+cargo run -p podjs-runtime --example service-bench -- <private>/diff.js
+```
+
+The replay checks exact transaction statements and returned channel metadata,
+including unread aggregates. Compare before/after fixture JSON to establish
+cross-version equivalence; a replay against its own golden is not that proof.
+Home refresh does not request original-content prefetch; that is a separate
+visible-feed path. Both feed/original full-file decodes use the bounded SDK codec.
+
+Optionally set `PODJS_BENCH_KV_DIR=<private scratch>` when running `service-bench`
+to exercise the production home-snapshot writer through the real Rust KV store.
+The K21 probe's unrelated 830000-character value is explicitly synthetic; SQL
+article/channel shapes come from the local snapshot. KV readback comparison
+sorts object keys because serde canonicalizes their ordering, preserving values.

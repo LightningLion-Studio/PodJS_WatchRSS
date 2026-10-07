@@ -187,7 +187,8 @@ export default function WatchRSS(props: {
   };
   const motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
-  function setPage(next: Page, data: Partial<Entry> = {}) {
+  function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>setPageImpl(next,data)); }
+  function setPageImpl(next: Page, data: Partial<Entry> = {}) {
     if(next==="debug-tools"&&!debugGate.allowed)return;
     if (
       (next === page() && Object.keys(data).length === 0) ||
@@ -647,7 +648,7 @@ export default function WatchRSS(props: {
     setError("");
     try {
       const list = await props.services.listChannels();
-      setChannels(list);
+      traceServiceWork("home.setChannels",()=>setChannels(list));
       writeHomeChannelSnapshot(kv, list);
       startupMark("channels.loaded");
       startupFirstScreen();
@@ -1205,7 +1206,7 @@ export default function WatchRSS(props: {
       if (event.kind === "refresh" || event.kind === "library")
         void props.services
           .listChannels()
-          .then(setChannels)
+          .then(list=>traceServiceWork("home.setChannels",()=>setChannels(list)))
           .catch((e) => setError(String(e)));
       pendingFeedUpdates.add(event.id);
       updateFeedWhenSettled();
