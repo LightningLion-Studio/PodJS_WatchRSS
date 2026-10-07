@@ -82,8 +82,11 @@ export class ManagedCache {
    const path=`${CACHE_ROOT}/${bucket}/${key}.${inline?'inline.img':'img'}`;
    // The mutation runs in the same queue as eviction, so a leased path cannot be deleted between stat and decode.
    await this.locked(async()=>{
-    if(stopped)throw Error('图片缓存请求已取消');work=this.jobs.get(path);
-    if(work?.cancelled){await work.promise.catch(()=>{});work=undefined;}
+    if(stopped)throw Error('图片缓存请求已取消');let candidate=this.jobs.get(path);
+    if(candidate?.cancelled){await candidate.promise.catch(()=>{});candidate=undefined;}
+    // Cancellation while waiting must not release the old job or reserve a new lease.
+    if(stopped)throw Error('图片缓存请求已取消');
+    work=candidate;
     if(!work){let resolve!:()=>void,reject!:(error:unknown)=>void;const promise=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});void promise.catch(()=>{});work={path,url,headers,refs:0,started:false,cancelled:false,promise,resolve,reject};this.jobs.set(path,work);this.queue.push(work);}
     work.refs++;this.pump();
    });
