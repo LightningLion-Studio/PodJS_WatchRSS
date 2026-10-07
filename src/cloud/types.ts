@@ -1,3 +1,5 @@
+import {decodeUtf8} from '../core/utf8-decode.ts';
+
 export interface HttpRequest {
   method: string;
   url: string;
@@ -37,17 +39,7 @@ export function utf8Encode(value: string): Uint8Array {
 }
 
 export function utf8Decode(bytes: Uint8Array): string {
-  let out = "";
-  for (let i = 0; i < bytes.length;) {
-    const first = bytes[i++]; let cp: number;
-    if (first < 0x80) cp = first;
-    else if ((first & 0xe0) === 0xc0) cp = ((first & 31) << 6) | (bytes[i++] & 63);
-    else if ((first & 0xf0) === 0xe0) cp = ((first & 15) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63);
-    else cp = ((first & 7) << 18) | ((bytes[i++] & 63) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63);
-    if (cp <= 0xffff) out += String.fromCharCode(cp);
-    else { cp -= 0x10000; out += String.fromCharCode(0xd800 | (cp >> 10), 0xdc00 | (cp & 0x3ff)); }
-  }
-  return out;
+  return decodeUtf8(bytes,'douyin');
 }
 
 export interface CloudCrypto {

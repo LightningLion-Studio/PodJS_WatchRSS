@@ -1,5 +1,6 @@
+import {decodeUtf8} from '../core/utf8-decode.ts';
 export function utf8(value: string): Uint8Array { const out:number[]=[]; for(let i=0;i<value.length;i++){let c=value.charCodeAt(i);if(c>=0xd800&&c<=0xdbff&&i+1<value.length){const low=value.charCodeAt(i+1);if(low>=0xdc00&&low<=0xdfff){c=0x10000+((c-0xd800)<<10)+(low-0xdc00);i++}}if(c<128)out.push(c);else if(c<2048)out.push(192|c>>6,128|c&63);else if(c<0x10000)out.push(224|c>>12,128|c>>6&63,128|c&63);else out.push(240|c>>18,128|c>>12&63,128|c>>6&63,128|c&63)} return new Uint8Array(out) }
-export function text(bytes: Uint8Array): string { let s="",i=0; while(i<bytes.length){const a=bytes[i++];let cp:number;if(a<128)cp=a;else if(a<224)cp=(a&31)<<6|bytes[i++]&63;else if(a<240)cp=(a&15)<<12|(bytes[i++]&63)<<6|bytes[i++]&63;else cp=(a&7)<<18|(bytes[i++]&63)<<12|(bytes[i++]&63)<<6|bytes[i++]&63;if(cp<=0xffff)s+=String.fromCharCode(cp);else{cp-=0x10000;s+=String.fromCharCode(0xd800|(cp>>10),0xdc00|(cp&0x3ff))}} return s }
+export function text(bytes: Uint8Array): string { return decodeUtf8(bytes,'bili'); }
 export function enc(value: string): string { return encodeURIComponent(value).replace(/%20/g,"%20") }
 export function query(params: Record<string,string|number|undefined>): string { return Object.keys(params).filter(k=>params[k]!==undefined).sort().map(k=>enc(k)+"="+enc(String(params[k]))).join("&") }
 // Small RFC 1321 implementation; avoids WebCrypto in QuickJS.
