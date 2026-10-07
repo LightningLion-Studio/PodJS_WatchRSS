@@ -18,7 +18,7 @@ REHEARSAL = 'com.lightningstudio.watchrss.podjs.rehearsal'
 PHASES = ['DETECTED', 'SNAPSHOTTED', 'COPYING', 'VERIFYING', 'READY', 'ACTIVATING', 'ACTIVE']
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/migration'))
-from takeover_oracle import compare as oracle
+from takeover_complete_oracle import compare_complete as oracle
 
 
 def command(cmd, *, data=None):
@@ -160,7 +160,7 @@ def sample_phase(samples, state, elapsed_ms):
         samples.append({'phase': phase, 'elapsedMs': max(0, int(elapsed_ms))})
 
 
-def launch(adb, root, label, timeout):
+def launch(adb, root, label, timeout, interrupt_phase=None):
     # Capture before launch; scoped tag holds fixed phase names only. Filter launch PID.
     log = root / (label + '-phases.log')
     with log.open('wb') as output:
@@ -193,6 +193,13 @@ def launch(adb, root, label, timeout):
                     pass
                 elapsed_ms = (time.monotonic() - started) * 1000
                 sample_phase(samples, state, elapsed_ms)
+                if interrupt_phase and state.get('phase') == interrupt_phase:
+                    # Allow actual copy work, then kill only the isolated app process.
+                    time.sleep(2)
+                    command(adb + ['shell', 'am', 'force-stop', REHEARSAL])
+                    raw = command(adb + ['exec-out', 'run-as', REHEARSAL, 'cat', 'files/package-takeover/journal']).decode('iso-8859-1')
+                    state = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line and not line.startswith('#'))
+                    break
                 if state.get('phase') in ('ACTIVE', 'BLOCKED', 'PAUSED'):
                     break
                 time.sleep(0.25)
@@ -207,9 +214,51 @@ def launch(adb, root, label, timeout):
     # Save only codes, not raw logcat (other processes can use the same tag).
     log.unlink()
     reason = state.get('reason', '')
-    return {'phase': state.get('phase', 'TIMEOUT'), 'phases': phases,
+    return {'phase': state.get('phase', 'TIMEOUT'), 'phases': phases, 'pid': int(pid),
+            'generation': state.get('generation', '') if re.fullmatch(r'g-[a-zA-Z0-9-]{1,96}', state.get('generation', '')) else '',
             'reason': reason if re.fullmatch(r'[a-z0-9_]{0,96}', reason) else 'redacted',
             'elapsedMs': int(elapsed_ms), 'phaseSamples': samples}
+
+
+# Public projection: fixed store names, categories and codes only. Never copy raw reports.
+KNOWN_STORES = frozenset(('settings', 'bili_cache', 'reader_preset_state', 'home_entry_placement',
+    'app_resume_state', 'douyin_watch_history', 'douyin_recent_window', 'douyin_feed_cache',
+    'watchrss_announcement', 'watchrss_push', 'watch_device_identity', 'watchrss_installation_identity',
+    'watchrss_daily_telemetry', 'watchrss_download_telemetry', 'watchrss_cloud_state',
+    'watchrss_account_state', 'llm_secure_prefs', 'tts_secure_prefs', 'watchrss_cloud_keys',
+    'bili_account_store', 'douyin_account_store', 'WebViewChromiumPrefs'))
+STORE_REASONS = frozenset(('source_absent', 'ambiguous_store_files', 'source_backup_pending',
+    'isolated_uid_keystore_unavailable', 'source_master_key_missing', 'source_authentication_failed',
+    'source_crypto_failed', 'source_crypto_unavailable', 'encrypted_schema_invalid',
+    'kv_quota_exceeded', 'store_schema_invalid', 'schema_valid', 'cloud_binding_unavailable',
+    'secure_quota_exceeded', 'cloud_alias_adoption_pending', 'cloud_state_adapter_pending',
+    'llm_secret_consumer_missing', 'native_route_unsupported_home_fallback', 'unmapped_keys_retained',
+    'tts_secret_missing'))
+
+
+def store_diagnostics(snapshot):
+    state = properties(snapshot / 'files/package-takeover/journal')
+    generation = state.get('generation', '')
+    if not re.fullmatch(r'g-[a-zA-Z0-9-]{1,96}', generation):
+        raise ValueError('store_diagnostics_generation_invalid')
+    report = snapshot / 'files/package-takeover/generations' / generation / 'stores-report.json'
+    if not report.is_file():
+        return {'protocol': 1, 'available': False}
+    entries = []
+    counts = {'blocked': 0, 'known-difference': 0, 'needs-reauth': 0}
+    for store, item in sorted(json.loads(report.read_text()).items()):
+        category = item.get('activationDisposition', 'ready' if item.get('status') in ('migrated', 'absent') else 'blocked')
+        if category == 'ready':
+            continue
+        if category not in counts:
+            category = 'blocked'
+        counts[category] += 1
+        reason = item.get('reason', '')
+        entries.append({'store': store if store in KNOWN_STORES else 'unknown_store', 'category': category,
+                        'reason': reason if reason in STORE_REASONS else 'redacted'})
+    return {'protocol': 1, 'available': True, 'blockerCount': counts['blocked'],
+            'knownDifferenceCount': counts['known-difference'], 'needsReauthCount': counts['needs-reauth'],
+            'entries': entries}
 
 
 def dry_plan(a):
@@ -220,6 +269,9 @@ def dry_plan(a):
     print('adb -s ' + a.serial + ' exec-out run-as ' + NATIVE + ' tar -cf - databases files shared_prefs -> private validated copy + SHA256')
     print('Install fresh rehearsal APK and its instrumentation APK only; import sanitized tar into rehearsal sandbox.')
     print('Check imported source SHA256; cold launch with debug phase trace; require ' + ' -> '.join(PHASES))
+    if getattr(a, 'interrupt_phase', None):
+        print('Force-stop rehearsal during COPYING; resume same generation in a new process; validate aggregate seven-phase sequence.')
+    print('Project fixed store names/categories only; isolated missing source Keystore is a known difference, malformed/unknown stores remain blocked.')
     print('Stop rehearsal; validate journal/pointer/receipt, unchanged source, SQLite/KV oracle.')
     print('Restart rehearsal; same ACTIVE generation/receipt, no conversion stages; run read/render instrumentation.')
     print('Finally re-read native SHA256; report counts/codes only. Cleanup: adb uninstall ' + REHEARSAL + '.test; adb uninstall ' + REHEARSAL)
@@ -266,17 +318,36 @@ def rehearse(a):
         if not unchanged(before, imported):
             raise ValueError('import_digest_mismatch')
         shutil.rmtree(root / 'imported')
-        result['firstLaunch'] = launch(a.adb, root, 'first', a.takeover_timeout)
+        if getattr(a, 'interrupt_phase', None):
+            stopped = launch(a.adb, root, 'interrupted', a.takeover_timeout, a.interrupt_phase)
+            result['interruptedLaunch'] = stopped
+            if stopped['phase'] != 'COPYING' or not stopped['generation']:
+                raise ValueError('interruption_phase_not_reached')
+            result['firstLaunch'] = launch(a.adb, root, 'resumed', a.takeover_timeout)
+            resumed = result['firstLaunch']
+            result['interruptionRecovered'] = stopped['generation'] == resumed['generation'] and stopped['pid'] != resumed['pid'] and resumed['phase'] == 'ACTIVE'
+            if not result['interruptionRecovered']:
+                raise ValueError('interruption_resume_failed')
+            aggregate = []
+            for phase in stopped['phases'] + resumed['phases']:
+                if not aggregate or phase != aggregate[-1]:
+                    aggregate.append(phase)
+            result['aggregatePhases'] = aggregate
+        else:
+            result['firstLaunch'] = launch(a.adb, root, 'first', a.takeover_timeout)
         command(a.adb + ['shell', 'am', 'force-stop', REHEARSAL])
         first = capture(a.adb, REHEARSAL, root / 'first')
         result['sourceCopyUnchanged'] = unchanged(before, first)
+        result['storeDiagnostics'] = store_diagnostics(root / 'first')
         if not result['sourceCopyUnchanged']:
             raise ValueError('source_copy_changed')
         if result['firstLaunch']['phase'] != 'ACTIVE':
             result['outcome'] = 'BLOCKED'
             raise ValueError('takeover_blocked_or_incomplete')
-        if result['firstLaunch']['phases'] != PHASES:
+        if result.get('aggregatePhases', result['firstLaunch']['phases']) != PHASES:
             raise ValueError('phase_sequence_incomplete')
+        if not result['storeDiagnostics']['available'] or result['storeDiagnostics']['blockerCount']:
+            raise ValueError('active_store_diagnostics_invalid')
         candidate, identity = activated(root / 'first')
         result['oracle'] = oracle(root / 'native', candidate)
         if not result['oracle']['pass']:
@@ -298,7 +369,8 @@ def rehearse(a):
         result['hostReadAndRender'] = bool(re.search(rb'OK \([1-9][0-9]* tests?\)', output)) and not any(x in output for x in (b'FAILURES!!!', b'INSTRUMENTATION_FAILED', b'Process crashed'))
         if not result['hostReadAndRender']:
             raise ValueError('read_render_instrumentation_failed')
-        result['outcome'] = 'PASS'
+        result['outcome'] = 'PASS_WITH_KNOWN_DIFFERENCES' if result['storeDiagnostics']['knownDifferenceCount'] or result['storeDiagnostics']['needsReauthCount'] else 'PASS'
+        result['accountKeystoreParity'] = 'PENDING' if any(e['reason'] == 'isolated_uid_keystore_unavailable' for e in result['storeDiagnostics']['entries']) else 'not_checked_by_core_oracle'
     except Exception as error:
         # Fixed allowlisted script errors only. Never echo external exception text.
         code = str(error)
@@ -320,5 +392,5 @@ def rehearse(a):
         if a.cleanup_private:
             shutil.rmtree(root)
             print('Private host copies removed; isolated package still requires explicit uninstall.')
-    if result['outcome'] != 'PASS':
+    if result['outcome'] not in ('PASS', 'PASS_WITH_KNOWN_DIFFERENCES'):
         raise ValueError('rehearsal_not_passed')
