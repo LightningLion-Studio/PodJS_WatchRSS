@@ -31,7 +31,7 @@ const requests:any[]=[],events:any[]=[],calls:any[]=[];
 (globalThis as any).pod={
  takeEvents:()=>events.length?JSON.stringify(events.splice(0)):undefined,
  emit:(line:string)=>{const req=JSON.parse(line);calls.push(req);if(req.t==='service.request')requests.push(req);else if(req.t==='service.cancel'){const timer=timers.get(req.id);if(timer&&timerMethods.get(req.id)==='runtime.delay'){clearTimeout(timer);timers.delete(req.id);}}},
- capabilities:()=>JSON.stringify(['runtime.timer','data.images','data.files.chunks','text.layout']),
+ capabilities:()=>JSON.stringify(['runtime.timer','data.images','data.files.chunks','text.layout','text.raster']),
  displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),
  kvGet:()=>undefined,kvSet:()=>0,kvDelete:()=>0,kvKeys:()=> '[]',uploadTextureFile:()=>41,
 };
@@ -44,13 +44,14 @@ const {NoteDetailScreen}=await import('../../src/ui/NotesScreen.tsx');
 const {releaseRetainedRemoteImages,remoteImageResourceCounts}=await import('../../src/ui/RemoteImage.tsx');
 const nodes=(value:any):Node[]=>typeof value==='function'?nodes(value()):Array.isArray(value)?value.flatMap(nodes):value&&typeof value==='object'&&'props'in value?[value,...nodes(value.props.children)]:[];
 const timers=new Map<number,ReturnType<typeof setTimeout>>();
-let batchNumber=0;const timerMethods=new Map<number,string>();
+let batchNumber=0,headerBatches=0;const timerMethods=new Map<number,string>();
 const delivery:string[]=[];
 const reply=(req:any,value:any,ms:number)=>{timerMethods.set(req.id,req.method);timers.set(req.id,setTimeout(()=>{timers.delete(req.id);delivery.push(req.method);events.push({t:'service.result',id:req.id,ok:true,value});__pumpPodEvents();},ms));};
 const paragraph=(args:any)=>({lines:[{start:0,end:args.text.length,visibleEnd:args.text.length,topPx:0,bottomPx:40,baselinePx:30}]});
 async function pump(){for(let i=0;i<8;i++)await Promise.resolve();for(const req of requests.splice(0)){
  if(req.method==='text.layout'){reply(req,paragraph(req.args),req.args.text==='README'?35:1);continue;}
- if(req.method==='text.layoutBatch'){reply(req,{results:req.args.paragraphs.map(paragraph)},[40,1,20][batchNumber++%3]);continue;}
+ if(req.method==='text.layoutBatch'){const header=req.args.paragraphs[0]?.text==='README';if(header){headerBatches++;expect(req.args.paragraphs).toHaveLength(2);expect(req.args.paragraphs[0]).toMatchObject({widthPx:380,align:'center'});expect(req.args.paragraphs[1].widthPx).toBe(410);}reply(req,{results:req.args.paragraphs.map(paragraph)},header?35:[40,1,20][batchNumber++%3]);continue;}
+ if(req.method==='text.raster'){reply(req,{path:'text/local.rgba',width:512,height:64,carets:Array(req.args.text.length+1).fill(0)},1);continue;}
  if(req.method==='runtime.delay'){if(req.args.milliseconds<1||req.args.milliseconds>120000){events.push({t:'service.result',id:req.id,ok:false,code:'invalid_argument',message:'Timer delay must be 1..120000ms'});}else reply(req,null,req.args.milliseconds);continue;}
  let value:unknown=null;
  if(req.method==='image.decode')value={path:'images/local.rgba',width:2,height:1,sourceWidth:400,sourceHeight:200};
@@ -77,7 +78,7 @@ test(`production note publishes with valid host timers and delayed native replie
  if(mode==='late'){
   // Native body and header share host turns. Leave while their replies are
   // pending; old native replies still arrive after reactivation and are ignored.
-  await until(()=>calls.some(c=>c.method==='text.layoutBatch'));
+  await until(()=>calls.some(c=>c.method==='text.layoutBatch'&&c.args.paragraphs[0]?.text!=='README'));
   setActive(false);await pump();setActive(true);
   expect(calls.some(c=>c.t==='service.cancel')).toBe(true);
  }
@@ -90,7 +91,8 @@ test(`production note publishes with valid host timers and delayed native replie
  expect(calls.some(c=>c.method==='file.read'||c.method==='http.request')).toBe(false);
  expect(images.some(call=>call[1]===41)).toBe(true);
  expect(visibleText(root)).toContain('hymission');expect(batchNumber).toBeGreaterThan(1);
- expect(delivery).toContain('text.layoutBatch');expect(delivery).toContain('text.layout');
+ expect(calls.find(c=>c.method==='text.raster'&&c.args.text==='README')?.args).toMatchObject({widthPx:380,align:'center',paragraph:{widthPx:380,align:'center'}});
+ expect(delivery).toContain('text.layoutBatch');expect(headerBatches).toBeGreaterThan(0);expect(calls.some(c=>c.method==='text.layout')).toBe(false);
  expect(calls.filter(c=>c.method==='runtime.delay').every(c=>c.args.milliseconds>=1&&c.args.milliseconds<=120000)).toBe(true);
  handle.scroller.scrollTo(200,{immediate:true});expect(handle.scroller.offset()).toBe(200);
  setActive(false);await pump();setActive(true);
