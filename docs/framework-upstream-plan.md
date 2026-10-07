@@ -269,3 +269,45 @@ On app baseline `4895139` / framework `9f09ca5`, branch `impl/upstream-4`:
 
 See `framework-upstream-u5.md` for verification and frozen oracle provenance.
 Device parity remains PENDING; no device operation was performed.
+
+
+## U6 状态复核（2026-10-07，app 2e84513 / framework 58ab3c4）
+
+状态仅表示源码上移，设备验收仍 PENDING。本表取代 U1 草案与 U4 基线状态；
+“部分”明确区分通用机制与仍在应用的组合层，不把 host 能力存在算作组件迁完。
+
+| 组 | 状态 | 当前证据 / 剩余边界 |
+| --- | --- | --- |
+| 1 上传探测 | 已完成 | framework services/image；应用 RemoteImage provider |
+| 2 窗口索引 | 已完成 | windowed-list/windowed-rows；app visible-range 转出 |
+| 3 文本环境/carets | 未开始 | ReaderTextRow/system-carets 仍应用；SystemTextLine 已有但不是此项 |
+| 4 进度指示 | 已完成 | watch-ui WatchProgressIndicator |
+| 5 返回动效 | 已完成 | navigation BackMotion |
+| 6 UTF-8 | 已完成 | bytes decodeUtf8Chunk；应用保留协议方言 |
+| 7 ScrollEntries | 部分 | windowed-list 通用索引与 K15 切片；手势/刷新/恢复接线仍应用 |
+| 8 RemoteImage | 已完成 | framework image 管线，应用 cache provider |
+| 9 SwipeCard | 已完成 | U5 SwipeActionCard，业务动作留应用 |
+| 10 确认框 | 已完成 | U5 WatchConfirmDialog，删除含义留应用 |
+| 11 文字排版 | 部分 | text-layout/text-wrap 调度与 atlas wrap；ui/text-layout、line-break 等仍应用 |
+| 12 Compose 缩放 | 已完成 | U4 text-compat |
+| 13 Activity 协调 | 部分 | M1/M2 application.activityState 底座已有；U6 navigation.ActivityStateHub 已上移；route-activity 仍应用；路由白名单不迁移（业务专属） |
+| 14 滚动恢复 | 已完成 | U6 framework navigation.ScrollRestoration，app 转出 |
+| 15 恢复式输入 | 未开始 | modal-input 的 owner/epoch 协调仍应用；host pending/dismiss 已有 |
+| 16 启动 trace/gate | 已完成 | U4 startup；应用标签与阶段保留 |
+| 17 启动过渡 | 部分 | U5 startupExitFrame；overlay 生命周期未迁；onboarding 不迁移（业务专属） |
+| 18 日志机制 | 已完成 | U6 logging 脱敏与 FIFO/trim；logs/app-logger 保留业务参数；上传加密协议不迁移（业务专属） |
+| 19 QR raster | 未开始 | QRCode/qr-pixels 仍应用 |
+| 20 圆屏布局 | 已完成 | U4 safeQrLayout/rectInsideCircle |
+| 21 大图分块 | 未开始 | TiledImage/image-tiles/image-preview 仍应用 |
+| 22 ManagedCache | 未开始 | managed.ts 仍应用；policy 淘汰桶规则不迁移（业务专属） |
+| 23 编辑辅助 | 未开始 | SerialWriteQueue/TextHistory/AutoScrollController/DraftAutosave 四项仍应用 |
+| 24 lazy regexp | 部分 | text-wrap 私有 helper；应用 helper 仍服务未迁算法 |
+| 25 SQL/framing | 部分 | sync-framing/bytes 底座；sql-pages/sql-text/stream 编排仍应用 |
+
+后续轮次复核：K15 的切片布局、索引/retained window 在 framework text-layout、
+windowed-list；RS1/RS2 的通用 HTML parser 与 async slice 在 html/html-slices，
+reader/content 仅映射业务块。K21 的 XML 在 xml、KV 原生批处理在 runtime；
+K22 的 JSON projection/切片与 UTF-8 在 json/bytes；K23 的 KV checkpoint 微任务
+合批在 framework watch 与 runtime kv，ActivityStateHub 只调用通用 trace，
+Douyin restore/setPage 业务仍应用。RS3 的首屏源字符预算/延后调度在 text-layout，
+notes header 参数、内容模型和测量组合仍应用。这些轮次不等价于迁完 #3/#7/#11/#13/#25。
