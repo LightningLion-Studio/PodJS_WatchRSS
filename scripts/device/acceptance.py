@@ -282,6 +282,7 @@ def main():
     p.add_argument('--test-apk', type=Path)
     p.add_argument('--cleanup-private', action='store_true')
     p.add_argument('--takeover-timeout', type=int, default=300)
+    p.add_argument('--interrupt-phase', choices=['COPYING'], help='Rehearsal only: force-stop during COPYING, then resume the same generation')
     p.add_argument('--reference', type=Path)
     p.add_argument('--actual', type=Path)
     p.add_argument('--framework', type=Path, default=FRAMEWORK)
