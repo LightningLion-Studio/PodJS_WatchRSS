@@ -1,7 +1,7 @@
 import type { SqlDatabase } from "../core/types.ts";
 import { resolveUrl } from "../core/parser.ts";
 import { articlePreview } from "../core/preview.ts";
-import { extractReadableHtml } from "./content.ts";
+import { extractReadableHtmlAsync } from "./content.ts";
 
 export interface OriginalDownload { cancelled:boolean; cancel?:()=>void }
 export interface OriginalContent { html:string; sourceUrl:string }
@@ -110,7 +110,7 @@ export class OriginalContentCache {
     const sourceUrl=resolveUrl(identity.link,identity.channelUrl)??"";
     if(!/^https?:\/\//i.test(sourceUrl))throw new Error("文章没有可读取的网页链接");
     this.check(job);const raw=await this.download(sourceUrl,job);this.check(job);
-    const html=extractReadableHtml(raw,sourceUrl)??"";
+    const html=await extractReadableHtmlAsync(raw,sourceUrl)??"";
     if(!html)throw new Error("网页没有可读取的正文");
     await this.waitUntilSettled(job);
     const latest=await this.identity(job);

@@ -38,6 +38,21 @@ const geometry=(entries:ReturnType<typeof notePreviewEntries>)=>entries.map(entr
 for(const layout of [undefined,native]){if(JSON.stringify(geometry(notePreviewEntries(markup,205,undefined,preset,layout)))!==JSON.stringify(geometry(beforeEntries(markup,205,undefined,preset,layout))))throw Error('README geometry/anchors changed');}
 const cache=createKeyedMemo<string>();
 time('note.cachedNativeBatchPublications',()=>{const map=new Map();for(let i=0;i<body.length;i+=16){for(const b of body.slice(i,i+16))map.set(b.text,native.get(b.text));notePreviewEntries(markup,205,undefined,preset,map,undefined,undefined,undefined,cache);}});
+// The stable early source prefix uses exactly the final document's block and
+// anchor geometry; cached image identity survives completion.
+let prefix:typeof blocks|undefined;
+let prefixComplete:typeof blocks=[];
+const parsePrefix=prepareNotePreviewSteps(markup,1200,value=>prefix=value);
+for(;;){const value=parsePrefix.next();if(value.done){prefixComplete=value.value;break;}}
+if(!prefix||JSON.stringify(prefix)!==JSON.stringify(blocks.slice(0,prefix.length)))throw Error('source prefix changed blocks');
+const prefixCache=createKeyedMemo<string>();
+const early=notePreviewEntries(markup,205,undefined,preset,undefined,undefined,undefined,undefined,prefixCache,{blocks:prefix,offsets:noteBlockSourceOffsets(markup,prefix)});
+prefixCache.get('parse',[markup],()=>({blocks:prefixComplete,offsets:noteBlockSourceOffsets(markup,prefixComplete)}));
+const final=notePreviewEntries(markup,205,undefined,preset,native,undefined,undefined,undefined,prefixCache);
+if(JSON.stringify(geometry(early))!==JSON.stringify(geometry(final.slice(0,early.length))))throw Error('first screen geometry changed');
+const earlyImage=early.find(e=>e.data===260)!;
+if(!earlyImage||!final.includes(earlyImage))throw Error('first screen image was replaced');
+print(JSON.stringify({phase:'note.prefixDifferential',blocks:prefix.length,rows:early.length,geometryEqual:true,imageRetained:true}));
 const identityCache=createKeyedMemo<string>();
 const first=notePreviewEntries(markup,205,undefined,preset,undefined,undefined,undefined,undefined,identityCache),image=first.find(e=>e.data===260)!;
 if(!image)throw Error('image fixture missing');

@@ -62,3 +62,30 @@ all synchronous Rust KV IO (the fixture uses a JS KV boundary). The host example
 `maxMicrotaskTurnMs`, not the JS pump's wall sample, includes drained Promise jobs.
 The generated fixture and loader contain private article data; do not publish
 them. Labels and printed result summaries contain only code identity/counts.
+
+RS2 HTML differential (existing fixture literals/JSON, local real 411/407 captures,
+2000 malformed random fragments, Unicode/oversized fallback):
+
+```sh
+bun scripts/bench/html-fragment.ts --framework=<minor-framework> --out=<private-output>/html.js
+# Run from the framework checkout, using the same rquickjs dependency/features.
+cargo run -p podjs-runtime --release --example service-bench -- <private-output>/html.js
+PODJS_BENCH_PORTABLE=1 cargo run -p podjs-runtime --release --example service-bench -- <private-output>/html.js
+```
+
+RS2 note probes use `note-reader.ts` to compare complete geometry/anchors with the
+frozen collector and the stable early heading/image prefix, and `reader-entry.ts
+--mode=note --timer-floor=16 --native-delay=16` to mount the real note screen on
+QuickJS/UiSurface. Use `--source-ref=b361e25` for the RS2 baseline. Entry output
+includes title/body/image/raster milestones, scheduler jobs, all delivered native
+layout batch turns, and CPU before the first body. Those IO replies are synthetic;
+CPU scaling by 5–10 is an estimate, and physical visibility/GPU/Android scheduling
+must be checked separately. Outputs containing captured HTML/Markdown remain
+local and must not be committed.
+
+`--cpu-scale=5` / `--cpu-scale=10` use a scaled monotonic clock for the default
+1 ms work budget, retain unscaled 16 ms IO timers, and report raw CPU separately.
+For a conditional device estimate, add `(scale-1)*rawCpuBeforeBodyMs` to modeled
+elapsed time and anchor title appearance to a recorded device title upper bound.
+This is a conservative scheduling scenario, not a calibrated armv7 emulator;
+its complete-document estimate may overpredict actual device latency.

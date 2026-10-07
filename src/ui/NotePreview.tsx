@@ -72,13 +72,13 @@ function NotePreviewTable(props:{block:NoteTable;width:number;height:number;rows
  const body=props.textColor.slice(0,7),outerBorder=`${body}3d`,cellBorder=`${body}33`,headerColor=`${body}1a`;
  return <View ref={n=>node=n} class="absolute inset-0 overflow-hidden rounded-[12]" style={{borderWidth:1,borderColor:outerBorder}}><View class="absolute left-[0] top-[0]" style={{width:columns*128,height:props.height,translateX:-scroller.offset()}}><For each={rows}>{(row,index)=><For each={row}>{(lines,column)=><NotePreviewTableCell source={props.block.rows[index()]?.[column()]??''} lines={lines} column={column()} top={offsets[index()]!} height={heights[index()]!} header={index()<props.block.headerRows} alignment={props.block.alignments[column()]??'Start'} font={index()<props.block.headerRows?props.headerFont:props.font} textColor={props.textColor} headerColor={headerColor} cellBorder={cellBorder} codeColor={props.codeColor} codeBackground={props.codeBackground}/>}</For>}</For></View></View>;
 }
-export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path:string)=>void,preset?:ReaderPreset,nativeBody?:ReadonlyMap<string,readonly ParagraphLine[]>,onDownload?:()=>void,imageHeights?:ReadonlyMap<string,number>,onImageSize?:(path:string,width:number,height:number)=>void,cache?:ReturnType<typeof createKeyedMemo<string>>):Generator<NotePreviewEntry,void> {
+export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path:string)=>void,preset?:ReaderPreset,nativeBody?:ReadonlyMap<string,readonly ParagraphLine[]>,onDownload?:()=>void,imageHeights?:ReadonlyMap<string,number>,onImageSize?:(path:string,width:number,height:number)=>void,cache?:ReturnType<typeof createKeyedMemo<string>>,preparedPrefix?:{blocks:NotePreviewBlock[];offsets:(number|null)[]}):Generator<NotePreviewEntry,void> {
  const bodyColor=preset?readerColor(preset.body.colorArgb):'#e5e5e5';
  const codeColor=preset?presetContentFont(preset,'code').color:'#e5e5e5';
  const codeBackground=preset?readerColor(preset.codeBackgroundColorArgb):'#202427';
  const tableFont=rowFont({text:'',role:'body',size:14,lineHeight:20,sourceMarkup:'',sourceStart:0,mappingText:'',mappingStart:0},preset);
  const tableHeaderFont=preset?{...tableFont,...presetContentFont({...preset,body:{...preset.body,fontWeight:600}},'body')}:tableFont;
- const prepared=cache?cache.get('parse',[markup],()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};}):(()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};})();
+ const prepared=preparedPrefix??(cache?cache.get('parse',[markup],()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};}):(()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};})());
  const {blocks,offsets}=prepared;let emitted=0;
  const spacer=(height:number):NotePreviewEntry=>({height,render:()=>null});
  for(let blockIndex=0;blockIndex<blocks.length;blockIndex++){

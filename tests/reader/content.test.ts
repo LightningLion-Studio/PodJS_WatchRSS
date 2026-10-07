@@ -1,5 +1,5 @@
 import {expect,test} from "bun:test";
-import {parseContent,contentText} from "../../src/reader/content.ts";
+import {parseContent,parseContentAsync,contentText} from "../../src/reader/content.ts";
 test("native block order and styles survive mixed HTML",()=>{
  const result=parseContent('<h1>Title</h1><p>Hello <b>world</b><img src="a>b.png" width="20" style="height: 10.5px" alt="A &amp; B">after</p><ol><li>First<li>Second</ol><blockquote><ul><li>Quoted</li></ul></blockquote><pre>code</pre><video poster="p"><source src="movie.mp4"></video>');
  expect(result).toEqual([{type:"text",style:"title",text:"Title"},{type:"text",style:"body",text:"Hello world"},{type:"image",url:"a>b.png",alt:"A & B",width:20,height:11},{type:"text",style:"body",text:"after\n1. First\n2. Second"},{type:"text",style:"quote",text:"- Quoted"},{type:"text",style:"code",text:"code"},{type:"video",url:"movie.mp4",poster:"p"}]);
@@ -27,4 +27,10 @@ import nativeFixtures from "./native-content-fixtures.json";
 test("matches captured production Kotlin parser fixtures",()=>{
  const normalize=(value:unknown):unknown=>JSON.parse(JSON.stringify(value,(_key,v)=>v===null?undefined:v));
  for(const fixture of nativeFixtures)expect(normalize(parseContent(fixture.raw))).toEqual(normalize(fixture.blocks));
+});
+
+test('async production default keeps legacy blocks and rejects pre-cancelled input',async()=>{
+ expect(await parseContentAsync('<p>one<img src="a">two</p>')).toEqual(parseContent('<p>one<img src="a">two</p>'));
+ const abort=new AbortController();abort.abort();
+ await expect(parseContentAsync('plain text',abort.signal)).rejects.toThrow('HTML parse cancelled');
 });
