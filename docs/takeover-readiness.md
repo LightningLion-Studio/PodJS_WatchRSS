@@ -46,7 +46,7 @@
 |---|---|---|
 | 手机连接/同步 | `src/sync/application-host.ts`、foreground/IP/RFCOMM及session/reader资源/note资产/remote input已有；原生device identity先迁移再默认初始化 | 本轮不操作手机、不发账号写请求；真实双端、断连/ACK、大正文及权限验收PENDING |
 | 通知与后台 | host notification/scheduler/worker/playback storage入口有admission gate；应用后台handler与6h cloud worker已有，cloud/acoustic严格debug gate | 系统权限、通知显示/点击、进程回收后调度及后台存活PENDING；不能把UI可达当后台成功 |
-| WorkManager旧任务 | 原生 `WatchCloudSyncWorker` 与PodJS `PodCloudWorker` 共用唯一名称 `watchrss-watch-cloud-sync-6h`；release路径取消该名称，debug使用UPDATE | 没有找到旧类名WorkerFactory或接管前旧任务协调器；WorkManager内部DB不切代际。旧pending work先于guest初始化、版本schema和旧worker class处理缺专门夹具与设备证明，是发布门槛 |
+| WorkManager旧任务（T3） | app 声明原生类/name；框架 on-demand WorkerFactory 映射为无害 worker，ACTIVE admission 后按 unique name/显式及自动 class tag 取消并持久记录。PodJS cloud 改用 `podjs-cloud-sync-6h` | 代码兼容缺口已处理；synthetic WorkManager/Room 的旧类、取消、重复启动、磁盘重开和 2.10.1 v23→2.11.2 v24 升级有 Robolectric 覆盖。真实同包升级/系统后台唤醒仍 PENDING，正式发布门槛未撤销 |
 | debug-only全覆盖 | `application.buildInfo().debugBuild` fail-closed门控；声波/云/性能/调试UI已有 | C15外部alias/故障广播/provider dump ABI仍未找到；C17详细TTS model/voice/baseURL/key手表编辑仍子集。用户要求全迁，不能擅自豁免 |
 | C审计历史与决策 | C11手工Cookie在手表release保留、C12收藏持久化已获用户决定；C01 OSS低优先级。C02–C10旧行号来自较早源码，当前不能整体照抄为仍缺失 | C16隐藏独立总结页仍需用户范围决定；其余已修项需要按最新基线走页面/离线行为验收，不能从历史表直接关闭设备验收 |
 | 接管进度/失败/重试 | lead的Java `RecoveryView`为圆屏黑底、边缘进度环、字节/阶段、BLOCKED说明和“重试迁移”；controller弱引用Activity，后台执行后回主线程创建guest | 没有重写UI。本轮被系统充电层覆盖，圆屏进度布局、失败文案/按钮实际点击与无缝进入guest全部PENDING |
@@ -74,3 +74,37 @@ WorkManager保存worker类名并建议旧类名兼容factory的机制依据 [Wor
 - 后续先在充电层可退出且安全门解除后由授权设备负责人：只读原生after摘要与本次before复核；按文档精确卸载`.rehearsal.test`和`.rehearsal`，重跑普通+`--interrupt-phase COPYING`两轮；完成所有页面/像素核对、二启、guest instrumentation，回收演练包并回正式PodJS首页。**本轮最终首页及演练包卸载PENDING**，安全门阻止操作，不能称本任务DONE。
 
 详细命令见 [takeover-rehearsal.md](takeover-rehearsal.md)，脱敏结果/测试日志见本轮`.codex-tmp/t1/`；真实源副本仅在私有`/tmp`，不提交或分享。此前P2–P5报告是覆盖式文件，当前report已为RS3；本轮使用P2–P5实现文档、任务记录、P5离线日志和device report-04可核查证据，不声称找到了未保存的原报告全文。
+
+
+## T3：原生 WorkManager 盘点与迁移兼容（2026-10-07）
+
+范围：原生手表仓库 `Android_WatchRSS` 的全部 Kotlin 源码使用点，未修改原生代码。
+未发现其他 WorkManager request（刷新、日志、蓝牙/IP同步使用其他机制，不伪造任务清单）。
+历史发布版本的其他 worker/name 仍应由 release owner 对照历史源码确认。
+
+| 请求/入口 | worker / unique name / tag | 约束、周期、输入、策略 |
+|---|---|---|
+| 原生 `WatchRssApplication.onCreate` debug schedule，release cancel | `com.lightningstudio.watchrss.data.cloud.WatchCloudSyncWorker`；`watchrss-watch-cloud-sync-6h`；无显式 tag，自动 class tag | 6h、UNMETERED、无输入、无显式 initial delay，UPDATE；默认指数退避。worker release 直接 success，debug 无账号 success；同步失败最多3次 retry 后 failure |
+| PodJS `src/cloud/application.ts` / `PodCloudWork` | `dev.podjs.runtime.PodCloudWorker`；T3 改为 `podjs-cloud-sync-6h`；自动 class tag | debug-only、6h、首次延迟6h、UNMETERED、指数退避30s、无输入、UPDATE；release cancel。现有生产 scheduler 在 guest admission 后注册，不迁移运行中的原生任务状态 |
+| 通用 `PodBackgroundScheduler` | `dev.podjs.runtime.PodBackgroundWorker`；`podjs-bg:<app长度>:<app>:<task>`；自动 class tag | 一次性、可选 CONNECTED、earliestAt延迟、指数退避10s；输入 app/task，任务 payload/方法白名单保存在host DB；REPLACE |
+| 通用 `PodNotifications.schedule` | `dev.podjs.runtime.PodNotificationWorker`；`podjs-notification:<id>` tag；自动 class tag | 一次性、at延迟、无网络约束；输入 notificationId；enqueue 后按authoritative run收敛，不与原生 cloud unique name冲突 |
+
+应用 `android.workManagerTakeover` 明确声明原生 appId、完整 worker 类名、旧 unique name。
+框架对同包名生效；当前并存 `.podjs` 及独立 rehearsal 不清理原生包记录。
+自动 class tag 取消可覆盖未命名/一次性遗留请求；本次原生没有显式 tag，配置 tags 为空。
+WorkerFactory 先于任何 WorkManager 调度安装；旧类不反射加载原生 Kotlin 类。
+迁移前 stub 只 retry，不访问业务数据或触发迁移；ACTIVE 后返回 success 并自取消，
+周期请求不再重调度。接管完成后等取消操作落盘，才放行 guest，随后现有 app scheduler
+注册等价 debug cloud 工作。release 沿用原生 debug gate，禁用 cloud。
+
+T2 合并点只有 `PodTakeover.paths` 的 post-admission 调用与 cached Activity admission
+完成条件；不改 Coordinator、converter、快照/备份/恢复流程。完成标记/锁放独立
+`no_backup/podjs-workmanager-takeover`，按generation与公开配置hash区分。原生 DB、prefs、
+文件和 T2 备份目录不改写。生产清理只用 WorkManager cancel API，不删除 workdb、
+不直接改SQL、不调用全局 cancelAllWork/pruneWork；测试中的SQL仅用于synthetic夹具。
+
+源码/JVM验证不能证明真实系统 JobScheduler/进程回收顺序或正式同UID升级。
+后续由有设备权限的 lead 派发：在专用测试包/合成旧worker DB里验证首次冷启动与
+系统后台唤醒、ACTIVE前等待/ACTIVE后取消、重复启动保留PodJS工作；同包正式升级需
+先完成现有版本/签名/备份/设备安全门，不能直接把并存APK安装视为验收。
+本任务没有 adb、安装、仪器化执行或签名密码读取；整体接管发布仍为 PARTIAL。

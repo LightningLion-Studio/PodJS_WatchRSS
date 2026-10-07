@@ -42,6 +42,16 @@
         "name": "com.lightningstudio.watchrss.debug.DebugLogProvider",
         "authority": "com.lightningstudio.watchrss.podjs.debuglog"
       }
+    },
+    "workManagerTakeover": {
+      "nativeAppId": "com.lightningstudio.watchrss",
+      "workerClasses": [
+        "com.lightningstudio.watchrss.data.cloud.WatchCloudSyncWorker"
+      ],
+      "uniqueWorkNames": [
+        "watchrss-watch-cloud-sync-6h"
+      ],
+      "tags": []
     }
   },
   "capabilities": [
