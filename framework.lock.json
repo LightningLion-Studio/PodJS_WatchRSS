@@ -1,7 +1,7 @@
 {
-  "path": "/home/wilf/data/PodJS/podjs-watch.wt-c-k21",
-  "revision": "15fe30019e60b6b4c6599db09158ad02b1c4a785",
+  "path": "/home/wilf/data/PodJS/podjs-watch",
+  "revision": "f672a80ecfbef58bf5c33f6d86810bcfb9457fec",
   "requiresLocalChanges": false,
   "pocketjsRevision": "78b1c8629c31b2eca8642c8c03f481783042306f",
-  "branch": "c/douyin-entry"
+  "branch": "watchrss-migration"
 }
