@@ -21,7 +21,7 @@ const {RemoteImage:before}=await import('./fixtures/RemoteImage-u3-before.tsx');
 const {RemoteImage:after}=await import('../src/ui/RemoteImage.tsx');
 function snapshot(node:Element):unknown {
  const styles:Record<string,unknown>={};const classes=String(node.props.class??'').split(' ');
- if(classes.includes('relative'))styles.position='relative';if(classes.includes('absolute'))styles.position='absolute';if(classes.includes('overflow-hidden'))styles.overflow='hidden';
+ if(classes.includes('relative'))styles.posType=0;if(classes.includes('absolute'))styles.posType=1;if(classes.includes('overflow-hidden'))styles.overflow=1;
  Object.assign(styles,node.props.style);
  return {kind:node.kind,class:classes.filter(x=>!['relative','absolute','overflow-hidden'].includes(x)).join(' '),styles,children:node.children?Array.isArray(node.children)?node.children.map(snapshot):snapshot(node.children):null};
 }
