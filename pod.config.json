@@ -45,6 +45,16 @@
     },
     "takeover": {
       "sourceVersionCode": 40
+    },
+    "workManagerTakeover": {
+      "nativeAppId": "com.lightningstudio.watchrss",
+      "workerClasses": [
+        "com.lightningstudio.watchrss.data.cloud.WatchCloudSyncWorker"
+      ],
+      "uniqueWorkNames": [
+        "watchrss-watch-cloud-sync-6h"
+      ],
+      "tags": []
     }
   },
   "capabilities": [
