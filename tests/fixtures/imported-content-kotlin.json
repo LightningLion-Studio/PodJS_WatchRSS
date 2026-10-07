@@ -1,0 +1,683 @@
+{
+  "oracle": "Kotlin/JVM 2.0.21 StringsKt.trim; native ImportedContentIds 6bb99ed4",
+  "cases": [
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": null
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": ""
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "  "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001c\u001c"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001d\u001d"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001e\u001e"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001f\u001f"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "  "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200b\u200b"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "　　"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": "https://watchrss.local/import-content/txt/book"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": " https://watchrss.local/import-content/txt/book "
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": "\u001chttps://watchrss.local/import-content/txt/book\u001c"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": "\u001dhttps://watchrss.local/import-content/txt/book\u001d"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": "\u001ehttps://watchrss.local/import-content/txt/book\u001e"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": "\u001fhttps://watchrss.local/import-content/txt/book\u001f"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": " https://watchrss.local/import-content/txt/book "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085https://watchrss.local/import-content/txt/book\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎https://watchrss.local/import-content/txt/book᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿https://watchrss.local/import-content/txt/book﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bhttps://watchrss.local/import-content/txt/book\u200b"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": true,
+      "url": "　https://watchrss.local/import-content/txt/book　"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "https://watchrss.local/import-epub"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " https://watchrss.local/import-epub "
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001chttps://watchrss.local/import-epub\u001c"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001dhttps://watchrss.local/import-epub\u001d"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001ehttps://watchrss.local/import-epub\u001e"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001fhttps://watchrss.local/import-epub\u001f"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " https://watchrss.local/import-epub "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085https://watchrss.local/import-epub\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎https://watchrss.local/import-epub᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿https://watchrss.local/import-epub﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bhttps://watchrss.local/import-epub\u200b"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "　https://watchrss.local/import-epub　"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "https://watchrss.local/import-txt-novel/book/chapter/001"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " https://watchrss.local/import-txt-novel/book/chapter/001 "
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001chttps://watchrss.local/import-txt-novel/book/chapter/001\u001c"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001dhttps://watchrss.local/import-txt-novel/book/chapter/001\u001d"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001ehttps://watchrss.local/import-txt-novel/book/chapter/001\u001e"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001fhttps://watchrss.local/import-txt-novel/book/chapter/001\u001f"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " https://watchrss.local/import-txt-novel/book/chapter/001 "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085https://watchrss.local/import-txt-novel/book/chapter/001\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎https://watchrss.local/import-txt-novel/book/chapter/001᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿https://watchrss.local/import-txt-novel/book/chapter/001﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bhttps://watchrss.local/import-txt-novel/book/chapter/001\u200b"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "　https://watchrss.local/import-txt-novel/book/chapter/001　"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "watchrss://phone-imports"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " watchrss://phone-imports "
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001cwatchrss://phone-imports\u001c"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001dwatchrss://phone-imports\u001d"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001ewatchrss://phone-imports\u001e"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001fwatchrss://phone-imports\u001f"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " watchrss://phone-imports "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085watchrss://phone-imports\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎watchrss://phone-imports᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿watchrss://phone-imports﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bwatchrss://phone-imports\u200b"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "　watchrss://phone-imports　"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL "
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001cHTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL\u001c"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001dHTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL\u001d"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001eHTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL\u001e"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001fHTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL\u001f"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bHTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL\u200b"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "　HTTPS://WATCHRSS.LOCAL/IMPORT-TXT-NOVEL　"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "https://watchrss.local/import-content-extra"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " https://watchrss.local/import-content-extra "
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001chttps://watchrss.local/import-content-extra\u001c"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001dhttps://watchrss.local/import-content-extra\u001d"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001ehttps://watchrss.local/import-content-extra\u001e"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "\u001fhttps://watchrss.local/import-content-extra\u001f"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": " https://watchrss.local/import-content-extra "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085https://watchrss.local/import-content-extra\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎https://watchrss.local/import-content-extra᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿https://watchrss.local/import-content-extra﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bhttps://watchrss.local/import-content-extra\u200b"
+    },
+    {
+      "imported": true,
+      "deletable": true,
+      "textItem": false,
+      "url": "　https://watchrss.local/import-content-extra　"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "https://example.com"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": " https://example.com "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001chttps://example.com\u001c"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001dhttps://example.com\u001d"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001ehttps://example.com\u001e"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u001fhttps://example.com\u001f"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": " https://example.com "
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u0085https://example.com\u0085"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "᠎https://example.com᠎"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "﻿https://example.com﻿"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "\u200bhttps://example.com\u200b"
+    },
+    {
+      "imported": false,
+      "deletable": false,
+      "textItem": false,
+      "url": "　https://example.com　"
+    }
+  ],
+  "whitespaceCodePoints": [
+    9,
+    10,
+    11,
+    12,
+    13,
+    28,
+    29,
+    30,
+    31,
+    32,
+    160,
+    5760,
+    8192,
+    8193,
+    8194,
+    8195,
+    8196,
+    8197,
+    8198,
+    8199,
+    8200,
+    8201,
+    8202,
+    8232,
+    8233,
+    8239,
+    8287,
+    12288
+  ]
+}

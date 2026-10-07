@@ -20,6 +20,9 @@ export class DouyinLoginLog {
    this.qrKind=event.kind;
   }else if(event.type==='qrCleared'||event.type==='verifying'||event.type==='cancelled')this.qrKind=undefined;
  }
+ qrLoaded(durationMs:number):void {
+  if(!this.closed)appLogger.d('DouyinLogin',`二维码加载耗时: ${durationMs}ms (${seconds(durationMs)}秒)`);
+ }
  completed():void {
   if(this.closed||this.loginStarted===undefined)return;
   const duration=Math.max(0,this.now()-this.loginStarted);

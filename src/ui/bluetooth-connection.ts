@@ -3,7 +3,7 @@ import {remoteInputUrl,subscribeRemoteInput} from '../remote-input/inbox.ts';
 
 export interface BluetoothConnectionState {status:string;detail:string|null;busy:boolean}
 export interface BluetoothConnectionPorts {
- sync:Pick<ApplicationForegroundSync,'state'|'subscribe'|'refresh'>;
+ sync:Pick<ApplicationForegroundSync,'state'|'subscribe'|'refresh'>&Partial<Pick<ApplicationForegroundSync,'acquireConnectionPage'>>;
  radio:{status():Promise<{available:boolean;permission:string;enabled:boolean}>;requestPermission():Promise<string>};
  /** Defaults to the application inbox. Deliveries are observed, never consumed. */
  subscribeInput?:(observer:(url:string)=>void)=>()=>void;
@@ -21,6 +21,7 @@ export class BluetoothConnectionController {
  state:BluetoothConnectionState={status:'等待手机蓝牙连接…',detail:null,busy:false};
  private active=false;
  private awaiting=false;
+ private releaseConnectionPage:(()=>void)|undefined;
  private version=0;
  private disposed=false;
  private stops:(()=>void)[]=[];
@@ -36,7 +37,7 @@ export class BluetoothConnectionController {
  }
  private set(state:BluetoothConnectionState){if(this.disposed)return;this.state=state;this.changed(state);}
  private fail(detail:string,status='蓝牙同步失败'){this.awaiting=false;this.version++;this.set({status,detail,busy:false});}
- setActive(active:boolean){if(this.disposed||this.active===active)return;this.active=active;if(active)void this.retry();else{this.version++;this.awaiting=false;}}
+ setActive(active:boolean){if(this.disposed||this.active===active)return;this.active=active;if(active){this.releaseConnectionPage=this.ports.sync.acquireConnectionPage?.();void this.retry();}else{this.releaseConnectionPage?.();this.releaseConnectionPage=undefined;this.version++;this.awaiting=false;}}
  async retry():Promise<void>{
   if(this.disposed||!this.active)return;
   const version=++this.version;
@@ -73,5 +74,5 @@ export class BluetoothConnectionController {
   else if(event.action==='syncLibrary')this.set({status:'蓝牙同步完成',detail:`收到 ${event.received} 条，应用 ${event.applied} 项变更`,busy:false});
   else this.set({status:'蓝牙连接成功',detail:'手机已完成握手',busy:false});
  }
- dispose(){if(this.disposed)return;this.disposed=true;this.active=false;this.awaiting=false;this.version++;for(const stop of this.stops)stop();this.stops=[];}
+ dispose(){if(this.disposed)return;this.disposed=true;this.releaseConnectionPage?.();this.releaseConnectionPage=undefined;this.active=false;this.awaiting=false;this.version++;for(const stop of this.stops)stop();this.stops=[];}
 }

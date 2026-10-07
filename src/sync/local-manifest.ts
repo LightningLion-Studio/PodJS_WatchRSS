@@ -11,7 +11,8 @@ export interface SyncTextPort {
  parseUri(value:string):Promise<{valid:boolean;scheme:string|null;host:string|null;rawPath:string|null;rawQuery:string|null}>;
  htmlText(html:string):Promise<string>;
 }
-export const nativeTrim=(s:string)=>s.replace(/^[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g,"");
+export {kotlinTrim as nativeTrim} from '@podjs/framework/text-compat';
+import {kotlinTrim as nativeTrim} from '@podjs/framework/text-compat';
 const blank=(s:string|null|undefined)=>!s||!nativeTrim(s);
 // These phone-generated chapter URLs are already in Android Uri's stable-ID
 // form: lowercase scheme/host, literal path and no query. Restrict the fast

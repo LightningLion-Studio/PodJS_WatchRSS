@@ -18,13 +18,16 @@ function deferredForegroundSync(){
  let inner:Sync|undefined,disposed=false,mediaEnabled:boolean|undefined;
  const observers=new Set<Parameters<Sync['bluetooth']['subscribe']>[0]>();
  const unsubscribers=new Map<unknown,()=>void>();
+ const connectionPages=new Map<object,(()=>void)|undefined>();
  void afterFirstScreen().then(()=>{
   if(disposed)return;
   inner=startApplicationForegroundSync();startApplicationCloudSync();startupMark('sync.started');
   if(mediaEnabled!==undefined)inner.setMediaEnabled(mediaEnabled);
+  for(const token of connectionPages.keys())connectionPages.set(token,inner.bluetooth.acquireConnectionPage());
   for(const observer of observers)unsubscribers.set(observer,inner.bluetooth.subscribe(observer));
  });
  const bluetooth:Sync['bluetooth']={
+  acquireConnectionPage:()=>{if(disposed)return ()=>{};const token={};connectionPages.set(token,inner?.bluetooth.acquireConnectionPage());return ()=>{connectionPages.get(token)?.();connectionPages.delete(token);};},
   get state(){return inner?inner.bluetooth.state:'idle';},
   subscribe:observer=>{observers.add(observer);if(inner)unsubscribers.set(observer,inner.bluetooth.subscribe(observer));return ()=>{observers.delete(observer);unsubscribers.get(observer)?.();unsubscribers.delete(observer);};},
   refresh:async()=>{await inner?.bluetooth.refresh();},
@@ -33,7 +36,7 @@ function deferredForegroundSync(){
   bluetooth,
   createDebugBluetooth:(()=>{if(!inner)throw Error('蓝牙同步尚未启动');return inner.createDebugBluetooth();}) as Sync['createDebugBluetooth'],
   setMediaEnabled:(enabled:boolean)=>{mediaEnabled=enabled;inner?.setMediaEnabled(enabled);},
-  dispose:async()=>{disposed=true;stopApplicationCloudSync();await inner?.dispose();},
+  dispose:async()=>{disposed=true;for(const release of connectionPages.values())release?.();connectionPages.clear();stopApplicationCloudSync();await inner?.dispose();},
  };
 }
 function ContentApp(){

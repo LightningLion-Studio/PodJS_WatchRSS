@@ -1,3 +1,4 @@
+import {browserQrWaitStatus} from '@podjs/framework/browser-qr-wait';
 import type { InternetStatus } from '../../onboarding/state.ts';
 
 export function loginGate(status: InternetStatus, browserAvailable: boolean) {
@@ -34,16 +35,17 @@ export interface LoginStatusState {
   verifying: boolean;
   loginPanelVisible?: boolean;
   cancelled: boolean;
+  ended?: boolean;
 }
 export const initialLoginStatus = (): LoginStatusState => ({ loading: true, verifying: false, cancelled: false });
 export function updateLoginStatus(state: LoginStatusState, event: import('@podjs/framework/services').BrowserAuthStatus): LoginStatusState {
-  if (state.cancelled) return state;
+  if (state.cancelled || state.ended) return state;
   switch (event.type) {
     case 'qr': if (state.verifying) return state; return { ...state, qr: event, verifying: false, loading: false };
     case 'qrCleared': return { ...state, qr: undefined };
     case 'verifying': return { ...state, verifying: event.active, ...(event.active ? { qr: undefined } : {}) };
     case 'pageState': return { ...state, loading: event.loading, loginPanelVisible: event.loginPanelVisible };
-    case 'cancelled': return { ...state, qr: undefined, cancelled: true, verifying: false, loading: false };
+    case 'cancelled': return { ...state, qr: undefined, cancelled: true, ended: true, verifying: false, loading: false };
   }
 }
 export function loginStatusMessage(state: LoginStatusState): string {
@@ -53,4 +55,13 @@ export function loginStatusMessage(state: LoginStatusState): string {
   if (state.loading) return '正在加载抖音登录页…';
   if (state.loginPanelVisible) return '请在网页中选择登录或验证方式';
   return '请在网页中完成验证，登录后点“完成”返回手表。';
+}
+
+/** Provider copy is data for the lead-owned app and host waiting UI. */
+export const DOUYIN_QR_WAIT = Object.freeze({message:'正在加载抖音登录二维码，需要 30~60 秒，请您耐心等待'});
+export function loginQrWaitStatus(state:LoginStatusState){
+ return browserQrWaitStatus(DOUYIN_QR_WAIT,{hasQr:!!state.qr,verifying:state.verifying,ended:state.cancelled||state.ended===true});
+}
+export function finishLoginStatus(state:LoginStatusState):LoginStatusState {
+ return {...state,qr:undefined,loading:false,verifying:false,ended:true};
 }

@@ -14,7 +14,11 @@ export class AppLogger extends FileLogger {
   this.d('AppLogger','日志系统初始化完成');
   return ready;
  }
- async pull(maxChars:unknown){return debugLogReply(await this.readLogs(),{maxChars});}
+ async pull(maxChars:unknown){
+  let raw:string|null;
+  try{raw=await this.readLogs();}catch{this.e('AppLogger','读取日志失败');raw=null;}
+  return debugLogReply(raw,{maxChars});
+ }
  override clearLogs():Promise<void>{return super.clearLogs().then(()=>{this.d('AppLogger','日志已清空');});}
 }
 // Host-free facade lets domain modules log without importing platform services.

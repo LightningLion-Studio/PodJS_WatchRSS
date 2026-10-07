@@ -10,7 +10,7 @@ export interface PhoneRoutesProps {
   active: () => boolean;
   width: number;
   height: number;
-  bluetoothSync: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh">;
+  bluetoothSync: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh"> & Partial<Pick<ApplicationForegroundSync,"acquireConnectionPage">>;
   onUrl: (url: string, destination: "return" | "add") => void;
   popPage: (skipInternal?: boolean) => boolean;
 }

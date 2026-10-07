@@ -94,3 +94,13 @@ test('an immediately closed route queues recovery while initial selection is sti
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,acquireDescriptor:()=>{discoveries++;return {result:pending.result,cancel:()=>pending.reject(new Error('disposed'))};}});
  await controller.offer({...f.descriptor});await flush();expect(discoveries).toBe(1);await controller.dispose();
 });
+
+import {foregroundRequestFilter} from '../../src/sync/action-policy.ts';
+test('IP automatic policy rejects extra actions without closing the route; allowed next action dispatches',async()=>{
+ const f=ipFixture();await f.sign();const handled:string[]=[];
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now},{filterRequest:foregroundRequestFilter,handleAction:async r=>{handled.push(String(r.action));return {success:true,action:r.action};}});
+ await controller.offer({...f.descriptor});await flush();
+ for(const action of ['remoteInput','clearLibrary']){f.feed({action});f.feed({action:'ack',success:true,applied:true});await flush();}
+ const decoder=new FrameDecoder(),replies=f.writes.flatMap(b=>decoder.push(b));
+ expect(replies.map(r=>r.success)).toEqual([false,true]);expect(handled).toEqual(['clearLibrary']);expect(f.closed).toHaveLength(0);await controller.dispose();
+});

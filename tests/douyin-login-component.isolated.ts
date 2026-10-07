@@ -111,6 +111,7 @@ test('M4 renders PNG login and JPEG verification, clears QR and reports webpage 
   probe = async () => ({status:'available'}); const f=mount(); await settle(); f.press(); await settle();
   expect(authOptions.qrExtractionScript).toBe('framework-status-script');
   expect(authOptions.completeOnLoginPanelHidden).toBe(true);
+  expect(authOptions.qrWait).toEqual({message:'正在加载抖音登录二维码，需要 30~60 秒，请您耐心等待'});
   expect(authOptions.userAgent).toBe('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0');
   const emit=authOptions.onStatus;
   emit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'});

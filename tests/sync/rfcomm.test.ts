@@ -3,7 +3,7 @@ import {RfcommLibraryListener,HostSyncByteStream,WATCH_RSS_RFCOMM_UUID,WATCH_RSS
 import {encodeFrame,FrameDecoder,type JsonObject} from '../../src/sync/protocol.ts';
 import type {LibrarySessionRepository} from '../../src/sync/session.ts';
 const operation=<T>(value:T)=>({result:Promise.resolve(value),cancel(){}});
-function setup(){const chunks=[encodeFrame({action:'syncLibrary',phase:'probe',version:14}),encodeFrame({action:'responseAck',success:true,phase:'applied',applied:true})];let offset=0;const closed=new Set<string>(),listenCalls:unknown[]=[],sent:JsonObject[]=[],decoder=new FrameDecoder();
+function setup(request:JsonObject={action:'syncLibrary',phase:'probe',version:14}){const chunks=[encodeFrame(request),encodeFrame({action:'responseAck',success:true,phase:'applied',applied:true})];let offset=0;const closed=new Set<string>(),listenCalls:unknown[]=[],sent:JsonObject[]=[],decoder=new FrameDecoder();
  const ports:RfcommPorts={radio:{requestPermission:()=>operation("granted" as const),status:async()=>({available:true,permission:'granted',enabled:true}),listen:(name,uuid)=>{listenCalls.push([name,uuid]);return operation({id:'listener-1'});},accept:()=>operation({id:'stream-1',remoteName:'Phone',remoteAddress:'fixture'}),close:async id=>{closed.add(id);return {closed:true};}},streams:{read:(_id,max)=>{const head=chunks[0];if(!head)return operation({eof:true,dataBase64:''});const bytes=head.slice(offset,offset+Math.min(max,7));offset+=bytes.length;if(offset===head.length){chunks.shift();offset=0;}return operation({eof:false,dataBase64:Buffer.from(bytes).toString('base64')});},write:(_id,bytes)=>{sent.push(...decoder.push(bytes));return operation({written:bytes.length});},close:async id=>{closed.add(id);return {closed:true};}}};
  const repository={deviceId:async()=>'watch'} as LibrarySessionRepository;return {ports,closed,listenCalls,sent,listener:new RfcommLibraryListener(repository,ports)};
 }
@@ -13,3 +13,12 @@ test('stop during peer notification closes the accepted stream before running pr
 test('permission failure opens no listener and simultaneous start is rejected',async()=>{const f=setup();f.ports.radio.status=async()=>({available:true,permission:'required',enabled:false});const first=f.listener.start();await expect(f.listener.start()).rejects.toThrow('already active');await expect(first).rejects.toThrow('权限');expect(f.listenCalls).toEqual([]);});
 test('host stream checks complete write counts and makes close idempotent',async()=>{let closed=0;const f=setup();f.ports.streams.write=()=>operation({written:1});f.ports.streams.close=async()=>{closed++;return {closed:true};};const stream=new HostSyncByteStream('s',f.ports.streams);await expect(stream.write(new Uint8Array([1,2]))).rejects.toThrow('Incomplete');await stream.close();await stream.close();expect(closed).toBe(1);await expect(stream.read(1,10)).rejects.toThrow('closed');});
 test('debug timeout overrides the default accept deadline',async()=>{const f=setup();const accept=f.ports.radio.accept;let timeout=0;f.ports.radio.accept=(id,ms)=>{timeout=ms??0;return accept(id,ms);};await f.listener.start({acceptTimeoutMs:4321});expect(timeout).toBe(4321);});
+
+import {foregroundRequestFilter} from '../../src/sync/action-policy.ts';
+test('RFCOMM automatic denies extra actions while active listener default allows them',async()=>{
+ for(const filterRequest of [foregroundRequestFilter,undefined]){
+  const f=setup({action:'pullDebugLog'});let handled=0;
+  await f.listener.start({filterRequest,handleAction:async()=>{handled++;return {success:true,action:'pullDebugLog'};}});
+  expect(f.sent[0]?.success).toBe(!filterRequest);expect(handled).toBe(filterRequest?0:1);
+ }
+});

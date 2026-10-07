@@ -1,3 +1,4 @@
+import type {BrowserQrWaitOptions,BrowserQrWaitStatus} from '@podjs/framework/browser-qr-wait'
 import { browserAuth, hostOperation, secureStorage, type BrowserAuthStatus, type HostOperation } from '@podjs/framework/services'
 
 export interface BrowserAuthorizationOptions {
@@ -7,6 +8,8 @@ export interface BrowserAuthorizationOptions {
   userAgent?: string
   /** Optional page-owned script returning a QR data image or null. */
   qrExtractionScript?: string
+  qrWait?: BrowserQrWaitOptions
+  onQrWait?: (status: BrowserQrWaitStatus) => void
   onStatus?: (status: BrowserAuthStatus) => void
   completeOnLoginPanelHidden?: boolean
 }
@@ -18,7 +21,7 @@ export interface BrowserAuthorizationResult {
 
 /** Opens an official login page; the user completes login and explicitly confirms it. */
 export function authorizeInBrowser(options: BrowserAuthorizationOptions): HostOperation<BrowserAuthorizationResult> {
-  if (options.onStatus) return browserAuth.authorize(options)
+  if (options.onStatus || options.onQrWait || options.qrWait) return browserAuth.authorize(options)
   return hostOperation<BrowserAuthorizationResult>('browser.authorize', {
     url: options.url,
     cookieOrigin: options.cookieOrigin,

@@ -135,7 +135,7 @@ const rowHeight = 48;
 export default function WatchRSS(props: {
   createDebugBluetooth?:()=>DebugBluetoothSession;
   services: AppServices;
-  bluetoothSync?: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh">;
+  bluetoothSync?: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh"> & Partial<Pick<ApplicationForegroundSync,"acquireConnectionPage">>;
   announcements?: ReturnType<typeof createAnnouncementServices>;
   onSyncMediaKeepAliveChange?: (enabled: boolean) => void;
 }) {

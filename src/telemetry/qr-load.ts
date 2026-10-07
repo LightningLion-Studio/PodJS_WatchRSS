@@ -4,10 +4,12 @@ import type {BrowserAuthStatus} from '@podjs/framework/services';
 export class DouyinQrLoadTelemetry {
   private started?:number;
   private reported=false;
+  private verifying=false;
   constructor(private readonly report:(durationMs:number)=>void,private readonly now:()=>number=Date.now){}
   status(event:BrowserAuthStatus){
+    if(event.type==='verifying')this.verifying=event.active;
     if(event.type==='pageState'&&event.loginPanelVisible&&this.started===undefined)this.started=this.now();
-    if(event.type==='qr'&&event.kind==='login'&&this.started!==undefined&&!this.reported){
+    if(event.type==='qr'&&event.kind==='login'&&!this.verifying&&this.started!==undefined&&!this.reported){
       this.reported=true;this.report(this.now()-this.started);
     }
   }

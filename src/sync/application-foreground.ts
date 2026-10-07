@@ -5,6 +5,7 @@ export interface ApplicationSyncListener extends ForegroundListener {
  start(options:LibrarySessionOptions & {onListening?:()=>void;onPeer?:(peer:{remoteName:string|null;remoteAddress:string})=>void}):ReturnType<ForegroundListener['start']>;
 }
 export interface ApplicationForegroundPorts {
+ acquireConnectionPage?:()=>()=>void;
  repository():Promise<LibrarySessionRepository>;
  createListener(repository:LibrarySessionRepository):ApplicationSyncListener;
  lifecycle():string;
@@ -58,6 +59,8 @@ export class ApplicationForegroundSync {
   const {request,response}=result,stats=response.stats;
   this.emit({type:'completed',action:String(request.action??''),success:response.success===true,message:typeof response.message==='string'?response.message:'',count:Number(response.count)||0,received:Array.isArray(request.articles)?request.articles.length:0,applied:stats&&typeof stats==='object'&&!Array.isArray(stats)?Number((stats as Record<string,unknown>).applied)||0:0});
  }
+ /** Permission scope for an active connection page; transport ownership stays here. */
+ acquireConnectionPage():()=>void {return this.disposed?()=>{}:this.ports.acquireConnectionPage?.()??(()=>{});}
  get state(){return this.currentState;}
  private status(state:ApplicationSyncState){if(this.disposed&&state!=='disposed')return;this.currentState=state;try{this.ports.onState?.(state);}catch{}this.emit({type:'state',state});}
  private report(error:unknown){try{this.ports.onError?.(error);}catch{}this.emit({type:'error',message:error instanceof Error?error.message:String(error)});}
