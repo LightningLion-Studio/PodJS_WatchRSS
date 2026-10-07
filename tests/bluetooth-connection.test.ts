@@ -64,3 +64,15 @@ test('route owner consumes its observed URL without stealing older queued input'
  expect(takeRemoteInput('https://owned.test/rss')).toBe(' https://owned.test/rss ');
  expect(takeRemoteInput()).toBe('https://older.test');expect(takeRemoteInput()).toBe('https://later.test');expect(takeRemoteInput()).toBeUndefined();
 });
+
+import {BluetoothActionPolicy,foregroundRequestFilter} from '../src/sync/action-policy.ts';
+test('production-shaped active page scope permits extra Bluetooth actions; IP stays automatic and lifecycle releases',async()=>{
+ const f=fixture(),policy=new BluetoothActionPolicy();
+ Object.assign(f.sync,{acquireConnectionPage:()=>policy.acquireConnectionPage()});
+ expect(policy.filterRequest({action:'remoteInput'})?.success).toBe(false);
+ await f.start();expect(policy.filterRequest({action:'remoteInput'})).toBeUndefined();expect(policy.filterRequest({action:'pullSavedItems'})).toBeUndefined();
+ expect(foregroundRequestFilter({action:'remoteInput'})?.success).toBe(false);
+ f.controller.setActive(false);expect(policy.filterRequest({action:'remoteInput'})?.success).toBe(false);
+ await f.start();await f.controller.retry();expect(policy.filterRequest({action:'pullDebugLog'})).toBeUndefined();
+ f.controller.dispose();f.controller.dispose();expect(policy.filterRequest({action:'pullDebugLog'})?.success).toBe(false);
+});

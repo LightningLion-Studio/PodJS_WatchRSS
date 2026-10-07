@@ -1,3 +1,4 @@
+import type {RequestFilter} from '@podjs/framework/request-policy';
 import {SyncEventLog} from '../logs/sync-events.ts';
 import {ACTION_SYNC_LIBRARY,PROTOCOL_VERSION,MIN_SUPPORTED_PHONE_PROTOCOL_VERSION,buildProbeResponse,type JsonObject,type ProbeCapabilities} from './protocol.ts';
 import {ArticleBatchReceiver,wireFields,type ReceivedArticle,type RequestedArticleBody} from './article-batches.ts';
@@ -32,6 +33,7 @@ export interface LibrarySessionRepository {
 export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number}
 export interface SessionActionResult {request:JsonObject;response:JsonObject;ack:ResponseAck|null;libraryApplied:boolean}
 export interface LibrarySessionOptions {
+ filterRequest?:RequestFilter<JsonObject,JsonObject>;
  diagnosticLog?:SyncEventLog;
  now?:()=>number;
  monotonic?:()=>number;
@@ -84,16 +86,18 @@ export class LibrarySyncSession {
      const phase=string(request.phase);if(!persistent||!['complete','abort'].includes(phase))throw new Error('Invalid persistent session control');
      const response={version:PROTOCOL_VERSION,action:'syncSession',phase,success:true,...persistentFields};await this.write(response);const ack=await this.ack();results.push({request,response,ack,libraryApplied:false});this.log.event("server.session.complete",{phase,completedActions:results.length,elapsedMs:this.log.elapsed()});return results;
     }
-    if(string(request.action)==='previewReader'&&bool(request.stream)){
+    let rejection=this.options.filterRequest?.(request);
+    if(!rejection&&string(request.action)==='previewReader'&&bool(request.stream)){
      const result=await this.previewStream(request);results.push(result);this.options.onActionCompleted?.(result);this.status({phase:'complete',applied:false});return results;
     }
     const unsupported=()=>string(request.action)===ACTION_SYNC_LIBRARY&&optLong(request.version)<MIN_SUPPORTED_PHONE_PROTOCOL_VERSION;
-    if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='cursor'){
+    if(!rejection&&!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='cursor'){
      this.status({phase:'cursor'});const peer=trim(string(request.deviceId))||'phone';const response=buildCursorResponse(localId,await this.repository.cursor(peer),this.now);
-     this.log.event("library.cursor.exchanged",{remoteDeviceId:peer});await this.write({...response,...(accepted?persistentFields:{})});request=await this.read(timeout);
+     this.log.event("library.cursor.exchanged",{remoteDeviceId:peer});await this.write({...response,...(accepted?persistentFields:{})});request=await this.read(timeout);rejection=this.options.filterRequest?.(request);
     }
     let response:JsonObject,pending:PendingSyncSuccess|null=null;
-    if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='manifest'){
+    if(rejection){response=accepted?{...rejection,...persistentFields}:rejection;await this.write(response);}
+    else if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='manifest'){
      try{
       this.log.event('library.manifest.handle.start');this.status({phase:'manifest'});const count=manifestBatchCount(request);if(count>512)throw new Error('Manifest batch limit exceeded');const frames=[request];for(let i=1;i<count;i++)frames.push(await this.read(180000));request=combineManifestFrames(frames);
       const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;
@@ -136,7 +140,7 @@ export class LibrarySyncSession {
  private async previewStream(initial:JsonObject):Promise<SessionActionResult>{
   let request=initial,lastAcknowledgedAt:number|undefined;
   while(true){
-   const response=this.options.handleAction?await this.options.handleAction(request):{success:false,applied:false,message:'当前同步操作尚未接入'};
+   const response=this.options.filterRequest?.(request)??(this.options.handleAction?await this.options.handleAction(request):{success:false,applied:false,message:'当前同步操作尚未接入'});
    this.check();const phase=string(request.phase),terminal=phase==='stop'||phase==='resourceHandoff',handledAt=this.monotonic();
    if(lastAcknowledgedAt===undefined||terminal||!bool(response.applied,true)||response.success===false||handledAt-lastAcknowledgedAt>=50){await this.write(response);lastAcknowledgedAt=this.monotonic();}
    if(terminal)return {request:initial,response,ack:null,libraryApplied:false};

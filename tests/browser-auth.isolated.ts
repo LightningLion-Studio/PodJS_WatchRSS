@@ -52,3 +52,11 @@ test('status wrapper uses SDK event transport and waits for explicit cookie resu
   events.push({t:'service.result',id:command.id,ok:true,value}); runtime.__pumpPodEvents();
   expect(await operation.result).toEqual(value);
 });
+
+test('QR waiting-only wrapper forwards generic config and local state hook without exposing callback on wire',async()=>{
+ statusCapability=true;const waits:unknown[]=[];
+ const operation=authorizeInBrowser({url:'https://example.com',cookieOrigin:'https://example.com',requiredCookieNames:['sid'],qrWait:{message:'Wait'},onQrWait:state=>waits.push(state)});
+ const command=emitted[0]!;expect(command.method).toBe('browser.authorizeWithStatus');expect(command.args).toMatchObject({qrWait:{message:'Wait'}});expect(command.args).not.toHaveProperty('onQrWait');
+ events.push({t:'browser.auth.status',id:command.id,value:{type:'pageState',loading:false}});runtime.__pumpPodEvents();expect(waits.at(-1)).toEqual({visible:true,message:'Wait'});
+ operation.cancel();await expect(operation.result).rejects.toMatchObject({code:'cancelled'});expect(waits.at(-1)).toEqual({visible:false,message:'Wait'});
+});

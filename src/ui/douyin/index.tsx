@@ -17,7 +17,7 @@ import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
 import { observeHostInternet } from "../../onboarding/network-host.ts";
 import type { InternetStatus } from "../../onboarding/state.ts";
-import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage } from "./login-state.ts";
+import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage, DOUYIN_QR_WAIT, finishLoginStatus } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import { platformCardEntry, WithPlatformNotice } from "../PlatformNotice.tsx";
 import { platformScope } from "../../announcement/platform.ts";
@@ -123,7 +123,7 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
 
 function LoginScreen(props: DouyinScreenProps) {
   const loginLog=new DouyinLoginLog();
-  const qrTelemetry=new DouyinQrLoadTelemetry(ms=>usageTelemetry.recordDouyinQrLoadTime(ms));
+  const qrTelemetry=new DouyinQrLoadTelemetry(ms=>{loginLog.qrLoaded(ms);usageTelemetry.recordDouyinQrLoadTime(ms);});
   const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal(props.loginQrImage ? "请使用抖音手机客户端扫码登录" : "打开抖音官方登录页，完成登录后点“完成”返回手表。");
   const [authStatus, setAuthStatus] = createSignal(initialLoginStatus());
   const [statusMode, setStatusMode] = createSignal(false);
@@ -135,7 +135,7 @@ function LoginScreen(props: DouyinScreenProps) {
   let authorization: ReturnType<typeof authorizeInBrowser> | undefined;
   onMount(() => onCleanup(observeHostInternet(status => {
     setInternet(status);
-    if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setAuthStatus(initialLoginStatus()); setBusy(false); }
+    if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setAuthStatus(finishLoginStatus(authStatus())); setBusy(false); }
   })));
   onCleanup(() => { loginLog.dispose(); disposed = true; generation++; authorization?.cancel(); });
   const openLogin = async () => {
@@ -150,7 +150,7 @@ function LoginScreen(props: DouyinScreenProps) {
       const available = await douyinBrowserAvailable({ ...browser, hasCapability });
       if (disposed || current !== generation || gate()) return;
       if (!available) { setBrowserAvailable(false); return; }
-      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
+      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,qrWait:DOUYIN_QR_WAIT,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
         if (disposed || current !== generation || !acceptingStatus) return;
         loginLog.status(event);
         qrTelemetry.status(event);
@@ -160,16 +160,16 @@ function LoginScreen(props: DouyinScreenProps) {
       const result = await authorization.result;
       acceptingStatus = false;
       if (disposed || current !== generation || gate()) return;
-      setAuthStatus(initialLoginStatus());
+      setAuthStatus(finishLoginStatus(authStatus()));
       const saved = await props.client.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);
       loginLog.completed();
       if (!disposed && current === generation) { feedSnapshots.delete(props.client); props.onNavigate({name:"entry"}); }
     } catch (error) {
       acceptingStatus = false;
-      if (!disposed && current === generation) setAuthStatus(initialLoginStatus());
+      if (!disposed && current === generation) setAuthStatus(finishLoginStatus(authStatus()));
       if (!disposed && current === generation) { const failure = loginError(error); if(failure.unavailable)appLogger.e("DouyinLoginScreen","Failed to initialize WebView"); setMessage(failure.message); if (failure.unavailable) setBrowserAvailable(false); }
-    } finally { if (!disposed && current === generation) { authorization = undefined; setBusy(false); } }
+    } finally { if (!disposed && current === generation) { authorization = undefined; setAuthStatus(finishLoginStatus(authStatus())); setBusy(false); } }
   };
   const inputCookie = async () => {
     if (gate() || busy()) return;

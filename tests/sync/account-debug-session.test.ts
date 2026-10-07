@@ -76,3 +76,15 @@ test('account telemetry counts Shanghai days, retains seven days and survives re
  expect(new SyncAccountTelemetry(storage).backlogCount()).toBe(2);
  expect(JSON.parse([...data.values()][0]!).map((x:{day:string})=>x.day)).toEqual(['2026-10-02','2026-10-08']);
 });
+
+import {AppLogger} from '../../src/logs/app-logger.ts';
+test('production-shaped logger read failure returns native empty success and preserves persistent session',async()=>{
+ const output:string[]=[];const logger=new AppLogger({read:async()=>{throw Error('private-file-path');},size:async()=>0,replace:async()=>{},append:async()=>{}},undefined,(_level,line)=>output.push(line));
+ const handler=createApplicationActionHandler({notes:{} as never,deviceId:async()=>'watch',notesChanged:()=>{},readDebugLog:limit=>logger.pull(limit)});
+ const p=phone([{action:'pullDebugLog',maxChars:1,requestPersistentSession:true,supportsPersistentSession:true},{action:'ack',success:true,applied:true},{action:'ping',nonce:'after-failure'},{action:'ack',success:true,applied:true},{action:'syncSession',phase:'complete'},{action:'ack',success:true,applied:true}]);
+ const r=repository();expect(await new LibrarySyncSession(p.connection,r.repo,{handleAction:handler}).run()).toHaveLength(3);
+ expect(p.out[0]).toEqual({success:true,action:'pullDebugLog',log:'',truncated:false,totalChars:0,supportsPersistentSession:true,persistentSessionAccepted:true});
+ expect(p.out[1]).toMatchObject({success:true,action:'pong',nonce:'after-failure'});expect(r.marks()).toBe(0);
+ await logger.flush();expect(output.join()).toContain('读取日志失败');expect(output.join()).not.toContain('private-file-path');
+ await expect(logger.readLogs()).rejects.toThrow('private-file-path'); // strict file-read contract is preserved
+});
