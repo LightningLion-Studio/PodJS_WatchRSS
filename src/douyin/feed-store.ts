@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {appLogger} from '../logs/app-logger.ts';
 import {logPlatformId} from '../logs/fields.ts';
 import type { DouyinFeedSnapshot, DouyinItem, DouyinSecureStorage } from "./types.ts";
@@ -15,22 +16,22 @@ export class DouyinFeedStore {
   constructor(private storage: DouyinSecureStorage) {}
   async read(key: string): Promise<RecentFeed> {
     const raw = await this.storage.get(key);
-    try { const value = JSON.parse(raw ?? "null"); if (!value || !Array.isArray(value.items)) return EMPTY(); const items = normalizeItems(value.items).slice(0, key === QUEUE_KEY ? 200 : 40); return { items, cursor: typeof value.cursor === "string" ? value.cursor : null, hasMore: value.hasMore === true, anchorAwemeId: items.some(x => x.awemeId === value.anchorAwemeId) ? value.anchorAwemeId : null, savedAtMillis: Number(value.savedAtMillis) || 0, resolved: value.resolved && typeof value.resolved === "object" ? value.resolved : {} }; } catch { return EMPTY(); }
+    try { const value = traceServiceWork("douyin.store.parse",()=>JSON.parse(raw ?? "null"),raw?.length??0); if (!value || !Array.isArray(value.items)) return EMPTY(); const items = traceServiceWork("douyin.store.normalize",()=>normalizeItems(value.items)).slice(0, key === QUEUE_KEY ? 200 : 40); return { items, cursor: typeof value.cursor === "string" ? value.cursor : null, hasMore: value.hasMore === true, anchorAwemeId: items.some(x => x.awemeId === value.anchorAwemeId) ? value.anchorAwemeId : null, savedAtMillis: Number(value.savedAtMillis) || 0, resolved: value.resolved && typeof value.resolved === "object" ? value.resolved : {} }; } catch { return EMPTY(); }
   }
   async bootstrap(): Promise<RecentFeed> {
     await this.writes;
     const [feed, recent] = await Promise.all([this.read(FEED_KEY), this.read(RECENT_KEY)]);
-    const resolved:Record<string,number>={}, freshest=new Map<string,DouyinItem>();
+    return traceServiceWork("douyin.store.bootstrapResult",()=>{const resolved:Record<string,number>={}, freshest=new Map<string,DouyinItem>();
     for(const snapshot of [recent,feed])for(const item of snapshot.items){const timestamp=Number(snapshot.resolved[item.awemeId])||0;if(!freshest.has(item.awemeId)||timestamp>resolved[item.awemeId]){freshest.set(item.awemeId,item);resolved[item.awemeId]=timestamp;}}
     const ordered=normalizeItems([...recent.items,...feed.items]).map(item=>freshest.get(item.awemeId)!);
     const anchor=Math.max(0,ordered.findIndex(item=>item.awemeId===recent.anchorAwemeId));
     const items=ordered.slice(anchor,anchor+40);
     appLogger.d("DouyinFeedVM",`read bootstrap pinned=0 feed=${feed.items.length} recent=${recent.items.length} merged=${ordered.length} restored=${items.length} anchor=${logPlatformId(recent.anchorAwemeId)}`);
-    return { ...(recent.items.length ? recent : feed), items, anchorAwemeId: recent.anchorAwemeId, resolved };
+    return { ...(recent.items.length ? recent : feed), items, anchorAwemeId: recent.anchorAwemeId, resolved };});
   }
   save(key: string, snapshot: RecentFeed): Promise<void> {
-    const value = JSON.stringify(snapshot);
-    const write = this.writes.catch(() => {}).then(() => this.storage.set(key, value));
+    const value = traceServiceWork("douyin.store.serialize",()=>JSON.stringify(snapshot),snapshot.items.length);
+    const write = this.writes.catch(() => {}).then(() => traceServiceWork("douyin.store.write",()=>this.storage.set(key, value),value.length));
     this.writes = write; return write;
   }
   clear(): Promise<void> { const write = this.writes.catch(() => {}).then(async () => { await this.storage.remove(FEED_KEY); await this.storage.remove(RECENT_KEY); await this.storage.remove(QUEUE_KEY); }); this.writes = write; return write; }

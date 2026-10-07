@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import type { DouyinClient } from './client.ts';
 import type { DouyinItem } from './types.ts';
 
@@ -21,7 +22,7 @@ export class DouyinRssFeedController {
   refresh() { return this.load(false); }
   loadMore() { return this.load(true); }
   dispose() { this.disposed = true; }
-  private publish(patch: Partial<DouyinRssFeedState>) { if (!this.disposed) { this.state = { ...this.state, ...patch }; this.changed(this.state); } }
+  private publish(patch: Partial<DouyinRssFeedState>) { if (!this.disposed) { this.state = { ...this.state, ...patch }; traceServiceWork("douyin.rss.publish",()=>this.changed(this.state)); } }
   private async load(append: boolean) {
     if (this.disposed || this.loading || append && !this.hasMore) return;
     this.publish({ loading: true, error: '' });
@@ -29,9 +30,9 @@ export class DouyinRssFeedController {
       const result = await this.client.fetchFeedPage({ cursor: append ? this.state.cursor : undefined, count: 12 });
       if (this.disposed) return;
       if (!result.ok) { this.publish({ error: result.message }); return; }
-      const snapshot = { items: appendDouyinItems(append ? this.state.items : [], result.data.items),
+      const snapshot = { items: traceServiceWork("douyin.rss.append",()=>appendDouyinItems(append ? this.state.items : [], result.data.items)),
         cursor: result.data.nextCursor ?? (append ? this.state.cursor : undefined), hasMore: result.data.hasMore };
-      this.saved(snapshot); this.publish(snapshot);
+      traceServiceWork("douyin.rss.save",()=>this.saved(snapshot)); this.publish(snapshot);
     } catch (error) { this.publish({ error: String(error) }); }
     finally { this.publish({ loading: false }); }
   }

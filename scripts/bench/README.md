@@ -114,3 +114,9 @@ to exercise the production home-snapshot writer through the real Rust KV store.
 The K21 probe's unrelated 830000-character value is explicitly synthetic; SQL
 article/channel shapes come from the local snapshot. KV readback comparison
 sorts object keys because serde canonicalizes their ordering, preserving values.
+
+JSON projection differential (synthetic feed, not a production response capture):
+`bun scripts/bench/json-projection.ts --out=/tmp/json-projection.js` then run the
+framework `service-bench` example on that bundle. It compares raw JSON projection
+and async feed mapping with the existing parser, including malformed values,
+duplicates, numeric edge cases, Unicode and cancellation.

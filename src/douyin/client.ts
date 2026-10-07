@@ -1,9 +1,10 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure} from './errors.ts';
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems } from "./feed-store.ts";
 import {decodeMediaText} from '../media/text.ts';
-import { parseDouyinDetail, parseDouyinFeed } from "./parser.ts";
+import { parseDouyinDetail, parseDouyinFeedAsync } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
 import { DouyinSavedStore } from "./saved.ts";
 import type { DouyinClientOptions, DouyinContent, DouyinFeedPage, DouyinHistoryEntry, DouyinInteraction, DouyinItem, DouyinResult, DouyinSavedKind, DouyinSigner } from "./types.ts";
@@ -34,7 +35,7 @@ export class DouyinClient {
   }
 
   constructor(private readonly options:DouyinClientOptions){this.feedStore=new DouyinFeedStore(options.historyStorage??options.secureStorage);this.now=options.now??Date.now;this.signer=options.signer??new ABogusSigner();this.saved=options.savedStore??new DouyinSavedStore(options.savedStorage??options.historyStorage??options.secureStorage,this.now);}
-  async readCookie(){return (await this.options.secureStorage.get(COOKIE_KEY))?.trim()||null;}
+  async readCookie(){const raw=await traceServiceWork("douyin.cookie.request",()=>this.options.secureStorage.get(COOKIE_KEY));return traceServiceWork("douyin.cookie.result",()=>raw?.trim()||null,raw?.length??0);}
   async isLoggedIn(){return (await this.readCookie())!==null;}
   private clearFeedCache(){this.feedCache.clear();this.feedCursor=null;this.feedHasMore=false;}
   async applyCookie(raw:string){const value=raw.trim();if(!value)return fail<void>("NOT_LOGGED_IN","缺少有效 Cookie");await this.options.secureStorage.set(COOKIE_KEY,value);this.clearFeedCache();await this.feedStore.clear();return {ok:true,data:undefined} as DouyinResult<void>;}
@@ -67,12 +68,12 @@ export class DouyinClient {
     }
   }
   private freshFeedItem(awemeId:string):DouyinItem|null{const cached=this.feedCache.get(awemeId);if(!cached)return null;if(this.now()-cached.resolvedAtMillis>=PLAY_URL_TTL_MS){this.feedCache.delete(awemeId);return null;}return cached.item.playUrl.trim()?cached.item:null;}
-  async fetchFeedPage(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>>{const count=Math.max(1,Math.min(20,Math.floor(input.count??10))),params:Record<string,string>={...baseParams,count:String(count)};const cursor=input.cursor?.trim();if(cursor){params.cursor=cursor;params.max_cursor=cursor;}const r=await this.get("/aweme/v2/web/module/feed/",params,"POST");if(!r.ok)return r;try{const data=parseDouyinFeed(r.data),resolvedAtMillis=this.now();for(const item of data.items)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});this.feedCursor=data.nextCursor;this.feedHasMore=data.hasMore;await this.feedStore.save(FEED_KEY,{items:data.items.slice(0,20),cursor:data.nextCursor,hasMore:data.hasMore,anchorAwemeId:null,savedAtMillis:resolvedAtMillis,resolved:Object.fromEntries(data.items.map(item=>[item.awemeId,resolvedAtMillis]))});return {ok:true,data,source:"network"};}catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail("PARSE_FAILED",formatDouyinError("PARSE_FAILED"));}}
+  async fetchFeedPage(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>>{const count=Math.max(1,Math.min(20,Math.floor(input.count??10))),params:Record<string,string>={...baseParams,count:String(count)};const cursor=input.cursor?.trim();if(cursor){params.cursor=cursor;params.max_cursor=cursor;}const r=await this.get("/aweme/v2/web/module/feed/",params,"POST");if(!r.ok)return r;try{const data=await parseDouyinFeedAsync(r.data),resolvedAtMillis=this.now();for(const item of data.items)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});this.feedCursor=data.nextCursor;this.feedHasMore=data.hasMore;await this.feedStore.save(FEED_KEY,{items:data.items.slice(0,20),cursor:data.nextCursor,hasMore:data.hasMore,anchorAwemeId:null,savedAtMillis:resolvedAtMillis,resolved:Object.fromEntries(data.items.map(item=>[item.awemeId,resolvedAtMillis]))});return {ok:true,data,source:"network"};}catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail("PARSE_FAILED",formatDouyinError("PARSE_FAILED"));}}
   feedSnapshot(){const items:DouyinItem[]=[];for(const id of this.feedCache.keys()){const item=this.freshFeedItem(id);if(item)items.push(item);}return {items:items.slice(-40),cursor:this.feedCursor,hasMore:this.feedHasMore};}
-  async fetchDetail(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinContent>>{const id=awemeId.trim();if(!id)return fail("PARSE_FAILED","缺少 awemeId");const initialCached=this.freshFeedItem(id);if(initialCached&&!options.forceRefresh)return {ok:true,data:{kind:"video",item:initialCached},source:"feed-cache"};const r=await this.get("/aweme/v1/web/aweme/detail/",{...baseParams,aweme_id:id},"GET");if(!r.ok){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:r;}try{const data=parseDouyinDetail(r.data);if(data.kind==="video")this.feedCache.set(id,{item:data.item,resolvedAtMillis:this.now()});return {ok:true,data,source:"network"};}catch(e){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:fail("PARSE_FAILED",String(e));}}
+  async fetchDetail(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinContent>>{const id=awemeId.trim();if(!id)return fail("PARSE_FAILED","缺少 awemeId");const initialCached=this.freshFeedItem(id);if(initialCached&&!options.forceRefresh)return {ok:true,data:{kind:"video",item:initialCached},source:"feed-cache"};const r=await this.get("/aweme/v1/web/aweme/detail/",{...baseParams,aweme_id:id},"GET");if(!r.ok){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:r;}try{const data=traceServiceWork("douyin.detail.parse",()=>parseDouyinDetail(r.data));if(data.kind==="video")this.feedCache.set(id,{item:data.item,resolvedAtMillis:this.now()});return {ok:true,data,source:"network"};}catch(e){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:fail("PARSE_FAILED",String(e));}}
   async resolvePlayback(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinItem>>{const id=awemeId.trim();if(options.forceRefresh)this.feedCache.delete(id);const cached=this.freshFeedItem(id);if(cached)return {ok:true,data:cached,source:"feed-cache"};const r=await this.fetchDetail(id);return !r.ok?r:r.data.kind==="video"?{ok:true,data:r.data.item,source:r.source}:fail("UNSUPPORTED","图文内容没有视频播放流");}
   async clearPlaybackWindow(){this.clearFeedCache();await this.feedStore.clear();}
-  async restoreFeed(){const snapshot=await this.feedStore.bootstrap();for(const item of snapshot.items){const resolvedAtMillis=Number(snapshot.resolved[item.awemeId]);if(Number.isFinite(resolvedAtMillis)&&this.now()-resolvedAtMillis<PLAY_URL_TTL_MS)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});}this.feedCursor=snapshot.cursor;this.feedHasMore=snapshot.hasMore;return snapshot;}
+  async restoreFeed(){const snapshot=await this.feedStore.bootstrap();traceServiceWork("douyin.restore.result",()=>{for(const item of snapshot.items){const resolvedAtMillis=Number(snapshot.resolved[item.awemeId]);if(Number.isFinite(resolvedAtMillis)&&this.now()-resolvedAtMillis<PLAY_URL_TTL_MS)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});}this.feedCursor=snapshot.cursor;this.feedHasMore=snapshot.hasMore;});return snapshot;}
   async saveRecentWindow(items:DouyinItem[],anchorAwemeId:string,cursor:string|null,hasMore:boolean){
     const normalized=normalizeItems(items),index=normalized.findIndex(x=>x.awemeId===anchorAwemeId);if(index<0)return;
     const bootstrap=normalized.slice(index,index+40),window=bootstrap.slice(0,4);
@@ -83,7 +84,7 @@ export class DouyinClient {
   }
 
   async savePlaybackQueue(items:DouyinItem[],anchorAwemeId:string,cursor:string|null,hasMore:boolean){
-    await this.feedStore.save(QUEUE_KEY,{items:normalizeItems(items).slice(0,200),anchorAwemeId,cursor,hasMore,savedAtMillis:this.now(),resolved:{}});
+    await this.feedStore.save(QUEUE_KEY,{items:traceServiceWork("douyin.queue.normalize",()=>normalizeItems(items)).slice(0,200),anchorAwemeId,cursor,hasMore,savedAtMillis:this.now(),resolved:{}});
   }
   async restorePlaybackQueue(){return this.feedStore.read(QUEUE_KEY);}
 
