@@ -33,6 +33,7 @@ export class ApplicationForegroundSync {
  private radio={available:false,permission:'required',enabled:false};
  private active:boolean;
  private exclusive=false;
+ private connectionEnabled=true;
  private disposed=false;
  private disposeJob:Promise<void>|undefined;
  private refreshVersion=0;
@@ -63,6 +64,7 @@ export class ApplicationForegroundSync {
  private report(error:unknown){try{this.ports.onError?.(error);}catch{}this.emit({type:'error',message:error instanceof Error?error.message:String(error)});}
  private enqueue(action:()=>Promise<unknown>):Promise<void>{this.resources=this.resources.then(action).then(()=>{},error=>{this.report(error);});return this.resources;}
  private keepScreen(active:boolean){if(this.disposed&&active||this.screenDesired===active)return;this.screenDesired=active;void this.enqueue(()=>this.ports.display.keepAwake(OWNER,active));}
+ setConnectionEnabled(enabled:boolean){if(this.disposed||this.connectionEnabled===enabled)return;this.connectionEnabled=enabled;this.apply();if(!enabled)void this.controller?.quiesce();}
  setMediaEnabled(enabled:boolean){if(this.disposed||this.mediaEnabled===enabled)return;this.mediaEnabled=enabled;if(this.controller)void this.enqueue(()=>this.ports.silence.setEnabled(enabled));}
  async acquireExclusive(){
   if(this.disposed||this.exclusive)throw Error("Bluetooth listener already owned");
@@ -96,7 +98,7 @@ export class ApplicationForegroundSync {
    this.status('idle');await this.refresh();
   }catch(error){this.status('failed');this.report(error);throw error;}
  }
- private apply(){if(this.disposed)return;this.controller?.update({resumed:this.active&&this.display?.resumed===true,interactive:this.display?.interactive===true,exclusive:this.exclusive,permission:this.radio.permission==='granted',enabled:this.radio.available&&this.radio.enabled});}
+ private apply(){if(this.disposed)return;this.controller?.update({resumed:this.active&&this.display?.resumed===true,interactive:this.display?.interactive===true,exclusive:this.exclusive,permission:this.radio.permission==='granted',enabled:this.connectionEnabled&&this.radio.available&&this.radio.enabled});}
  async refresh(){
   if(this.disposed||!this.controller)return;const version=++this.refreshVersion;
   try{const [display,radio]=await Promise.all([this.ports.display.state(),this.ports.radio.status()]);if(this.disposed||version!==this.refreshVersion)return;this.display=display;this.radio=radio;this.apply();}

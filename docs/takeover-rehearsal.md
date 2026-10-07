@@ -14,6 +14,18 @@ schema23→24 的单测证据在 T4，物理历史版本迁移另验。
 正式 PodJS/native 包及手机不在本演练范围。不得卸载、clear-data、降级或复制真实账号。
 若已有隔离安装，先由负责人确认其归属/处理方式；不要为本链自动删除。
 
+## T6b 夹具修正
+
+合成账号与业务标记放在 sandbox 根 `recovery-rehearsal/`，不属于四根迁移范围。
+不为 seed.json/business.json 放宽生产 unknown_user_files。64 MiB 中断观测文件放在
+`files/offline/rss/t6/interrupt.bin`（有效的离线资源路径），背景 variantsJson 使用对象 `{}`。
+原生 instrumentation 另注入本仓库 `scripts/migration/native-rehearsal`；运行类为
+`T6bCredentialsTest` 和 `T6BusinessTest`，只作用于同 UID debug 隔离包。
+源码中原来的 RehearsalCredentialsTest 不再调用。
+标记在包覆盖后保留，但不是 backup 逐文件相等的证据；四根 manifest 全量核验仍必须执行。
+跨包副本演练通过 `-PpodTakeoverSourcePackage=<实际源包>` 声明来源；默认是目标 appId，
+同 UID 接管无需原生正式包硬编码别名。
+
 ## 主机构建与身份门
 
 以下使用 bash。Gradle 使用本机支持的 JDK（本轮 JDK21），不读取生产签名 properties。
@@ -34,7 +46,9 @@ cd "$WRSS_NATIVE"
   -PrecoveryRehearsal=true -PrecoveryVersionCode=900000 --offline
 cp app/build/outputs/apk/debug/app-debug.apk "$WRSS_OUT/recovery900000.apk"
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest \
-  -PrecoveryRehearsal=true -PrecoveryFixture=true -PrecoveryVersionCode=40 --offline
+  -PrecoveryRehearsal=true -PrecoveryFixture=true -PrecoveryVersionCode=40 --offline \
+  -I "$WRSS_APP/scripts/migration/native-rehearsal.init.gradle" \
+  -PrehearsalTestSourceDir="$WRSS_APP/scripts/migration/native-rehearsal"
 cp app/build/outputs/apk/debug/app-debug.apk "$WRSS_OUT/seed40.apk"
 # 不复制 test APK；当前输出可以同时检查 code40 和恢复900000。
 WRSS_NATIVE_TEST="$WRSS_NATIVE/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
@@ -90,7 +104,7 @@ adb -s e3aca8af shell pm path "$WRSS_PKG"
 adb -s e3aca8af install "$WRSS_OUT/seed40.apk"
 adb -s e3aca8af install -r "$WRSS_NATIVE_TEST"
 adb -s e3aca8af shell am instrument -w -r \
-  -e class dev.podjs.takeover.RehearsalCredentialsTest#seedNative40 \
+  -e class dev.podjs.takeover.T6bCredentialsTest#seedNative40 \
   "$WRSS_PKG.test/com.karumi.shot.ShotTestRunner" > "$WRSS_PRIVATE/seed40.txt"
 adb -s e3aca8af shell dumpsys package "$WRSS_PKG" > "$WRSS_PRIVATE/seed40-package.txt"
 adb -s e3aca8af shell am start -W -n "$WRSS_PKG/com.lightningstudio.watchrss.MainActivity"
@@ -99,7 +113,7 @@ adb -s e3aca8af shell am start -W -n "$WRSS_PKG/com.lightningstudio.watchrss.Mai
 adb -s e3aca8af shell am force-stop "$WRSS_PKG"
 adb -s e3aca8af shell run-as "$WRSS_PKG" sha256sum \
   shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml \
-  shared_prefs/douyin_account_store.xml files/recovery-rehearsal/seed.json \
+  shared_prefs/douyin_account_store.xml \
   > "$WRSS_PRIVATE/seed-credentials.sha256"
 
 adb -s e3aca8af install -r "$WRSS_PODJS"
@@ -116,7 +130,7 @@ adb -s e3aca8af shell run-as "$WRSS_PKG" cat files/package-takeover/active \
 # WRSS_G 仅允许 [A-Za-z0-9_-]+，不把未知外部文本直接拼接执行。
 WRSS_G=REPLACE_WITH_VERIFIED_GENERATION
 adb -s e3aca8af shell run-as "$WRSS_PKG" sh -c \
-  "'cd files/.podjs-takeover-backup/$WRSS_G/data && sha256sum shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml shared_prefs/douyin_account_store.xml files/recovery-rehearsal/seed.json'" \
+  "'cd files/.podjs-takeover-backup/$WRSS_G/data && sha256sum shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml shared_prefs/douyin_account_store.xml'" \
   > "$WRSS_PRIVATE/backup-credentials.sha256"
 cmp "$WRSS_PRIVATE/seed-credentials.sha256" "$WRSS_PRIVATE/backup-credentials.sha256"
 # 二次 force-stop/start，再跑同探针；ACTIVE generation 和 backup 摘要不变。
@@ -125,13 +139,13 @@ adb -s e3aca8af install -r "$WRSS_OUT/recovery900000.apk"
 adb -s e3aca8af install -r "$WRSS_NATIVE_TEST"
 adb -s e3aca8af shell am start -W -n "$WRSS_PKG/com.lightningstudio.watchrss.MainActivity"
 adb -s e3aca8af shell am instrument -w -r \
-  -e class dev.podjs.takeover.RehearsalCredentialsTest#verifyRecovered900000 \
+  -e class dev.podjs.takeover.T6bCredentialsTest#verifyRecovered900000 \
   "$WRSS_PKG.test/com.karumi.shot.ShotTestRunner" > "$WRSS_PRIVATE/recovery900000.txt"
 adb -s e3aca8af shell dumpsys package "$WRSS_PKG" > "$WRSS_PRIVATE/recovery900000-package.txt"
 adb -s e3aca8af shell am force-stop "$WRSS_PKG"
 adb -s e3aca8af shell run-as "$WRSS_PKG" sha256sum \
   shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml \
-  shared_prefs/douyin_account_store.xml files/recovery-rehearsal/seed.json \
+  shared_prefs/douyin_account_store.xml \
   > "$WRSS_PRIVATE/restored-credentials.sha256"
 cmp "$WRSS_PRIVATE/seed-credentials.sha256" "$WRSS_PRIVATE/restored-credentials.sha256"
 # 再次 start + verifyRecovered900000，检查不重复恢复、不覆盖恢复后新写入。

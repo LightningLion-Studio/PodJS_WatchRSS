@@ -1,3 +1,4 @@
+import {SettingsStore} from '../settings/store.ts';
 import {loggedSyncSilence} from '../logs/sync-media.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {debugGate} from '../debug/host.ts';
@@ -27,6 +28,7 @@ import {acquireIpDescriptor} from './ip-discovery.ts';
 import {buildWatchMediaCapabilities} from './media-capabilities.ts';
 import {hostIpCrypto} from './ip-crypto-host.ts';
 export function startApplicationForegroundSync(){
+ let connectionEnabled=new SettingsStore().load().phoneConnectionEnabled;
  const loggedSilence=loggedSyncSilence(silencePlayback);
  const storage={get:(key:string)=>kv.get<string>(key),set:(key:string,value:string)=>kv.set(key,value)};
  const diagnostics=new SyncDiagnosticLog(storage,undefined,message=>hostAppLogger.d('WatchSync',message));
@@ -35,7 +37,7 @@ export function startApplicationForegroundSync(){
  const watchCapabilities=buildWatchMediaCapabilities(getDisplayMetrics());
  diagnostics.state('bluetooth','starting');
  let disposed=false,ip:IpSyncController|undefined;
- const stopLifecycle=onLifecycleChange(state=>ip?.setActive(state==='active'));
+ const stopLifecycle=onLifecycleChange(state=>ip?.setActive(connectionEnabled&&state==='active'));
  const stopNetwork=hasCapability('net.discovery')?onNetworkChange(()=>ip?.refresh(),()=>appLogger.w('WatchRSS_IpSync','默认网络监听注册失败')):()=>{};
  const ipReady=getLibrarySyncRepository().then(repository=>{
   if(disposed||!hasCapability('net.websocket'))return;
@@ -43,12 +45,13 @@ export function startApplicationForegroundSync(){
    const operation=discovery.mdns({serviceType:'_watchrss-sync._tcp.',namePrefix:'WatchRSS-',expectedPort:port,windowMs:1500});
    return {cancel:()=>operation.cancel(),result:operation.result.then(({endpoints})=>endpoints.map(endpoint=>({endpointId:'mdns-'+endpoint.address,address:endpoint.address,family:'ipv4',transportKind:'wifiLan' as const,priority:300})))};
   }:undefined,sockets:webSockets,streams:byteStreams,crypto:hostIpCrypto,delay,mediaLease:active=>loggedSilence.lease('ip-sync',active),onError:error=>{diagnostics.failure('ip');logConsole.warn('WatchRSS IP sync: <redacted>');},onRoute:route=>{diagnostics.state('ip',route?route.endpoint.transportKind:'closed');logConsole.info('WatchRSS IP route: '+(route?route.endpoint.transportKind:'closed'));}},{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);if(result.request.action==='syncLibrary')notifyLibraryChanged();}});
-  ip.setActive(lifecycle()==='active');return ip;
+  ip.setEnabled(connectionEnabled);ip.setActive(connectionEnabled&&lifecycle()==='active');return ip;
  });void ipReady.catch(error=>logConsole.warn('WatchRSS IP initialization: <redacted>'));
  const bluetooth=new ApplicationForegroundSync({repository:getLibrarySyncRepository,createListener:createRfcommLibraryListener,lifecycle,onLifecycle:onLifecycleChange,display:displayPower,radio:rfcomm,silence:loggedSilence,delay,
   onLibraryChanged:notifyLibraryChanged,onState:state=>{diagnostics.state('bluetooth',state);logConsole.info('WatchRSS foreground sync: '+state);},onError:error=>{diagnostics.failure('bluetooth');logConsole.warn('WatchRSS foreground sync: <redacted>');},
  },{handleAction,watchCapabilities,onActionCompleted:result=>{diagnostics.action(String(result.request.action??''),result.response.success===true);if(!disposed)completeRemoteInput(result);},offerIpEndpoint:async descriptor=>(await ipReady)?.offer(descriptor)??false});
+ bluetooth.setConnectionEnabled(connectionEnabled);
  const ready=Promise.all([bluetooth.ready,ipReady]);void ready.catch(()=>{});
  let closing:Promise<void>|undefined;
- return {ready,createDebugBluetooth:()=>{debugGate.require();return new DebugBluetoothSession(debugGate,{acquire:()=>bluetooth.acquireExclusive(),listener:()=>{let inner:ReturnType<typeof createRfcommLibraryListener>|undefined,stopped=false;return {start:async options=>{const repository=await getLibrarySyncRepository();if(stopped)throw Error('Bluetooth sync cancelled');inner=createRfcommLibraryListener(repository);return inner.start({...options,handleAction,watchCapabilities,onActionCompleted:result=>{if(result.request.action==='syncLibrary')notifyLibraryChanged();}});},stop:()=>{stopped=true;inner?.stop();}};},keepAwake:active=>displayPower.keepAwake('debug-bt-sync',active)});},bluetooth:{get state(){return bluetooth.state;},subscribe:(observer:Parameters<ApplicationForegroundSync['subscribe']>[0])=>bluetooth.subscribe(observer),refresh:()=>bluetooth.refresh()},setMediaEnabled:(enabled:boolean)=>bluetooth.setMediaEnabled(enabled),refresh:()=>{ip?.refresh();return bluetooth.refresh();},dispose:()=>closing??=(async()=>{disposed=true;clearRemoteInput();stopNetwork();stopLifecycle();await ipReady.catch(()=>{});await Promise.all([ip?.dispose(),bluetooth.dispose(),disposeReaderPreview()]);})()};
+ return {ready,setConnectionEnabled:(enabled:boolean)=>{connectionEnabled=enabled;bluetooth.setConnectionEnabled(enabled);ip?.setEnabled(enabled);ip?.setActive(enabled&&lifecycle()==='active');},createDebugBluetooth:()=>{debugGate.require();return new DebugBluetoothSession(debugGate,{acquire:()=>bluetooth.acquireExclusive(),listener:()=>{let inner:ReturnType<typeof createRfcommLibraryListener>|undefined,stopped=false;return {start:async options=>{const repository=await getLibrarySyncRepository();if(stopped)throw Error('Bluetooth sync cancelled');inner=createRfcommLibraryListener(repository);return inner.start({...options,handleAction,watchCapabilities,onActionCompleted:result=>{if(result.request.action==='syncLibrary')notifyLibraryChanged();}});},stop:()=>{stopped=true;inner?.stop();}};},keepAwake:active=>displayPower.keepAwake('debug-bt-sync',active)});},bluetooth:{get state(){return bluetooth.state;},subscribe:(observer:Parameters<ApplicationForegroundSync['subscribe']>[0])=>bluetooth.subscribe(observer),refresh:()=>bluetooth.refresh()},setMediaEnabled:(enabled:boolean)=>bluetooth.setMediaEnabled(enabled),refresh:()=>{ip?.refresh();return bluetooth.refresh();},dispose:()=>closing??=(async()=>{disposed=true;clearRemoteInput();stopNetwork();stopLifecycle();await ipReady.catch(()=>{});await Promise.all([ip?.dispose(),bluetooth.dispose(),disposeReaderPreview()]);})()};
 }

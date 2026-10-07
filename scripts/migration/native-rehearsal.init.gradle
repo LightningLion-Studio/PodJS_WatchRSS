@@ -1,0 +1,9 @@
+// Only Android instrumentation receives the isolated synthetic fixture classes.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    def source = gradle.startParameter.projectProperties['rehearsalTestSourceDir']
+    if (!source) throw new GradleException('rehearsalTestSourceDir required')
+    if (gradle.startParameter.projectProperties['recoveryRehearsal'] != 'true')
+        throw new GradleException('isolated recoveryRehearsal build required')
+    app.android.sourceSets.androidTest.java.srcDir(source)
+}

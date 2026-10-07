@@ -65,3 +65,12 @@ test('debug exclusive ownership waits for foreground stop and resumes only after
  f.lifecycle('background');f.lifecycle('active');await flush();await f.clock.advance(5000);expect(f.sessions).toHaveLength(1);
  release();await flush();expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
 });
+
+test('disabled phone connection prevents production-default initialization, stops transfer, and can resume',async()=>{
+ const f=fixture();f.runtime.setConnectionEnabled(false);f.repository.resolve(f.repo);await f.runtime.ready;
+ expect(f.sessions).toHaveLength(0);f.lifecycle('background');f.lifecycle('active');await f.runtime.refresh();expect(f.sessions).toHaveLength(0);
+ f.runtime.setConnectionEnabled(true);await flush();expect(f.sessions).toHaveLength(1);f.peer();
+ f.runtime.setConnectionEnabled(false);await flush();expect(f.sessions[0].stops).toBe(1);
+ await f.clock.advance(30000);expect(f.sessions).toHaveLength(1);expect(f.resources).toContain('lease:rfcomm-bootstrap:false');
+ f.runtime.setConnectionEnabled(true);await flush();expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
+});

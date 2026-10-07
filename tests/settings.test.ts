@@ -51,3 +51,20 @@ test("volume controls remain independent and survive a settings reload", () => {
  store.update({mediaVolumeControl:true});
  expect(new SettingsStore(storage).load()).toMatchObject({mediaVolumeControl:true,mediaVolumeGuard:true,playbackStartVolumeLimit:null,fontSizeSp:22,speechRate:1.4});
 });
+
+ test("native phone switch and legacy LLM fields survive reload; old stores default phone on",()=>{
+  let stored:unknown={...DEFAULT_SETTINGS,phoneConnectionEnabled:undefined,fontSizeSp:22};
+  const storage={get:<T>()=>stored as T,set:(_key:string,value:unknown)=>{stored=value;}};
+  const store=new SettingsStore(storage);expect(store.load()).toMatchObject({phoneConnectionEnabled:true,fontSizeSp:22});
+  store.update({phoneConnectionEnabled:false,llmProvider:"synthetic",llmModel:"model",llmBaseUrl:"https://rehearsal.invalid",llmSystemPrompt:"prompt"});
+  expect(new SettingsStore(storage).load()).toMatchObject({phoneConnectionEnabled:false,llmProvider:"synthetic",llmModel:"model",llmBaseUrl:"https://rehearsal.invalid",llmSystemPrompt:"prompt",fontSizeSp:22});
+  expect(()=>store.update({phoneConnectionEnabled:"false" as unknown as boolean})).toThrow();
+ });
+
+test('migrated original-mode hint attempts retain native twelve-hour throttle',async()=>{
+ const {TemporaryOriginalHintStore}=await import('../src/settings/temporary-original-hints.ts');
+ const now=1700000000000;let stored:unknown={'39':{attempts:`${now-1000},${now-500}`,lastToast:0}};
+ const store=new TemporaryOriginalHintStore({get:<T>()=>stored as T,set:(_key,value)=>{stored=value;}});
+ expect(store.record(39,now)).toBe(true);expect(store.record(39,now+1)).toBe(false);expect(store.record(39,now+12*60*60*1000+1)).toBe(false);
+ expect(store.record(-1,now)).toBe(false);
+});

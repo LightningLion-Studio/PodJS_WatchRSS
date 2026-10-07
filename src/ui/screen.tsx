@@ -137,6 +137,7 @@ export default function WatchRSS(props: {
   services: AppServices;
   bluetoothSync?: Pick<ApplicationForegroundSync, "state" | "subscribe" | "refresh">;
   announcements?: ReturnType<typeof createAnnouncementServices>;
+  onPhoneConnectionEnabledChange?: (enabled:boolean)=>void;
   onSyncMediaKeepAliveChange?: (enabled: boolean) => void;
 }) {
   const metrics = getDisplayMetrics();
@@ -448,6 +449,7 @@ export default function WatchRSS(props: {
         if (shareAlive) setError(String(e));
       });
   };
+  createEffect(()=>props.onPhoneConnectionEnabledChange?.(settings().phoneConnectionEnabled));
   createEffect(() =>
     props.onSyncMediaKeepAliveChange?.(settings().syncMediaKeepAlive),
   );
