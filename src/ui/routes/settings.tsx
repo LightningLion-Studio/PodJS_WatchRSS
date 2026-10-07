@@ -60,7 +60,7 @@ interface SettingsRoutesProps {
 export function SettingsRoutes(props: SettingsRoutesProps) {
   return (
     <>
-      <Show when={props.page()==="debug-summary"&&debugGate.allowed}><DebugSummaryPlaceholder id={props.entry.articleId??""} services={props.services} preset={()=>props.settings().llmPromptPreset} showTokens={()=>props.settings().llmShowTokenUsage}/></Show>
+      <Show when={props.page()==="debug-summary"&&debugGate.allowed}><DebugSummaryPlaceholder id={props.entry.articleId??""} width={props.width} height={props.height} active={props.active} services={props.services} preset={()=>props.settings().llmPromptPreset} showTokens={()=>props.settings().llmShowTokenUsage}/></Show>
       <Show when={props.page()==="debug-tools"&&debugGate.allowed}><DebugToolsScreen width={props.width} height={props.height} active={props.active} services={props.services} entry={props.entry} createBluetooth={props.createDebugBluetooth} onAcousticUrl={enqueueRemoteInput}/></Show>
       <Show when={props.page() === "settings-llm-usage"}>
         <LlmUsageScreen
