@@ -21,9 +21,13 @@ function fixture(size = 3 * MiB, length = 2 * PREVIEW_MS) {
   let gate: ReturnType<typeof deferred> | undefined;
   const started = deferred();
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
-    const range = request.headers.get('range')!; requests.push({ range, headers: request.headers }); started.resolve();
+    // An unrelated request must not satisfy the download gate or crash a test.
+    if (request.method !== 'GET' || new URL(request.url).pathname !== '/video') return new Response(null, { status: 404 });
+    const range = request.headers.get('range') ?? '';
+    const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+    if (!match) return new Response(null, { status: 416 });
+    requests.push({ range, headers: request.headers }); started.resolve();
     if (gate) await gate.promise;
-    const match = /^bytes=(\d+)-(\d+)$/.exec(range)!;
     const start = Number(match[1]), end = Number(match[2]);
     if (start >= failAfter) return new Response('fixture_failure', { status: 500 });
     if (responseMode === 'ignored') return new Response(body);
@@ -74,13 +78,26 @@ function fixture(size = 3 * MiB, length = 2 * PREVIEW_MS) {
     download() { throw Error('unused_image_download'); },
   });
   const managed = newManaged(), cache = new BiliPreviewCache(ports, managed);
-  return { ports, managed, cache, stored, requests, body, disk, put, newManaged, started,
+  return { ports, managed, cache, stored, requests, body, disk, put, newManaged, started, url: server.url,
     setMode(mode: typeof responseMode) { responseMode = mode; }, setFailure(start: number) { failAfter = start; },
     block() { gate = deferred(); }, unblock() { gate?.resolve(); gate = undefined; },
     get peak() { return peak; }, get cancelled() { return cancelled; },
-    async cleanup() { gate?.resolve(); await managed.clearBucket('bili-preview'); server.stop(true); rmSync(root, { recursive: true, force: true }); },
+    async cleanup() { gate?.resolve(); await managed.clearBucket('bili-preview'); await server.stop(true); rmSync(root, { recursive: true, force: true }); },
   };
 }
+
+test('Range fixture rejects unrelated and missing-Range requests without opening the download gate', async () => {
+  const f = fixture(); let started = false;
+  f.started.promise.then(() => { started = true; });
+  try {
+    expect((await fetch(f.url)).status).toBe(404);
+    expect((await fetch(new URL('video', f.url))).status).toBe(416);
+    expect(f.requests).toEqual([]); expect(started).toBe(false);
+    await f.cache.enqueue(target).result;
+    expect(started).toBe(true);
+    expect(f.requests.map(row => row.range)).toEqual(['bytes=0-1048575', 'bytes=1048576-1572863']);
+  } finally { await f.cleanup(); }
+});
 
 test('native qn32 estimate is a 30-minute prefix, uses exact arithmetic, rejects absent/invalid metadata', () => {
   expect(previewBytes(300, PREVIEW_MS * 2)).toBe(150);
