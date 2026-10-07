@@ -51,6 +51,8 @@ for(const [key,value] of Object.entries(pkg.exports) as [string,any][]){
  if(typeof file==="string")aliases[`@pocketjs/framework/${key.slice(2)}`]=resolve(pocket,file);
 }
 for(const name of ["watch","services","text","media-surface","debug-memory"])aliases[`@podjs/framework/${name}`]=resolve(framework,`packages/framework/src/${name}.${["text","media-surface"].includes(name)?"tsx":"ts"}`);
+const {solidConditionalProps}=await import(resolve(pocket,"framework/compiler/solid-props.ts"));
+const classLiterals=new Set<string>();
 const native=arg("runtime","bun")==="quickjs";
 const output=resolve(arg("out",native?"/tmp/reader-memory.js":"/tmp/reader-scroll.js"));
 const sourceRef=arg("source-ref","");
@@ -69,14 +71,21 @@ const built=await Bun.build({entrypoints:[resolve(import.meta.dir,native?"reader
    if(!/^\d+$/.test(retainRows))throw new Error("retain-rows must be a nonnegative integer");
    source=source.replace("retainRows={24}",`retainRows={${retainRows}}`);
   }
+  if(native&&args.path===resolve(appRoot,"src/ui/ReaderBody.tsx"))source=source.replace("props.ref(handle);","props.ref(handle); globalThis.__readerHandle = handle;");
   if(!native&&args.path.endsWith("/frame.ts"))source=source.replace("callbacks.add(callback);",`const wrapped = (buttons: number) => { globalThis.__readerProfile.count("onFrameCallbacks"); return globalThis.__readerProfile.time("onFrame", () => callback(buttons)); }; callbacks.add(wrapped);`).replace("callbacks.delete(callback)","callbacks.delete(wrapped)");
   const isTs=/\.tsx?$/.test(args.path);
   // Strip types before the profiler moves bodies into wrapper functions.
   // Otherwise copied non-null assertions can escape the TypeScript visitor.
   const stripped=isTs?transformSync(source,{filename:args.path,babelrc:false,configFile:false,presets:[[require("@babel/preset-typescript"),{isTSX:args.path.endsWith(".tsx"),allExtensions:true}]]}).code:source;
-  const result=transformSync(stripped,{filename:args.path,babelrc:false,configFile:false,plugins:native?[]:[instrument],presets:[...(args.path.endsWith(".tsx")?[[require("babel-preset-solid"),{generate:"universal",moduleName:"@pocketjs/framework/renderer"}]]:[])]});
+  const result=transformSync(stripped,{filename:args.path,babelrc:false,configFile:false,plugins:[...(arg("conditional-memos","0")==="1"?[]:[solidConditionalProps]),...(native?[()=>({visitor:{StringLiteral(path:any){classLiterals.add(path.node.value);}}})]:[instrument])],presets:[...(args.path.endsWith(".tsx")?[[require("babel-preset-solid"),{generate:"universal",moduleName:"@pocketjs/framework/renderer"}]]:[])]});
   return {contents:result.code,loader:"js"};
  });
 }}]});
 if(!built.success)throw new Error(built.logs.join("\n"));
+if(native){
+ const {compileClasses}=await import(resolve(pocket,"framework/compiler/tailwind.ts"));
+ const styles=compileClasses(classLiterals);
+ const source=await Bun.file(output).text();
+ await Bun.write(output,`globalThis.__readerStyles=${JSON.stringify({ids:styles.ids,bin:[...styles.bin]})};\n${source}`);
+}
 console.log(`Built ${native?"QuickJS ownership":"instrumented Bun"} ReaderBody/PocketJS/Solid/SystemTextLine: ${output}`);
