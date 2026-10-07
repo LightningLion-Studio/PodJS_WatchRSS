@@ -1,9 +1,12 @@
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
+import * as solidRuntime from 'solid-js';
 import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,mergeProps,onCleanup,Show} from 'solid-js';
 import {createScrollerWith} from '/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs/framework/src/kinetics-core.ts';
 import {captureActivityNavigation,restoreActivityNavigation,routeMemory,type ActivityRoute} from '../src/navigation/activity-navigation.ts';
+// Match production's single-Solid alias for the file-linked framework.
+mock.module(Bun.resolveSync('solid-js',Bun.resolveSync('@podjs/framework/windowed-list',import.meta.dir)),()=>solidRuntime);
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
 plugin({name:'activity-recreation-solid',setup(builder){builder.onLoad({filter:/\/ui\/(route-activity|ScrollEntries|AddRssScreen|VideoPlayerScreen|NoteInlineEditor|NotesScreen)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 // Keep the production Solid owner/effect graph and scroller state machine.

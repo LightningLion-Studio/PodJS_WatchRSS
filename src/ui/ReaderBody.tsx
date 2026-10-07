@@ -1,3 +1,6 @@
+import {prepareTextLayout} from "@podjs/framework/text";
+import {createWindowValue} from "@podjs/framework/windowed-list";
+import {readerRowKey} from "../reader/content-layout.ts";
 import {updateSystemCarets} from "../reader/system-carets.ts";
 import {appLogger} from '../logs/app-logger.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
@@ -16,7 +19,7 @@ import type { NativeBlockLayouts } from "../reader/content-layout.ts";
 import { delay, textLayout } from "@podjs/framework/services";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
-import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
+import { ScrollEntries, type ScrollEntry, type PositionedScrollEntry, type IndexedScrollEntries } from "./ScrollEntries.tsx";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { getOps } from "@pocketjs/framework/host";
 import { resolveUrl } from "../core/parser.ts";
@@ -93,7 +96,17 @@ export function ReaderBody(props:{
     const task=requestReaderLayout(blocks,width,size,pixelScale,preset,args=>textLayout.layout(args),setNativeLayouts,error=>logConsole.warn("Reader paragraph layout",String(error)),fonts());
     onCleanup(()=>task.cancel());
   });
-  const layout=createMemo(()=>{importedRevision();return imported?.layout()??layoutContent(props.blocks,props.width-28,props.fontSize,ratios(),props.preset,nativeLayouts());});
+  const [prepared,setPrepared]=createSignal<{layout:ReturnType<typeof layoutContent>;entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>}|undefined>();
+  createEffect(()=>{
+    if(imported)return;
+    const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios();
+    if(!native.size){setPrepared(undefined);return;}
+    const task=prepareTextLayout(layoutContent.steps(source,width,size,ratio,preset,native),{key:readerRowKey,entry:makeEntry,publish:setPrepared});
+    void task.done.catch(error=>logConsole.warn("Reader layout preparation",String(error)));
+    onCleanup(()=>task.cancel());
+  });
+  const layout=createMemo(()=>{importedRevision();return imported?.layout()??prepared()?.layout??layoutContent(props.blocks,props.width-28,props.fontSize,ratios(),props.preset);});
+
   const [systemCarets,setSystemCarets]=createSignal<ReadonlyMap<ReaderRow,readonly number[]>>(new Map());
   const highlightRects=createMemo(()=>contentHighlightRects(layout(),imported&&props.highlight?.importedChunkIndex!==undefined?{...props.highlight,contentBlockIndex:props.highlight.importedChunkIndex}:props.highlight,props.width-28,(text,slot)=>getOps().measureText(text,slot),systemCarets()));
   const headerHeight=()=>props.header?.reduce((sum,row)=>sum+row.height,0)??0;
@@ -218,11 +231,19 @@ export function ReaderBody(props:{
     if(!foreground)void save();
   });
   onCleanup(()=>{void save();disposed=true;imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createWindowValue(raw);return row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,raw(),positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
+      {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
+    </View>;}};}
+  const indexedEntries=createMemo<IndexedScrollEntries>(()=>{
+    const snapshot=prepared();
+    if(snapshot&&!imported)return {...snapshot,scope:props.blocks};
+    const entries=layout().rows.map(makeEntry),indices=new Map<string,number>();
+    entries.forEach((entry,index)=>indices.set(entry.key as string,index));
+    return {entries,indices,scope:blocks()};
+  });
   return <View debugName="ReaderViewport" class="absolute left-[0] right-[0]" style={{insetT:props.top??40,height:props.height,bgColor:props.preset?readerColor(props.preset.background.colorArgb):"#000000"}}>
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
-    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={[...(props.header??[]),...layout().rows.map(row=>({height:row.height,retain:row.kind==="text",render:()=>row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(row);return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,row,positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
-      {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
-    </View>})),...(props.footer??[])]}/>
+    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={props.footer??[]} indexedEntries={indexedEntries()}/>
 
     <View class="absolute left-[12] right-[12] bottom-[0] h-[18] items-center justify-center" style={{opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
   </View>;

@@ -1,0 +1,2425 @@
+{
+  "source": "b36e5be:src/reader/content-layout.ts",
+  "cases": [
+    {
+      "blocks": [
+        {
+          "type": "text",
+          "style": "title",
+          "text": "标题\r\nABC😀"
+        },
+        {
+          "type": "image",
+          "url": "a",
+          "width": 400,
+          "height": 200
+        },
+        {
+          "type": "text",
+          "style": "quote",
+          "text": "Quote words é\n第二行\n"
+        },
+        {
+          "type": "video",
+          "url": "v"
+        },
+        {
+          "type": "text",
+          "style": "code",
+          "text": "let x = 1;\r\n\r\n尾"
+        }
+      ],
+      "width": 205,
+      "fontSize": 16,
+      "ratios": {
+        "1": 1.5
+      },
+      "native": [],
+      "layout": {
+        "rows": [
+          {
+            "kind": "text",
+            "text": "标题",
+            "blockIndex": 0,
+            "sourceStart": 0,
+            "character": 0,
+            "top": 0,
+            "height": 33.480000000000004,
+            "gap": 0,
+            "fontSlot": 10,
+            "scale": 1.3777777777777778,
+            "lineHeight": 33.480000000000004,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "ABC😀",
+            "blockIndex": 0,
+            "sourceStart": 4,
+            "character": 3,
+            "top": 33.480000000000004,
+            "height": 33.480000000000004,
+            "gap": 0,
+            "fontSlot": 10,
+            "scale": 1.3777777777777778,
+            "lineHeight": 33.480000000000004,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "image",
+            "block": {
+              "type": "image",
+              "url": "a",
+              "width": 400,
+              "height": 200
+            },
+            "blockIndex": 1,
+            "character": 9,
+            "top": 66.96000000000001,
+            "height": 142.66666666666666,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "Quote words é",
+            "blockIndex": 2,
+            "sourceStart": 0,
+            "character": 9,
+            "top": 209.62666666666667,
+            "height": 27.6,
+            "gap": 6,
+            "fontSlot": 2,
+            "scale": 1,
+            "lineHeight": 21.6,
+            "color": "#c5c5c5",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "第二行",
+            "blockIndex": 2,
+            "sourceStart": 15,
+            "character": 24,
+            "top": 237.22666666666666,
+            "height": 21.6,
+            "gap": 0,
+            "fontSlot": 2,
+            "scale": 1,
+            "lineHeight": 21.6,
+            "color": "#c5c5c5",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 2,
+            "sourceStart": 19,
+            "character": 28,
+            "top": 258.82666666666665,
+            "height": 21.6,
+            "gap": 0,
+            "fontSlot": 2,
+            "scale": 1,
+            "lineHeight": 21.6,
+            "color": "#c5c5c5",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "video",
+            "block": {
+              "type": "video",
+              "url": "v"
+            },
+            "blockIndex": 3,
+            "character": 29,
+            "top": 280.4266666666667,
+            "height": 121.3125,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "let x = 1;",
+            "blockIndex": 4,
+            "sourceStart": 0,
+            "character": 29,
+            "top": 401.7391666666667,
+            "height": 25.44,
+            "gap": 6,
+            "fontSlot": 1,
+            "scale": 1.0285714285714287,
+            "lineHeight": 19.44,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 4,
+            "sourceStart": 12,
+            "character": 40,
+            "top": 427.1791666666667,
+            "height": 19.44,
+            "gap": 0,
+            "fontSlot": 1,
+            "scale": 1.0285714285714287,
+            "lineHeight": 19.44,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "尾",
+            "blockIndex": 4,
+            "sourceStart": 14,
+            "character": 41,
+            "top": 446.6191666666667,
+            "height": 19.44,
+            "gap": 0,
+            "fontSlot": 1,
+            "scale": 1.0285714285714287,
+            "lineHeight": 19.44,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          }
+        ],
+        "height": 466.05916666666667,
+        "textLength": 42
+      },
+      "anchors": [
+        {
+          "anchor": {
+            "character": -2,
+            "fraction": 0.37
+          },
+          "offset": 12.3876
+        },
+        {
+          "anchor": {
+            "character": -1,
+            "fraction": 0.37
+          },
+          "offset": 12.3876
+        },
+        {
+          "anchor": {
+            "character": 0,
+            "fraction": 0.37
+          },
+          "offset": 12.3876
+        },
+        {
+          "anchor": {
+            "character": 1,
+            "fraction": 0.37
+          },
+          "offset": 12.3876
+        },
+        {
+          "anchor": {
+            "character": 2,
+            "fraction": 0.37
+          },
+          "offset": 12.3876
+        },
+        {
+          "anchor": {
+            "character": 3,
+            "fraction": 0.37
+          },
+          "offset": 45.8676
+        },
+        {
+          "anchor": {
+            "character": 4,
+            "fraction": 0.37
+          },
+          "offset": 45.8676
+        },
+        {
+          "anchor": {
+            "character": 5,
+            "fraction": 0.37
+          },
+          "offset": 45.8676
+        },
+        {
+          "anchor": {
+            "character": 6,
+            "fraction": 0.37
+          },
+          "offset": 45.8676
+        },
+        {
+          "anchor": {
+            "character": 7,
+            "fraction": 0.37
+          },
+          "offset": 45.8676
+        },
+        {
+          "anchor": {
+            "character": 8,
+            "fraction": 0.37
+          },
+          "offset": 45.8676
+        },
+        {
+          "anchor": {
+            "character": 9,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 10,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 11,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 12,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 13,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 14,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 15,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 16,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 17,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 18,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 19,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 20,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 21,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 22,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 23,
+            "fraction": 0.37
+          },
+          "offset": 223.61866666666666
+        },
+        {
+          "anchor": {
+            "character": 24,
+            "fraction": 0.37
+          },
+          "offset": 245.21866666666665
+        },
+        {
+          "anchor": {
+            "character": 25,
+            "fraction": 0.37
+          },
+          "offset": 245.21866666666665
+        },
+        {
+          "anchor": {
+            "character": 26,
+            "fraction": 0.37
+          },
+          "offset": 245.21866666666665
+        },
+        {
+          "anchor": {
+            "character": 27,
+            "fraction": 0.37
+          },
+          "offset": 245.21866666666665
+        },
+        {
+          "anchor": {
+            "character": 28,
+            "fraction": 0.37
+          },
+          "offset": 266.8186666666667
+        },
+        {
+          "anchor": {
+            "character": 29,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 30,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 31,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 32,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 33,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 34,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 35,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 36,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 37,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 38,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 39,
+            "fraction": 0.37
+          },
+          "offset": 414.93196666666665
+        },
+        {
+          "anchor": {
+            "character": 40,
+            "fraction": 0.37
+          },
+          "offset": 434.37196666666665
+        },
+        {
+          "anchor": {
+            "character": 41,
+            "fraction": 0.37
+          },
+          "offset": 453.81196666666665
+        },
+        {
+          "anchor": {
+            "character": 42,
+            "fraction": 0.37
+          },
+          "offset": 453.81196666666665
+        },
+        {
+          "anchor": {
+            "character": 43,
+            "fraction": 0.37
+          },
+          "offset": 453.81196666666665
+        },
+        {
+          "anchor": {
+            "character": 44,
+            "fraction": 0.37
+          },
+          "offset": 453.81196666666665
+        }
+      ]
+    },
+    {
+      "blocks": [
+        {
+          "type": "text",
+          "style": "title",
+          "text": "标题\r\nABC😀"
+        },
+        {
+          "type": "image",
+          "url": "a",
+          "width": 400,
+          "height": 200
+        },
+        {
+          "type": "text",
+          "style": "quote",
+          "text": "Quote words é\n第二行\n"
+        },
+        {
+          "type": "video",
+          "url": "v"
+        },
+        {
+          "type": "text",
+          "style": "code",
+          "text": "let x = 1;\r\n\r\n尾"
+        }
+      ],
+      "width": 205,
+      "fontSize": 16,
+      "ratios": {
+        "1": 1.5
+      },
+      "preset": {
+        "schemaVersion": 2,
+        "id": "reader-system-fallback",
+        "name": "安全默认",
+        "body": {
+          "fontAssetId": null,
+          "fontFaceIndex": 0,
+          "variationSettings": "",
+          "fontSizeSp": 14,
+          "fontWeight": 400,
+          "italic": false,
+          "underline": false,
+          "strikethrough": false,
+          "colorArgb": 4294111986,
+          "lineHeightEm": 1.35,
+          "letterSpacingEm": 0,
+          "paragraphSpacingDp": 6,
+          "firstLineIndentEm": 0,
+          "horizontalPaddingDp": 14,
+          "alignment": "START",
+          "lineBreakMode": "PARAGRAPH",
+          "hyphenation": "NONE",
+          "renderMode": "READABILITY",
+          "fontSynthesis": "ENABLED"
+        },
+        "categoryTypographyEnabled": true,
+        "title": {},
+        "subtitle": {},
+        "quote": {
+          "fontSizeSp": 18,
+          "colorArgb": 4282668390,
+          "lineHeightEm": 1.7,
+          "letterSpacingEm": 0.02
+        },
+        "code": {},
+        "link": {},
+        "background": {
+          "type": "SOLID",
+          "colorArgb": 4278190080,
+          "assetId": null,
+          "fit": "CROP",
+          "focusX": 0.5,
+          "focusY": 0.5,
+          "zoom": 1,
+          "rotationDegrees": 0,
+          "blurDp": 0,
+          "brightness": 1,
+          "saturation": 1,
+          "overlayColorArgb": 4278190080,
+          "overlayOpacity": 0,
+          "videoTrimStartMs": 0,
+          "videoTrimEndMs": 60000,
+          "videoSpeed": 1,
+          "loop": true,
+          "posterAssetId": null
+        },
+        "codeBackgroundColorArgb": 4280753672,
+        "accentColorArgb": 4294924854,
+        "updatedAt": 0,
+        "modifiedBy": "",
+        "deleted": false
+      },
+      "native": [],
+      "layout": {
+        "rows": [
+          {
+            "kind": "text",
+            "text": "标题",
+            "blockIndex": 0,
+            "sourceStart": 0,
+            "character": 0,
+            "top": 0,
+            "height": 29.294998455047608,
+            "gap": 0,
+            "fontSlot": 37,
+            "scale": 0.9999999472622498,
+            "lineHeight": 29.294998455047608,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "ABC😀",
+            "blockIndex": 0,
+            "sourceStart": 4,
+            "character": 3,
+            "top": 29.294998455047608,
+            "height": 29.294998455047608,
+            "gap": 0,
+            "fontSlot": 37,
+            "scale": 0.9999999472622498,
+            "lineHeight": 29.294998455047608,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "image",
+            "block": {
+              "type": "image",
+              "url": "a",
+              "width": 400,
+              "height": 200
+            },
+            "blockIndex": 1,
+            "character": 9,
+            "top": 58.589996910095216,
+            "height": 142.66666666666666,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "Quote words é",
+            "blockIndex": 2,
+            "sourceStart": 0,
+            "character": 9,
+            "top": 201.25666357676187,
+            "height": 36.599999999999994,
+            "gap": 6,
+            "fontSlot": 36,
+            "scale": 1,
+            "lineHeight": 30.599999999999998,
+            "color": "#445566ff",
+            "tracking": 0.36,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "第二行",
+            "blockIndex": 2,
+            "sourceStart": 15,
+            "character": 24,
+            "top": 237.85666357676186,
+            "height": 30.599999999999998,
+            "gap": 0,
+            "fontSlot": 36,
+            "scale": 1,
+            "lineHeight": 30.599999999999998,
+            "color": "#445566ff",
+            "tracking": 0.36,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 2,
+            "sourceStart": 19,
+            "character": 28,
+            "top": 268.45666357676185,
+            "height": 30.599999999999998,
+            "gap": 0,
+            "fontSlot": 36,
+            "scale": 1,
+            "lineHeight": 30.599999999999998,
+            "color": "#445566ff",
+            "tracking": 0.36,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "video",
+            "block": {
+              "type": "video",
+              "url": "v"
+            },
+            "blockIndex": 3,
+            "character": 29,
+            "top": 299.0566635767619,
+            "height": 121.3125,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "let x = 1;",
+            "blockIndex": 4,
+            "sourceStart": 0,
+            "character": 29,
+            "top": 420.3691635767619,
+            "height": 23.009999227523807,
+            "gap": 6,
+            "fontSlot": 33,
+            "scale": 1.0499999523162842,
+            "lineHeight": 17.009999227523807,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 4,
+            "sourceStart": 12,
+            "character": 40,
+            "top": 443.37916280428567,
+            "height": 17.009999227523807,
+            "gap": 0,
+            "fontSlot": 33,
+            "scale": 1.0499999523162842,
+            "lineHeight": 17.009999227523807,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          },
+          {
+            "kind": "text",
+            "text": "尾",
+            "blockIndex": 4,
+            "sourceStart": 14,
+            "character": 41,
+            "top": 460.38916203180946,
+            "height": 17.009999227523807,
+            "gap": 0,
+            "fontSlot": 33,
+            "scale": 1.0499999523162842,
+            "lineHeight": 17.009999227523807,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": 0
+          }
+        ],
+        "height": 477.39916125933325,
+        "textLength": 42
+      },
+      "anchors": [
+        {
+          "anchor": {
+            "character": -2,
+            "fraction": 0.37
+          },
+          "offset": 10.839149428367614
+        },
+        {
+          "anchor": {
+            "character": -1,
+            "fraction": 0.37
+          },
+          "offset": 10.839149428367614
+        },
+        {
+          "anchor": {
+            "character": 0,
+            "fraction": 0.37
+          },
+          "offset": 10.839149428367614
+        },
+        {
+          "anchor": {
+            "character": 1,
+            "fraction": 0.37
+          },
+          "offset": 10.839149428367614
+        },
+        {
+          "anchor": {
+            "character": 2,
+            "fraction": 0.37
+          },
+          "offset": 10.839149428367614
+        },
+        {
+          "anchor": {
+            "character": 3,
+            "fraction": 0.37
+          },
+          "offset": 40.134147883415224
+        },
+        {
+          "anchor": {
+            "character": 4,
+            "fraction": 0.37
+          },
+          "offset": 40.134147883415224
+        },
+        {
+          "anchor": {
+            "character": 5,
+            "fraction": 0.37
+          },
+          "offset": 40.134147883415224
+        },
+        {
+          "anchor": {
+            "character": 6,
+            "fraction": 0.37
+          },
+          "offset": 40.134147883415224
+        },
+        {
+          "anchor": {
+            "character": 7,
+            "fraction": 0.37
+          },
+          "offset": 40.134147883415224
+        },
+        {
+          "anchor": {
+            "character": 8,
+            "fraction": 0.37
+          },
+          "offset": 40.134147883415224
+        },
+        {
+          "anchor": {
+            "character": 9,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 10,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 11,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 12,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 13,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 14,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 15,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 16,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 17,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 18,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 19,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 20,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 21,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 22,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 23,
+            "fraction": 0.37
+          },
+          "offset": 218.57866357676187
+        },
+        {
+          "anchor": {
+            "character": 24,
+            "fraction": 0.37
+          },
+          "offset": 249.17866357676186
+        },
+        {
+          "anchor": {
+            "character": 25,
+            "fraction": 0.37
+          },
+          "offset": 249.17866357676186
+        },
+        {
+          "anchor": {
+            "character": 26,
+            "fraction": 0.37
+          },
+          "offset": 249.17866357676186
+        },
+        {
+          "anchor": {
+            "character": 27,
+            "fraction": 0.37
+          },
+          "offset": 249.17866357676186
+        },
+        {
+          "anchor": {
+            "character": 28,
+            "fraction": 0.37
+          },
+          "offset": 279.77866357676186
+        },
+        {
+          "anchor": {
+            "character": 29,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 30,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 31,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 32,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 33,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 34,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 35,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 36,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 37,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 38,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 39,
+            "fraction": 0.37
+          },
+          "offset": 432.66286329094567
+        },
+        {
+          "anchor": {
+            "character": 40,
+            "fraction": 0.37
+          },
+          "offset": 449.67286251846946
+        },
+        {
+          "anchor": {
+            "character": 41,
+            "fraction": 0.37
+          },
+          "offset": 466.68286174599325
+        },
+        {
+          "anchor": {
+            "character": 42,
+            "fraction": 0.37
+          },
+          "offset": 466.68286174599325
+        },
+        {
+          "anchor": {
+            "character": 43,
+            "fraction": 0.37
+          },
+          "offset": 466.68286174599325
+        },
+        {
+          "anchor": {
+            "character": 44,
+            "fraction": 0.37
+          },
+          "offset": 466.68286174599325
+        }
+      ]
+    },
+    {
+      "blocks": [
+        {
+          "type": "text",
+          "style": "title",
+          "text": "标题\r\nABC😀"
+        },
+        {
+          "type": "image",
+          "url": "a",
+          "width": 400,
+          "height": 200
+        },
+        {
+          "type": "text",
+          "style": "quote",
+          "text": "Quote words é\n第二行\n"
+        },
+        {
+          "type": "video",
+          "url": "v"
+        },
+        {
+          "type": "text",
+          "style": "code",
+          "text": "let x = 1;\r\n\r\n尾"
+        }
+      ],
+      "width": 205,
+      "fontSize": 16,
+      "ratios": {
+        "1": 1.5
+      },
+      "native": [
+        [
+          0,
+          [
+            {
+              "start": 0,
+              "visibleEnd": 2,
+              "end": 3,
+              "height": 21,
+              "baseline": 16
+            },
+            {
+              "start": 3,
+              "visibleEnd": 8,
+              "end": 8,
+              "height": 22,
+              "baseline": 17
+            }
+          ]
+        ],
+        [
+          2,
+          [
+            {
+              "start": 0,
+              "visibleEnd": 14,
+              "end": 15,
+              "height": 21,
+              "baseline": 16
+            },
+            {
+              "start": 15,
+              "visibleEnd": 18,
+              "end": 19,
+              "height": 22,
+              "baseline": 17
+            },
+            {
+              "start": 19,
+              "visibleEnd": 19,
+              "end": 19,
+              "height": 23,
+              "baseline": 18
+            }
+          ]
+        ],
+        [
+          4,
+          [
+            {
+              "start": 0,
+              "visibleEnd": 10,
+              "end": 11,
+              "height": 21,
+              "baseline": 16
+            },
+            {
+              "start": 11,
+              "visibleEnd": 11,
+              "end": 12,
+              "height": 22,
+              "baseline": 17
+            },
+            {
+              "start": 12,
+              "visibleEnd": 13,
+              "end": 13,
+              "height": 23,
+              "baseline": 18
+            }
+          ]
+        ]
+      ],
+      "layout": {
+        "rows": [
+          {
+            "kind": "text",
+            "text": "标题",
+            "blockIndex": 0,
+            "sourceStart": 0,
+            "character": 0,
+            "top": 0,
+            "height": 21,
+            "gap": 0,
+            "fontSlot": 10,
+            "scale": 1.3777777777777778,
+            "lineHeight": 21,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -4.144444444444446,
+            "nativeBaseline": 16
+          },
+          {
+            "kind": "text",
+            "text": "ABC😀",
+            "blockIndex": 0,
+            "sourceStart": 4,
+            "character": 3,
+            "top": 21,
+            "height": 22,
+            "gap": 0,
+            "fontSlot": 10,
+            "scale": 1.3777777777777778,
+            "lineHeight": 22,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -3.6444444444444457,
+            "nativeBaseline": 17
+          },
+          {
+            "kind": "image",
+            "block": {
+              "type": "image",
+              "url": "a",
+              "width": 400,
+              "height": 200
+            },
+            "blockIndex": 1,
+            "character": 9,
+            "top": 43,
+            "height": 142.66666666666666,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "Quote words é",
+            "blockIndex": 2,
+            "sourceStart": 0,
+            "character": 9,
+            "top": 185.66666666666666,
+            "height": 27,
+            "gap": 6,
+            "fontSlot": 2,
+            "scale": 1,
+            "lineHeight": 21,
+            "color": "#c5c5c5",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1.5,
+            "nativeBaseline": 16
+          },
+          {
+            "kind": "text",
+            "text": "第二行",
+            "blockIndex": 2,
+            "sourceStart": 15,
+            "character": 24,
+            "top": 212.66666666666666,
+            "height": 22,
+            "gap": 0,
+            "fontSlot": 2,
+            "scale": 1,
+            "lineHeight": 22,
+            "color": "#c5c5c5",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1,
+            "nativeBaseline": 17
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 2,
+            "sourceStart": 19,
+            "character": 28,
+            "top": 234.66666666666666,
+            "height": 23,
+            "gap": 0,
+            "fontSlot": 2,
+            "scale": 1,
+            "lineHeight": 23,
+            "color": "#c5c5c5",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -0.5,
+            "nativeBaseline": 18
+          },
+          {
+            "kind": "video",
+            "block": {
+              "type": "video",
+              "url": "v"
+            },
+            "blockIndex": 3,
+            "character": 29,
+            "top": 257.66666666666663,
+            "height": 121.3125,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "let x = 1;",
+            "blockIndex": 4,
+            "sourceStart": 0,
+            "character": 29,
+            "top": 378.97916666666663,
+            "height": 27,
+            "gap": 6,
+            "fontSlot": 1,
+            "scale": 1.0285714285714287,
+            "lineHeight": 21,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1.6999999999999993,
+            "nativeBaseline": 16
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 4,
+            "sourceStart": 12,
+            "character": 40,
+            "top": 405.97916666666663,
+            "height": 22,
+            "gap": 0,
+            "fontSlot": 1,
+            "scale": 1.0285714285714287,
+            "lineHeight": 22,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1.1999999999999993,
+            "nativeBaseline": 17
+          },
+          {
+            "kind": "text",
+            "text": "尾",
+            "blockIndex": 4,
+            "sourceStart": 14,
+            "character": 41,
+            "top": 427.97916666666663,
+            "height": 23,
+            "gap": 0,
+            "fontSlot": 1,
+            "scale": 1.0285714285714287,
+            "lineHeight": 23,
+            "color": "#f2f2f2",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -0.6999999999999993,
+            "nativeBaseline": 18
+          }
+        ],
+        "height": 450.97916666666663,
+        "textLength": 42
+      },
+      "anchors": [
+        {
+          "anchor": {
+            "character": -2,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": -1,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 0,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 1,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 2,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 3,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 4,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 5,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 6,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 7,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 8,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 9,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 10,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 11,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 12,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 13,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 14,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 15,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 16,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 17,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 18,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 19,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 20,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 21,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 22,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 23,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 24,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 25,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 26,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 27,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 28,
+            "fraction": 0.37
+          },
+          "offset": 243.17666666666665
+        },
+        {
+          "anchor": {
+            "character": 29,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 30,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 31,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 32,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 33,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 34,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 35,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 36,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 37,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 38,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 39,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 40,
+            "fraction": 0.37
+          },
+          "offset": 414.1191666666666
+        },
+        {
+          "anchor": {
+            "character": 41,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        },
+        {
+          "anchor": {
+            "character": 42,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        },
+        {
+          "anchor": {
+            "character": 43,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        },
+        {
+          "anchor": {
+            "character": 44,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        }
+      ]
+    },
+    {
+      "blocks": [
+        {
+          "type": "text",
+          "style": "title",
+          "text": "标题\r\nABC😀"
+        },
+        {
+          "type": "image",
+          "url": "a",
+          "width": 400,
+          "height": 200
+        },
+        {
+          "type": "text",
+          "style": "quote",
+          "text": "Quote words é\n第二行\n"
+        },
+        {
+          "type": "video",
+          "url": "v"
+        },
+        {
+          "type": "text",
+          "style": "code",
+          "text": "let x = 1;\r\n\r\n尾"
+        }
+      ],
+      "width": 205,
+      "fontSize": 16,
+      "ratios": {
+        "1": 1.5
+      },
+      "preset": {
+        "schemaVersion": 2,
+        "id": "reader-system-fallback",
+        "name": "安全默认",
+        "body": {
+          "fontAssetId": null,
+          "fontFaceIndex": 0,
+          "variationSettings": "",
+          "fontSizeSp": 14,
+          "fontWeight": 400,
+          "italic": false,
+          "underline": false,
+          "strikethrough": false,
+          "colorArgb": 4294111986,
+          "lineHeightEm": 1.35,
+          "letterSpacingEm": 0,
+          "paragraphSpacingDp": 6,
+          "firstLineIndentEm": 0,
+          "horizontalPaddingDp": 14,
+          "alignment": "START",
+          "lineBreakMode": "PARAGRAPH",
+          "hyphenation": "NONE",
+          "renderMode": "READABILITY",
+          "fontSynthesis": "ENABLED"
+        },
+        "categoryTypographyEnabled": true,
+        "title": {},
+        "subtitle": {},
+        "quote": {
+          "fontSizeSp": 18,
+          "colorArgb": 4282668390,
+          "lineHeightEm": 1.7,
+          "letterSpacingEm": 0.02
+        },
+        "code": {},
+        "link": {},
+        "background": {
+          "type": "SOLID",
+          "colorArgb": 4278190080,
+          "assetId": null,
+          "fit": "CROP",
+          "focusX": 0.5,
+          "focusY": 0.5,
+          "zoom": 1,
+          "rotationDegrees": 0,
+          "blurDp": 0,
+          "brightness": 1,
+          "saturation": 1,
+          "overlayColorArgb": 4278190080,
+          "overlayOpacity": 0,
+          "videoTrimStartMs": 0,
+          "videoTrimEndMs": 60000,
+          "videoSpeed": 1,
+          "loop": true,
+          "posterAssetId": null
+        },
+        "codeBackgroundColorArgb": 4280753672,
+        "accentColorArgb": 4294924854,
+        "updatedAt": 0,
+        "modifiedBy": "",
+        "deleted": false
+      },
+      "native": [
+        [
+          0,
+          [
+            {
+              "start": 0,
+              "visibleEnd": 2,
+              "end": 3,
+              "height": 21,
+              "baseline": 16
+            },
+            {
+              "start": 3,
+              "visibleEnd": 8,
+              "end": 8,
+              "height": 22,
+              "baseline": 17
+            }
+          ]
+        ],
+        [
+          2,
+          [
+            {
+              "start": 0,
+              "visibleEnd": 14,
+              "end": 15,
+              "height": 21,
+              "baseline": 16
+            },
+            {
+              "start": 15,
+              "visibleEnd": 18,
+              "end": 19,
+              "height": 22,
+              "baseline": 17
+            },
+            {
+              "start": 19,
+              "visibleEnd": 19,
+              "end": 19,
+              "height": 23,
+              "baseline": 18
+            }
+          ]
+        ],
+        [
+          4,
+          [
+            {
+              "start": 0,
+              "visibleEnd": 10,
+              "end": 11,
+              "height": 21,
+              "baseline": 16
+            },
+            {
+              "start": 11,
+              "visibleEnd": 11,
+              "end": 12,
+              "height": 22,
+              "baseline": 17
+            },
+            {
+              "start": 12,
+              "visibleEnd": 13,
+              "end": 13,
+              "height": 23,
+              "baseline": 18
+            }
+          ]
+        ]
+      ],
+      "layout": {
+        "rows": [
+          {
+            "kind": "text",
+            "text": "标题",
+            "blockIndex": 0,
+            "sourceStart": 0,
+            "character": 0,
+            "top": 0,
+            "height": 21,
+            "gap": 0,
+            "fontSlot": 37,
+            "scale": 0.9999999472622498,
+            "lineHeight": 21,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1.4999996308357488,
+            "nativeBaseline": 16
+          },
+          {
+            "kind": "text",
+            "text": "ABC😀",
+            "blockIndex": 0,
+            "sourceStart": 4,
+            "character": 3,
+            "top": 21,
+            "height": 22,
+            "gap": 0,
+            "fontSlot": 37,
+            "scale": 0.9999999472622498,
+            "lineHeight": 22,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -0.9999996308357488,
+            "nativeBaseline": 17
+          },
+          {
+            "kind": "image",
+            "block": {
+              "type": "image",
+              "url": "a",
+              "width": 400,
+              "height": 200
+            },
+            "blockIndex": 1,
+            "character": 9,
+            "top": 43,
+            "height": 142.66666666666666,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "Quote words é",
+            "blockIndex": 2,
+            "sourceStart": 0,
+            "character": 9,
+            "top": 185.66666666666666,
+            "height": 27,
+            "gap": 6,
+            "fontSlot": 36,
+            "scale": 1,
+            "lineHeight": 21,
+            "color": "#445566ff",
+            "tracking": 0.36,
+            "textAlign": 0,
+            "textOffsetY": -1.5,
+            "nativeBaseline": 16
+          },
+          {
+            "kind": "text",
+            "text": "第二行",
+            "blockIndex": 2,
+            "sourceStart": 15,
+            "character": 24,
+            "top": 212.66666666666666,
+            "height": 22,
+            "gap": 0,
+            "fontSlot": 36,
+            "scale": 1,
+            "lineHeight": 22,
+            "color": "#445566ff",
+            "tracking": 0.36,
+            "textAlign": 0,
+            "textOffsetY": -1,
+            "nativeBaseline": 17
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 2,
+            "sourceStart": 19,
+            "character": 28,
+            "top": 234.66666666666666,
+            "height": 23,
+            "gap": 0,
+            "fontSlot": 36,
+            "scale": 1,
+            "lineHeight": 23,
+            "color": "#445566ff",
+            "tracking": 0.36,
+            "textAlign": 0,
+            "textOffsetY": -0.5,
+            "nativeBaseline": 18
+          },
+          {
+            "kind": "video",
+            "block": {
+              "type": "video",
+              "url": "v"
+            },
+            "blockIndex": 3,
+            "character": 29,
+            "top": 257.66666666666663,
+            "height": 121.3125,
+            "gap": 6
+          },
+          {
+            "kind": "text",
+            "text": "let x = 1;",
+            "blockIndex": 4,
+            "sourceStart": 0,
+            "character": 29,
+            "top": 378.97916666666663,
+            "height": 27,
+            "gap": 6,
+            "fontSlot": 33,
+            "scale": 1.0499999523162842,
+            "lineHeight": 21,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1.8499996662139893,
+            "nativeBaseline": 16
+          },
+          {
+            "kind": "text",
+            "text": "",
+            "blockIndex": 4,
+            "sourceStart": 12,
+            "character": 40,
+            "top": 405.97916666666663,
+            "height": 22,
+            "gap": 0,
+            "fontSlot": 33,
+            "scale": 1.0499999523162842,
+            "lineHeight": 22,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -1.3499996662139893,
+            "nativeBaseline": 17
+          },
+          {
+            "kind": "text",
+            "text": "尾",
+            "blockIndex": 4,
+            "sourceStart": 14,
+            "character": 41,
+            "top": 427.97916666666663,
+            "height": 23,
+            "gap": 0,
+            "fontSlot": 33,
+            "scale": 1.0499999523162842,
+            "lineHeight": 23,
+            "color": "#f2f2f2ff",
+            "tracking": 0,
+            "textAlign": 0,
+            "textOffsetY": -0.8499996662139893,
+            "nativeBaseline": 18
+          }
+        ],
+        "height": 450.97916666666663,
+        "textLength": 42
+      },
+      "anchors": [
+        {
+          "anchor": {
+            "character": -2,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": -1,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 0,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 1,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 2,
+            "fraction": 0.37
+          },
+          "offset": 7.77
+        },
+        {
+          "anchor": {
+            "character": 3,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 4,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 5,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 6,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 7,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 8,
+            "fraction": 0.37
+          },
+          "offset": 29.14
+        },
+        {
+          "anchor": {
+            "character": 9,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 10,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 11,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 12,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 13,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 14,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 15,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 16,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 17,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 18,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 19,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 20,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 21,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 22,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 23,
+            "fraction": 0.37
+          },
+          "offset": 199.43666666666667
+        },
+        {
+          "anchor": {
+            "character": 24,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 25,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 26,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 27,
+            "fraction": 0.37
+          },
+          "offset": 220.80666666666667
+        },
+        {
+          "anchor": {
+            "character": 28,
+            "fraction": 0.37
+          },
+          "offset": 243.17666666666665
+        },
+        {
+          "anchor": {
+            "character": 29,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 30,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 31,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 32,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 33,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 34,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 35,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 36,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 37,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 38,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 39,
+            "fraction": 0.37
+          },
+          "offset": 392.7491666666666
+        },
+        {
+          "anchor": {
+            "character": 40,
+            "fraction": 0.37
+          },
+          "offset": 414.1191666666666
+        },
+        {
+          "anchor": {
+            "character": 41,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        },
+        {
+          "anchor": {
+            "character": 42,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        },
+        {
+          "anchor": {
+            "character": 43,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        },
+        {
+          "anchor": {
+            "character": 44,
+            "fraction": 0.37
+          },
+          "offset": 436.4891666666666
+        }
+      ]
+    }
+  ]
+}

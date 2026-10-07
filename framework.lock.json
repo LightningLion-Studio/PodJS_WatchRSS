@@ -1,7 +1,7 @@
 {
   "path": "/home/wilf/data/PodJS/podjs-watch",
-  "revision": "077adcdcf1cda9c88768ef9c481468929d6aa882",
+  "revision": "78374f7d672e9807997a48490b723cc2f78132b2",
   "requiresLocalChanges": false,
-  "pocketjsRevision": "2ee82deab3c649af9b2eb9c7e3ad339e76fae73c",
+  "pocketjsRevision": "78b1c8629c31b2eca8642c8c03f481783042306f",
   "branch": "watchrss-migration"
 }
