@@ -13,7 +13,8 @@ plugin({name:'douyin-entry-solid',setup(builder){builder.onLoad({filter:/\/ui\/d
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
-mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p)}));
+mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p),Image:(p:Node['props'])=>element('Image',p)}));
+const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string)=>text.length*21})}));
 let gesture:any;
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gesture=options;return {dispose(){}};}}));
 const {ImmersiveEntry}=await import('../src/ui/douyin/ImmersiveEntry.tsx');
@@ -37,7 +38,7 @@ function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;
   return {data,client,requests,plays,routes,dispose,setActive,
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
     swipe:(dy:number)=>entryGesture.onPanEnd({dy}),
-    press:()=>nodes(root).find(n=>n.kind==='View'&&n.props.class?.includes('bottom-[24]'))!.props.onPress()};
+    press:()=>nodes(root).find(n=>n.kind==='View'&&n.props.accessibilityRole==='button'&&n.props.class?.includes('rounded-full'))!.props.onPress()};
 }
 
 for(const outcome of ['success','timeout','http','empty','expired','parse'] as const)test(`fresh feed ${outcome} leaves 刷新中 and supports the native next action`,async()=>{

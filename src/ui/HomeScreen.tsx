@@ -34,9 +34,12 @@ function formatTime(timestamp: number): string {
   return `${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function actionEntry(label:string, action:()=>void, enabled=true, danger=false):ScrollEntry {
-  return {height:52,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} accessibilityRole="button" accessibilityLabel={label} class="absolute inset-0 rounded-[47] bg-[#2a2a2a] items-center justify-center">
-    <Text class={danger?"text-[17px] leading-[23] text-[#e54d4d]":enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#777777]"}>{label}</Text>
+/** Native ActionDialogScreen/ActionButton: centred 160x48dp pill (narrower on round screens so the
+ * ends stay inside the circle), 8dp gaps, 17sp label, disabled text at 60%. */
+function actionEntry(width:number, label:string, action:()=>void, enabled=true, danger=false):ScrollEntry {
+  const pill=Math.min(160,width-36-18);
+  return {height:48,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center" style={{insetL:(width-36-pill)/2,width:pill}}>
+    <Text class={danger?"text-[17px] leading-[23] text-[#e54d4d]":enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#f5f5f599]"}>{label}</Text>
   </View>};
 }
 
@@ -50,12 +53,12 @@ function ChannelActions(props:{width:number;height:number;target:HomeLongPressTa
   const entries=createMemo<ScrollEntry[]>(()=>{
     const c=channel();
     return [
-      actionEntry("移动到顶部",()=>run(props.onMove),!props.busy),
-      actionEntry(pinned()?"取消置顶":"置顶",()=>run(props.onPin),!props.busy),
-      ...(c?[actionEntry("标记已读",()=>run(props.onRead),!props.busy&&canRead())]:[]),
-      ...(c&&isDeletableLocalContentChannel(c.url)?[actionEntry("清空",()=>setConfirm("clear"),!props.busy)]:[]),
-      ...(c?[actionEntry("删除",()=>setConfirm("delete"),!props.busy,true)]:[]),
-      actionEntry("取消",props.onClose,!props.busy),
+      actionEntry(props.width,"移动到顶部",()=>run(props.onMove),!props.busy),
+      actionEntry(props.width,pinned()?"取消置顶":"置顶",()=>run(props.onPin),!props.busy),
+      ...(c?[actionEntry(props.width,"标记已读",()=>run(props.onRead),!props.busy&&canRead())]:[]),
+      ...(c&&isDeletableLocalContentChannel(c.url)?[actionEntry(props.width,"清空",()=>setConfirm("clear"),!props.busy)]:[]),
+      ...(c?[actionEntry(props.width,"删除",()=>setConfirm("delete"),!props.busy,true)]:[]),
+      actionEntry(props.width,"取消",props.onClose,!props.busy),
     ];
   });
   return <View class="absolute inset-0 bg-[#000000]">

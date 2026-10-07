@@ -1,5 +1,6 @@
 import { createSignal, createEffect, untrack, onCleanup, Show } from "solid-js";
-import { View, Text } from "@pocketjs/framework/components";
+import { View, Text, Image } from "@pocketjs/framework/components";
+import { getOps } from "@pocketjs/framework/host";
 import { createGesture } from "@pocketjs/framework/gesture";
 import type { DouyinScreenProps } from "./index.tsx";
 import { formatDouyinError } from "../../douyin/errors.ts";
@@ -55,9 +56,17 @@ export function ImmersiveEntry(props: DouyinScreenProps) {
   };
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
   createEffect(()=>{if(props.active??true)void untrack(()=>load());else{generation++;setBusy(false);}});onCleanup(()=>{disposed=true;generation++;gesture.dispose();});
+  // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
+  // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
+  const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
+  const hint=()=>busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
   return <View class="absolute inset-0 bg-black">
-    <View class="absolute left-[24] right-[24] top-[32] h-[76] items-center" onPress={()=>props.onNavigate({name:"channel-info"})} focusable><Text class="text-lg text-white">抖音 ›</Text><Text class="text-xs text-[#b6b6b6]">{busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试"}</Text></View>
-    <Show when={error()}><Text class="absolute left-[25] right-[25] top-[114] text-xs text-[#ff5a5f]">{error()}</Text></Show>
-    <View class="absolute left-[82] right-[82] bottom-[24] h-[44] rounded-[22] bg-[#2a2a2a] items-center justify-center" onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable><Text class="text-base text-white">{logged()?"↑":"登录"}</Text></View>
+    <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
+      <Text class="absolute top-[0] text-[21px] leading-[26] text-[#f5f5f5]" style={{insetL:groupLeft-18}}>抖音</Text>
+      <Image src="../assets/icons/info-hint.svg" class="absolute top-[3.4]" style={{insetL:groupLeft-18+titleWidth+hintGap-3.6,width:hintBox,height:hintBox}}/>
+      <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
+    </View>
+    <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text></Show>
+    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Text class="text-base text-[#f5f5f5]">{logged()?"↑":"登录"}</Text></View>
   </View>;
 }
