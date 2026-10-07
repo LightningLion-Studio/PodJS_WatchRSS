@@ -1,3 +1,4 @@
+import type {CacheNamespace} from '@podjs/framework/cache';
 import type {ContentBlock} from '../reader/content.ts';
 import {resolveUrl} from '../core/parser.ts';
 export const CACHE_BUCKETS=['douyin-preload','images','bili-preview','rss-offline'] as const;
@@ -23,3 +24,12 @@ export function cacheEvictionOrder(files:readonly CacheFile[],limit:number,pinne
  }
  return result;
 }
+
+/** File ownership and offline traversal are application namespace rules. */
+export function cacheNamespace(bucket:CacheBucket):CacheNamespace {return {
+ filename:(key,variant)=>`${key}.${variant==='inline'?'inline.img':'img'}`,
+ ownsFile:name=>bucket==='rss-offline'||/^[a-f0-9]{64}\.(inline\.img|img|mp4(?:\.part|\.chunk)?)$/.test(name),
+ stagedTarget:name=>/^([a-f0-9]{64}\.(?:inline\.img|img|mp4(?:\.chunk)?))\.download-[0-9]+$/.exec(name)?.[1],
+ traverseDirectory:path=>bucket==='rss-offline'&&path.split('/').length<16,
+ cleanupStaged:bucket!=='rss-offline',
+};}

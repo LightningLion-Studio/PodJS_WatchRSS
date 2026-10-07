@@ -16,6 +16,8 @@ mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:()=>null}));
 mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
 mock.module('@podjs/framework/watch',()=>({hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
+let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
+mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
 let network:(s:InternetStatus)=>void,initial:InternetStatus='available';
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(fn:typeof network)=>{network=fn;fn(initial);return()=>{};}}));
 let prepares:any[]=[],plays=0,retries=0,failures=0,nextError:unknown,current:any;
@@ -63,4 +65,10 @@ test('D2 immersive paused rendered frame stays visible; buffering network pause 
  network('available');await flush();current={...state('buffering'),hasRenderedFirstFrame:true};ticks.shift()!();await flush();
  network('unavailable');await flush();expect(current.state).toBe('paused');expect(plays).toBe(1);
  network('available');await flush();expect(plays).toBe(2);expect(prepares).toHaveLength(1);expect(retries).toBe(0);
+});
+
+test('DBG2 slot diagnostics bind only active debug immersive ownership and dispose with the screen',async()=>{
+ debugAllowed=false;diagnosticBindings=0;diagnosticDisposals=0;mount('available','https://video/current',true);await flush();expect(diagnosticBindings).toBe(0);stops.pop()!();
+ debugAllowed=true;mount('available','https://video/current',false);await flush();expect(diagnosticBindings).toBe(0);stops.pop()!();
+ mount('available','https://video/current',true);await flush();expect(diagnosticBindings).toBe(1);expect(await diagnosticReader!()).toBeUndefined();stops.pop()!();expect(diagnosticDisposals).toBe(1);debugAllowed=false;
 });

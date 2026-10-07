@@ -1,11 +1,21 @@
+import {playbackDiagnosticLines,type PlaybackCacheDiagnostics,type PlaybackQueueDiagnostics,type SessionDiagnostics} from './playback-diagnostics.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {logPlatformId} from '../logs/fields.ts';
 import type {DebugGate} from './gate.ts';
 export class DouyinDebugController {
  private poisoned=new Set<string>();private autoMs=0;private last=0;private advancing=false;private poisonNext=false;private advancePending=false;private context={activeAwemeId:"",nextAwemeId:"",inVideoFlow:false};
+ private queue?:{diagnostics():PlaybackQueueDiagnostics};private sessionReader?:()=>Promise<SessionDiagnostics>;
  constructor(private gate:DebugGate){}
- updateContext(activeAwemeId:string,nextAwemeId:string,inVideoFlow:boolean){if(this.gate.allowed)this.context={activeAwemeId,nextAwemeId,inVideoFlow};}
- dumpPlayback(){this.gate.require();const c=this.context;if(!c.inVideoFlow)return "DOUYIN_PLAYBACK_DEBUG\nstate=unavailable";return `DOUYIN_PLAYBACK_DEBUG\nactiveAwemeId=${c.activeAwemeId}\nnextAwemeId=${c.nextAwemeId}\ninVideoFlow=${c.inVideoFlow}\nDL=unavailable\nRAM=unavailable\nSlots=unavailable\nQuarantined=unavailable\ninjectedFaults=${[...this.poisoned].join(",")||"none"}`;}
+ get allowed(){return this.gate.allowed;}
+ bindSessions(reader:()=>Promise<SessionDiagnostics>):()=>void {if(!this.gate.allowed)return ()=>{};this.sessionReader=reader;return ()=>{if(this.sessionReader===reader)this.sessionReader=undefined;};}
+ updateContext(activeAwemeId:string,nextAwemeId:string,inVideoFlow:boolean,queue?:{diagnostics():PlaybackQueueDiagnostics}){if(this.gate.allowed){this.context={activeAwemeId,nextAwemeId,inVideoFlow};this.queue=queue;}}
+ async dumpPlayback(readCache?:()=>Promise<PlaybackCacheDiagnostics>){
+  this.gate.require();const c=this.context;if(!c.inVideoFlow)return "DOUYIN_PLAYBACK_DEBUG\nstate=unavailable";
+  const reader=this.sessionReader,queue=this.queue;
+  const [cache,sessions]=await Promise.all([readCache?readCache().catch(()=>({} as PlaybackCacheDiagnostics)):Promise.resolve({}),reader?reader().catch(()=>undefined):Promise.resolve(undefined)]);
+  this.gate.require();if(!this.context.inVideoFlow||this.context.activeAwemeId!==c.activeAwemeId||this.queue!==queue||this.sessionReader!==reader)return "DOUYIN_PLAYBACK_DEBUG\nstate=unavailable (playback owner changed)";
+  return [`DOUYIN_PLAYBACK_DEBUG`,`activeAwemeId=${c.activeAwemeId}`,`nextAwemeId=${c.nextAwemeId}`,`inVideoFlow=${c.inVideoFlow}`,...playbackDiagnosticLines(cache,queue?.diagnostics(),sessions),`injectedFaults=${[...this.poisoned].join(',')||'none'}`].join('\n');
+ }
  snapshot(){this.gate.require();return {...this.context};}
  requestAdvance(){this.gate.require();this.advancePending=true;appLogger.d("DouyinPlaybackDebug",`request advance next video emitted=true source=debug_ui activeAwemeId=${logPlatformId(this.context.activeAwemeId)} nextAwemeId=${logPlatformId(this.context.nextAwemeId)}`);}
  armNext(){this.gate.require();if(this.context.nextAwemeId){this.poisoned.add(this.context.nextAwemeId);appLogger.d("DouyinPlaybackDebug",`request poison next video awemeId=${logPlatformId(this.context.nextAwemeId)} source=debug_ui activeAwemeId=${logPlatformId(this.context.activeAwemeId)}`);}else this.poisonNext=true;}

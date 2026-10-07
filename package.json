@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@pocketjs/framework": "file:/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs",
-    "@podjs/framework": "file:/home/wilf/data/PodJS/podjs-watch/packages/framework",
+    "@podjs/framework": "file:/home/wilf/data/PodJS/podjs-watch.wt-impl/packages/framework",
     "entities": "7.0.1",
     "qrcode-generator": "1.4.4",
     "solid-js": "1.9.9"

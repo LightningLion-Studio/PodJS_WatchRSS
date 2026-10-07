@@ -129,6 +129,7 @@ mock.module('@podjs/framework/services',()=>({textInput:{openInline:async()=>{in
  play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
  setBounds:async()=>{},setTransform:async(value:any)=>{transforms.push(value);},setVolume:async(value:number)=>{volumes.push(value);return {...videoState(),volume:value};},
 },videoSessions:{},hostOperation:()=>{throw Error('unexpected native operation');},delay:()=>({result:new Promise<void>(()=>{}),cancel(){}})}));
+mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 
 test('production immersive player keeps restored mode through prepare and next source; consumed volume guard does not repeat',async()=>{
@@ -154,7 +155,6 @@ let resolveCurrent!:(id:string)=>Promise<any>,queueSnapshot:any;
 mock.module('../src/media-services.ts',()=>({biliClient:{},biliPreviewCache:{lookup:async()=>undefined},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:()=>{throw Error('unexpected login');}}));
-mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 function mediaController(){
  let entry:ActivityRoute={page:'home'};const navigations:any[]=[],errors:any[]=[];

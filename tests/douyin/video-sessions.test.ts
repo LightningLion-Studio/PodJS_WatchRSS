@@ -91,3 +91,12 @@ describe("Douyin video sessions",()=>{
     expect(new Set(port.calls.filter(call=>call.method==="release").map(call=>call.sessionId)).size).toBe(2);
   });
 });
+
+test('session diagnostics follow real slot roles, host states, promotion and owner generation',async()=>{
+ const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+ await pool.prepare(source('101'),{url:'https://video/101',bounds} as any).result;
+ await pool.prewarm(source('102'),{url:'https://video/102',bounds} as any);
+ const initial=await pool.diagnostics();expect(initial?.slots.map(s=>[s.role,s.awemeId,s.bound])).toEqual([['active','101',true],['standby','102',true]]);expect(initial?.standbyReady).toBe(true);expect(initial?.capabilities?.targetBufferBytesTotal).toBe(12582912);
+ await pool.promote('up',bounds);const promoted=await pool.diagnostics();expect(promoted?.slots[0]?.sessionId).toBe(initial?.slots[1]?.sessionId);expect(promoted?.slots[0]?.awemeId).toBe('102');expect(promoted?.slots[1]?.bound).toBe(false);
+ let finish!:(value:any)=>void;port.capabilities=()=>new Promise(r=>finish=r);const stale=pool.diagnostics();await pool.releaseAll();finish({});expect(await stale).toBeUndefined();expect(port.calls.filter(c=>c.method==='play')).toEqual([]);
+});

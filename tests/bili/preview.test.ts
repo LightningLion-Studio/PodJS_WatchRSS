@@ -248,3 +248,7 @@ test('server may ignore Range only when the whole small file is the requested pr
     expect(readFileSync(f.disk(path))).toEqual(f.body); expect(f.requests).toHaveLength(1);
   } finally { await f.cleanup(); }
 });
+
+test('M3 diagnostics expose real index offsets and workers without source or credential data',async()=>{
+ const f=fixture();try{f.block();const request=f.cache.enqueue(target);await f.started.promise;const working=f.cache.diagnostics();expect(working.indexScope).toBe('bili-preview');expect(working.jobs.filter(j=>j.active)).toHaveLength(1);expect(working.records[0]?.offset).toBe(0);expect(working.records[0]?.complete).toBe(false);expect(JSON.stringify(working)).not.toContain('fixture_cookie');expect(JSON.stringify(working)).not.toContain('http://');f.unblock();await request.result;const done=f.cache.diagnostics();expect(done.records[0]?.offset).toBe(f.body.length/2);expect(done.records[0]?.complete).toBe(true);done.records[0]!.offset=0;expect(f.cache.diagnostics().records[0]?.offset).toBe(f.body.length/2);}finally{await f.cleanup();}
+});
