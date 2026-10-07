@@ -96,7 +96,7 @@ export interface AppServices {
   previewChannel?(url:string):Promise<AddChannelPreview>;
   confirmAddChannel?(token:string):Promise<Channel>;
   refresh(channelId?: string): Promise<void>;
-  markRead(articleId: string): Promise<void>;
+  markRead(articleId: string, read?: boolean): Promise<void>;
   toggleSaved(articleId: string, saved?: boolean): Promise<void>;
   setSaveState(articleId: string, type: "favorite" | "watchLater", saved: boolean): Promise<void>;
   reorderSavedArticles(type:"favorite"|"watchLater",orderedIds:string[]):Promise<void>;

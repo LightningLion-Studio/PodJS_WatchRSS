@@ -306,7 +306,7 @@ export const services: AppServices = {
     }
     if(firstError!==undefined)throw firstError;
   },
-  async markRead(id) { await init(); await repo.setRead(Number(id)); },
+  async markRead(id, read = true) { await init(); await repo.setRead(Number(id), read); },
   async toggleSaved(id,saved) { await init(); if(saved === undefined) { const rows=await db.query("SELECT is_saved FROM articles WHERE id=?",[Number(id)]); saved=!rows[0]?.is_saved; } await repo.setSaved(Number(id),saved); },
   async setSaveState(id,type,saved) { await init(); await repo.setSaveState(Number(id),type,saved); },
   async reorderSavedArticles(type,orderedIds) { await init();await repo.reorderSavedItems(type,orderedIds.map(Number)); },

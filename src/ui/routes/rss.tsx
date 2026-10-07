@@ -70,6 +70,7 @@ interface RssRoutesProps {
   refresh: () => Promise<void>;
   loadMoreFeedArticles: () => void;
   deleteArticle: () => Promise<void>;
+  markArticleUnread: () => Promise<void>;
   saveArticleState: (
     type: "favorite" | "watchLater",
     saved: boolean,
@@ -263,6 +264,7 @@ export function RssRoutes(props: RssRoutesProps) {
                 ?.url
             }
             onDelete={() => void props.deleteArticle()}
+            onMarkUnread={() => void props.markArticleUnread()}
             systemShare={props.systemShareEnabled()}
             busy={props.busy()}
             onBack={() => props.popPage()}

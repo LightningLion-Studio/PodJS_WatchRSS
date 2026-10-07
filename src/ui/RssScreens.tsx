@@ -90,12 +90,13 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
     if(props.canNext&&!props.loadingMore&&last>=props.items.length+(props.leading?.length??0)&&lastAutoLoadCount!==props.items.length){lastAutoLoadCount=props.items.length;props.onNext();}
   }} onScrollStateChange={value=>{setScrolling(value);if(value)setOpenSwipeId(null);props.onOriginalPaused?.(value);}} onRefresh={props.onRefresh} ref={props.ref}/>;
 }
-export function RssActionsScreen(props:{width:number;height:number;article:Article;channelUrl?:string;onDelete:()=>void;systemShare?:boolean;busy:boolean;onSave:(type:"favorite"|"watchLater",saved:boolean)=>void;onShare:()=>void;onBack:()=>void;ref?:(value:{scroller:Scroller;goBack:()=>boolean})=>void}) {
+export function RssActionsScreen(props:{width:number;height:number;article:Article;channelUrl?:string;onDelete:()=>void;onMarkUnread:()=>void;systemShare?:boolean;busy:boolean;onSave:(type:"favorite"|"watchLater",saved:boolean)=>void;onShare:()=>void;onBack:()=>void;ref?:(value:{scroller:Scroller;goBack:()=>boolean})=>void}) {
   const [confirm,setConfirm]=createSignal(false);
   const goBack=()=>{if(!confirm())return false;if(props.busy)return true;setConfirm(false);return true;};
   const entries=()=>[
     {label:props.article.saved?"取消收藏":"收藏",act:()=>props.onSave("favorite",!props.article.saved),enabled:!props.busy},
     {label:props.article.watchLater?"取消稍后再看":"稍后再看",act:()=>props.onSave("watchLater",!props.article.watchLater),enabled:!props.busy},
+    ...(props.article.read?[{label:"标为未读",act:props.onMarkUnread,enabled:!props.busy}]:[]),
     {label:"分享",act:props.onShare,enabled:!props.busy&&shareActionEnabled(props.article.title,props.article.link,!!props.systemShare)},
     ...(isDeletableLocalContentChannel(props.channelUrl)?[{label:"删除",act:()=>setConfirm(true),enabled:!props.busy}]:[]),
     {label:"取消",act:props.onBack,enabled:!props.busy}

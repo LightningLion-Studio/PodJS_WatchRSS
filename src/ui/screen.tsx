@@ -935,6 +935,30 @@ export default function WatchRSS(props: {
       setBusy(false);
     }
   }
+  async function markArticleUnread() {
+    const selected = article();
+    if (!selected?.read || busy()) return;
+    setBusy(true);
+    try {
+      await props.services.markRead(selected.id, false);
+      setArticle({ ...selected, read: false });
+      setArticles((items) =>
+        items.map((a) => (a.id === selected.id ? { ...a, read: false } : a)),
+      );
+      setChannels((items) =>
+        items.map((c) =>
+          c.id === selected.channelId
+            ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 }
+            : c,
+        ),
+      );
+      popPage();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function toggleFeedSave(
     item: Article,
     type: "favorite" | "watchLater",
@@ -1546,6 +1570,7 @@ export default function WatchRSS(props: {
               refresh={refresh}
               loadMoreFeedArticles={loadMoreFeedArticles}
               deleteArticle={deleteArticle}
+              markArticleUnread={markArticleUnread}
               saveArticleState={saveArticleState}
             />
             <SavedRoutes
