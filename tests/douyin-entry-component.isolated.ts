@@ -13,7 +13,7 @@ plugin({name:'douyin-entry-solid',setup(builder){builder.onLoad({filter:/\/ui\/(
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
-mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p),Image:(p:Node['props'])=>element('Image',p)}));
+mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p),Image:(p:Node['props'])=>element('Image',p),FocusScope:(p:Node['props'])=>element('FocusScope',p)}));
 const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string)=>text.length*21})}));
 let debugAllowed=false;
 mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return debugAllowed;}}}));
