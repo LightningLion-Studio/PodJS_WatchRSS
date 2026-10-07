@@ -1,0 +1,378 @@
+"""Offline policy, APK reader, CLI and append tests; never create/read signing keys."""
+import copy
+import io
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+import zipfile
+
+import preflight as p
+
+FIXTURE = Path(__file__).parent / 'fixtures/manifest.xml'
+CERT = 'f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d'
+OLD = 'a8d7d64efa7ed36af6a7e1a3850eb6d005a8a0c3800a5692a57f888e617205f9'
+NATIVE = 'com.lightningstudio.watchrss'
+COEXIST = NATIVE + '.podjs'
+
+
+def signature():
+    return {'verified': True, 'v3': True, 'certificatesSha256': [CERT],
+            'watchCertificatesSha256': [CERT],
+            'lineage': [{'sha256': OLD, 'installedData': True},
+                        {'sha256': CERT, 'installedData': True}]}
+
+
+def facts():
+    return {**p.parse_manifest(FIXTURE.read_text()), 'signature': signature(),
+            'podManifest': {'schema': 1}, 'apkSha256': 'a' * 64}
+
+
+class PolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.ledger = p.load_ledger(p.DEFAULT_LEDGER)
+        self.facts = facts()
+        self.channel = 'coexistence'
+
+    def result(self):
+        return p.evaluate(self.facts, self.channel, self.ledger)
+
+    def failed(self, name):
+        result = self.result()
+        self.assertFalse(result['ok'])
+        self.assertFalse(next(c for c in result['checks'] if c['name'] == name)['passed'])
+
+    def native(self):
+        self.channel = 'takeover-prebeta'
+        self.facts['appId'] = NATIVE
+        self.facts['versionCode'] = 1000
+        self.facts['signature']['lineage'] = []
+        self.facts['podManifest']['androidWorkManagerTakeover'] = copy.deepcopy(
+            self.ledger['policy']['workManagerTakeover'])
+        # Synthetic policy approval, NOT a change to the actual shipping ledger.
+        self.ledger['policy']['packages'][NATIVE]['highestPublishedVerified'] = True
+
+    def test_coexistence_pass_and_input_immutable(self):
+        before = copy.deepcopy((self.facts, self.ledger))
+        self.assertTrue(self.result()['ok'])
+        self.assertEqual(before, (self.facts, self.ledger))
+
+    def test_wrong_package_and_channel(self):
+        for app, channel in [('dev.other', 'coexistence'), (COEXIST, 'unknown'),
+                             (COEXIST, 'takeover-beta')]:
+            with self.subTest(app=app, channel=channel):
+                self.facts['appId'], self.channel = app, channel
+                self.failed('appId')
+
+    def test_code_equal_or_lower_fails(self):
+        for code in (28, 29):
+            self.facts['versionCode'] = code
+            self.failed('versionCode')
+
+    def test_highest_is_across_channels_and_observations(self):
+        entry = copy.deepcopy(self.ledger['releases'][0])
+        entry.update(channel='another-channel', versionCode=31, status='observed')
+        self.ledger['releases'].append(entry)
+        self.failed('versionCode')
+
+    def test_unconfirmed_native_inventory_blocks_real_policy(self):
+        self.native()
+        self.ledger['policy']['packages'][NATIVE]['highestPublishedVerified'] = False
+        self.failed('publicationInventory')
+
+    def test_takeover_and_epoch_boundaries(self):
+        self.native()
+        for code, allowed in [(999, False), (1000, True), (899999, True),
+                              (900000, False), (999999, False), (1000000, False),
+                              (1000999, False), (1001000, True)]:
+            with self.subTest(code=code):
+                self.facts['versionCode'] = code
+                if allowed:
+                    self.assertTrue(self.result()['ok'])
+                else:
+                    self.failed('reservedVersionRange')
+
+    def test_recovery_boundaries_and_no_pod_metadata(self):
+        self.native()
+        self.channel = 'recovery'
+        self.facts.update(metadata={}, podManifest=None)
+        for code, allowed in [(899999, False), (900000, True), (999999, True),
+                              (1000000, False), (1900000, True)]:
+            self.facts['versionCode'] = code
+            if allowed:
+                self.assertTrue(self.result()['ok'])
+            else:
+                self.failed('reservedVersionRange')
+
+    def test_debuggable_fails(self):
+        self.facts['debuggable'] = True
+        self.failed('nonDebuggable')
+
+    def test_signature_tamper_and_unsigned_fail(self):
+        self.facts['signature']['verified'] = False
+        self.failed('signatureVerified')
+
+    def test_wrong_multiple_and_watch_sdk_signer_fail(self):
+        for key, certs in [('certificatesSha256', [OLD]), ('certificatesSha256', [CERT, OLD]),
+                           ('watchCertificatesSha256', [OLD])]:
+            self.facts['signature'] = signature()
+            self.facts['signature'][key] = certs
+            self.failed('certificate')
+
+    def test_optional_lineage_and_all_invalid_chain_cases(self):
+        self.facts['signature']['lineage'] = []
+        self.assertTrue(self.result()['ok'])
+        for chain in [[CERT, OLD], [OLD, OLD, CERT], ['b' * 64, CERT]]:
+            self.facts['signature']['lineage'] = [
+                {'sha256': cert, 'installedData': True} for cert in chain]
+            self.failed('v3Lineage')
+        self.facts['signature'] = signature()
+        self.facts['signature']['lineage'][0]['installedData'] = False
+        self.failed('v3Lineage')
+        self.facts['signature'] = signature()
+        self.facts['signature']['v3'] = False
+        self.failed('v3Lineage')
+
+    def test_all_debug_external_component_kinds(self):
+        for tag, name in [('activity', 'com.lightningstudio.watchrss.DouyinDebugEntryActivity'),
+                          ('activity-alias', 'com.lightningstudio.watchrss.LlmSummaryActivity'),
+                          ('receiver', '.debug.TestReceiver'), ('provider', '.debug.DebugLogProvider'),
+                          ('service', '.debug.TestService')]:
+            with self.subTest(tag=tag):
+                xml = FIXTURE.read_text().replace('</application>',
+                    f'<{tag} android:name="{name}" /></application>')
+                self.facts.update(p.parse_manifest(xml))
+                self.failed('debugExternal')
+
+    def test_debug_action_and_authority_detected_even_with_ordinary_class(self):
+        for node in ['<receiver android:name=".Receiver"><intent-filter><action '
+                     'android:name="com.lightningstudio.watchrss.debug.action.TEST"/></intent-filter></receiver>',
+                     '<provider android:name=".Provider" android:authorities="app.debuglog"/>']:
+            self.facts.update(p.parse_manifest(FIXTURE.read_text().replace(
+                '</application>', node + '</application>')))
+            self.failed('debugExternal')
+
+    def test_source_policy_missing_malformed_and_wrong(self):
+        key = 'dev.podjs.takeover.sourceVersionCode'
+        for value in ('39', '0', '@integer/source', '-1', None):
+            self.facts['metadata'][key] = value
+            self.failed('takeoverSourceVersionCode')
+        del self.facts['metadata'][key]
+        self.failed('takeoverSourceVersionCode')
+
+    def test_purge_prebeta_beta_without_acceptance_and_future_threshold(self):
+        self.native()
+        key = 'dev.podjs.takeover.purgeBackupAfter'
+        self.facts['metadata'][key] = '1000'
+        self.failed('purgeBackupAfter')
+        self.channel = 'takeover-release'
+        target = self.ledger['policy']['channels'][self.channel]
+        self.failed('purgeBackupAfter')
+        target.update(betaAccepted=True, approvedPurgeBackupAfter=1000)
+        self.assertTrue(self.result()['ok'])
+        self.facts['metadata'][key] = '1001'
+        target['approvedPurgeBackupAfter'] = 1001
+        self.failed('purgeBackupAfter')
+        self.facts['metadata'][key] = '@integer/purge'
+        self.failed('purgeBackupAfter')
+        del self.facts['metadata'][key]
+        self.failed('takeoverSourceVersionCode')
+
+    def test_coexistence_config_must_be_absent_even_null_or_disabled(self):
+        for wm in (None, {}, self.ledger['policy']['workManagerTakeover']):
+            self.facts['podManifest']['androidWorkManagerTakeover'] = wm
+            self.failed('workManagerTakeover')
+
+    def test_takeover_requires_exact_legacy_worker_config(self):
+        self.native()
+        self.assertTrue(self.result()['ok'])
+        wm = self.facts['podManifest']['androidWorkManagerTakeover']
+        wm['nativeAppId'] = COEXIST
+        self.failed('workManagerTakeover')
+        wm['nativeAppId'] = NATIVE
+        wm['workerClasses'] = []
+        self.failed('workManagerTakeover')
+        del self.facts['podManifest']['androidWorkManagerTakeover']
+        self.failed('workManagerTakeover')
+
+    def test_pod_asset_required_for_podjs(self):
+        self.facts['podManifest'] = None
+        self.failed('podManifest')
+
+
+class ReaderAndRecordTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.dir = Path(self.temp.name)
+        self.apk = self.dir / 'fixture.apk'
+        with zipfile.ZipFile(self.apk, 'w') as archive:
+            archive.writestr('AndroidManifest.xml', FIXTURE.read_text())
+            archive.writestr('assets/pod.manifest.json', '{"schema":1}')
+        self.ledger = self.dir / 'ledger.json'
+        self.ledger.write_bytes(p.DEFAULT_LEDGER.read_bytes())
+
+    def mock_tools(self):
+        return patch.object(p, 'sdk_tools', return_value=('apkanalyzer', 'apksigner.jar', 'java'))
+
+    def mock_run(self):
+        return patch.object(p, 'run', side_effect=[FIXTURE.read_text(), json.dumps(signature())])
+
+    def test_reader_from_apk_zip_and_synthetic_tool_outputs(self):
+        with self.mock_tools(), self.mock_run() as run:
+            result = p.inspect_apk(self.apk)
+        self.assertEqual(result['apkSha256'], p.sha256(self.apk))
+        self.assertEqual(result['podManifest'], {'schema': 1})
+        self.assertEqual(result['appId'], COEXIST)
+        self.assertEqual(len(run.call_args_list), 2)
+        self.assertTrue(all('keystore' not in str(c) for c in run.call_args_list))
+
+    def test_apk_changed_midinspection_fails(self):
+        with self.mock_tools(), self.mock_run(), patch.object(p, 'sha256', side_effect=['a', 'b']):
+            with self.assertRaisesRegex(ValueError, 'changed'):
+                p.inspect_apk(self.apk)
+
+    def test_duplicate_apk_entry_rejected(self):
+        with zipfile.ZipFile(self.apk, 'a') as archive:
+            archive.writestr('assets/pod.manifest.json', '{}')
+        with self.mock_tools(), self.mock_run(), self.assertRaisesRegex(ValueError, 'duplicate APK'):
+            p.inspect_apk(self.apk)
+
+    def test_malformed_and_duplicate_json_rejected(self):
+        for value in ('{', '{"a":1,"a":2}', '[]'):
+            with zipfile.ZipFile(self.apk, 'w') as archive:
+                archive.writestr('assets/pod.manifest.json', value)
+            with self.mock_tools(), self.mock_run(), self.assertRaises(ValueError):
+                p.inspect_apk(self.apk)
+
+    def test_unresolved_manifest_and_duplicate_metadata_rejected(self):
+        for before, after in [('android:versionCode="30"', 'android:versionCode="@integer/code"'),
+                              ('<application', '<application android:debuggable="@bool/debug"'),
+                              ('<manifest ', '<manifest android:versionCodeMajor="1" '),
+                              ('</application>', '<meta-data android:name="dev.podjs.takeover.sourceVersionCode" '
+                               'android:value="40"/></application>')]:
+            with self.assertRaises(ValueError):
+                p.parse_manifest(FIXTURE.read_text().replace(before, after))
+
+    def test_invalid_ledger_schema_and_code_rejected(self):
+        data = json.loads(self.ledger.read_text())
+        data['schemaVersion'] = 2
+        self.ledger.write_text(json.dumps(data))
+        with self.assertRaises(ValueError):
+            p.load_ledger(self.ledger)
+        data['schemaVersion'] = 1
+        data['releases'][0]['versionCode'] = True
+        self.ledger.write_text(json.dumps(data))
+        with self.assertRaises(ValueError):
+            p.load_ledger(self.ledger)
+
+    def test_invalid_policy_fails_closed_with_json_cli_output(self):
+        original = json.loads(self.ledger.read_text())
+        cases = [[], {**original, 'policy': []},
+                 {**original, 'releases': [None]}]
+        changed = copy.deepcopy(original)
+        changed['policy']['packages'][COEXIST]['highestPublishedVerified'] = 'true'
+        cases.append(changed)
+        for data in cases:
+            self.ledger.write_text(json.dumps(data))
+            with patch('sys.stdout', new_callable=io.StringIO) as out, patch('sys.stderr', new_callable=io.StringIO):
+                self.assertEqual(p.main(['check', str(self.apk), '--channel', 'coexistence',
+                                         '--ledger', str(self.ledger)]), 1)
+                self.assertIn('error', json.loads(out.getvalue()))
+
+    def test_record_reinspects_appends_then_rejects_repeat_without_policy_changes(self):
+        before = p.load_ledger(self.ledger)
+        with self.mock_tools(), self.mock_run():
+            result = p.record(self.apk, 'coexistence', self.ledger,
+                              {'app': '035f3bd', 'framework': '3b9b61d'}, '2026-10-07', 'published locally')
+        self.assertTrue(result['ok'])
+        after = p.load_ledger(self.ledger)
+        self.assertEqual(after['policy'], before['policy'])
+        self.assertEqual(after['releases'][:-1], before['releases'])
+        self.assertEqual(after['releases'][-1]['apkSha256'], p.sha256(self.apk))
+        self.assertEqual(after['releases'][-1]['status'], 'published')
+        saved = self.ledger.read_bytes()
+        with self.mock_tools(), self.mock_run():
+            self.assertFalse(p.record(self.apk, 'coexistence', self.ledger,
+                {'app': '035f3bd'}, '2026-10-07', 'repeat')['ok'])
+        self.assertEqual(self.ledger.read_bytes(), saved)
+
+    def test_failed_check_and_record_do_not_mutate_ledger(self):
+        before = self.ledger.read_bytes()
+        bad = facts()
+        bad['debuggable'] = True
+        with patch.object(p, 'inspect_apk', return_value=bad):
+            with patch('sys.stdout', new_callable=io.StringIO) as out, patch('sys.stderr', new_callable=io.StringIO):
+                self.assertEqual(p.main(['check', str(self.apk), '--channel', 'coexistence',
+                                         '--ledger', str(self.ledger)]), 1)
+                self.assertFalse(json.loads(out.getvalue())['ok'])
+            self.assertFalse(p.record(self.apk, 'coexistence', self.ledger,
+                {'app': '035f3bd'}, '2026-10-07', 'must fail')['ok'])
+        self.assertEqual(self.ledger.read_bytes(), before)
+
+    def test_cli_default_inspection_json_summary_and_read_only(self):
+        before = self.ledger.read_bytes()
+        with self.mock_tools(), self.mock_run(), patch('sys.stdout', new_callable=io.StringIO) as out, \
+                patch('sys.stderr', new_callable=io.StringIO) as err:
+            self.assertEqual(p.main(['check', str(self.apk), '--channel', 'coexistence',
+                                     '--ledger', str(self.ledger)]), 0)
+            self.assertTrue(json.loads(out.getvalue())['ok'])
+            self.assertIn('PASS certificate', err.getvalue())
+        self.assertEqual(self.ledger.read_bytes(), before)
+        self.assertFalse(self.ledger.with_suffix('.json.lock').exists())
+
+    def test_cli_missing_apk_is_structured_failure(self):
+        with patch('sys.stdout', new_callable=io.StringIO) as out, patch('sys.stderr', new_callable=io.StringIO):
+            self.assertEqual(p.main(['check', str(self.dir / 'missing.apk'),
+                                     '--channel', 'coexistence']), 1)
+            self.assertIn('error', json.loads(out.getvalue()))
+
+    def test_cli_record_source_argument_and_success(self):
+        with self.mock_tools(), self.mock_run(), patch('sys.stdout', new_callable=io.StringIO) as out, \
+                patch('sys.stderr', new_callable=io.StringIO):
+            self.assertEqual(p.main(['record', str(self.apk), '--channel', 'coexistence',
+                '--ledger', str(self.ledger), '--source-rev', 'app=035f3bd',
+                '--source-rev', 'framework=3b9b61d', '--date', '2026-10-07',
+                '--notes', 'local publication fixture']), 0)
+            self.assertEqual(json.loads(out.getvalue())['recorded']['sourceRevs'],
+                             {'app': '035f3bd', 'framework': '3b9b61d'})
+
+    def test_record_requires_publication_metadata(self):
+        for revs, date, notes in [({}, '2026-10-07', 'published'),
+                                  ({'app': ''}, '2026-10-07', 'published'),
+                                  ({'app': 'abc'}, 'bad-date', 'published'),
+                                  ({'app': 'abc'}, '2026-10-07', '')]:
+            with self.assertRaises(ValueError):
+                p.record(self.apk, 'coexistence', self.ledger, revs, date, notes)
+
+
+class SdkIntegrationTests(unittest.TestCase):
+    def test_real_unsigned_aapt_apk_is_cryptographically_rejected(self):
+        # Production constructor, SDK discovery, Java helper and binary AXML parsing.
+        # The generated unsigned fixture is temporary; no key material is needed.
+        try:
+            analyzer, jar, _ = p.sdk_tools()
+        except ValueError as error:
+            self.skipTest(str(error))
+        sdk = analyzer.parents[3]
+        android_jars = sorted((sdk / 'platforms').glob('android-*/android.jar'))
+        aapt = jar.parents[1] / 'aapt2'
+        if not android_jars or not aapt.exists():
+            self.skipTest('aapt2 and android.jar required for SDK integration fixture')
+        with tempfile.TemporaryDirectory() as temp:
+            apk = Path(temp) / 'unsigned.apk'
+            p.run([aapt, 'link', '-I', android_jars[-1], '--manifest', FIXTURE, '-o', apk])
+            with zipfile.ZipFile(apk, 'a') as archive:
+                archive.writestr('assets/pod.manifest.json', '{"schema":1}')
+            result = p.inspect_apk(apk)
+            self.assertEqual(result['versionCode'], 30)
+            self.assertFalse(result['debuggable'])
+            self.assertFalse(result['signature']['verified'])
+            check = p.evaluate(result, 'coexistence', p.load_ledger(p.DEFAULT_LEDGER))
+            self.assertFalse(check['ok'])
+            self.assertFalse(next(c for c in check['checks'] if c['name'] == 'signatureVerified')['passed'])
+
+
+if __name__ == '__main__':
+    unittest.main()

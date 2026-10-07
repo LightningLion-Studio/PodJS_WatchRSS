@@ -1,5 +1,10 @@
 # T1：原生包接管就绪审计
 
+> T7（2026-10-07）：新增[离线发布门禁](../scripts/release/README.md)及
+> [结构化台账](release-ledger.json)。检查实际 APK 的身份/版本、release 标志、公开
+> 签名与 lineage、debug-external、takeover metadata 和打包的 WorkManager 配置。
+> 原生全渠道最高 code 尚未核实，台账明确 fail-closed；门禁通过不代替设备接管验收。
+
 > T2（2026-10-07）：独立分支已增加原字节backup、native恢复入口和显式版本门槛清理。见 [T2演练](takeover-rehearsal.md#t2原生备份--同隔离包恢复--公测后显式清理)。以下T1/P1历史事实保留；源在ACTIVE前转存backup，不能再要求原路径存在。设备/正式签名/原生功能验收仍PENDING，ACTIVE后新数据归档而非反向合并。
 
 2026-10-07，app 基线 `2e84513` / framework `58ab3c4` / PocketJS `78b1c8629c31b2eca8642c8c03f481783042306f`。实施分支均为 `minor/takeover-ready`。结论：**尚不具备正式接管发布条件；本轮 PARTIAL**。本轮没有向原生包安装，没有写原生沙箱，没有卸载/清理原生或正式 PodJS 包，没有读取/打印签名密码。真正同包升级必须由 lead 另行取得用户确认后派发。

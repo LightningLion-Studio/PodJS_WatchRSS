@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.lightningstudio.watchrss.podjs" android:versionCode="30" android:versionName="0.1.0">
+  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="30" />
+  <application android:hasCode="false">
+    <meta-data android:name="dev.podjs.takeover.sourceVersionCode" android:value="40" />
+    <meta-data android:name="dev.podjs.takeover.purgeBackupAfter" android:value="0" />
+    <activity android:name="dev.podjs.runtime.MainActivity" android:exported="true" />
+  </application>
+</manifest>
