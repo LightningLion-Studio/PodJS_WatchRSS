@@ -1,0 +1,16 @@
+{
+  "ui/QRCode.tsx": "f6f32f727d32d885604ddad3a0a3f97ee210950f61e8b1d2ede87828772d991e",
+  "ui/qr-pixels.ts": "340e37591346e60153a366ed75bfc1fdc4664116796e3e7c6baacd3562b3331a",
+  "ui/image-tiles.ts": "d01f091a826db85b0ca7e2f213cc1243bf51c144dbb8a43efb4da3af661c4556",
+  "ui/image-preview.ts": "cd66c6c7fa2764caaa5b811fdf5e15ab2166b3e51f1966475e71a2e9c65f24a8",
+  "ui/route-activity.tsx": "8ae8e83fc3743cd8630431ad70c781ddcd34bb0739fbfd8d4382296ac5ce59b3",
+  "ui/service.ts": "38e58226c7a58847caa495a261b576db9d1118084b9bcf1a26559d7ebcc9bc8c",
+  "ui/TiledImage.tsx": "b8223e0791a152c5e1eb271d34400939c497064a1cb7551ecc1a43c23beaf2f7",
+  "ui/modal-input.ts": "f3c77554baa6c303bbad2a55392cf96680b5801f978e7eb3dafcd661520a29ad",
+  "reader/progress-write-queue.ts": "288d034b01cf645a99ca4aeb2a80e71c65139fcc9815cd304f253d0a6a4c447c",
+  "reader/autoscroll.ts": "d46503032f86f355b9aae94cf4ed943b08d4a40cbcc0a62fb11b3e73e3b5f428",
+  "notes/raw-text-history.ts": "702ba12e96139f7cfb310667724d508a92ed107718c654ceb7f72eb00ceb07c5",
+  "notes/draft-autosave.ts": "8ce48f5407b0e97b0c6a56f676a9ffc8c170ce204fc1d5b896ec030a1fc021da",
+  "notes/types.ts": "c3e1a24505317a29b3dae0698ced2084b93d944ed88afe1ee70af19c9af5aa5a",
+  "navigation/activity-navigation.ts": "01731208dd39f6cb743697b43cda08cf8355f3ed37db0b41082acb6b511ce7a8"
+}

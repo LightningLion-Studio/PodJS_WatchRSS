@@ -1,4 +1,5 @@
-import {createEffect,onCleanup,untrack} from 'solid-js';
+import {mergeProps} from 'solid-js';
+import {useRestorableInput} from '@podjs/framework/restorable-input';
 import {routeActivity} from './route-activity.tsx';
 import {routeMemory} from '../navigation/activity-navigation.ts';
 import type {ModalInput,ModalInputRecovery} from './service.ts';
@@ -10,28 +11,5 @@ export function modalInputKey(name:string):string|undefined {
  const owner=routeActivity();return owner?`watchrss:${routeMemory(owner.entry).id}:${name}`:undefined;
 }
 export function useModalInput(options:{key:string;title:string;value:()=>string;input?:ModalInput;recovery?:ModalInputRecovery;active:()=>boolean;onValue:(value:string)=>void|Promise<void>;onError:(error:unknown)=>void}) {
- const key=modalInputKey(options.key);
- let disposed=false,busy=false,epoch=0,checked=false;
- const dismiss=()=>{if(key&&options.recovery)void options.recovery.dismiss(key).catch(()=>{});};
- const open=async()=>{
-  if(disposed||busy||!options.active())return;
-  if(!options.input){options.onError(new Error('当前运行时未接入文字输入'));return;}
-  busy=true;const current=++epoch;
-  try {
-   const value=await options.input(options.title,options.value(),key&&options.recovery?{restorationKey:key}:undefined);
-   if(!disposed&&current===epoch&&options.active()&&value!==null)await options.onValue(value);
-  } catch(error) {if(!disposed&&current===epoch&&options.active())options.onError(error);}
-  finally{if(current===epoch)busy=false;}
- };
- createEffect(()=>{
-  const active=options.active();
-  if(!active){epoch++;busy=false;if(checked)dismiss();return;}
-  if(checked||!key||!options.recovery)return;
-  checked=true;const current=epoch;
-  void options.recovery.pending(key).then(pending=>{
-   if(pending&&!disposed&&current===epoch&&options.active())void untrack(open);
-  }).catch(()=>{}); // Older hosts and corrupt state keep the ordinary input path.
- });
- onCleanup(()=>{disposed=true;epoch++;dismiss();});
- return open;
+ return useRestorableInput(mergeProps(options,{key:modalInputKey(options.key),missingInputMessage:'当前运行时未接入文字输入'}));
 }
