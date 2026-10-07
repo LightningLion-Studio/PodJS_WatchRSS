@@ -1,0 +1,1 @@
+Frozen production sources from WatchRSS 9be63d5 (before U2). Test-only differential oracles; do not update alongside the migrated implementation. The tests compare all component node properties over reactive props/lifecycle/frames and exact arc/motion outputs.
