@@ -51,3 +51,23 @@ Mark each row PASS only after a cold launch, navigation, back behavior, loading/
 ## Release gate
 
 The rewrite is acceptable only when all rows are PASS, migration dry-runs preserve a copied v18 database and stores, paired phone tests cover v13 and v14, replace/clear tests require the intended confirmations, and visual/device evidence is attached. Build or unit-test success alone does not close these gates.
+
+## Release installation chain (data preservation)
+
+Only the designated device owner runs this flow. The currently installed app must be debuggable and its protected-data snapshot must succeed before any installation. Do not start the app between snapshots.
+
+```sh
+ANDROID_SDK_ROOT=/path/to/sdk python3 scripts/device/acceptance.py upgrade-chain \
+  --serial <watch-serial> --package com.lightningstudio.watchrss.podjs \
+  --apk /path/release-v2.apk \
+  --verify-apk /path/release-debuggable-v3.apk \
+  --out /private/fresh-release-chain-receipts
+```
+
+Repeat `--apk` to install additional intermediate packages in the supplied order. The final `--verify-apk` must be debuggable. All application IDs must match; versionCodes must strictly increase from the currently installed version; all chain APKs must have the same effective signing certificates for the device SDK. Host preflight requires `apkanalyzer` and `apksigner` on PATH or under `ANDROID_SDK_ROOT`/`ANDROID_HOME`.
+
+The command force-stops the app, preflights all APKs, records `before-digest.json`, installs each APK with `adb install -r`, force-stops again, then reads back versionCode/debuggable and verifies the installed base APK's signing certificate SHA256. Finally it records `after-digest.json` and the same strict `data-compare.json` format used by `upgrade`. `chain-install.json` records each attempted step and its readback, including partial failures. No launch, downgrade, uninstall or data clearing is performed. A failure stops subsequent steps; retain receipts and ask the lead to review the actual installed state.
+
+Require exit0 **and** `data-compare.json` `equal=true`. This proves preservation across the installation chain; it does not prove a later launch or schema migration preserves data. The release-signed debuggable APK is temporary and must not be published or used for release performance measurements. Afterwards the device owner installs a higher-version ordinary non-debuggable release with the same signing policy, checks its identity/flags, and first compares homepage sizing with the required reference before proceeding to runtime acceptance. Existing `upgrade` still requires run-as for its after snapshot, so it cannot perform that final non-debuggable installation.
+
+`--dry-run` prints the offline chain plan without accessing a device or creating digest receipts.
