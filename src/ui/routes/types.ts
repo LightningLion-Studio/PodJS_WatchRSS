@@ -15,6 +15,7 @@ import type { HttpExportMode } from "../../remote-input/exports.ts";
 
 export type Page =
   | "debug-tools"
+  | "debug-summary"
   | "add-rss"
   | "remote-input"
   | "log-upload"

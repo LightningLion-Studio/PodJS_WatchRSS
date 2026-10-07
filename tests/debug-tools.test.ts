@@ -44,7 +44,7 @@ test('Douyin next poison is one target, automatic advance is active-only, cookie
 test('debug TTS engine defaults, account validation, status and connectivity',async()=>{
  const {DebugTts}=await import('../src/debug/tts.ts');
  let config:import('../src/tts/config-store.ts').TtsConfig={engine:'local',model:'',voiceId:'',baseUrl:'',speed:1.4},saved=0,requests=0,account:import('../src/tts/cloud-synth.ts').TtsAccount|null=null;
- const store={read:()=>config,publicConfig:async()=>({...config,apiKey:'****1234'}),apiKey:async()=>'test-key',selectDebugEngine:(engine:typeof config.engine,defaults:Pick<typeof config,'model'|'voiceId'|'baseUrl'>)=>{saved++;config={...config,...defaults,engine};return config;}};
+ const store={updateDebugField:()=>config,setDebugApiKey:async()=>{},read:()=>config,publicConfig:async()=>({...config,apiKey:'****1234'}),apiKey:async()=>'test-key',selectDebugEngine:(engine:typeof config.engine,defaults:Pick<typeof config,'model'|'voiceId'|'baseUrl'>)=>{saved++;config={...config,...defaults,engine};return config;}};
  const transport={request:async()=>{requests++;return {status:200,headers:{'content-type':'audio/mpeg'},body:new TextEncoder().encode(JSON.stringify({audio:'0102'}))};}};
  const release=new DebugTts(new DebugGate(),store,transport,async()=>account);await expect(release.select('local')).rejects.toThrow();await expect(release.test()).rejects.toThrow();await expect(release.status()).rejects.toThrow();expect(saved+requests).toBe(0);
  const tts=new DebugTts(await allowed(),store,transport,async()=>account);expect(await tts.test()).toContain('本地 TTS');expect(requests).toBe(0);

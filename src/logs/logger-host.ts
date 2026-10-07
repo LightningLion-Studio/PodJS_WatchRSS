@@ -1,3 +1,4 @@
+import {debugLogBuffer} from '../debug/log-buffer.ts';
 import {kv} from '@podjs/framework/watch';
 import {fileChunks} from '@podjs/framework/services';
 import {base64ToBytes,bytesToBase64,stringToUtf8,utf8ToString} from '@podjs/framework/bytes';
@@ -26,6 +27,7 @@ export function createHostLogFile(files= fileChunks):LogFile {
  };
 }
 export const hostAppLogger=new AppLogger(createHostLogFile(),()=>new Date(),(level,line)=>{
+ debugLogBuffer.append(line);
  if(level==='E')console.error(line);else if(level==='W')console.warn(line);else console.info(line);
 });
 let started=false;

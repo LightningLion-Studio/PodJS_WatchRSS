@@ -1,3 +1,4 @@
+import {startExternalDebug} from '../debug/external-host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {markFeedArticleRead} from "./reader-open-state.ts";
 import {ActivityLog} from '../logs/activity.ts';
@@ -189,7 +190,7 @@ export default function WatchRSS(props: {
   const [backOffset, setBackOffset] = createSignal(0);
   function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
   function setPageImpl(next: Page, data: Partial<Entry> = {}) {
-    if(next==="debug-tools"&&!debugGate.allowed)return;
+    if((next==="debug-tools"||next==="debug-summary")&&!debugGate.allowed)return;
     if (
       (next === page() && Object.keys(data).length === 0) ||
       motion.phase !== "idle"
@@ -1192,6 +1193,8 @@ export default function WatchRSS(props: {
       });
   }
   onFrame(updateFeedWhenSettled);
+  let debugDisposed=false,debugStop:(()=>void)|undefined;
+  onCleanup(()=>{debugDisposed=true;debugStop?.();});
   onMount(() => {
     const unsubscribe = props.services.subscribeChannel((event) => {
       if (event.kind === "error") {
@@ -1214,7 +1217,7 @@ export default function WatchRSS(props: {
     });
     onCleanup(unsubscribe);
     if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
-    void restoreStartupNavigation();
+    void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",debugAutoEnterFlow:true,resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));});
   });
   createEffect(() => setNavigationState({ canGoBack: stack().length > 1 }));
   const removeHostEvent = __onHostEvent((event) => {
