@@ -5,7 +5,7 @@ import { CommentScreen } from "./CommentScreen.tsx";
 import { BiliDetailController, type DetailState, type DetailTarget } from "../../bili/detail.ts";
 import { BiliFeedBrowser, BiliSearchHistory, favoritePager, historyPager, searchPager, type BrowseState } from "../../bili/browse.ts";
 import {biliShareLink,biliActionTitle,type ShareHandler} from "../../sharing/policy.ts";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
@@ -14,8 +14,8 @@ import { layoutUiText } from "../../reader/line-break.ts";
 import { measuredLines } from "../../reader/measured-text.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
-import { platformCardEntry, platformNoticeEntry } from "../PlatformNotice.tsx";
-import { platformNotice, platformScope } from "../../announcement/platform.ts";
+import { platformCardEntry, WithPlatformNotice } from "../PlatformNotice.tsx";
+import { platformScope } from "../../announcement/platform.ts";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SwipeCard } from "../SwipeCard.tsx";
 import { BiliSideMenu } from "./BiliSideMenu.tsx";
@@ -142,7 +142,6 @@ function FeedScreen(props: BiliScreenProps) {
       <Image src="../assets/icons/info-hint.svg" style={{ insetL: groupLeft + titleWidth + hintGap - 3.6, width: hintBox, height: hintBox }} class="absolute top-[3.9]" />
       <Text class="absolute left-[0] right-[0] top-[32.5] text-[9px] leading-[17] text-[#b6b6b6] text-center">{loggedIn ? "已登录" : "未登录"}</Text>
     </View> } as ScrollEntry,
-      ...(props.route.name === "entry" ? [platformNoticeEntry(contentWidth, platformNotice("哔哩哔哩", true))] : []),
       ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []),
       ...(!session.loading() && loggedIn && !feed.state().loading && !values.length ? [emptyStateEntry("暂无内容", feed.state().error ? String(feed.state().error instanceof Error ? (feed.state().error as Error).message : feed.state().error) : "稍后再试或刷新", props.width ?? 233)] : []),
       ...(!session.loading() && !loggedIn ? [emptyStateEntry("需要登录", "登录后获取推荐内容", props.width ?? 233)] : []),
@@ -589,7 +588,6 @@ function ActionsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { na
     pillEntry("稍后再看", width, (aid || props.route.bvid) && !busy() ? () => void watchLater() : undefined, 8),
     pillEntry("分享", width, biliShareLink(props.route.bvid, props.route.aid) && !busy() ? share : undefined, 8),
     pillEntry("取消", width, busy() ? undefined : props.onBack, 8),
-    platformNoticeEntry(width - 36, platformNotice("哔哩哔哩", true)),
   ]);
   return <Scrolled {...props} entries={entries()} />;
 }
@@ -617,12 +615,14 @@ function PlayerScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
 
 export function BiliScreen(props: BiliScreenProps) {
   const route = () => props.route;
-  return <Show when={route().name !== "entry" && route().name !== "feed"} fallback={<FeedScreen {...props} />}>
-    <Show when={route().name !== "channel-info"} fallback={<ChannelInfoScreen {...props} />}><Show when={route().name !== "history"} fallback={<HistoryScreen {...props} />}><Show when={route().name !== "watch-later"} fallback={<WatchLaterScreen {...props} />}><Show when={route().name !== "favorites"} fallback={<FavoritesScreen {...props} />}><Show when={route().name !== "favorite-folder"} fallback={<FavoriteFolderScreen {...props} route={route() as Extract<BiliRoute, { name: "favorite-folder" }>} />}><Show when={route().name !== "login"} fallback={<LoginScreen {...props} />}><Show when={route().name !== "search"} fallback={<SearchScreen {...props} />}>
+  // Native BiliEntry/Login/VideoActions Activities: fixed platform notice above the page.
+  const framed = (page: (height: number) => JSX.Element) => <WithPlatformNotice width={props.width ?? 233} height={props.height} platform="bili">{page}</WithPlatformNotice>;
+  return <Show when={route().name !== "entry" && route().name !== "feed"} fallback={framed(height => <FeedScreen {...props} height={height} />)}>
+    <Show when={route().name !== "channel-info"} fallback={<ChannelInfoScreen {...props} />}><Show when={route().name !== "history"} fallback={<HistoryScreen {...props} />}><Show when={route().name !== "watch-later"} fallback={<WatchLaterScreen {...props} />}><Show when={route().name !== "favorites"} fallback={<FavoritesScreen {...props} />}><Show when={route().name !== "favorite-folder"} fallback={<FavoriteFolderScreen {...props} route={route() as Extract<BiliRoute, { name: "favorite-folder" }>} />}><Show when={route().name !== "login"} fallback={framed(height => <LoginScreen {...props} height={height} />)}><Show when={route().name !== "search"} fallback={<SearchScreen {...props} />}>
       <Show when={route().name !== "results"} fallback={<ResultsScreen {...props} route={route() as Extract<BiliRoute, { name: "results" }>} />}>
         <Show when={route().name !== "detail"} fallback={(props.settings?.originalContentEnabled ?? true) ? <DetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} /> : <RssDetailScreen {...props} route={route() as Extract<BiliRoute, { name: "detail" }>} />}>
           <Show when={route().name !== "comments" && route().name !== "replies"} fallback={<CommentScreen {...props} route={route() as Extract<BiliRoute, { name: "comments" | "replies" }>} />}>
-            <Show when={route().name !== "actions"} fallback={<ActionsScreen {...props} route={route() as Extract<BiliRoute, { name: "actions" }>} />}><Show when={route().name !== "share"} fallback={<ShareScreen {...props} route={route() as Extract<BiliRoute, { name: "share" }>} />}><Show when={route().name !== "settings"} fallback={<SettingsScreen {...props} />}><PlayerScreen {...props} route={route() as Extract<BiliRoute, { name: "player" }>} /></Show></Show></Show>
+            <Show when={route().name !== "actions"} fallback={framed(height => <ActionsScreen {...props} height={height} route={route() as Extract<BiliRoute, { name: "actions" }>} />)}><Show when={route().name !== "share"} fallback={<ShareScreen {...props} route={route() as Extract<BiliRoute, { name: "share" }>} />}><Show when={route().name !== "settings"} fallback={<SettingsScreen {...props} />}><PlayerScreen {...props} route={route() as Extract<BiliRoute, { name: "player" }>} /></Show></Show></Show>
           </Show>
         </Show>
       </Show>

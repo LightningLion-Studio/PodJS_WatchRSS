@@ -92,7 +92,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
     const platform = props.entry.playback?.platform;
     return platform === "bili" || platform === "douyin" ? platform : undefined;
   };
-  const playerTop = () => (playerPlatform() ? platformNoticeHeaderHeight(props.width, playerPlatform()!) : 0);
+  const playerTop = () => (playerPlatform() ? platformNoticeHeaderHeight(props.width, props.height, playerPlatform()!) : 0);
   // A blocking dialog swallows Back, like native AlertDialog with an empty onDismissRequest.
   createRenderEffect(() => {
     if (props.page() === "douyin") props.entry.internalBack = () => blocked("douyin");
@@ -175,7 +175,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <Show when={playerPlatform()} keyed>
-          {(platform) => <PlatformNoticeHeader width={props.width} platform={platform} />}
+          {(platform) => <PlatformNoticeHeader width={props.width} height={props.height} platform={platform} />}
         </Show>
         <VideoPlayerScreen
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}
