@@ -69,10 +69,10 @@ export function PendingDisclosure(props:{width:number;height:number;pending:()=>
  return <Show when={props.pending()} keyed>{copy=> <TransparencyDialog width={props.width} height={props.height} copy={copy} onConfirm={props.onConfirm}/>}</Show>;
 }
 
-/** Native player header: compact notice with 8x4dp outer padding on black; the player takes the rest. */
+/** Native entry/player header: compact notice with 8x4dp outer padding on black; the player takes the rest. */
 const playerNotice=(width:number,platform:'bili'|'douyin')=>platformNoticeEntry(width-16,platformNotice(platform==='bili'?'哔哩哔哩':'抖音',true));
-export const playerNoticeHeight=(width:number,platform:'bili'|'douyin')=>playerNotice(width,platform).height+8;
-export function PlayerPlatformNotice(props:{width:number;platform:'bili'|'douyin'}) {
+export const platformNoticeHeaderHeight=(width:number,platform:'bili'|'douyin')=>playerNotice(width,platform).height+8;
+export function PlatformNoticeHeader(props:{width:number;platform:'bili'|'douyin'}) {
  const notice=()=>playerNotice(props.width,props.platform);
  return <View class="absolute left-[0] right-[0] top-[0] bg-[#000000]" style={{height:notice().height+8}}>
   <View class="absolute left-[8] top-[4]" style={{width:props.width-16,height:notice().height}}>{notice().render()}</View>

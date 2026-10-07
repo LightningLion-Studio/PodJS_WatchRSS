@@ -2,7 +2,7 @@ import type { ReaderPreset } from "../../reader/preset.ts";
 import type { BrowserOrigin } from "../../browser/open.ts";
 import { Show, createRenderEffect, onCleanup } from "solid-js";
 import { entryDisclosure } from "../entry-disclosure.ts";
-import { PendingDisclosure, PlayerPlatformNotice, playerNoticeHeight } from "../PlatformNotice.tsx";
+import { PendingDisclosure, PlatformNoticeHeader, platformNoticeHeaderHeight } from "../PlatformNotice.tsx";
 import type { ShareHandler } from "../../sharing/policy.ts";
 import {
   biliClient,
@@ -92,7 +92,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
     const platform = props.entry.playback?.platform;
     return platform === "bili" || platform === "douyin" ? platform : undefined;
   };
-  const playerTop = () => (playerPlatform() ? playerNoticeHeight(props.width, playerPlatform()!) : 0);
+  const playerTop = () => (playerPlatform() ? platformNoticeHeaderHeight(props.width, playerPlatform()!) : 0);
   // A blocking dialog swallows Back, like native AlertDialog with an empty onDismissRequest.
   createRenderEffect(() => {
     if (props.page() === "douyin") props.entry.internalBack = () => blocked("douyin");
@@ -175,7 +175,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <Show when={playerPlatform()} keyed>
-          {(platform) => <PlayerPlatformNotice width={props.width} platform={platform} />}
+          {(platform) => <PlatformNoticeHeader width={props.width} platform={platform} />}
         </Show>
         <VideoPlayerScreen
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}

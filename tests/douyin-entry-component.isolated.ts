@@ -9,7 +9,7 @@ import type {HttpRequest,HttpResponse} from '../src/cloud/types.ts';
 import type {DouyinScreenProps} from '../src/ui/douyin/index.tsx';
 
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'douyin-entry-solid',setup(builder){builder.onLoad({filter:/\/ui\/douyin\/ImmersiveEntry\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'douyin-entry-solid',setup(builder){builder.onLoad({filter:/\/ui\/(douyin\/ImmersiveEntry|PlatformNotice)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));

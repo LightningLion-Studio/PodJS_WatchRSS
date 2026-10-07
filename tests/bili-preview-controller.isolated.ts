@@ -17,7 +17,7 @@ let player: any;
 mock.module('../src/ui/VideoPlayerScreen.tsx', () => ({ VideoPlayerScreen: (props: any) => { player = props; return null; } }));
 mock.module('../src/ui/bili/index.tsx', () => ({ BiliScreen: () => null }));
 mock.module('../src/ui/douyin/index.tsx', () => ({ DouyinScreen: () => null }));
-mock.module('../src/ui/PlatformNotice.tsx', () => ({ PendingDisclosure: () => null, PlayerPlatformNotice: () => null, playerNoticeHeight: () => 30 }));
+mock.module('../src/ui/PlatformNotice.tsx', () => ({ PendingDisclosure: () => null, PlatformNoticeHeader: () => null, platformNoticeHeaderHeight: () => 30 }));
 const values = new Map<string, any>();
 mock.module('@podjs/framework/watch', () => ({ kv: { get: (key: string) => values.get(key), set: (key: string, value: any) => values.set(key, value), delete: (key: string) => values.delete(key) }, lifecycle: () => 'active' }));
 mock.module('@podjs/framework/services', () => ({ video: { captureBackdrop: async () => {}, stop: async () => {} }, videoSessions: {}, browserAuth: {}, hostOperation() {}, secureStorage: {} }));
