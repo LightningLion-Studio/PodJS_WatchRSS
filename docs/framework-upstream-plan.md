@@ -254,3 +254,18 @@ bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts build --target=and
 ## 本轮核验记录
 
 已执行只读命令：读取 LEAD_BRIEF/U1；`rg --files src tests`；候选与框架 exports/源码的 cat/sed/rg；两仓和 pocket `git rev-parse HEAD`；app `git branch --show-current`；受审计源码范围 `git diff --name-only`。未执行 git 变更操作、fetch、ADB、安装、构建、测试或设备性能测量。文档内 API 草案、规模、顺序为审计建议，并非已实现事实。
+
+## U5 completion update (2026-10-07)
+
+On app baseline `4895139` / framework `9f09ca5`, branch `impl/upstream-4`:
+
+- #9 DONE at source/host level: `watch-ui.SwipeActionCard`; WatchRSS keeps its
+  two business actions, asset paths, labels and 164-unit reveal in a wrapper.
+- #10 DONE at source/host level: `watch-ui.WatchConfirmDialog`; WatchRSS keeps
+  deletion labels/icons/colors and the exact measuredLines/22px measurement.
+- #17 PARTIAL: pure startup exit frame preset moved into `startup`; overlay
+  lifecycle, mounting and onboarding remain application-owned and unmoved.
+- Navigation/activity, douyin, secure store and notes reading paths untouched.
+
+See `framework-upstream-u5.md` for verification and frozen oracle provenance.
+Device parity remains PENDING; no device operation was performed.
