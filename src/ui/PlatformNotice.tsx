@@ -3,6 +3,7 @@ import {Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {watchUiLines} from './text-layout.ts';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
+import {platformNotice} from '../announcement/platform.ts';
 
 /** Native ThirdPartyPlatformNotice.kt. Notice: surfaceVariant #23272A at .72, 12dp radius,
  * 10dp horizontal padding; compact 6dp vertical / 2dp rows, title labelSmall 9/11 SemiBold,
@@ -66,4 +67,14 @@ export function TransparencyDialog(props:{width:number;height:number;copy:Copy&{
 /** Owner-side helper: shows whichever disclosure the route still owes, in native order. */
 export function PendingDisclosure(props:{width:number;height:number;pending:()=>(Copy&{confirm:string})|undefined;onConfirm:()=>void}) {
  return <Show when={props.pending()} keyed>{copy=> <TransparencyDialog width={props.width} height={props.height} copy={copy} onConfirm={props.onConfirm}/>}</Show>;
+}
+
+/** Native player header: compact notice with 8x4dp outer padding on black; the player takes the rest. */
+const playerNotice=(width:number,platform:'bili'|'douyin')=>platformNoticeEntry(width-16,platformNotice(platform==='bili'?'哔哩哔哩':'抖音',true));
+export const playerNoticeHeight=(width:number,platform:'bili'|'douyin')=>playerNotice(width,platform).height+8;
+export function PlayerPlatformNotice(props:{width:number;platform:'bili'|'douyin'}) {
+ const notice=()=>playerNotice(props.width,props.platform);
+ return <View class="absolute left-[0] right-[0] top-[0] bg-[#000000]" style={{height:notice().height+8}}>
+  <View class="absolute left-[8] top-[4]" style={{width:props.width-16,height:notice().height}}>{notice().render()}</View>
+ </View>;
 }

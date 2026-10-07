@@ -2,7 +2,7 @@ import type { ReaderPreset } from "../../reader/preset.ts";
 import type { BrowserOrigin } from "../../browser/open.ts";
 import { Show, createRenderEffect, onCleanup } from "solid-js";
 import { entryDisclosure } from "../entry-disclosure.ts";
-import { PendingDisclosure } from "../PlatformNotice.tsx";
+import { PendingDisclosure, PlayerPlatformNotice, playerNoticeHeight } from "../PlatformNotice.tsx";
 import type { ShareHandler } from "../../sharing/policy.ts";
 import {
   biliClient,
@@ -87,6 +87,12 @@ export function MediaRoutes(props: MediaRoutesProps) {
     return (route?.name ?? "entry") === "entry" ? entryDisclosure(props.entry, { page, name: "entry" }) : undefined;
   };
   const blocked = (page: "bili" | "douyin") => !!disclosure(page)?.pending();
+  // Native Bili/Douyin players: a compact platform notice above a weight(1) player.
+  const playerPlatform = () => {
+    const platform = props.entry.playback?.platform;
+    return platform === "bili" || platform === "douyin" ? platform : undefined;
+  };
+  const playerTop = () => (playerPlatform() ? playerNoticeHeight(props.width, playerPlatform()!) : 0);
   // A blocking dialog swallows Back, like native AlertDialog with an empty onDismissRequest.
   createRenderEffect(() => {
     if (props.page() === "douyin") props.entry.internalBack = () => blocked("douyin");
@@ -168,10 +174,14 @@ export function MediaRoutes(props: MediaRoutesProps) {
         <PendingDisclosure width={props.width} height={props.height} pending={() => disclosure("douyin")?.pending()} onConfirm={() => disclosure("douyin")?.confirm()} />
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
+        <Show when={playerPlatform()} keyed>
+          {(platform) => <PlayerPlatformNotice width={props.width} platform={platform} />}
+        </Show>
         <VideoPlayerScreen
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}
           width={props.width}
-          height={props.height}
+          height={props.height - playerTop()}
+          top={playerTop()}
           source={
             props.active()
               ? (props.playingSource() ?? props.entry.playback!)
