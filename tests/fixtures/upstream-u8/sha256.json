@@ -1,0 +1,13 @@
+{
+  "ui/ReaderTextRow.tsx": "71365f45395ac4239ec1383a3813a9958c65b2b5ec9a26bced990ab67b5bb6f6",
+  "reader/system-carets.ts": "07b004c7b8ea80be31e65a9c94b1e8abdaea23ca7f09d81cb27b0499c9aa5184",
+  "ui/text-layout.ts": "36a341652850d8fb5ec2eba2b8c79f99dc4b29a9fd6522e9adc2ca86021d9e11",
+  "reader/line-break.ts": "91bd751d57aa275c55b2f3c398727cfdbbd794d4937007aa7c9036c69460c9a7",
+  "reader/measured-text.ts": "80ad1c631385ce0c4323ccda25aeb138e759b173c74fae9d5f7f6e79f07a1b3b",
+  "core/lazy-regexp.ts": "807d31f827fdf3964d2ae8ac4ca6290e3e85739d1986c9efc7ef39e4dbdbf282",
+  "sync/sql-pages.ts": "528a69fae2badb51c73c80cfd8540da0b86603ccdc6dc4443d0d5cec16523725",
+  "sync/sql-text.ts": "b1dcf69580dac4d6d2cd495b36e53897eb02dece5468b814fdc49cf95504abe3",
+  "sync/stream.ts": "d7ffa4ea922541cd1633f49500a8834c3b6c33e6971fa2908d8242356a37801b",
+  "ui/route-activity.tsx": "8ae8e83fc3743cd8630431ad70c781ddcd34bb0739fbfd8d4382296ac5ce59b3",
+  "ui/ScrollEntries.tsx": "b84205734ecb34de03d17a1a61f90c217c04e1365f2a052a3de3df7486f77ff6"
+}

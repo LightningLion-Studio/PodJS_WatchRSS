@@ -280,17 +280,17 @@ Device parity remains PENDING; no device operation was performed.
 | --- | --- | --- |
 | 1 上传探测 | 已完成 | framework services/image；应用 RemoteImage provider |
 | 2 窗口索引 | 已完成 | windowed-list/windowed-rows；app visible-range 转出 |
-| 3 文本环境/carets | 未开始 | ReaderTextRow/system-carets 仍应用；SystemTextLine 已有但不是此项 |
+| 3 文本环境/carets | 已完成 | U8 text-environment/text-carets；配置级成功字体缓存、显式失效与稳定 map；ReaderPreset/raster options 留应用 |
 | 4 进度指示 | 已完成 | watch-ui WatchProgressIndicator |
 | 5 返回动效 | 已完成 | navigation BackMotion |
 | 6 UTF-8 | 已完成 | bytes decodeUtf8Chunk；应用保留协议方言 |
-| 7 ScrollEntries | 部分 | windowed-list 通用索引与 K15 切片；手势/刷新/恢复接线仍应用 |
+| 7 ScrollEntries | 已完成 | U8 variable-list 通用组件接线；应用保留 18/6/80/48 几何与文档控制器白名单 |
 | 8 RemoteImage | 已完成 | framework image 管线，应用 cache provider |
 | 9 SwipeCard | 已完成 | U5 SwipeActionCard，业务动作留应用 |
 | 10 确认框 | 已完成 | U5 WatchConfirmDialog，删除含义留应用 |
-| 11 文字排版 | 部分 | text-layout/text-wrap 调度与 atlas wrap；ui/text-layout、line-break 等仍应用 |
+| 11 文字排版 | 已完成 | U8 text-lines 的两种断行、测量省略、标题 generator；既有 text-layout/text-wrap 不合并 profile，150/190 与 normalize 选择留应用 |
 | 12 Compose 缩放 | 已完成 | U4 text-compat |
-| 13 Activity 协调 | 部分 | M1/M2 application.activityState 底座已有；U6 navigation.ActivityStateHub 已上移；route-activity 仍应用；路由白名单不迁移（业务专属） |
+| 13 Activity 协调 | 已完成 | U6 ActivityStateHub + U8 navigation RouteStateProvider/restoredSignal；业务路由 codec/白名单、ID/命名空间和限制仍应用 |
 | 14 滚动恢复 | 已完成 | U6 framework navigation.ScrollRestoration，app 转出 |
 | 15 恢复式输入 | 已完成 | U7 restorable-input owner/epoch/pending/dismiss 协调；route key、文案与 host 接线留应用 |
 | 16 启动 trace/gate | 已完成 | U4 startup；应用标签与阶段保留 |
@@ -301,8 +301,8 @@ Device parity remains PENDING; no device operation was performed.
 | 21 大图分块 | 已完成 | U7 tiled-image/image-tiles/image-preview；cache provider、原尺寸阈值与 decode preset 留应用 |
 | 22 ManagedCache | 已完成 | DBG2 framework cache.FileCache；app managed.ts 薄适配与 namespace/淘汰桶策略；设备验收 PENDING |
 | 23 编辑辅助 | 已完成 | U7 async/editing/navigation 四项；笔记字段/换行/身份与业务调用时点留应用 |
-| 24 lazy regexp | 部分 | text-wrap 私有 helper；应用 helper 仍服务未迁算法 |
-| 25 SQL/framing | 部分 | sync-framing/bytes 底座；sql-pages/sql-text/stream 编排仍应用 |
+| 24 lazy regexp | 已完成 | U8 regexp.lazyRegExpTest 共供应用薄转出与 text-wrap/text-lines，原 g/y 状态语义保持 |
+| 25 SQL/framing | 已完成 | U8 sql query/text 分页 + frame-stream 泛型协调；业务最大长度/错误文案/编解码与协议 session 留应用 |
 
 后续轮次复核：K15 的切片布局、索引/retained window 在 framework text-layout、
 windowed-list；RS1/RS2 的通用 HTML parser 与 async slice 在 html/html-slices，
@@ -326,3 +326,12 @@ notes header 参数、内容模型和测量组合仍应用。这些轮次不等�
 离线目录深度与不淘汰规则、抖音 6→4 reserve、内联图 128MiB、默认 512MiB、
 中文错误与图片 decode/download 参数留在应用。详情见 `framework-upstream-dbg2.md`。
 这次源码迁移完成；旧 U7 的“未实施”是历史状态。设备验收仍 PENDING。
+
+## U8 状态更新（2026-10-07，app 592c763 / framework ae44bbc）
+
+在两仓 wt-c 的 `c/upstream-7` 实施 #3/#7/#11/#13/#24/#25 六组通用部分。
+状态仅表示源码迁移与离线验证；业务参数和原有公开 app 导出均保留薄包装。
+冻结 `592c763` 的 11 个原文件并记录 SHA256，以算法、完整组件树/几何、事件与
+资源清理差分验证。#17 overlay 生命周期仍为部分，页面挂载与 onboarding
+耦合，不在本轮扩大 UI 重构。#22 交由 wrss-impl；takeover/T3 未触碰。
+详见 `framework-upstream-u8.md`；设备验收 PENDING，未安装或操作设备。

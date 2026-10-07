@@ -1,0 +1,1 @@
+Frozen byte-for-byte from app commit 592c763. sha256.json verifies every original. Tests load .txt through a TS/Solid loader and redirect only module imports to the matching frozen source or unchanged app dependencies. No algorithm edits.
