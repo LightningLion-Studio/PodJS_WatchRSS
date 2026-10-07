@@ -1,59 +1,28 @@
-import type { MemoNote } from "./types.ts";
-
-export type NoteDraftSaveState = "empty" | "pending" | "saving" | "saved" | "error";
-type NoteStore = Pick<{save(input:{noteId?:string;title?:string;markdown:string}):Promise<MemoNote>},"save">;
-
-/** Serializes editor saves so a slower old write cannot overwrite a newer draft. */
+import {DraftAutosave,type AutosaveState} from '@podjs/framework/editing';
+import type {MemoNote} from './types';
+export type NoteDraftSaveState=AutosaveState;
+type NoteStore=Pick<{save(input:{noteId?:string;title?:string;markdown:string}):Promise<MemoNote>},'save'>;
+type Draft={title:string;markdown:string};
+/** WatchRSS fields, newline normalization and note identity stay at this boundary. */
 export class NoteDraftAutosave {
-  title:string;
-  markdown:string;
-  note:MemoNote|null;
-  state:NoteDraftSaveState;
-  private savedTitle:string;
-  private savedMarkdown:string;
-  private dueAt:number|undefined;
-  private saving:Promise<MemoNote|null>|undefined;
-
-  constructor(private readonly store:NoteStore,initial:MemoNote|null,private readonly onState?:(state:NoteDraftSaveState)=>void,private readonly onSaved?:(note:MemoNote)=>void,private readonly onError?:(error:unknown)=>void,private readonly delayMs=600,private readonly now=Date.now){
-    this.note=initial;
-    this.title=initial?.title??"";
-    this.markdown=initial?.markdown??"";
-    this.savedTitle=this.title;
-    this.savedMarkdown=this.markdown;
-    this.state=initial?"saved":"empty";
-  }
-
-  setTitle(value:string){if(value===this.title)return;this.title=value;this.changed();}
-  setMarkdown(value:string){value=value.replace(/\r\n?/g,"\n");if(value===this.markdown)return;this.markdown=value;this.changed();}
-  private setState(value:NoteDraftSaveState){if(this.state===value)return;this.state=value;this.onState?.(value);}
-  private changed(){
-    this.dueAt=undefined;
-    if(!this.note&&!this.title.trim()&&!this.markdown.trim()){this.setState("empty");return;}
-    this.setState(this.title===this.savedTitle&&this.markdown===this.savedMarkdown?"saved":"pending");
-    if(this.state==="pending")this.dueAt=this.now()+this.delayMs;
-  }
-  tick(){if(this.dueAt===undefined||this.now()<this.dueAt)return;this.dueAt=undefined;void this.flush().catch(error=>this.onError?.(error));}
-  private async saveOnce():Promise<MemoNote|null>{
-    if(this.saving)return this.saving;
-    if(this.title===this.savedTitle&&this.markdown===this.savedMarkdown)return this.note;
-    if(!this.note&&!this.title.trim()&&!this.markdown.trim()){this.setState("empty");return null;}
-    const title=this.title,markdown=this.markdown,noteId=this.note?.noteId;
-    this.setState("saving");
-    const work=this.store.save({noteId,title,markdown});
-    this.saving=work.then(saved=>{
-      this.note=saved;this.savedTitle=saved.title;this.savedMarkdown=saved.markdown;
-      this.onSaved?.(saved);
-      this.setState(this.title===saved.title&&this.markdown===saved.markdown?"saved":"pending");
-      return saved;
-    },error=>{this.setState("error");throw error;}).finally(()=>{this.saving=undefined;});
-    return this.saving;
-  }
-  async flush():Promise<MemoNote|null>{
-    this.dueAt=undefined;
-    while(true){
-      await this.saveOnce();
-      if(this.title===this.savedTitle&&this.markdown===this.savedMarkdown)return this.note;
-    }
-  }
-  dispose(){this.dueAt=undefined;}
+ private readonly autosave:DraftAutosave<Draft,MemoNote>;
+ constructor(store:NoteStore,initial:MemoNote|null,onState?:(state:NoteDraftSaveState)=>void,onSaved?:(note:MemoNote)=>void,onError?:(error:unknown)=>void,delayMs=600,now=Date.now){
+  this.autosave=new DraftAutosave({initial:{title:initial?.title??'',markdown:initial?.markdown??''},saved:initial,
+   save:(value,previous)=>store.save({noteId:previous?.noteId,...value}),valueOf:note=>({title:note.title,markdown:note.markdown}),
+   equal:(a,b)=>a.title===b.title&&a.markdown===b.markdown,isEmpty:value=>!value.title.trim()&&!value.markdown.trim(),
+   onState,onSaved,onError,delayMs,now});
+ }
+ get title(){return this.autosave.value.title;}
+ set title(value:string){this.autosave.value={...this.autosave.value,title:value};}
+ get markdown(){return this.autosave.value.markdown;}
+ set markdown(value:string){this.autosave.value={...this.autosave.value,markdown:value};}
+ get note(){return this.autosave.saved;}
+ set note(value:MemoNote|null){this.autosave.saved=value;}
+ get state(){return this.autosave.state;}
+ set state(value:NoteDraftSaveState){this.autosave.state=value;}
+ setTitle(value:string){this.autosave.setValue({...this.autosave.value,title:value});}
+ setMarkdown(value:string){this.autosave.setValue({...this.autosave.value,markdown:value.replace(/\r\n?/g,'\n')});}
+ tick(){this.autosave.tick();}
+ flush(){return this.autosave.flush();}
+ dispose(){this.autosave.dispose();}
 }

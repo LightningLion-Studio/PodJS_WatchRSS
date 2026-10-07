@@ -1,0 +1,1 @@
+Frozen byte-for-byte from app da18c00 via git show. Do not update to match new implementation. Component oracle dependencies are resolved by the isolated test loader; .txt context snapshots are provenance only.

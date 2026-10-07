@@ -292,15 +292,15 @@ Device parity remains PENDING; no device operation was performed.
 | 12 Compose 缩放 | 已完成 | U4 text-compat |
 | 13 Activity 协调 | 部分 | M1/M2 application.activityState 底座已有；U6 navigation.ActivityStateHub 已上移；route-activity 仍应用；路由白名单不迁移（业务专属） |
 | 14 滚动恢复 | 已完成 | U6 framework navigation.ScrollRestoration，app 转出 |
-| 15 恢复式输入 | 未开始 | modal-input 的 owner/epoch 协调仍应用；host pending/dismiss 已有 |
+| 15 恢复式输入 | 已完成 | U7 restorable-input owner/epoch/pending/dismiss 协调；route key、文案与 host 接线留应用 |
 | 16 启动 trace/gate | 已完成 | U4 startup；应用标签与阶段保留 |
 | 17 启动过渡 | 部分 | U5 startupExitFrame；overlay 生命周期未迁；onboarding 不迁移（业务专属） |
 | 18 日志机制 | 已完成 | U6 logging 脱敏与 FIFO/trim；logs/app-logger 保留业务参数；上传加密协议不迁移（业务专属） |
-| 19 QR raster | 未开始 | QRCode/qr-pixels 仍应用 |
+| 19 QR raster | 已完成 | U7 qr raster/QRCode；native profile、payload、中文错误留应用 |
 | 20 圆屏布局 | 已完成 | U4 safeQrLayout/rectInsideCircle |
-| 21 大图分块 | 未开始 | TiledImage/image-tiles/image-preview 仍应用 |
+| 21 大图分块 | 已完成 | U7 tiled-image/image-tiles/image-preview；cache provider、原尺寸阈值与 decode preset 留应用 |
 | 22 ManagedCache | 未开始 | managed.ts 仍应用；policy 淘汰桶规则不迁移（业务专属） |
-| 23 编辑辅助 | 未开始 | SerialWriteQueue/TextHistory/AutoScrollController/DraftAutosave 四项仍应用 |
+| 23 编辑辅助 | 已完成 | U7 async/editing/navigation 四项；笔记字段/换行/身份与业务调用时点留应用 |
 | 24 lazy regexp | 部分 | text-wrap 私有 helper；应用 helper 仍服务未迁算法 |
 | 25 SQL/framing | 部分 | sync-framing/bytes 底座；sql-pages/sql-text/stream 编排仍应用 |
 
@@ -311,3 +311,9 @@ K22 的 JSON projection/切片与 UTF-8 在 json/bytes；K23 的 KV checkpoint �
 合批在 framework watch 与 runtime kv，ActivityStateHub 只调用通用 trace，
 Douyin restore/setPage 业务仍应用。RS3 的首屏源字符预算/延后调度在 text-layout，
 notes header 参数、内容模型和测量组合仍应用。这些轮次不等价于迁完 #3/#7/#11/#13/#25。
+
+## U7 状态更新（2026-10-07，app da18c00 / framework e717726）
+
+上表 #15/#19/#21/#23 已更新为源码完成，四组覆盖本轮最低数量；#22 ManagedCache
+未实施，namespace/路径约束与淘汰桶策略须单独抽象，仍为未开始。其余状态不变。
+本轮没有修改 takeover/存储迁移。详见 `framework-upstream-u7.md`。设备验收仍 PENDING。
