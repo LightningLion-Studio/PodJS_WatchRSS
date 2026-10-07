@@ -2,7 +2,7 @@
   "entry": "src/main.tsx",
   "appId": "com.lightningstudio.watchrss.podjs",
   "versionName": "0.1.0",
-  "versionCode": 5,
+  "versionCode": 8,
   "name": "腕上RSS · PodJS",
   "bytecode": { "stripSource": true },
   "android": {
