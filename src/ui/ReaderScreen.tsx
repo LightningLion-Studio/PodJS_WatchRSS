@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {restoredSignal,booleanState} from './route-activity.tsx';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('ReaderScreen');
@@ -34,7 +35,7 @@ import {contentFont} from "../reader/content-layout.ts";
 import {isImportedContentUrl} from "../core/imported-content.ts";
 import type {SpeechAnchor} from "../reader/speech-segments.ts";
 
-export function ReaderScreen(props:{
+function ReaderScreenImpl(props:{
  highlight?:SpeechHighlight;mediaCacheMode?:string;
  preset:ReaderPreset;article:Article;services:AppServices;width:number;height:number;fontSize:number;lineHeight:number;
  llmEnabled:boolean;llmAutoSummarize:boolean;llmPromptPreset:number;llmShowTokenUsage?:boolean;
@@ -130,3 +131,5 @@ export function ReaderScreen(props:{
   return <><ReaderBody progressStore={props.services.readingProgress} imported={article().importedText&&props.services.loadImportedTextChunk?{handle:article().importedText!,read:index=>props.services.loadImportedTextChunk!(article().importedText!,index)}:undefined} highlight={activeHighlight()} speechPlaying={props.speaking} speechTitleCenter={titleRects().length?22+highlightCenter(titleRects())!:undefined} highlightColor={highlightColor()} onSpeechControls={anchor=>props.onSpeechControls(speechArticle(),anchor)} preset={props.preset} articleId={props.article.id} text={article().content} blocks={article().contentBlocks??[{type:"text",text:article().content,style:"body"}]} offlineMedia={offlineMedia()} baseUrl={article().link} width={props.width} height={props.height} top={0} fontSize={props.fontSize} lineHeight={props.lineHeight} active={props.active&&!webWarning()} autoStart={props.autoStart} speed={props.speed} header={header()} footer={footer()} onMedia={block=>props.onMedia({...article(),offlineMedia:offlineMedia()},block)} onControls={props.onControls} onError={props.onError} ref={value=>{setHandle(value);props.ref(value);}}/><Show when={webWarning()}><OriginalWebConfirm width={props.width} height={props.height} onCancel={()=>setWebWarning(false)} onConfirm={()=>{setWebWarning(false);void openBrowserUrl(props.article.link??"","article",props.preset).catch(error=>props.onError(String(error)));}}/></Show></>;
  }}</ArticleSource>;
 }
+
+export function ReaderScreen(props:Parameters<typeof ReaderScreenImpl>[0]) {return traceServiceWork("reader.ReaderScreen",()=>ReaderScreenImpl(props));}

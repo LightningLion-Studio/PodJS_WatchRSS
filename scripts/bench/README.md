@@ -40,3 +40,25 @@ not Task 04's issue 411; raw HTML and timing inputs are deliberately not committ
 The harness asserts that Reader teardown releases all SystemTextLine requests,
 cache entries, text textures and frame callbacks, and reports the separate existing
 media texture cache. It also rejects double texture frees or component errors.
+
+K20 SQL completion diagnostic (read-only local snapshot, no backend):
+
+```sh
+bun scripts/bench/sql-turn.ts --db=/absolute/path/to/podjs.sqlite \
+  --framework=/absolute/path/to/framework-worktree \
+  --out=/tmp/sql-turn-fixture.json --bundle=/tmp/sql-turn.js
+cargo run -p podjs-runtime --example reader-entry -- \
+  /tmp/sql-turn.js /absolute/path/to/android-watch/main.pak
+```
+
+Run Cargo from the selected framework worktree. This extracts the current
+production `getArticle` and mapper at build time, uses actual row12569/channel40
+SQLite results, and mounts the WatchRSS reader restoration route in QuickJS.
+Initialization/migrations are bypassed; other native IO is synthetic and network
+requests fail closed. The script compares the complete reader result with the
+Bun/SQLite reference, including HTML blocks and flattened text. It does not
+reproduce a physical tap, Android SQL worker timing, native raster/GPU time, or
+all synchronous Rust KV IO (the fixture uses a JS KV boundary). The host example's
+`maxMicrotaskTurnMs`, not the JS pump's wall sample, includes drained Promise jobs.
+The generated fixture and loader contain private article data; do not publish
+them. Labels and printed result summaries contain only code identity/counts.

@@ -10,8 +10,8 @@
     "package:android": "bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts package --target=android-watch --project=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS"
   },
   "dependencies": {
-    "@pocketjs/framework": "file:/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs",
-    "@podjs/framework": "file:/home/wilf/data/PodJS/podjs-watch/packages/framework",
+    "@pocketjs/framework": "file:/home/wilf/data/PodJS/podjs-watch.wt-c-k20/vendor/pocketjs",
+    "@podjs/framework": "file:/home/wilf/data/PodJS/podjs-watch.wt-c-k20/packages/framework",
     "entities": "7.0.1",
     "qrcode-generator": "1.4.4",
     "solid-js": "1.9.9"
@@ -21,6 +21,6 @@
     "@types/bun": "1.3.10"
   },
   "overrides": {
-    "@pocketjs/framework": "file:/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs"
+    "@pocketjs/framework": "file:/home/wilf/data/PodJS/podjs-watch.wt-c-k20/vendor/pocketjs"
   }
 }

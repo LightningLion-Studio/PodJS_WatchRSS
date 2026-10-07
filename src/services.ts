@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {notifyLibrarySqlCommit} from './core/library-mutations';
 import {startupMark,startupStep} from "./core/startup-trace.ts";
 import {appLogger} from './logs/app-logger.ts';
@@ -50,8 +51,8 @@ export async function getSavedLinksForSync(type:SavedLinkType):Promise<string[]>
 }
 
 export const db: SqlDatabase = {
-  query: (sql, params) => sqlite.query(sql, params as (string | number | null)[]),
-  execute: async (sql, params) => {await sqlite.execute(sql, params as (string | number | null)[]);notifyLibrarySqlCommit([{sql}]);},
+  query: (sql, params, traceLabel) => sqlite.query(sql, params as (string | number | null)[],traceLabel),
+  execute: async (sql, params, traceLabel) => {await sqlite.execute(sql, params as (string | number | null)[],traceLabel);notifyLibrarySqlCommit([{sql}]);},
   transaction: async statements => {await sqlite.transaction(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements);},
   transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);if(changes.some(n=>n>0))notifyLibrarySqlCommit(statements);return changes;},
 };
@@ -244,7 +245,7 @@ export const services: AppServices = {
       article.searchSnippet=searchSnippet(term,description,content,value(row,'summary_match')||value(row,'summary'));
       return article;});
   },
-  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)]); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=mapArticle(rows[0]); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=buildArticleBlocks(article.rawContent,article); article.content=contentText(article.contentBlocks); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
+  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=traceServiceWork("reader.buildBlocks",()=>buildArticleBlocks(article.rawContent!,article)); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
   getOriginalArticle(id) { return originalArticle(id); },
   async addChannel(url) {
     await init();

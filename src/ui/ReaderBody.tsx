@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {prepareTextLayout} from "@podjs/framework/text";
 import {createWindowValue} from "@podjs/framework/windowed-list";
 import {readerRowKey} from "../reader/content-layout.ts";
@@ -46,7 +47,7 @@ export interface ReaderBodyHandle {
   reachedBottom:()=>boolean;
   flushProgress:()=>Promise<void>;
 }
-export function ReaderBody(props:{
+function ReaderBodyImpl(props:{
   progressStore?:Pick<ReadingProgressStore,"load"|"save">;
   imported?:{handle:ImportedTextHandle;read:(index:number)=>Promise<string|null>};
   preset?:ReaderPreset;
@@ -298,3 +299,5 @@ export function ReaderBody(props:{
     <View class="absolute left-[12] right-[12] bottom-[0] h-[18] items-center justify-center" style={{opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
   </View>;
 }
+
+export function ReaderBody(props:Parameters<typeof ReaderBodyImpl>[0]) {return traceServiceWork("reader.ReaderBody",()=>ReaderBodyImpl(props));}
