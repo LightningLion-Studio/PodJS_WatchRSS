@@ -15,10 +15,12 @@ const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p),Image:(p:Node['props'])=>element('Image',p)}));
 const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string)=>text.length*21})}));
+let debugAllowed=false;
+mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return debugAllowed;}}}));
 let gesture:any;
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gesture=options;return {dispose(){}};}}));
 const {ImmersiveEntry}=await import('../src/ui/douyin/ImmersiveEntry.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))stop();});
+const stops:(()=>void)[]=[];afterEach(()=>{debugAllowed=false;for(const stop of stops.splice(0))stop();});
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props' in value))return [];return [value,...nodes(value.props.children)];}
 // Event-loop turn only drains component promise chains; no elapsed-time assertions.
 const settle=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
@@ -29,7 +31,7 @@ async function requestReady(f:{requests:unknown[]},count=1){const end=Date.now()
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
-function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean}={}){
+function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string}={}){
   const data=new Map<string,string>();if(options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
   const items=Array.from({length:options.cacheCount??0},(_,i)=>({awemeId:String(i+1),description:'cached',playUrl:`https://old.test/${i+1}`,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}));
   const cached={items,anchorAwemeId:items[0]?.awemeId??null,cursor:options.cursor??null,hasMore:options.hasMore??false,savedAtMillis:1,resolved:{}};
@@ -37,7 +39,7 @@ function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;
   const requests:{request:HttpRequest;reply:ReturnType<typeof deferred<HttpResponse>>}[]=[],plays:any[]=[],routes:any[]=[];
   const client=new DouyinClient({secureStorage:{get:async k=>data.get(k)??null,set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>1_000_000,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
   const [active,setActive]=createSignal(true);let dispose!:()=>void;
-  const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({width:233,height:233,client,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
+  const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
   const entryGesture=gesture;
   return {data,client,requests,plays,routes,dispose,setActive,
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
@@ -98,4 +100,9 @@ test('late response from an inactive entry cannot erase login or a newer feed',a
 
 test('missing login leaves refresh state without a network request',async()=>{
   const f=mount({logged:false});await settle();expect(f.requests).toHaveLength(0);expect(f.text()).not.toContain('刷新中...');expect(f.text()).toContain('需要登录');f.swipe(-80);await settle();expect(f.routes).toEqual([{name:'login'}]);
+});
+
+for(const debug of [false,true])test(`external auto-enter obeys build gate debug=${debug}`,async()=>{
+ debugAllowed=debug;const f=mount({cacheCount:4,autoEnter:true,resume:'2'});await settled(f);await settle();
+ expect(f.plays.length).toBe(debug?1:0);if(debug){expect(f.plays[0].item.awemeId).toBe('2');expect(f.plays[0].immersive).toBe(true);}
 });

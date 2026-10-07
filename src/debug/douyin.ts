@@ -5,6 +5,7 @@ export class DouyinDebugController {
  private poisoned=new Set<string>();private autoMs=0;private last=0;private advancing=false;private poisonNext=false;private advancePending=false;private context={activeAwemeId:"",nextAwemeId:"",inVideoFlow:false};
  constructor(private gate:DebugGate){}
  updateContext(activeAwemeId:string,nextAwemeId:string,inVideoFlow:boolean){if(this.gate.allowed)this.context={activeAwemeId,nextAwemeId,inVideoFlow};}
+ dumpPlayback(){this.gate.require();const c=this.context;if(!c.inVideoFlow)return "DOUYIN_PLAYBACK_DEBUG\nstate=unavailable";return `DOUYIN_PLAYBACK_DEBUG\nactiveAwemeId=${c.activeAwemeId}\nnextAwemeId=${c.nextAwemeId}\ninVideoFlow=${c.inVideoFlow}\nDL=unavailable\nRAM=unavailable\nSlots=unavailable\nQuarantined=unavailable\ninjectedFaults=${[...this.poisoned].join(",")||"none"}`;}
  snapshot(){this.gate.require();return {...this.context};}
  requestAdvance(){this.gate.require();this.advancePending=true;appLogger.d("DouyinPlaybackDebug",`request advance next video emitted=true source=debug_ui activeAwemeId=${logPlatformId(this.context.activeAwemeId)} nextAwemeId=${logPlatformId(this.context.nextAwemeId)}`);}
  armNext(){this.gate.require();if(this.context.nextAwemeId){this.poisoned.add(this.context.nextAwemeId);appLogger.d("DouyinPlaybackDebug",`request poison next video awemeId=${logPlatformId(this.context.nextAwemeId)} source=debug_ui activeAwemeId=${logPlatformId(this.context.activeAwemeId)}`);}else this.poisonNext=true;}

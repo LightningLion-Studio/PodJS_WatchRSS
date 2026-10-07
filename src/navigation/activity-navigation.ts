@@ -37,7 +37,7 @@ function argsFor(entry:ActivityRoute):Record<string,unknown>{
 }
 function decodedRoute(raw:Descriptor,retained:unknown,debug:boolean):ActivityRoute|null {
  if(!object(raw)||!routeIsKnown(raw.page)||!identifier(raw.id)||!/^r[1-9]\d{0,8}$/.test(raw.id)||!object(raw.args)||!json(raw.ui))return null;
- if(raw.page==='debug-tools'&&!debug)return null;
+ if((raw.page==='debug-tools'||raw.page==='debug-summary')&&!debug)return null;
  const a=raw.args,entry:ActivityRoute={page:raw.page,memory:{id:raw.id,saved:data(raw.ui,16384),retained:data(retained,524288)}};
  for(const key of fields)if(Object.hasOwn(a,key)){
   const v=a[key];if(key==='returnRemoteUrl'||key==='readerFromWatchLater'){if(typeof v!=='boolean')return null;}
@@ -69,7 +69,7 @@ function decodedRoute(raw:Descriptor,retained:unknown,debug:boolean):ActivityRou
   else if(t.kind==='rss'&&identifier(t.articleId)&&text(t.url)&&!!t.url)entry.videoTarget={kind:'rss',articleId:t.articleId,url:t.url};
   else return null;
  }
- if(['reader','rss-actions','rss-share'].includes(entry.page)&&!entry.articleId)return null;
+ if(['reader','rss-actions','rss-share','debug-summary'].includes(entry.page)&&!entry.articleId)return null;
  if(['articles','search','channel-detail','channel-settings','channel-share'].includes(entry.page)&&!identifier(entry.channelId))return null;
  if(entry.page==='note-actions'&&!identifier(entry.noteId))return null;
  if(entry.page==='reader-image'&&!entry.imageUrl)return null;

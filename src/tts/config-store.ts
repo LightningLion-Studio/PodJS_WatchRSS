@@ -28,6 +28,12 @@ export class TtsConfigStore {
  async publicConfig():Promise<TtsConfigPublic>{const config=this.read();const key=keyRequired(config.engine)?await this.secrets.get(SECRET_PREFIX+config.engine):'';return {...config,apiKey:masked(key??'')};}
  async apiKey(engine:TtsEngine):Promise<string>{return keyRequired(engine)?(await this.secrets.get(SECRET_PREFIX+engine))??'':'';}
  selectDebugEngine(engine:TtsEngine,defaults:Pick<TtsConfig,'model'|'voiceId'|'baseUrl'>){debugGate.require();if(!engines.has(engine))throw Error('语音引擎无效');const config={...this.read(),...defaults,engine};this.storage.set(KEY,config);return config;}
+ /** Debug editor permits incomplete configs, just like native per-field updates. */
+ updateDebugField(field:'model'|'voiceId'|'baseUrl',value:string){
+  debugGate.require();if(!['model','voiceId','baseUrl'].includes(field)||typeof value!=='string'||value.length>(field==='baseUrl'?1024:256))throw Error('配置字段无效');
+  const config={...this.read(),[field]:value};this.storage.set(KEY,config);return config;
+ }
+ async setDebugApiKey(engine:TtsEngine,value:string){debugGate.require();if(!engines.has(engine)||!keyRequired(engine)||typeof value!=='string'||value.length>4096)throw Error('API Key 无效');await this.secrets.set(SECRET_PREFIX+engine,value);}
  setSpeed(speed:number){if(!Number.isFinite(speed)||speed<0.5||speed>2)throw new Error('语速无效');this.storage.set(KEY,{...this.read(),speed});}
  private async prepare(input:unknown):Promise<{config:TtsConfig;apiKeyToSave?:string}>{
   if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('配置格式无效');

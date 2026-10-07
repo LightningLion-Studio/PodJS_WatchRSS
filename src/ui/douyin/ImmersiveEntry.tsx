@@ -1,3 +1,4 @@
+import {debugGate} from '../../debug/host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import { createSignal, createEffect, untrack, onCleanup, Show } from "solid-js";
 import { View, Text, Image } from "@pocketjs/framework/components";
@@ -55,6 +56,14 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true});
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
+  let debugEntered=false;
+  createEffect(()=>{
+    const route=props.route;
+    if(debugGate.allowed&&route.name==='entry'&&route.debugAutoEnterFlow&&!debugEntered&&active()&&!busy()&&logged()&&items().length){
+      debugEntered=true;if(route.resumeAwemeId)anchor=route.resumeAwemeId;
+      void untrack(enter);
+    }
+  });
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
   createEffect(()=>{if(props.active??true)void untrack(()=>load());else{generation++;setBusy(false);}});onCleanup(()=>{disposed=true;generation++;gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,

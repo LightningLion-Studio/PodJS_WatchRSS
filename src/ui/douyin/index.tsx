@@ -35,7 +35,7 @@ import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
 import type { DouyinClient, DouyinContent, DouyinHistoryEntry, DouyinItem, DouyinResult } from "../../douyin/index.ts";
 
 export type DouyinRoute =
-  | { name: "entry" }
+  | { name: "entry"; debugAutoEnterFlow?:boolean; resumeAwemeId?:string }
   | { name: "channel-info" }
   | { name: "login" }
   | { name: "feed" }

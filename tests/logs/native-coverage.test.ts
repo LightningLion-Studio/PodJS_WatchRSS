@@ -67,7 +67,7 @@ test('local TTS initialization failure keeps rejection and uses LocalTtsEngine',
 test('each debug cloud TTS test and default voice failure uses native tag, release gate emits nothing',async()=>{
  for(const [engine,message] of [['backend_default','Backend default'],['minimax','MiniMax'],['azure','Azure'],['doubao','Doubao']] as const){
   const config:TtsConfig={engine,model:'',voiceId:'',baseUrl:'',speed:1};
-  const store={read:()=>config,publicConfig:async()=>({...config,apiKey:secret}),apiKey:async()=>{throw Error(secret);},selectDebugEngine:()=>config};
+  const store={updateDebugField:()=>config,setDebugApiKey:async()=>{},read:()=>config,publicConfig:async()=>({...config,apiKey:secret}),apiKey:async()=>{throw Error(secret);},selectDebugEngine:()=>config};
   const release=new DebugTts(new DebugGate(),store,{} as never,async()=>null),before=output.length;
   await expect(release.test()).rejects.toThrow();expect(output.length).toBe(before);
   const debug=new DebugTts(await enabled(),store,{} as never,async()=>null);

@@ -1,6 +1,7 @@
 import type { Page } from "./types.ts";
 
 const routeTitles: Record<Page, string> = {
+  "debug-summary": "AI 总结",
   "debug-tools": "调试工具",
   "add-rss": "添加 RSS",
   "remote-input": "从手机输入",
