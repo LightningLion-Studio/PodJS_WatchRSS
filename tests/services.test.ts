@@ -27,7 +27,16 @@ const sqlite = {
   },
 };
 
+function mockFeedDownload(url:string,path:string) {
+    feedRequests.push(url);const source=feedResponses.get(url)?.shift()??Promise.resolve(feedBytes);
+    let cancelled=false,reject!:(error:unknown)=>void;
+    const result=new Promise((yes,no)=>{reject=no;source.then(bytes=>{if(cancelled)return;downloaded.set(path,bytes);yes({status:200,headers:{},url,path,size:bytes.length});},no);});
+    return {result,cancel:()=>{cancelled=true;feedCancels++;reject(new Error("cancelled"));}};
+}
+
+const frameworkServices = await import("@podjs/framework/services");
 mock.module("@podjs/framework/services", () => ({
+  ...frameworkServices,
   sqlite,
   uri:{parse:async(value:string)=>{try{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};}catch{return {valid:false,scheme:null,host:null,rawPath:null,rawQuery:null};}}},
   secureStorage:{get:async()=>null,set:async()=>{},delete:async()=>{}},
@@ -37,16 +46,16 @@ mock.module("@podjs/framework/services", () => ({
   hostOperation: (method:string,args:Record<string,unknown>)=>{
     if(method==='crypto.random')return {result:Promise.resolve({bytesBase64:Buffer.alloc(Number(args.bytes)).toString('base64')})};
     if(method==='crypto.hash')return {result:Promise.resolve({digestBase64:Buffer.from(new Bun.CryptoHasher('sha256').update(Buffer.from(String(args.dataBase64),'base64')).digest('hex'),'hex').toString('base64')})};
+    if(method === "http.download" && String(args.path).startsWith("feeds/")) {
+      expect(args.timeoutMs).toBe(12000);expect(args.readTimeoutMs).toBe(12000);expect(args.callTimeoutMs).toBe(20000);
+      expect((args.headers as Record<string,string>)["User-Agent"]).toContain("Chrome/120.0.0.0");
+      return mockFeedDownload(String(args.url),String(args.path));
+    }
     expect(method).toBe("http.download");expect(args.text).toBe(true);expect(args.temporary).toBe(true);originalDownloads++;
     const bytes=new TextEncoder().encode(originalHtml);downloaded.set(String(args.path),bytes);
     return {result:Promise.resolve({status:200,headers:{},url:"https://example.test/final/article",path:args.path,size:bytes.length}),cancel:()=>{}};
   },
-  http: { download: (url:string,path:string) => {
-    feedRequests.push(url);const source=feedResponses.get(url)?.shift()??Promise.resolve(feedBytes);
-    let cancelled=false,reject!:(error:unknown)=>void;
-    const result=new Promise((yes,no)=>{reject=no;source.then(bytes=>{if(cancelled)return;downloaded.set(path,bytes);yes({status:200,headers:{},url,path,size:bytes.length});},no);});
-    return {result,cancel:()=>{cancelled=true;feedCancels++;reject(new Error("cancelled"));}};
-  } },
+  http: { download: mockFeedDownload },
   fileChunks: {
     stat: async (path:string) => ({exists:downloaded.has(path),file:downloaded.has(path),directory:false,size:downloaded.get(path)?.length??0,modified:0}),
     list: async (path:string) => ({entries:[...downloaded.keys()].filter(key=>key.startsWith(path+'/')).map(key=>({path:key,file:true,directory:false,size:downloaded.get(key)!.length,modified:0}))}),
