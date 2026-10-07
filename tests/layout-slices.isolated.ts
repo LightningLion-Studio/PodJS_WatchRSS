@@ -20,7 +20,7 @@ function fixture(){
  }
  return {blocks,native};
 }
-test('production defaults use real host delay(0), publish once, and preserve every row metric and key',async()=>{
+test('production defaults use real host delay(1), publish once, and preserve every row metric and key',async()=>{
  const {blocks,native}=fixture(),preset=defaultReaderPreset(),make=createContentLayouter(text=>text.length*7,undefined,()=>({cellHeight:26,baseline:20}));
  const expected=layoutContent(blocks,205,16,text=>text.length*7,{},undefined,undefined,preset,native,()=>({cellHeight:26,baseline:20}));
  const baseline=make(blocks,205,16,{},preset);let result:ContentLayout|undefined,publishes=0;
@@ -28,7 +28,7 @@ test('production defaults use real host delay(0), publish once, and preserve eve
  const task=prepareTextLayout(make.steps(blocks,205,16,{},preset,native),{key:readerRowKey,entry:row=>row,publish:value=>{result=value.layout;publishes++;expect(value.indices.size).toBe(value.entries.length);}});
  expect(result).toBeUndefined();let turns=0;
  while(requests.length){await nextTurn();turns++;expect(publishes).toBeLessThanOrEqual(1);}
- await task.done;expect(turns).toBeGreaterThan(10);expect(publishes).toBe(1);expect(result).toEqual(expected);expect(task.stats.rows).toBe(expected.rows.length);
+ await task.done;expect(turns).toBeGreaterThan(2);expect(publishes).toBe(1);expect(result).toEqual(expected);expect(task.stats.rows).toBe(expected.rows.length);
  for(const row of baseline.rows){const match=expected.rows.find(next=>next.blockIndex===row.blockIndex&&next.sourceStart===row.sourceStart&&next.kind===row.kind);if(match)expect(readerRowKey(match)).toBe(readerRowKey(row));}
  for(const row of expected.rows){const offset=30+row.top+row.gap+(row.height-row.gap)*.4,anchor=documentAnchorAt(expected,offset,30);expect(offsetForDocumentAnchor(expected,anchor,30,Infinity)).toBeCloseTo(offset);}
 });

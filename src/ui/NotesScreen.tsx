@@ -9,7 +9,7 @@ import {createKeyedMemo} from '@podjs/framework/keyed-memo';
 import {noteImageDisplayHeight,noteTextRows} from '../notes/presentation.ts';
 import type {ModalInput,ModalInputRecovery} from './service.ts';
 import {noteBodyLayoutSteps} from '../notes/native-layout-input.ts';
-import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup, on } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, untrack, onMount, onCleanup, on } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { createScroller, type Scroller } from "@pocketjs/framework/kinetics";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
@@ -28,7 +28,7 @@ import { presetContentFont, readerColor } from "../reader/content-layout.ts";
 import { getDisplayMetrics, hasCapability } from "@podjs/framework/watch";
 import { textLayout } from "@podjs/framework/services";
 import { requestReaderLayout, requestReaderLayoutBatched } from "../reader/platform-layout.ts";
-import type { ParagraphLine } from "../reader/content-layout.ts";
+import type { NativeBlockLayouts, ParagraphLine } from "../reader/content-layout.ts";
 import { useReaderFonts } from "./reader-fonts.ts";
 import { SystemTextLine } from "@podjs/framework/text";
 import { resolvedReaderStyle, type ReaderPreset } from "../reader/preset.ts";
@@ -127,7 +127,8 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   createEffect(()=>{
     const current=note(),prepared=preparedSource(),native=nativeBody(),heights=imageHeights(),preset=props.preset;
     if(!current||prepared!==current.markdown||props.active===false||editing())return;
-    const task=prepareTextLayout(notePreviewEntrySteps(current.markdown,props.width-28,props.onImage,preset,native,openDownload,heights,imageSize,previewCache),{key:entry=>entry,entry:entry=>entry,publish:snapshot=>setPreviewRows(snapshot.entries)});
+    const task=prepareTextLayout(notePreviewEntrySteps(current.markdown,props.width-28,props.onImage,preset,native,openDownload,heights,imageSize,previewCache),{key:entry=>entry,entry:entry=>entry,preview:{rows:16,publish:snapshot=>{if(!untrack(previewRows).length)setPreviewRows(snapshot.entries);}},
+      publish:snapshot=>setPreviewRows(snapshot.entries)});
     void task.done.catch(error=>logConsole.warn('Note preview layout',String(error)));
     onCleanup(()=>task.cancel());
   });
@@ -149,7 +150,8 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
       const title=layouts.get(titleBlock),subtitle=layouts.get(subtitleBlock);
       if(title?.every(line=>line.height!==undefined)&&subtitle?.every(line=>line.height!==undefined))setNativeHeader({title:title.reduce((sum,line)=>sum+line.height!,0),subtitle:subtitle.reduce((sum,line)=>sum+line.height!,0),titleLines:title,subtitleLines:subtitle});
     },error=>logConsole.warn('Note header layout',String(error)),resolveFont);
-    let bodyTask:ReturnType<typeof requestReaderLayoutBatched>|undefined;
+    let bodyTask:ReturnType<typeof requestReaderLayoutBatched>|undefined,cancelled=false;
+    let completeLayouts:NativeBlockLayouts|undefined;
     const steps=(function*(){
       const prepared=previewCache.peek<{blocks:NotePreviewBlock[]}>('parse',[current.markdown])!;
       yield* noteBodyLayoutSteps(current.markdown,prepared.blocks,(block,index)=>previewCache.get('text:'+index,[block],()=>noteTextRows(block.markup,block.html)));
@@ -157,13 +159,19 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     const bodyPrepare=prepareTextLayout(steps,{key:block=>block.text,entry:block=>block,publish:({entries:bodyBlocks})=>{
       if(!bodyBlocks.length)return;
       bodyTask=requestReaderLayoutBatched(bodyBlocks,width,preset.body.fontSizeSp,scale,preset,args=>textLayout.layoutBatch(args),layouts=>{
-        const byText=new Map<string,readonly ParagraphLine[]>();
-        for(const block of bodyBlocks){const lines=layouts.get(block);if(lines?.length)byText.set(block.text,lines);}
-        setNativeBody(byText);
+        completeLayouts=layouts;
       },error=>logConsole.warn('Note body layout',String(error)),resolveFont,{firstBlocks:4,batchBlocks:16});
+      // Keep the first fallback preview running while host batches arrive.
+      // Reflow once at completion, including valid neighbors of failed inputs.
+      void bodyTask.done.then(()=>{
+        if(cancelled||!completeLayouts)return;
+        const byText=new Map<string,readonly ParagraphLine[]>();
+        for(const block of bodyBlocks){const lines=completeLayouts.get(block);if(lines?.length)byText.set(block.text,lines);}
+        setNativeBody(byText);
+      });
     }});
     void bodyPrepare.done.catch(error=>logConsole.warn('Note body prepare',String(error)));
-    onCleanup(()=>{headerTask.cancel();bodyPrepare.cancel();bodyTask?.cancel();});
+    onCleanup(()=>{cancelled=true;headerTask.cancel();bodyPrepare.cancel();bodyTask?.cancel();});
   });
   const [editButtonVisible,setEditButtonVisible]=createSignal(true);
   const [editorAnchor,setEditorAnchor]=createSignal<number|undefined>();
