@@ -74,3 +74,14 @@ test('the 128 MiB inline ceiling does not lower the managed limit for general im
  const f=fixture(),prefix='managed-cache/images/';f.put(prefix+digest('general')+'.img',130*1024*1024,1);f.put(prefix+digest('inline-old')+'.inline.img',65*1024*1024,2);f.put(prefix+digest('inline-new')+'.inline.img',65*1024*1024,3);
  await f.cache.configure(512*1024*1024);expect(f.removed).toEqual([prefix+digest('inline-old')+'.inline.img']);expect(f.files.has(prefix+digest('general')+'.img')).toBe(true);
 });
+
+test('cancelled reacquisition never borrows or leaks the previous job reference',async()=>{
+ const f=fixture();let finish!:()=>void;
+ const originalStat=f.ports.stat;
+ let blocked=true;
+ const cache=new ManagedCache({...f.ports,stat:async path=>{if(blocked){await new Promise<void>(r=>finish=r);}return originalStat(path);}});
+ const first=cache.acquire('https://x/cancelled-waiter',{},true);void first.result.catch(()=>{});await tick();first.cancel();
+ const waiting=cache.acquire('https://x/cancelled-waiter',{},true);void waiting.result.catch(()=>{});await tick();waiting.cancel();blocked=false;finish();await tick();
+ const retry=cache.acquire('https://x/cancelled-waiter',{},true);await tick();expect(f.downloads).toHaveLength(1);f.downloads[0].finish();const lease=await retry.result;lease.release();
+ await cache.configure(0);expect(f.files.has(lease.path)).toBe(false);
+});
