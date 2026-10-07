@@ -171,7 +171,7 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     const titleBlock={type:'text' as const,style:'title' as const,text:titleLines.join('\n')};
     const subtitleBlock={type:'text' as const,style:'subtitle' as const,text:noteMetadata(current)};
     const metrics=getDisplayMetrics(),scale=metrics.physicalWidth/metrics.logicalWidth;
-    const headerTask=requestReaderLayoutBatched([titleBlock,subtitleBlock],width,preset.body.fontSizeSp,scale,preset,args=>textLayout.layoutBatch(args.map((paragraph,index)=>index===0?{...paragraph,widthPx:Math.ceil(Math.min(190,width)*scale),align:'center' as const}:paragraph)),layouts=>{
+    const headerTask=requestReaderLayoutBatched([titleBlock,subtitleBlock],width,preset.body.fontSizeSp,scale,preset,args=>{args[0]!.widthPx=Math.ceil(Math.min(190,width)*scale);args[0]!.align='center';return textLayout.layoutBatch(args);},layouts=>{
       const title=layouts.get(titleBlock),subtitle=layouts.get(subtitleBlock);
       if(title?.every(line=>line.height!==undefined)&&subtitle?.every(line=>line.height!==undefined))setNativeHeader({title:title.reduce((sum,line)=>sum+line.height!,0),subtitle:subtitle.reduce((sum,line)=>sum+line.height!,0),titleLines:title,subtitleLines:subtitle});
     },error=>logConsole.warn('Note header layout',String(error)),resolveFont,{firstBlocks:2,batchBlocks:2});
