@@ -1,3 +1,4 @@
+import { feedRequest } from "./core/feed-request";
 import {decodeUtf8Async} from "@podjs/framework/bytes";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {notifyLibrarySqlCommit} from './core/library-mutations';
@@ -102,7 +103,7 @@ async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string
   appLogger.d('Network','RSS fetch');
   const path = `feeds/fetch-${Date.now()}-${++downloadSequence}.xml`;
   try {
-    const request=http.download(url,path,8*1024*1024);
+    const request=hostOperation<DownloadResult>("http.download",feedRequest(url,path));
     if(job){job.cancel=()=>request.cancel();if(job.cancelled)request.cancel();}
     const response = await request.result;
     if(job?.cancelled)throw new Error("刷新已取消");
