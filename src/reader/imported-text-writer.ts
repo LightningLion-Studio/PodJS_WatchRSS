@@ -1,3 +1,4 @@
+import {encodeUtf8} from '@podjs/framework/bytes';
 /** Native FileArticleContentStore v2 naming and Java UTF-8 encoding. */
 export interface ImportedTextWritePort {
   createTemp(directory:string):Promise<{path:string}>;
@@ -14,20 +15,7 @@ export function* javaUtf8Chunks(text:string):Generator<Uint8Array> {
   for(let start=0;start<text.length;){
     let end=Math.min(start+MAX_CHARS,text.length);
     if(end<text.length&&text.charCodeAt(end-1)>=0xd800&&text.charCodeAt(end-1)<=0xdbff)end--;
-    const bytes:number[]=[];
-    for(let i=start;i<end;i++){
-      let code=text.charCodeAt(i);
-      if(code>=0xd800&&code<=0xdbff){
-        const low=text.charCodeAt(i+1);
-        if(low>=0xdc00&&low<=0xdfff){code=0x10000+((code-0xd800)<<10)+low-0xdc00;i++;}
-        else code=63;
-      }else if(code>=0xdc00&&code<=0xdfff)code=63;
-      if(code<0x80)bytes.push(code);
-      else if(code<0x800)bytes.push(0xc0|(code>>6),0x80|(code&63));
-      else if(code<0x10000)bytes.push(0xe0|(code>>12),0x80|((code>>6)&63),0x80|(code&63));
-      else bytes.push(0xf0|(code>>18),0x80|((code>>12)&63),0x80|((code>>6)&63),0x80|(code&63));
-    }
-    yield new Uint8Array(bytes);start=end;
+    yield encodeUtf8(text.slice(start,end),'question');start=end;
   }
 }
 function checkedDigest(value:{size:number;sha256:string},size:number):string {

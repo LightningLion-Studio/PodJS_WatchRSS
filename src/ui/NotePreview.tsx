@@ -1,3 +1,5 @@
+import {wrapAtlasText} from '@podjs/framework/text-wrap';
+import {createKeyedMemo} from '@podjs/framework/keyed-memo';
 import {For,Show,createSignal,onCleanup} from 'solid-js';
 import {View,Text,type NodeMirror} from '@pocketjs/framework/components';
 import {createGesture} from '@pocketjs/framework/gesture';
@@ -29,7 +31,7 @@ function rowFont(row:NoteTextRow,preset?:ReaderPreset):NoteFont {
  const base=presetContentFont(preset,role),factor=row.role==='heading'?row.size/14:1;
  return {fontSlot:base.fontSlot,scale:base.scale*factor,lineHeight:base.lineHeight*factor,color:base.color,tracking:base.tracking};
 }
-const wrap=(text:string,width:number,font:NoteFont)=>layoutText(text,{width,measure:s=>getOps().measureText(s,font.fontSlot)*font.scale+Math.max(0,Array.from(s).length-1)*font.tracking});
+const wrap=(text:string,width:number,font:NoteFont)=>wrapAtlasText(text,{width,fontSlot:font.fontSlot,scale:font.scale,tracking:font.tracking,measure:s=>getOps().measureText(s,font.fontSlot)*font.scale+(font.tracking?Math.max(0,Array.from(s).length-1)*font.tracking:0)});
 function NotePreviewImage(props:{block:NoteImage;width:number;height:number;onOpen?:(path:string)=>void;onDownload?:()=>void;onSize?:(path:string,width:number,height:number)=>void;textColor:string;preset?:ReaderPreset}){
  const [failed,setFailed]=createSignal(false),[loaded,setLoaded]=createSignal(false),source=()=>noteImageSource(props.block.path);
  const subtitle=props.preset?presetContentFont(props.preset,'subtitle'):{fontSlot:22,scale:1,lineHeight:23};
@@ -70,19 +72,26 @@ function NotePreviewTable(props:{block:NoteTable;width:number;height:number;rows
  const body=props.textColor.slice(0,7),outerBorder=`${body}3d`,cellBorder=`${body}33`,headerColor=`${body}1a`;
  return <View ref={n=>node=n} class="absolute inset-0 overflow-hidden rounded-[12]" style={{borderWidth:1,borderColor:outerBorder}}><View class="absolute left-[0] top-[0]" style={{width:columns*128,height:props.height,translateX:-scroller.offset()}}><For each={rows}>{(row,index)=><For each={row}>{(lines,column)=><NotePreviewTableCell source={props.block.rows[index()]?.[column()]??''} lines={lines} column={column()} top={offsets[index()]!} height={heights[index()]!} header={index()<props.block.headerRows} alignment={props.block.alignments[column()]??'Start'} font={index()<props.block.headerRows?props.headerFont:props.font} textColor={props.textColor} headerColor={headerColor} cellBorder={cellBorder} codeColor={props.codeColor} codeBackground={props.codeBackground}/>}</For>}</For></View></View>;
 }
-export function notePreviewEntries(markup:string,width:number,onImage?:(path:string)=>void,preset?:ReaderPreset,nativeBody?:ReadonlyMap<string,readonly ParagraphLine[]>,onDownload?:()=>void,imageHeights?:ReadonlyMap<string,number>,onImageSize?:(path:string,width:number,height:number)=>void):NotePreviewEntry[]{
+export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path:string)=>void,preset?:ReaderPreset,nativeBody?:ReadonlyMap<string,readonly ParagraphLine[]>,onDownload?:()=>void,imageHeights?:ReadonlyMap<string,number>,onImageSize?:(path:string,width:number,height:number)=>void,cache?:ReturnType<typeof createKeyedMemo<string>>):Generator<NotePreviewEntry,void> {
  const bodyColor=preset?readerColor(preset.body.colorArgb):'#e5e5e5';
  const codeColor=preset?presetContentFont(preset,'code').color:'#e5e5e5';
  const codeBackground=preset?readerColor(preset.codeBackgroundColorArgb):'#202427';
  const tableFont=rowFont({text:'',role:'body',size:14,lineHeight:20,sourceMarkup:'',sourceStart:0,mappingText:'',mappingStart:0},preset);
  const tableHeaderFont=preset?{...tableFont,...presetContentFont({...preset,body:{...preset.body,fontWeight:600}},'body')}:tableFont;
- const entries:NotePreviewEntry[]=[],blocks=prepareNotePreview(markup),offsets=noteBlockSourceOffsets(markup,blocks);
+ const prepared=cache?cache.get('parse',[markup],()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};}):(()=>{const blocks=prepareNotePreview(markup);return {blocks,offsets:noteBlockSourceOffsets(markup,blocks)};})();
+ const {blocks,offsets}=prepared;let emitted=0;
  const spacer=(height:number):NotePreviewEntry=>({height,render:()=>null});
  for(let blockIndex=0;blockIndex<blocks.length;blockIndex++){
   const block=blocks[blockIndex]!,blockStart=offsets[blockIndex]??null;
+  const textRows=block.kind==='rich'?(cache?cache.get('text:'+blockIndex,[block],()=>noteTextRows(block.markup,block.html)):noteTextRows(block.markup,block.html)):[];
+  const dependencies=[block,width,preset,onImage,onDownload,onImageSize,block.kind==='image'?imageHeights?.get(block.path):undefined,...textRows.map(row=>nativeBody?.get(row.text)),textRows.some(row=>row.role==='code')?nativeBody?.get(' '):undefined];
+  const cached=cache?.peek<NotePreviewEntry[]>('block:'+blockIndex,dependencies);
+  if(cached){for(const entry of cached){emitted++;yield entry;}continue;}
+  const entries:NotePreviewEntry[]=[];
+  (()=>{
   if(blockIndex)entries.push(spacer(10));
   entries.push(spacer(5));
-  if(block.kind==='image'){const height=imageHeights?.get(block.path)??260;entries.push({height:height+(block.description?34:4),render:()=> <NotePreviewImage block={block} width={width} height={height} onOpen={onImage} onDownload={onDownload} onSize={onImageSize} textColor={bodyColor} preset={preset}/>});entries.push(spacer(5));continue;}
+  if(block.kind==='image'){const height=imageHeights?.get(block.path)??260;entries.push({key:cache?.get('image-key:'+blockIndex,[block,width,preset],()=>({})),data:height,height:height+(block.description?34:4),render:current=> <NotePreviewImage block={block} width={width} height={current?Number(current().data):height} onOpen={onImage} onDownload={onDownload} onSize={onImageSize} textColor={bodyColor} preset={preset}/>});entries.push(spacer(5));return;}
   if(block.kind==='table'){
    const rows=tableRows(block,tableFont,tableHeaderFont),heights=tableHeights(rows,tableFont.lineHeight,block.headerRows),height=heights.reduce((a,b)=>a+b,0);
    let readHorizontalOffset=()=>0;
@@ -102,17 +111,17 @@ export function notePreviewEntries(markup:string,width:number,onImage?:(path:str
    };
    entries.push({height,positionedAnchors,render:()=> <NotePreviewTable block={block} width={width} height={height} rows={rows} heights={heights} font={tableFont} headerFont={tableHeaderFont} textColor={bodyColor} codeColor={codeColor} codeBackground={codeBackground} registerOffset={read=>{readHorizontalOffset=read;}}/>});
    entries.push(spacer(5));
-   continue;
+   return;
   }
   let inCodeFence=false;
-  for(const row of noteTextRows(block.markup,block.html)){
+  for(const row of textRows){
    if(row.role==='code'){
     if(!inCodeFence)entries.push(spacer(nativeBody?.get(' ')?.[0]?.height??rowFont(row,preset).lineHeight));
     inCodeFence=true;continue;
    }
    inCodeFence=false;
    const inset=0,font=rowFont(row,preset),native=row.role==='body'||row.role==='quote'?nativeBody?.get(row.text):undefined;
-   const fallback=wrap(row.text,width-inset*2,font);
+   const fallback=native?.length?[]:wrap(row.text,width-inset*2,font);
    let cursor=0;
    const visualLines=native?.length?native.map(line=>({text:row.text.slice(line.start,line.visibleEnd),start:line.start,height:line.height??font.lineHeight,baseline:line.baseline,paragraph:line.paragraph})):fallback.length?fallback.map(text=>{const start=cursor;cursor+=text.length;return {text,start,height:font.lineHeight,baseline:undefined,paragraph:undefined};}):[{text:'',start:0,height:font.lineHeight,baseline:undefined,paragraph:undefined}];
    for(const visual of visualLines){
@@ -124,6 +133,12 @@ export function notePreviewEntries(markup:string,width:number,onImage?:(path:str
    }
   }
   entries.push(spacer(5));
+  })();
+  cache?.get('block:'+blockIndex,dependencies,()=>entries);
+  for(const entry of entries){emitted++;yield entry;}
  }
- return entries.length?entries:[{height:32,render:()=> <Text class="text-sm" style={{textColor:bodyColor}}>这条备忘录还没有正文。</Text>}];
+ if(!emitted)yield {height:32,render:()=> <Text class="text-sm" style={{textColor:bodyColor}}>这条备忘录还没有正文。</Text>};
 }
+
+/** Compatibility synchronous collector; screen jobs consume the sliced iterator. */
+export function notePreviewEntries(...args:Parameters<typeof notePreviewEntrySteps>):NotePreviewEntry[]{return [...notePreviewEntrySteps(...args)];}

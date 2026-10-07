@@ -1,7 +1,7 @@
+import {encodeUtf8Async} from '@podjs/framework/bytes';
 import {javaJsonQuote,type SyncArticleBody,type SyncBodyCodec,type SyncBodyPayload} from "./article-body.ts";
 import type {WireIncomingArticle,RequestedArticleBody} from "./article-batches.ts";
 import type {ArticleManifest} from "./manifest.ts";
-import {javaUtf8Chunks} from "../reader/imported-text-writer.ts";
 import {isImportedContentUrl} from "../core/imported-content.ts";
 export interface ExportedArticle extends WireIncomingArticle,SyncArticleBody {}
 export const BODY_CHUNK_SIZE=128*1024;
@@ -13,8 +13,7 @@ export function metadataJson(article:ExportedArticle):string {
  return '{'+Object.entries(fields).filter(([,v])=>v!==null).map(([k,v])=>javaJsonQuote(k)+':'+(typeof v==='string'?javaJsonQuote(v):String(v))).join(',')+'}';
 }
 export async function hashJavaText(value:string,codec:Pick<SyncBodyCodec,"sha256">):Promise<string>{
- const chunks=[...javaUtf8Chunks(value)];const bytes=new Uint8Array(chunks.reduce((n,c)=>n+c.length,0));let offset=0;
- for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}return codec.sha256(bytes);
+ return codec.sha256(await encodeUtf8Async(value,'question'));
 }
 export async function articleMetadataHash(article:ExportedArticle,codec:Pick<SyncBodyCodec,"sha256">){return hashJavaText(metadataJson(article),codec);}
 export interface PreparedArticle {article:ExportedArticle;manifest:ArticleManifest;encodedBody:Uint8Array|null}
