@@ -10,7 +10,7 @@ const {readerRowKey}=await import('../src/reader/content-layout.ts');
 const {defaultReaderPreset}=await import('../src/reader/preset.ts');
 const {documentAnchorAt,offsetForDocumentAnchor}=await import('../src/reader/document-layout.ts');
 const settle=async()=>{for(let i=0;i<6;i++)await Promise.resolve();};
-async function nextTurn(){const req=requests.shift()!;expect(req.method).toBe('runtime.delay');expect(req.args.milliseconds).toBe(0);for(const fn of events)fn({t:'service.result',id:req.id,ok:true,value:null});await settle();}
+async function nextTurn(){const req=requests.shift()!;expect(req.method).toBe('runtime.delay');expect(req.args.milliseconds).toBe(1);for(const fn of events)fn({t:'service.result',id:req.id,ok:true,value:null});await settle();}
 function fixture(){
  const blocks:ContentBlock[]=[{type:'text',style:'title',text:'标题\r\n\r\nABC😀'},...Array.from({length:50},(_,i):ContentBlock=>i%10===0?{type:'image',url:`image-${i}`,width:400,height:200}:{type:'text',style:i%3===0?'quote':'body',text:'甲乙丙丁\r\n'.repeat(12)+'尾'})];
  const native=new Map<ContentBlock,ParagraphLine[]>();
