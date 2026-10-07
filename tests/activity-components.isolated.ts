@@ -8,7 +8,7 @@ import {captureActivityNavigation,restoreActivityNavigation,routeMemory,type Act
 // Match production's single-Solid alias for the file-linked framework.
 mock.module(Bun.resolveSync('solid-js',Bun.resolveSync('@podjs/framework/windowed-list',import.meta.dir)),()=>solidRuntime);
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'activity-recreation-solid',setup(builder){builder.onLoad({filter:/\/ui\/(route-activity|ScrollEntries|AddRssScreen|VideoPlayerScreen|NoteInlineEditor|NotesScreen)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'activity-recreation-solid',setup(builder){builder.onLoad({filter:/\/ui\/(route-activity|ScrollEntries|AddRssScreen|VideoPlayerScreen|NoteInlineEditor|NotesScreen)\.tsx$|\/variable-list\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 // Keep the production Solid owner/effect graph and scroller state machine.
 // Only native rendering and hardware registration are replaced at their boundaries.
 type Node={kind:string;props:Record<string,any>};

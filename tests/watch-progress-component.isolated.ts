@@ -30,7 +30,8 @@ const element = (props: Element["props"]): Element => {
   return {props: renderedProps};
 };
 mock.module("@pocketjs/framework/components", () => ({View: element, Text: element, Image: element}));
-mock.module("@pocketjs/framework/host", () => ({getOps: () => ({measureText: (text: string) => Array.from(text).length * 12})}));
+const realHost={...await import("@pocketjs/framework/host")};
+mock.module("@pocketjs/framework/host", () => ({...realHost,getOps: () => ({measureText: (text: string) => Array.from(text).length * 12})}));
 mock.module("../src/ui/OnboardingCustomizationScreen.tsx", () => ({OnboardingCustomizationScreen: () => null}));
 // The SDK checkout has its own node_modules. Production bundles one Solid
 // runtime; keep this test's component and real frame hook on that same owner.

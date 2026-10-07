@@ -1,7 +1,7 @@
 import {createMemo} from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
-import { getDisplayMetrics, getFontMetrics, hasCapability, type FontMetrics } from "@podjs/framework/watch";
+import {createTextEnvironment,type TextEnvironment} from "@podjs/framework/text-environment";
 import { SystemTextLine } from "@podjs/framework/text";
 import type { ContentStyle } from "../reader/content.ts";
 import { readerTextClass, type ReaderRow } from "../reader/content-layout.ts";
@@ -11,27 +11,8 @@ import { requiresReaderSystemText, systemTextOptions } from "../reader/system-te
 
 type TextRow = ReaderRow & { kind: "text" };
 
-/** One reader configuration owns these immutable host facts, not each line. */
-export interface ReaderTextEnvironment {
-  pixelScale: number;
-  rasterSupported: boolean;
-  fontMetrics(slot: number): FontMetrics | undefined;
-}
-export function createReaderTextEnvironment(): ReaderTextEnvironment {
-  const display = getDisplayMetrics(), fonts = new Map<number, FontMetrics>();
-  return {
-    pixelScale: display.physicalWidth / display.logicalWidth,
-    rasterSupported: hasCapability("text.raster"),
-    fontMetrics(slot) {
-      const cached = fonts.get(slot);
-      if (cached) return cached;
-      const metrics = getFontMetrics(slot);
-      // A missing font can become available after an asynchronous load.
-      if (metrics) fonts.set(slot, metrics);
-      return metrics;
-    },
-  };
-}
+export type ReaderTextEnvironment=Pick<TextEnvironment,"pixelScale"|"rasterSupported"|"fontMetrics">;
+export const createReaderTextEnvironment=createTextEnvironment;
 
 /** The shared reader text primitive used by article, full-preview and selector rows. */
 export function ReaderTextRow(props: {
