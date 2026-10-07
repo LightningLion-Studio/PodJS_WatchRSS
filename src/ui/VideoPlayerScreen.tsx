@@ -1,3 +1,4 @@
+import {douyinDebug} from '../debug/douyin-host.ts';
 import {restoredSignal,booleanState} from './route-activity.tsx';
 import {appLogger} from '../logs/app-logger.ts';
 import { observeHostInternet } from "../onboarding/network-host.ts";
@@ -55,6 +56,8 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
   const networkPrompt = () => props.source.platform === "douyin" ? douyinPlayerNetwork(internet(), state()?.state === "playing" && !error(), allowBluetooth(), douyinSourceNeedsInternet(props.source.url ?? props.source.videoUrl), networkFailure(), props.source.immersive ? {hasRenderedFirstFrame:state()?.hasRenderedFirstFrame,buffering:state()?.state === "buffering" || state()?.isBuffering === true,hasError:!!error()} : undefined) : null;
   onMount(() => { if (props.source.platform === "douyin") onCleanup(observeHostInternet(setInternet)); });
   const sessionOwner=Symbol("video-screen");
+  createEffect(()=>{if(props.active&&props.source.platform==='douyin'&&props.source.immersive&&douyinDebug.allowed)
+    onCleanup(douyinDebug.bindSessions(async()=>usingSessions()&&videoSessionOwner===sessionOwner?sessionPool!.diagnostics():undefined));});
   let preparedSource:PlaybackSource|undefined;
   let sessionCapacity:"unchecked"|"checking"|"available"|"unavailable"=sessionCapable?"unchecked":"unavailable";
   let autoplayAllowed=false;

@@ -103,6 +103,20 @@ export class DouyinVideoSessionPool {
     this.activeId=`dy${id}a`;this.standbyId=`dy${id}b`;
   }
 
+  /** On-demand host observations, independent of renderer diagnostics and playback scheduling. */
+  async diagnostics(){
+    const generation=this.generation,activeId=this.activeId,standbyId=this.standbyId;
+    const slots=[{role:'active',sessionId:activeId,awemeId:this.activeKey,bound:!!this.activeKey},
+      {role:'standby',sessionId:standbyId,awemeId:this.standby?.source.awemeId,bound:!!this.standby}];
+    const [capabilities,...states]=await Promise.allSettled([this.port.capabilities(),...slots.map(slot=>slot.bound?this.port.state(slot.sessionId):Promise.resolve(undefined))]);
+    if(generation!==this.generation||activeId!==this.activeId||standbyId!==this.standbyId)return undefined;
+    return {capabilities:capabilities.status==='fulfilled'?capabilities.value as VideoSessionCapabilities:undefined,
+      generation,standbyReady:this.standbyReady,standbyPreparing:!!this.standbyPrepare,
+      slots:slots.map((slot,i)=>({...slot,awemeId:slot.awemeId&&/^[0-9]+$/.test(slot.awemeId)?slot.awemeId:undefined,
+        state:states[i]?.status==='fulfilled'?states[i].value as VideoSessionState|undefined:undefined})),
+    };
+  }
+
   async supportsPrewarm(profile:VideoDecoderProfile={}):Promise<boolean>{
     const capability=await this.port.capabilities(profile);
     return capability.decoderLimit>=2&&capability.surfacePromotion&&capability.verticalTransition;

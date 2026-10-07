@@ -299,7 +299,7 @@ Device parity remains PENDING; no device operation was performed.
 | 19 QR raster | 已完成 | U7 qr raster/QRCode；native profile、payload、中文错误留应用 |
 | 20 圆屏布局 | 已完成 | U4 safeQrLayout/rectInsideCircle |
 | 21 大图分块 | 已完成 | U7 tiled-image/image-tiles/image-preview；cache provider、原尺寸阈值与 decode preset 留应用 |
-| 22 ManagedCache | 未开始 | managed.ts 仍应用；policy 淘汰桶规则不迁移（业务专属） |
+| 22 ManagedCache | 已完成 | DBG2 framework cache.FileCache；app managed.ts 薄适配与 namespace/淘汰桶策略；设备验收 PENDING |
 | 23 编辑辅助 | 已完成 | U7 async/editing/navigation 四项；笔记字段/换行/身份与业务调用时点留应用 |
 | 24 lazy regexp | 部分 | text-wrap 私有 helper；应用 helper 仍服务未迁算法 |
 | 25 SQL/framing | 部分 | sync-framing/bytes 底座；sql-pages/sql-text/stream 编排仍应用 |
@@ -317,3 +317,12 @@ notes header 参数、内容模型和测量组合仍应用。这些轮次不等�
 上表 #15/#19/#21/#23 已更新为源码完成，四组覆盖本轮最低数量；#22 ManagedCache
 未实施，namespace/路径约束与淘汰桶策略须单独抽象，仍为未开始。其余状态不变。
 本轮没有修改 takeover/存储迁移。详见 `framework-upstream-u7.md`。设备验收仍 PENDING。
+
+
+## DBG2 状态更新（2026-10-07，app a32a129 / framework 22f0cc0 基线）
+
+#22 的通用目录扫描、租约/去重、取消/串行维护、producer pin/clear、计费和
+淘汰执行已进入 `@podjs/framework/cache`。WatchRSS 的缓存桶、命名空间、
+离线目录深度与不淘汰规则、抖音 6→4 reserve、内联图 128MiB、默认 512MiB、
+中文错误与图片 decode/download 参数留在应用。详情见 `framework-upstream-dbg2.md`。
+这次源码迁移完成；旧 U7 的“未实施”是历史状态。设备验收仍 PENDING。

@@ -1,3 +1,4 @@
+import type {PlaybackCacheDiagnostics} from './playback-diagnostics.ts';
 import type {DebugExternalEvent} from '@podjs/framework/services';
 import type {DebugGate} from './gate.ts';
 import type {DouyinDebugController} from './douyin.ts';
@@ -5,6 +6,7 @@ export const DEBUG_ACTION='com.lightningstudio.watchrss.debug.action.';
 export interface ExternalDebugPorts {
  douyin:DouyinDebugController; openDouyin:(resumeAwemeId?:string)=>void; openSummary:(id:string)=>void;
  applyCookie:(raw:string)=>Promise<{ok:boolean;message?:string}>;
+ playbackDiagnostics?:()=>Promise<PlaybackCacheDiagnostics>;
  dumpLogs:()=>string;clearLogs:()=>void;
 }
 /** Application ABI; transport and bounded replies belong to the framework. */
@@ -13,7 +15,7 @@ export class ExternalDebugActions {
  async handle(event:DebugExternalEvent):Promise<{code:number;data:string}>{
   this.gate.require();const p=this.ports;
   if(event.kind==='dump'){
-   if(event.args.includes('--douyin-playback'))return {code:0,data:p.douyin.dumpPlayback()};
+   if(event.args.includes('--douyin-playback'))return {code:0,data:await p.douyin.dumpPlayback(p.playbackDiagnostics)};
    if(event.args.includes('--clear')){p.clearLogs();return {code:0,data:'DebugLogBuffer cleared.'};}
    return {code:0,data:p.dumpLogs()};
   }

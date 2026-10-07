@@ -77,6 +77,13 @@ export class BiliPreviewCache {
       cleared: () => { this.clearing = false; },
     });
   }
+  /** Index and worker state only; offset is committed partial-file progress, not wire bytes. */
+  diagnostics(){return {
+    indexScope:'bili-preview' as const,clearing:this.clearing,
+    records:this.records.map(({path,size,offset,complete,updated})=>({path,size,offset,complete,updated})),
+    jobs:[...this.jobs.values()].map(job=>({active:job===this.active,cancelled:job.cancelled,pinnedPaths:[...job.pins]})),
+    queuedJobs:this.queue.length,
+  };}
   private save(record?: PreviewRecord) {
     if (record) {
       const records = [record, ...this.records.filter(row => row.key !== record.key)];
