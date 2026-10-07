@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import type {ActivityState} from '@podjs/framework/services';
 
 /** A guest has several state owners (startup and content). Merge their namespaces
@@ -14,6 +15,6 @@ export class ActivityStateHub {
    else delete merged[channel][key];
   }
   this.state=merged;
-  return this.publish(merged);
+  return traceServiceWork("navigation.activityPublish",()=>this.publish(merged));
  }
 }
