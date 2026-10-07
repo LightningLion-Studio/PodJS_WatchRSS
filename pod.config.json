@@ -16,7 +16,10 @@
       "rotationMinSdk": 28,
       "lineageDebugKeystore": "/home/wilf/.android/debug.keystore"
     },
-    "cleartextTraffic": true
+    "cleartextTraffic": true,
+    "takeover": {
+      "sourceVersionCode": 40
+    }
   },
   "capabilities": [
     "input.touch",
