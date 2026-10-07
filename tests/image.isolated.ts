@@ -55,7 +55,10 @@ mock.module("@podjs/framework/services", () => ({
   },
 }));
 
-const { bindRemoteImage, remoteImageResourceCounts, releaseRetainedRemoteImages } = await import("../src/ui/RemoteImage.tsx");
+// file: framework has its own PocketJS installation; production bundles one host.
+const frameworkDir=new URL('.', 'file://'+Bun.resolveSync('@podjs/framework/image',import.meta.dir)).pathname;
+mock.module(Bun.resolveSync('@pocketjs/framework/host',frameworkDir),()=>({...realHost,getOps:()=>ops}));
+const { bindRemoteImage, remoteImageResourceCounts, releaseRetainedRemoteImages } = process.env.WRSS_IMAGE_BASELINE ? await import("./fixtures/RemoteImage-u3-before.tsx") : await import("../src/ui/RemoteImage.tsx");
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const roots: Array<() => void> = [];
 function mount(url: string): void {
