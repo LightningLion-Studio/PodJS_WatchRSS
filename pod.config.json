@@ -1,13 +1,19 @@
 {
   "entry": "src/main.tsx",
   "appId": "com.lightningstudio.watchrss.podjs",
-  "versionName": "0.1.0-dev",
-  "versionCode": 1,
+  "versionName": "0.1.0",
+  "versionCode": 2,
   "name": "腕上RSS · PodJS",
   "bytecode": { "stripSource": true },
   "android": {
     "resources": "android/res",
-    "theme": "@style/Theme.WatchRSS.PodJS.Splash"
+    "theme": "@style/Theme.WatchRSS.PodJS.Splash",
+    "signing": {
+      "keystoreProperties": "/home/wilf/data/OPPO_Develop/Android_WatchRSS/keystore.properties",
+      "lineage": "/home/wilf/.config/podjs-signing/watchrss.lineage",
+      "rotationMinSdk": 28,
+      "lineageDebugKeystore": "/home/wilf/.android/debug.keystore"
+    }
   },
   "capabilities": [
     "input.touch",
