@@ -19,8 +19,9 @@ import { observeHostInternet } from "../../onboarding/network-host.ts";
 import type { InternetStatus } from "../../onboarding/state.ts";
 import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
-import { platformCardEntry } from "../PlatformNotice.tsx";
-import { platformScope } from "../../announcement/platform.ts";
+import { platformCardEntry, platformNoticeEntry } from "../PlatformNotice.tsx";
+import { platformNotice, platformScope } from "../../announcement/platform.ts";
+const douyinNotice = (width: number) => platformNoticeEntry(width, platformNotice("抖音", true));
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
 import { MediaReaderDetail } from "../MediaReaderDetail.tsx";
 import { readerChrome } from "../../reader/chrome.ts";
@@ -188,7 +189,7 @@ function LoginScreen(props: DouyinScreenProps) {
     finally { if (!disposed) setBusy(false); }
   };
   const detail = () => lines(message(), props.width - 60, 12);
-  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
+  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), douyinNotice(props.width - 36), statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), douyinNotice(props.width - 36), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
   return <Show when={!gate() && statusMode() && authStatus().qr} fallback={<ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />}>
     <View class="absolute inset-0 bg-black items-center justify-center">
       <Text class="absolute top-[16] text-sm text-white">请使用手机扫码</Text>
@@ -245,9 +246,9 @@ function FeedScreen(props: DouyinScreenProps) {
   const articles = createMemo<Article[]>(() => loggedIn() === false ? [] : items().map(item => ({ id: item.awemeId, title: itemTitle(item), excerpt: itemSummary(item), content: "", read: true })));
   const withItem = (article: Article, run: (item: DouyinItem) => void) => { const item = byId().get(article.id); if (item) run(item); };
   const toggleSaved = (item: DouyinItem, kind: "favorite" | "watchLater") => void props.client.toggleSaved(item, kind).then(saved => toast(kind === "favorite" ? saved ? "已收藏" : "已取消收藏" : saved ? "已加入稍后再看" : "已从稍后再看移除"), error => toast(error instanceof Error ? error.message : String(error)));
-  const leading = createMemo<ScrollEntry[]>(() => loggedIn() === false
+  const leading = createMemo<ScrollEntry[]>(() => [douyinNotice(props.width - 36), ...(loggedIn() === false
     ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => props.onNavigate({ name: "login" }))]
-    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : []);
+    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : [])]);
   const empty = createMemo<ScrollEntry[]>(() => loggedIn() === false || (loading() && !error()) ? [] : [feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width)]);
   return <RssFeedScreen width={props.width} height={props.height} title="抖音" active={props.active !== false} onInfo={() => props.onNavigate({ name: "channel-info" })}
     items={articles()} refreshing={refreshing() || (loading() && !items().length)} loadingMore={loading() && !refreshing() && items().length > 0} canNext={hasMore() && loggedIn() !== false}
@@ -326,7 +327,7 @@ function ActionsScreen(props: DouyinScreenProps & { awemeId: string }) {
   onMount(() => void controller.load());
   onCleanup(() => controller.dispose());
   const toggle = (kind: "favorite" | "watchLater") => controller.toggle(kind);
-  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr);else qr();}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack)]);
+  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr);else qr();}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack), douyinNotice(props.width - 44)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} padding={22} ref={props.ref} />;
 }
 

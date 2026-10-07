@@ -14,8 +14,8 @@ import { layoutUiText } from "../../reader/line-break.ts";
 import { measuredLines } from "../../reader/measured-text.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
-import { platformCardEntry } from "../PlatformNotice.tsx";
-import { platformScope } from "../../announcement/platform.ts";
+import { platformCardEntry, platformNoticeEntry } from "../PlatformNotice.tsx";
+import { platformNotice, platformScope } from "../../announcement/platform.ts";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SwipeCard } from "../SwipeCard.tsx";
 import { BiliSideMenu } from "./BiliSideMenu.tsx";
@@ -142,6 +142,7 @@ function FeedScreen(props: BiliScreenProps) {
       <Image src="../assets/icons/info-hint.svg" style={{ insetL: groupLeft + titleWidth + hintGap - 3.6, width: hintBox, height: hintBox }} class="absolute top-[3.9]" />
       <Text class="absolute left-[0] right-[0] top-[32.5] text-[9px] leading-[17] text-[#b6b6b6] text-center">{loggedIn ? "已登录" : "未登录"}</Text>
     </View> } as ScrollEntry,
+      ...(props.route.name === "entry" ? [platformNoticeEntry(contentWidth, platformNotice("哔哩哔哩", true))] : []),
       ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []),
       ...(!session.loading() && loggedIn && !feed.state().loading && !values.length ? [emptyStateEntry("暂无内容", feed.state().error ? String(feed.state().error instanceof Error ? (feed.state().error as Error).message : feed.state().error) : "稍后再试或刷新", props.width ?? 233)] : []),
       ...(!session.loading() && !loggedIn ? [emptyStateEntry("需要登录", "登录后获取推荐内容", props.width ?? 233)] : []),
@@ -588,6 +589,7 @@ function ActionsScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { na
     pillEntry("稍后再看", width, (aid || props.route.bvid) && !busy() ? () => void watchLater() : undefined, 8),
     pillEntry("分享", width, biliShareLink(props.route.bvid, props.route.aid) && !busy() ? share : undefined, 8),
     pillEntry("取消", width, busy() ? undefined : props.onBack, 8),
+    platformNoticeEntry(width - 36, platformNotice("哔哩哔哩", true)),
   ]);
   return <Scrolled {...props} entries={entries()} />;
 }
