@@ -19,6 +19,8 @@ import { observeHostInternet } from "../../onboarding/network-host.ts";
 import type { InternetStatus } from "../../onboarding/state.ts";
 import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
+import { platformCardEntry } from "../PlatformNotice.tsx";
+import { platformScope } from "../../announcement/platform.ts";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
 import { MediaReaderDetail } from "../MediaReaderDetail.tsx";
 import { readerChrome } from "../../reader/chrome.ts";
@@ -111,8 +113,8 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
   const [loggedIn,setLoggedIn]=createSignal(false);
   createEffect(()=>{void props.client.isLoggedIn().then(setLoggedIn);});
   const entries=createMemo<ScrollEntry[]>(()=>[
-    header("抖音"),statusCard("频道说明",loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
-    statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),
+    header("腕上RSS · 抖音频道"),statusCard("频道说明",loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
+    statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),platformCardEntry(props.width-36,platformScope),
     ...(!loggedIn()?[button("登录",()=>props.onNavigate({name:"login"}))]:[]),
     button("设置",()=>props.onNavigate({name:"settings"})),button("播放历史",()=>props.onNavigate({name:"history"})),button("返回",props.onBack)
   ]);

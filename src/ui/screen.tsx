@@ -118,6 +118,8 @@ import type { Page, RouteEntry } from "./routes/types.ts";
 import type { ApplicationForegroundSync } from "../sync/application-foreground.ts";
 import type { createAnnouncementServices } from "../announcement/host.ts";
 import { loadHomeNotices } from "../announcement/home.ts";
+import { entryDisclosure } from "./entry-disclosure.ts";
+import { PendingDisclosure } from "./PlatformNotice.tsx";
 import type { Announcement, PushMessage } from "../announcement/models.ts";
 import { HomeNoticeDialog } from "./HomeNoticeDialog.tsx";
 
@@ -482,6 +484,9 @@ export default function WatchRSS(props: {
   const [pendingAnnouncement, setPendingAnnouncement] = createSignal<Announcement | null>(null);
   const [pendingPushMessages, setPendingPushMessages] = createSignal<PushMessage[]>([]);
   const homeNoticeVisible = () => !!pendingAnnouncement() || pendingPushMessages().length > 0;
+  // Native shows the first-use disclosure only once announcements and push messages are gone.
+  const homeDisclosure = entryDisclosure({}, { page: "home" });
+  const homeDisclosurePending = () => homeDisclosure.pending(homeNoticeVisible());
   const dismissHomeNotice = () => {
     if (pendingPushMessages().length) {
       setPendingPushMessages([]);
@@ -1257,6 +1262,7 @@ export default function WatchRSS(props: {
     }
   });
   const removeBack = onSystemBack(() => {
+    if (page() === "home" && homeDisclosurePending()) return true;
     if (page() === "home" && dismissHomeNotice()) return true;
     if (stack().length <= 1) return false;
     if (motion.phase !== "idle") return true;
@@ -1504,7 +1510,7 @@ export default function WatchRSS(props: {
             <HomeRoutes
               entry={entry}
               page={entryPage}
-              active={() => active() && !(entryPage() === "home" && homeNoticeVisible())}
+              active={() => active() && !(entryPage() === "home" && (homeNoticeVisible() || !!homeDisclosurePending()))}
               width={width}
               height={height}
               channels={channels}
@@ -1739,6 +1745,9 @@ export default function WatchRSS(props: {
               }}
               onDismissMessages={dismissHomeNotice}
             />}
+          </Show>
+          <Show when={active() && entryPage() === "home"}>
+            <PendingDisclosure width={width} height={height} pending={homeDisclosurePending} onConfirm={homeDisclosure.confirm} />
           </Show>
         </View>
       </View>

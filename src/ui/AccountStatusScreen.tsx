@@ -6,6 +6,8 @@ import {accountCloudLines,type AccountStatusSnapshot} from '../account/status.ts
 import {DownloadPhoneAppDialog} from './DownloadPhoneAppDialog.tsx';
 import {ScrollEntries, type ScrollEntry} from './ScrollEntries.tsx';
 import {watchUiLines} from './text-layout.ts';
+import {platformCardEntry,platformNoticeEntry} from './PlatformNotice.tsx';
+import {accessBoundary,platformNotice} from '../announcement/platform.ts';
 
 export function AccountStatusScreen(props: {
   width: number;
@@ -46,6 +48,9 @@ export function AccountStatusScreen(props: {
     const rows: ScrollEntry[] = [
       {height:26,render:()=><Text class="absolute inset-0 text-[21px] leading-[26] text-center text-[#f5f5f5]">账号</Text>},
       {height:4,render:()=>null},
+      platformNoticeEntry(props.width - 36, platformNotice('哔哩哔哩', true)),
+      platformNoticeEntry(props.width - 36, platformNotice('抖音', true)),
+      platformCardEntry(props.width - 36, accessBoundary),
     ];
     if (error()) rows.push({height:34,render:()=><Text class="absolute inset-0 text-sm leading-[17] text-center text-[#ff7777]">账号状态读取失败，请返回后重试</Text>});
     else if (value === undefined) rows.push(line('正在读取账号状态', 14, true, 34));

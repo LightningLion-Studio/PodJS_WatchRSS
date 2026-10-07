@@ -14,6 +14,8 @@ import { layoutUiText } from "../../reader/line-break.ts";
 import { measuredLines } from "../../reader/measured-text.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
+import { platformCardEntry } from "../PlatformNotice.tsx";
+import { platformScope } from "../../announcement/platform.ts";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SwipeCard } from "../SwipeCard.tsx";
 import { BiliSideMenu } from "./BiliSideMenu.tsx";
@@ -190,10 +192,12 @@ function ChannelInfoScreen(props: BiliScreenProps) {
     const info = (text: string, color: string, gapBelow: number): ScrollEntry => ({ height: 14 + gapBelow, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-xs leading-[14] text-center" style={{ textColor: color }}>{text}</Text> });
     const go = (route: BiliRoute) => loggedIn ? () => props.onNavigate(route) : undefined;
     return [
-      { height: 26, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[20] text-[#f5f5f5] text-center">哔哩哔哩</Text> },
+      ((title: string[]) => ({ height: title.length * 20 + 6, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[20] text-[#f5f5f5] text-center">{title.join("\n")}</Text> }))(lines("腕上RSS · 哔哩哔哩频道", width - 36, 17)),
       info(loggedIn ? "进入以获取推荐内容" : "未登录，登录后获取推荐内容", "#b6b6b6", 4),
       info("https://www.bilibili.com", "#f5f5f5", 4),
-      info(loggedIn ? "更新：实时" : "更新: --", "#b6b6b6", 8),
+      info(loggedIn ? "更新：实时" : "更新: --", "#b6b6b6", 4),
+      platformCardEntry(width - 36, platformScope),
+      { height: 8, render: () => null },
       pillEntry("设置", width, () => props.onNavigate({ name: "settings" })),
       ...(!loggedIn ? [pillEntry("登录", width, () => props.onNavigate({ name: "login" }))] : []),
       pillEntry("搜索", width, go({ name: "search" })),

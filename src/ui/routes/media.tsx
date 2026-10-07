@@ -1,6 +1,8 @@
 import type { ReaderPreset } from "../../reader/preset.ts";
 import type { BrowserOrigin } from "../../browser/open.ts";
-import { Show, onCleanup } from "solid-js";
+import { Show, createRenderEffect, onCleanup } from "solid-js";
+import { entryDisclosure } from "../entry-disclosure.ts";
+import { PendingDisclosure } from "../PlatformNotice.tsx";
 import type { ShareHandler } from "../../sharing/policy.ts";
 import {
   biliClient,
@@ -79,13 +81,23 @@ export function MediaRoutes(props: MediaRoutesProps) {
     if (platform === "bili") props.setBiliBackground(value);
     else props.setDouyinBackground(value);
   };
+  // Native Bili/Douyin entry Activities block on the first-use or platform confirmation.
+  const disclosure = (page: "bili" | "douyin") => {
+    const route = page === "bili" ? props.entry.biliRoute : props.entry.douyinRoute;
+    return (route?.name ?? "entry") === "entry" ? entryDisclosure(props.entry, { page, name: "entry" }) : undefined;
+  };
+  const blocked = (page: "bili" | "douyin") => !!disclosure(page)?.pending();
+  // A blocking dialog swallows Back, like native AlertDialog with an empty onDismissRequest.
+  createRenderEffect(() => {
+    if (props.page() === "douyin") props.entry.internalBack = () => blocked("douyin");
+  });
 
   return (
     <>
       <Show when={props.page() === "bili"}>
         <BiliScreen
           preset={props.preset()}
-          active={props.active()}
+          active={props.active() && !blocked("bili")}
           loadLocalDetail={loadLocalBiliDetail}
           onShare={props.share}
           width={props.width}
@@ -121,14 +133,15 @@ export function MediaRoutes(props: MediaRoutesProps) {
             if (value.scroller) {
               props.entry.list = { scroller: value.scroller };
             }
-            props.entry.internalBack = value.onRootBack;
+            props.entry.internalBack = () => blocked("bili") || (value.onRootBack?.() ?? false);
           }}
         />
+        <PendingDisclosure width={props.width} height={props.height} pending={() => disclosure("bili")?.pending()} onConfirm={() => disclosure("bili")?.confirm()} />
       </Show>
       <Show when={props.page() === "douyin"}>
         <DouyinScreen
           preset={props.preset()}
-          active={props.active()}
+          active={props.active() && !blocked("douyin")}
           onShare={props.share}
           width={props.width}
           height={props.height}
@@ -152,6 +165,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onLogoutSuccess={props.onDouyinLogoutSuccess}
           ref={(value) => (props.entry.list = value)}
         />
+        <PendingDisclosure width={props.width} height={props.height} pending={() => disclosure("douyin")?.pending()} onConfirm={() => disclosure("douyin")?.confirm()} />
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <VideoPlayerScreen
