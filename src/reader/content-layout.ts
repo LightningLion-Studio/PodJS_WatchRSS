@@ -1,6 +1,6 @@
 import type {TextParagraphLine} from "@podjs/framework/services";
 import type {ContentBlock, ContentStyle} from "./content.ts";
-import {layoutText} from "./layout.ts";
+import {wrapAtlasText} from "@podjs/framework/text-wrap";
 import {lineStarts, type TextAnchor} from "./text-anchor.ts";
 import { resolvedReaderStyle, type ReaderPreset } from "./preset.ts";
 export interface ContentAnchor extends TextAnchor {mediaIndex?:number}
@@ -80,7 +80,7 @@ export function* contentLayoutSteps(blocks:readonly ContentBlock[],width:number,
       if(breaks?.length){const result:string[]=[];let start=0;for(const end of breaks){result.push(paragraph.slice(start,end));start=end;}result.push(paragraph.slice(start));return result;}
       return measuredHardWrap(paragraph,Math.max(1,width),value=>measure(value,font.fontSlot)*font.scale);
      }
-     return layoutText(paragraph,{width:Math.max(1,width),measure:s=>measure(s,font.fontSlot)*font.scale+Math.max(0,Array.from(s).length-1)*font.tracking});
+     return wrapAtlasText(paragraph,{width:Math.max(1,width),fontSlot:font.fontSlot,scale:font.scale,tracking:font.tracking,measure:s=>measure(s,font.fontSlot)*font.scale+Math.max(0,Array.from(s).length-1)*font.tracking});
     });cached={width,fontSize,fontKey,text:block.text,style:block.style,normalized,lines,starts:lineStarts(block.text,lines),native:undefined};textCache?.set(block,cached);}
    const lines=cached?.lines??[],starts=cached?.starts??[];
    let rawOffset=0,normalizedOffset=0;

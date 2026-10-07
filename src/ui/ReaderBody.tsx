@@ -14,10 +14,10 @@ import type {SpeechHighlight} from "../reader/speech-highlight.ts";
 import {contentHighlightRects,highlightCenter} from "../reader/speech-highlight-layout.ts";
 import type { ReaderPreset } from "../reader/preset.ts";
 import { readerColor } from "../reader/content-layout.ts";
-import { requestReaderLayout } from "../reader/platform-layout.ts";
+import { requestReaderLayout, requestReaderLayoutBatched } from "../reader/platform-layout.ts";
 import type { NativeBlockLayouts } from "../reader/content-layout.ts";
 import { delay, textLayout } from "@podjs/framework/services";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, batch } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { ScrollEntries, type ScrollEntry, type PositionedScrollEntry, type IndexedScrollEntries } from "./ScrollEntries.tsx";
 import { RemoteImage } from "./RemoteImage.tsx";
@@ -68,6 +68,7 @@ export function ReaderBody(props:{
   const [ratios,setRatios]=createSignal<Record<number,number>>({});
   const layoutContent=createContentLayouter((text,slot)=>getOps().measureText(text,slot),(text,slot,width)=>getOps().wrapText?.(text,slot,width),getFontMetrics);
   const [nativeLayouts,setNativeLayouts]=createSignal<NativeBlockLayouts>(new Map());
+  const [nativeReady,setNativeReady]=createSignal(false);
   const [importedRevision,setImportedRevision]=createSignal(0);
   const importedTasks=new Set<{cancel():void}>();
   const imported=props.imported?new ImportedReaderDocument(props.imported.handle,props.imported.read,async block=>{
@@ -90,22 +91,56 @@ export function ReaderBody(props:{
   createEffect(()=>{
     if(imported)return;
     const blocks=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset;
-    setNativeLayouts(new Map());
-    if(!hasCapability("text.layout"))return;
+    batch(()=>{setNativeReady(false);setNativeLayouts(new Map());});
+    if(!hasCapability("text.layout")){setNativeReady(true);return;}
     const metrics=getDisplayMetrics(),pixelScale=metrics.physicalWidth/metrics.logicalWidth;
-    const task=requestReaderLayout(blocks,width,size,pixelScale,preset,args=>textLayout.layout(args),setNativeLayouts,error=>logConsole.warn("Reader paragraph layout",String(error)),fonts());
-    onCleanup(()=>task.cancel());
+    let cancelled=false,first=true,complete:NativeBlockLayouts=new Map();
+    const task=requestReaderLayoutBatched(blocks,width,size,pixelScale,preset,args=>textLayout.layoutBatch(args),value=>{
+      complete=value;
+      if(first){first=false;setNativeLayouts(value);}
+    },error=>logConsole.warn("Reader paragraph layout",String(error)),fonts());
+    void task.done.then(()=>{if(!cancelled)batch(()=>{setNativeLayouts(complete);setNativeReady(true);});});
+    onCleanup(()=>{cancelled=true;task.cancel();});
   });
-  const [prepared,setPrepared]=createSignal<{layout:ReturnType<typeof layoutContent>;entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>}|undefined>();
+  const [prepared,setPrepared]=createSignal<{layout:ReturnType<typeof layoutContent>;entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>;complete:boolean;scope:ContentBlock[]}|undefined>();
   createEffect(()=>{
     if(imported)return;
-    const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios();
-    if(!native.size){setPrepared(undefined);return;}
-    const task=prepareTextLayout(layoutContent.steps(source,width,size,ratio,preset,native),{key:readerRowKey,entry:makeEntry,publish:setPrepared});
+    const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios(),complete=nativeReady();
+    // Native-capable hosts can show their first shaped paragraphs without
+    // wrapping the unseen tail in the atlas first. Saved anchors wait for the
+    // complete document; portable hosts and failed paragraphs use Rust wrap.
+    let input=source;
+    if(!complete){
+      if(!native.size||pendingProgress&&(pendingProgress.textAnchor||pendingProgress.progress>0))return;
+      const end=source.findIndex(block=>block.type==='text'&&!native.has(block));
+      input=end<0?source:source.slice(0,end);
+      if(!input.length)return;
+    }
+    const first=!untrack(prepared);
+    const task=prepareTextLayout(layoutContent.steps(input,width,size,ratio,preset,native),{key:readerRowKey,entry:makeEntry,
+      preview:first?{rows:16,publish:snapshot=>{
+        // A saved position must not mount an unrelated start window first.
+        if(pendingProgress&&(pendingProgress.textAnchor||pendingProgress.progress>0))return;
+        const rows=snapshot.entries.map(entry=>entry.data as ReaderRow),last=rows.at(-1);
+        setPrepared({...snapshot,layout:{rows,height:last?last.top+last.height:0,textLength:0},complete:false,scope:source});
+      }}:undefined,
+      publish:snapshot=>{
+        const progress=pendingProgress;
+        if(complete&&progress&&(progress.textAnchor||progress.progress>0)){
+          pendingProgress=undefined;
+          const anchor=progress.textAnchor??{character:progress.progress*props.text.replace(/\r\n?/g,"\n").length,fraction:0};
+          const maximum=Math.max(0,headerHeight()+snapshot.layout.height+footerHeight()-props.height);
+          const offset=offsetForDocumentAnchor(snapshot.layout,anchor,headerHeight(),maximum);
+          // Commit geometry and saved position together, so the window mounts
+          // only the saved viewport. Later native/image reflows retain its keys.
+          batch(()=>{setPrepared({...snapshot,complete,scope:source});scroller.scrollTo(offset,{immediate:true});});
+          lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);
+        }else setPrepared({...snapshot,complete,scope:source});
+      }});
     void task.done.catch(error=>logConsole.warn("Reader layout preparation",String(error)));
     onCleanup(()=>task.cancel());
   });
-  const layout=createMemo(()=>{importedRevision();return imported?.layout()??prepared()?.layout??layoutContent(props.blocks,props.width-28,props.fontSize,ratios(),props.preset);});
+  const layout=createMemo(()=>{importedRevision();return imported?.layout()??prepared()?.layout??{rows:[],height:0,textLength:0};});
 
   const [systemCarets,setSystemCarets]=createSignal<ReadonlyMap<ReaderRow,readonly number[]>>(new Map());
   const highlightRects=createMemo(()=>contentHighlightRects(layout(),imported&&props.highlight?.importedChunkIndex!==undefined?{...props.highlight,contentBlockIndex:props.highlight.importedChunkIndex}:props.highlight,props.width-28,(text,slot)=>getOps().measureText(text,slot),systemCarets()));
@@ -189,6 +224,23 @@ export function ReaderBody(props:{
     const active=props.active;
     untrack(()=>{lastFrame=0;controller.setBackground(!active||!foreground);if(!active){save();if(tapTimer){tapTimer();tapTimer=undefined;}}});
   });
+  let pendingProgress:Awaited<ReturnType<typeof store.load>>|undefined;
+  let restoreTimer:ReturnType<typeof delay>|undefined;
+  const restoreProgress=()=>{
+    if(!pendingProgress||disposed||imported||!prepared()?.complete||restoreTimer)return;
+    // Publishing the first window and mounting the saved window are separate
+    // host turns. The source anchor stays pending until complete geometry exists.
+    restoreTimer=delay(1);
+    void restoreTimer.result.then(()=>{
+      restoreTimer=undefined;
+      if(!pendingProgress||disposed||!prepared()?.complete)return;
+      const progress=pendingProgress;pendingProgress=undefined;
+      const anchor=progress.textAnchor??{character:progress.progress*props.text.replace(/\r\n?/g,"\n").length,fraction:0};
+      scroller.scrollTo(!progress.textAnchor&&progress.progress<=0?0:offsetForDocumentAnchor(layout(),anchor,headerHeight(),max()),{immediate:true});
+      lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);
+    },()=>{restoreTimer=undefined;});
+  };
+  createEffect(()=>{prepared();untrack(restoreProgress);});
   onMount(()=>{
     void store.load(Number(props.articleId)).then(async progress=>{
       if(disposed)return;
@@ -200,9 +252,7 @@ export function ReaderBody(props:{
         scroller.scrollTo(!saved&&progress.progress<=0?0:imported.offset(anchor,headerHeight(),max()),{immediate:true});
         lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);return;
       }
-      const anchor=progress.textAnchor??{character:progress.progress*props.text.replace(/\r\n?/g,"\n").length,fraction:0};
-      scroller.scrollTo(!progress.textAnchor&&progress.progress<=0?0:offsetForDocumentAnchor(layout(),anchor,headerHeight(),max()),{immediate:true});
-      lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);
+      pendingProgress=progress;restoreProgress();
     }).catch(error=>{if(!disposed){setRestored(true);props.onError(String(error));}});
   });
   onFrame(()=>{
@@ -230,13 +280,13 @@ export function ReaderBody(props:{
     foreground=event.state==="active";lastFrame=0;controller.setBackground(!foreground||!props.active);
     if(!foreground)void save();
   });
-  onCleanup(()=>{void save();disposed=true;imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  onCleanup(()=>{void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
   function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createWindowValue(raw);return row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,raw(),positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>;}};}
   const indexedEntries=createMemo<IndexedScrollEntries>(()=>{
     const snapshot=prepared();
-    if(snapshot&&!imported)return {...snapshot,scope:props.blocks};
+    if(snapshot&&!imported)return snapshot;
     const entries=layout().rows.map(makeEntry),indices=new Map<string,number>();
     entries.forEach((entry,index)=>indices.set(entry.key as string,index));
     return {entries,indices,scope:blocks()};
