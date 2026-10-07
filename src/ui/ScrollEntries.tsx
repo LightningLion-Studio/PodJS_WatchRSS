@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {createIndexedWindowSource,createWindowedList,visibleWindowRange,type IndexedWindowEntries} from "@podjs/framework/windowed-list";
 import {routeActivity} from './route-activity.tsx';
 import {routeMemory} from '../navigation/activity-navigation.ts';
@@ -13,7 +14,7 @@ export interface ScrollEntry { height: number; render: (current?:()=>ScrollEntry
 export interface PositionedScrollEntry extends ScrollEntry {top:number}
 export type IndexedScrollEntries=IndexedWindowEntries<PositionedScrollEntry,unknown>;
 /** Variable-height, windowed column; the clipping viewport never translates. */
-export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; indexedEntries?:IndexedScrollEntries; footerEntries?:ScrollEntry[]; gap?: number; padding?: number; verticalPadding?: number; retainRows?:number; fixed?: boolean; controller?: Scroller; inputActive?: () => boolean; accessibilityLabel?:string; onRefresh?: () => void; onManualScroll?:()=>void; onTap?:(contact:GestureContact)=>boolean|void; onLongPress?: (contact: GestureContact) => void; onScrollStateChange?:(scrolling:boolean)=>void; onOffsetChange?:(previous:number,current:number)=>void; onSettledRange?:(first:number,last:number)=>void; settleKey?:unknown; ref?: (handle: {scroller: Scroller}) => void }) {
+function ScrollEntriesImpl(props: { height: number; entries: ScrollEntry[]; indexedEntries?:IndexedScrollEntries; footerEntries?:ScrollEntry[]; gap?: number; padding?: number; verticalPadding?: number; retainRows?:number; fixed?: boolean; controller?: Scroller; inputActive?: () => boolean; accessibilityLabel?:string; onRefresh?: () => void; onManualScroll?:()=>void; onTap?:(contact:GestureContact)=>boolean|void; onLongPress?: (contact: GestureContact) => void; onScrollStateChange?:(scrolling:boolean)=>void; onOffsetChange?:(previous:number,current:number)=>void; onSettledRange?:(first:number,last:number)=>void; settleKey?:unknown; ref?: (handle: {scroller: Scroller}) => void }) {
   let viewport: NodeMirror | undefined;
   const rows = createMemo(() => {
     if(props.indexedEntries)return createIndexedWindowSource(props.indexedEntries,props.entries,props.footerEntries??[],{padding:props.verticalPadding??props.padding??18,gap:props.gap??6});
@@ -83,3 +84,5 @@ export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; i
     </View>
   </View>;
 }
+
+export function ScrollEntries(props:Parameters<typeof ScrollEntriesImpl>[0]) {return traceServiceWork("navigation.ScrollEntries",()=>ScrollEntriesImpl(props));}

@@ -156,13 +156,13 @@ export default function WatchRSS(props: {
   const [resumeReady, setResumeReady] = createSignal(false);
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
-  const saveActivity=()=>untrack(()=>{
+  const saveActivity=()=>traceServiceWork("navigation.saveActivity",()=>untrack(()=>{
     if(!resumeReady())return;
-    for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();
-    resumeStore.save(resumeTargetForStack(stack()));
+    traceServiceWork("navigation.checkpoints",()=>{for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();});
+    traceServiceWork("navigation.resume",()=>resumeStore.save(resumeTargetForStack(stack())));
     const next=captureActivityNavigation(activityStateHub.read(),stack());
     void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
-  });
+  }));
   const informationActivity=new InformationActivity(saveActivity,error=>logConsole.warn('Information restore',String(error)));
   onCleanup(()=>informationActivity.close());
   const [playingSource, setPlayingSource] = createSignal<PlaybackSource>();
@@ -187,7 +187,7 @@ export default function WatchRSS(props: {
   };
   const motion = new BackMotion(width);
   const [backOffset, setBackOffset] = createSignal(0);
-  function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>setPageImpl(next,data)); }
+  function setPage(next: Page,data: Partial<Entry> = {}) { return traceServiceWork("navigation.setPage",()=>kv.batch(()=>setPageImpl(next,data))); }
   function setPageImpl(next: Page, data: Partial<Entry> = {}) {
     if(next==="debug-tools"&&!debugGate.allowed)return;
     if (
@@ -195,9 +195,9 @@ export default function WatchRSS(props: {
       motion.phase !== "idle"
     )
       return;
-    checkpointInformationSnapshot(current());
-    current().list?.scroller.stop();
-    setStack((entries) => [...entries, { page: next, ...data }]);
+    traceServiceWork("navigation.informationCheckpoint",()=>checkpointInformationSnapshot(current()));
+    traceServiceWork("navigation.stopList",()=>current().list?.scroller.stop());
+    traceServiceWork("navigation.setStack",()=>setStack((entries) => [...entries, { page: next, ...data }]));
   }
   function finishPopPage(leaving: Entry) {
     if (current() !== leaving || stack().length <= 1) return false;
@@ -547,7 +547,6 @@ export default function WatchRSS(props: {
   createEffect(() => {
     const entries = stack();
     if (resumeReady()) {
-      resumeStore.save(resumeTargetForStack(entries));
       informationActivity.prune(entries);saveActivity();
     }
   });

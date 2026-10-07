@@ -1,3 +1,5 @@
+import {projectJsonAsync} from "@podjs/framework/json";
+import {yieldWorkTurn} from "@podjs/framework/text-layout";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {appLogger} from '../logs/app-logger.ts';
 import {logPlatformId} from '../logs/fields.ts';
@@ -15,8 +17,11 @@ export class DouyinFeedStore {
   private writes: Promise<void> = Promise.resolve();
   constructor(private storage: DouyinSecureStorage) {}
   async read(key: string): Promise<RecentFeed> {
-    const raw = await this.storage.get(key);
-    try { const value = traceServiceWork("douyin.store.parse",()=>JSON.parse(raw ?? "null"),raw?.length??0); if (!value || !Array.isArray(value.items)) return EMPTY(); const items = traceServiceWork("douyin.store.normalize",()=>normalizeItems(value.items)).slice(0, key === QUEUE_KEY ? 200 : 40); return { items, cursor: typeof value.cursor === "string" ? value.cursor : null, hasMore: value.hasMore === true, anchorAwemeId: items.some(x => x.awemeId === value.anchorAwemeId) ? value.anchorAwemeId : null, savedAtMillis: Number(value.savedAtMillis) || 0, resolved: value.resolved && typeof value.resolved === "object" ? value.resolved : {} }; } catch { return EMPTY(); }
+    // Leave the cookie completion before synchronous KV decoding, then leave
+    // that completion before adopting cached JSON. No storage lifetime cache.
+    await yieldWorkTurn().result;
+    const raw = await traceServiceWork("douyin.store.get",()=>this.storage.get(key));
+    try { const value = await projectJsonAsync(raw ?? "null",{items:[null],cursor:null,hasMore:null,anchorAwemeId:null,savedAtMillis:null,resolved:null}) as Record<string,any> | null; if (!value || !Array.isArray(value.items)) return EMPTY(); const items = traceServiceWork("douyin.store.normalize",()=>normalizeItems(value.items)).slice(0, key === QUEUE_KEY ? 200 : 40); return { items, cursor: typeof value.cursor === "string" ? value.cursor : null, hasMore: value.hasMore === true, anchorAwemeId: items.some(x => x.awemeId === value.anchorAwemeId) ? value.anchorAwemeId : null, savedAtMillis: Number(value.savedAtMillis) || 0, resolved: value.resolved && typeof value.resolved === "object" ? value.resolved : {} }; } catch { return EMPTY(); }
   }
   async bootstrap(): Promise<RecentFeed> {
     await this.writes;

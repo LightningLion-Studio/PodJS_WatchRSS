@@ -9,7 +9,7 @@ import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 
 /** Title page owns no player; the single host session starts only on entering the flow. */
-export function ImmersiveEntry(props: DouyinScreenProps) {
+function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[logged,setLogged]=createSignal(true);
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
   const active=()=>!disposed&&(props.active??true);
@@ -71,3 +71,5 @@ export function ImmersiveEntry(props: DouyinScreenProps) {
     <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Text class="text-base text-[#f5f5f5]">{logged()?"↑":"登录"}</Text></View>
   </View>;
 }
+
+export function ImmersiveEntry(props:Parameters<typeof ImmersiveEntryImpl>[0]) {return traceServiceWork("navigation.ImmersiveEntry",()=>ImmersiveEntryImpl(props));}

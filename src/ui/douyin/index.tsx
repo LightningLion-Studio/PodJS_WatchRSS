@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import { DouyinFavoriteController } from '../../douyin/favorite.ts';
 import { DouyinRssFeedController, type DouyinRssFeedSnapshot } from '../../douyin/rss-feed.ts';
 import { DouyinActionsController, type DouyinActionDone } from '../../douyin/actions.ts';
@@ -350,7 +351,7 @@ function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
-export function DouyinScreen(props: DouyinScreenProps) {
+function DouyinScreenImpl(props: DouyinScreenProps) {
   return <Show when={props.route} keyed>{route => {
     switch (route.name) {
       case "entry": return <Show when={props.settings.originalContentEnabled} fallback={<FeedScreen {...props} />}><ImmersiveEntry {...props} /></Show>;
@@ -368,3 +369,5 @@ export function DouyinScreen(props: DouyinScreenProps) {
 }
 
 export default DouyinScreen;
+
+export function DouyinScreen(props:Parameters<typeof DouyinScreenImpl>[0]) {return traceServiceWork("navigation.DouyinScreen",()=>DouyinScreenImpl(props));}
