@@ -1,4 +1,4 @@
-import {decodeFrame,encodeFrame,MAX_FRAME_BYTES,type JsonObject} from './protocol.ts';
+import {decodeFrameAsync,encodeFrameAsync,MAX_FRAME_BYTES,type JsonObject} from './protocol.ts';
 import type {SyncFrameConnection,TransferByteProgress} from './session.ts';
 export const TRANSFER_CHUNK_BYTES=16*1024;
 export interface SyncByteStream {
@@ -24,7 +24,7 @@ export class StreamFrameConnection implements SyncFrameConnection {
   try{
    const header=new Uint8Array(4);await this.readInto(header,deadline,false);this.progress?.({direction:'read',bytes:4});
    const length=new DataView(header.buffer).getInt32(0,false);if(length<1||length>MAX_FRAME_BYTES)throw new Error('Sync frame length out of range');
-   const frame=new Uint8Array(length+4);frame.set(header);await this.readInto(frame.subarray(4),deadline);return decodeFrame(frame);
+   const frame=new Uint8Array(length+4);frame.set(header);await this.readInto(frame.subarray(4),deadline);return await decodeFrameAsync(frame,{cancelled:()=>this.closed});
   }catch(error){await this.close();throw error;}finally{this.reading=false;}
  }
  private async readInto(target:Uint8Array,deadline:number,report=true):Promise<void>{
@@ -40,7 +40,7 @@ export class StreamFrameConnection implements SyncFrameConnection {
  async writeFrame(frame:JsonObject):Promise<void>{
   if(this.closed)throw new Error('Sync connection closed');if(this.writing)throw new Error('Concurrent sync frame writes');this.writing=true;
   try{
-   const bytes=encodeFrame(frame);
+   const bytes=await encodeFrameAsync(frame,{cancelled:()=>this.closed});
    const write=async(part:Uint8Array)=>{if(this.closed)throw new Error('Sync connection closed');await this.stream.write(part);if(this.closed)throw new Error('Sync connection closed');this.progress?.({direction:'write',bytes:part.length});};
    await write(bytes.subarray(0,4));
    for(let i=4;i<bytes.length;i+=TRANSFER_CHUNK_BYTES)await write(bytes.subarray(i,i+TRANSFER_CHUNK_BYTES));

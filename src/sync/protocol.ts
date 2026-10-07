@@ -1,3 +1,5 @@
+import {encodeUtf8,encodeBase64,decodeBase64} from '@podjs/framework/bytes';
+import {encodeUtf8Async,decodeUtf8Async,type CodecWorkOptions} from '@podjs/framework/bytes';
 import {parseWireJson} from "./wire-json.ts";
 /** Pure TypeScript representation of the Android BluetoothSyncProtocol and the
  * wire-level parts of LibrarySyncPayload. It deliberately does not open a
@@ -27,22 +29,7 @@ export const PHASE_COMPLETE = "complete";
 export type JsonObject = Record<string, unknown>;
 export type Sha256 = (bytes: Uint8Array) => Promise<string>;
 
-function utf8Encode(value: string): Uint8Array {
-  const out: number[] = [];
-  for (let i = 0; i < value.length; i++) {
-    let code = value.charCodeAt(i);
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const low = value.charCodeAt(++i);
-      if (!Number.isFinite(low) || low < 0xdc00 || low > 0xdfff) throw new Error("invalid UTF-16 surrogate");
-      code = 0x10000 + ((code - 0xd800) << 10) + low - 0xdc00;
-    } else if (code >= 0xdc00 && code <= 0xdfff) throw new Error("invalid UTF-16 surrogate");
-    if (code <= 0x7f) out.push(code);
-    else if (code <= 0x7ff) out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
-    else if (code <= 0xffff) out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
-    else out.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
-  }
-  return new Uint8Array(out);
-}
+const utf8Encode=(value:string)=>encodeUtf8(value,'strict');
 
 export function decodeSyncUtf8(bytes: Uint8Array): string {
   const parts:string[]=[],units:number[]=[];
@@ -74,12 +61,27 @@ export function encodeFrame(payload: JsonObject): Uint8Array {
   return frame;
 }
 
+/** Transport callers yield between bounded encoding pieces and can close/cancel. */
+export async function encodeFrameAsync(payload:JsonObject,options:CodecWorkOptions={}):Promise<Uint8Array>{
+  const body=await encodeUtf8Async(JSON.stringify(payload),'strict',options);
+  if(body.length<1||body.length>MAX_FRAME_BYTES)throw new RangeError(`sync frame length out of range: ${body.length}`);
+  const frame=new Uint8Array(4+body.length);new DataView(frame.buffer).setInt32(0,body.length,false);frame.set(body,4);return frame;
+}
+
 export function decodeFrame(frame: Uint8Array): JsonObject {
   if (frame.byteLength < LENGTH_PREFIX_BYTES) throw new Error("truncated sync frame prefix");
   const length = new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getInt32(0, false);
   if (length < 1 || length > MAX_FRAME_BYTES) throw new RangeError(`sync frame length out of range: ${length}`);
   if (frame.byteLength !== LENGTH_PREFIX_BYTES + length) throw new Error("truncated or trailing sync frame bytes");
   return parseWireJson(decodeSyncUtf8(frame.subarray(LENGTH_PREFIX_BYTES)));
+}
+
+export async function decodeFrameAsync(frame:Uint8Array,options:CodecWorkOptions={}):Promise<JsonObject>{
+  if(frame.length<4)throw new Error('truncated sync frame prefix');
+  const length=new DataView(frame.buffer,frame.byteOffset,frame.byteLength).getInt32(0,false);
+  if(length<1||length>MAX_FRAME_BYTES)throw new RangeError(`sync frame length out of range: ${length}`);
+  if(frame.length!==4+length)throw new Error('truncated or trailing sync frame bytes');
+  return parseWireJson(await decodeUtf8Async(frame.subarray(4),options));
 }
 
 /** Incremental reassembler for arbitrary transport read boundaries. */
@@ -158,27 +160,8 @@ export function validateLibraryPayload(payload: JsonObject): void {
 
 export interface Chunk { index: number; hash: string; data: string; }
 
-export function decodeChunkData(data:string):Uint8Array {
-  // java.util.Base64 basic decoder accepts unpadded groups of two or three,
-  // rejects whitespace, misplaced padding and one-character trailing groups.
-  if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$/.test(data))throw new Error("invalid base64 chunk data");
-  const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",raw=data.replace(/=+$/,"");
-  const out=new Uint8Array(Math.floor(raw.length*6/8));let accumulator=0,bits=0,index=0;
-  for(const c of raw){accumulator=(accumulator<<6)|alphabet.indexOf(c);bits+=6;if(bits>=8){bits-=8;out[index++]=(accumulator>>bits)&255;}}
-  return out;
-}
-
-export function encodeChunkData(bytes: Uint8Array): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const groups=new Array<string>(Math.ceil(bytes.length/3));
-  for(let i=0,group=0;i<bytes.length;i+=3,group++){
-    const a=bytes[i]!,b=i+1<bytes.length?bytes[i+1]!:0,c=i+2<bytes.length?bytes[i+2]!:0;
-    groups[group]=alphabet[a>>2]!+alphabet[((a&3)<<4)|(b>>4)]!+
-      (i+1<bytes.length?alphabet[((b&15)<<2)|(c>>6)]!:'=')+
-      (i+2<bytes.length?alphabet[c&63]!:'=');
-  }
-  return groups.join('');
-}
+export const decodeChunkData=decodeBase64;
+export const encodeChunkData=encodeBase64;
 
 export async function verifyChunk(chunk: Chunk, sha256: Sha256): Promise<Uint8Array> {
   const bytes = decodeChunkData(chunk.data);

@@ -66,6 +66,19 @@ test('production ScrollEntries restores late rows, yields to touch, and reuses i
  mount(restored,()=>createComponent(ScrollEntries,{height:100,entries:[{height:900,render:()=>null}],gap:0,padding:0,ref:v=>next=v.scroller}));frame();expect(next.offset()).toBe(40);
 });
 
+test('production indexed ScrollEntries keeps a pending local image owner across layout publications and size reflow',()=>{
+ const key={},scope={},[height,setHeight]=createSignal(260);let mounts=0,releases=0,observed=0;
+ const Image=()=>{mounts++;onCleanup(()=>releases++);return element('Image')({get height(){observed=height();return observed;}});};
+ const render=()=>createComponent(Image as any,{}),[rows,setRows]=createSignal([{key,top:0,height:260,render}]);
+ const source=createMemo(()=>({entries:rows(),indices:new Map([[key,0]]),scope}));
+ const f=mount({page:'note-detail'},()=>createComponent(ScrollEntries,{height:233,entries:[],get indexedEntries(){return source();},gap:0,padding:0}));
+ for(let i=0;i<9;i++)setRows([{key,top:i,height:260,render}]);
+ expect(mounts).toBe(1);expect(releases).toBe(0);
+ setHeight(140);setRows([{key,top:9,height:140,render}]);
+ const image=nodes(f.root).find(node=>node.kind==='Image')!;expect(image.props.height).toBe(140);expect(mounts).toBe(1);
+ f.dispose();expect(releases).toBe(1);
+});
+
 test('production AddRss preserves inline draft across configuration and drops it after process loss',async()=>{
  const entry:ActivityRoute={page:'add-rss',addUrl:'intent URL'};let change!:(v:string)=>void,closed=0;
  const props={width:233,height:233,active:true,initialUrl:'intent URL',input:async()=>null,onAdded:()=>{},onExisting:()=>{},openInlineInput:async(_v:any,_b:any,onChange:any)=>{change=onChange;return {close:async()=>{closed++;}};}};
@@ -199,7 +212,7 @@ test('inactive page invalidates a delayed recovery probe and ordinary unsupporte
 mock.module('../src/ui/DownloadPhoneAppDialog.tsx',()=>({DownloadPhoneAppDialog:element('Download')}));
 mock.module('../src/ui/DeleteConfirmDialog.tsx',()=>({DeleteConfirmDialog:element('Delete')}));
 mock.module('../src/ui/ReaderBackground.tsx',()=>({ReaderBackground:element('Background')}));
-mock.module('../src/ui/NotePreview.tsx',()=>({notePreviewEntries:()=>[]}));
+mock.module('../src/ui/NotePreview.tsx',()=>({notePreviewEntries:()=>[],notePreviewEntrySteps:function*(){}}));
 mock.module('../src/ui/reader-fonts.ts',()=>({useReaderFonts:()=>()=>undefined}));
 mock.module('@podjs/framework/text',()=>({SystemTextLine:element('SystemText')}));
 const {NoteDetailScreen}=await import('../src/ui/NotesScreen.tsx');

@@ -1,11 +1,14 @@
+import {prepareTextLayout} from '@podjs/framework/text-layout';
+import {prepareNotePreviewSteps,noteBlockSourceOffsets,type NotePreviewBlock} from '../notes/preview.ts';
 import {modalInputKey} from './modal-input.ts';
 import {restoredSignal,booleanState} from './route-activity.tsx';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('NotesScreen');
-import {notePreviewEntries} from './NotePreview.tsx';
-import {noteImageDisplayHeight} from '../notes/presentation.ts';
+import {notePreviewEntrySteps,type NotePreviewEntry} from './NotePreview.tsx';
+import {createKeyedMemo} from '@podjs/framework/keyed-memo';
+import {noteImageDisplayHeight,noteTextRows} from '../notes/presentation.ts';
 import type {ModalInput,ModalInputRecovery} from './service.ts';
-import {noteBodyLayoutBlocks} from '../notes/native-layout-input.ts';
+import {noteBodyLayoutSteps} from '../notes/native-layout-input.ts';
 import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup, on } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { createScroller, type Scroller } from "@pocketjs/framework/kinetics";
@@ -103,16 +106,40 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   const fonts=useReaderFonts();
   const [nativeBody,setNativeBody]=createSignal<ReadonlyMap<string,readonly ParagraphLine[]>>(new Map());
   const [nativeHeader,setNativeHeader]=createSignal<NoteHeaderLayout|undefined>();
+  const previewCache=createKeyedMemo<string>();
+  const [previewRows,setPreviewRows]=createSignal<NotePreviewEntry[]>([]);
+  const previewIndexed=createMemo(()=>{let top=0;const indices=new Map<unknown,number>();const entries=previewRows().map((entry,index)=>{const key=entry.key??entry;indices.set(key,index);const row={...entry,key,top};top+=entry.height;return row;});return {entries,indices,scope:previewCache};});
+  const [preparedSource,setPreparedSource]=createSignal<string>();
+  let previewSource:string|undefined,previewReady=false;
+  const openDownload=()=>setDownload(true);
+  const imageSize=(path:string,width:number,height:number)=>{const next=noteImageDisplayHeight(props.width-28,width,height);if(imageHeights().get(path)!==next)setImageHeights(previous=>new Map(previous).set(path,next));};
+  onCleanup(()=>previewCache.clear());
   createEffect(()=>{
-    const current=note(),preset=props.preset,width=props.width-28,resolveFont=fonts();
+    const current=note(),active=props.active!==false&&!editing();
+    if(previewSource!==current?.markdown){previewSource=current?.markdown;previewReady=false;previewCache.clear();setPreviewRows([]);setPreparedSource(undefined);}
+    if(!current||!active||previewReady)return;
+    let work=0;
+    const task=prepareTextLayout(prepareNotePreviewSteps(current.markdown),{key:()=>work++,entry:()=>undefined,publish:snapshot=>{
+      previewReady=true;const blocks=snapshot.layout;previewCache.get('parse',[current.markdown],()=>({blocks,offsets:noteBlockSourceOffsets(current.markdown,blocks)}));setPreparedSource(current.markdown);
+    }});
+    void task.done.catch(error=>logConsole.warn('Note parse',String(error)));onCleanup(()=>task.cancel());
+  });
+  createEffect(()=>{
+    const current=note(),prepared=preparedSource(),native=nativeBody(),heights=imageHeights(),preset=props.preset;
+    if(!current||prepared!==current.markdown||props.active===false||editing())return;
+    const task=prepareTextLayout(notePreviewEntrySteps(current.markdown,props.width-28,props.onImage,preset,native,openDownload,heights,imageSize,previewCache),{key:entry=>entry,entry:entry=>entry,publish:snapshot=>setPreviewRows(snapshot.entries)});
+    void task.done.catch(error=>logConsole.warn('Note preview layout',String(error)));
+    onCleanup(()=>task.cancel());
+  });
+  createEffect(()=>{
+    const current=note(),prepared=preparedSource(),preset=props.preset,width=props.width-28,resolveFont=fonts();
     setNativeBody(new Map());
     setNativeHeader(undefined);
-    if(!current||!preset||!hasCapability('text.layout'))return;
+    if(!current||prepared!==current.markdown||!preset||props.active===false||editing()||!hasCapability('text.layout'))return;
     const titleStyle=presetContentFont(preset,'title');
     const titleLines=watchTitleLines(current.title||'未命名笔记',width,value=>getOps().measureText(value,titleStyle.fontSlot)*titleStyle.scale);
     const titleBlock={type:'text' as const,style:'title' as const,text:titleLines.join('\n')};
     const subtitleBlock={type:'text' as const,style:'subtitle' as const,text:noteMetadata(current)};
-    const bodyBlocks=noteBodyLayoutBlocks(current.markdown);
     const metrics=getDisplayMetrics(),scale=metrics.physicalWidth/metrics.logicalWidth;
     let headerRequestIndex=0;
     const headerTask=requestReaderLayout([titleBlock,subtitleBlock],width,preset.body.fontSizeSp,scale,preset,args=>{
@@ -122,12 +149,21 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
       const title=layouts.get(titleBlock),subtitle=layouts.get(subtitleBlock);
       if(title?.every(line=>line.height!==undefined)&&subtitle?.every(line=>line.height!==undefined))setNativeHeader({title:title.reduce((sum,line)=>sum+line.height!,0),subtitle:subtitle.reduce((sum,line)=>sum+line.height!,0),titleLines:title,subtitleLines:subtitle});
     },error=>logConsole.warn('Note header layout',String(error)),resolveFont);
-    const bodyTask=bodyBlocks.length?requestReaderLayoutBatched(bodyBlocks,width,preset.body.fontSizeSp,scale,preset,args=>textLayout.layoutBatch(args),layouts=>{
-      const byText=new Map<string,readonly ParagraphLine[]>();
-      for(const block of bodyBlocks){const lines=layouts.get(block);if(lines?.length)byText.set(block.text,lines);}
-      setNativeBody(byText);
-    },error=>logConsole.warn('Note body layout',String(error)),resolveFont,{firstBlocks:4,batchBlocks:16}):undefined;
-    onCleanup(()=>{headerTask.cancel();bodyTask?.cancel();});
+    let bodyTask:ReturnType<typeof requestReaderLayoutBatched>|undefined;
+    const steps=(function*(){
+      const prepared=previewCache.peek<{blocks:NotePreviewBlock[]}>('parse',[current.markdown])!;
+      yield* noteBodyLayoutSteps(current.markdown,prepared.blocks,(block,index)=>previewCache.get('text:'+index,[block],()=>noteTextRows(block.markup,block.html)));
+    })();
+    const bodyPrepare=prepareTextLayout(steps,{key:block=>block.text,entry:block=>block,publish:({entries:bodyBlocks})=>{
+      if(!bodyBlocks.length)return;
+      bodyTask=requestReaderLayoutBatched(bodyBlocks,width,preset.body.fontSizeSp,scale,preset,args=>textLayout.layoutBatch(args),layouts=>{
+        const byText=new Map<string,readonly ParagraphLine[]>();
+        for(const block of bodyBlocks){const lines=layouts.get(block);if(lines?.length)byText.set(block.text,lines);}
+        setNativeBody(byText);
+      },error=>logConsole.warn('Note body layout',String(error)),resolveFont,{firstBlocks:4,batchBlocks:16});
+    }});
+    void bodyPrepare.done.catch(error=>logConsole.warn('Note body prepare',String(error)));
+    onCleanup(()=>{headerTask.cancel();bodyPrepare.cancel();bodyTask?.cancel();});
   });
   const [editButtonVisible,setEditButtonVisible]=createSignal(true);
   const [editorAnchor,setEditorAnchor]=createSignal<number|undefined>();
@@ -158,15 +194,11 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     {height:10,render:()=>null},
     {height:subtitleHeight,render:()=>measured?.subtitleLines.length&&hasCapability('text.raster')?<View class="absolute inset-0">{measured.subtitleLines.map((line,index)=>{const text=noteMetadata(n).slice(line.start,line.visibleEnd),top=measured.subtitleLines.slice(0,index).reduce((sum,value)=>sum+(value.height??0),0),height=line.height??subtitleStyle.lineHeight;return <View class="absolute left-[0] right-[0]" style={{insetT:top,height}}><SystemTextLine pixelScale={pixelScale} options={{...line.paragraph,text,widthPx:Math.ceil(contentWidth*pixelScale),heightPx:Math.ceil(height*pixelScale),baselinePx:Math.ceil((line.baseline??height*.8)*pixelScale),fontSizePx:line.paragraph?.fontSizePx??subtitleStyle.scale*18*pixelScale,paragraph:line.paragraph}} fallback={<Text class="absolute" style={{width:contentWidth/subtitleStyle.scale,height:height/subtitleStyle.scale,fontSlot:subtitleStyle.fontSlot,scale:subtitleStyle.scale,originX:-.5,originY:-.5,lineHeight:height/subtitleStyle.scale,textColor:subtitleColor()}}>{text}</Text>}/></View>;})}</View>:<Text class="absolute" style={{width:contentWidth/subtitleStyle.scale,height:subtitleHeight/subtitleStyle.scale,fontSlot:subtitleStyle.fontSlot,scale:subtitleStyle.scale,originX:-.5,originY:-.5,lineHeight:subtitleStyle.lineHeight/subtitleStyle.scale,textColor:subtitleColor()}}>{noteMetadata(n)}</Text>},
     {height:10,render:()=>null},
-    ...notePreviewEntries(n.markdown,contentWidth,props.onImage,props.preset,nativeBody(),()=>setDownload(true),imageHeights(),(path,width,height)=>{
-      const next=noteImageDisplayHeight(contentWidth,width,height);
-      if(imageHeights().get(path)===next)return;
-      setImageHeights(previous=>new Map(previous).set(path,next));
-    }),
+    ...previewRows(),
     {height:42,render:()=>null}
   ]; });
   const readerScroller=createScroller({max:()=>Math.max(0,44+entries().reduce((sum,row)=>sum+row.height,0)-props.height)});
-  return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries()} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack})}/><Show when={editButtonVisible()}><View class="absolute left-[0] right-[0] bottom-[0] h-[56] items-center justify-center"><View onPress={edit} focusable accessibilityRole="button" accessibilityLabel="编辑备忘录" class="h-[32] w-[44] rounded-[47] items-center justify-center" style={{bgColor:editBackground()}}><Text class="text-sm" style={{textColor:bodyColor()}}>编辑</Text></View></View></Show><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
+  return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><Show when={editing()} fallback={<Show when={note()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">备忘录不存在</Text></View>}><View class="absolute inset-0">{props.preset&&props.backgroundSnapshot&&<ReaderBackground background={props.preset.background} snapshot={props.backgroundSnapshot} width={props.width} height={props.height} active={props.active??true}/>}<ScrollEntries controller={readerScroller} height={props.height} entries={entries().slice(0,4)} indexedEntries={previewIndexed()} footerEntries={entries().slice(-1)} padding={14} verticalPadding={22} gap={0} inputActive={()=>!download()} onOffsetChange={(previous,current)=>setEditButtonVisible(current<=0||current<previous)} ref={value=>props.ref?.({...value,goBack})}/><Show when={editButtonVisible()}><View class="absolute left-[0] right-[0] bottom-[0] h-[56] items-center justify-center"><View onPress={edit} focusable accessibilityRole="button" accessibilityLabel="编辑备忘录" class="h-[32] w-[44] rounded-[47] items-center justify-center" style={{bgColor:editBackground()}}><Text class="text-sm" style={{textColor:bodyColor()}}>编辑</Text></View></View></Show><Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show></View></Show>}>
     <NoteInlineEditor width={props.width} height={props.height} repository={props.repository} initial={editorSeed()} initialSelection={editorAnchor()} active={props.active} fallbackInput={props.input} inputRecovery={props.inputRecovery} onSaved={saved=>{setNote(saved);props.onNoteIdentity?.(saved.noteId);}} onClose={saved=>{if(saved)setNote(saved);readerScroller.scrollTo(readerScroller.offset(),{immediate:true});setEditorAnchor(undefined);if(!createdHere){setEditButtonVisible(true);setEditing(false);}else props.onBack();}} onError={message=>props.onError?.(message)} ref={(value:NoteInlineEditorHandle)=>{editorClose=value.close;props.ref?.({goBack});}}/>
   </Show></Show>;
 }

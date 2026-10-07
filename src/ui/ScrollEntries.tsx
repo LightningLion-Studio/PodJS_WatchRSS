@@ -2,7 +2,7 @@ import {createIndexedWindowSource,createWindowedList,visibleWindowRange,type Ind
 import {routeActivity} from './route-activity.tsx';
 import {routeMemory} from '../navigation/activity-navigation.ts';
 import {ScrollRestoration,validScrollSnapshot} from '../navigation/scroll-restoration.ts';
-import { For, createMemo, onCleanup, type JSX } from "solid-js";
+import { For, createMemo, onCleanup, untrack, type JSX } from "solid-js";
 import { View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture, type GestureContact } from "@pocketjs/framework/gesture";
 import { createScroller, bindDpadScroll, type Scroller } from "@pocketjs/framework/kinetics";
@@ -11,7 +11,7 @@ import { pressNode, hitNode } from "@pocketjs/framework/input";
 
 export interface ScrollEntry { height: number; render: (current?:()=>ScrollEntry) => JSX.Element; retain?:boolean; key?:unknown; data?:unknown }
 export interface PositionedScrollEntry extends ScrollEntry {top:number}
-export type IndexedScrollEntries=IndexedWindowEntries<PositionedScrollEntry,string>;
+export type IndexedScrollEntries=IndexedWindowEntries<PositionedScrollEntry,unknown>;
 /** Variable-height, windowed column; the clipping viewport never translates. */
 export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; indexedEntries?:IndexedScrollEntries; footerEntries?:ScrollEntry[]; gap?: number; padding?: number; verticalPadding?: number; retainRows?:number; fixed?: boolean; controller?: Scroller; inputActive?: () => boolean; accessibilityLabel?:string; onRefresh?: () => void; onManualScroll?:()=>void; onTap?:(contact:GestureContact)=>boolean|void; onLongPress?: (contact: GestureContact) => void; onScrollStateChange?:(scrolling:boolean)=>void; onOffsetChange?:(previous:number,current:number)=>void; onSettledRange?:(first:number,last:number)=>void; settleKey?:unknown; ref?: (handle: {scroller: Scroller}) => void }) {
   let viewport: NodeMirror | undefined;
@@ -79,7 +79,7 @@ export function ScrollEntries(props: { height: number; entries: ScrollEntry[]; i
       takeScroll();props.onManualScroll?.();scroller.scrollBy((event.actionName==="increment"?1:-1)*Math.max(1,props.height*.8),{durMs:120});
     }:undefined}>
     <View class="absolute left-[0] right-[0] top-[0]" style={{height:total(), translateY:props.fixed?0:-scroller.offset()}}>
-      <For each={visible()}>{item => <View class="absolute" style={{insetL:props.padding ?? 18,insetR:props.padding ?? 18,insetT:item.value().top,height:item.value().height}}>{item.value().render(item.value)}</View>}</For>
+      <For each={visible()}>{item => {const render=untrack(()=>item.value().render);return <View class="absolute" style={{insetL:props.padding ?? 18,insetR:props.padding ?? 18,insetT:item.value().top,height:item.value().height}}>{render(item.value)}</View>;}}</For>
     </View>
   </View>;
 }
