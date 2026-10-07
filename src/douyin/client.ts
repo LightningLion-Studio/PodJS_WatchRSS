@@ -2,7 +2,7 @@ import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure} from './errors.ts';
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems } from "./feed-store.ts";
-import { utf8Decode } from "../cloud/types.ts";
+import {decodeMediaText} from '../media/text.ts';
 import { parseDouyinDetail, parseDouyinFeed } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
 import { DouyinSavedStore } from "./saved.ts";
@@ -53,7 +53,7 @@ export class DouyinClient {
         timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
       appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
       if(r.status!==200){appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
-      const body=utf8Decode(r.body);
+      const body=await decodeMediaText(r.body);
       if(!body.trim()||body==='blocked'){
         const category=body==='blocked'?'blocked':'empty';
         appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=${category}`);
