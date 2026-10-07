@@ -1,6 +1,7 @@
+import {createMemo} from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
-import { getDisplayMetrics, getFontMetrics, hasCapability } from "@podjs/framework/watch";
+import { getDisplayMetrics, getFontMetrics, hasCapability, type FontMetrics } from "@podjs/framework/watch";
 import { SystemTextLine } from "@podjs/framework/text";
 import type { ContentStyle } from "../reader/content.ts";
 import { readerTextClass, type ReaderRow } from "../reader/content-layout.ts";
@@ -10,9 +11,32 @@ import { requiresReaderSystemText, systemTextOptions } from "../reader/system-te
 
 type TextRow = ReaderRow & { kind: "text" };
 
+/** One reader configuration owns these immutable host facts, not each line. */
+export interface ReaderTextEnvironment {
+  pixelScale: number;
+  rasterSupported: boolean;
+  fontMetrics(slot: number): FontMetrics | undefined;
+}
+export function createReaderTextEnvironment(): ReaderTextEnvironment {
+  const display = getDisplayMetrics(), fonts = new Map<number, FontMetrics>();
+  return {
+    pixelScale: display.physicalWidth / display.logicalWidth,
+    rasterSupported: hasCapability("text.raster"),
+    fontMetrics(slot) {
+      const cached = fonts.get(slot);
+      if (cached) return cached;
+      const metrics = getFontMetrics(slot);
+      // A missing font can become available after an asynchronous load.
+      if (metrics) fonts.set(slot, metrics);
+      return metrics;
+    },
+  };
+}
+
 /** The shared reader text primitive used by article, full-preview and selector rows. */
 export function ReaderTextRow(props: {
   row: TextRow;
+  environment?: ReaderTextEnvironment;
   style: ContentStyle;
   fontSize: number;
   width: number;
@@ -23,14 +47,12 @@ export function ReaderTextRow(props: {
   rasterHeightExtraPx?: number;
   onCarets?: (positions: readonly number[] | undefined) => void;
 }) {
-  const row = () => ({ ...props.row, textAlign: props.textAlign ?? props.row.textAlign });
-  const pixelScale = () => {
-    const metrics = getDisplayMetrics();
-    return metrics.physicalWidth / metrics.logicalWidth;
-  };
-  const style = () => props.preset
+  const row = createMemo(() => ({ ...props.row, textAlign: props.textAlign ?? props.row.textAlign }));
+  const environment = createMemo(() => props.environment ?? createReaderTextEnvironment());
+  const pixelScale = () => environment().pixelScale;
+  const style = createMemo(() => props.preset
     ? (props.style === "body" ? props.preset.body : resolvedReaderStyle(props.preset, props.style))
-    : { ...DEFAULT_READER_TEXT, fontSizeSp: props.fontSize };
+    : { ...DEFAULT_READER_TEXT, fontSizeSp: props.fontSize });
   const fallback = () => <Text class={readerTextClass(props.row.fontSlot)} style={{
     insetT: props.row.textOffsetY ?? 0,
     width: props.width / props.row.scale,
@@ -43,7 +65,11 @@ export function ReaderTextRow(props: {
     tracking: (props.row.tracking ?? 0) / props.row.scale,
     textAlign: props.textAlign ?? props.row.textAlign ?? 0,
   }}>{props.row.text}</Text>;
-  const raster = () => requiresReaderSystemText(props.row.text, props.preset, props.style) && hasCapability("text.raster");
+  const raster = createMemo(() => requiresReaderSystemText(props.row.text, props.preset, props.style) && environment().rasterSupported);
+  const options = createMemo(() => raster() ? {
+    ...systemTextOptions(row(), props.style, props.fontSize, props.width, pixelScale(), props.preset, environment().fontMetrics(props.row.fontSlot), props.fonts, props.profile),
+    heightPx: Math.min(1024, Math.ceil(props.row.lineHeight * pixelScale()) + (props.rasterHeightExtraPx ?? 0)),
+  } : undefined);
   const textWidth = () => Math.min(props.width, getOps().measureText(props.row.text, props.row.fontSlot) * props.row.scale);
   const left = () => (props.textAlign ?? props.row.textAlign) === 1 ? (props.width - textWidth()) / 2 : 0;
   const baseline = () => props.row.nativeBaseline ?? props.row.lineHeight * .8;
@@ -51,10 +77,7 @@ export function ReaderTextRow(props: {
     {raster()
       ? <SystemTextLine
           pixelScale={pixelScale()}
-          options={{
-            ...systemTextOptions(row(), props.style, props.fontSize, props.width, pixelScale(), props.preset, getFontMetrics(props.row.fontSlot), props.fonts, props.profile),
-            heightPx: Math.min(1024, Math.ceil(props.row.lineHeight * pixelScale()) + (props.rasterHeightExtraPx ?? 0)),
-          }}
+          options={options()!}
           onCarets={props.onCarets}
           fallback={fallback()}
         />
