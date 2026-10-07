@@ -269,6 +269,7 @@ export default function WatchRSS(props: {
     region: {
       rect: () =>
         stack().length > 1 &&
+        !disclosurePending() &&
         motion.phase !== "settling" &&
         (current().player?.canSwipeBack?.() ?? true) &&
         current().page !== "reader-image"
@@ -487,6 +488,14 @@ export default function WatchRSS(props: {
   // Native shows the first-use disclosure only once announcements and push messages are gone.
   const homeDisclosure = entryDisclosure({}, { page: "home" });
   const homeDisclosurePending = () => homeDisclosure.pending(homeNoticeVisible());
+  let homeDisclosureList: Entry["disclosureList"];
+  const disclosurePending = () => {
+    const entry = current();
+    if (entry.page === "home") return !!homeDisclosurePending();
+    if (entry.page !== "bili" && entry.page !== "douyin") return false;
+    const route = entry.page === "bili" ? entry.biliRoute : entry.douyinRoute;
+    return (route?.name ?? "entry") === "entry" && !!entryDisclosure(entry, {page:entry.page,name:"entry"}).pending();
+  };
   const dismissHomeNotice = () => {
     if (pendingPushMessages().length) {
       setPendingPushMessages([]);
@@ -1262,7 +1271,7 @@ export default function WatchRSS(props: {
     }
   });
   const removeBack = onSystemBack(() => {
-    if (page() === "home" && homeDisclosurePending()) return true;
+    if (disclosurePending()) return true;
     if (page() === "home" && dismissHomeNotice()) return true;
     if (stack().length <= 1) return false;
     if (motion.phase !== "idle") return true;
@@ -1271,6 +1280,12 @@ export default function WatchRSS(props: {
     return true;
   });
   const removeAxis = onAxisDelta(RelativeAxis.Primary, (delta: number) => {
+    if (disclosurePending()) {
+      const list = page() === "home" ? homeDisclosureList : current().disclosureList;
+      list?.scroller.scrollBy((delta * rowHeight) / (12 * RelativeAxisUnits.PerDegree), {durMs:120});
+      return;
+    }
+    if (page() === "home" && homeNoticeVisible()) return;
     if (motion.phase === "idle" && !current().player?.onCrown(delta)) {
       if (current().page === "reader") current().reader?.manualScroll();
       current().list?.scroller.scrollBy(
@@ -1747,7 +1762,7 @@ export default function WatchRSS(props: {
             />}
           </Show>
           <Show when={active() && entryPage() === "home"}>
-            <PendingDisclosure width={width} height={height} pending={homeDisclosurePending} onConfirm={homeDisclosure.confirm} />
+            <PendingDisclosure width={width} height={height} pending={homeDisclosurePending} onConfirm={homeDisclosure.confirm} ref={value => { homeDisclosureList = value; }} />
           </Show>
         </View>
       </View>

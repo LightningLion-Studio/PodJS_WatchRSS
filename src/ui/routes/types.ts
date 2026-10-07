@@ -88,6 +88,7 @@ export type RouteEntry = {
   unavailableMessage?: string;
   recommendationGroup?: string;
   list?: Pick<VirtualListHandle, "scroller">;
+  disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
   player?: {
     onCrown: (delta: number) => boolean;

@@ -142,7 +142,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
             props.entry.internalBack = () => blocked("bili") || (value.onRootBack?.() ?? false);
           }}
         />
-        <PendingDisclosure width={props.width} height={props.height} pending={() => disclosure("bili")?.pending()} onConfirm={() => disclosure("bili")?.confirm()} />
+        <PendingDisclosure width={props.width} height={props.height} pending={() => props.active() ? disclosure("bili")?.pending() : undefined} onConfirm={() => disclosure("bili")?.confirm()} ref={value => { props.entry.disclosureList = value; }} />
       </Show>
       <Show when={props.page() === "douyin"}>
         <DouyinScreen
@@ -171,7 +171,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onLogoutSuccess={props.onDouyinLogoutSuccess}
           ref={(value) => (props.entry.list = value)}
         />
-        <PendingDisclosure width={props.width} height={props.height} pending={() => disclosure("douyin")?.pending()} onConfirm={() => disclosure("douyin")?.confirm()} />
+        <PendingDisclosure width={props.width} height={props.height} pending={() => props.active() ? disclosure("douyin")?.pending() : undefined} onConfirm={() => disclosure("douyin")?.confirm()} ref={value => { props.entry.disclosureList = value; }} />
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <Show when={playerPlatform()} keyed>

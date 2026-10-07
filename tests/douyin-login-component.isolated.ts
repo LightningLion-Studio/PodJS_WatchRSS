@@ -13,7 +13,7 @@ let authOptions: any, finishAuth: (value: any) => void, rejectAuth: (error: any)
 let statusCapability = true;
 let probe: () => Promise<BrowserAvailability>, capability = true, calls: string[] = [], network: (status: InternetStatus) => void;
 mock.module('@pocketjs/framework/renderer', () => ({ createComponent, mergeProps, memo: createMemo, effect: createRenderEffect }));
-mock.module('@pocketjs/framework/components', () => ({ View: (p: Node['props']) => element('View', p), Text: (p: Node['props']) => element('Text', p), Image: (p: Node['props']) => element('Image', p) }));
+mock.module('@pocketjs/framework/components', () => ({ FocusScope: (p: Node['props']) => element('FocusScope', p), View: (p: Node['props']) => element('View', p), Text: (p: Node['props']) => element('Text', p), Image: (p: Node['props']) => element('Image', p) }));
 const realWatch = await import('@podjs/framework/watch');
 mock.module('@podjs/framework/watch', () => ({ ...realWatch, hasCapability: (name: string) => name === 'system.browser.auth' || (name === 'system.browser.auth.status' ? statusCapability : capability) }));
 const realServices = await import('@podjs/framework/services');
