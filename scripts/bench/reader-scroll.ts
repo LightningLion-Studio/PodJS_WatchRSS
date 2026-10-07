@@ -52,7 +52,7 @@ for(const [key,value] of Object.entries(pkg.exports) as [string,any][]){
  const file=typeof value==="string"?value:value.import??value.default;
  if(typeof file==="string")aliases[`@pocketjs/framework/${key.slice(2)}`]=resolve(pocket,file);
 }
-for(const name of ["watch","services","text","media-surface","debug-memory"])aliases[`@podjs/framework/${name}`]=resolve(framework,`packages/framework/src/${name}.${["text","media-surface"].includes(name)?"tsx":"ts"}`);
+for(const name of ["watch","services","text","media-surface","debug-memory","windowed-list"])aliases[`@podjs/framework/${name}`]=resolve(framework,`packages/framework/src/${name}.${["text","media-surface"].includes(name)?"tsx":"ts"}`);
 const {solidConditionalProps}=await import(resolve(pocket,"framework/compiler/solid-props.ts"));
 const classLiterals=new Set<string>();
 const native=arg("runtime","bun")==="quickjs";
@@ -61,17 +61,20 @@ const sourceRef=arg("source-ref","");
 const retainRows=arg("retain-rows","");
 const appRoot=resolve(import.meta.dir,"../..");
 const built=await Bun.build({entrypoints:[resolve(import.meta.dir,native?"reader-memory-runner.tsx":"reader-scroll-runner.ts")],outdir:dirname(output),naming:output.split("/").at(-1),target:native?"browser":"bun",format:native?"iife":"esm",conditions:["browser"],alias:aliases,minify:false,plugins:[{name:"reader-scroll-production-solid",setup(builder){
- builder.onResolve({filter:/.*/},args=>aliases[args.path]?{path:realpathSync(aliases[args.path])}:undefined);
+ builder.onResolve({filter:/.*/},args=>{
+   if(aliases[args.path])return {path:realpathSync(aliases[args.path])};
+   if(sourceRef&&args.path==="./windowed-rows.ts"&&args.importer===resolve(appRoot,"src/ui/ScrollEntries.tsx"))return {path:resolve(appRoot,"src/ui/windowed-rows.ts")};
+  });
  builder.onLoad({filter:/\.(tsx|ts|js)$/},async args=>{
   if(!args.path.includes("/src/")&&!args.path.endsWith("/solid.js")&&!(native&&args.path===resolve(import.meta.dir,"reader-memory-runner.tsx")))return;
-  let source=await Bun.file(args.path).text();
+  let source:string;
   if(sourceRef&&["src/ui/ScrollEntries.tsx","src/ui/ReaderBody.tsx","src/ui/windowed-rows.ts","src/reader/content-layout.ts"].some(name=>args.path===resolve(appRoot,name))){
    const original=Bun.spawnSync(["git","show",`${sourceRef}:${args.path.slice(appRoot.length+1)}`],{cwd:appRoot});
    if(original.exitCode!==0)throw new Error(original.stderr.toString());source=original.stdout.toString();
-  }
+  }else source=await Bun.file(args.path).text();
   if(native&&arg("layout-slices-profile","0")==="1"){
-   if(args.path===resolve(appRoot,"src/reader/layout-slices.ts"))source=source.replace("clock=options.clock??Date.now","clock=options.clock??globalThis.__readerWallClock").replace("options.onSlice?.(elapsed,count);","options.onSlice?.(elapsed,count); globalThis.__layoutSlices.turns++; globalThis.__layoutSlices.maxMs=Math.max(globalThis.__layoutSlices.maxMs,elapsed); globalThis.__layoutSlices.rows+=count;globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));");
-   if(args.path===resolve(appRoot,"src/ui/ReaderBody.tsx"))source=source.replace(",makeEntry,setPrepared)",",makeEntry,value=>{const start=globalThis.__readerWallClock();setPrepared(value);globalThis.__layoutSlices.publishes++;globalThis.__layoutSlices.publishMs=Math.max(globalThis.__layoutSlices.publishMs,globalThis.__readerWallClock()-start);globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));})");
+   if(args.path===resolve(framework,"packages/framework/src/text-layout.ts"))source=source.replace("clock=options.clock??Date.now","clock=options.clock??globalThis.__readerWallClock").replace("options.onSlice?.(elapsed,count);","options.onSlice?.(elapsed,count); globalThis.__layoutSlices.turns++; globalThis.__layoutSlices.maxMs=Math.max(globalThis.__layoutSlices.maxMs,elapsed); globalThis.__layoutSlices.rows+=count;globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));");
+   if(args.path===resolve(appRoot,"src/ui/ReaderBody.tsx"))source=source.replace("publish:setPrepared","publish:value=>{const start=globalThis.__readerWallClock();setPrepared(value);globalThis.__layoutSlices.publishes++;globalThis.__layoutSlices.publishMs=Math.max(globalThis.__layoutSlices.publishMs,globalThis.__readerWallClock()-start);globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));}");
    if(sourceRef&&args.path===resolve(appRoot,"src/ui/ReaderBody.tsx"))source=source.replace("args=>textLayout.layout(args),setNativeLayouts,error", "args=>textLayout.layout(args),value=>{const start=globalThis.__readerWallClock();setNativeLayouts(value);globalThis.__layoutSlices.publishes++;globalThis.__layoutSlices.publishMs=Math.max(globalThis.__layoutSlices.publishMs,globalThis.__readerWallClock()-start);globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));},error");
    if(args.path===resolve(import.meta.dir,"reader-memory-runner.tsx"))source=source.replace("JSON.stringify({t:'bench.meta',blocks:","JSON.stringify(globalThis.__readerMeta={t:'bench.meta',blocks:");
   }

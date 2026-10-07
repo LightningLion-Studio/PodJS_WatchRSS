@@ -117,3 +117,6 @@ export function offsetForContentAnchor(layout:ContentLayout,anchor:ContentAnchor
  if(!row)return 0;
  return Math.max(0,Math.min(maximum,row.top+row.gap+Math.max(0,Math.min(.999,anchor.fraction))*(row.height-row.gap)));
 }
+
+/** WatchRSS line identity follows the source block and raw UTF-16 offset. */
+export function readerRowKey(row:ReaderRow):string {return `${row.kind}:${row.blockIndex}:${row.sourceStart??0}`;}
