@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {ActivityLog} from '../logs/activity.ts';
 import {activityStateHub} from '../navigation/activity-host.ts';
 import {captureActivityNavigation,restoreActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
@@ -858,10 +859,10 @@ export default function WatchRSS(props: {
             : c,
         ),
       );
-      setPage("reader", {
+      traceServiceWork("reader.setPage",()=>setPage("reader", {
         readerArticle: { ...(full ?? item), read: true },
         readerFromWatchLater: fromWatchLater,
-      });
+      }));
     } catch (e) {
       setError(String(e));
     } finally {

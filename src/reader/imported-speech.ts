@@ -15,7 +15,7 @@ export async function importedSpeechSource(db: SqlDatabase, store: ImportedTextS
 export async function importedReaderHandle(db:SqlDatabase,store:ImportedTextStore,id:string):Promise<{hasMarker:boolean;handle:ImportedTextHandle|null}> {
   const row = (await db.query(`SELECT link,substr(content,1,512) content,
     (SELECT substr(body,1,512) FROM article_original_chunks WHERE article_id=a.id AND chunk_index=0) original
-    FROM articles a WHERE id=?`, [Number(id)]))[0];
+    FROM articles a WHERE id=?`, [Number(id)],"reader.importedMarker"))[0];
   if (!row || !isImportedTextItemUrl(String(row.link ?? ""))) return {hasMarker:false,handle:null};
   const original = String(row.original ?? ""), content = String(row.content ?? "");
   const marker = importedTextFileName(original) ? original : importedTextFileName(content) ? content : null;

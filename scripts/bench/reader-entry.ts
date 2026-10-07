@@ -16,10 +16,10 @@ const aliases:Record<string,string>={'@podjs/framework':resolve(framework,'packa
 for(const [root,prefix] of [[pocket,'@pocketjs/framework'],[resolve(framework,'packages/framework'),'@podjs/framework']]){
  for(const [key,v] of Object.entries((await Bun.file(resolve(root,'package.json')).json()).exports) as [string,any][]){const file=typeof v==='string'?v:v.import??v.default;if(key.startsWith('./'))aliases[prefix+'/'+key.slice(2)]=resolve(root,file);}
 }
-const names=new Set(['parseContent','layoutText','createContentLayouter','finishContentLayout','defaultReaderPreset','useReaderFonts','useReaderBackgrounds','ReaderBackground','ReaderBody','NoteDetailScreen','SystemTextLine','ReaderTextRow','createReaderTextEnvironment','createWindowRows','ScrollEntries','documentAnchorAt','offsetForDocumentAnchor','noteBlockSourceOffsets','noteMetadata','requiresSystemText']);
+const names=new Set(['parseContent','layoutText','createContentLayouter','finishContentLayout','defaultReaderPreset','useReaderFonts','useReaderBackgrounds','ReaderBackground','ReaderBody','NoteDetailScreen','SystemTextLine','ReaderTextRow','createReaderTextEnvironment','createWindowRows','ScrollEntries','documentAnchorAt','offsetForDocumentAnchor','noteBlockSourceOffsets','noteMetadata','requiresSystemText','WatchRSS','ReaderScreenImpl','ReaderBodyImpl','mapArticle','setPage','captureActivityNavigationImpl']);
 const wrap=(name:string,body:any)=>t.callExpression(t.memberExpression(t.identifier('__entryProfile'),t.identifier('time')),[t.stringLiteral(name),t.arrowFunctionExpression([],body)]);
 const profile=(file:string)=>({visitor:{
- FunctionDeclaration(path:any){if(!path.node.generator&&names.has(path.node.id?.name))path.node.body=t.blockStatement([t.returnStatement(wrap(path.node.id.name,path.node.body))]);},
+ FunctionDeclaration(path:any){if(!path.node.generator&&!path.node.async&&names.has(path.node.id?.name))path.node.body=t.blockStatement([t.returnStatement(wrap(path.node.id.name,path.node.body))]);},
  NewExpression(path:any){if(path.node.callee?.name==='RegExp'&&file.endsWith('lazy-regexp.ts')){path.replaceWith(wrap('unicodeRegExpCompile',t.cloneNode(path.node)));path.skip();}},
  CallExpression(path:any){if(['createMemo','createEffect','onMount'].includes(path.node.callee?.name)&&/ReaderBody|NotesScreen|ScrollEntries|windowed-list/.test(file)){
   const fn=path.node.arguments[0];if(fn?.type==='ArrowFunctionExpression'&&!fn.async){fn.body=wrap(file.split('/').at(-1)+':'+(path.parentPath.node.id?.name??path.node.callee.name)+':'+path.node.loc.start.line,fn.body);path.skip();}
@@ -27,9 +27,10 @@ const profile=(file:string)=>({visitor:{
 }});
 const {solidConditionalProps}=await import(resolve(pocket,'framework/compiler/solid-props.ts'));
 const literals=new Set<string>();
-const result=await Bun.build({entrypoints:[resolve(import.meta.dir,'reader-entry-runner.tsx')],target:'browser',format:'iife',conditions:['browser'],alias:aliases,outdir:dirname(out),naming:out.split('/').at(-1),plugins:[{name:'production-solid-entry-profile',setup(b){b.onResolve({filter:/.*/},args=>aliases[args.path]?{path:realpathSync(aliases[args.path])}:undefined);b.onLoad({filter:/\.(tsx|ts|js)$/},async({path})=>{
- if(!path.includes('/src/')&&!path.includes('reader-entry-runner'))return;
+const result=await Bun.build({entrypoints:[resolve(arg('runner',resolve(import.meta.dir,'reader-entry-runner.tsx')))],target:'browser',format:'iife',conditions:['browser'],alias:aliases,outdir:dirname(out),naming:out.split('/').at(-1),plugins:[{name:'production-solid-entry-profile',setup(b){b.onResolve({filter:/.*/},args=>aliases[args.path]?{path:realpathSync(aliases[args.path])}:undefined);b.onLoad({filter:/\.(tsx|ts|js)$/},async({path})=>{
+ if(!path.includes('/src/')&&!path.includes('reader-entry-runner')&&!path.includes('sql-turn-runner'))return;
  let source=await Bun.file(path).text();
+ if(source.includes('/* SQL_LOADER */'))source=source.replace('/* SQL_LOADER */',await Bun.file(arg('sql-loader')).text());
  const appRoot=resolve(import.meta.dir,'../..'),appRef=arg('source-ref',''),frameworkRef=arg('framework-ref','');
  const ref=path.startsWith(appRoot+'/src/')?appRef:path===resolve(framework,'packages/framework/src/text-layout.ts')?frameworkRef:'';
  if(ref){const root=path.startsWith(appRoot+'/src/')?appRoot:framework;const before=Bun.spawnSync(['git','show',`${ref}:${path.slice(root.length+1)}`],{cwd:root});if(before.exitCode)throw Error(before.stderr.toString());source=before.stdout.toString();}
@@ -42,6 +43,7 @@ if(!result.success)throw Error(result.logs.join('\n'));
 const html=await Bun.file(arg('html','/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/.codex-tmp/k19-411.html')).text();
 const note=await Bun.file(arg('note','/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/.codex-tmp/wrss-minor-rs1-readme.md')).text();
 const {compileClasses}=await import(resolve(pocket,'framework/compiler/tailwind.ts'));const styles=compileClasses(literals);
-const config={html,note,notePlain:memoPlainText(note),mode:arg('mode','reader'),nativeDelay:Number(arg('native-delay','16')),timerFloor:Number(arg('timer-floor','1')),savedProgress:Number(arg('progress','0'))};
+const sqlFixture=arg('sql-fixture','');
+const config={...(sqlFixture?await Bun.file(sqlFixture).json():{}),html,note,notePlain:memoPlainText(note),mode:arg('mode','reader'),nativeDelay:Number(arg('native-delay','16')),timerFloor:Number(arg('timer-floor','1')),savedProgress:Number(arg('progress','0'))};
 await Bun.write(out,`globalThis.console={log(){},warn(...v){__benchPrint(JSON.stringify({warning:v}));},error(...v){__benchPrint(JSON.stringify({error:v}));},info(){},debug(){}};globalThis.__entryFixture=${JSON.stringify(config)};globalThis.__entryStyles=${JSON.stringify({ids:styles.ids,bin:[...styles.bin]})};
  globalThis.__entryProfile={stats:{},spans:[],stack:[],time(name,fn){const start=__benchNow(),frame={child:0};this.stack.push(frame);try{const value=fn();if(name.startsWith('ReaderBody.tsx:layout:'))globalThis.__entryLayout=value;return value;}finally{const ms=__benchNow()-start;this.stack.pop();if(this.stack.length)this.stack[this.stack.length-1].child+=ms;const s=this.stats[name]??={calls:0,ms:0,exclusiveMs:0,maxMs:0};s.calls++;s.ms+=ms;s.exclusiveMs+=ms-frame.child;s.maxMs=Math.max(s.maxMs,ms);if(ms>1)this.spans.push({name,start,ms});}}};\n`+await Bun.file(out).text());console.log(out);

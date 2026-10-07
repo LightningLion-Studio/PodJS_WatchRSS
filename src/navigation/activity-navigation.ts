@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {stringToUtf8} from '@podjs/framework/bytes';
 import type {ActivityState} from '@podjs/framework/services';
 import type {RouteEntry,Page} from '../ui/routes/types.ts';
@@ -76,7 +77,7 @@ function decodedRoute(raw:Descriptor,retained:unknown,debug:boolean):ActivityRou
  return entry;
 }
 
-export function captureActivityNavigation(prior:ActivityState,entries:readonly ActivityRoute[]):ActivityState {
+function captureActivityNavigationImpl(prior:ActivityState,entries:readonly ActivityRoute[]):ActivityState {
  const saved={...prior.saved},retained={...prior.retained};
  // Limit Android Bundle metadata; never serialize live handles, cookies or media headers.
  const descriptors:Descriptor[]=[],live:Record<string,unknown>={};
@@ -122,3 +123,5 @@ export async function resolveActivityNavigation(entries:ActivityRoute[],resolver
  }
  return result.length?result:[{page:'home'}];
 }
+
+export function captureActivityNavigation(...args:Parameters<typeof captureActivityNavigationImpl>) {return traceServiceWork("reader.captureActivity",()=>captureActivityNavigationImpl(...args));}

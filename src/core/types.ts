@@ -1,7 +1,7 @@
 export type SqlParams = readonly unknown[];
 export interface SqlDatabase {
-  query(sql: string, params?: SqlParams): Promise<Record<string, unknown>[]>;
-  execute(sql: string, params?: SqlParams): Promise<void>;
+  query(sql: string, params?: SqlParams, traceLabel?: string): Promise<Record<string, unknown>[]>;
+  execute(sql: string, params?: SqlParams, traceLabel?: string): Promise<void>;
   transaction(statements: { sql: string; params?: SqlParams }[]): Promise<void>;
   transactionChanges?(statements: { sql: string; params?: SqlParams }[]): Promise<number[]>;
 }
