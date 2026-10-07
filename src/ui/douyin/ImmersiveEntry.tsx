@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import { createSignal, createEffect, untrack, onCleanup, Show } from "solid-js";
 import { View, Text, Image } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
@@ -19,21 +20,21 @@ export function ImmersiveEntry(props: DouyinScreenProps) {
     try{
       const signed=await props.client.isLoggedIn();if(!current())return;setLogged(signed);if(!signed){setItems([]);setError(formatDouyinError('NOT_LOGGED_IN'));return;}
       if(!refresh){
-        const feed=await props.client.restoreFeed(),queue=await props.client.restorePlaybackQueue();if(!current())return;
+        const feed=await traceServiceWork("douyin.entry.restoreFeed",()=>props.client.restoreFeed()),queue=await traceServiceWork("douyin.entry.restoreQueue",()=>props.client.restorePlaybackQueue());if(!current())return;
         const cached=queue.items.length?queue:feed;
-        setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;
+        traceServiceWork("douyin.entry.restoreResult",()=>{setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;});
         // Native restores the title page immediately; a small/incomplete bootstrap
         // needs a 16-item feed request. Expired detail refresh is background work.
         if(cached.items.length>=3&&(!hasMore||!!cursor?.trim())){
-          void props.client.resolvePlayback(anchor??cached.items[0].awemeId).then(result=>{
-            if(current()&&result.ok)setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item));
+          void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(result=>{
+            traceServiceWork("douyin.entry.resolveResult",()=>{if(current()&&result.ok)setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item));});
           }).catch(()=>{});
           return;
         }
       }
       appLogger.d('DouyinEntry',`feed requested reason=${refresh?'refresh':'bootstrap'}`);
-      const result=await props.client.fetchFeedPage({count:16});if(!current())return;
-      if(result.ok){setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;}
+      const result=await traceServiceWork("douyin.entry.fetch",()=>props.client.fetchFeedPage({count:16}));if(!current())return;
+      if(result.ok){traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
       else{
         setError(formatDouyinError(result.code));
         if(result.code==='NOT_LOGGED_IN'){

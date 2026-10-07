@@ -1,0 +1,18 @@
+import {projectJsonSteps,projectJsonValue} from '@podjs/framework/json';
+import {parseDouyinFeed,parseDouyinFeedAsync} from '../../src/douyin/parser.ts';
+const g=globalThis as any,print=g.__benchPrint,now=g.__benchNow;let assertions=0,nativeSteps=0,nativeMax=0,adoptions=0;
+const native=g.pod.jsonProjectionNext;g.pod.jsonProjectionNext=(id:number)=>{const began=now();const r=native(id);nativeMax=Math.max(nativeMax,now()-began);nativeSteps++;return r;};
+function expected(fn:()=>unknown){try{return JSON.stringify({value:fn()});}catch(e){return JSON.stringify({error:String(e)});}}
+function run(raw:string,selection:any){const before=expected(()=>projectJsonValue(JSON.parse(raw),selection));const after=expected(()=>{const it=projectJsonSteps(raw,selection);for(;;){const r=it.next();if(r.done)return r.value;adoptions++;}});if(before!==after)throw Error('projection mismatch '+raw.slice(0,200));assertions++;}
+const special=['','{','{"drop":1,}','null','4','[1]','{"rows":false}','{"rows":[{"n":-0,"s":"\\ud800","n":1e400}],"x":9999999999999999999999999999999}','{"__proto__":{"x":2},"rows":[{"n":1,"n":3,"0":"zero"}]}','{"rows":[{"s":"'+ '\ud800' +'"}]}','{"drop":{"bad":"\\uZZZZ"},"rows":[]}'];
+const selection=JSON.parse('{"rows":[{"n":null,"s":null}],"x":null,"__proto__":null}');for(const raw of special)run(raw,selection);
+let seed=42;const random=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+for(let i=0;i<2000;i++){const raw=JSON.stringify({rows:Array.from({length:random()%20},()=>({n:(random()-2147483648)/10,s:['中🙂','x','\ud800','\u0000'][random()%4],drop:{ignored:random()}})),x:random(),drop:Array.from({length:random()%5},()=>random())});run(raw,selection);}
+for(let i=0;i<8;i++){const steps=projectJsonSteps('{"rows":[]}',selection);steps.next();steps.return(undefined);}
+const events:any[]=[],pending:any[]=[];Object.assign(g.pod,{capabilities:()=>JSON.stringify(['runtime.timer']),emit:(line:string)=>{const r=JSON.parse(line);if(r.t==='service.request')pending.push(r);},takeEvents:()=>events.length?JSON.stringify(events.splice(0)):undefined});g.__benchPump=()=>{if(!pending.length)return false;const r=pending.shift();if(r.method!=='runtime.delay')throw Error('timer');events.push({t:'service.result',id:r.id,ok:true,value:null});g.__pocketPumpServices();return true;};
+const item={aweme_id:'7',desc:'中🙂 description',create_time:12,author:{uid:'u',nickname:'作者',avatar_thumb:{url_list:['https://fixture/avatar']}},statistics:{digg_count:9,comment_count:2,share_count:3,collect_count:4},video:{duration:1500,play_addr:{url_list:['https://fixture/main'],width:720,height:1280},cover:{url_list:['https://fixture/cover']},bit_rate:[{gear_name:'normal',codec_type:'h264',bit_rate:123,play_addr:{url_list:['https://fixture/h264'],width:720,height:1280}}]}};
+async function finish(){
+ const feeds=['{}','null','{','{"aweme_list":false}',JSON.stringify({aweme_list:[item,null,{}, {...item,aweme_id:''}],max_cursor:99,has_more:1}),JSON.stringify({aweme_list:Array.from({length:16},(_,i)=>({...item,aweme_id:String(i),ignored:'x'.repeat(145000)})),cursor:'next',has_more:1})];
+ for(const raw of feeds){let before=expected(()=>parseDouyinFeed(raw));const began=now();let after;try{after=JSON.stringify({value:await parseDouyinFeedAsync(raw)});}catch(e){after=JSON.stringify({error:String(e)});}if(before!==after)throw Error('feed mismatch');assertions++;print(JSON.stringify({phase:'feed.async',units:raw.length,wallMs:now()-began,equal:true}));}
+ print(JSON.stringify({phase:'json.differential',assertions,nativeSteps,nativeMaxMs:nativeMax,adoptions,cancelled:true}));g.__benchDone=true;
+}finish().catch((e:any)=>{print(String(e));throw e;});

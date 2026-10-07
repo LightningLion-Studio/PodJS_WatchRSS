@@ -22,6 +22,9 @@ const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))sto
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props' in value))return [];return [value,...nodes(value.props.children)];}
 // Event-loop turn only drains component promise chains; no elapsed-time assertions.
 const settle=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
+// Feed parsing now yields host turns. Observe the public settled state instead
+// of assuming every response is synchronous after one event-loop turn.
+async function settled(f:{text:()=>string}){const end=Date.now()+2000;while(f.text().includes('刷新中...')&&Date.now()<end)await settle();}
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
@@ -51,7 +54,7 @@ for(const outcome of ['success','timeout','http','empty','expired','parse'] as c
   else if(outcome==='expired')reply.resolve({status:200,headers:{},body:utf8Encode('blocked')});
   else if(outcome==='parse')reply.resolve({status:200,headers:{},body:utf8Encode('{')});
   else reply.resolve(response(outcome==='empty'?[]:['fresh'],outcome==='http'?503:200));
-  await settle();expect(f.text()).not.toContain('刷新中...');expect(f.plays).toHaveLength(0);
+  await settled(f);expect(f.text()).not.toContain('刷新中...');expect(f.plays).toHaveLength(0);
   if(outcome==='success'){
     expect(f.text()).toContain('下拉刷新，向上进入短视频流');f.swipe(-80);await settle();
     expect(f.plays).toMatchObject([{item:{awemeId:'fresh'},immersive:true}]);expect(f.requests).toHaveLength(1);
@@ -60,7 +63,7 @@ for(const outcome of ['success','timeout','http','empty','expired','parse'] as c
   }else{
     expect(f.text()).toContain(outcome==='empty'?'暂无内容，下拉刷新或点箭头重试':outcome==='parse'?'解析失败':'网络请求失败');
     f.press();await settle();expect(f.requests).toHaveLength(2);expect(f.text()).toContain('刷新中...');
-    f.requests[1]!.reply.resolve(response(['retry']));await settle();expect(f.text()).not.toContain('刷新中...');
+    f.requests[1]!.reply.resolve(response(['retry']));await settled(f);expect(f.text()).not.toContain('刷新中...');
   }
 });
 
@@ -74,7 +77,7 @@ test('upward entry is immediate even if the expired cached detail refresh never 
 
 for(const options of [{cacheCount:1},{cacheCount:2},{cacheCount:4,hasMore:true,cursor:null}])test(`native bootstrap feed rule ${JSON.stringify(options)}`,async()=>{
   const f=mount(options);await settle();expect(f.requests).toHaveLength(1);expect(new URL(f.requests[0]!.request.url).pathname).toBe('/aweme/v2/web/module/feed/');
-  f.requests[0]!.reply.resolve(response(['fresh']));await settle();expect(f.text()).not.toContain('刷新中...');f.swipe(-80);await settle();expect(f.plays[0]?.item.awemeId).toBe('fresh');
+  f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);expect(f.text()).not.toContain('刷新中...');f.swipe(-80);await settle();expect(f.plays[0]?.item.awemeId).toBe('fresh');
 });
 
 test('cached feed refresh failure remains retryable without serial detail probes',async()=>{
@@ -85,9 +88,9 @@ test('cached feed refresh failure remains retryable without serial detail probes
 });
 
 test('late response from an inactive entry cannot erase login or a newer feed',async()=>{
-  const f=mount();await settle();f.setActive(false);await settle();expect(f.text()).not.toContain('刷新中...');
+  const f=mount();await settle();f.setActive(false);await settled(f);expect(f.text()).not.toContain('刷新中...');
   f.setActive(true);await settle();expect(f.requests).toHaveLength(2);
-  f.requests[1]!.reply.resolve(response(['new']));await settle();
+  f.requests[1]!.reply.resolve(response(['new']));await settled(f);
   f.requests[0]!.reply.resolve({status:200,headers:{},body:utf8Encode('blocked')});await settle();
   expect(f.text()).not.toContain('刷新中...');expect(f.data.has('douyin.cookie')).toBe(true);f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('new');
 });

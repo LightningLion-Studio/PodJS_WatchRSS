@@ -1,3 +1,4 @@
+import {traceServiceWork} from "@podjs/framework/service-trace";
 import {delay} from '@podjs/framework/services';
 import {decodeUtf8Piece,type Utf8Dialect} from '../core/utf8-decode.ts';
 
@@ -10,5 +11,5 @@ export async function decodeMediaText(bytes:Uint8Array,dialect:Utf8Dialect='douy
     const part=decodeUtf8Piece(bytes,i,dialect);parts.push(part.text);i=part.next;
     if(i<bytes.length)await yieldTurn();
   }
-  return parts.join('');
+  return traceServiceWork("media.text.join",()=>parts.join(''));
 }
