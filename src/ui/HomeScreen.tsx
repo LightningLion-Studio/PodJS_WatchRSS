@@ -14,6 +14,7 @@ import { measuredLines } from "../reader/measured-text.ts";
 export interface HomeScreenProps {
   channels: Channel[]; notesPlacement: NotesHomePlacement; height: number; width: number;
   refreshing: boolean; busy: boolean;
+  active?: boolean;
   platformLoginState: HomePlatformLoginState;
   speechState?: SpeechPlaybackState; speechSpectrum?: readonly number[];
   onProfile: () => void; onNotes: () => void; onRecommend: () => void;
@@ -128,7 +129,7 @@ export default function HomeScreen(props: HomeScreenProps) {
   const entries=()=>rows().map(row=>row.entry);
   const hitEntries=()=>rows().map<HomeHitEntry>(row=>({height:row.entry.height,channel:row.channel,notes:row.notes}));
   return <View class="absolute inset-0 bg-[#000000]">
-    <ScrollEntries height={props.height} entries={entries()} inputActive={()=>!selected()&&!props.busy} onRefresh={props.onRefresh} onLongPress={contact=>{
+    <ScrollEntries height={props.height} entries={entries()} inputActive={()=>props.active!==false&&!selected()&&!props.busy} onRefresh={props.onRefresh} onLongPress={contact=>{
       const target=homeEntryAtLongPress(hitEntries(),contact.x,contact.y,props.width,scroller?.offset()??0);
       if(target){scroller?.stop();setSelected(target);}
     }} ref={handle=>{scroller=handle.scroller;props.ref?.(handle);}}/>

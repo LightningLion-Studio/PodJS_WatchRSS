@@ -69,6 +69,7 @@ export function HomeRoutes(props: HomeRoutesProps) {
     <>
       <Show when={props.page() === "home"}>
         <HomeScreen
+          active={props.active()}
           width={props.width}
           channels={props.channels()}
           notesPlacement={props.notesPlacement}

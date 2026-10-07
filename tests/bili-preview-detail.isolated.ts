@@ -11,7 +11,7 @@ plugin({ name: 'bili-preview-detail', setup(builder) {
 type Node = { props: any };
 const element = (props: any): Node => ({ props });
 mock.module('@pocketjs/framework/renderer', () => ({ createComponent, mergeProps, memo: createMemo, effect: createRenderEffect }));
-mock.module('@pocketjs/framework/components', () => ({ View: element, Text: element, Image: element }));
+mock.module('@pocketjs/framework/components', () => ({ FocusScope: element, View: element, Text: element, Image: element }));
 mock.module('@pocketjs/framework/host', () => ({ getOps: () => ({ measureText: (text: string) => text.length * 7 }) }));
 mock.module('@podjs/framework/watch', () => ({ kv: { get: () => undefined, set() {} } }));
 mock.module('@podjs/framework/services', () => ({ delay: () => ({ result: Promise.resolve(), cancel() {} }), hostOperation: () => ({ result: Promise.resolve(), cancel() {} }) }));

@@ -163,8 +163,8 @@ function FeedScreen(props: BiliScreenProps) {
   // Native loads more once the last visible item is within 3 of the end.
   const settled = (_first: number, last: number) => { const state = feed.state(); if (last >= entries().length - 4 && state.canLoadMore && !state.loading && state.items.length) feed.more(); };
   return <>
-    <ScrollEntries onRefresh={feed.refetch} height={props.height} entries={entries()} gap={8} onSettledRange={settled} onScrollStateChange={value => { setScrolling(value); if (value) setOpenSwipeId(null); }} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />
-    <BiliSideMenu ref={handle => { sideMenu = handle; }} width={props.width ?? 233} height={props.height} active={() => !openSwipeId()} items={() => {
+    <ScrollEntries inputActive={() => props.active !== false} onRefresh={feed.refetch} height={props.height} entries={entries()} gap={8} onSettledRange={settled} onScrollStateChange={value => { setScrolling(value); if (value) setOpenSwipeId(null); }} ref={value => props.ref?.({ scroller: value.scroller, onRootBack: () => false })} />
+    <BiliSideMenu ref={handle => { sideMenu = handle; }} width={props.width ?? 233} height={props.height} active={() => props.active !== false && !openSwipeId()} items={() => {
       const loggedIn = authenticated(session.value()), go = (route: BiliRoute) => () => props.onNavigate(route);
       return [{ label: "频道信息", enabled: true, onPress: go({ name: "channel-info" }) },
         ...(!loggedIn ? [{ label: "登录", enabled: true, onPress: go({ name: "login" }) }] : []),

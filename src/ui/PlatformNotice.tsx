@@ -1,5 +1,5 @@
-import {For,Show} from 'solid-js';
-import {Text,View} from '@pocketjs/framework/components';
+import {For,Show,onCleanup} from 'solid-js';
+import {FocusScope,Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {watchUiLines} from './text-layout.ts';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
@@ -9,6 +9,7 @@ import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
  * description bodySmall 12/14 #B6B6B6, all centred. Scope/access cards: same colour at .46,
  * 10x8dp padding, 3dp rows, title bodyMedium 14/17 SemiBold, body labelSmall 9/11. */
 type Copy={title:string;paragraphs:readonly string[]};
+type DialogList=Pick<import('@pocketjs/framework/virtual-list').VirtualListHandle,'scroller'>;
 const ON_SURFACE='#f5f5f5',MUTED='#b6b6b6',PRIMARY='#ff6026';
 const NOTICE_BG='#23272ab8',CARD_BG='#23272a75';
 const LABEL_SLOT=24,LABEL_BODY_SLOT=19,SMALL_SLOT=0,CARD_TITLE_SLOT=8,BODY_SLOT=1,DIALOG_TITLE_SLOT=10;
@@ -42,7 +43,8 @@ export function platformCardEntry(width:number,card:Copy):ScrollEntry {
 
 /** Blocking first-use / platform confirmation (native AlertDialog with empty onDismiss).
  * Full-screen and pure black on the round display; crown scrolls long copy; Back is swallowed by the owner. */
-export function TransparencyDialog(props:{width:number;height:number;copy:Copy&{confirm:string};onConfirm:()=>void}) {
+export function TransparencyDialog(props:{width:number;height:number;copy:Copy&{confirm:string};onConfirm:()=>void;ref?:(list:DialogList|undefined)=>void}) {
+ onCleanup(()=>props.ref?.(undefined));
  const inner=()=>props.width-36;
  const entries=():ScrollEntry[]=>{
   const title=wrap(props.copy.title,inner(),DIALOG_TITLE_SLOT);
@@ -58,12 +60,12 @@ export function TransparencyDialog(props:{width:number;height:number;copy:Copy&{
   </View>});
   return rows;
  };
- return <View class="absolute inset-0 z-30 bg-[#000000]" accessibilityLabel={props.copy.title}>
-  <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={40} gap={10} accessibilityLabel={props.copy.title}/>
- </View>;
+ return <FocusScope class="absolute inset-0 z-30 bg-[#000000]" accessibilityLabel={props.copy.title}>
+  <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={40} gap={10} accessibilityLabel={props.copy.title} ref={props.ref}/>
+ </FocusScope>;
 }
 
 /** Owner-side helper: shows whichever disclosure the route still owes, in native order. */
-export function PendingDisclosure(props:{width:number;height:number;pending:()=>(Copy&{confirm:string})|undefined;onConfirm:()=>void}) {
- return <Show when={props.pending()} keyed>{copy=> <TransparencyDialog width={props.width} height={props.height} copy={copy} onConfirm={props.onConfirm}/>}</Show>;
+export function PendingDisclosure(props:{width:number;height:number;pending:()=>(Copy&{confirm:string})|undefined;onConfirm:()=>void;ref?:(list:DialogList|undefined)=>void}) {
+ return <Show when={props.pending()} keyed>{copy=> <TransparencyDialog width={props.width} height={props.height} copy={copy} onConfirm={props.onConfirm} ref={props.ref}/>}</Show>;
 }
