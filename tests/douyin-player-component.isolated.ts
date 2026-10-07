@@ -32,8 +32,9 @@ const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
 function mount(status:InternetStatus,url='https://video/current',immersive=false){
  initial=status;prepares=[];plays=0;retries=0;failures=0;ticks=[];current=state('idle');
- const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',url,title:'current',immersive},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retries++;},onPlaybackFailure:()=>{failures++;}});});
- return {text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
+ const activeEvents:Array<{source:string|undefined;active:boolean}>=[];
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',url,title:'current',immersive},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retries++;},onPlaybackFailure:()=>{failures++;},onPlaybackActiveChanged:(source,active)=>activeEvents.push({source,active})});});
+ return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 test('D2 initial network gate clears on WiFi without fetching or replacing queue',async()=>{
  const f=mount('unavailable');await flush();expect(f.text()).toContain('未检测到可用互联网');expect(prepares).toHaveLength(0);
@@ -60,11 +61,13 @@ test('D2 local video remains playable while offline',async()=>{
 
 test('D2 immersive paused rendered frame stays visible; buffering network pause resumes on recovery',async()=>{
  const f=mount('available','https://video/current',true);await flush();
+ expect(f.activeEvents.at(-1)).toEqual({source:'douyin',active:true});
  current={...state('paused'),hasRenderedFirstFrame:true};ticks.shift()!();await flush();network('unavailable');await flush();
- expect(f.text()).not.toContain('未检测到可用互联网');expect(plays).toBe(1);
+ expect(f.text()).not.toContain('未检测到可用互联网');expect(plays).toBe(1);expect(f.activeEvents.at(-1)?.active).toBe(false);
  network('available');await flush();current={...state('buffering'),hasRenderedFirstFrame:true};ticks.shift()!();await flush();
  network('unavailable');await flush();expect(current.state).toBe('paused');expect(plays).toBe(1);
- network('available');await flush();expect(plays).toBe(2);expect(prepares).toHaveLength(1);expect(retries).toBe(0);
+ network('available');await flush();expect(plays).toBe(2);expect(prepares).toHaveLength(1);expect(retries).toBe(0);expect(f.activeEvents.at(-1)?.active).toBe(true);
+ stops.pop()!();expect(f.activeEvents.at(-1)).toEqual({source:undefined,active:false});
 });
 
 test('DBG2 slot diagnostics bind only active debug immersive ownership and dispose with the screen',async()=>{

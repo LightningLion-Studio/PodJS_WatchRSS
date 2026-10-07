@@ -1,5 +1,6 @@
+import {ActiveBatterySession} from '@podjs/framework/telemetry';
 import {kv} from '@podjs/framework/watch';
-import {application,hostOperation,fileChunks,base64ToBytes,bytesToBase64,delay,type DownloadResult} from '@podjs/framework/services';
+import {application,battery,hostOperation,fileChunks,base64ToBytes,bytesToBase64,delay,type DownloadResult} from '@podjs/framework/services';
 import config from '../../pod.config.json';
 import {watchAppVersion} from '../core/app-version.ts';
 import {summaryAccountStore} from '../llm/runtime.ts';
@@ -45,4 +46,8 @@ export const usageTelemetry=new WatchUsageTelemetry({get:key=>kv.get<string>(key
 /** Older hosts fail closed: never infer release from a version name. */
 export async function recordHostReleaseOobeOpened(){
   try{const info=await application.buildInfo();if(typeof info.debugBuild==='boolean')usageTelemetry.recordReleaseOobeOpened(info.debugBuild);}catch{/* Revisit on the next OOBE after a host upgrade. */}
+}
+
+export function createVideoBatteryTelemetry(){
+  return new ActiveBatterySession(()=>battery.percent(),sample=>usageTelemetry.recordVideoBatteryDrain(sample.source,sample.durationMs,sample.batteryStart,sample.batteryEnd));
 }

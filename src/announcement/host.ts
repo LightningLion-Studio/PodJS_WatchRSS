@@ -1,3 +1,4 @@
+import {createPlatformNoticeRoute,type PlatformNoticeTarget} from './platform.ts';
 import {kv, hasCapability} from '@podjs/framework/watch';
 import {hostOperation, fileChunks, base64ToBytes, type DownloadResult} from '@podjs/framework/services';
 import config from '../../pod.config.json';
@@ -57,3 +58,5 @@ export function createAnnouncementServices() {
     updater: new AppUpdateService(createHostUpdatePort(), config.appId),
   };
 }
+
+export const hostPlatformNoticeRoute=(target:PlatformNoticeTarget)=>createPlatformNoticeRoute(kv,target);

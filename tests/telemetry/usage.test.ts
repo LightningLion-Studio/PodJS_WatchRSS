@@ -77,3 +77,15 @@ test('internal Bili search and Douyin immersive navigation retain their native s
  expect(telemetryScreenOwner([entry,{page:'douyin',douyinRoute:{name:'feed'}},{page:'video',playback:{platform:'douyin',title:'private',immersive:true}}])).toBe(entry);
  expect(telemetryScreen({page:'settings-auto-scroll'})).toBe('AutoScrollControlActivity');
 });
+
+test('new measurements send only bounded metric fields; invalid inputs and unbound/offline fail quietly',async()=>{
+ const f=fixture();f.telemetry.recordDouyinQrLoadTime(1234);f.telemetry.recordVideoBatteryDrain('bilibili',60000,90,89);await tick();
+ expect(f.requests.map(r=>r.url)).toEqual(['https://telemetry.invalid/functions/v1/douyin-qr-load-time','https://telemetry.invalid/functions/v1/video-battery-drain']);
+ expect(f.requests.map(r=>JSON.parse(utf8Decode(r.body!)))).toEqual([{durationMs:1234,appVersionName:'fixture',appVersionCode:42},{source:'bilibili',durationMs:60000,batteryStart:90,batteryEnd:89,appVersionName:'fixture'}]);
+ expect(f.requests.every(r=>r.headers?.Authorization==='Bearer fixture-access')).toBe(true);expect(f.telemetry.backlogCount()).toBe(0);expect(f.timers).toHaveLength(0);
+ for(const n of [0,-1,NaN,Infinity])f.telemetry.recordDouyinQrLoadTime(n);
+ for(const args of [['rss',60000,90,89],['douyin',59999,90,89],['douyin',60000,90,91],['douyin',60000,-1,0],['douyin',Infinity,90,89]] as const)f.telemetry.recordVideoBatteryDrain(args[0],args[1],args[2],args[3]);
+ await tick();expect(f.requests).toHaveLength(2);
+ f.setBound(false);f.telemetry.recordDouyinQrLoadTime(500);await tick();expect(f.requests).toHaveLength(2);
+ f.setBound(true);f.intercept(async()=>{throw Error('offline');});f.telemetry.recordVideoBatteryDrain('douyin',90000,80,79);await tick();expect(f.requests).toHaveLength(3);expect(f.timers).toHaveLength(0);
+});

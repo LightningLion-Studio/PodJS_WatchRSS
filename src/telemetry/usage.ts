@@ -1,3 +1,4 @@
+import {CaptureUploadScheduler} from '@podjs/framework/telemetry';
 import {SyncAccountTelemetry,type UsageEvent} from '../sync/account-telemetry.ts';
 import type {DiagnosticStorage} from '../sync/diagnostic-log.ts';
 import type {WatchAccountState} from '../account/types.ts';
@@ -11,11 +12,10 @@ export interface TelemetryPorts {
 }
 /** No raw content or per-item identities enter this API or its persisted store. */
 export class WatchUsageTelemetry extends SyncAccountTelemetry {
-  private scheduled=false;
-  private generation=0;
-  constructor(storage:DiagnosticStorage,private readonly ports:TelemetryPorts,now:()=>number=Date.now){super(storage,now);}
+  private readonly scheduler:CaptureUploadScheduler;
+  constructor(storage:DiagnosticStorage,private readonly ports:TelemetryPorts,now:()=>number=Date.now){super(storage,now);this.scheduler=new CaptureUploadScheduler(ports.delay,()=>this.uploadPending());}
   override record(event:UsageEvent,properties:{screen?:string;durationMs?:number}={}):void {
-    super.record(event,properties);this.generation++;this.schedule();
+    super.record(event,properties);this.scheduler.capture();
   }
   recordAppLaunch(){this.record('app_opened');}
   recordReleaseOobeOpened(debugBuild:boolean){
@@ -29,15 +29,19 @@ export class WatchUsageTelemetry extends SyncAccountTelemetry {
   recordArticleReadStarted(){this.record('article_read_started');}
   recordArticleReadFinished(){this.record('article_read_finished');}
   recordVideoPlayed(){this.record('video_played');}
-  private schedule(){
-    if(this.scheduled)return;
-    this.scheduled=true;
-    void this.run();
+  recordDouyinQrLoadTime(durationMs:number){
+    if(!Number.isFinite(durationMs)||durationMs<=0)return;
+    void this.sendMeasurement('/functions/v1/douyin-qr-load-time',{durationMs:Math.trunc(durationMs),appVersionName:this.ports.versionName,appVersionCode:this.ports.versionCode}).catch(()=>{});
   }
-  private async run(){
-    let uploadingGeneration=this.generation;
-    try{await this.ports.delay(750);uploadingGeneration=this.generation;await this.uploadPending();}catch{/* Native retries on subsequent captures, not on a timer. */}
-    finally{this.scheduled=false;if(this.generation!==uploadingGeneration)this.schedule();}
+  recordVideoBatteryDrain(source:string,durationMs:number,batteryStart:number,batteryEnd:number){
+    if(!['bilibili','douyin'].includes(source)||!Number.isFinite(durationMs)||durationMs<60000||
+      !Number.isInteger(batteryStart)||batteryStart<0||batteryStart>100||!Number.isInteger(batteryEnd)||batteryEnd<0||batteryEnd>batteryStart)return;
+    void this.sendMeasurement('/functions/v1/video-battery-drain',{source,durationMs:Math.trunc(durationMs),batteryStart,batteryEnd,appVersionName:this.ports.versionName}).catch(()=>{});
+  }
+  private async sendMeasurement(path:string,payload:unknown){
+    const account=await this.ports.freshAccount();
+    await this.ports.transport.request({method:'POST',url:account.backendBaseUrl.replace(/\/+$/,'')+path,
+      headers:{Authorization:`Bearer ${account.watchDeviceToken}`,'X-WatchRSS-App-Version':this.ports.appVersion,'content-type':'application/json; charset=utf-8'},body:utf8Encode(JSON.stringify(payload))});
   }
   private async uploadPending(){
     const account=await this.ports.freshAccount();
