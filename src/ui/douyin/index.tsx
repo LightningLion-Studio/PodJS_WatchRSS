@@ -1,3 +1,5 @@
+import {usageTelemetry} from '../../telemetry/host.ts';
+import {DouyinQrLoadTelemetry} from '../../telemetry/qr-load.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import { DouyinFavoriteController } from '../../douyin/favorite.ts';
 import { DouyinRssFeedController, type DouyinRssFeedSnapshot } from '../../douyin/rss-feed.ts';
@@ -119,6 +121,7 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
 
 function LoginScreen(props: DouyinScreenProps) {
   const loginLog=new DouyinLoginLog();
+  const qrTelemetry=new DouyinQrLoadTelemetry(ms=>usageTelemetry.recordDouyinQrLoadTime(ms));
   const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal(props.loginQrImage ? "请使用抖音手机客户端扫码登录" : "打开抖音官方登录页，完成登录后点“完成”返回手表。");
   const [authStatus, setAuthStatus] = createSignal(initialLoginStatus());
   const [statusMode, setStatusMode] = createSignal(false);
@@ -148,6 +151,7 @@ function LoginScreen(props: DouyinScreenProps) {
       authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
         if (disposed || current !== generation || !acceptingStatus) return;
         loginLog.status(event);
+        qrTelemetry.status(event);
         setAuthStatus(state => updateLoginStatus(state, event));
         setMessage(loginStatusMessage(authStatus()));
       }} : {}),requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});

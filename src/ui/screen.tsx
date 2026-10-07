@@ -10,7 +10,7 @@ import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
 import {readHomeChannelSnapshot,writeHomeChannelSnapshot} from "./home-snapshot.ts";
 import {debugGate} from '../debug/host.ts';
 import type {DebugBluetoothSession} from '../debug/bluetooth.ts';
-import {usageTelemetry} from '../telemetry/host.ts';
+import {usageTelemetry,createVideoBatteryTelemetry} from '../telemetry/host.ts';
 import {TelemetryScreenSession} from '../telemetry/usage.ts';
 import {telemetryScreen,telemetryScreenOwner} from '../telemetry/screens.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
@@ -1593,6 +1593,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
+              createBatteryTelemetry={createVideoBatteryTelemetry}
               preset={readerPreset}
               entry={entry}
               page={entryPage}

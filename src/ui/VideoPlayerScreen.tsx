@@ -38,9 +38,14 @@ function PlayerButton(props: { left: number; top: number; size: number; icon: "f
   </View>;
 }
 
-export function VideoPlayerScreen(props: { source: PlaybackSource; width: number; height: number; active: boolean; offset: number; round: boolean; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onPrepareAdjacent?:(direction:"next"|"previous")=>Promise<DouyinPreparedSource|undefined>; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onHeader?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number)=>void; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
+export function VideoPlayerScreen(props: { source: PlaybackSource; width: number; height: number; active: boolean; offset: number; round: boolean; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onPrepareAdjacent?:(direction:"next"|"previous")=>Promise<DouyinPreparedSource|undefined>; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onHeader?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number)=>void; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
+  onCleanup(()=>props.onPlaybackActiveChanged?.(undefined,false));
   const saveablePlayer=props.source.platform==='douyin'&&props.source.immersive===true;
   const [state, setState] = createSignal<ExtendedVideoState | null>(null), [error, setError] = createSignal("");
+  createEffect(()=>{
+    const source=props.source.platform==='bili'?'bilibili':props.source.platform==='douyin'?'douyin':undefined;
+    props.onPlaybackActiveChanged?.(source,!!source&&props.active&&state()?.state==='playing'&&!state()?.isBuffering&&!error());
+  });
   const [ready, setReady] = createSignal(false), [controlsVisible, setControlsVisible] = restoredSignal('saved','player-controls',true,booleanState,saveablePlayer);
   const [mode, setMode] = restoredSignal<PlayerScaleMode>('saved','player-scale',"standard",(v):v is PlayerScaleMode=>v==='standard'||v==='expanded'||v==='shrunk',saveablePlayer), [rotation, setRotation] = createSignal(0);
   const [displayRotation, setDisplayRotation] = createSignal(0), [pan, setPan] = createSignal(0), [volumeVisible, setVolumeVisible] = createSignal(false), [loadingRotation, setLoadingRotation] = createSignal(0);

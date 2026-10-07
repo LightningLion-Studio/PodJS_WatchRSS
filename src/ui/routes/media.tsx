@@ -1,6 +1,6 @@
 import type { ReaderPreset } from "../../reader/preset.ts";
 import type { BrowserOrigin } from "../../browser/open.ts";
-import { Show } from "solid-js";
+import { Show, onCleanup } from "solid-js";
 import type { ShareHandler } from "../../sharing/policy.ts";
 import {
   biliClient,
@@ -23,6 +23,7 @@ import type { HttpExportMode } from "../../remote-input/exports.ts";
 import type { DouyinPreparedSource } from "../douyin/video-sessions.ts";
 
 interface MediaRoutesProps {
+  createBatteryTelemetry?:()=>import("@podjs/framework/telemetry").ActiveBatterySession;
   preset: () => ReaderPreset;
   entry: RouteEntry;
   page: () => Page;
@@ -71,6 +72,8 @@ interface MediaRoutesProps {
 }
 
 export function MediaRoutes(props: MediaRoutesProps) {
+  const batteryTelemetry=props.createBatteryTelemetry?.();
+  onCleanup(()=>{void batteryTelemetry?.stop();});
   const updateBackground = (platform: "bili" | "douyin", value: boolean) => {
     props.saveMediaSetting(platform, "background-playback", value);
     if (platform === "bili") props.setBiliBackground(value);
@@ -152,6 +155,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <VideoPlayerScreen
+          onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}
           width={props.width}
           height={props.height}
           source={
