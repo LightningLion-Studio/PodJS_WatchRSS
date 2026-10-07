@@ -1,4 +1,5 @@
 import {afterFirstScreen,startupMark} from './core/startup-trace.ts';
+import {trackDebugMemoryOwner} from '@podjs/framework/debug-memory';
 import {initializeDebugBuild} from './debug/host.ts';
 import {usageTelemetry,setTelemetryDeviceId} from './telemetry/host.ts';
 import {getLibrarySyncRepository} from './services.ts';
@@ -36,6 +37,7 @@ function deferredForegroundSync(){
  };
 }
 function ContentApp(){
+ trackDebugMemoryOwner();
  startupMark('content.mount');
  const sync=deferredForegroundSync();
  onCleanup(()=>{void sync.dispose();});
