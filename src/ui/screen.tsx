@@ -1111,8 +1111,10 @@ export default function WatchRSS(props: {
   async function refresh() {
     const refreshAll = page() === "home";
     if (refreshAll && homeRefreshing()) return;
-    setBusy(true);
+    // Native HomeComposeScreen keeps channel interactions enabled while "刷新全部" runs; the
+    // refresh state only drives the indicator. Per-page refresh still holds the busy gate.
     if (refreshAll) setHomeRefreshing(true);
+    else setBusy(true);
     setError("");
     try {
       try { await props.services.refresh(current().channelId); }
@@ -1129,7 +1131,7 @@ export default function WatchRSS(props: {
       setError(String(e));
     } finally {
       if (refreshAll) setHomeRefreshing(false);
-      setBusy(false);
+      else setBusy(false);
     }
   }
   const pendingFeedUpdates = new Set<string>();
