@@ -1,3 +1,4 @@
+import {traceServiceWork} from '@podjs/framework/service-trace';
 import {prepareTextLayout} from '@podjs/framework/text-layout';
 import {prepareNotePreviewSteps,noteBlockSourceOffsets,type NotePreviewBlock} from '../notes/preview.ts';
 import {modalInputKey} from './modal-input.ts';
@@ -120,16 +121,16 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
     if(previewSource!==current?.markdown){previewSource=current?.markdown;previewReady=false;previewCache.clear();setPreviewRows([]);setPreparedSource(undefined);setSourcePrefix(undefined);}
     if(!current||!active||previewReady)return;
     let work=0;
-    const task=prepareTextLayout(prepareNotePreviewSteps(current.markdown,1200,blocks=>setSourcePrefix({source:current.markdown,blocks,offsets:noteBlockSourceOffsets(current.markdown,blocks)})),{key:()=>work++,entry:()=>undefined,publish:snapshot=>{
+    const task=prepareTextLayout(prepareNotePreviewSteps(current.markdown,1200,blocks=>traceServiceWork('note.sourcePrefix',()=>setSourcePrefix({source:current.markdown,blocks,offsets:noteBlockSourceOffsets(current.markdown,blocks)}),blocks.length)),{key:()=>work++,entry:()=>undefined,publish:snapshot=>{
       previewReady=true;const blocks=snapshot.layout;previewCache.get('parse',[current.markdown],()=>({blocks,offsets:noteBlockSourceOffsets(current.markdown,blocks)}));setPreparedSource(current.markdown);
-    }});
+    }},{traceLabel:'note.sourceSlice'});
     void task.done.catch(error=>logConsole.warn('Note parse',String(error)));onCleanup(()=>task.cancel());
   });
   createEffect(()=>{
     const current=note(),prepared=preparedSource(),prefix=sourcePrefix(),native=nativeBody(),heights=imageHeights(),preset=props.preset;
     if(!current||(prepared!==current.markdown&&prefix?.source!==current.markdown)||props.active===false||editing())return;
-    const task=prepareTextLayout(notePreviewEntrySteps(current.markdown,props.width-28,props.onImage,preset,native,openDownload,heights,imageSize,previewCache,prepared===current.markdown?undefined:prefix),{key:entry=>entry,entry:entry=>entry,preview:{rows:16,publish:snapshot=>{if(!untrack(previewRows).length)setPreviewRows(snapshot.entries);}},
-      publish:snapshot=>setPreviewRows(snapshot.entries)});
+    const task=prepareTextLayout(notePreviewEntrySteps(current.markdown,props.width-28,props.onImage,preset,native,openDownload,heights,imageSize,previewCache,prepared===current.markdown?undefined:prefix),{key:entry=>entry,entry:entry=>entry,preview:{rows:16,publish:snapshot=>{if(!untrack(previewRows).length)traceServiceWork('note.previewPrefix',()=>setPreviewRows(snapshot.entries),snapshot.entries.length);}},
+      publish:snapshot=>traceServiceWork('note.previewComplete',()=>setPreviewRows(snapshot.entries),snapshot.entries.length)},{traceLabel:'note.previewSlice'});
     void task.done.catch(error=>logConsole.warn('Note preview layout',String(error)));
     onCleanup(()=>task.cancel());
   });
@@ -157,7 +158,7 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
         for(const block of bodyBlocks){const lines=completeLayouts.get(block);if(lines?.length)byText.set(block.text,lines);}
         setNativeBody(byText);
       });
-    }});
+    }},{traceLabel:'note.bodyInputSlice'});
     void bodyPrepare.done.catch(error=>logConsole.warn('Note body prepare',String(error)));
     onCleanup(()=>{cancelled=true;bodyPrepare.cancel();bodyTask?.cancel();});
   });
@@ -191,7 +192,7 @@ export function NoteDetailScreen(props: NoteDetailScreenProps) {
   let editorClose=()=>{};
   let readVersion=0,disposed=false;
   onCleanup(()=>{disposed=true;readVersion++;});
-  async function reload(id:string){const version=++readVersion;try{const value=await props.repository.get(id);if(!disposed&&version===readVersion)setNote(value);}catch(e){if(!disposed&&version===readVersion)fail(props,e);}}
+  async function reload(id:string){const version=++readVersion;try{const value=await traceServiceWork('note.readRequest',()=>props.repository.get(id));if(!disposed&&version===readVersion)traceServiceWork('note.setNote',()=>setNote(value));}catch(e){if(!disposed&&version===readVersion)fail(props,e);}}
   const edit=()=>{const current=note();setEditorSeed(current);setEditorAnchor(current?noteEditorAnchor(entries(),current.markdown,readerScroller.offset(),props.width,props.height,(text,slot)=>getOps().measureText(text,slot),{top:22,gap:0,horizontalInset:14}):undefined);setEditing(true);};
   const goBack=()=>{if(!editing())return false;editorClose();return true;};
   onMount(async()=>{setCreateMode(createdHere);try{if(props.noteId)await reload(props.noteId);}catch(e){if(!disposed)fail(props,e);}finally{if(!disposed)setLoaded(true);}});
