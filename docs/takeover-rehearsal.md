@@ -143,3 +143,88 @@ bash scripts/benchmark-takeover.sh --isolated-stores /tmp/wrss-rehearsal-REPLACE
 ```
 
 本轮本地replay通过，物理runner在COPYING时因充电安全门中止控制器：本次before摘要存在，无after摘要和result.json；不宣称nativeUnchanged、ACTIVE、二启或出帧。恢复设备任务时先比对原生after摘要，再只卸载演练app/test包，重跑两轮并最终回正式PodJS首页。保留主机私有副本便于复核，不复制进仓库。
+
+## T2：原生备份 → 同隔离包恢复 → 公测后显式清理
+
+2026-10-07。wrss-c **没有任何设备操作**。以下仅供有设备独占权的 wrss-minor/设备负责人
+执行；开始前仍遵循 DEVICE_BRIEF 和充电层安全门。所有安装、force-stop、run-as 操作仅针对
+`com.lightningstudio.watchrss.podjs.rehearsal`，不使用正式/native包作为覆盖目标。
+不得 uninstall/clear-data/downgrade 绕过演练流程；不用生产签名，也不读取/打印签名密码。
+
+T2 将原生源从原路径 rename 到备份。因此前文旧 runner 的 `sourceCopyUnchanged`
+（假设原文件仍在原路径）不能直接套用，旧 `rehearse-takeover` **尚不验证T2恢复链**。
+恢复演练改为比较 originalRelativePath → backup data → restored originalRelativePath
+三个位置的逐文件大小/SHA256，并额外验证空目录；不要把原路径缺失判成数据丢失。
+
+### 构建和版本台账
+
+framework/app 分支均为 `c/takeover-backup`，worktree均为 `.wt-c`；原生独立目录
+`/home/wilf/data/OPPO_Develop/Android_WatchRSS.wt-recovery` 为 `podjs-recovery`。
+
+1. 原生隔离起点：在 recovery worktree 运行下列命令，得到同隔离包 debug APK code40。
+   将此**隔离**APK作为起点安装，播种已验证的**合成 Room v18 + prefs/DataStore + 文件**
+   夹具，或将既有经授权获得的私有原生副本导入隔离沙箱。不得为T2临时读取正式/native数据。
+   原生起点启动后验证频道、阅读正文、设置、备忘录、离线媒体和 reader assets；记录基线
+   counts/摘要，force-stop隔离包后才切换实现。不同UID不能导入真实Keystore，账号项PENDING。
+
+   ```sh
+   cd /home/wilf/data/OPPO_Develop/Android_WatchRSS.wt-recovery
+   ./gradlew :app:assembleDebug --offline --no-daemon \
+     -PrecoveryRehearsal=true -PrecoveryFixture=true -PrecoveryVersionCode=40
+   ```
+
+2. 在 app wt-c 运行 `bash scripts/migration/build_recovery_rehearsal.sh`，仅主机构建：
+   framework 的 `:androidApp:assembleDebug` 为 code1000，native恢复包为 code900000。
+   两者同固定隔离appId及本机debug证书；不打正式release，不加载原生签名properties。
+   原生起点APK已安装后，重建900000会替换同一路径的40APK，不额外保留起点APK。
+
+3. 构建后分别用 `apkanalyzer manifest application-id/version-code/debuggable` 和
+   `apksigner verify --print-certs` 检查三阶段身份、40 < 1000 < 900000、debug=true、
+   同debug公有证书。不要根据Gradle参数猜实际APK。APK位置：
+   framework `platforms/android/app/build/outputs/apk/debug/androidApp-debug.apk`；
+   native `app/build/outputs/apk/debug/app-debug.apk`。脚本构建并不证明设备安装或原生可用。
+
+生产版本统一前向台账：首次接管保留1000..899999，恢复900000..999999；恢复900000后
+下一轮PodJS至少1001000，下一轮恢复1900000。已发布最高code由全部渠道核实，未知就
+不能发布。`python scripts/migration/allocate_takeover_version.py --highest-published 40
+--kind podjs` 仅输出建议1000；不自动分配或发布。每次台账需记录 package、渠道、
+最高code、分配code、app/framework/native修订、APK hash、公有cert、beta状态及清理阈值。
+本轮原生提交基线source39，T1观察40；其业务源码差异仍需发布负责人核对。
+Android要求新code大于安装code，见[官方版本管理](https://developer.android.com/studio/publish/versioning)。
+
+### 设备负责人的精确验收顺序
+
+1. 安装前验证全部APK均为固定隔离appId；仅隔离包原地 `install -r` 从native40覆盖为
+   PodJS1000。不得卸载、清数据或 `-d`。等完整ACTIVE，检查首页对K8尺寸/布局和像素统计。
+   读取私有journal/active/activation-receipt，要求同generation/receipt；读取
+   `native-backup-receipt`，与backup seal、manifest规范摘要一致。
+2. 备份 `files/.podjs-takeover-backup/G/data` 的全部源路径、字节、空目录与夹具基线相等；
+   包括数据库/WAL/SHM、prefs、files/datastore及所有native files/no_backup条目。
+   仅保留本地私有摘要，不打印账号值、设置值、secret digests或分享manifest。
+   两次冷启动仍同ACTIVE，不重导；在PodJS新建一个合成note，确认backup摘要始终不变。
+3. force-stop隔离包；只对同隔离包 `install -r` 覆盖native900000恢复APK并启动
+   `com.lightningstudio.watchrss.MainActivity`（完整component的package仍为隔离包）。
+   恢复入口在Application.attachBaseContext、先于providers/stores；不能靠普通onCreate
+   恢复，因为[Application文档](https://developer.android.com/reference/android/app/Application)
+   明确providers不在onCreate的先行保证范围。失败应 `podjs_recovery_pending`，不继续打开空库。
+4. 成功后检查 `files/.podjs-recovery-state/G/complete`；原生所有planned paths逐文件相等，
+   备份仍相等。PodJS代际、新建note、transport/no_backup及冲突目标已在
+   `.podjs-recovered/G/` 保存。再次启动不覆盖恢复后的新native写入。打开原生频道/正文、
+   设置、备忘录、离线媒体、字体/背景和后台调度，逐项记录功能/像素验收。演练UID下
+   unavailable真实账号/KeyStore继续PENDING，不能宣称同UID原生登录态连续性。
+5. 中断测试只force-stop**隔离**包：分别在backup rename、restore copy、archive、restore
+   install阶段中断；重启/重新覆盖须恢复同代际，backup摘要不变。同步文件流写入受损或
+   真实断电需要专门验收；没有观察到对应阶段就标PENDING，不把Linux测试当设备结果。
+6. 显式清理另起一轮夹具，或从恢复900000前向升级到新PodJS1001000（绝不能回1000）；
+   默认配置只含 `android.takeover.sourceVersionCode`，backup必须一直存在。公测通过后
+   才出更高版本声明 `purgeBackupAfter` 门槛（例1001001），检查所有retained backup已删除、
+   converter-only源payload已删除、active用户数据和`.podjs-recovered`不变。原生900000不能
+   覆盖这个新code；若需再恢复，按台账构建1900000。清理后原生baseline备份不再可回滚。
+7. 完成独立演练后，仅由设备负责人按前文安全规则回收隔离包，并回到正式PodJS首页。
+   每一步记录实际APK metadata/摘要、PID、阶段、boolean/count与验收状态；所有操作仍需
+   设备负责人独占，不将本任务解释为正式同包覆盖授权。
+
+恢复是原生接管时刻baseline。ACTIVE后PodJS新增资料会被归档，**不会**自动合并进
+native；保留`.podjs-recovered`供再次接管或人工分析。备份包含四个指定数据根，未涵盖
+app_webview、系统/Keystore状态；这两项及正式账号解密仍是独立验收门槛。物理耐久性、
+恢复后native功能、真实同UID/签名升级、公测清理和最终设备状态全部PENDING。

@@ -42,6 +42,9 @@
         "name": "com.lightningstudio.watchrss.debug.DebugLogProvider",
         "authority": "com.lightningstudio.watchrss.podjs.debuglog"
       }
+    },
+    "takeover": {
+      "sourceVersionCode": 40
     }
   },
   "capabilities": [

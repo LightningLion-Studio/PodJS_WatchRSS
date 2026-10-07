@@ -1,5 +1,7 @@
 # PodJS 接管原生包名设计（P1）
 
+> T2（2026-10-07）：独立分支已增加原字节backup、native恢复入口和显式版本门槛清理。见 [T2演练](takeover-rehearsal.md#t2原生备份--同隔离包恢复--公测后显式清理)。以下T1/P1历史事实保留；源在ACTIVE前转存backup，不能再要求原路径存在。设备/正式签名/原生功能验收仍PENDING，ACTIVE后新数据归档而非反向合并。
+
 日期：2026-10-04。状态：设计完成，**未实现、未进行覆盖安装验收，不可据此开启生产更新**。
 
 用户已决定最终接管 `com.lightningstudio.watchrss`。本文仅设计，未修改 appId、版本、签名配置、迁移器或宿主代码；未操作设备，未读取 keystore 内容或口令。应用基线 `6b98ce1`，工作分支 `minor/takeover-design`。框架后续实现必须在框架 worktree，不能修改框架主目录。
