@@ -195,6 +195,7 @@ export function SettingsRoutes(props: SettingsRoutesProps) {
           state={props.settings()}
           onChange={props.updateSettings}
           onNavigate={props.navigate}
+          input={(title, value) => props.services.input(title, value)}
           ref={(value) => (props.entry.list = value)}
         />
       </Show>

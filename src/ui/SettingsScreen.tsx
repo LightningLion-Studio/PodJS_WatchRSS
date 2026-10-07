@@ -1,4 +1,8 @@
 import {debugGate} from '../debug/host.ts';
+import {DebugTts,debugTtsEngines} from '../debug/tts.ts';
+import {TtsConfigStore,type TtsEngine} from '../tts/config-store.ts';
+import {summaryAccountStore} from '../llm/runtime.ts';
+import {mediaTransport} from '../media-services.ts';
 import {managedCache} from "../cache/host.ts";
 import {advancedCacheRows} from "./advanced-cache-settings.tsx";
 import { mediaVolumeSettingsRows } from "./media-volume-settings.tsx";
@@ -70,7 +74,46 @@ export function AdvancedSettingsScreen(props: Props) {
 export function SettingsScreen(props: Props) { return <Top {...props} />; }
 export default SettingsScreen;
 
-export function SpeechSettingsScreen(props: Props) {
-  const entries = createMemo(() => [heading("朗读语速"), ...stepper("语速", `${props.state.speechRate.toFixed(1)}x`, "调节朗读语速", props.width-36, () => props.onChange({speechRate:Math.max(0.5,Math.round((props.state.speechRate-0.1)*10)/10)}), () => props.onChange({speechRate:Math.min(2,Math.round((props.state.speechRate+0.1)*10)/10)})), ...row("手机扫码配置语音","在手机端选择音色、输入 API Key 并同步到手表",props.width-36,undefined,()=>props.onNavigate('tts-config'))]);
+/** Native TtsSettingsScreen. Release: "朗读语速" (speed + phone QR). Debug builds: "朗读语音源" with the
+ * engine picker (✓ on the selected engine), account/voice/model/key status, per-field editing (the
+ * explicitly requested wrist editor; stored keys are never shown or prefilled), speed, 测试连接 with
+ * success #4CAF50 + latency / failure #FF6B6B, and the phone QR entry. Section gap 8dp, detail 10dp/4dp. */
+export function SpeechSettingsScreen(props: Props & {input?:(title:string,value:string)=>Promise<string|null>}) {
+  const debug=debugGate.allowed&&!!props.input;
+  const tts=debug?new DebugTts(debugGate,new TtsConfigStore(),mediaTransport,()=>summaryAccountStore.read()):undefined;
+  const [config,setConfig]=createSignal(tts?.fields());
+  const [keySet,setKeySet]=createSignal(false),[logged,setLogged]=createSignal(false);
+  const [picker,setPicker]=createSignal(false),[testing,setTesting]=createSignal(false),[result,setResult]=createSignal<{ok:boolean;text:string}>();
+  let alive=true;onCleanup(()=>{alive=false;});
+  const refresh=async()=>{if(!tts)return;setConfig(tts.fields());try{const pub=await new TtsConfigStore().publicConfig(),account=await summaryAccountStore.read();if(alive){setKeySet(!!pub.apiKey);setLogged(!!account?.watchDeviceToken);}}catch{}};
+  if(tts)void refresh();
+  const width=props.width-36;
+  const edit=(field:"model"|"voiceId"|"baseUrl",title:string)=>()=>{if(!tts||!props.input)return;void props.input(title,tts.fields()[field]).then(value=>{if(!alive||value===null)return;tts.update(field,value);void refresh();});};
+  const setKey=()=>{if(!tts||!props.input)return;void props.input("API Key","").then(async value=>{if(!alive||value===null)return;await tts.setApiKey(value);void refresh();});};
+  const select=(engine:TtsEngine)=>{if(!tts)return;setPicker(false);setResult(undefined);void tts.select(engine).then(()=>refresh(),error=>{if(alive)setResult({ok:false,text:error instanceof Error?error.message:String(error)});});};
+  const test=()=>{if(!tts||testing())return;setTesting(true);setResult(undefined);void tts.test().then(text=>{if(alive)setResult({ok:true,text});},error=>{if(alive)setResult({ok:false,text:error instanceof Error?error.message:String(error)});}).finally(()=>{if(alive)setTesting(false);});};
+  const detail=(text:string,color="#b6b6b6"):ScrollEntry=>{const lines=wrap(text,width-10);return {height:4+lines.length*14,render:()=> <Text class="absolute left-[10] right-[0] top-[4] text-xs leading-[14]" style={{textColor:color}}>{lines.join("\n")}</Text>};};
+  const speed=()=>stepper("语速", `${props.state.speechRate.toFixed(1)}x`, "调节朗读语速", width, () => props.onChange({speechRate:Math.max(0.5,Math.round((props.state.speechRate-0.1)*10)/10)}), () => props.onChange({speechRate:Math.min(2,Math.round((props.state.speechRate+0.1)*10)/10)}));
+  const qrRow=()=>row("手机扫码配置语音","在手机端选择音色、输入 API Key 并同步到手表",width,undefined,()=>props.onNavigate('tts-config'));
+  const entries = createMemo<ScrollEntry[]>(() => {
+    if(!tts)return [heading("朗读语速"), ...speed(), ...qrRow()];
+    const c=config(),engine=c?.engine??"local";
+    if(picker())return [heading("选择引擎"),...(Object.keys(debugTtsEngines) as TtsEngine[]).map(id=>row(debugTtsEngines[id],"",width,id===engine?"✓":undefined,()=>select(id))).flat()];
+    const keyed=engine!=="local"&&engine!=="backend_default";
+    return [heading("朗读语音源"),
+      ...row("当前引擎","",width,debugTtsEngines[engine],()=>setPicker(true)),
+      ...(engine==="backend_default"?[detail(logged()?"账号已登录，使用 WatchRSS 提供的默认语音":"使用默认语音前请先登录")]:[]),
+      ...(keyed?[
+        ...row("音色",c?.voiceId?"":"默认",width,c?.voiceId||"默认",edit("voiceId","音色 ID")),
+        ...row("模型","",width,c?.model||"默认",edit("model","模型")),
+        ...row("服务地址",c?.baseUrl||"默认",width,"编辑",edit("baseUrl","服务地址")),
+        ...row("API Key","",width,keySet()?"已配置":"未配置",setKey),
+        detail("也可以在手机端编辑音色、模型和 API Key 后同步到手表"),
+      ]:[]),
+      ...speed(),
+      ...row(testing()?"正在测试...":"测试连接","",width,undefined,testing()?undefined:test),
+      ...(result()?[detail(result()!.text,result()!.ok?"#4caf50":"#ff6b6b")]:[]),
+      ...qrRow()];
+  });
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref}/>;
 }
