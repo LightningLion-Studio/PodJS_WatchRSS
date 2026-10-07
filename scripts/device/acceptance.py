@@ -115,16 +115,170 @@ def compare_receipts(before, after):
             'policy': 'strict; no automatic allowance for cache/schema/startup changes'}
 
 
+def android_tool(name):
+    # SDK tools are host-only; never consult signing properties or key material.
+    import shutil
+    found = shutil.which(name)
+    if found:
+        return found
+    sdk = os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
+    if sdk:
+        if name == 'apkanalyzer':
+            found = Path(sdk) / 'cmdline-tools/latest/bin' / name
+            if found.is_file():
+                return str(found)
+        else:
+            for version in sorted((Path(sdk) / 'build-tools').glob('*'),
+                                  key=lambda p: tuple(int(x) for x in p.name.split('.') if x.isdigit()), reverse=True):
+                if (version / name).is_file():
+                    return str(version / name)
+    raise ValueError('Missing Android SDK tool: ' + name)
+
+
+def apk_certificates(a, apk, sdk=None):
+    import re
+    cmd = [a.apksigner, 'verify', '--print-certs']
+    if sdk is not None:
+        cmd += ['--min-sdk-version', str(sdk), '--max-sdk-version', str(sdk)]
+    text = run(cmd + [str(apk)], a.dry_run)
+    certs = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})$', text, re.M)
+    if not a.dry_run and not certs:
+        raise ValueError('No verified APK signing certificate; chain refused')
+    return sorted(c.lower() for c in certs)
+
+
+def apk_metadata(a, apk, sdk):
+    fields = {}
+    for key, verb in [('package', 'application-id'), ('versionCode', 'version-code'), ('debuggable', 'debuggable')]:
+        fields[key] = run([a.apkanalyzer, 'manifest', verb, str(apk)], a.dry_run).strip()
+    if not a.dry_run:
+        if fields['package'] != a.package:
+            raise ValueError('APK application-id mismatch; chain refused before installation')
+        if not fields['versionCode'].isdigit() or int(fields['versionCode']) < 1:
+            raise ValueError('Invalid APK versionCode')
+        if fields['debuggable'] not in ('true', 'false'):
+            raise ValueError('Unknown APK debuggable flag')
+        fields['versionCode'] = int(fields['versionCode'])
+        fields['debuggable'] = fields['debuggable'] == 'true'
+        with Path(apk).open('rb') as stream:
+            fields['sha256'] = hashlib.file_digest(stream, 'sha256').hexdigest()
+    fields['certificatesSha256'] = apk_certificates(a, apk, sdk)
+    return fields
+
+
+def installed_metadata(a):
+    import re
+    text = run(a.adb + ['shell', 'dumpsys', 'package', a.package], a.dry_run)
+    if a.dry_run:
+        return {'versionCode': None, 'debuggable': None}
+    # versionCode/flags from the active package entry, not historical signatures.
+    versions = re.findall(r'^\s*versionCode=(\d+)\b', text, re.M)
+    flags = re.findall(r'^\s*(?:pkgFlags|flags)=\[([^\]]*)\]', text, re.M)
+    if len(versions) != 1 or not flags:
+        raise ValueError('Cannot read installed package version/flags; chain stopped')
+    return {'versionCode': int(versions[0]), 'debuggable': any('DEBUGGABLE' in f.split() for f in flags)}
+
+
+def installed_certificates(a, sdk):
+    paths = run(a.adb + ['shell', 'pm', 'path', a.package], a.dry_run)
+    if a.dry_run:
+        print('Dry run: pull installed base.apk to a temporary directory and verify signer SHA256')
+        return []
+    bases = [line.removeprefix('package:') for line in paths.splitlines()
+             if line.startswith('package:') and line.endswith('/base.apk')]
+    if len(bases) != 1:
+        raise ValueError('Cannot identify installed base APK; chain stopped')
+    with tempfile.TemporaryDirectory(prefix='wrss-installed-cert-') as temp:
+        apk = Path(temp) / 'base.apk'
+        run(a.adb + ['pull', bases[0], str(apk)])
+        return apk_certificates(a, apk, sdk)
+
+
+def upgrade_chain(a):
+    for name in ('before-digest.json', 'after-digest.json', 'data-compare.json', 'chain-install.json'):
+        if (a.out / name).exists():
+            raise ValueError('Use a fresh upgrade output directory; existing ' + name)
+    a.apkanalyzer = 'apkanalyzer' if a.dry_run else android_tool('apkanalyzer')
+    a.apksigner = 'apksigner' if a.dry_run else android_tool('apksigner')
+    paths = [*a.apk, a.verify_apk]
+    if not a.dry_run:
+        if any(not path.is_file() for path in paths):
+            raise ValueError('All chain APKs must exist before installation')
+        if len({path.resolve() for path in paths}) != len(paths):
+            raise ValueError('Chain APK paths must be distinct')
+    run(a.adb + ['shell', 'am', 'force-stop', a.package], a.dry_run)
+    initial = installed_metadata(a)
+    if not a.dry_run and not initial['debuggable']:
+        raise ValueError('Current package must be debuggable/run-as accessible; no installation attempted')
+    sdk_text = run(a.adb + ['shell', 'getprop', 'ro.build.version.sdk'], a.dry_run).strip()
+    if not a.dry_run and not sdk_text.isdigit():
+        raise ValueError('Cannot read device SDK; chain refused')
+    sdk = int(sdk_text) if not a.dry_run else None
+    metadata = [apk_metadata(a, path, sdk) for path in paths]
+    if not a.dry_run:
+        if not metadata[-1]['debuggable']:
+            raise ValueError('Verification APK must be debuggable; no installation attempted')
+        previous = initial['versionCode']
+        for info in metadata:
+            if info['versionCode'] <= previous:
+                raise ValueError('Chain versionCodes must strictly increase above installed version')
+            previous = info['versionCode']
+            if info['certificatesSha256'] != metadata[0]['certificatesSha256']:
+                raise ValueError('Chain APK signing certificates differ; no installation attempted')
+    # This must actually succeed (not just FLAG_DEBUGGABLE) before any installation.
+    before = snapshot(a, 'before')
+    log = {'initial': initial, 'steps': [], 'applicationLaunchRequested': False, 'complete': False}
+    def save_log():
+        if not a.dry_run:
+            (a.out / 'chain-install.json').write_text(json.dumps(log, indent=2) + '\n')
+    save_log()
+    for path, info in zip(paths, metadata):
+        step = {'apk': str(path), 'expected': info, 'verified': False}
+        log['steps'].append(step)
+        save_log()
+        try:
+            if not a.dry_run:
+                with path.open('rb') as stream:
+                    if hashlib.file_digest(stream, 'sha256').hexdigest() != info['sha256']:
+                        raise ValueError('APK changed after preflight; chain stopped')
+            output = run(a.adb + ['install', '-r', str(path)], a.dry_run)
+            # Some adb versions can return exit0 even when the package manager refuses.
+            if not a.dry_run and (not any(line.strip() == 'Success' for line in output.splitlines()) or 'Failure' in output):
+                raise ValueError('APK installation rejected; chain stopped without uninstall')
+            run(a.adb + ['shell', 'am', 'force-stop', a.package], a.dry_run)
+            actual = installed_metadata(a)
+            actual['certificatesSha256'] = installed_certificates(a, sdk)
+            step['actual'] = actual
+            if not a.dry_run and any(actual[k] != info[k] for k in ('versionCode', 'debuggable', 'certificatesSha256')):
+                raise ValueError('Installed version/debuggable/certificate mismatch; chain stopped')
+            step['verified'] = not a.dry_run
+            save_log()
+        except (ValueError, OSError, subprocess.SubprocessError):
+            step['error'] = 'Install/readback refused or failed; no subsequent APK installed, no uninstall attempted'
+            save_log()
+            raise
+    after = snapshot(a, 'after')
+    if not a.dry_run:
+        result = compare_receipts(before, after)
+        # Identical JSON structure/policy to the ordinary upgrade receipts.
+        (a.out / 'data-compare.json').write_text(json.dumps(result, indent=2) + '\n')
+        log['complete'] = True
+        save_log()
+        if not result['equal']:
+            raise ValueError('Data changed; inspect data-compare.json. Do not mark preservation PASS')
+
+
 def main():
     os.umask(0o077)  # Local receipts/logs can contain private metadata.
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action', choices=['rehearse-takeover', 'digest', 'upgrade', 'cold-start', 'routes', 'capture', 'compare', 'framework-tests', 'logs', 'reset-isolated'])
+    p.add_argument('action', choices=['rehearse-takeover', 'digest', 'upgrade', 'upgrade-chain', 'cold-start', 'routes', 'capture', 'compare', 'framework-tests', 'logs', 'reset-isolated'])
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--serial', default=os.environ.get('ANDROID_SERIAL', 'e3aca8af'))
     p.add_argument('--package', default=FORMAL)
     p.add_argument('--out', type=Path, default=ROOT / 'artifacts/device-acceptance')
     p.add_argument('--label', default='before')
-    p.add_argument('--apk', type=Path)
+    p.add_argument('--apk', type=Path, action='append', help='Repeat in installation order for upgrade-chain')
+    p.add_argument('--verify-apk', type=Path, help='Final debuggable data verification APK')
     p.add_argument('--test-apk', type=Path)
     p.add_argument('--cleanup-private', action='store_true')
     p.add_argument('--takeover-timeout', type=int, default=300)
@@ -136,6 +290,12 @@ def main():
     import re
     if not re.fullmatch(r'[A-Za-z0-9_.]+', a.package) or not re.fullmatch(r'[A-Za-z0-9_-]+', a.label):
         p.error('Unsafe package or label')
+    if a.action == 'upgrade-chain' and (not a.apk or not a.verify_apk):
+        p.error('upgrade-chain requires one or more --apk and --verify-apk')
+    if a.action != 'upgrade-chain':
+        if a.apk and len(a.apk) != 1:
+            p.error('Multiple --apk are supported only by upgrade-chain')
+        a.apk = a.apk[0] if a.apk else None
     if a.action == 'upgrade' and not a.apk:
         p.error('upgrade requires --apk')
     if a.action == 'compare' and (not a.reference or not a.actual):
@@ -164,6 +324,8 @@ def main():
         a.out.mkdir(parents=True, exist_ok=True)
     if a.action == 'digest':
         snapshot(a, a.label)
+    elif a.action == 'upgrade-chain':
+        upgrade_chain(a)
     elif a.action == 'upgrade':
         for name in ('before-digest.json', 'after-digest.json', 'data-compare.json'):
             if (a.out / name).exists():
