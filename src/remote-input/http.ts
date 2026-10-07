@@ -1,3 +1,4 @@
+import {readHttpRequest} from "@podjs/framework/http-request";
 import {appLogger} from '../logs/app-logger.ts';
 import {EXPORT_ABILITIES,historyPayload,playbackPayload,historyFailure,type HttpExportSession} from './exports.ts';
 import {nativeTrim} from '../sync/local-manifest.ts';
@@ -9,32 +10,8 @@ export const REMOTE_INPUT_ABILITY = {code:'dc40517c-a09c-419c-8c4d-d3883258992e'
 export const MAX_REMOTE_INPUT_BODY = 65536;
 export interface RemoteHttpRequest { method?:string; target:string; headers:Record<string,string>; body:string }
 export interface RemoteHttpResponse { status:number; type:string; body:string; url?:string }
-class InvalidRequest extends Error {}
-/** One request per connection, with a whole-request deadline and bounded buffers. */
-export async function readRemoteHttpRequest(stream:SyncByteStream,now=Date.now):Promise<RemoteHttpRequest> {
- const deadline=now()+15000;let buffer:Uint8Array=new Uint8Array(0);let offset=0,headerBytes=0;
- const read=async(length:number):Promise<Uint8Array>=>{
-  const out=new Uint8Array(length);let used=0;
-  while(used<length){if(offset===buffer.length){const remaining=deadline-now();if(remaining<=0)throw new InvalidRequest('Request timed out');const bytes=await stream.read(4096,remaining);if(!bytes?.length||bytes.length>4096||now()>deadline)throw new InvalidRequest('Truncated request');buffer=bytes;offset=0;}
-   const count=Math.min(length-used,buffer.length-offset);out.set(buffer.subarray(offset,offset+count),used);used+=count;offset+=count;
-  }return out;
- };
- const line=async():Promise<string>=>{const bytes:number[]=[];while(true){if(++headerBytes>16384)throw new InvalidRequest('Headers too large');const b=(await read(1))[0];if(b===10){if(bytes.pop()!==13)throw new InvalidRequest('Invalid line ending');return utf8ToString(new Uint8Array(bytes));}bytes.push(b);}};
- const start=await line(),match=/^[A-Z]+ ([^\s]+) HTTP\/1\.[01]$/.exec(start);if(!match||!match[1].startsWith('/'))throw new InvalidRequest('Invalid request line');
- const headers:Record<string,string>=Object.create(null);
- while(true){const value=await line();if(!value)break;const colon=value.indexOf(':');if(colon<1)throw new InvalidRequest('Invalid header');const key=value.slice(0,colon).toLowerCase();if(!/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(key))throw new InvalidRequest('Invalid header');if(headers[key]!==undefined&&(key==='content-length'||key==='transfer-encoding'))throw new InvalidRequest('Duplicate framing');headers[key]=value.slice(colon+1).trim();}
- let bytes:Uint8Array;
- if(headers['transfer-encoding']){
-  if(headers['content-length']!==undefined||headers['transfer-encoding'].toLowerCase()!=='chunked')throw new InvalidRequest('Invalid transfer encoding');
-  const parts:Uint8Array[]=[];let size=0;
-  while(true){const encoded=(await line()).split(';',1)[0];if(!/^[0-9a-f]+$/i.test(encoded))throw new InvalidRequest('Invalid chunk');const count=parseInt(encoded,16);if(!Number.isSafeInteger(count)||count>MAX_REMOTE_INPUT_BODY-size)throw new InvalidRequest('Body too large');
-   if(count===0){while(await line()){}break;}parts.push(await read(count));size+=count;if(await line()!=='')throw new InvalidRequest('Invalid chunk ending');
-  }bytes=new Uint8Array(size);let at=0;for(const part of parts){bytes.set(part,at);at+=part.length;}
- }else{
-  const length=headers['content-length']??'0';if(!/^\d+$/.test(length)||Number(length)>MAX_REMOTE_INPUT_BODY)throw new InvalidRequest('Body too large');bytes=await read(Number(length));
- }
- return {method:start.slice(0,start.indexOf(' ')),target:match[1],headers,body:utf8ToString(bytes)};
-}
+/** One request per connection; routes and native limits stay application-owned. */
+export function readRemoteHttpRequest(stream:SyncByteStream,now=Date.now):Promise<RemoteHttpRequest>{return readHttpRequest(stream,{now,timeoutMs:15000,readBytes:4096,maxHeaderBytes:16384,maxBodyBytes:MAX_REMOTE_INPUT_BODY});}
 const json=(status:number,value:unknown,url?:string):RemoteHttpResponse=>{const body=JSON.stringify(value);return {status,type:/[^\x00-\x7f]/.test(body)?'application/json; charset=UTF-8':'application/json',body,url};};
 function parameter(query:string,key:string):string {for(const pair of query.split('&')){const at=pair.indexOf('=');const decode=(s:string)=>decodeURIComponent(s.replace(/\+/g,' '));if(decode(at<0?pair:pair.slice(0,at))===key)return decode(at<0?'':pair.slice(at+1));}return '';}
 export function routeRemoteHttp(request:RemoteHttpRequest,exportSession?:HttpExportSession):RemoteHttpResponse {

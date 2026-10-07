@@ -1,3 +1,5 @@
+import {StartupOverlayTransition} from "@podjs/framework/startup-overlay";
+import {restoreIfOwned} from "@podjs/framework/startup";
 import {activityStateHub} from '../navigation/activity-host.ts';
 import {ONBOARDING_DRAFT_KEY} from '../onboarding/restoration.ts';
 import {STARTUP_LEGAL_KEY} from '../onboarding/legal-restoration.ts';
@@ -106,18 +108,13 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
 }
 
 function StartupTransition(props:{ready:()=>boolean;exit:()=>boolean;render:()=>JSX.Element}){
- const [elapsed,setElapsed]=createSignal(0),[finished,setFinished]=createSignal(false);let started:number|undefined;
- const now=()=>globalThis.performance?.now?.()??Date.now();
- createEffect(()=>{if(!props.exit()){started=undefined;setElapsed(0);setFinished(false);return;}if(started===undefined){startupMark('overlay.exitStart');started=now();setElapsed(0);setFinished(false);}});
- onFrame(()=>{if(started===undefined||finished())return;const value=Math.max(0,now()-started);setElapsed(value);if(value>=STARTUP_EXIT_DURATION_MS){startupMark('overlay.finished');setFinished(true);}});
- return <><Show when={props.ready()}>{props.render()}</Show><Show when={!finished()}><StartupLoading exitElapsedMs={elapsed()}/></Show></>;
+ return <StartupOverlayTransition ready={props.ready} exit={props.exit} content={props.render} overlay={elapsed=><StartupLoading exitElapsedMs={elapsed()}/>} durationMs={STARTUP_EXIT_DURATION_MS} onExitStart={()=>startupMark('overlay.exitStart')} onFinished={()=>startupMark('overlay.finished')}/>;
 }
 
 function StartupLoading(props:{exitElapsedMs:number}){
  // The overlay now outlives the content mount: only undo our own navigation state,
  // never the stack state the content published while the overlay was fading.
- setNavigationState({canGoBack:false,rootSwipeEnabled:false});const ownState=navigationStateSnapshot();
- onCleanup(()=>{if(navigationStateSnapshot()===ownState)setNavigationState({canGoBack:false});});
+ onCleanup(restoreIfOwned(()=>setNavigationState({canGoBack:false,rootSwipeEnabled:false}),navigationStateSnapshot,()=>setNavigationState({canGoBack:false})));
  const metrics=getDisplayMetrics(),frame=()=>startupExitFrame(props.exitElapsedMs);
  // Pod apps cannot own the host Android splash window; animate the first app
  // surface while the resolved destination is already mounted underneath.

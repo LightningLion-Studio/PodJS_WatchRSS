@@ -335,3 +335,73 @@ notes header 参数、内容模型和测量组合仍应用。这些轮次不等�
 资源清理差分验证。#17 overlay 生命周期仍为部分，页面挂载与 onboarding
 耦合，不在本轮扩大 UI 重构。#22 交由 wrss-impl；takeover/T3 未触碰。
 详见 `framework-upstream-u8.md`；设备验收 PENDING，未安装或操作设备。
+
+## U9 第二轮清单（2026-10-07，d1d4515 / 25beb14）
+
+在两仓 wt-c 的 `c/upstream-8` 复核。扫描 `src/` 全部396文件（392个TS/TSX，
+25264行，含资源/说明），生成逐文件SHA256/行数/export清单
+`.codex-tmp/u9/src-inventory.json`；随后检查下表候选的实现、调用点、测试与
+现有框架入口。扫描覆盖全部模块；这不是对所有业务模块逐行正确性的承诺。
+
+覆盖分组：account6、announcement7、bili13、browser1、cache4、cloud20、
+core20、debug12、douyin18、llm4、logs12、media7、navigation7、notes11、
+onboarding10、phoneconnection4、reader41、remote-input6、rss3、settings2、
+sharing2、sync49、telemetry3、tts6、ui122，另有顶层5文件和assets1。
+
+收益指重复使用/减少应用通用实现；风险指行为、资源或持久化边界变化。
+按先完成旧清单收尾、再高复用纯机制、最后带业务所有权的协调器排序。
+1为旧#17收尾，2–6为本轮五个新漏项并已实施；7以后仅候选，未改代码。
+每项都可供无RSS概念的其他应用使用。
+
+| 顺序 | 通用候选 / 原位置 | 收益 / 风险 | 框架边界与应用保留 | U9 |
+| --- | --- | --- | --- | --- |
+| 1 | #17 overlay 生命周期，`ui/StartupGate.tsx:StartupTransition/StartupLoading` | 高 / 中 | `startup-overlay.StartupOverlayTransition` 管ready/exit分离、frame、重置/完成/卸载；`startup.restoreIfOwned` 管状态发布者身份；300ms preset、图像/文案/导航字段/trace与onboarding留app | 已迁 |
+| 2 | HTTP/1 单请求分帧，`remote-input/http.ts:readRemoteHttpRequest` | 高 / 中 | `http-request.readHttpRequest` 管截止时间、分片、CRLF、chunked/Content-Length、限额与UTF-8；app明确传15s/4KiB/16KiB/64KiB，全部路由/能力/响应及扫码留app | 已迁 |
+| 3 | JSON 数字lexeme，`sync/wire-json.ts` | 高 / 低 | `json-numbers` 保留WeakMap token、重复key及整数/浮点判定；app传128层上限和原sync错误，协议实体/字段reader留app；独立纯入口可供后台使用 | 已迁 |
+| 4 | UTF-16 文本位置锚点，`reader/text-anchor.ts` | 高 / 低 | `text-anchor` 管CRLF、重复/缺失行、行内fraction与clamp；app保留TextAnchor.mediaIndex以及原公开函数签名，不迁笔记Markdown映射 | 已迁 |
+| 5 | 日出日落与跨午夜调度，`reader/theme-schedule.ts` | 中高 / 低 | `theme-schedule` 管CalendarDay/时区event offset、极地fallback及daily interval；app保留ReaderThemeSchedule、默认07:00/19:00、locationUpdatedAt、显示格式/存储和SYSTEM含义 | 已迁 |
+| 6 | 有界内存日志行，`debug/log-buffer.ts`（DBG1/2） | 中 / 低 | `logging.BoundedLineBuffer` 管行/UTF-16容量和尾截断；app保留debug gate、400/50000/4096、dump前缀和已脱敏输出接线；不采集新遥测 | 已迁 |
+| 7 | fail-closed build gate，`debug/gate.ts` | 中 / 低 | 可抽象一次异步host flag解析/并发init；debugBuild判定、拒绝文案和各业务操作的gating留app | 后续 |
+| 8 | 冠轮音量批处理/Float guard，`media/crown-volume.ts` | 高 / 中 | 通用media-volume controller可管分数积累、串行readback与generation；21%/600ms、方向/.01/.06、1200ms及通知规则应作为app profile | 后续 |
+| 9 | 有界退出flush与同目标合并，`navigation/reader-exit.ts` | 中高 / 中 | 可扩async的结果race/取消timer/目标identity；2.5s、Back目标/保存业务和完成策略留app | 后续 |
+| 10 | 私有文件HTTP response读取，`media/transport.ts`、`tts/transport.ts` | 高 / 中高 | 复用services/fileChunks而不重造host；路径所有权、迟到失败清理、严格size/offset/EOF验证可通用；平台错误、临时目录/8MiB/timeout/log留app。两种校验profile不能强行合并 | 后续 |
+| 11 | 带session/sequence的节流预览发布，`reader/preview-session.ts` | 中高 / 中高 | 可抽发布时钟/尾合并/heartbeat/generation，preset delta验证、失败仍消耗sequence、资源transfer 120s/20s与33ms profile留app | 后续 |
+| 12 | 匹配高亮/跨行位置，`rss/search-snippet.ts` | 中 / 中 | 可抽纯匹配与measure geometry；大小写/UTF-16索引语义须冻结，140/35、候选顺序、HTML清理和“暂无摘要”留app | 后续 |
+| 13 | displayed/source caret映射，`notes/editor-anchor.ts` | 中 / 高 | 最近region/字符caret/源映射可通用并接受转换callback；memoPlainText、Markdown/sourceMarkup、中心选点/layout参数留app，先查与text-carets能力边界 | 后续 |
+| 14 | resumable TUS chunk/retry与headers，`cloud/tus.ts` | 中 / 高 | 通用上传协调可接受transport/source/metadata/authorization；Supabase字段、签名header、同源限制、6MiB/重试数和CloudGuard留app。当前无性能证据，不直接Rust化 | 后续 |
+
+### 新增轮次和不迁移边界
+
+- K15/K19/K20/K20b/K21/K22/K23、RS1/RS2/RS3：分片文本/HTML/XML/JSON、
+  service trace、keyed memo、KV batching和SQL分页已有框架实现；app剩余
+  content model、首屏预算选择、UTF-8平台方言、Feed窗口/阅读进度/库revision
+  属业务适配，不再重复实现一套renderer/解析器/队列。此次新漏项为JSON
+  lexical typing和文本锚点；不把已具host能力误标为组件迁完。
+- DBG1/DBG2：external ABI host桥、FileCache通用机制已迁；新漏项是内存line
+  buffer，后续build gate可抽。`debug/playback-diagnostics.ts` 的DL/M3/Slots/
+  Queue/Quarantined标签、业务owner绑定和“unavailable”依据属于app；没有新
+  preview producer、RAM数据或decoder测量，保持原数据来源和release门禁。
+- C16：`llm/summary.ts`/`debug/summary.ts` 的原文等待、账号和usage/route状态
+  业务保留；`llm/usage.ts` 的provider字段归一化、SQL表/窗口和聚合政策不
+  作为普通UI组件上移。C17：`debug/tts.ts`、`tts/config-store.ts` 的引擎字段、
+  secure key命名空间和中文mask保留；通用临时HTTP文件读取列入候选10。
+- 全模块其余结果：account/announcement/feed/RSS/平台client/notes repository/
+  settings/sharing/phoneconnection/sync实体/telemetry/onboarding与UI页面主要
+  为业务；U1–U8薄转出、ManagedCache、layout/font环境等已迁部分不重新计项。
+  `HomeEntryPlacementStore`、home snapshot、noteRelativeTime和library deletion
+  含命名空间、排序/字段/文案策略，本轮不扩大持久化重构。
+- takeover/存储迁移T4、wrss-impl G1脚手架/示例完全未触碰；框架只增加中性
+  API、测试、文档和纯JSON headless allowlist。无Rust性能改动和加速结论。
+
+### #17 收尾状态与验收
+
+旧U5/U8“overlay生命周期未迁”是历史状态，U9已完成通用源码部分；onboarding
+业务不迁移。全UI样式/图片/文案在app原处。冻结d1d4515六个原文件，逐字节
+SHA256与两类隔离oracle测试核对算法、完整overlay树、事件顺序、结束边界、
+退出撤销/重新开始、frame清理和新导航发布者保护。完整oracle文件不改；loader
+只转译/重定向，StartupGate仅取两段原私有函数及其必要imports，避免执行
+无关onboarding依赖；该测试不宣称整个StartupGate/设备启动已验收。
+
+见 `framework-upstream-u9.md` 和 `.codex-tmp/wrss-c-report.md`。设备PENDING，
+未安装、未触碰数据，也未生成userdata tar；正式升级及首页尺寸门禁由设备
+负责人执行。源码/host测试和CLI build不是设备parity证据。
