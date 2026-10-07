@@ -108,3 +108,9 @@ including unread aggregates. Compare before/after fixture JSON to establish
 cross-version equivalence; a replay against its own golden is not that proof.
 Home refresh does not request original-content prefetch; that is a separate
 visible-feed path. Both feed/original full-file decodes use the bounded SDK codec.
+
+Optionally set `PODJS_BENCH_KV_DIR=<private scratch>` when running `service-bench`
+to exercise the production home-snapshot writer through the real Rust KV store.
+The K21 probe's unrelated 830000-character value is explicitly synthetic; SQL
+article/channel shapes come from the local snapshot. KV readback comparison
+sorts object keys because serde canonicalizes their ordering, preserving values.
