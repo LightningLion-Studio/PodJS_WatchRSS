@@ -27,7 +27,7 @@ export function presetContentFont(preset:ReaderPreset,style:ContentStyle){
 export interface ParagraphLine { start:number; end:number; visibleEnd:number; height?:number; baseline?:number; paragraph?:TextParagraphLine }
 export interface AtlasLineMetrics {cellHeight:number;baseline:number}
 export type NativeBlockLayouts=ReadonlyMap<ContentBlock,readonly ParagraphLine[]>;
-interface TextBlockLayout {native?:readonly ParagraphLine[];width:number;fontSize:number;fontKey:string;text:string;style:ContentStyle;lines:string[];starts:number[]}
+interface TextBlockLayout {native?:readonly ParagraphLine[];width:number;fontSize:number;fontKey:string;text:string;style:ContentStyle;normalized:string;lines:string[];starts:number[]}
 /** Native atlas wrapping can return no breakpoints for a long unsupported run.
  * Binary-search each line using actual measured width, retaining code point
  * boundaries and bounding a line to the host's 4096-byte semantic limit. */
@@ -51,17 +51,27 @@ function measuredHardWrap(text:string,width:number,measure:(value:string)=>numbe
 export function createContentLayouter(measure:(text:string,slot:number)=>number,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined){
  const textCache=new WeakMap<object,TextBlockLayout>(),widths=new Map<string,number>();
  const measured=(text:string,slot:number)=>{if(text.length>128)return measure(text,slot);const key=slot+":"+text,hit=widths.get(key);if(hit!==undefined){widths.delete(key);widths.set(key,hit);return hit;}const value=measure(text,slot);if(widths.size>=4096)widths.delete(widths.keys().next().value!);widths.set(key,value);return value;};
- return (blocks:readonly ContentBlock[],width:number,fontSize:number,ratios:Readonly<Record<number,number>>={},preset?:ReaderPreset,native?:NativeBlockLayouts)=>layoutContent(blocks,width,fontSize,measured,ratios,textCache,wrap,preset,native,atlasMetrics);
+ const steps=(blocks:readonly ContentBlock[],width:number,fontSize:number,ratios:Readonly<Record<number,number>>={},preset?:ReaderPreset,native?:NativeBlockLayouts)=>contentLayoutSteps(blocks,width,fontSize,measured,ratios,textCache,wrap,preset,native,atlasMetrics);
+ return Object.assign((...args:Parameters<typeof steps>)=>finishContentLayout(steps(...args)),{steps});
 }
 export function layoutContent(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined):ContentLayout {
+ return finishContentLayout(contentLayoutSteps(blocks,width,fontSize,measure,ratios,textCache,wrap,preset,native,atlasMetrics));
+}
+function finishContentLayout(steps:Generator<ReaderRow,ContentLayout>):ContentLayout {
+ let next=steps.next();while(!next.done)next=steps.next();return next.value;
+}
+/** The synchronous and sliced paths share every geometry calculation. */
+export function* contentLayoutSteps(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined):Generator<ReaderRow,ContentLayout> {
  const rows:ReaderRow[]=[];let top=0,character=0;
- blocks.forEach((block,blockIndex)=>{
+ for(let blockIndex=0;blockIndex<blocks.length;blockIndex++){
+  const block=blocks[blockIndex]!;
   const gap=blockIndex?6:0;
   if(block.type==="text"){
    const font=preset?presetContentFont(preset,block.style):{...contentFont(fontSize,block.style),tracking:0,textAlign:0};let cached=textCache?.get(block);
    const platformLines=native?.get(block);
    const fontKey=`${font.fontSlot}:${font.scale}:${font.tracking}`;
-   if(!cached||cached.native!==platformLines||cached.width!==width||cached.fontSize!==fontSize||cached.fontKey!==fontKey||cached.text!==block.text||cached.style!==block.style){const normalized=block.text.replace(/\r\n?/g,"\n");const lines=platformLines?platformLines.map(line=>normalized.slice(line.start,line.visibleEnd)):normalized.split("\n").flatMap(paragraph=>{
+   const normalized=cached?.text===block.text?cached.normalized:block.text.replace(/\r\n?/g,"\n");
+   if(!platformLines&&(!cached||cached.native!==platformLines||cached.width!==width||cached.fontSize!==fontSize||cached.fontKey!==fontKey||cached.text!==block.text||cached.style!==block.style)){const lines=normalized.split("\n").flatMap(paragraph=>{
      // For a single word without grapheme extenders, native hard wrapping is
      // identical to the existing grapheme loop. Keep that loop for spaced
      // text and combining/ZWJ clusters rather than changing their boundaries.
@@ -71,21 +81,21 @@ export function layoutContent(blocks:readonly ContentBlock[],width:number,fontSi
       return measuredHardWrap(paragraph,Math.max(1,width),value=>measure(value,font.fontSlot)*font.scale);
      }
      return layoutText(paragraph,{width:Math.max(1,width),measure:s=>measure(s,font.fontSlot)*font.scale+Math.max(0,Array.from(s).length-1)*font.tracking});
-    });cached={width,fontSize,fontKey,text:block.text,style:block.style,lines,starts:platformLines?platformLines.map(line=>line.start):lineStarts(block.text,lines),native:platformLines};textCache?.set(block,cached);}
-   const {lines,starts}=cached;
+    });cached={width,fontSize,fontKey,text:block.text,style:block.style,normalized,lines,starts:lineStarts(block.text,lines),native:undefined};textCache?.set(block,cached);}
+   const lines=cached?.lines??[],starts=cached?.starts??[];
    let rawOffset=0,normalizedOffset=0;
-   lines.forEach((text,i)=>{while(normalizedOffset<starts[i]&&rawOffset<block.text.length){if(block.text[rawOffset]==="\r"&&block.text[rawOffset+1]==="\n")rawOffset++;rawOffset++;normalizedOffset++;}const rowGap=i?0:gap,metrics=platformLines?.[i],lineHeight=metrics?.height??font.lineHeight,height=rowGap+lineHeight;
+   for(let i=0;i<(platformLines?.length??lines.length);i++){const metrics=platformLines?.[i],start=metrics?.start??starts[i],text=metrics?normalized.slice(metrics.start,metrics.visibleEnd):lines[i];while(normalizedOffset<start&&rawOffset<block.text.length){if(block.text[rawOffset]==="\r"&&block.text[rawOffset+1]==="\n")rawOffset++;rawOffset++;normalizedOffset++;}const rowGap=i?0:gap,lineHeight=metrics?.height??font.lineHeight,height=rowGap+lineHeight;
     const atlas=metrics?.baseline===undefined?undefined:atlasMetrics?.(font.fontSlot);
     const textOffsetY=atlas?metrics!.baseline!-((lineHeight-atlas.cellHeight*font.scale)/2+atlas.baseline*font.scale):0;
-    rows.push({kind:"text",text,blockIndex,sourceStart:rawOffset,character:character+starts[i],top,height,gap:rowGap,...font,lineHeight,textOffsetY,...(metrics?.baseline!==undefined?{nativeBaseline:metrics.baseline}:{}),...(metrics?.paragraph?{nativeParagraph:metrics.paragraph}:{})});top+=height;});
-   character+=block.text.replace(/\r\n?/g,"\n").length+1;
+    rows.push({kind:"text",text,blockIndex,sourceStart:rawOffset,character:character+start,top,height,gap:rowGap,...font,lineHeight,textOffsetY,...(metrics?.baseline!==undefined?{nativeBaseline:metrics.baseline}:{}),...(metrics?.paragraph?{nativeParagraph:metrics.paragraph}:{})});top+=height;yield rows[rows.length-1]!;}
+   character+=normalized.length+1;
   }else{
    const declared=block.type==="image"&&block.width&&block.height?block.width/block.height:0;
    const ratio=ratios[blockIndex]||declared||(block.type==="video"?16/9:0);
    const height=gap+(ratio>0?width/ratio:100);
-   rows.push({kind:block.type,block,blockIndex,character,top,height,gap});top+=height;
+   rows.push({kind:block.type,block,blockIndex,character,top,height,gap});top+=height;yield rows[rows.length-1]!;
   }
- });
+ }
  return {rows,height:top,textLength:Math.max(0,character-1)};
 }
 export function rowAtOffset(rows:readonly {top:number;height:number}[],offset:number):number {
@@ -98,7 +108,12 @@ export function contentAnchorAt(layout:ContentLayout,offset:number):ContentAncho
 }
 export function offsetForContentAnchor(layout:ContentLayout,anchor:ContentAnchor,maximum:number):number {
  let row=anchor.mediaIndex===undefined?undefined:layout.rows.find(r=>r.kind!=="text"&&r.blockIndex===anchor.mediaIndex);
- if(!row){for(const candidate of layout.rows){if(candidate.kind!=="text")continue;if(!row||candidate.character<=anchor.character)row=candidate;else break;}}
+ if(!row){
+  let lo=0,hi=layout.rows.length;
+  while(lo<hi){const mid=(lo+hi)>>>1;if(layout.rows[mid]!.character<=anchor.character)lo=mid+1;else hi=mid;}
+  for(let i=Math.max(0,lo-1);i>=0;i--)if(layout.rows[i]!.kind==="text"){row=layout.rows[i];break;}
+  if(!row)row=layout.rows.find(candidate=>candidate.kind==="text");
+ }
  if(!row)return 0;
  return Math.max(0,Math.min(maximum,row.top+row.gap+Math.max(0,Math.min(.999,anchor.fraction))*(row.height-row.gap)));
 }

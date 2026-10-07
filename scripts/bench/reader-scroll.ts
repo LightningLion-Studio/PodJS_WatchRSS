@@ -1,6 +1,8 @@
 /** Build a standalone, instrumented copy; production sources are not patched.
  * bun scripts/bench/reader-scroll.ts --framework=... --out=.../baseline.js
  * bun baseline.js --html=... --timing=... --out=.../baseline.json
+ * --runtime=quickjs --layout-slices-profile=1 records slice/publish milliseconds
+ * in reader-memory probe metadata using the original wall clock, not timeline time.
  */
 import {createRequire} from "node:module";
 import {resolve, dirname} from "node:path";
@@ -63,9 +65,15 @@ const built=await Bun.build({entrypoints:[resolve(import.meta.dir,native?"reader
  builder.onLoad({filter:/\.(tsx|ts|js)$/},async args=>{
   if(!args.path.includes("/src/")&&!args.path.endsWith("/solid.js")&&!(native&&args.path===resolve(import.meta.dir,"reader-memory-runner.tsx")))return;
   let source=await Bun.file(args.path).text();
-  if(sourceRef&&["ScrollEntries.tsx","ReaderBody.tsx"].some(name=>args.path===resolve(appRoot,"src/ui",name))){
-   const original=Bun.spawnSync(["git","show",`${sourceRef}:src/ui/${args.path.split("/").at(-1)}`],{cwd:appRoot});
+  if(sourceRef&&["src/ui/ScrollEntries.tsx","src/ui/ReaderBody.tsx","src/ui/windowed-rows.ts","src/reader/content-layout.ts"].some(name=>args.path===resolve(appRoot,name))){
+   const original=Bun.spawnSync(["git","show",`${sourceRef}:${args.path.slice(appRoot.length+1)}`],{cwd:appRoot});
    if(original.exitCode!==0)throw new Error(original.stderr.toString());source=original.stdout.toString();
+  }
+  if(native&&arg("layout-slices-profile","0")==="1"){
+   if(args.path===resolve(appRoot,"src/reader/layout-slices.ts"))source=source.replace("clock=options.clock??Date.now","clock=options.clock??globalThis.__readerWallClock").replace("options.onSlice?.(elapsed,count);","options.onSlice?.(elapsed,count); globalThis.__layoutSlices.turns++; globalThis.__layoutSlices.maxMs=Math.max(globalThis.__layoutSlices.maxMs,elapsed); globalThis.__layoutSlices.rows+=count;globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));");
+   if(args.path===resolve(appRoot,"src/ui/ReaderBody.tsx"))source=source.replace(",makeEntry,setPrepared)",",makeEntry,value=>{const start=globalThis.__readerWallClock();setPrepared(value);globalThis.__layoutSlices.publishes++;globalThis.__layoutSlices.publishMs=Math.max(globalThis.__layoutSlices.publishMs,globalThis.__readerWallClock()-start);globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));})");
+   if(sourceRef&&args.path===resolve(appRoot,"src/ui/ReaderBody.tsx"))source=source.replace("args=>textLayout.layout(args),setNativeLayouts,error", "args=>textLayout.layout(args),value=>{const start=globalThis.__readerWallClock();setNativeLayouts(value);globalThis.__layoutSlices.publishes++;globalThis.__layoutSlices.publishMs=Math.max(globalThis.__layoutSlices.publishMs,globalThis.__readerWallClock()-start);globalThis.pod.emit(JSON.stringify({...globalThis.__readerMeta,layoutSlices:globalThis.__layoutSlices}));},error");
+   if(args.path===resolve(import.meta.dir,"reader-memory-runner.tsx"))source=source.replace("JSON.stringify({t:'bench.meta',blocks:","JSON.stringify(globalThis.__readerMeta={t:'bench.meta',blocks:");
   }
   if(retainRows&&args.path===resolve(appRoot,"src/ui/ReaderBody.tsx")){
    if(!/^\d+$/.test(retainRows))throw new Error("retain-rows must be a nonnegative integer");
@@ -86,6 +94,6 @@ if(native){
  const {compileClasses}=await import(resolve(pocket,"framework/compiler/tailwind.ts"));
  const styles=compileClasses(classLiterals);
  const source=await Bun.file(output).text();
- await Bun.write(output,`globalThis.__readerStyles=${JSON.stringify({ids:styles.ids,bin:[...styles.bin]})};\n${source}`);
+ await Bun.write(output,`globalThis.__readerWallClock=Date.now;globalThis.__layoutSlices={turns:0,maxMs:0,rows:0,publishes:0,publishMs:0};\nglobalThis.__readerStyles=${JSON.stringify({ids:styles.ids,bin:[...styles.bin]})};\n${source}`);
 }
 console.log(`Built ${native?"QuickJS ownership":"instrumented Bun"} ReaderBody/PocketJS/Solid/SystemTextLine: ${output}`);
