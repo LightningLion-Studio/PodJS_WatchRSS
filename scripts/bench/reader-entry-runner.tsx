@@ -10,9 +10,12 @@ import {getFontMetrics} from '@podjs/framework/watch';
 import {defaultReaderPreset} from '../../src/reader/preset.ts';
 import {releaseRetainedRemoteImages} from '../../src/ui/RemoteImage.tsx';
 const g=globalThis as any,now=g.__benchNow,print=g.__benchPrint,fixture=g.__entryFixture;
-const start=now();let firstBody:number|undefined,firstRaster:number|undefined,nodeId=1,textureId=1,maxTurn=0,turns=0,stop:()=>void,finished=false;
+// Optional offline CPU model changes the default scheduler's clock budget;
+// actual host IO timers still use unscaled monotonic time. Reported CPU remains raw.
+if(fixture.cpuScale!==1){if(!Number.isFinite(fixture.cpuScale)||fixture.cpuScale<1)throw Error('invalid CPU scale');Date.now=()=>Math.floor(now()*fixture.cpuScale);}
+const start=now();let firstBody:number|undefined,firstTitle:number|undefined,firstImage:number|undefined,firstRaster:number|undefined,nodeId=1,textureId=1,maxTurn=0,turns=0,stop:()=>void,finished=false;
 const nativeArgs=new Map<string,any>();
-const events:any[]=[],pending=new Map<number,{due:number;method:string;event:any}>(),counts:Record<string,number>={},rasterTexts:string[]=[],nodes=new Map<number,string>(),kv=new Map<string,string>();
+const events:any[]=[],serviceTurns:any[]=[],pending=new Map<number,{due:number;method:string;event:any}>(),counts:Record<string,number>={},rasterTexts:string[]=[],nodes=new Map<number,string>(),kv=new Map<string,string>();
 let phase='mount';const phases:any[]=[];
 function record(name:string){phases.push({phase:name,atMs:now()-start});}
 function paragraph(args:any){
@@ -37,7 +40,7 @@ Object.assign(g.pod,{
  else if(method==='text.raster'){rasterTexts.push(args.text);if(firstRaster===undefined){firstRaster=now()-start;record('firstRasterRequest');}value={path:`text/${id}`,width:512,height:64,carets:Array.from({length:args.text.length+1},(_,i)=>i*14)};}
  else if(method==='file.stat')value={file:false,size:0};
  else if(method==='file.delete')value={deleted:true};
- else if(method==='image.decode'){pending.set(id,{due:now()+delay,method,event:{t:'service.result',id,ok:false,code:'not_found',message:'Fixture has no JPEG'}});return;}
+ else if(method==='image.decode'){if(firstImage===undefined){firstImage=now()-start;record('firstImageRequest');}pending.set(id,{due:now()+delay,method,event:{t:'service.result',id,ok:false,code:'not_found',message:'Fixture has no JPEG'}});return;}
  else if(method==='file.mkdir')value={created:true};
  else if(method.startsWith('http.')||method.startsWith('download.')||method==='file.list'){pending.set(id,{due:now()+delay,method,event:{t:'service.result',id,ok:false,code:'fixture_unavailable',message:'Offline IO boundary'}});return;}
  else throw Error('Unexpected IO '+method);
@@ -45,7 +48,7 @@ Object.assign(g.pod,{
  }});
 const ops:any={__viewport:{w:233,h:233},__scrollConfiguration:{touchSlopPx:8,minimumFlingVelocityPx:50,maximumFlingVelocityPx:8000},createNode:()=>nodeId++,
  measureText:(text:string)=>text.length*7,wrapText:(text:string,_slot:number,width:number)=>{const out:number[]=[];for(let end=Math.max(1,Math.floor(width/7));end<text.length;end+=Math.max(1,Math.floor(width/7)))out.push(end);return out;},
- getLayout:()=>({x:0,y:0,w:233,h:233}),getProp:()=>0,uploadTexture:()=>textureId++,freeTexture(){},setText:(id:number,text:string)=>{nodes.set(id,text);if(fixture.mode==='note'&&text.startsWith('hymission')&&firstBody===undefined){firstBody=now()-start;g.__entryHasBody=true;record('firstBodyMount');}},
+ getLayout:()=>({x:0,y:0,w:233,h:233}),getProp:()=>0,uploadTexture:()=>textureId++,freeTexture(){},setText:(id:number,text:string)=>{nodes.set(id,text);if(fixture.mode==='note'&&text==='README'&&firstTitle===undefined){firstTitle=now()-start;record('firstTitleMount');}if(fixture.mode==='note'&&text.startsWith('hymission')&&firstBody===undefined){firstBody=now()-start;g.__entryHasBody=true;record('firstBodyMount');}},
 };
 for(const name of ['destroyNode','insertBefore','removeChild','setStyle','setProp','replaceText','setImage','setSprite','setFocus','animate','setAccessibility','setNavigationState'])ops[name]=()=>{};
 if(g.ui){
@@ -54,7 +57,7 @@ if(g.ui){
   const native=g.ui[name];ops[name]=(...args:any[])=>g.__entryProfile.time('host.'+name,()=>native(...args));
  }
  const setText=ops.setText;
- ops.setText=(id:number,text:string)=>{setText(id,text);nodes.set(id,text);if(fixture.mode==='note'&&text.startsWith('hymission')&&firstBody===undefined){firstBody=now()-start;g.__entryHasBody=true;record('firstBodyMount');}};
+ ops.setText=(id:number,text:string)=>{setText(id,text);nodes.set(id,text);if(fixture.mode==='note'&&text==='README'&&firstTitle===undefined){firstTitle=now()-start;record('firstTitleMount');}if(fixture.mode==='note'&&text.startsWith('hymission')&&firstBody===undefined){firstBody=now()-start;g.__entryHasBody=true;record('firstBodyMount');}};
 }
 let handle:any;const preset=defaultReaderPreset();record('presetReady');
 const blocks=fixture.mode!=='note'?parseContent(fixture.html):[];record('contentReady');
@@ -73,7 +76,7 @@ stop=render(()=>{setStyleResolver(c=>g.__entryStyles.ids[c]??0);
 g.__benchPump=()=>{
  if(!pending.size){finish();return false;}
  const due=Math.min(...[...pending.values()].map(v=>v.due));g.__benchSleep(Math.max(0,due-now()));
- const turnStart=now();for(const [id,v] of pending)if(v.due<=now()){pending.delete(id);events.push(v.event);}
+ const turnStart=now();for(const [id,v] of pending)if(v.due<=now()){serviceTurns.push({method:v.method,atMs:now()-start});pending.delete(id);events.push(v.event);}
  g.__pocketPumpServices();g.frame(0);maxTurn=Math.max(maxTurn,now()-turnStart);turns++;return true;
 };
 function finish(){if(finished)return;finished=true;
@@ -92,4 +95,4 @@ function finish(){if(finished)return;finished=true;
   record('readerGeometryAndSavedAnchorEqual');
  }
  phase='cleanup';stop();releaseRetainedRemoteImages();record('disposed');
- print(JSON.stringify({phase:'entry.summary',mode:fixture.mode,htmlUnits:fixture.html.length,blocks:blocks.length,markdownUnits:markdown.length,nativeDelay:fixture.nativeDelay,timerFloor:fixture.timerFloor,totalMs:now()-start,firstRasterMs:firstRaster,firstBodyMs:firstBody,maxPumpMs:maxTurn,turns,counts,phases,profile:entryProfile.stats,spans:entryProfile.spans}));g.__benchDone=true;}
+ print(JSON.stringify({phase:'entry.summary',mode:fixture.mode,htmlUnits:fixture.html.length,blocks:blocks.length,markdownUnits:markdown.length,nativeDelay:fixture.nativeDelay,timerFloor:fixture.timerFloor,cpuScale:fixture.cpuScale,totalMs:now()-start,firstTitleMs:firstTitle,firstImageMs:firstImage,serviceTurns,firstRasterMs:firstRaster,firstBodyMs:firstBody,maxPumpMs:maxTurn,turns,counts,phases,profile:entryProfile.stats,spans:entryProfile.spans,jobs:entryProfile.jobs.map((job:any)=>({...job,startMs:job.startMs-start,endMs:job.endMs-start}))}));g.__benchDone=true;}

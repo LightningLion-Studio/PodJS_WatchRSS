@@ -26,7 +26,7 @@ import { importedSpeechSource, importedReaderHandle } from "./reader/imported-sp
 import {createSummarySession,summaryAccountStore} from "./llm/runtime.ts";
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from './cloud/status';
 import {accountStatusSnapshot} from "./account/status.ts";
-import { buildArticleBlocks } from "./reader/media.ts";
+import { buildArticleBlocksAsync } from "./reader/media.ts";
 import {readOfflineMedia,retryOfflineMedia as retryStoredOfflineMedia} from "./reader/offline-media.ts";
 import { isDeletableLocalContentChannel, isImportedContentUrl } from "./core/imported-content.ts";
 import { OriginalContentCache, type OriginalDownload } from "./reader/original-cache.ts";
@@ -245,7 +245,7 @@ export const services: AppServices = {
       article.searchSnippet=searchSnippet(term,description,content,value(row,'summary_match')||value(row,'summary'));
       return article;});
   },
-  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=traceServiceWork("reader.buildBlocks",()=>buildArticleBlocks(article.rawContent!,article)); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
+  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=await buildArticleBlocksAsync(article.rawContent!,article); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
   getOriginalArticle(id) { return originalArticle(id); },
   async addChannel(url) {
     await init();
@@ -364,7 +364,7 @@ async function loadOriginalArticle(id:string):Promise<Article>{
   const article=await services.getArticle(id);if(!article)throw new Error("文章不存在");
   if(article.importedText||isImportedContentUrl(article.link))return article;
   const cached=await originalCache.get(id),sourceUrl=cached.sourceUrl,html=await hydrateStoredContent(cached.html);
-  const contentBlocks=buildArticleBlocks(html,article);return {...article,rawContent:html,contentBlocks,content:contentText(contentBlocks),link:sourceUrl};
+  const contentBlocks=await buildArticleBlocksAsync(html,article);return {...article,rawContent:html,contentBlocks,content:contentText(contentBlocks),link:sourceUrl};
 }
 
 let librarySyncRepository:SqlLibrarySessionRepository|undefined;

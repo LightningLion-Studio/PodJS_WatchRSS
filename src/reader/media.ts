@@ -1,4 +1,4 @@
-import { parseContent, type ContentBlock } from "./content.ts";
+import { parseContentAsync, parseContent, type ContentBlock } from "./content.ts";
 export type BiliVideoTarget={aid?:number;bvid?:string;cid?:number};
 function urlParts(value:string){
   const match=value.trim().match(/^https?:\/\/([^/?#]+)([^?#]*)(?:\?([^#]*))?/i);if(!match)return null;
@@ -24,7 +24,11 @@ export function douyinVideoTarget(link?:string):{awemeId?:string;webUrl:string}|
   return {awemeId:id,webUrl:id?`https://www.douyin.com/video/${id}`:raw};
 }
 export function buildArticleBlocks(raw:string,article:{enclosureImageUrl?:string;videoUrl?:string;link?:string}):ContentBlock[]{
-  const blocks=parseContent(raw),image=article.enclosureImageUrl?.trim(),video=article.videoUrl?.trim();
+  return appendArticleMedia(parseContent(raw),article);
+}
+export async function buildArticleBlocksAsync(raw:string,article:{enclosureImageUrl?:string;videoUrl?:string;link?:string},signal?:AbortSignal):Promise<ContentBlock[]>{return appendArticleMedia(await parseContentAsync(raw,signal),article);}
+function appendArticleMedia(blocks:ContentBlock[],article:{enclosureImageUrl?:string;videoUrl?:string;link?:string}):ContentBlock[]{
+  const image=article.enclosureImageUrl?.trim(),video=article.videoUrl?.trim();
   if(image&&!blocks.some(b=>b.type==='image'&&b.url===image))blocks.push({type:'image',url:image});
   if(video){if(!blocks.some(b=>b.type==='video'&&b.url===video))blocks.push({type:'video',url:video});}
   else {

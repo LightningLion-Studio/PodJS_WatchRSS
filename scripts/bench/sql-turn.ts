@@ -36,7 +36,7 @@ await Bun.write(out,JSON.stringify({...fixture,expectedArticle}));
 const helper=`import {WatchRssRepository} from '../../src/core/repository.ts';
 import {importedReaderHandle} from '../../src/reader/imported-speech.ts';
 import {readOfflineMedia} from '../../src/reader/offline-media.ts';
-import {buildArticleBlocks} from '../../src/reader/media.ts';
+import {buildArticleBlocks,buildArticleBlocksAsync} from '../../src/reader/media.ts';
 import {contentText} from '../../src/reader/content.ts';
 import {htmlToText} from '../../src/core/html.ts';
 import {articlePreview} from '../../src/core/preview.ts';

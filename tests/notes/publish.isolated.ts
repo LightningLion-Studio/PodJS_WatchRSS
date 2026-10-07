@@ -82,6 +82,7 @@ test(`production note publishes with valid host timers and delayed native replie
   expect(calls.some(c=>c.t==='service.cancel')).toBe(true);
  }
  await until(()=>calls.some(c=>c.method==='image.decode'));
+ if(mode==='first')expect(batchNumber).toBe(0); // first screen precedes all full body batches
  await until(()=>timers.size===0&&requests.length===0);
  expect(errors).toEqual([]);
  expect(calls.filter(c=>c.method==='image.decode')).toHaveLength(1);
