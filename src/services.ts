@@ -1,3 +1,4 @@
+import {requestFeedText} from "./rss/site-challenge.ts";
 import { feedRequest } from "./core/feed-request";
 import {decodeUtf8Async} from "@podjs/framework/bytes";
 import {traceServiceWork} from "@podjs/framework/service-trace";
@@ -100,10 +101,19 @@ let downloadSequence = 0;
 let addPreviewSequence=0;
 const pendingAddPreviews=new Map<string,{url:string;xml:string|null;builtin:BuiltinChannel|undefined}>();
 async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string> {
+  const request=requestFeedText(url,(cookie,userAgent)=>{
+    const download:OriginalDownload={cancelled:false};
+    return {result:downloadFeedText(url,download,cookie,userAgent),cancel(){download.cancelled=true;download.cancel?.();}};
+  });
+  if(job){job.cancel=()=>request.cancel();if(job.cancelled)request.cancel();}
+  return request.result;
+}
+async function downloadFeedText(url: string, job:OriginalDownload, cookie:string, userAgent?:string): Promise<string> {
   appLogger.d('Network','RSS fetch');
   const path = `feeds/fetch-${Date.now()}-${++downloadSequence}.xml`;
   try {
-    const request=hostOperation<DownloadResult>("http.download",feedRequest(url,path));
+    const base=feedRequest(url,path);
+    const request=hostOperation<DownloadResult>("http.download",{...base,headers:{...base.headers,...(userAgent?{"User-Agent":userAgent}:{}),...(cookie?{Cookie:cookie}:{})}});
     if(job){job.cancel=()=>request.cancel();if(job.cancelled)request.cancel();}
     const response = await request.result;
     if(job?.cancelled)throw new Error("刷新已取消");
