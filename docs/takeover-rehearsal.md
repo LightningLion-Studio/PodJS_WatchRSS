@@ -1,3 +1,166 @@
+# T5 固定基线与 T6 同 UID 合成账号链（2026-10-07）
+
+本节替代下文 T2 的 source39 基线及“跨 UID 导入后账号不可用”的合成夹具流程。
+原生恢复分支为 `Android_WatchRSS.wt-recovery` 的 `podjs-recovery-40`：
+基于本地 main **6bb99ed4**（1.3.2-13、业务 code40），重放 T2 `3d31ec31` 和
+T4 `9563c88`。seed40 与 recovery900000 都使用这棵业务树及 WorkManager 2.11.2；
+所以本轮 seed workdb 可以已经是 schema24，不能声称物理测到了 2.10.1/schema23。
+schema23→24 的单测证据在 T4，物理历史版本迁移另验。
+
+本节是 **T6 设备负责人执行单**；T5 只构建/编译，未安装、播种或操作设备。
+所有应用 APK 固定 `com.lightningstudio.watchrss.podjs.rehearsal`，同 debug 证书、
+`40 < 1000 < 900000`，持续 `install -r`，因而应保留同 UID 和该 UID 的 AndroidKeyStore。
+仍须记录实际 UID 三次相等；appId 相同或安装成功本身不是解密证据。
+正式 PodJS/native 包及手机不在本演练范围。不得卸载、clear-data、降级或复制真实账号。
+若已有隔离安装，先由负责人确认其归属/处理方式；不要为本链自动删除。
+
+## 主机构建与身份门
+
+以下使用 bash。Gradle 使用本机支持的 JDK（本轮 JDK21），不读取生产签名 properties。
+两个原生应用 APK 是 T5 明确要求的例外；只保留下面两份隔离候选，不再复制到 artifacts。
+测试 APK 是 Gradle 输出，仅由 T6 按阶段安装；测试代码没有打入应用 APK。
+
+```sh
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+export ANDROID_HOME=/home/wilf/Android/Sdk
+WRSS_APP=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS
+WRSS_NATIVE=/home/wilf/data/OPPO_Develop/Android_WatchRSS.wt-recovery
+WRSS_FRAMEWORK=/home/wilf/data/PodJS/podjs-watch
+WRSS_PKG=com.lightningstudio.watchrss.podjs.rehearsal
+WRSS_OUT="$WRSS_APP/.codex-tmp/t5"
+mkdir -p "$WRSS_OUT"
+cd "$WRSS_NATIVE"
+./gradlew :app:testDebugUnitTest assembleDebug \
+  -PrecoveryRehearsal=true -PrecoveryVersionCode=900000 --offline
+cp app/build/outputs/apk/debug/app-debug.apk "$WRSS_OUT/recovery900000.apk"
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest \
+  -PrecoveryRehearsal=true -PrecoveryFixture=true -PrecoveryVersionCode=40 --offline
+cp app/build/outputs/apk/debug/app-debug.apk "$WRSS_OUT/seed40.apk"
+# 不复制 test APK；当前输出可以同时检查 code40 和恢复900000。
+WRSS_NATIVE_TEST="$WRSS_NATIVE/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+
+# 主线框架已有 podTestSourceDir 接口，无需修改框架源码。
+bun "$WRSS_FRAMEWORK/packages/cli/src/cli.ts" build --target=android-watch --project="$WRSS_APP"
+cd "$WRSS_FRAMEWORK"
+bash scripts/build-android-runtime.sh
+cd platforms/android
+./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest --offline \
+  -PpodAppId="$WRSS_PKG" -PpodAppName=WatchRSSRecoveryRehearsal \
+  -PpodVersionCode=1000 -PpodTakeoverSourceVersionCode=40 -PpodCleartextTraffic=true \
+  -PpodDistDir="$WRSS_FRAMEWORK/dist/projects/com.lightningstudio.watchrss.podjs/android-watch" \
+  -PpodResDir="$WRSS_APP/android/res" -PpodAppTheme=@style/Theme.WatchRSS.PodJS.Splash \
+  -PpodTestSourceDir="$WRSS_APP/scripts/migration/rehearsal-credentials"
+WRSS_PODJS="$WRSS_FRAMEWORK/platforms/android/app/build/outputs/apk/debug/androidApp-debug.apk"
+WRSS_PODJS_TEST="$WRSS_FRAMEWORK/platforms/android/app/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk"
+
+WRSS_ANALYZER="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+WRSS_SIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+for apk in "$WRSS_OUT/seed40.apk" "$WRSS_PODJS" "$WRSS_OUT/recovery900000.apk"; do
+  "$WRSS_ANALYZER" manifest application-id "$apk"
+  "$WRSS_ANALYZER" manifest version-code "$apk"
+  "$WRSS_ANALYZER" manifest version-name "$apk"
+  "$WRSS_ANALYZER" manifest debuggable "$apk"
+  "$WRSS_SIGNER" verify --print-certs "$apk"
+  sha256sum "$apk"
+done
+"$WRSS_ANALYZER" manifest print "$WRSS_NATIVE_TEST"
+"$WRSS_ANALYZER" manifest print "$WRSS_PODJS_TEST"
+```
+
+判定：三个 appId 完全相等、实际 code 为 40/1000/900000、debuggable=true、
+公开证书 SHA256 相等；native versionName 为 `1.3.2-13` / `1.3.2-13-podjs-recovery`。
+两个 instrumentation manifest 的 targetPackage 必须是隔离 appId；runner 分别为
+`com.karumi.shot.ShotTestRunner`、`androidx.test.runner.AndroidJUnitRunner`。
+未通过身份门不得安装。T5 只验证两个原生应用 APK 和测试源码编译，PodJS1000
+完整 APK/JNI 的重建和三 APK 证书门由 T6 执行；不要把旧 APK 当这次源码的产物。
+
+## 设备阶段（仅 T6 授权后执行）
+
+先读 DEVICE_BRIEF；只用 `e3aca8af`，满足充电/系统弹窗安全门。截图尺寸先比 K8，
+异常立即停；空白/黑屏判断要记录 ROI 非零像素、颜色分布及参照 MAE。
+以下测试只报告 stage/uid/三个 matches 布尔值，不导出凭据或密钥。
+fake Watch token、Bili cookie 和 Douyin cookie 是源码中的固定 `t5-fake-*`，
+Watch backend/telemetry 使用 `https://rehearsal.invalid`，不进行登录或真实账号操作。
+
+```sh
+umask 077
+WRSS_PRIVATE=$(mktemp -d /tmp/wrss-t6-XXXXXXXX)
+adb -s e3aca8af shell pm path "$WRSS_PKG"
+# 必须为未安装；已有安装时停止，不能卸载/清数据绕过。
+adb -s e3aca8af install "$WRSS_OUT/seed40.apk"
+adb -s e3aca8af install -r "$WRSS_NATIVE_TEST"
+adb -s e3aca8af shell am instrument -w -r \
+  -e class dev.podjs.takeover.RehearsalCredentialsTest#seedNative40 \
+  "$WRSS_PKG.test/com.karumi.shot.ShotTestRunner" > "$WRSS_PRIVATE/seed40.txt"
+adb -s e3aca8af shell dumpsys package "$WRSS_PKG" > "$WRSS_PRIVATE/seed40-package.txt"
+adb -s e3aca8af shell am start -W -n "$WRSS_PKG/com.lightningstudio.watchrss.MainActivity"
+# 原生频道/正文/设置/备忘录/媒体等完整业务夹具沿下文 T2 另播种和核验。
+# seedNative40 已用生产 DefaultAppContainer 打开 Room18，账号由原生三个存储 API 写入。
+adb -s e3aca8af shell am force-stop "$WRSS_PKG"
+adb -s e3aca8af shell run-as "$WRSS_PKG" sha256sum \
+  shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml \
+  shared_prefs/douyin_account_store.xml files/recovery-rehearsal/seed.json \
+  > "$WRSS_PRIVATE/seed-credentials.sha256"
+
+adb -s e3aca8af install -r "$WRSS_PODJS"
+adb -s e3aca8af install -r "$WRSS_PODJS_TEST"
+adb -s e3aca8af shell am start -W -n "$WRSS_PKG/dev.podjs.androidwatch.MainActivity"
+# 等实际 ACTIVE 后按尺寸门检查首页，再执行只读 secure.get 探针。
+adb -s e3aca8af shell am instrument -w -r \
+  -e class dev.podjs.runtime.RehearsalCredentialProbe \
+  "$WRSS_PKG.test/androidx.test.runner.AndroidJUnitRunner" > "$WRSS_PRIVATE/podjs1000.txt"
+adb -s e3aca8af shell dumpsys package "$WRSS_PKG" > "$WRSS_PRIVATE/podjs1000-package.txt"
+adb -s e3aca8af shell run-as "$WRSS_PKG" cat files/package-takeover/active \
+  > "$WRSS_PRIVATE/active.properties"
+# 从 active.properties 人工核对同 journal/activation-receipt 的 generation，并填 WRSS_G。
+# WRSS_G 仅允许 [A-Za-z0-9_-]+，不把未知外部文本直接拼接执行。
+WRSS_G=REPLACE_WITH_VERIFIED_GENERATION
+adb -s e3aca8af shell run-as "$WRSS_PKG" sh -c \
+  "'cd files/.podjs-takeover-backup/$WRSS_G/data && sha256sum shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml shared_prefs/douyin_account_store.xml files/recovery-rehearsal/seed.json'" \
+  > "$WRSS_PRIVATE/backup-credentials.sha256"
+cmp "$WRSS_PRIVATE/seed-credentials.sha256" "$WRSS_PRIVATE/backup-credentials.sha256"
+# 二次 force-stop/start，再跑同探针；ACTIVE generation 和 backup 摘要不变。
+adb -s e3aca8af shell am force-stop "$WRSS_PKG"
+adb -s e3aca8af install -r "$WRSS_OUT/recovery900000.apk"
+adb -s e3aca8af install -r "$WRSS_NATIVE_TEST"
+adb -s e3aca8af shell am start -W -n "$WRSS_PKG/com.lightningstudio.watchrss.MainActivity"
+adb -s e3aca8af shell am instrument -w -r \
+  -e class dev.podjs.takeover.RehearsalCredentialsTest#verifyRecovered900000 \
+  "$WRSS_PKG.test/com.karumi.shot.ShotTestRunner" > "$WRSS_PRIVATE/recovery900000.txt"
+adb -s e3aca8af shell dumpsys package "$WRSS_PKG" > "$WRSS_PRIVATE/recovery900000-package.txt"
+adb -s e3aca8af shell am force-stop "$WRSS_PKG"
+adb -s e3aca8af shell run-as "$WRSS_PKG" sha256sum \
+  shared_prefs/watchrss_account_state.xml shared_prefs/bili_account_store.xml \
+  shared_prefs/douyin_account_store.xml files/recovery-rehearsal/seed.json \
+  > "$WRSS_PRIVATE/restored-credentials.sha256"
+cmp "$WRSS_PRIVATE/seed-credentials.sha256" "$WRSS_PRIVATE/restored-credentials.sha256"
+# 再次 start + verifyRecovered900000，检查不重复恢复、不覆盖恢复后新写入。
+```
+
+每次 instrument 必须出现 **OK (1 test)**、无失败/进程崩溃；不能只看 adb exit0。
+三段报告 UID 必须与 seed marker、installed package userId 相同，三个 matches=true。
+PodJS 探针通过生产 `secure.get` 读取 ACTIVE secure.store，逐值比较 Watch access/refresh
+token、Bili session/csrf/refresh、Douyin cookie，并核验 backup 原始密文字节未变。
+恢复测试在独立进程以原生默认存储名读回完整账号对象，核验没有触发原生清空/修复逻辑；
+禁止重新 seed 或手工重新登录掩盖失败。native wrappers 遇到损坏可能执行自身 repair，
+任何 mismatch/密文变化立即失败并保留证据，不能反复运行测试直到通过。
+
+以上密文摘要文件只存本机 0700 私有目录，报告仅写相等布尔值，不公开 secret digest。
+完整四根 manifest/planned paths、空目录、backup seal/ready 和 `.podjs-recovery-state/G/complete`
+仍按下文 T2 核验；不要只凭三账号通过声称整个数据恢复通过。恢复启动后 Room/WorkManager
+可能写数据库，不能以运行后的整库 SHA 相等代替恢复阶段字节校验及行/UUID语义检查。
+T4 的 jobs receipt、PodJS unique work 不再执行、native debug unique 唯一、二启不重播取消
+另逐项记录；本轮 seed 已是 WorkManager2.11.2，这不覆盖历史 schema23 物理迁移。
+
+通过这一链只能证明**同隔离 UID 的合成凭据**可迁移和恢复，不能证明真实账号有效、
+正式签名轮换、WebView 登录态、网络登录/刷新或正式包升级。其余业务/中断/清理验收仍
+PENDING。完成后按负责人要求回正式 PodJS 首页；本节不授权清理任何现存正式数据。
+
+
+---
+
+以下为历史 T1/T2 执行记录；基线与同 UID 合成账号以顶部 T5 为准。
+
 # T1：真实原生数据副本隔离接管演练
 
 本流程由当前任务明确授权的设备负责人执行。T1授权wrss-minor独占e3aca8af；真正原生包覆盖仍需另派任务。本轮2026-10-07因充电层无法退出而中止，物理完整演练PENDING，详见 [takeover-readiness.md](takeover-readiness.md)。
