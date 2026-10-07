@@ -85,7 +85,7 @@ import { layoutText } from "../reader/index.ts";
 import type { AppServices, Article, Channel, ArticleQuery } from "./service.ts";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/lifecycle";
-import { BackMotion } from "./back-motion.ts";
+import { BackMotion } from "@podjs/framework/navigation";
 import { HomeEntryPlacementStore } from "./home-placement.ts";
 import type { SettingsRoute } from "./SettingsScreen.tsx";
 import { SettingsStore, type SettingsState } from "../settings/index.ts";

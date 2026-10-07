@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BackMotion } from "../src/ui/back-motion.ts";
+import { BackMotion } from "@podjs/framework/navigation";
 describe("follow-finger back", () => {
   test("tracks distance directly and clamps leftward movement", () => {
     const m = new BackMotion(233); m.begin(17.25); expect(m.offset).toBe(17.25);

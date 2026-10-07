@@ -7,7 +7,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import { Image, View, type NodeMirror } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
 import { getDisplayMetrics } from "@podjs/framework/watch";
-import { base64ToBytes, hostOperation } from "@podjs/framework/services";
+import { base64ToBytes, hostOperation, hasTextureFileUpload, uploadTextureFile } from "@podjs/framework/services";
 
 export interface RemoteImageProps {
   url: string;
@@ -25,7 +25,6 @@ export interface RemoteImageProps {
 
 interface DecodeResult { path: string; width: number; height: number; sourceWidth?:number; sourceHeight?:number }
 interface ChunkResult { dataBase64: string; offset: number; size: number; eof: boolean }
-interface NativeTextureFileHost { uploadTextureFile?: (path:string,width:number,height:number,psm:number)=>number }
 interface Entry {
   key: string;
   refs: number;
@@ -75,10 +74,6 @@ function decodedSize(decoded:DecodeResult):number {
   return size;
 }
 
-function nativeTextureFileHost():NativeTextureFileHost|undefined {
-  return (globalThis as {pod?:NativeTextureFileHost}).pod;
-}
-
 async function readDecoded(entry: Entry, decoded: DecodeResult, size: number): Promise<Uint8Array> {
   const bytes = new Uint8Array(size);
   let offset = 0;
@@ -109,14 +104,15 @@ async function load(entry: Entry): Promise<void> {
     entry.outputPath = decoded.path;
     if (entry.cancelled) return;
     const size=decodedSize(decoded);
-    const nativeUpload=nativeTextureFileHost()?.uploadTextureFile;
-    let handle:number;
-    if(typeof nativeUpload==="function"){
+    let handle:number|null=null;
+    if(hasTextureFileUpload()){
       // A supporting host consumes the generated path on every outcome.
       entry.outputPath=undefined;
-      const result=nativeUpload(decoded.path,decoded.width,decoded.height,3);
-      handle=typeof result==="number"&&Number.isInteger(result)?result:-1;
-    }else{
+      handle=uploadTextureFile(decoded.path,decoded.width,decoded.height,3);
+      // null means no supporting host took ownership.
+      if(handle===null)entry.outputPath=decoded.path;
+    }
+    if(handle===null){
       const rgba = await readDecoded(entry, decoded, size);
       if (entry.cancelled) return;
       handle = getOps().uploadTexture(rgba, decoded.width, decoded.height, 3);

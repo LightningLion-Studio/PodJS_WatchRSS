@@ -31,7 +31,9 @@ const ops = {
 const realHost = await import("@pocketjs/framework/host");
 mock.module("@pocketjs/framework/host", () => ({ ...realHost, getOps: () => ops }));
 
+const realServices = await import("@podjs/framework/services");
 mock.module("@podjs/framework/services", () => ({
+  ...realServices,
   fileChunks:{list:async(path:string)=>({entries:[...stored].filter(([p])=>p.startsWith(path+'/')).map(([path,size])=>({path,size,modified:1,file:true,directory:false}))}),stat:async(path:string)=>({exists:stored.has(path),file:stored.has(path),size:stored.get(path)??0}),touch:async()=>({modified:1}),remove:async(path:string)=>{stored.delete(path);removedFiles.push(path);}},
   bytesToBase64:(value:Uint8Array)=>Buffer.from(value).toString('base64'),
   stringToUtf8:(value:string)=>new Uint8Array(Buffer.from(value)),
@@ -149,3 +151,16 @@ test("download failure reaches all subscribers including a late subscriber",asyn
 });
 
 test("local note images decode without downloading and retain the owned source after release",async()=>{const path="notes/assets/kept.png";const release=bindRemoteImage({url:"assets/kept.png",filePath:path,width:2,height:1},{id:nextNode++} as never);await tick();expect(pendingDownloads.size).toBe(0);expect(imageFiles).toEqual([path]);expect(calls.some(c=>c[0]==="uploadTexture")).toBe(true);release();releaseRetainedRemoteImages();await tick();expect(removedFiles).not.toContain(path);expect(removedFiles).toContain("images/a.rgba");expect(remoteImageResourceCounts()).toEqual({active:0,queued:0,cached:0});});
+
+for (const outcome of [-1, NaN, 1.5, undefined, "throw"] as const) {
+ test(`native upload ${outcome} consumes decoder file without fallback or double delete`, async () => {
+  const errors:unknown[]=[];
+  pod.uploadTextureFile=()=>{if(outcome==="throw")throw new Error("rejected");return outcome;};
+  roots.push(bindRemoteImage({url:"assets/fail.png",filePath:"notes/assets/fail.png",width:2,height:1,onError:e=>errors.push(e)},{id:nextNode++} as never));
+  await tick();await tick();expect(errors).toHaveLength(1);
+  expect(hostMethods).not.toContain("file.read");
+  expect(calls.some(c=>c[0]==="uploadTexture"||c[0]==="setImage")).toBe(false);
+  roots.pop()!();releaseRetainedRemoteImages();await tick();
+  expect(removedFiles).not.toContain("images/a.rgba");expect(removedFiles).not.toContain("notes/assets/fail.png");
+ });
+}

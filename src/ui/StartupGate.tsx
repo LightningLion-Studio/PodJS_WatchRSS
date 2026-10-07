@@ -33,7 +33,7 @@ import {PrivacyPolicyConsentScreen} from './PrivacyPolicyConsentScreen.tsx';
 import {useReaderTitleEntry} from './ReaderTitleEntry.tsx';
 import {ReaderBackground} from './ReaderBackground.tsx';
 import {InformationScreen,type InformationPage,type InformationSnapshot,type InformationRestorationEvent} from './InformationScreens.tsx';
-import {BackMotion} from './back-motion.ts';
+import {BackMotion} from "@podjs/framework/navigation";
 import {ScrollEntries} from './ScrollEntries.tsx';
 import {watchUiLines} from './text-layout.ts';
 import {STARTUP_EXIT_DURATION_MS,startupExitFrame} from './startup-transition.ts';

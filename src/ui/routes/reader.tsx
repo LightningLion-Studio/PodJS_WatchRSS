@@ -10,7 +10,7 @@ import { ImagePreviewScreen } from "../ImagePreviewScreen.tsx";
 import { ReaderPreviewScreen } from "../ReaderPreviewScreen.tsx";
 import { ReaderScreen } from "../ReaderScreen.tsx";
 import { SpeechPlaybackScreen } from "../SpeechPlaybackScreen.tsx";
-import type { BackMotion } from "../back-motion.ts";
+import type { BackMotion } from "@podjs/framework/navigation";
 import type { AppServices, Article } from "../service.ts";
 import type { Page, RouteEntry, SetPage } from "./types.ts";
 

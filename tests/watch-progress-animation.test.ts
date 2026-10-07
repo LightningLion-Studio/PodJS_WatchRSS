@@ -1,5 +1,5 @@
 import {expect, test} from "bun:test";
-import {watchProgressArc} from "../src/ui/watch-progress-animation.ts";
+import {watchProgressArc} from "@podjs/framework/watch-ui";
 
 // Fixed oracle points evaluated independently from the published Material3
 // 1.3.0 head/tail keyframes and cubic curve. Angles add 90 degrees to Compose
