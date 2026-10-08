@@ -110,8 +110,12 @@ export default function HomeScreen(props: HomeScreenProps) {
       </View>
     </View>};
   };
+  // Narrow centred rows declare what they draw, so the round list does not treat them as full-width boxes.
+  const centred=(width:number,top:number,height:number)=>({x:(props.width-36-width)/2,y:top,width,height});
+  // 9px caption width upper bound (CJK 9, other 6) — no measurement for rows that may never mount.
+  const caption=(text:string)=>Array.from(text).reduce((width,ch)=>width+(ch.codePointAt(0)!>255?9:6),0);
   const rows=createMemo<Array<{entry:ScrollEntry;channel?:Channel;notes?:boolean}>>(()=>[
-    {entry:{height: 73, render: () => <View class="absolute inset-0 items-center">
+    {entry:{height: 73, bounds:centred(Math.max(44,caption("点击进入我的")),4,65), render: () => <View class="absolute inset-0 items-center">
       <View onPress={props.onProfile} focusable style={{insetL:(props.width-36-44)/2}} class="absolute top-[4] w-[44] h-[44] rounded-full bg-[#1c1f21] border-[#ff6026] border-[0.7] items-center justify-center">
         <Text class="text-sm leading-[17] text-[#f5f5f5]">我</Text>
       </View>
@@ -123,8 +127,8 @@ export default function HomeScreen(props: HomeScreenProps) {
       : {entry:channelCard(item.channel),channel:item.channel}),
     ...(shouldShowHomeEmptyState(props.channels)?[{entry:card({title:"还没有 RSS 频道",summary:"点击下方添加你的第一个订阅源",summaryLines:1,titleSize:17})}]:[]),
     {entry:card({title:"RSS推荐",summary:"一键加入官方支持频道",onPress:props.onRecommend,summaryLines:1,titleSize:17})},
-    {entry:{height:56,render:() => <View class="absolute inset-0 items-center"><View onPress={props.onAdd} focusable style={{insetL:(props.width-36-48)/2}} class="absolute top-[4] w-[48] h-[48] rounded-[47] bg-[#23272a] items-center justify-center"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>}},
-    {entry:{height:25,render:() => <View onPress={props.onBeian} focusable class="absolute inset-0 items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">浙ICP备2024111886号-5A</Text></View>}},
+    {entry:{height:56,bounds:centred(48,4,48),render:() => <View class="absolute inset-0 items-center"><View onPress={props.onAdd} focusable style={{insetL:(props.width-36-48)/2}} class="absolute top-[4] w-[48] h-[48] rounded-[47] bg-[#23272a] items-center justify-center"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>}},
+    {entry:{height:25,bounds:centred(caption("浙ICP备2024111886号-5A"),4,17),render:() => <View onPress={props.onBeian} focusable class="absolute inset-0 items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">浙ICP备2024111886号-5A</Text></View>}},
   ]);
   const entries=()=>rows().map(row=>row.entry);
   const hitEntries=()=>rows().map<HomeHitEntry>(row=>({height:row.entry.height,channel:row.channel,notes:row.notes}));

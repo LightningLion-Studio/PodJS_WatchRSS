@@ -56,7 +56,8 @@ const rowNodes=(tree:any)=>nodes(tree).filter(n=>n.props.style?.insetL===18&&typ
 test('home long-press still selects the displayed channel after round padding',()=>{
  shape='round';let dispose!:()=>void,handle:any,read='';const noop=()=>{},done=async()=>{};
  const tree=createRoot(d=>{dispose=d;return HomeScreen({width:233,height:233,channels:[{id:'first',title:'第一条',url:'https://example.com/1',unreadCount:1,sortOrder:2},{id:'second',title:'第二条',url:'https://example.com/2',sortOrder:1}],notesPlacement:{sortOrder:-1,isPinned:false},refreshing:false,busy:false,platformLoginState:{bili:false,douyin:false},onProfile:noop,onNotes:noop,onRecommend:noop,onSpeech:noop,onAdd:noop,onChannel:noop,onBeian:noop,onRefresh:noop,onMoveChannelToTop:done,onToggleChannelPinned:done,onMarkChannelRead:async c=>{read=c.id;},onDeleteChannel:done,onClearChannel:done,onMoveNotesToTop:noop,onToggleNotesPinned:noop,ref:v=>handle=v});});
- expect(handle.roundInsets().start).toBeGreaterThan(0);handle.scroller.scrollTo(50,{immediate:true});
+ // Home's narrow header declares its bounds, so it needs no start inset; the hit mapping must hold either way.
+ expect(handle.roundInsets().start).toBeGreaterThanOrEqual(0);handle.scroller.scrollTo(50,{immediate:true});
  const row=rowNodes(tree)[1],y=row.props.style.insetT-handle.scroller.offset()+row.props.style.height-4;
  gestures.find(g=>g.onLongPress).onLongPress({x:100,y});
  nodes(tree).find(n=>n.props.accessibilityLabel==='标记已读')!.props.onPress();expect(read).toBe('first');dispose();
