@@ -218,6 +218,22 @@
       "notes": "R3 recovery组件基线：现有本机native40 debug APK，T8 native-existing-apk.json和离线apkanalyzer输出核验。仅本机候选，不证明公开发行或现装APK身份。T2/T4恢复钩子无新增manifest组件。",
       "status": "local-candidate",
       "manifestComponents": "docs/release-baselines/native40-components.json"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 33,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": "d22ad48c4a6ba171e515cd330266c1c648f65c84",
+        "framework": "4a41b535d65a9683a63e1b24cb2e3ddcc0f98fc0",
+        "pocketjs": "78b1c8629c31b2eca8642c8c03f481783042306f"
+      },
+      "apkSha256": "ee20e3318f65ef68e75c616fe5cfa4c8865c5fb175fcffca63c57f194a696be2",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-08",
+      "notes": "P7 installed-local evidence only: frozen exact sources and preflight12/12 passed; same-signature non-debuggable upgrade32 to33 on e3aca8af. No strict private digest/no equal=true. Postinstall K8 home gate FAILED: MAE18.577214844,80physical-pixel downward shift; remaining regressions PENDING/stopped. No store or public distribution performed; tool fixed published status is not public publication evidence.",
+      "status": "published"
     }
   ]
 }
