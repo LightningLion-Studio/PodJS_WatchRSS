@@ -1,6 +1,7 @@
 import { createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
+import {getDisplayMetrics} from '@podjs/framework/watch';
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { location, timeInput, type HostOperation } from "@podjs/framework/services";
 import { activeReaderPreset, availableReaderPresets, type ReaderPresetState, type ReaderThemeMode } from "../reader/preset-store.ts";
@@ -114,7 +115,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
     <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={26} gap={10} inputActive={() => props.active() && !download() && !menu()} ref={value => { scroller = value.scroller; props.ref({ ...value, goBack }); }} />
     <Show when={menu()}>{selection => <View class="absolute inset-0" onPress={() => setMenu(undefined)}>
       <View class="absolute left-[18] rounded-[4] bg-[#211f26] overflow-hidden" style={{ insetT: (props.height - menuHeight()) / 2, width: menuWidth(), height: menuHeight() }}>
-        <ScrollEntries height={menuHeight()} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: "#211f26" }}>
+        <ScrollEntries round={getDisplayMetrics().shape==='round'?{width:props.width,height:props.height,viewport:{x:18,y:(props.height-menuHeight())/2,width:menuWidth()}}:null} height={menuHeight()} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: "#211f26" }}>
           {item.preset
             ? <ReaderPresetSingleLinePreview preset={item.preset} snapshot={backgrounds()} fonts={fonts()} width={menuWidth() - 24} height={item.height} active={props.active() && !!menu()}/>
             : <Text class="absolute left-[0] right-[0] text-sm leading-[17] text-[#f5f5f5]" style={{ insetT: (item.height - 17) / 2 }}>{item.name}</Text>}

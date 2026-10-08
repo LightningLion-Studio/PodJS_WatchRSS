@@ -73,7 +73,7 @@ function ChannelActions(props:{width:number;height:number;target:HomeLongPressTa
 // Glyph origins include the measured difference between Compose and atlas baselines.
 export default function HomeScreen(props: HomeScreenProps) {
   const [selected,setSelected]=createSignal<HomeLongPressTarget>();
-  let scroller:Scroller|undefined;
+  let scroller:Scroller|undefined;let roundStart=()=>0;
   // Native HomeDefaultItem: 14dp start / 6dp end / 14.5dp vertical padding, title maxLines 1,
   // summary maxLines 2 (one Text, "\n"-separated), unread dot 6dp after a 4dp gap, offset -4dp.
   const cardWidth = () => props.width - 36;
@@ -130,9 +130,9 @@ export default function HomeScreen(props: HomeScreenProps) {
   const hitEntries=()=>rows().map<HomeHitEntry>(row=>({height:row.entry.height,channel:row.channel,notes:row.notes}));
   return <View class="absolute inset-0 bg-[#000000]">
     <ScrollEntries height={props.height} entries={entries()} inputActive={()=>props.active!==false&&!selected()&&!props.busy} onRefresh={props.onRefresh} onLongPress={contact=>{
-      const target=homeEntryAtLongPress(hitEntries(),contact.x,contact.y,props.width,scroller?.offset()??0);
+      const target=homeEntryAtLongPress(hitEntries(),contact.x,contact.y-roundStart(),props.width,scroller?.offset()??0);
       if(target){scroller?.stop();setSelected(target);}
-    }} ref={handle=>{scroller=handle.scroller;props.ref?.(handle);}}/>
+    }} ref={handle=>{scroller=handle.scroller;roundStart=()=>handle.roundInsets?.().start??0;props.ref?.(handle);}}/>
     <Show when={props.refreshing}><View class="absolute top-[8] left-[68] right-[68] h-[24] rounded-[12] bg-[#214536] items-center justify-center"><Text class="text-xs text-[#9ff0c9]">正在刷新全部…</Text></View></Show>
     <Show when={selected()}>{target=>{
       const forChannel=(action:(channel:Channel)=>Promise<void>)=>async()=>{const t=target();if(t.kind==="channel")await action(t.channel);};
