@@ -25,7 +25,7 @@ public final class RehearsalCredentialProbe {
         String generation = active.getProperty("generation");
         assertTrue("generation", generation != null && generation.matches("[A-Za-z0-9_-]+"));
         File backup = new File(c.getFilesDir(), ".podjs-takeover-backup/" + generation + "/data");
-        File marker = new File(backup, "files/recovery-rehearsal/seed.json");
+        File marker = new File(c.getApplicationInfo().dataDir, "recovery-rehearsal/seed.json");
         JSONObject seed = new JSONObject(new String(Files.readAllBytes(marker.toPath()), java.nio.charset.StandardCharsets.UTF_8));
         assertTrue("fixture_marker", "t5-synthetic-accounts-v1".equals(seed.getString("fixture")));
         assertTrue("same_seed_uid", seed.getInt("uid") == Process.myUid());

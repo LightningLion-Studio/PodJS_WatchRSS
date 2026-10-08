@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {SettingsStore} from '../../src/settings/store.ts';
 import {ipFixture,flush,deferred} from '../helpers/ip-fixture.ts';
 import {IpSyncController} from '../../src/sync/ip-controller.ts';
 import {FrameDecoder} from '../../src/sync/protocol.ts';
@@ -103,4 +104,23 @@ test('IP automatic policy rejects extra actions without closing the route; allow
  for(const action of ['remoteInput','clearLibrary']){f.feed({action});f.feed({action:'ack',success:true,applied:true});await flush();}
  const decoder=new FrameDecoder(),replies=f.writes.flatMap(b=>decoder.push(b));
  expect(replies.map(r=>r.success)).toEqual([false,true]);expect(handled).toEqual(['clearLibrary']);expect(f.closed).toHaveLength(0);await controller.dispose();
+});
+
+test('saved native phone setting does not reject IP bootstrap or close its transport',async()=>{
+ const data=new Map<string,unknown>();
+ const storage={get:<T>(key:string)=>data.get(key) as T|undefined,set:(key:string,value:unknown)=>{data.set(key,value);}};
+ new SettingsStore(storage).update({phoneConnectionEnabled:false});
+ const f=ipFixture();await f.sign();const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});
+ expect(await controller.offer({...f.descriptor})).toBe(true);await flush();expect(f.opens).toHaveLength(1);
+ new SettingsStore(storage).update({phoneConnectionEnabled:true});new SettingsStore(storage).update({phoneConnectionEnabled:false});
+ controller.refresh();await flush();await f.clock.advance(3000);expect(f.closed).toHaveLength(0);
+ expect(new SettingsStore(storage).load().phoneConnectionEnabled).toBe(false);await controller.dispose();
+});
+
+test('changing saved phone setting during descriptor authentication does not reject a valid bootstrap',async()=>{
+ const data=new Map<string,unknown>();const settings=new SettingsStore({get:<T>(key:string)=>data.get(key) as T|undefined,set:(key:string,value:unknown)=>{data.set(key,value);}});
+ const f=ipFixture();await f.sign();const pending=deferred<string>();f.ports.crypto.hmac=()=>pending.result;
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});
+ const offering=controller.offer({...f.descriptor});settings.update({phoneConnectionEnabled:false});pending.resolve(f.descriptor.hmac);
+ expect(await offering).toBe(true);await flush();expect(f.opens).toHaveLength(1);expect(settings.load().phoneConnectionEnabled).toBe(false);await controller.dispose();
 });
