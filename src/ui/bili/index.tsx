@@ -149,7 +149,7 @@ function FeedScreen(props: BiliScreenProps) {
         const open = () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid });
         if (!(props.settings?.originalContentEnabled ?? true)) return rssFeedEntry(item, props.width ?? 233, open);
         const card = listVideoCard(item, undefined, props.width ?? 233), key = itemKey(item);
-        return { height: card.height, render: () => <SwipeCard cardClass="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden"
+        return { height: card.height, bounds: card.bounds, render: () => <SwipeCard cardClass="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden"
           onOpen={() => { if (openSwipeId()) setOpenSwipeId(null); else open(); }}
           onActions={() => props.onNavigate({ name: "actions", aid: item.aid, bvid: item.bvid, cid: item.cid, title: item.title, owner: item.owner?.name, cover: item.cover })}
           onFavorite={() => { setOpenSwipeId(null); void favorite(item); }} onWatchLater={() => { setOpenSwipeId(null); void watchLater(item); }}
@@ -227,12 +227,14 @@ function listVideoCard(item: BiliItem, summaryText: string | undefined, width: n
     {title.map((line, index) => <Text class="absolute text-sm leading-[18] text-[#f5f5f5]" style={{ insetL: padding, insetR: padding, insetT: top + index * 18 }}>{line}</Text>)}
     <Text class="absolute text-[9px] leading-[9.9] text-[#b6b6b6cc]" style={{ insetL: padding, insetR: padding, insetT: top + 2 + title.length * 18 }}>{summary.join("\n")}</Text>
   </>;
-  return { height, content };
+  // The cover may lose its corners to the round mask; the text must stay fully readable.
+  const bounds = { x: padding, y: top, width: textWidth, height: textHeight };
+  return { height, content, bounds };
 }
 /** Native BiliFeedCard: 100dp cover, background gradient, 8dp padding, 14sp title + 9sp summary at the bottom. */
 function listVideoEntry(item: BiliItem, summaryText: string | undefined, width: number, onPress: () => void): ScrollEntry {
   const card = listVideoCard(item, summaryText, width);
-  return { height: card.height, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={`视频：${item.title ?? ""}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">{card.content()}</View> };
+  return { height: card.height, bounds: card.bounds, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={`视频：${item.title ?? ""}`} class="absolute inset-0 rounded-[16] bg-[#1c1f21] overflow-hidden">{card.content()}</View> };
 }
 
 /** Native buildListSummary: "UP 主 · mm:ss", or 哔哩哔哩. */
