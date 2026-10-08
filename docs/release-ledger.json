@@ -201,6 +201,23 @@
       "date": "2026-10-07",
       "notes": "P6 explicitly requested post-install record. Evidence: local OWW242 e3aca8af same-signature non-debug upgrade31 to32; preflight12/12 and first stable K8 home MAE0. No store/public distribution performed; installed-local evidence only. Tool fixes status=published; this label does not prove public publication. Exact APK provenance in .codex-tmp/p6/artifact-provenance.json; private digests unavailable; no equal=true claim. Regressions documented in wrss-perf-report.md.",
       "status": "published"
+    },
+    {
+      "package": "com.lightningstudio.watchrss",
+      "channel": "native-local-baseline",
+      "versionCode": 40,
+      "versionName": "1.3.2-13",
+      "sourceRevs": {
+        "native": null,
+        "app": null,
+        "framework": null
+      },
+      "apkSha256": "1d915427e2dce75a62fd71b229e476969ecd655176e6b32ff2e216e2f622895a",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "R3 recovery组件基线：现有本机native40 debug APK，T8 native-existing-apk.json和离线apkanalyzer输出核验。仅本机候选，不证明公开发行或现装APK身份。T2/T4恢复钩子无新增manifest组件。",
+      "status": "local-candidate",
+      "manifestComponents": "docs/release-baselines/native40-components.json"
     }
   ]
 }

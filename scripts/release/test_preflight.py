@@ -11,6 +11,9 @@ import zipfile
 import preflight as p
 
 FIXTURE = Path(__file__).parent / 'fixtures/manifest.xml'
+# Frozen ledger: real releases keep appending to docs/release-ledger.json, which must not move test expectations.
+LEDGER_FIXTURE = Path(__file__).parent / 'fixtures/ledger.json'
+RECOVERY_FIXTURE = FIXTURE.with_name('recovery-manifest.xml')
 CERT = 'f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d'
 OLD = 'a8d7d64efa7ed36af6a7e1a3850eb6d005a8a0c3800a5692a57f888e617205f9'
 NATIVE = 'com.lightningstudio.watchrss'
@@ -31,7 +34,7 @@ def facts():
 
 class PolicyTests(unittest.TestCase):
     def setUp(self):
-        self.ledger = p.load_ledger(p.DEFAULT_LEDGER)
+        self.ledger = p.load_ledger(LEDGER_FIXTURE)
         self.facts = facts()
         self.channel = 'coexistence'
 
@@ -52,6 +55,11 @@ class PolicyTests(unittest.TestCase):
             self.ledger['policy']['workManagerTakeover'])
         # Synthetic policy approval, NOT a change to the actual shipping ledger.
         self.ledger['policy']['packages'][NATIVE]['highestPublishedVerified'] = True
+
+    def recovery(self):
+        self.native()
+        self.channel = 'recovery'
+        self.facts.update(p.parse_manifest(RECOVERY_FIXTURE.read_text()), podManifest=None)
 
     def test_coexistence_pass_and_input_immutable(self):
         before = copy.deepcopy((self.facts, self.ledger))
@@ -94,9 +102,7 @@ class PolicyTests(unittest.TestCase):
                     self.failed('reservedVersionRange')
 
     def test_recovery_boundaries_and_no_pod_metadata(self):
-        self.native()
-        self.channel = 'recovery'
-        self.facts.update(metadata={}, podManifest=None)
+        self.recovery()
         for code, allowed in [(899999, False), (900000, True), (999999, True),
                               (1000000, False), (1900000, True)]:
             self.facts['versionCode'] = code
@@ -104,6 +110,97 @@ class PolicyTests(unittest.TestCase):
                 self.assertTrue(self.result()['ok'])
             else:
                 self.failed('reservedVersionRange')
+
+    def test_recovery_baseline_debug_components_pass_without_mutation(self):
+        self.recovery()
+        self.assertEqual(len(self.facts['debugExternalComponents']), 4)
+        before = copy.deepcopy((self.facts, self.ledger))
+        result = self.result()
+        self.assertTrue(result['ok'])
+        self.assertNotIn('debugExternal', [c['name'] for c in result['checks']])
+        check = next(c for c in result['checks'] if c['name'] == 'recoveryComponents')
+        self.assertEqual(check['detail']['unexpected'], [])
+        self.assertEqual(check['detail']['approvedAdditions'], [])
+        self.assertEqual(before, (self.facts, self.ledger))
+
+    def test_recovery_all_native40_component_types_and_names_pass(self):
+        self.recovery()
+        baseline, components = p.recovery_baseline(self.ledger)
+        self.assertEqual(len(components), 90)
+        self.assertTrue(baseline['source']['debuggable'])  # local debug APK, not public release proof
+        nodes = ''.join(f'<{tag} android:name="{name}" />' for tag, name in sorted(components))
+        xml = RECOVERY_FIXTURE.read_text().replace('</application>', nodes + '</application>')
+        self.facts.update(p.parse_manifest(xml))
+        self.assertTrue(self.result()['ok'])
+
+    def test_recovery_rejects_each_extra_component_kind_even_non_debug(self):
+        self.recovery()
+        for tag in sorted(p.COMPONENT_TYPES):
+            for name in ('.UnexpectedComponent', '.debug.UnexpectedComponent'):
+                with self.subTest(tag=tag, name=name):
+                    xml = RECOVERY_FIXTURE.read_text().replace('</application>',
+                        f'<{tag} android:name="{name}" android:exported="false" /></application>')
+                    self.facts.update(p.parse_manifest(xml))
+                    self.failed('recoveryComponents')
+                    check = next(c for c in self.result()['checks'] if c['name'] == 'recoveryComponents')
+                    self.assertEqual(check['detail']['unexpected'], [{'type': tag, 'name': NATIVE + name}])
+
+    def test_recovery_rejects_baseline_name_with_changed_component_type(self):
+        self.recovery()
+        xml = RECOVERY_FIXTURE.read_text().replace('</application>',
+            '<service android:name=".LlmSummaryActivity" /></application>')
+        self.facts.update(p.parse_manifest(xml))
+        self.failed('recoveryComponents')
+
+    def test_podjs_channels_still_reject_native_baseline_debug_components(self):
+        for channel in ('coexistence', 'takeover-prebeta', 'takeover-beta', 'takeover-release'):
+            with self.subTest(channel=channel):
+                self.setUp()
+                if channel != 'coexistence':
+                    self.native()
+                self.channel = channel
+                xml = FIXTURE.read_text().replace('</application>',
+                    '<activity android:name="com.lightningstudio.watchrss.LlmSummaryActivity" />'
+                    '<provider android:name="com.lightningstudio.watchrss.debug.DebugLogProvider" />'
+                    '</application>')
+                manifest = p.parse_manifest(xml)
+                self.facts['debugExternalComponents'] = manifest['debugExternalComponents']
+                self.facts['components'] = manifest['components']
+                self.failed('debugExternal')
+                self.assertNotIn('recoveryComponents', [c['name'] for c in self.result()['checks']])
+
+    def test_recovery_still_requires_non_debuggable_and_confirmed_inventory(self):
+        self.recovery()
+        self.facts['debuggable'] = True
+        self.failed('nonDebuggable')
+        self.facts['debuggable'] = False
+        self.ledger['policy']['packages'][NATIVE]['highestPublishedVerified'] = False
+        self.failed('publicationInventory')
+        self.assertTrue(next(c for c in self.result()['checks'] if c['name'] == 'recoveryComponents')['passed'])
+
+    def test_recovery_missing_components_or_unlinked_baseline_fails_closed(self):
+        self.recovery()
+        components = self.facts.pop('components')
+        self.failed('recoveryComponents')
+        self.facts['components'] = components
+        record = next(r for r in self.ledger['releases'] if r['channel'] == 'native-local-baseline')
+        record['apkSha256'] = 'b' * 64
+        self.failed('recoveryComponents')
+
+    def test_recovery_missing_malformed_and_wrong_baseline_fails_closed(self):
+        self.recovery()
+        original = p.load_json(p.NATIVE40_COMPONENTS.read_text())
+        changed = copy.deepcopy(original)
+        changed['components'][0]['type'] = 'application'
+        for data in ([], {**original, 'appId': COEXIST}, {**original, 'versionCode': 39},
+                     {**original, 'apkSha256': 'b' * 64}, {**original, 'components': []}, changed):
+            with tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / 'components.json'
+                path.write_text(json.dumps(data))
+                with patch.object(p, 'NATIVE40_COMPONENTS', path):
+                    self.failed('recoveryComponents')
+        with patch.object(p, 'NATIVE40_COMPONENTS', Path('/nonexistent/native40-components.json')):
+            self.failed('recoveryComponents')
 
     def test_debuggable_fails(self):
         self.facts['debuggable'] = True
@@ -211,7 +308,7 @@ class ReaderAndRecordTests(unittest.TestCase):
             archive.writestr('AndroidManifest.xml', FIXTURE.read_text())
             archive.writestr('assets/pod.manifest.json', '{"schema":1}')
         self.ledger = self.dir / 'ledger.json'
-        self.ledger.write_bytes(p.DEFAULT_LEDGER.read_bytes())
+        self.ledger.write_bytes(LEDGER_FIXTURE.read_bytes())
 
     def mock_tools(self):
         return patch.object(p, 'sdk_tools', return_value=('apkanalyzer', 'apksigner.jar', 'java'))
@@ -254,6 +351,12 @@ class ReaderAndRecordTests(unittest.TestCase):
                                'android:value="40"/></application>')]:
             with self.assertRaises(ValueError):
                 p.parse_manifest(FIXTURE.read_text().replace(before, after))
+
+    def test_missing_or_unresolved_component_name_rejected(self):
+        for attribute in ('', 'android:name=""', 'android:name="@string/component"'):
+            with self.assertRaisesRegex(ValueError, 'component name'):
+                p.parse_manifest(FIXTURE.read_text().replace('</application>',
+                    f'<activity {attribute}/></application>'))
 
     def test_invalid_ledger_schema_and_code_rejected(self):
         data = json.loads(self.ledger.read_text())
@@ -369,7 +472,7 @@ class SdkIntegrationTests(unittest.TestCase):
             self.assertEqual(result['versionCode'], 30)
             self.assertFalse(result['debuggable'])
             self.assertFalse(result['signature']['verified'])
-            check = p.evaluate(result, 'coexistence', p.load_ledger(p.DEFAULT_LEDGER))
+            check = p.evaluate(result, 'coexistence', p.load_ledger(LEDGER_FIXTURE))
             self.assertFalse(check['ok'])
             self.assertFalse(next(c for c in check['checks'] if c['name'] == 'signatureVerified')['passed'])
 

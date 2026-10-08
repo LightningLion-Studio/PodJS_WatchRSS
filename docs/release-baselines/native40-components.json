@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 1,
+  "appId": "com.lightningstudio.watchrss",
+  "versionCode": 40,
+  "versionName": "1.3.2-13",
+  "apkSha256": "1d915427e2dce75a62fd71b229e476969ecd655176e6b32ff2e216e2f622895a",
+  "manifestSha256": "358f347740b1e49a7a2fc3e146334b5a557800a8b63e9f86c2e23cb49f3961d5",
+  "source": {
+    "apk": "Android_WatchRSS/app/build/outputs/apk/debug/app-debug.apk",
+    "command": "apkanalyzer manifest print <native40.apk>",
+    "debuggable": true,
+    "evidenceStatus": "local-candidate; published/installed APK identity unverified"
+  },
+  "components": [
+    {
+      "type": "activity",
+      "name": "androidx.activity.ComponentActivity"
+    },
+    {
+      "type": "activity",
+      "name": "androidx.compose.ui.tooling.PreviewActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.AboutActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.AccountStatusActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.AcousticConnectionActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.AddRssActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.AdvancedSettingsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.AutoScrollControlActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BeianActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliChannelInfoActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliCommentActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliDetailActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliEntryActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliListActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliLoginActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliPlayerActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliReplyDetailActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliSearchActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliSettingsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BiliVideoActionsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.BluetoothConnectionActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ChannelActionsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ChannelDetailActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ChannelSettingsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.CollaboratorsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ContactDeveloperActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DebugAcousticConnectionActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DebugBluetoothSyncActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DetailActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinChannelInfoActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinDetailActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinEntryActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinHistoryActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinLoginActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinPlayerActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinSettingsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.DouyinVideoActionsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.FeedActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.HomeFeedListActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ImagePreviewActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.InfoActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ItemActionsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.JoinGroupActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.LlmPromptPresetActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.LlmSummaryActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.LlmTokenUsageActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.LogUploadActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.LogUploadPrivacyActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.MainActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.NoteActionsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.NoteDetailActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.NotesActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.OobeActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.PhoneConnectionActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.PhoneConnectionUnavailableActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.PrivacyPolicyConsentActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ProfileActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ReadAloudPlaybackActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ReaderPresetActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ReaderPresetPreviewActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.RssPlayerActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.RssRecommendActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.RssRecommendGroupActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.RssSearchActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.SavedItemsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ServerActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.SettingsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.ShareQrActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.TtsSettingsActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.WebViewActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.debug.PerfLargeArticleActivity"
+    },
+    {
+      "type": "activity",
+      "name": "com.lightningstudio.watchrss.debug.PerfLargeListActivity"
+    },
+    {
+      "type": "activity-alias",
+      "name": "com.lightningstudio.watchrss.DouyinDebugEntryActivity"
+    },
+    {
+      "type": "provider",
+      "name": "androidx.core.content.FileProvider"
+    },
+    {
+      "type": "provider",
+      "name": "androidx.startup.InitializationProvider"
+    },
+    {
+      "type": "provider",
+      "name": "com.lightningstudio.watchrss.debug.DebugLogProvider"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.profileinstaller.ProfileInstallReceiver"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryChargingProxy"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryNotLowProxy"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.background.systemalarm.ConstraintProxy$NetworkStateProxy"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.background.systemalarm.ConstraintProxy$StorageNotLowProxy"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.background.systemalarm.ConstraintProxyUpdateReceiver"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.background.systemalarm.RescheduleReceiver"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.diagnostics.DiagnosticsReceiver"
+    },
+    {
+      "type": "receiver",
+      "name": "androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver"
+    },
+    {
+      "type": "receiver",
+      "name": "com.lightningstudio.watchrss.debug.DouyinPlaybackDebugReceiver"
+    },
+    {
+      "type": "service",
+      "name": "androidx.room.MultiInstanceInvalidationService"
+    },
+    {
+      "type": "service",
+      "name": "androidx.work.impl.background.systemalarm.SystemAlarmService"
+    },
+    {
+      "type": "service",
+      "name": "androidx.work.impl.background.systemjob.SystemJobService"
+    },
+    {
+      "type": "service",
+      "name": "androidx.work.impl.foreground.SystemForegroundService"
+    }
+  ]
+}

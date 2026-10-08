@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "nativeAppId": "com.lightningstudio.watchrss",
+    "watchSdk": 30,
+    "packages": {
+      "com.lightningstudio.watchrss.podjs": {
+        "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+        "highestPublishedVerified": true,
+        "inventoryScope": "仅本机并存发行渠道；27..29已安装留存记录，新增渠道须重新核实",
+        "allowedLineages": [
+          [
+            "a8d7d64efa7ed36af6a7e1a3850eb6d005a8a0c3800a5692a57f888e617205f9",
+            "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
+          ]
+        ]
+      },
+      "com.lightningstudio.watchrss": {
+        "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+        "highestPublishedVerified": false,
+        "inventoryScope": "39源码基线 / 40设备观察和本机候选；全渠道最高值和原生公有证书匹配尚未核实",
+        "allowedLineages": [
+          [
+            "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
+          ]
+        ]
+      }
+    },
+    "channels": {
+      "coexistence": {
+        "kind": "coexistence",
+        "packages": [
+          "com.lightningstudio.watchrss.podjs"
+        ],
+        "sourceVersionCodes": [
+          40
+        ],
+        "betaAccepted": false,
+        "approvedPurgeBackupAfter": null
+      },
+      "takeover-prebeta": {
+        "kind": "takeover",
+        "packages": [
+          "com.lightningstudio.watchrss"
+        ],
+        "sourceVersionCodes": [
+          40
+        ],
+        "betaAccepted": false,
+        "approvedPurgeBackupAfter": null
+      },
+      "takeover-beta": {
+        "kind": "takeover",
+        "packages": [
+          "com.lightningstudio.watchrss"
+        ],
+        "sourceVersionCodes": [
+          40
+        ],
+        "betaAccepted": false,
+        "approvedPurgeBackupAfter": null
+      },
+      "takeover-release": {
+        "kind": "takeover",
+        "packages": [
+          "com.lightningstudio.watchrss"
+        ],
+        "sourceVersionCodes": [
+          40
+        ],
+        "betaAccepted": false,
+        "approvedPurgeBackupAfter": null
+      },
+      "recovery": {
+        "kind": "recovery",
+        "packages": [
+          "com.lightningstudio.watchrss"
+        ],
+        "sourceVersionCodes": [
+          0
+        ],
+        "betaAccepted": false,
+        "approvedPurgeBackupAfter": null
+      }
+    },
+    "versionRanges": {
+      "stride": 1000000,
+      "takeover": [
+        1000,
+        899999
+      ],
+      "recovery": [
+        900000,
+        999999
+      ]
+    },
+    "workManagerTakeover": {
+      "nativeAppId": "com.lightningstudio.watchrss",
+      "workerClasses": [
+        "com.lightningstudio.watchrss.data.cloud.WatchCloudSyncWorker"
+      ],
+      "uniqueWorkNames": [
+        "watchrss-watch-cloud-sync-6h"
+      ],
+      "tags": []
+    }
+  },
+  "releases": [
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 27,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": null,
+        "framework": null,
+        "native": null
+      },
+      "apkSha256": "f07b5f3bc92a1f4b48f14f1f422ac356f1a5f3865dee47036e484b255f3252df",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "本机并存包已安装；公开APK证据 .codex-tmp/device/rs3/apk-v27.json；P2报告 .codex-tmp/p3/previous-p2-report.md 引用v28对照并固定v29摘要。版本名来自同目录manifest.xmltree.txt 0.1.0；未声称公开商店发布。",
+      "status": "installed-local"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 28,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": null,
+        "framework": null,
+        "native": null
+      },
+      "apkSha256": "798aa7dbb2872ae52bd767fadd23809a736d88ec387c695f69269e1d063cf548",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "本机并存包已安装；公开APK证据 .codex-tmp/device/s16/apk-v28.json；P2报告 .codex-tmp/p3/previous-p2-report.md 引用v28对照并固定v29摘要。版本名来自同目录manifest.xmltree.txt 0.1.0；未声称公开商店发布。",
+      "status": "installed-local"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 29,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": null,
+        "framework": null,
+        "native": null
+      },
+      "apkSha256": "b8084fecd9db3ef096ac99c6925860bce184b7e25dcfaaa315d24c0f4f759aa2",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "本机并存包已安装；公开APK证据 .codex-tmp/device/p2/apk-v29.json；P2报告 .codex-tmp/p3/previous-p2-report.md 引用v28对照并固定v29摘要。版本名来自同目录manifest.xmltree.txt 0.1.0；未声称公开商店发布。 构建过程中并行合并，P2明确精确源码归属未建立；仅记录观察修订。",
+      "status": "installed-local"
+    },
+    {
+      "package": "com.lightningstudio.watchrss",
+      "channel": "native-source-baseline",
+      "versionCode": 39,
+      "versionName": "1.3.2-12",
+      "sourceRevs": {
+        "native": "734121c3",
+        "app": null,
+        "framework": null
+      },
+      "apkSha256": null,
+      "cert": null,
+      "date": "2026-10-07",
+      "notes": "来源：源码观察/本机候选；docs/takeover-rehearsal.md 构建和版本台账；原生734121c3 app/build.gradle.kts。非已证实全渠道发布。",
+      "status": "source-baseline"
+    },
+    {
+      "package": "com.lightningstudio.watchrss",
+      "channel": "native-observation",
+      "versionCode": 40,
+      "versionName": "1.3.2-13",
+      "sourceRevs": {
+        "native": null,
+        "app": null,
+        "framework": null
+      },
+      "apkSha256": null,
+      "cert": null,
+      "date": "2026-10-07",
+      "notes": "来源：设备观察/本机候选；docs/takeover-readiness.md T1、.codex-tmp/p2/previous-r1-report.md。安装40与本机40候选的公开APK hash/cert 尚未匹配；dirty源码不可作为发布修订。",
+      "status": "observed"
+    },
+    {
+      "package": "com.lightningstudio.watchrss",
+      "channel": "native-local-baseline",
+      "versionCode": 40,
+      "versionName": "1.3.2-13",
+      "sourceRevs": {
+        "native": null,
+        "app": null,
+        "framework": null
+      },
+      "apkSha256": "1d915427e2dce75a62fd71b229e476969ecd655176e6b32ff2e216e2f622895a",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "R3 recovery组件基线：现有本机native40 debug APK，T8 native-existing-apk.json和离线apkanalyzer输出核验。仅本机候选，不证明公开发行或现装APK身份。T2/T4恢复钩子无新增manifest组件。",
+      "status": "local-candidate",
+      "manifestComponents": "docs/release-baselines/native40-components.json"
+    }
+  ]
+}
