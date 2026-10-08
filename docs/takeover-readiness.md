@@ -1,3 +1,59 @@
+# T11b：release 原字节保护核验通道（源码实现，设备 PENDING）
+
+`PodTakeoverDigest` 在 SNAPSHOTTED 与 ACTIVE 各输出每个 root 一行，另有
+`root=manifest` 的合并摘要。字段仅 `phase/generation/root/files/bytes/sha256`，
+无文件名、账号、cookie 或内容。T11b 保持共享 `NativeBackup.java` 与恢复树逐字节相同，
+不改变恢复 manifest 格式。SNAPSHOTTED 复用 converter 文件/store/原始 DB/WAL 哈希，
+补充测量四个保护 root 中转换器未覆盖的文件，写入 generation 内独立私有摘要快照；
+重试只读该快照，不重写基线，也不提前封存或移动 NativeBackup 的源计划。
+ACTIVE 前沿用原有 prepare/verify 校验字节、原子移动并持久化 manifest/seal/ready，
+再从这些 Properties 元数据投影并与私有摘要快照比较，不同则阻止 ACTIVE 发布。
+ACTIVE 日志只读封存元数据，不重读大文件，沿用迁移后台线程。
+取舍：恢复计划仍在原有 prepare 阶段封存，不在 SNAPSHOTTED 提前冻结；
+哈希复用用于独立摘要快照，NativeBackup 原有 prepare/verify 的实际字节读取保持不变。
+
+摘要 v1：root 内采用去掉 root 前缀的相对路径；合并 manifest 采用 sandbox 相对路径。
+按 UTF-8 字节升序，逐文件 SHA256 输入为 `uint32be(path UTF-8 bytes length)`、
+路径 UTF-8 字节、`uint64be(size)`、文件 SHA256 的32个原始字节。目录不计数；
+空/不存在 root 为 files=0、bytes=0、SHA256(empty)。root 范围是
+`databases/files/shared_prefs/no_backup`；cache 是 Android 可丢弃数据，不进入备份或比较。
+排除框架自有 `files/podjs`、`files/package-takeover`、`files/.podjs-*`、
+`databases/podjs.sqlite*` 和 `no_backup/podjs-*`，与 NativeBackup 规则一致。
+比较协议只接受上述四个 root 与 manifest；不扩大共享恢复 manifest 的 root 定义。
+manifest 汇总是原字节清单摘要，不是 manifest 文件自身 SHA256，亦不单独证明
+证书、sourceVersion、active 指针、迁移业务结果或 Keystore 可用性。
+
+**T10 接管 APK 不含本通道，必须从 T11 框架重建并重新跑离线发布门禁。**
+T11b 不再扩展 cache root；共享 NativeBackup 与原生恢复树 `8d65e148` 字节一致，
+保持现有恢复候选的 manifest 兼容性。实际恢复 APK 仍须独立门禁和设备验收；
+此轮只改框架/脚本/文档，不构建或安装 APK。
+框架全套测试包含 SHA256 守卫：`PODJS_RECOVERY_TREE` 默认指向
+`/home/wilf/data/OPPO_Develop/Android_WatchRSS.wt-recovery`；路径不存在打印 SKIP，
+路径存在而共享源码缺失或不同即失败。
+
+`pre` 只允许现装 debuggable 原生，force-stop 后 run-as tar 全程在主机内存流式计算，
+只落聚合 JSON；不落 tar/文件内容/文件名/原始 stderr。现有 takeover journal/backup、
+run-as 拒绝、坏 tar、links/越界/重复条目均拒绝生成基线。`post` 只读取同包 UID/更高
+versionCode、当前单一 PID 的过滤 logcat；按 epoch 时间排除 pre 前日志，要求主机与
+设备时钟同步。须在首次 ACTIVE 后、进程重启前及时 post；日志缺失/轮转、进程改变、
+代际歧义、格式错误或任一 root 不等均 FAIL，不能用旧日志/重新安装补成 PASS。
+可用 `--generation g-...` 明确选择观测到的代际；receipt/report 不覆盖，失败报告仅固定
+reason 或变化 root，无原始日志。PASS 只证明原生基线字节与封存备份清单一致，设备业务
+验收、同 UID 账号解密、WorkManager 和恢复实测继续分别 PENDING。
+
+离线测试命令（本轮报告记录实际结果）：
+
+```sh
+PODJS_T11_FRAMEWORK=/home/wilf/data/PodJS/podjs-watch.wt-t11 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/device -p 'test_*.py'
+```
+
+跨语言测试使用两仓库字节一致的 `takeover-digest-v1.tsv`，Python 将该夹具构造为内存 tar，
+Java 使用同一个夹具的路径/长度/内容哈希，断言四个 root 加 manifest 共五个聚合摘要完全相等；包含 binary、
+UTF-8 排序、空文件与空 root。后续合并后测试默认 framework 主 checkout，可用上述环境变量
+指定未合并 worktree。以下 T10/T9/T8 候选及结论保留为历史证据，正式清单按本节通道执行。
+
+---
+
 # T10：最新主线正式接管候选（2026-10-08）
 
 冻结 app `873fbd9` / framework `ecc8d3e` / PocketJS `78b1c86`，
@@ -165,7 +221,7 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
 | C16 / C17 | 独立总结controller/route、TTS数据能力已有；lead布局及设备/backend/audio验收按debug-parity待办，不沿用T1“没有任何实现”的旧描述 |
 | 手机/同步、文件/字体/媒体、通知/后台 | Host及迁移离线测试已有；实际手机双端、断连/ACK、大正文、真实资源加载/播放、权限和系统后台仍 PENDING |
 | 全渠道版本/证书 | 发布负责人提供原生全部发行渠道最高code证据，并核对现装原生公开APK signer；更新台账policy须有证据。1000与900000是候选，不是已发布记录 |
-| 同UID用户数据保护 | 当前 `acceptance.py upgrade` 会在安装前后用run-as读取摘要；release非debug可能拒绝after读取。必须先准备可审计的保护性摘要/备份验证方案，失败不能宣布equal=true，也不能用安装成功替代 |
+| 同UID用户数据保护 | T11 `takeover_verify.py pre/post` 对比安装前原生聚合摘要、SNAPSHOTTED 和 ACTIVE 封存备份 manifest；release 不需要 after run-as。新通道源码/host 证明不等于设备 PASS；须重建接管 APK 并核对现有恢复候选门禁，失败/日志缺失不能宣布 equal=true |
 | 回滚能力 | 恢复包还原封存原生基线、归档PodJS新增数据；不自动反向合并。ACTIVE后不能承诺所有新增资料在原生可见。恢复900000后不能重新安装1000；下一轮接管起1001000并仍需高于全部历史 |
 
 ## 正式安装清单（仅供审阅，本轮未执行）
@@ -177,23 +233,33 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
    的 `takeover-release`、`recovery`，必须全部PASS。核对原生实际appId/code/公开signer/
    UID，确认code40对应受支持Room18及store版本、用户解锁、空间足够（迁移副本、
    原字节备份、恢复stage和PodJS归档均需预留）；审核全部渠道版本上界。
-2. 安装前按保护性验证方案获取原生源的digest JSON（至少databases/files/shared_prefs/
-   no_backup及迁移root计划），检查已有backup/journal/active与seal是否一致、无歧义。
-   留存恢复候选和可用备份。Keystore不能当可导出的普通文件；不再落完整userdata tar。
-   若正式sandbox无法安全核验，停止并报告，不能先安装再补证据。
+2. 安装前确认原生 DEBUGGABLE，并执行 `python3 scripts/device/takeover_verify.py pre
+   --serial e3aca8af --package com.lightningstudio.watchrss
+   --out .codex-tmp/t11-device/pre.json`（命令换行仅为排版）。只落聚合JSON，覆盖
+   databases/files/shared_prefs/no_backup；cache 不进备份、不参与比较；原生保持 force-stop，不启动任何原生业务。
+   pre 检测到旧 takeover journal/backup、缺少原生 watchrss.db 或无法安全读取时即停止，不安装再补证据。
+   确认原格式恢复候选可用（T11b 共享 NativeBackup 字节一致）；Keystore 不作为可导出文件备份。
 3. 按 2026-10-08 用户决定，接管只用原生来源，丢弃 `.podjs` 测试数据，不从
    该包迁移或合并任何资料。接管后 `.podjs` 是否卸载待用户另行确认，本清单不执行
    卸载。确认 release after 摘要的授权验证入口已准备。
-4. 通过现有保护性升级入口执行同包覆盖；底层安装命令为
-   `adb -s e3aca8af install -r .codex-tmp/t10/watchrss-takeover-v1000.apk`，
-   不加 `-d`，不作为绕过验证的独立执行指令。当前 `acceptance.py upgrade`
-   在非debug after拒绝run-as时不能完成保护证明，必须先解决该门槛。安装后在首启前
-   核对UID和迁移前源digest；禁止把未运行迁移时的文件一致性当迁移验收。
-5. 首启 `com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity`，
+4. 步骤1/2/3全部通过且已获本轮安装授权后，按保护性清单执行同包覆盖
+   `adb -s e3aca8af install -r <重新构建并过门禁的 T11 接管 APK>`，不加 `-d`。
+   此处 `<...>` 是待填审阅值，历史 T10 APK 不能直接替代。安装后只核对包名、code、
+   公开signer、UID和非debug标志；**原字节保护保持PENDING**，不要求 release after run-as。
+   也可用 `acceptance.py upgrade --package com.lightningstudio.watchrss --apk <T11 APK>
+   --out <新目录>` 合并步骤2/4：其 release 分支先生成 `takeover-pre.json`，安装后
+   写 `takeover-install.json` PENDING，并打印 post 命令；该新生成 receipt 是权威基线。
+   不自动首启，不把安装成功或未运行迁移时的摘要当迁移验收。
+5. 在授权首启 `com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity` 后，
    观察DETECTED→SNAPSHOTTED→COPYING→VERIFYING→READY→ACTIVATING→ACTIVE，
    PAUSED/BLOCKED保留源/候选并记录固定reason；记录真实耗时、主线程/ANR、generation。
-   ACTIVE核验封存backup manifest/seal/ready逐root摘要、sourceVersion40、公有cert、
-   active指针与receipt同代际、purge=0、旧WorkManager已取消且PodJS工作不被误取消。
+   首次 ACTIVE 后、进程重启前执行 `python3 scripts/device/takeover_verify.py post
+   --serial e3aca8af --package com.lightningstudio.watchrss --pre .codex-tmp/t11-device/pre.json
+   --out .codex-tmp/t11-device/post.json`；若步骤4使用 upgrade，改用其 `takeover-pre.json`。
+   必须所有 root 和 manifest 满足 pre == SNAPSHOTTED == ACTIVE 且报告 PASS；
+   日志丢失/不同PID/代际歧义/摘要不等即停止，绝不以安装成功替代保护证明。
+   另核对 sourceVersion40、公有cert、active指针与receipt同代际、purge=0、
+   旧WorkManager取消且PodJS工作不被误取消；聚合日志不替代这些事实的授权核验。
 6. 第一张Home截图与 `.codex-tmp/device/shots/s4-k8-home-after-cold.png`
    核对466×466尺寸/布局，以ROI/非RGB0/MAE证据判定；说明弹窗未经授权不点击。
    然后核对真实账号解密/登录、频道/正文/阅读进度/备忘录/设置/资源/手机同步；
@@ -201,7 +267,7 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
 7. 优先前向修 PodJS；仅在需要最后手段恢复时，先停止业务写入，保留并核验
    当前 PodJS 代际和封存原生 backup，明确
    ACTIVE后新资料只归档、不自动合并。通过保护性安装流程覆盖
-   `adb -s e3aca8af install -r .codex-tmp/t10/watchrss-native-recovery-v900000.apk`；
+   `adb -s e3aca8af install -r <通过独立门禁的原格式原生恢复 APK>`；
    启动 `com.lightningstudio.watchrss/.MainActivity`。恢复在providers前校验证书/备份、
    原字节还原及撤销旧系统WorkManager jobs；遇 `podjs_recovery_pending`停止、保留数据，
    不清空重试。校验completion/backup seal、PodJS归档、原生业务/资源/账号/WorkManager，

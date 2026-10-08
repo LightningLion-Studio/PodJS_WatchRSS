@@ -95,7 +95,7 @@ def main():
         result = subprocess.run(upgrade, capture_output=True, text=True, env=env)
         assert result.returncode and 'application-id mismatch' in result.stderr
         assert 'install' not in trace.read_text(), 'mismatched APK installed'
-        analyzer.write_text('#!/bin/sh\necho ' + m.FORMAL + '\n')
+        analyzer.write_text('#!/bin/sh\nif [ \"$2\" = debuggable ]; then echo true; else echo ' + m.FORMAL + '; fi\n')
         result = subprocess.run(upgrade, capture_output=True, text=True, env=env)
         assert result.returncode == 0, result.stderr
         assert json.loads((root / 'upgrade/data-compare.json').read_text())['equal']

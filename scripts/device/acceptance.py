@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 FORMAL = 'com.lightningstudio.watchrss.podjs'
@@ -268,6 +269,54 @@ def upgrade_chain(a):
             raise ValueError('Data changed; inspect data-compare.json. Do not mark preservation PASS')
 
 
+def upgrade(a):
+    for name in ('before-digest.json', 'after-digest.json', 'data-compare.json',
+                 'takeover-pre.json', 'takeover-post.json', 'takeover-install.json'):
+        if (a.out / name).exists():
+            raise ValueError('Use a fresh upgrade output directory; existing ' + name)
+    identity = run(['apkanalyzer', 'manifest', 'application-id', str(a.apk)], a.dry_run).strip()
+    debug = run(['apkanalyzer', 'manifest', 'debuggable', str(a.apk)], a.dry_run).strip()
+    if not a.dry_run and identity != a.package:
+        raise ValueError('APK application-id mismatch; installation refused')
+    if not a.dry_run and debug not in ('true', 'false'):
+        raise ValueError('APK debuggable flag unavailable; installation refused')
+    release = debug == 'false'
+    if release:
+        from takeover_verify import pre
+        try:
+            receipt = pre(SimpleNamespace(out=a.out / 'takeover-pre.json',
+                          package=a.package, serial=a.serial, dry_run=a.dry_run))
+        except Exception:
+            # Tar/parser errors can embed private filenames or header bytes.
+            raise ValueError('Takeover pre unavailable; no installation attempted') from None
+    else:
+        receipt = snapshot(a, 'before')
+    installed = run(a.adb + ['install', '-r', str(a.apk)], a.dry_run)
+    print(installed)
+    if not a.dry_run and not any(line.strip() == 'Success' for line in installed.splitlines()):
+        raise ValueError('Upgrade rejected; preservation unproven')
+    if release:
+        actual = installed_metadata(a)
+        if not a.dry_run and actual['debuggable']:
+            raise ValueError('Installed debuggable flag differs from release candidate')
+        if not a.dry_run:
+            (a.out / 'takeover-install.json').write_text(json.dumps({
+                'status': 'PENDING', 'preservationVerified': False,
+                'source': receipt['source'], 'installed': actual,
+                'next': 'first launch, observe ACTIVE, then takeover_verify.py post'}, indent=2) + '\n')
+        print('Release installed; protection PENDING. After authorized first launch reaches ACTIVE, run:')
+        print(shlex.join([sys.executable, str(ROOT / 'scripts/device/takeover_verify.py'), 'post',
+              '--serial', a.serial, '--package', a.package, '--pre', str(a.out / 'takeover-pre.json'),
+              '--out', str(a.out / 'takeover-post.json')]))
+        return
+    after = snapshot(a, 'after')
+    if not a.dry_run:
+        result = compare_receipts(receipt, after)
+        (a.out / 'data-compare.json').write_text(json.dumps(result, indent=2) + '\n')
+        if not result['equal']:
+            raise ValueError('Data changed; inspect data-compare.json. Do not mark preservation PASS')
+
+
 def main():
     os.umask(0o077)  # Local receipts/logs can contain private metadata.
     p = argparse.ArgumentParser(description=__doc__)
@@ -328,21 +377,7 @@ def main():
     elif a.action == 'upgrade-chain':
         upgrade_chain(a)
     elif a.action == 'upgrade':
-        for name in ('before-digest.json', 'after-digest.json', 'data-compare.json'):
-            if (a.out / name).exists():
-                raise ValueError('Use a fresh upgrade output directory; existing ' + name)
-        # Inspect identity BEFORE any adb install. Never trust filename/appId supplied by caller.
-        identity = run(['apkanalyzer', 'manifest', 'application-id', str(a.apk)], a.dry_run).strip()
-        if not a.dry_run and identity != a.package:
-            raise ValueError('APK application-id mismatch; installation refused')
-        before = snapshot(a, 'before')
-        print(run(a.adb + ['install', '-r', str(a.apk)], a.dry_run))
-        after = snapshot(a, 'after')
-        if not a.dry_run:
-            result = compare_receipts(before, after)
-            (a.out / 'data-compare.json').write_text(json.dumps(result, indent=2) + '\n')
-            if not result['equal']:
-                raise ValueError('Data changed; inspect data-compare.json. Do not mark preservation PASS')
+        upgrade(a)
     elif a.action == 'cold-start':
         run(a.adb + ['shell', 'am', 'force-stop', a.package], a.dry_run)
         result = run(a.adb + ['shell', 'am', 'start', '-W', '-n', a.package + '/dev.podjs.androidwatch.MainActivity'], a.dry_run)
