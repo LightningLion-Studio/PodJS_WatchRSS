@@ -18,7 +18,11 @@ import threading
 import time
 
 ROOTS = ('databases', 'files', 'shared_prefs', 'no_backup')
-FORMAT = 'pod-takeover-digest-v1'
+FORMAT = 'pod-takeover-digest-v2'
+LEGACY_FORMAT = 'pod-takeover-digest-v1'
+FILES_WITHOUT_PLATFORM_METADATA = 'files_without_platform_metadata'
+DIGEST_ROOTS = (*ROOTS, 'manifest', FILES_WITHOUT_PLATFORM_METADATA)
+PLATFORM_METADATA = {'files/profileinstaller_profileWrittenFor_lastUpdateTime.dat', 'files/profileInstalled'}
 FIELDS = {'phase', 'generation', 'root', 'files', 'bytes', 'sha256'}
 
 
@@ -35,10 +39,11 @@ def summarize(entries):
     if any(path.partition('/')[0] not in ROOTS for path in entries):
         raise ValueError('Unsupported digest root')
     result = {}
-    for root in (*ROOTS, 'manifest'):
+    for root in DIGEST_ROOTS:
         rows = {path if root == 'manifest' else path.partition('/')[2]: value
                 for path, value in entries.items()
-                if root == 'manifest' or path.partition('/')[0] == root}
+                if root == 'manifest' or path.partition('/')[0] == root
+                or (root == FILES_WITHOUT_PLATFORM_METADATA and path.startswith('files/') and path not in PLATFORM_METADATA)}
         digest = hashlib.sha256()
         total = 0
         for path in sorted(rows, key=lambda p: p.encode('utf-8')):
@@ -179,11 +184,11 @@ def validate_pre(before):
     if not isinstance(before, dict):
         raise ValueError('Invalid pre receipt')
     if (set(before) != {'format', 'package', 'serial', 'source', 'capturedAt', 'roots', 'archiveStored', 'contentStored'}
-            or before.get('format') != FORMAT or before.get('archiveStored') is not False
+            or before.get('format') not in (FORMAT, LEGACY_FORMAT) or before.get('archiveStored') is not False
             or before.get('contentStored') is not False
             or before.get('source', {}).get('debuggable') is not True
             or type(before.get('capturedAt')) not in (int, float)
-            or set(before.get('roots', {})) != set((*ROOTS, 'manifest'))):
+            or set(before.get('roots', {})) != set(DIGEST_ROOTS if before.get('format') == FORMAT else (*ROOTS, 'manifest'))):
         raise ValueError('Invalid pre receipt')
     if (not math.isfinite(before['capturedAt']) or before['capturedAt'] <= 0
             or set(before['source']) != {'versionCode', 'uid', 'debuggable'}
@@ -209,7 +214,7 @@ def compare_logs(before, log_lines, generation=None, pid=None):
             continue
         row = json.loads(match[3])
         if (set(row) != FIELDS or row['phase'] not in ('SNAPSHOTTED', 'ACTIVE')
-                or row['root'] not in (*ROOTS, 'manifest')
+                or row['root'] not in DIGEST_ROOTS
                 or not re.fullmatch('g-[a-zA-Z0-9-]+', row['generation'])):
             raise ValueError('Invalid digest log schema')
         summary = {key: row[key] for key in ('files', 'bytes', 'sha256')}
@@ -217,7 +222,7 @@ def compare_logs(before, log_lines, generation=None, pid=None):
         if generation is not None and row['generation'] != generation:
             continue
         phases = groups.setdefault(row['generation'], {'SNAPSHOTTED': {}, 'ACTIVE': {}})
-        if row['phase'] == 'ACTIVE' and set(phases['SNAPSHOTTED']) != set((*ROOTS, 'manifest')):
+        if row['phase'] == 'ACTIVE' and not set(before['roots']).issubset(phases['SNAPSHOTTED']):
             return {'status': 'FAIL', 'equal': False, 'reason': 'active_without_complete_snapshot'}
         phase = phases[row['phase']]
         if row['root'] in phase and phase[row['root']] != summary:
@@ -226,13 +231,32 @@ def compare_logs(before, log_lines, generation=None, pid=None):
     if len(groups) != 1:
         return {'status': 'FAIL', 'equal': False, 'reason': 'missing_or_ambiguous_generation'}
     g, phases = next(iter(groups.items()))
-    changed = {phase: [root for root in (*ROOTS, 'manifest')
+    changed = {phase: [root for root in before['roots']
                       if phases[phase].get(root) != before['roots'][root]]
                for phase in ('SNAPSHOTTED', 'ACTIVE')}
     equal = not any(changed.values())
-    return {'status': 'PASS' if equal else 'FAIL', 'equal': equal, 'generation': g,
-            'changedRoots': changed,
-            'policy': 'pre == SNAPSHOTTED == ACTIVE sealed backup manifest; original bytes only'}
+    result = {'status': 'PASS' if equal else 'FAIL', 'equal': equal, 'generation': g,
+              'changedRoots': changed,
+              'policy': 'Full roots remain original-byte evidence; metadata exclusions are separate aggregates'}
+    strict = ('databases', 'shared_prefs', 'no_backup')
+    strict_equal = all(phases[phase].get(root) == before['roots'][root]
+                       for phase in phases for root in strict)
+    complete = all(set(before['roots']).issubset(phases[phase]) for phase in phases)
+    result['strictRootsVerified'] = strict_equal and complete
+    result['nonPlatformFilesVerified'] = (before['format'] == FORMAT and complete
+        and all(phases[phase].get(FILES_WITHOUT_PLATFORM_METADATA) == before['roots'][FILES_WITHOUT_PLATFORM_METADATA]
+                for phase in phases))
+    if not equal and strict_equal and complete and all(
+            set(roots) == {'files', 'manifest'} or not roots for roots in changed.values()):
+        result['knownDifference'] = 'platform-metadata'
+        if result['nonPlatformFilesVerified']:
+            result['status'] = 'PASS_WITH_KNOWN_DIFFERENCES'
+            result['attribution'] = 'Only exact platform metadata excluded by the strict files subset'
+        elif before['format'] == LEGACY_FORMAT:
+            result['status'] = 'PARTIAL'
+            result['attribution'] = 'Expected platform metadata difference; legacy aggregates cannot prove which files changed'
+            result['reason'] = 'legacy_files_subset_unavailable'
+    return result
 
 
 def post(a):
@@ -262,7 +286,7 @@ def post(a):
     result.update(package=a.package, serial=a.serial, source=before['source'], installed=metadata)
     write_json(a.out, result)
     print(result['status'] + ': original-byte protection ' + ('verified' if result['equal'] else 'unproven'))
-    if not result['equal']:
+    if result['status'] not in ('PASS', 'PASS_WITH_KNOWN_DIFFERENCES'):
         raise ValueError('Digest mismatch or incomplete logs; inspect aggregate report')
     return result
 

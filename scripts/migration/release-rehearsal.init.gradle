@@ -1,0 +1,11 @@
+// Test-only release shape; never loads native signing properties.
+gradle.beforeProject { app ->
+    if (app.path == ':androidApp') app.plugins.withId('com.android.application') {
+        if (app.providers.gradleProperty('podAppId').orNull != 'com.lightningstudio.watchrss.podjs.rehearsal') {
+            throw new GradleException('release rehearsal requires the isolated application ID')
+        }
+        app.android.buildTypes.release.signingConfig = app.android.signingConfigs.debug
+        app.android.buildTypes.release.debuggable = false
+        app.android.testBuildType = 'release'
+    }
+}

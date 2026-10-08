@@ -131,6 +131,35 @@ class TakeoverVerifyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify.compare_logs(self.before, ['PodTakeoverDigest: not-json'])
 
+    def test_exact_platform_subset_and_legacy_cannot_claim_equal(self):
+        entries = {path: (len(data), hashlib.sha256(data).hexdigest()) for path, data in fixture_rows()}
+        entries['files/profileInstalled'] = (24, hashlib.sha256(b'a' * 24).hexdigest())
+        entries['files/profileinstaller_profileWrittenFor_lastUpdateTime.dat'] = (8, hashlib.sha256(b'b' * 8).hexdigest())
+        self.before['roots'] = verify.summarize(entries)
+        entries['files/profileInstalled'] = (24, hashlib.sha256(b'c' * 24).hexdigest())
+        after = verify.summarize(entries)
+        result = verify.compare_logs(self.before, self.logs(after))
+        self.assertEqual(result['status'], 'PASS_WITH_KNOWN_DIFFERENCES')
+        self.assertFalse(result['equal'])
+        self.assertTrue(result['strictRootsVerified'])
+        self.assertTrue(result['nonPlatformFilesVerified'])
+        legacy = copy.deepcopy(self.before)
+        legacy['format'] = verify.LEGACY_FORMAT
+        del legacy['roots'][verify.FILES_WITHOUT_PLATFORM_METADATA]
+        result = verify.compare_logs(legacy, self.logs(after))
+        self.assertEqual(result['status'], 'PARTIAL')
+        self.assertFalse(result['equal'])
+        self.assertFalse(result['nonPlatformFilesVerified'])
+        self.assertEqual(result['reason'], 'legacy_files_subset_unavailable')
+        for path in ('files/profileInstalled.user', 'files/nested/profileInstalled', 'files/private-new.bin', 'databases/new.db'):
+            corrupt = dict(entries)
+            corrupt[path] = (1, hashlib.sha256(b'x').hexdigest())
+            self.assertEqual(verify.compare_logs(self.before, self.logs(verify.summarize(corrupt)))['status'], 'FAIL')
+        for root in verify.DIGEST_ROOTS:
+            for phase in ('SNAPSHOTTED', 'ACTIVE'):
+                lines = [line for line in self.logs(after) if not (f'"root": "{root}"' in line and f'"phase": "{phase}"' in line)]
+                self.assertEqual(verify.compare_logs(self.before, lines)['status'], 'FAIL')
+
     def test_non_debug_pre_refuses_before_tar_or_force_stop(self):
         with self.assertRaisesRegex(ValueError, 'Native source database'):
             verify.stream_digest(archive([('files/private.txt', b'fixture')]), require_native=True)
