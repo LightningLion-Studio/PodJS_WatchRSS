@@ -185,6 +185,23 @@
       "date": "2026-10-07",
       "notes": "来源：设备观察/本机候选；docs/takeover-readiness.md T1、.codex-tmp/p2/previous-r1-report.md。安装40与本机40候选的公开APK hash/cert 尚未匹配；dirty源码不可作为发布修订。",
       "status": "observed"
+    },
+    {
+      "package": "com.lightningstudio.watchrss",
+      "channel": "native-local-baseline",
+      "versionCode": 40,
+      "versionName": "1.3.2-13",
+      "sourceRevs": {
+        "native": null,
+        "app": null,
+        "framework": null
+      },
+      "apkSha256": "1d915427e2dce75a62fd71b229e476969ecd655176e6b32ff2e216e2f622895a",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "R3 recovery组件基线：现有本机native40 debug APK，T8 native-existing-apk.json和离线apkanalyzer输出核验。仅本机候选，不证明公开发行或现装APK身份。T2/T4恢复钩子无新增manifest组件。",
+      "status": "local-candidate",
+      "manifestComponents": "docs/release-baselines/native40-components.json"
     }
   ]
 }

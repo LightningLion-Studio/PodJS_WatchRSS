@@ -22,7 +22,22 @@ stdout 为 JSON（包含 APK 身份、哈希、公有 signer、lineage 和逐项
 | `takeover-prebeta` / `takeover-beta` / `takeover-release` | `com.lightningstudio.watchrss` | 1000..899999 | source=40，精确匹配旧 WorkManager 身份 |
 | `recovery` | `com.lightningstudio.watchrss` | 900000..999999 | source=0（可缺席），WorkManager takeover 配置缺席；不要求 PodJS 资产 |
 
-所有渠道均要求非 debug、没有 debug-external 组件、APK 签名实际验证通过、当前和
+并存和接管渠道仍拒绝所有 debug-external 组件。恢复渠道使用 `recoveryComponents`：
+实际 APK 的全部 activity / activity-alias / receiver / provider / service 的
+（类型、完整类名）集合必须是原生 code40 基线与显式恢复新增名单的子集；普通组件
+也不能任意新增，同名换类型也拒绝。组件名缺失或未解析、基线缺失/损坏或与台账
+APK 记录不匹配时拒绝。
+
+基线为 `docs/release-baselines/native40-components.json`，来自本机 SHA256
+`1d915427e2dce75a62fd71b229e476969ecd655176e6b32ff2e216e2f622895a` 的 code40 APK
+的 `apkanalyzer manifest print`，共90个组件；台账 `native-local-baseline` 条目记录
+摘要路径和对应APK hash。该APK实际为debug本机候选，不声称与公开发行或现装APK
+相同。T2/T4通过 Application 的 attachBaseContext 恢复，无新增manifest组件，
+`RECOVERY_ADDED_COMPONENTS` 显式为空；以后任何新增须单独审阅并精确列出。
+基线包含的 LlmSummaryActivity、debug provider/perf activities 在恢复包中可保留。
+这项门禁比对组件身份，不比对 exported、intent-filter 或其他属性的等价性。
+
+所有渠道均要求非 debug、APK 签名实际验证通过、当前和
 SDK30 公有 signer 均为期望的 Lightning Studio 单证书。v3/v3.1 lineage 若存在，
 必须通过 apksig 校验、顺序与台账允许链完全一致、末端为当前证书、链内每个证书
 保留 installed-data capability。并存包允许历史 Android Debug → Lightning Studio

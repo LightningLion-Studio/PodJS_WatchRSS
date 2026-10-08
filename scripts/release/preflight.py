@@ -21,7 +21,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LEDGER = ROOT / 'docs/release-ledger.json'
+NATIVE40_COMPONENTS = ROOT / 'docs/release-baselines/native40-components.json'
 ANDROID = '{http://schemas.android.com/apk/res/android}'
+COMPONENT_TYPES = {'activity', 'activity-alias', 'receiver', 'provider', 'service'}
+# T2 (d3a778cb) / T4 (6bbf8e5e) restore through WatchRssApplication's
+# attachBaseContext hook. Neither adds a manifest component; no wildcard allowed.
+RECOVERY_ADDED_COMPONENTS = frozenset()
 MAX_CODE = 2_100_000_000
 HEX = re.compile(r'^[0-9a-f]{64}$')
 DEBUG_COMPONENTS = {
@@ -139,13 +144,17 @@ def parse_manifest(xml):
             raise ValueError('duplicate application meta-data')
         metadata[name] = node.get(ANDROID + 'value')
     debug = []
+    components = set()
     for node in app.iter():
-        if node.tag not in ('activity', 'activity-alias', 'receiver', 'provider', 'service'):
+        if node.tag not in COMPONENT_TYPES:
             continue
         name = node.get(ANDROID + 'name', '')
+        if not name or not re.fullmatch(r'[A-Za-z_$][A-Za-z0-9_.$]*', name.lstrip('.')):
+            raise ValueError('missing/unresolved component name')
         qualified = package + name if name.startswith('.') else name
         if '.' not in qualified:
             qualified = package + '.' + qualified
+        components.add((node.tag, qualified))
         values = ' '.join(node.attrib.values()) + ' ' + ' '.join(
             str(v) for child in node.iter() for v in child.attrib.values())
         if (qualified in DEBUG_COMPONENTS or re.search(
@@ -154,7 +163,47 @@ def parse_manifest(xml):
     return {'appId': package, 'versionCode': integer(int(code), 1),
             'versionName': root.get(ANDROID + 'versionName', ''),
             'debuggable': debuggable == 'true', 'metadata': metadata,
+            'components': [{'type': tag, 'name': name} for tag, name in sorted(components)],
             'debugExternalComponents': sorted(set(debug))}
+
+
+def component_set(components):
+    if not isinstance(components, list):
+        raise ValueError('manifest components must be a list')
+    result = set()
+    for item in components:
+        if (not isinstance(item, dict) or item.get('type') not in COMPONENT_TYPES
+                or not isinstance(item.get('name'), str)
+                or not re.fullmatch(r'(?:[A-Za-z_$][A-Za-z0-9_$]*\.)+[A-Za-z_$][A-Za-z0-9_$]*', item['name'])):
+            raise ValueError('invalid manifest component identity')
+        result.add((item['type'], item['name']))
+    return result
+
+
+def recovery_baseline(ledger):
+    """Read the checked-in APK summary, tied to the ledger's local code40 APK.
+
+    This evidence is deliberately independent of public version inventory and
+    installed APK provenance; it does not approve either of those gates.
+    """
+    baseline = load_json(NATIVE40_COMPONENTS.read_text())
+    if (not isinstance(baseline, dict) or baseline.get('schemaVersion') != 1
+            or baseline.get('appId') != ledger['policy']['nativeAppId']
+            or baseline.get('versionCode') != 40
+            or not isinstance(baseline.get('apkSha256'), str)
+            or not HEX.fullmatch(baseline['apkSha256'])):
+        raise ValueError('invalid native40 component baseline')
+    matches = [r for r in ledger['releases']
+               if r['package'] == baseline['appId'] and r['versionCode'] == 40
+               and r['channel'] == 'native-local-baseline' and r['status'] == 'local-candidate'
+               and r['apkSha256'] == baseline['apkSha256']
+               and r.get('manifestComponents') == 'docs/release-baselines/native40-components.json']
+    if len(matches) != 1:
+        raise ValueError('native40 component baseline does not match ledger APK record')
+    components = component_set(baseline.get('components'))
+    if not components:
+        raise ValueError('empty native40 component baseline')
+    return baseline, components
 
 
 def sdk_tools(sdk=None):
@@ -256,8 +305,20 @@ def evaluate(facts, channel, ledger):
         and chain in package['allowedLineages'] and chain[-1] == expected
         and all(c.get('installedData') is True for c in lineage))
     check('v3Lineage', lineage_ok, 'if embedded: verified, approved ordered chain, installed-data capability')
-    check('debugExternal', not facts['debugExternalComponents'],
-          facts['debugExternalComponents'])
+    if kind == 'recovery':
+        try:
+            baseline, allowed = recovery_baseline(ledger)
+            unexpected = component_set(facts.get('components')) - (allowed | RECOVERY_ADDED_COMPONENTS)
+            check('recoveryComponents', not unexpected, {
+                'baselineApkSha256': baseline['apkSha256'],
+                'approvedAdditions': [{'type': tag, 'name': name}
+                                     for tag, name in sorted(RECOVERY_ADDED_COMPONENTS)],
+                'unexpected': [{'type': tag, 'name': name} for tag, name in sorted(unexpected)]})
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            check('recoveryComponents', False, str(error))
+    else:
+        check('debugExternal', not facts['debugExternalComponents'],
+              facts['debugExternalComponents'])
 
     metadata = facts['metadata']
     source_key = 'dev.podjs.takeover.sourceVersionCode'
