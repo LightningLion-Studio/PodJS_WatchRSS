@@ -1,3 +1,162 @@
+# T16：v1001 PAUSED → v1002 前向修复候选（2026-10-08；正式设备验收 PENDING）
+
+冻结 app `10b75e8` / framework `5ee2c64` / PocketJS `78b1c86`。
+本节替代下方 T14 当前候选与清单，历史材料保留。T15 已移除自动 ProfileInstallerInitializer，
+在 storage admission 成功后由 PodProfileInstaller 延迟调度；business inventory 只排除两个精确
+ProfileInstaller marker：`files/profileinstaller_profileWrittenFor_lastUpdateTime.dat` 与
+`files/profileInstalled`（只认精确相对路径，不扩大到同名 nested/未知文件），
+不改变 NativeBackup 四根封存/恢复语义。正式 v1001 失败对象为平台 marker
+仍是有机制重现支持的推断，旧日志没有路径/category，不能声称已逐文件确认正式根因。
+
+当前现装观察为 v1001、UID10132、非 debuggable、PAUSED / stage_failed / UI 5%。
+依据 `.codex-tmp/t14/device/after-identity.json`、`summary.json`、`first-diagnostic.txt`；
+T16 只离线复核归档 APK 与身份，不重新查询设备。旧诊断为
+`phase=DETECTED exception=java.io.IOException frame=dev.podjs.runtime.PodFileConverter#copyFile:96`。
+
+| 候选 | 路径 / APK SHA256 | T16 离线结果 |
+|---|---|---|
+| 前向接管 | `.codex-tmp/t16/watchrss-takeover-v1002.apk`；`ca4ca71f2c68850bcebd519b5c95cb2674e4c94e3f123567569323cd8f85fee9`；121779452 bytes | `takeover-release` PASS 13/13；正式 appId / 1002；非 debuggable；sourceVersionCode40 / purgeBackupAfter0 |
+| 原生恢复 | `.codex-tmp/t16/watchrss-native-recovery-v900000.apk`；`a9747852a71ea5919b8dd7df271afdb58a195bd033409152c6835cc034cf9127`；25277224 bytes | `recovery` PASS 14/14；复用 t12 原字节，SHA256 不变 |
+
+现装 v1001 APK SHA256 为 `72fce61794fb25ec8ae5cc5ab0cfeb3fa9adab6e0742f12a0922d3114ec3efec`。
+现装/候选/恢复包当前及 SDK30 公有 signer 相同：
+`f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`。
+版本关系 **40 < 1000 < 1001 < 1002 < 900000**。台账 installedObservation 更新为已有
+v1001 PAUSED 身份证据；sourceVersionCode40 仍是原生数据来源。门禁拒绝 ≤1001，
+签名、lineage、非 debug、保留版本区间规则不变；没有 release/publication 新记录、没有 record。
+APK manifest/startup 不含 ProfileInstallerInitializer；DEX 包含 PodProfileInstaller 的 admission 后
+main looper → 原 initializer 延迟路径及诊断 `code=`/`category=`。这些是打包/源码证据，正式运行仍 PENDING。
+构建、全测、typecheck、冻结源审计和资产比对结果见 `.codex-tmp/t16/summary.json`、
+`artifact-provenance.json`、`release-dex-audit.json`、`release-profile-audit.json`。
+
+## v1001 PAUSED → v1002 前向升级清单（仅供后续获授权设备负责人执行）
+
+1. 按 DEVICE_OWNER 规则取得设备使用权；仅 `e3aca8af` / `com.lightningstudio.watchrss`。
+   安装前只读复核现装 code1001 / UID10132 / 非 debug / APK SHA / 公有 signer，核对设备解锁、空间。
+   若现装身份变化，停止并重新制定基线。T16 不操作设备、不安装、不 record、不 commit。
+
+   ```sh
+   (cd .codex-tmp/t16 && sha256sum -c SHA256SUMS)
+   python3 scripts/release/preflight.py check .codex-tmp/t16/watchrss-takeover-v1002.apk --channel takeover-release --ledger docs/release-ledger.json
+   python3 scripts/release/preflight.py check .codex-tmp/t16/watchrss-native-recovery-v900000.apk --channel recovery --ledger docs/release-ledger.json
+   ```
+
+   `scripts/release/` 与台账用 `minor/takeover-t16` 待审变更；APK/receipt 在主仓库 `.codex-tmp/`。
+   lead 集成前，preflight 脚本及台账使用
+   `/home/wilf/data/OPPO_Develop/PodJS_WatchRSS.wt-minor-t16/` 下的绝对路径。
+
+2. **不再运行 pre**。当前正式 release 不满足 run-as/DEBUGGABLE 要求。
+   `acceptance.py upgrade` 仍无条件调用 pre、没有复用旧 receipt 的选项，不能用于这次升级；
+   保留该保护，使用下面的直接安装和现有 post。pre 固定用
+   `.codex-tmp/t12/device/upgrade/takeover-pre.json`：`pod-takeover-digest-v1`、原生40 / UID10132，
+   155 files / 267202456 bytes，SHA256
+   `cd0a65b0809266eef3bb65e8acd44308383d998edb7f2526535307183cd0d190`。
+   不改写/重采/伪造此 receipt，不根据新结果更新旧基线。
+
+   适用依据：V6 的真实诊断定位 DETECTED FileConverter 复制失败；snapshot 只读原生源，
+   转换和 WAL replay 使用 generation 副本，NativeBackup prepare/move 在 ACTIVATING 才执行。
+   因此迁移自身在该失败点不会移动原生源。T15 同时证实平台 writer 可改变 files marker，
+   WorkManager 存量 job 也可能提前改写 DB/prefs；旧基线并不自动证明这些源字节一直未变。
+   旧 v1 只有 aggregate、没有逐文件或历史 files subset，不能补造 v2 子集。
+   三根可由 post 严格证明，files 只能按下面的 legacy PARTIAL 语义记录限制。
+
+3. 输出 `.codex-tmp/t16/device/`。独立终端安装前开始日志捕获，保持到 post 结束：
+
+   ```sh
+   mkdir -p .codex-tmp/t16/device
+   adb -s e3aca8af logcat -v epoch -T 1 > .codex-tmp/t16/device/logcat.txt
+   ```
+
+   在另一终端安装，不加降级参数、不卸载、不清数据：
+
+   ```sh
+   adb -s e3aca8af install -r .codex-tmp/t16/watchrss-takeover-v1002.apk
+   ```
+
+   必须 Success；只读核对 code1002 / UID10132 / 非 debug / APK SHA / signer。
+   身份不符则不首启。安装 Success 仅证明升级身份，不证明原数据保护。
+
+4. 日志已捕获后首启一次：
+
+   ```sh
+   adb -s e3aca8af shell am start -W -n com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity
+   ```
+
+   DETECTED stage_failed 前向重试原子持久化新 journal、保留旧失败 candidate、重新采只读源。
+   generation 必须从此次实际日志读取，不能复用未知旧代际。若发现继续旧 completed-phase
+   SNAPSHOTTED/COPYING/VERIFYING/READY/ACTIVATING，停止本“新代际”清单并报告实际阶段。
+   PAUSED/BLOCKED 或 PodTakeover 失败行立即停止后续验收，不点重试、不二启、不擅自恢复；
+   保存第一条 `phase/exception/frame/code/category` 诊断（字段只在适用时出现）、进度、时间。
+
+5. 同一进程首次 ACTIVE 后立即 post：
+
+   ```sh
+   generation="$(python3 .codex-tmp/t16/read-generation.py .codex-tmp/t16/device/logcat.txt)" && \
+   python3 scripts/device/takeover_verify.py post --serial e3aca8af --package com.lightningstudio.watchrss --pre .codex-tmp/t12/device/upgrade/takeover-pre.json --generation "$generation" --out .codex-tmp/t16/device/takeover-post.json
+   ```
+
+   generation helper 只读本地日志，要求唯一代际、SNAPSHOTTED/ACTIVE 六项 digest 完整
+   （四根、manifest、新 files_without_platform_metadata）；post 仍以当前 PID、UID、时戳、schema、
+   代际、冲突检查及实时日志为准，连续日志文件不替代 post 门禁。不能用 `|| true` 抹平退出码。
+
+   | post 结果 | 可接受程度与动作 |
+   |---|---|
+   | `PASS / equal=true`，pre == SNAPSHOTTED == ACTIVE 全部原始四根和 manifest | 可接受为完整 aggregate 保护证据；不得声称具有旧 receipt 不存在的逐文件证据 |
+   | **预期 legacy `PARTIAL / equal=false`**，`strictRootsVerified=true`，databases/shared_prefs/no_backup 在 pre、SNAPSHOTTED、ACTIVE 三方严格相等；changedRoots 每阶段只可能是 files+manifest 或空；`knownDifference=platform-metadata`，`reason=legacy_files_subset_unavailable`，`nonPlatformFilesVerified=false` | 可接受为本轮受限 post 记录；保留非零退出码，明确 files 已知平台元数据差异的预期与无法逐文件归因的限制。不能标完整数据保护 PASS、不能标其他 files 完整性已验证；该项继续 PENDING |
+   | `FAIL`；三根任一不同；files/manifest 之外的 root 变化；缺/冲突日志、PID/UID/代际/时戳/schema 不符；未 ACTIVE 或输出字段不符合上行 | 必须停止并报告，不扩展平台豁免、不改旧 receipt、不重新采 baseline 迁就结果 |
+
+   **T12 v1 不可能提供 nonPlatformFilesVerified=true。** `PASS_WITH_KNOWN_DIFFERENCES` 只适用于
+   今后真实 v2 pre，且三根和 files subset 在 pre/SNAPSHOTTED/ACTIVE 全部相等；不适用于本清单。
+   即使出现预期 PARTIAL，也不能仅凭 aggregate 证明变更文件一定只有两个 marker。
+   此受限记录不等于正式所有业务数据/Keystore/WorkManager 通过。
+
+6. post 可接受记录之后，分别记录 Home/K8 MAE、sourceVersion40/purge0、pointer/receipt/backup
+   同代际、旧 WorkManager 取消/PodJS 工作保留、真实账号解密、频道/正文/进度/备忘录/设置/资源/
+   手机同步以及二启不重导。每项只能凭真实观测标通过；legacy files 保护限制保持 PENDING。
+   `使用前说明` 未经授权不点击。T16 本轮所有正式设备项目均 PENDING。
+
+## WorkManager 存量 job 提前初始化：日志识别与停条件
+
+framework 自动 WorkManagerInitializer 虽已移除，系统仍可能投递已有 job，启动
+`androidx.work.impl.background.systemjob.SystemJobService.onCreate → WorkManagerImpl.getInstance →
+Configuration.Provider` 懒初始化；正常 MainActivity 路径是在 ACTIVE 后初始化。
+按 epoch 与同一 package PID 对齐首启/首条 ACTIVE digest，检查 **ACTIVE 之前** 的
+`WM-WorkManagerImpl` / `WM-ForceStopRunnable` / `WM-WrkDbPathHelper` / `WM-SystemJobService` 日志，
+例如 `Migrating WorkDatabase to the no-backup directory`、
+`Migrated ...to ...`、`onStartJob for ...`、job/service 启动或执行日志。这些字符串来自 T15 核对的实际 WorkManager 2.11.2 源码，
+是识别线索，不能伪称本轮已观察到。部分信息是 DEBUG，release 的 logger level 可能隐藏；
+日志缺失不能排除提前初始化。`Initializing WorkManager with default configuration.` 实际由
+`WM-WrkMgrInitializer` 自动 initializer 发出；若出现说明另一条启动路径，不能冒称是
+Configuration.Provider 懒初始化的专属日志。日志可能带私有路径，报告只记录 tag/epoch/PID/事件类型。
+
+路径迁移可涉及 `databases/androidx.work.workdb` 与 -journal/-shm/-wal 到 no_backup，
+Room 升级/写 DB；旧迁移还可消费/清除 shared_prefs 的 androidx.work.util.preferences/id。
+如果 post 的 databases/shared_prefs/no_backup 任一不等，即使仅疑似 WorkManager 调度数据，
+仍为 FAIL 并停止，不归入 files 的 platform-metadata 豁免。保存 digest changedRoots 与相关
+时间顺序；仅有日志+root 差异是机制线索，不能从 aggregate 证明具体被改文件。
+禁止清 WorkManager DB/prefs、取消系统 job 或扩展豁免来制造相等；由 lead 分析剩余 writer 路径。
+
+## v1001 PAUSED 时的原生恢复判断
+
+离线覆盖条件满足：同 appId/signer，900000 > 1001（也 > 1002），recovery 预检全过、原字节不变。
+在 ACTIVATING 之前且无 active/backup 时，NativeRecovery.beforeProviders 的 recoveryGeneration 为 null，
+原生读原位数据；合成 PAUSED/DETECTED + partial candidate 测试验证源字节不变。
+NativeBackup 与 t12 recovery 源码一致；有 backup 则仍严格验证 manifest/seal/证书/字节，
+损坏/缺失 plan 或 active 无 backup 仍 fail-closed。PAUSED 本身不保证未进入 ACTIVATING。
+两边使用 WorkManager 2.11.2，但正式源可用、真实存量 job、账号/Keystore/Room 启动仍 PENDING。
+本轮不执行恢复；以后授权恢复任务的命令为：
+
+```sh
+adb -s e3aca8af install -r .codex-tmp/t16/watchrss-native-recovery-v900000.apk
+adb -s e3aca8af shell am start -W -n com.lightningstudio.watchrss/.MainActivity
+```
+
+恢复到900000后不能正常降级装1002；ACTIVE 后 PodJS 新数据只归档，不自动反向合并。
+
+---
+
+## 历史 T14（已被上方 T16 候选与清单替代）
+
 # T14：v1000 PAUSED → v1001 前向修复候选（2026-10-08；设备验收 PENDING）
 
 冻结 app `e69d23c` / framework `367c706` / PocketJS `78b1c86`。

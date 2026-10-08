@@ -104,6 +104,24 @@ class PolicyTests(unittest.TestCase):
         self.ledger['policy']['packages'][NATIVE]['installedObservation']['versionCode'] = 900000
         self.failed('versionCode')
 
+    def test_v1001_paused_requires_strictly_higher_forward_code(self):
+        self.installed_paused()
+        self.channel = 'takeover-release'
+        self.ledger['policy']['packages'][NATIVE]['installedObservation']['versionCode'] = 1001
+        for code in (40, 999, 1000, 1001):
+            with self.subTest(code=code):
+                self.facts['versionCode'] = code
+                self.failed('versionCode')
+        self.facts['versionCode'] = 1002
+        self.assertTrue(self.result()['ok'])
+        self.facts['signature']['watchCertificatesSha256'] = [OLD]
+        self.failed('certificate')
+        self.facts['signature']['watchCertificatesSha256'] = [CERT]
+        self.facts['versionCode'] = 900000
+        self.failed('reservedVersionRange')
+        self.recovery()
+        self.assertTrue(self.result()['ok'])
+
     def test_paused_forward_keeps_signature_and_range_gates(self):
         self.installed_paused()
         self.facts['versionCode'] = 1001
