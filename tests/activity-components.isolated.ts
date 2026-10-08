@@ -23,6 +23,9 @@ mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(cb:()=>void)=>{frames
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:(opts:any)=>{gestures.add(opts);onCleanup(()=>gestures.delete(opts));return {dispose(){}};}}));
 mock.module('@pocketjs/framework/kinetics',()=>({createScroller:(opts:any)=>createScrollerWith(createSignal,opts),bindDpadScroll:()=>{}}));
 mock.module('@pocketjs/framework/input',()=>({pressNode:()=>{},hitNode:()=>undefined}));
+// Restoration fixtures below use rectangular display geometry. Round fitting
+// is covered separately with a full display/viewport contract in U11.
+mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,shape:'rect',safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,__onHostEvent:()=>()=>{},getFontMetrics:()=>undefined,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
 const {RouteActivityProvider,restoredSignal,booleanState,stringState}=await import('../src/ui/route-activity.tsx');
 const {ScrollEntries}=await import('../src/ui/ScrollEntries.tsx');
 const {AddRssScreen}=await import('../src/ui/AddRssScreen.tsx');
@@ -118,7 +121,7 @@ test('production list keeps the visible item when earlier row heights change aft
 const transforms:any[]=[],volumes:number[]=[];
 let internet='wifi';
 const videoState=()=>({state:'playing',positionMs:0,durationMs:100000,width:466,height:466,volume:.8});
-mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:466,logicalWidth:233,logicalHeight:233,shape:'round',density:2}),hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
+mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:466,logicalWidth:233,logicalHeight:233,shape:'round',density:2,safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string)=>t.length*6})}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:element('RemoteImage')}));
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(listener:any)=>{listener(internet);return ()=>{};}}));

@@ -4,3 +4,5 @@ export class DebugGate extends FailClosedGate {
  constructor(){super(value=>!!value&&typeof value==='object'&&(value as {debugBuild?:unknown}).debugBuild===true);}
  require(){if(!this.allowed)throw new Error('Debug tools unavailable in this build');}
 }
+/** Shared state without importing debug tooling into ordinary UI adapters. */
+export const debugGate=new DebugGate();

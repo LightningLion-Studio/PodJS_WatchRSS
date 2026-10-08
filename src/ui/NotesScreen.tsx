@@ -48,7 +48,7 @@ export interface NotesListScreenProps extends BaseProps {
 export function NotesListScreen(props: NotesListScreenProps) {
   const [notes,setNotes]=createSignal<MemoNote[]>([]), [loaded,setLoaded]=createSignal(false);
   const [download,setDownload]=createSignal(false);
-  let scroller:Scroller|undefined;
+  let scroller:Scroller|undefined;let roundStart=()=>0;
   const {padding, verticalPadding, gap, headerHeight, promptHeight}=NOTE_LIST_LAYOUT;
   const phonePrompt=()=>measuredLines("下载手机端app以在手机上编辑和同步内容",props.width-2*padding-20,text=>getOps().measureText(text,22),2).join("\n");
   let readVersion=0,disposed=false;
@@ -74,23 +74,23 @@ export function NotesListScreen(props: NotesListScreenProps) {
     {height:56,render:()=> <View class="absolute inset-0 items-center"><View onPress={props.onCreateNote} focusable accessibilityRole="button" accessibilityLabel="新建备忘录" style={{insetL:(props.width-36-44)/2-0.5,insetT:4.5}} class="absolute w-[44] h-[44] rounded-[47] bg-[#23272a] items-center justify-center"><Image src="../assets/icons/speech-plus.svg" class="w-[24] h-[24]"/></View></View>}
   ]);
   const onLongPress=(screenX:number,screenY:number)=>{
-    const note=noteAtLongPress(notes(),screenX,screenY,props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));
+    const note=noteAtLongPress(notes(),screenX,screenY-roundStart(),props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));
     if(note)props.onOpenActions(note.noteId);
   };
   const onTap=(screenX:number,screenY:number)=>{
-    const contentY=screenY+(scroller?.offset()??0);
+    const contentY=screenY-roundStart()+(scroller?.offset()??0);
     const promptTop=verticalPadding+headerHeight+gap;
     if(screenX>=padding&&screenX<props.width-padding&&contentY>=promptTop&&contentY<promptTop+promptHeight-gap){
       queueMicrotask(()=>setDownload(true));
       return true;
     }
-    const note=noteAtLongPress(notes(),screenX,screenY,props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));
+    const note=noteAtLongPress(notes(),screenX,screenY-roundStart(),props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));
     if(!note)return false;
     queueMicrotask(()=>props.onOpenNote(note.noteId));
     return true;
   };
   return <Show when={loaded()} fallback={<View class="absolute inset-0 items-center justify-center"><Text class="text-sm text-[#b6b6b6]">加载中…</Text></View>}><View class="absolute inset-0 bg-black">
-    <ScrollEntries height={props.height} entries={entries()} gap={gap} padding={padding} verticalPadding={verticalPadding} inputActive={()=>!download()} onTap={contact=>onTap(contact.x,contact.y)} onLongPress={contact=>onLongPress(contact.x,contact.y)} ref={handle=>{scroller=handle.scroller;props.ref?.(handle);}}/>
+    <ScrollEntries height={props.height} entries={entries()} gap={gap} padding={padding} verticalPadding={verticalPadding} inputActive={()=>!download()} onTap={contact=>onTap(contact.x,contact.y)} onLongPress={contact=>onLongPress(contact.x,contact.y)} ref={handle=>{scroller=handle.scroller;roundStart=()=>handle.roundInsets?.().start??0;props.ref?.(handle);}}/>
     <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步备忘录" onDismiss={()=>setDownload(false)} onError={message=>props.onError?.(message)}/></Show>
   </View></Show>;
 }

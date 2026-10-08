@@ -35,12 +35,12 @@ export function SavedItemsScreen(props:{width:number;height:number;active:boolea
   const [skeletonAlpha,setSkeletonAlpha]=createSignal(.8);
   let scroller:Scroller|undefined,downKey:string|null=null,dragStart:SavedDisplayItem[]=[];
   let swipeReturn:{start:number;at:number}|null=null;
-  let touchY=0;
+  let touchY=0;let roundStart=()=>0;
   createEffect(()=>{if(!dragKey())setDisplay(props.items);});
   const title=()=>props.type==="favorite"?"我的收藏":"稍后再看";
   const operation=()=>props.type==="favorite"?"同步收藏":"同步稍后再看";
   const rowAt=(screenY:number)=>{
-    const y=screenY+(scroller?.offset()??0)-ITEM_START;
+    const y=screenY+(scroller?.offset()??0)-roundStart()-ITEM_START;
     if(y<0)return null;
     const index=Math.floor(y/STEP);
     return y-index*STEP<ROW_HEIGHT?display()[index]??null:null;
@@ -53,7 +53,7 @@ export function SavedItemsScreen(props:{width:number;height:number;active:boolea
     if(!commit){setDisplay(original);return;}
     if(original.map(item=>item.key).join("\u0000")!==updated.map(item=>item.key).join("\u0000"))props.onReorder(updated);
   };
-  createGesture({region:{rect:()=>props.active&&!props.loading&&display().length?{x:0,y:Math.max(0,ITEM_START-(scroller?.offset()??0)),w:props.width,h:props.height}:null},axis:"x",panSlop:8,
+  createGesture({region:{rect:()=>props.active&&!props.loading&&display().length?{x:0,y:Math.max(0,ITEM_START+roundStart()-(scroller?.offset()??0)),w:props.width,h:props.height}:null},axis:"x",panSlop:8,
     onDown:c=>{downKey=rowAt(c.y)?.key??null;touchY=c.y;},
     onLongPress:()=>{if(!downKey)return;dragStart=display().slice();setDragKey(downKey);setDragOffset(0);resetSwipe();},
     onMove:c=>{
@@ -96,8 +96,8 @@ export function SavedItemsScreen(props:{width:number;height:number;active:boolea
     {height:40,render:()=> <View/>}
   ]);
   return <View class="absolute inset-0 bg-black">
-    <ScrollEntries height={props.height} entries={entries()} padding={SAFE} verticalPadding={SAFE} gap={GAP} inputActive={()=>props.active} accessibilityLabel={`${title()}页面`} onScrollStateChange={scrolling=>{if(scrolling)resetSwipe();}} ref={handle=>{scroller=handle.scroller;props.ref?.(handle);}}/>
-    <Show when={dragKey()}>{key=>{const item=()=>display().find(value=>value.key===key());const index=()=>display().findIndex(value=>value.key===key());return <Show when={item()}>{value=><View class="absolute rounded-[16] overflow-hidden" style={{insetL:SAFE,width:props.width-2*SAFE,height:ROW_HEIGHT,insetT:ITEM_START+index()*STEP-(scroller?.offset()??0)+dragOffset()}}>{card(value(),true)}</View>}</Show>;}}</Show>
+    <ScrollEntries height={props.height} entries={entries()} padding={SAFE} verticalPadding={SAFE} gap={GAP} inputActive={()=>props.active} accessibilityLabel={`${title()}页面`} onScrollStateChange={scrolling=>{if(scrolling)resetSwipe();}} ref={handle=>{scroller=handle.scroller;roundStart=()=>handle.roundInsets?.().start??0;props.ref?.(handle);}}/>
+    <Show when={dragKey()}>{key=>{const item=()=>display().find(value=>value.key===key());const index=()=>display().findIndex(value=>value.key===key());return <Show when={item()}>{value=><View class="absolute rounded-[16] overflow-hidden" style={{insetL:SAFE,width:props.width-2*SAFE,height:ROW_HEIGHT,insetT:ITEM_START+roundStart()+index()*STEP-(scroller?.offset()??0)+dragOffset()}}>{card(value(),true)}</View>}</Show>;}}</Show>
     <Show when={props.undoVisible}><View onPress={props.onUndo} focusable accessibilityRole="button" accessibilityLabel="撤回按钮" class="absolute top-[18] w-[48] h-[48] rounded-[16] bg-[#2a2a2a] items-center justify-center" style={{insetL:(props.width-48)/2}}><Image src="../assets/icons/undo.svg" class="w-[20] h-[20]"/></View></Show>
     <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation={operation()} onDismiss={()=>setDownload(false)} onError={props.onError}/></Show>
   </View>;
