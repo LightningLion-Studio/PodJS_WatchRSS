@@ -12,6 +12,9 @@ export class ReadingProgressStore {
     try{const value=raw?JSON.parse(raw):{};return normalizeReadingProgress(value&&typeof value==="object"?value:{});}catch{return normalizeReadingProgress({});}
   }
   async save(articleId:number,offset:number,progress:number,textAnchor?:ReadingProgress["textAnchor"],importedAnchor?:ReadingProgress["importedAnchor"]):Promise<void>{
-    await this.kv.set(this.prefix+articleId,JSON.stringify(normalizeReadingProgress({offset,progress,updatedAt:Date.now(),textAnchor,importedAnchor})));
+    await this.saveSnapshot(articleId,normalizeReadingProgress({offset,progress,updatedAt:Date.now(),textAnchor,importedAnchor}));
+  }
+  async saveSnapshot(articleId:number,value:ReadingProgress):Promise<void>{
+    await this.kv.set(this.prefix+articleId,JSON.stringify(normalizeReadingProgress(value)));
   }
 }

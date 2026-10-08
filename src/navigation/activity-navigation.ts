@@ -125,3 +125,15 @@ export async function resolveActivityNavigation(entries:ActivityRoute[],resolver
 }
 
 export function captureActivityNavigation(...args:Parameters<typeof captureActivityNavigationImpl>) {return traceServiceWork("reader.captureActivity",()=>captureActivityNavigationImpl(...args));}
+
+const NAVIGATION_CHECKPOINT_KEY='watchrss.navigation-checkpoint.v1';
+/** Persist only content saved state; startup consent and retained drafts have
+ * separate owners and must not become durable through a route checkpoint. */
+export function writeNavigationCheckpoint(storage:{set(key:string,value:unknown):void},state:ActivityState):void {
+ storage.set(NAVIGATION_CHECKPOINT_KEY,{version:1,saved:{[CONTENT_ACTIVITY_KEY]:state.saved[CONTENT_ACTIVITY_KEY]}});
+}
+export function readNavigationCheckpoint(storage:{get<T>(key:string):T|undefined},debug=false):ActivityRoute[]|null {
+ const raw=storage.get<unknown>(NAVIGATION_CHECKPOINT_KEY);
+ if(!object(raw)||raw.version!==1||!object(raw.saved))return null;
+ return restoreActivityNavigation({saved:raw.saved,retained:{}},debug);
+}

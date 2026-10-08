@@ -37,7 +37,7 @@ const pending=new Map<number,ReturnType<typeof setTimeout>>();
  capabilities:()=>JSON.stringify(mode==='portable'?['runtime.timer','data.kv']:['runtime.timer','data.kv','text.layout']),
  displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),
  fontMetrics:()=>JSON.stringify({cellHeight:26,baseline:20}),
- kvGet:(key:string)=>storage.get(key),kvSet:(key:string,value:string)=>{storage.set(key,value);return 0;},kvDelete:()=>0,kvKeys:()=>JSON.stringify([...storage.keys()]),
+ kvGet:(key:string)=>storage.get(key),kvSet:(key:string,value:string)=>{storage.set(key,value);return 0;},kvDelete:(key:string)=>{storage.delete(key);return 0;},kvKeys:()=>JSON.stringify([...storage.keys()]),
 };
 for(const name of ['renderer','components','lifecycle','gesture','kinetics','input']){const boundary=await import('@pocketjs/framework/'+name);mock.module(Bun.resolveSync('@pocketjs/framework/'+name,Bun.resolveSync('@podjs/framework/image',import.meta.dir)),()=>boundary);}
 const {bindPocketServicePump}=await import('@podjs/framework/testing/bun-runtime');
@@ -88,4 +88,30 @@ test(`default ReaderBody slices entry, preserves saved geometry and cancels late
  handle.scroller.scrollTo(Math.min(100,expected.height-193),{immediate:true});await handle.flushProgress();
  const stored=JSON.parse(JSON.parse(storage.get('watchrss.reader.progress.12569')!));expect(stored.offset).toBe(100);expect(stored.textAnchor.character).toBeGreaterThanOrEqual(0);
  dispose();await pump();expect(frames.size).toBe(0);expect(gestures.size).toBe(0);
+});
+
+
+test('production default ReaderBody checkpoints the latest anchor before any async save and cold restores it',async()=>{
+ const props={articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v)};
+ let dispose!:()=>void,handle:any;
+ const mount=()=>createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{...props,ref:v=>handle=v});});
+ mount();await until(()=>pending.size===0&&requests.length===0);
+ const periodicBefore=storage.get('watchrss.reader.progress.12569');
+ handle.scroller.scrollTo(419,{immediate:true});
+ events.push({t:'lifecycle',state:'background'});__pumpPodEvents();
+ // No frames, clocks, microtasks, Back or cleanup between scroll and process loss.
+ const checkpoint=JSON.parse(storage.get('watchrss.reader.checkpoint.12569')!);
+ expect(checkpoint.value.offset).toBe(419);expect(checkpoint.value.textAnchor).toBeDefined();
+ expect(storage.get('watchrss.reader.progress.12569')).toBe(periodicBefore);
+ const durable=new Map(storage);dispose();await pump();
+ // Discard writes from the killed realm, including cleanup. Keep durable bytes only.
+ storage.clear();for(const [key,value]of durable)storage.set(key,value);
+ events.push({t:'lifecycle',state:'active'});__pumpPodEvents();
+ mount();await until(()=>!storage.has('watchrss.reader.checkpoint.12569')&&pending.size===0&&requests.length===0);
+ expect(handle.scroller.offset()).toBeCloseTo(419,4);
+ expect(storage.has('watchrss.reader.checkpoint.12569')).toBe(false);
+ handle.scroller.scrollTo(511,{immediate:true});
+ events.push({t:'checkpoint',reason:'screen-off'});__pumpPodEvents();
+ expect(JSON.parse(storage.get('watchrss.reader.checkpoint.12569')!).value.offset).toBe(511);
+ dispose();await pump();expect(errors).toEqual([]);expect(frames.size).toBe(0);
 });

@@ -44,7 +44,10 @@ export class SqlReadingProgressStore {
   return normalizeReadingProgress({progress:Number(row.progress),updatedAt:Number(row.changed_at)});
  }
  save(articleId:number,offset:number,progress:number,textAnchor?:ReadingProgress["textAnchor"],importedAnchor?:ReadingProgress["importedAnchor"]):Promise<void>{
-  const value=normalizeReadingProgress({offset,progress,updatedAt:Date.now(),textAnchor,importedAnchor});
+  return this.saveSnapshot(articleId,normalizeReadingProgress({offset,progress,updatedAt:Date.now(),textAnchor,importedAnchor}));
+ }
+ saveSnapshot(articleId:number,snapshot:ReadingProgress):Promise<void>{
+  const value=normalizeReadingProgress(snapshot);
   // Preserve local call order without using the remote wall clock as a veto.
   const task=(this.pending.get(articleId)??Promise.resolve()).catch(()=>{}).then(()=>this.persist(articleId,value));
   this.pending.set(articleId,task);

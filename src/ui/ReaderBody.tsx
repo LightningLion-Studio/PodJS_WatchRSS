@@ -29,10 +29,12 @@ import { createContentLayouter } from "../reader/content-layout.ts";
 import { documentAnchorAt, offsetForDocumentAnchor } from "../reader/document-layout.ts";
 import { createScroller, type Scroller } from "@pocketjs/framework/kinetics";
 import { onFrame } from "@pocketjs/framework/lifecycle";
-import { kv, __onHostEvent, getDisplayMetrics, getFontMetrics, hasCapability } from "@podjs/framework/watch";
+import { kv, onLifecycleCheckpoint, __onHostEvent, getDisplayMetrics, getFontMetrics, hasCapability } from "@podjs/framework/watch";
 import { AutoScrollController, ReadingProgressStore } from "../reader/index.ts";
 import { pressedSpeechAnchor, type SpeechAnchor } from "../reader/speech-segments.ts";
 import {readerReachedBottom} from "../reader/watch-later-completion.ts";
+import {LifecycleReadingProgressStore} from "../reader/lifecycle-progress.ts";
+import {normalizeReadingProgress} from "../reader/progress.ts";
 import {ReadingProgressWriteQueue} from "../reader/progress-write-queue.ts";
 import {ReaderTextRow,createReaderTextEnvironment} from "./ReaderTextRow.tsx";
 
@@ -151,7 +153,7 @@ function ReaderBodyImpl(props:{
   const scroller=createScroller({max});
   const controller=new AutoScrollController(0,offset=>scroller.scrollTo(offset,{immediate:true}));
   const [playing,setPlayingState]=createSignal(false),[restored,setRestored]=createSignal(false),[feedback,setFeedback]=createSignal("");
-  const store=props.progressStore??new ReadingProgressStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);}});
+  const store=new LifecycleReadingProgressStore(props.progressStore??new ReadingProgressStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);}}),kv);
   const writes=new ReadingProgressWriteQueue();
   const [lastManualScroll,setLastManualScroll]=createSignal(-Infinity);
   let followingSpeech=false;
@@ -159,23 +161,28 @@ function ReaderBodyImpl(props:{
   let disposed=false,foreground=true,lastFrame=0,lastSave=0,lastOffset=-1;
   let tapTimer:(()=>void)|undefined,feedbackTimer:(()=>void)|undefined;
   const schedule=(milliseconds:number,callback:()=>void)=>{const timer=delay(Math.max(1,milliseconds));void timer.result.then(callback,()=>{});return ()=>timer.cancel();};
-  const save=():Promise<void>=>{
-    if(!restored()||disposed)return writes.flush();
+  const currentProgress=()=>{
+    if(!restored()||disposed)return;
     const offset=scroller.offset();
-    if(offset===lastOffset)return writes.flush();
     if(imported){
-      const anchor=imported.anchor(offset,headerHeight());if(!anchor)return writes.flush();
-      const progress=imported.progress(anchor);
-      lastOffset=offset;lastSave=Date.now();
-      const task=writes.enqueue(()=>store.save(Number(props.articleId),offset,progress,undefined,anchor));
-      void task.catch(error=>{if(lastOffset===offset)lastOffset=-1;if(!disposed)props.onError(String(error));});return task;
+      const importedAnchor=imported.anchor(offset,headerHeight());if(!importedAnchor)return;
+      return normalizeReadingProgress({offset,progress:imported.progress(importedAnchor),updatedAt:Date.now(),importedAnchor});
     }
-    const anchor=documentAnchorAt(layout(),offset,headerHeight());
-    const progress=Math.min(1,anchor.character/Math.max(1,props.text.replace(/\r\n?/g,"\n").length));
-    lastOffset=offset;lastSave=Date.now();
-    const task=writes.enqueue(()=>store.save(Number(props.articleId),offset,progress,anchor));
+    const textAnchor=documentAnchorAt(layout(),offset,headerHeight());
+    return normalizeReadingProgress({offset,progress:Math.min(1,textAnchor.character/Math.max(1,props.text.replace(/\r\n?/g,"\n").length)),updatedAt:Date.now(),textAnchor});
+  };
+  const save=():Promise<void>=>{
+    if(!restored()||disposed||scroller.offset()===lastOffset)return writes.flush();
+    const value=currentProgress();if(!value)return writes.flush();
+    const {offset}=value;
+    lastOffset=offset;lastSave=value.updatedAt;
+    const task=writes.enqueue(store.prepareSave(Number(props.articleId),value));
     void task.catch(error=>{if(lastOffset===offset)lastOffset=-1;if(!disposed)props.onError(String(error));});return task;
   };
+  const removeCheckpoint=onLifecycleCheckpoint(()=>{
+    const value=currentProgress();
+    if(value)store.checkpoint(Number(props.articleId),value);
+  });
   const setPlaying=(value:boolean,notify=true)=>{
     if(value){const offset=scroller.offset();controller.setBounds(max());controller.setOffset(offset);controller.start();}
     else controller.pause();
@@ -281,7 +288,7 @@ function ReaderBodyImpl(props:{
     foreground=event.state==="active";lastFrame=0;controller.setBackground(!foreground||!props.active);
     if(!foreground)void save();
   });
-  onCleanup(()=>{void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  onCleanup(()=>{void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
   function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createWindowValue(raw);return row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,raw(),positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>;}};}

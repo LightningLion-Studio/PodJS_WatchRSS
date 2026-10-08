@@ -3,7 +3,7 @@ import {traceServiceWork} from "@podjs/framework/service-trace";
 import {markFeedArticleRead} from "./reader-open-state.ts";
 import {ActivityLog} from '../logs/activity.ts';
 import {activityStateHub} from '../navigation/activity-host.ts';
-import {captureActivityNavigation,restoreActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
+import {captureActivityNavigation,restoreActivityNavigation,readNavigationCheckpoint,writeNavigationCheckpoint,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
 import {InformationActivity} from '../navigation/information-activity.ts';
 import {RouteActivityProvider} from './route-activity.tsx';
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
@@ -64,6 +64,7 @@ import {
   RelativeAxis,
   RelativeAxisUnits,
   lifecycle,
+  onLifecycleCheckpoint,
   hasCapability,
   onLifecycleChange,
   getDisplayMetrics,
@@ -155,7 +156,8 @@ export default function WatchRSS(props: {
   );
   const resumeStore = new AppResumeStore(kv);
   const startupResume = resumeStore.read();
-  const activityEntries=restoreActivityNavigation(activityStateHub.read(),debugGate.allowed);
+  const activityEntries=restoreActivityNavigation(activityStateHub.read(),debugGate.allowed)
+    ??readNavigationCheckpoint(kv,debugGate.allowed);
   const [resumeReady, setResumeReady] = createSignal(false);
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
@@ -165,6 +167,13 @@ export default function WatchRSS(props: {
     traceServiceWork("navigation.resume",()=>resumeStore.save(resumeTargetForStack(stack())));
     const next=captureActivityNavigation(activityStateHub.read(),stack());
     void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
+  }));
+  onCleanup(onLifecycleCheckpoint(()=>{
+    if(!resumeReady())return;
+    saveActivity();
+    // Only saved descriptors/scroll anchors survive a cold launch. Retained
+    // drafts, article payloads and live handles keep their Activity-only scope.
+    writeNavigationCheckpoint(kv,activityStateHub.read());
   }));
   const informationActivity=new InformationActivity(saveActivity,error=>logConsole.warn('Information restore',String(error)));
   onCleanup(()=>informationActivity.close());
