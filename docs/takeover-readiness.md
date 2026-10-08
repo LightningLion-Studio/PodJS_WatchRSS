@@ -1,7 +1,40 @@
+# T10：最新主线正式接管候选（2026-10-08）
+
+冻结 app `873fbd9` / framework `ecc8d3e` / PocketJS `78b1c86`，
+接管 APK 已重新构建；原生恢复 `podjs-recovery-40` 仍为 `8d65e148`，
+复用 T8 恢复 APK，SHA256 与 T8 逐字节一致。当前候选表以本节和 T10 门禁为准，
+下方 T9b 保留决定与现装基线，T8/T1 等保留历史证据。
+
+| 候选 | 路径 / APK SHA256 | 当前离线结果 |
+|---|---|---|
+| 接管 | `.codex-tmp/t10/watchrss-takeover-v1000.apk`；`7b7308aeb9b2b06ad9e9b39a3b046c2e643a3e5e3cad696759a1b95a287625e0`；121779452 bytes | `takeover-release` PASS 13/13；`com.lightningstudio.watchrss` / 1000；非 debuggable；sourceVersionCode40 / purgeBackupAfter0；WorkManager 接管配置出现并精确匹配台账 |
+| 原生恢复 | `.codex-tmp/t10/watchrss-native-recovery-v900000.apk`；`a9747852a71ea5919b8dd7df271afdb58a195bd033409152c6835cc034cf9127`；25277224 bytes | `recovery` PASS 14/14；同原生 appId / 900000；非 debuggable；复用 `.codex-tmp/t8/` 原字节 |
+
+两个 APK 的当前及 SDK30 公有 signer 与已核验现装原生 v40 相同：
+`f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`。
+接管签名仅经 CLI 隔离 SigningWorker，不使用并存包的 debug 轮换 lineage。
+接管 `main.js/main.qbc/main.pak/pod.manifest.json` 与冻结 dist 逐字节相等，
+PocketJS revision 精确匹配；源码构建前后无漂移，所有 nested local 依赖均为快照 symlink。
+候选 appId/code/signing/dependency 路径只在已删除的快照中修改；审阅 worktree
+`minor/takeover-t10` 仅修改本文件，未 commit，主目录未执行 bun install。
+
+完整验证：先 CLI build 生成 styles，再运行 app 全测 **1321 PASS / 0 FAIL**、
+framework 全套测试（Bun **366 PASS / 0 FAIL**、Rust **105 PASS / 4 optional ignored**，
+browser/Java/C++/crypto/http/acoustic host checks 通过）；两者 typecheck PASS，
+preflight 单测 **45 PASS**，CLI release package PASS。
+证据在 `.codex-tmp/t10/`：`artifact-provenance.json`、`source-{before,after}-build.json`、
+`{takeover,recovery}-preflight.{json,log}`、`SHA256SUMS`、测试日志及 `cleanup.json`。
+
+**本轮没有操作设备、安装、record 或提交；正式同 UID 迁移、真实账号/数据、
+保护性备份、WorkManager 系统行为和设备功能验收仍 PENDING。** 候选准备不等于
+正式安装授权；用户决定和保护性安装/恢复清单仍适用，清单路径已更新到 T10。
+
+---
+
 # T9b：接管决定与现装基线（2026-10-08）
 
 本节替代下方 T8/T1 的全渠道版本未确认、并存资料合并待决和回滚优先级旧结论。
-正式安装前必须以最新 master 重建；T8 的 app `31d6612` 候选仅用于门禁复查，
+指定最新主线的候选已由 T10 重建并过门禁；T8 的 app `31d6612` 接管 APK 仅为历史证据，
 门禁通过不代替安装授权、用户数据保护和真实设备验收。本轮不安装、不执行 record。
 
 用户三项决定：
@@ -38,14 +71,15 @@ debug.PerfLargeListActivity 的完整属性与子节点均相同，包括 DebugL
 台账绑定 APK、AXML、公开证书及摘要文件 SHA256。原有 recovery 全组件身份子集门禁
 继续保留；接管与并存仍拒绝 debug-external。
 
-| T8 旧候选 | T9b 当前门禁结果 | 证据 |
+| T10 当前候选 | 当前门禁结果 | 证据 |
 |---|---|---|
-| 接管1000 | PASS 13/13 | `.codex-tmp/t9/takeover-preflight.json` |
-| 恢复900000 | PASS 14/14（含 recoveryComponents 和精确 debugExternal） | `.codex-tmp/t9/recovery-preflight.json` |
+| 接管1000（app `873fbd9` 新构建） | PASS 13/13 | `.codex-tmp/t10/takeover-preflight.json` |
+| 恢复900000（原生 `8d65e148`，复用 T8 原字节） | PASS 14/14（含 recoveryComponents 和精确 debugExternal） | `.codex-tmp/t10/recovery-preflight.json` |
 
 Python preflight 测试45 PASS；应用完整 `bun run test` **1321 PASS / 0 FAIL**，结果见
-`.codex-tmp/t9/app-test.log`。**正式安装前仍须以最新 master 重建两个候选并重新过门禁**，
-T8 app `31d6612` 的旧 APK 不能替代重建。设备接管/用户数据保护、真实账号和功能验收仍
+`.codex-tmp/t9/app-test.log`（T9b 历史测试）。**T10 已按指定最新主线重建接管候选，
+原生恢复源码未变，复用 T8 恢复 APK 并用当前门禁复查；当前候选及哈希见顶部 T10**。
+T8 app `31d6612` 的旧接管 APK 不用于正式安装。设备接管/用户数据保护、真实账号和功能验收仍
 PENDING；本轮未安装、不 record，也没有 protected-data/equal=true 结论。
 
 ---
@@ -151,7 +185,7 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
    该包迁移或合并任何资料。接管后 `.podjs` 是否卸载待用户另行确认，本清单不执行
    卸载。确认 release after 摘要的授权验证入口已准备。
 4. 通过现有保护性升级入口执行同包覆盖；底层安装命令为
-   `adb -s e3aca8af install -r .codex-tmp/t8/watchrss-takeover-v1000.apk`，
+   `adb -s e3aca8af install -r .codex-tmp/t10/watchrss-takeover-v1000.apk`，
    不加 `-d`，不作为绕过验证的独立执行指令。当前 `acceptance.py upgrade`
    在非debug after拒绝run-as时不能完成保护证明，必须先解决该门槛。安装后在首启前
    核对UID和迁移前源digest；禁止把未运行迁移时的文件一致性当迁移验收。
@@ -167,7 +201,7 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
 7. 优先前向修 PodJS；仅在需要最后手段恢复时，先停止业务写入，保留并核验
    当前 PodJS 代际和封存原生 backup，明确
    ACTIVE后新资料只归档、不自动合并。通过保护性安装流程覆盖
-   `adb -s e3aca8af install -r .codex-tmp/t8/watchrss-native-recovery-v900000.apk`；
+   `adb -s e3aca8af install -r .codex-tmp/t10/watchrss-native-recovery-v900000.apk`；
    启动 `com.lightningstudio.watchrss/.MainActivity`。恢复在providers前校验证书/备份、
    原字节还原及撤销旧系统WorkManager jobs；遇 `podjs_recovery_pending`停止、保留数据，
    不清空重试。校验completion/backup seal、PodJS归档、原生业务/资源/账号/WorkManager，
