@@ -250,6 +250,22 @@
       "date": "2026-10-08",
       "notes": "P8 installed-local on e3aca8af: frozen v34 same-signer non-debug upgrade; K8 Home MAE0, cold2 and README3 exact references, reader scroll and refresh-all1 sampled, subscribed36kr/feed timestamp/unread updated with no XML error observed. Douyin entry stopped at platform disclosure without confirmation; other3 36kr endpoints not subscribed/unrequested. No strict private digest/equal=true claim. Not publicly distributed; record tool status label is published, evidence is local install only.",
       "status": "published"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 35,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": "44fe2d77bb19c93729ce070d7c7d41c7d7055c5d",
+        "framework": "4a41b535d65a9683a63e1b24cb2e3ddcc0f98fc0",
+        "pocketjs": "78b1c8629c31b2eca8642c8c03f481783042306f"
+      },
+      "apkSha256": "5e0c3b6e9e1b30424b0f77f32ece873fad8dd1661ab3ac2c39050f654d756eb3",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-08",
+      "notes": "P9 installed-local OWW242 v34->v35 same-signer nondebug upgrade; no public distribution; no strict private digest/equal=true; device regression and two UI acceptances recorded separately.",
+      "status": "published"
     }
   ]
 }
