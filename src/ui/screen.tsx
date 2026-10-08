@@ -156,8 +156,13 @@ export default function WatchRSS(props: {
   );
   const resumeStore = new AppResumeStore(kv);
   const startupResume = resumeStore.read();
-  const activityEntries=restoreActivityNavigation(activityStateHub.read(),debugGate.allowed)
-    ??readNavigationCheckpoint(kv,debugGate.allowed);
+  // Like Android, routes come back only when the Activity is recreated (a saved Bundle exists);
+  // a fresh launch (force-stop, task removed) starts at home. The KV checkpoint is the newest
+  // synchronous copy of that same saved state.
+  const hostActivity=activityStateHub.read(),recreated=Object.keys(hostActivity.saved).length>0;
+  const activityEntries=recreated
+    ?readNavigationCheckpoint(kv,debugGate.allowed)??restoreActivityNavigation(hostActivity,debugGate.allowed)
+    :null;
   const [resumeReady, setResumeReady] = createSignal(false);
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
