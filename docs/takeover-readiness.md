@@ -1,3 +1,135 @@
+# T14：v1000 PAUSED → v1001 前向修复候选（2026-10-08；设备验收 PENDING）
+
+冻结 app `e69d23c` / framework `367c706` / PocketJS `78b1c86`。
+框架包含 T13 按列名核验历史迁移 Room v18 布局、DETECTED 失败的新代际重试及 release 一行诊断。
+当前正式包为 v1000、非 debuggable、UID10132，首次启动 PAUSED / stage_failed / UI 5%，
+不是原生 v40。身份依据现有 `t12/device/upgrade/installed-readback.json` 与 V5 报告，
+本轮未重新查询设备。当前候选与操作清单以本节为准；后文 T12/T11b 等命令只保留历史证据。
+
+| 候选 | 路径 / APK SHA256 | T14 离线结果 |
+|---|---|---|
+| 前向接管 | `.codex-tmp/t14/watchrss-takeover-v1001.apk`；`72fce61794fb25ec8ae5cc5ab0cfeb3fa9adab6e0742f12a0922d3114ec3efec`；121779452 bytes | `takeover-release` PASS 13/13；正式 appId / 1001；非 debuggable；sourceVersionCode40 / purgeBackupAfter0 |
+| 原生恢复 | `.codex-tmp/t14/watchrss-native-recovery-v900000.apk`；`a9747852a71ea5919b8dd7df271afdb58a195bd033409152c6835cc034cf9127`；25277224 bytes | `recovery` PASS 14/14；同正式 appId / 900000；复用 `.codex-tmp/t12/watchrss-native-recovery-v900000.apk`，SHA256 不变 |
+
+v1000、v1001 与恢复包的当前及 SDK30 公有 signer 相同：
+`f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`。
+版本关系 **40 < 1000 < 1001 < 900000**；原生 sourceVersionCode40 是数据来源，不是现装版本。
+台账新增 `policy.packages[正式appId].installedObservation`，记录已有 V5 安装证据；
+没有新增 release/publication 记录，也未执行 `record`。门禁同时取历史全部渠道与现装版本的最高值，
+拒绝 ≤1000 的候选。既有签名、lineage、非 debug、保留版本区间规则继续生效，
+新测试覆盖 PAUSED 前向/恢复、等号/降级、异签名与错区间拒绝。
+实际 release DEX 含 `PodTakeoverDigest` 及 `phase=… exception=… frame=…` 的诊断常量；
+见 `t14/release-dex-audit.json`。这只证明打包；设备诊断、摘要和迁移结果仍 PENDING。
+先 CLI build 后 app 全测 1321 PASS、framework Bun 366 PASS / Rust 105 PASS（4 optional ignored）及全部 host suites通过；两者 typecheck PASS；preflight 48 tests / takeover_verify 14 tests / Android runtime 26 tests 均通过。
+源码、依赖链接、dist/APK 资产与测试详情见 `t14/artifact-provenance.json`、`summary.json`。
+
+## v1000 PAUSED → v1001 前向升级清单（仅供获授权设备负责人执行）
+
+1. 按 DEVICE_OWNER 规则取得设备使用权，仅 `e3aca8af` / `com.lightningstudio.watchrss`。
+   复核两个 APK 的 SHA256 和两渠道 preflight，安装前只读复核现装 v1000 APK/公有签名、
+   UID10132、非 debug、设备解锁/空间。若现装身份发生变化，停止并重新制定升级基线。
+   本清单不是本轮设备操作授权；本轮只做离线构建，不安装、不 record、不 commit。
+
+   ```sh
+   (cd .codex-tmp/t14 && sha256sum -c SHA256SUMS)
+   python3 scripts/release/preflight.py check .codex-tmp/t14/watchrss-takeover-v1001.apk --channel takeover-release --ledger docs/release-ledger.json
+   python3 scripts/release/preflight.py check .codex-tmp/t14/watchrss-native-recovery-v900000.apk --channel recovery --ledger docs/release-ledger.json
+   ```
+
+   此处 `scripts/release/` 与 `docs/` 使用 `minor/takeover-t14` 的待审变更；APK/receipt 位于主仓库
+   `.codex-tmp/`。待 lead 集成后可直接从主仓库根目录执行；未集成时，preflight 脚本及台账改用
+   `/home/wilf/data/OPPO_Develop/PodJS_WatchRSS.wt-minor-t14/` 的绝对路径。
+
+2. **不再执行 pre**。`takeover_verify.py pre` 要求现装源 DEBUGGABLE，当前 release 不满足。
+   `acceptance.py upgrade` 对 release 也无条件调用这个 pre，因此会在安装前拒绝；
+   它没有接收旧 pre 的选项。本轮保留该保护，采用下面的直接 `adb install -r` 加原有 post。
+   旧基线固定为 `.codex-tmp/t12/device/upgrade/takeover-pre.json`（code40 / UID10132；
+   155 文件、267202456 bytes），SHA256 为 **cd0a65b0809266eef3bb65e8acd44308383d998edb7f2526535307183cd0d190**。不要改写、重采或伪造 receipt。
+
+   有效性论证：V5 第一次启动显示 5%“检查数据”，随后同为 5% PAUSED；未重试、未二启、未 ACTIVE。
+   代码将 DETECTED 映射为 5%，snapshot 只读原生源，副本/WAL replay/转换输出都在私有 generation；
+   Store→Room→File 顺序可留下半成品但不改写源。原生 backup 的 prepare/移动只在
+   coordinator **ACTIVATING → publisher.beforePublish** 执行。因而在 PAUSED 发生于 ACTIVATING
+   之前且无外部源写入的前提下，T12 pre 仍是原始源基线，v1001 新代际应与其相等。
+   这是源码和既有 UI 的证据推论：V5 的私有 journal/resumePhase 不可读，缺 digest 不能独自证明阶段，
+   不能宣称真实源已确认未变。最终只以 post 的 **pre == 新代际 SNAPSHOTTED == ACTIVE** 证明。
+   源被后台/平台改写、旧 receipt 不完整、日志缺失或摘要不等，一律停止并报告，不更新基线以迁就结果。
+
+3. 输出使用 `.codex-tmp/t14/device/`。安装前开启独立终端连续日志捕获并保持至 post 完成：
+
+   ```sh
+   mkdir -p .codex-tmp/t14/device
+   adb -s e3aca8af logcat -v epoch -T 1 > .codex-tmp/t14/device/logcat.txt
+   ```
+
+   在另一终端执行同包前向安装；不加降级参数、不卸载、不清数据：
+
+   ```sh
+   adb -s e3aca8af install -r .codex-tmp/t14/watchrss-takeover-v1001.apk
+   ```
+
+   必须 Success，并只读核对现装 code1001、UID10132、非 debug、公有 signer 和 APK SHA256。
+   安装成功只是身份/升级证据，原字节保护仍 PENDING。若身份核对失败，不首启。
+
+4. 首启（日志须已经捕获；只启动一次）：
+
+   ```sh
+   adb -s e3aca8af shell am start -W -n com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity
+   ```
+
+   观察新迁移至 ACTIVE；DETECTED stage_failed 重试代码会先持久化新的 `g-*` journal，
+   保留旧失败 candidate，再重新采只读源。不硬编码或复用 v1000 未知代际。
+   若 journal 的实际 resumePhase 已是 SNAPSHOTTED/COPYING/VERIFYING/READY/ACTIVATING，
+   修复会继续原固定代际，此时停止“新代际”清单、交 lead 审核，不能冒称本路径通过。
+   PAUSED/BLOCKED 或 `PodTakeover: phase=… exception=… frame=…` 失败行出现，立即停止后续验收；
+   不点重试、不二启、不擅自恢复。记录第一条诊断、进度和时间，未观测项标 PENDING。
+
+5. 同一进程首次 ACTIVE 后立即 post；generation 从本次真实日志唯一提取，禁止填造值：
+
+   ```sh
+   generation="$(python3 .codex-tmp/t14/read-generation.py .codex-tmp/t14/device/logcat.txt)" && \
+   python3 scripts/device/takeover_verify.py post --serial e3aca8af --package com.lightningstudio.watchrss --pre .codex-tmp/t12/device/upgrade/takeover-pre.json --generation "$generation" --out .codex-tmp/t14/device/takeover-post.json
+   ```
+
+   `read-generation.py` 仅解析本地日志，要求唯一代际且 SNAPSHOTTED/ACTIVE 各五 root 完整；
+   不替代 post 的 UID、当前 PID、时戳、代际、schema、摘要校验。post 不需要 run-as，
+   会保留旧原生 code40 receipt 并核对安装 code>40/UID一致；v1001>v1000 另由 preflight/身份读回证明。
+   必须报告 PASS/equal=true，所有 root 和 manifest 相等；日志环形缓冲丢失、PID变化、
+   代际歧义或摘要不等即停止，不以连续日志文件代替当前 post 门禁、不重写基线。
+
+6. 保护证明通过后才继续 Home/K8 MAE、sourceVersion40/purge0、active pointer/receipt/backup 同代际、
+   旧 WorkManager 取消和 PodJS 工作保留，以及真实账号解密、频道、正文、进度、备忘录、设置、
+   资源、手机同步与二启不重导/不覆盖新写。`使用前说明` 未经授权不点击；不能完成的项标 PENDING。
+   本轮这些设备事实全为 PENDING。
+
+## v1000 PAUSED 时的原生恢复判断
+
+**覆盖安装条件离线满足**：同 appId、同 signer，900000>1000（也>1001），恢复包预检通过且原字节不变。
+若实际处于 ACTIVATING 之前、无 active/备份，原生源保留在原位置；恢复 APK 的
+`NativeRecovery.beforeProviders` 调用 `recoveryGeneration()` 得到 null，确认无 active 后直接 return，
+随后原生 Room/Prefs/资源读取原位数据，不要求一个尚未生成的 sealed backup。
+`NativeBackup` 构造/recoveryGeneration 不创建备份。`t14/paused-recovery-proof.json` 的合成
+PAUSED/DETECTED+半成品 case 验证返回 null 与源字节不变；它不是正式设备恢复证明。
+恢复与框架均用 WorkManager 2.11.2，避免恢复包重新打开框架已升级的 workdb 时发生版本降级；
+当前 PAUSED 路径的真实系统 jobs/WorkManager 兼容性仍须设备验证。
+
+若已经进入 ACTIVATING 且有 backup，恢复会验证选定代际的 manifest/seal/证书/字节，
+完成未完备份并恢复、归档 PodJS 输出，撤销旧 WorkManager 系统 jobs；损坏/缺失计划或 active 无备份
+继续 fail-closed 为 `podjs_recovery_pending`。**PAUSED 并不普遍等于可直接读原位源**。
+V5 未读私有 journal，因此真实源可用、Keystore/账号、Room/WorkManager 启动均 PENDING，
+不能保证仅安装恢复包就通过。若需恢复，另派授权设备任务；本轮只复核 APK，不运行下面命令：
+
+```sh
+adb -s e3aca8af install -r .codex-tmp/t14/watchrss-native-recovery-v900000.apk
+adb -s e3aca8af shell am start -W -n com.lightningstudio.watchrss/.MainActivity
+```
+
+恢复到900000后不可正常降级装1001；优先前向修复。ACTIVE后新增 PodJS 数据只归档、不自动合并。
+
+---
+
+## 历史 T12（已被上方 T14 候选与前向清单替代）
+
 # T12：最新主线正式接管候选（2026-10-08；设备 PENDING）
 
 冻结 app `1690bb3` / framework `7e516a9` / PocketJS `78b1c86`。

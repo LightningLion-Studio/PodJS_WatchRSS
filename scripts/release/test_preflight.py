@@ -84,6 +84,54 @@ class PolicyTests(unittest.TestCase):
         self.ledger['releases'].append(entry)
         self.failed('versionCode')
 
+    def installed_paused(self):
+        self.native()
+        self.ledger['policy']['packages'][NATIVE]['installedObservation'] = {
+            'versionCode': 1000, 'apkSha256': 'b' * 64, 'certSha256': CERT,
+            'debuggable': False, 'uid': 10132, 'serial': 'synthetic-device',
+            'observedOn': '2026-10-08', 'migrationStatus': 'PAUSED',
+            'evidence': 'synthetic-readback.json'}
+
+    def test_paused_installed_version_forward_and_recovery(self):
+        self.installed_paused()
+        for code in (999, 1000):
+            self.facts['versionCode'] = code
+            self.failed('versionCode')
+        self.facts['versionCode'] = 1001
+        self.assertTrue(self.result()['ok'])
+        self.recovery()
+        self.assertTrue(self.result()['ok'])
+        self.ledger['policy']['packages'][NATIVE]['installedObservation']['versionCode'] = 900000
+        self.failed('versionCode')
+
+    def test_paused_forward_keeps_signature_and_range_gates(self):
+        self.installed_paused()
+        self.facts['versionCode'] = 1001
+        self.facts['signature']['watchCertificatesSha256'] = [OLD]
+        self.failed('certificate')
+        self.facts['signature']['watchCertificatesSha256'] = [CERT]
+        self.facts['versionCode'] = 900000
+        self.failed('reservedVersionRange')
+
+    def test_installed_observation_validation(self):
+        self.installed_paused()
+        original = copy.deepcopy(self.ledger)
+        for field, value in [('versionCode', True), ('uid', 0), ('certSha256', OLD),
+                             ('apkSha256', 'bad'), ('debuggable', 'false'),
+                             ('serial', ''), ('evidence', ''), ('migrationStatus', 'UNKNOWN'),
+                             ('observedOn', 'bad')]:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temp:
+                ledger = copy.deepcopy(original)
+                ledger['policy']['packages'][NATIVE]['installedObservation'][field] = value
+                path = Path(temp) / 'ledger.json'
+                path.write_text(json.dumps(ledger))
+                with self.assertRaises(ValueError):
+                    p.load_ledger(path)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'ledger.json'
+            path.write_text(json.dumps(original))
+            self.assertEqual(p.load_ledger(path), original)
+
     def test_unconfirmed_native_inventory_blocks_real_policy(self):
         self.native()
         self.ledger['policy']['packages'][NATIVE]['highestPublishedVerified'] = False

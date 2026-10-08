@@ -18,7 +18,7 @@
       "com.lightningstudio.watchrss": {
         "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
         "highestPublishedVerified": true,
-        "inventoryScope": "用户2026-10-08确认全渠道最高即本机build最高；原生Gradle全部git历史最大40；现装v40 APK证据见highestPublishedEvidence",
+        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1000已安装但首启PAUSED，见installedObservation；不作为公网发布记录",
         "allowedLineages": [
           [
             "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
@@ -45,6 +45,17 @@
             "debuggable": true,
             "evidence": ".codex-tmp/t9/native-installed-v40-facts.json"
           }
+        },
+        "installedObservation": {
+          "versionCode": 1000,
+          "apkSha256": "98798197629bd9569af770eb2fbbed84190fc1ba6baf3a65c183896a80c0fad7",
+          "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+          "debuggable": false,
+          "uid": 10132,
+          "serial": "e3aca8af",
+          "observedOn": "2026-10-08",
+          "migrationStatus": "PAUSED",
+          "evidence": ".codex-tmp/t12/device/upgrade/installed-readback.json"
         }
       }
     },

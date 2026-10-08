@@ -80,6 +80,21 @@ def load_ledger(path):
                 or type(package['highestPublishedVerified']) is not bool
                 or not isinstance(package['allowedLineages'], list)):
             raise ValueError('invalid package signing/inventory policy')
+        # Current installed identity is separate from historical native source and
+        # publication records. A failed takeover still reserves its installed code.
+        observation = package.get('installedObservation')
+        if observation is not None:
+            if (not isinstance(observation, dict)
+                    or not HEX.fullmatch(observation.get('apkSha256', ''))
+                    or observation.get('certSha256') != package['certSha256']
+                    or type(observation.get('debuggable')) is not bool
+                    or not isinstance(observation.get('serial'), str) or not observation['serial']
+                    or not isinstance(observation.get('evidence'), str) or not observation['evidence']
+                    or observation.get('migrationStatus') not in ('PAUSED', 'ACTIVE', 'BLOCKED')):
+                raise ValueError('invalid installed observation')
+            integer(observation['versionCode'], 1)
+            integer(observation['uid'], 1)
+            dt.date.fromisoformat(observation['observedOn'])
         for chain in package['allowedLineages']:
             if (not isinstance(chain, list) or not chain or len(set(chain)) != len(chain)
                     or not all(HEX.fullmatch(cert) for cert in chain)
@@ -329,10 +344,11 @@ def evaluate(facts, channel, ledger):
         return {'ok': False, 'channel': channel, 'apk': facts, 'checks': checks}
 
     history = [r['versionCode'] for r in ledger['releases'] if r['package'] == app_id]
-    highest = max(history, default=0)
+    installed = package.get('installedObservation', {}).get('versionCode', 0)
+    highest = max([installed, *history])
     code = facts['versionCode']
     check('versionCode', code > highest,
-          f'{code} must be > {highest} (all channels; observations also reserve codes)')
+          f'{code} must be > {highest} (all channels and current installed observation; codes remain reserved)')
     check('publicationInventory', package['highestPublishedVerified'] is True,
           'all-channel highest must be confirmed in ledger policy')
     kind = target['kind']
