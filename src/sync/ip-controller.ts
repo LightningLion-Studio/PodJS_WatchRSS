@@ -23,7 +23,6 @@ export class IpSyncController {
  private acquisition:HostOperation<JsonObject|null>|undefined;
  private descriptor:IpDescriptor|undefined;private route:OpenIpRoute|undefined;private probe:IpConnectionProbe|undefined;
  private refreshJob:Promise<void>|undefined;private refreshQueued=false;private queuedBootstrap=false;private routeGeneration=0;private serving:Promise<void>|undefined;private session:LibrarySyncSession|undefined;
- private enabled=true;
  private active=true;private disposed=false;private transferring=false;private lastAckSeq=0;private cooldown=new Map<string,number>();
  private recoveryTimer:ForegroundTimer|undefined;
  private stopTimer:ForegroundTimer|undefined;private mediaTimer:ForegroundTimer|undefined;private mediaOwned=false;private resources:Promise<void>=Promise.resolve();
@@ -33,14 +32,13 @@ export class IpSyncController {
  private routeChanged(route:OpenIpRoute|null){try{this.ports.onRoute?.(route);}catch{}}
  private media(active:boolean){if(this.mediaOwned===active)return;this.mediaOwned=active;this.resources=this.resources.then(()=>this.ports.mediaLease?.(active)).then(()=>{},e=>this.error(e));}
  private releaseLater(){if(this.disposed||!this.mediaOwned)return;this.mediaTimer?.cancel();const timer=this.ports.delay(30000);this.mediaTimer=timer;void timer.result.then(()=>{if(this.mediaTimer!==timer)return;this.mediaTimer=undefined;this.media(false);},()=>{});}
- setEnabled(enabled:boolean){if(this.disposed||this.enabled===enabled)return;this.enabled=enabled;if(enabled)this.refresh();else this.stopRoute();}
  setActive(active:boolean){if(this.disposed)return;this.active=active;if(active){this.stopTimer?.cancel();this.stopTimer=undefined;this.refresh();}else{this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.scheduleStop(2500);}}
  private scheduleStop(ms:number){this.stopTimer?.cancel();const timer=this.ports.delay(ms);this.stopTimer=timer;void timer.result.then(()=>{if(this.stopTimer!==timer)return;this.stopTimer=undefined;if(!this.active&&!this.transferring)this.stopRoute();},()=>{});}
  async offer(raw:JsonObject):Promise<boolean>{
-  if(this.disposed||!this.enabled)return false;let descriptor:IpDescriptor;try{descriptor=parseIpDescriptor(raw);}catch{return false;}
-  if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed||!this.enabled)return false;this.descriptor=descriptor;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
+  if(this.disposed)return false;let descriptor:IpDescriptor;try{descriptor=parseIpDescriptor(raw);}catch{return false;}
+  if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return false;this.descriptor=descriptor;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
  }
- refresh(bootstrap=false){if(this.disposed||!this.enabled||(!this.active&&!bootstrap))return;if(this.transferring){appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
+ refresh(bootstrap=false){if(this.disposed||(!this.active&&!bootstrap))return;if(this.transferring){appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
  private async select(bootstrap=false){
   const generation=this.routeGeneration;
   if(!bootstrap&&this.ports.acquireDescriptor){

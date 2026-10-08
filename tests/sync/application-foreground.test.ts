@@ -1,4 +1,5 @@
 import {expect,test} from 'bun:test';
+import {SettingsStore} from '../../src/settings/store.ts';
 import {ApplicationForegroundSync,type ApplicationForegroundPorts,type ApplicationSyncListener} from '../../src/sync/application-foreground.ts';
 import type {LibrarySessionRepository,SessionActionResult} from '../../src/sync/session.ts';
 import type {DisplayPowerState} from '@podjs/framework/services';
@@ -66,11 +67,14 @@ test('debug exclusive ownership waits for foreground stop and resumes only after
  release();await flush();expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
 });
 
-test('disabled phone connection prevents production-default initialization, stops transfer, and can resume',async()=>{
- const f=fixture();f.runtime.setConnectionEnabled(false);f.repository.resolve(f.repo);await f.runtime.ready;
- expect(f.sessions).toHaveLength(0);f.lifecycle('background');f.lifecycle('active');await f.runtime.refresh();expect(f.sessions).toHaveLength(0);
- f.runtime.setConnectionEnabled(true);await flush();expect(f.sessions).toHaveLength(1);f.peer();
- f.runtime.setConnectionEnabled(false);await flush();expect(f.sessions[0].stops).toBe(1);
- await f.clock.advance(30000);expect(f.sessions).toHaveLength(1);expect(f.resources).toContain('lease:rfcomm-bootstrap:false');
- f.runtime.setConnectionEnabled(true);await flush();expect(f.sessions).toHaveLength(2);await f.runtime.dispose();
+test('saved native phone setting does not gate Bluetooth initialization or an active transfer',async()=>{
+ const data=new Map<string,unknown>();
+ const storage={get:<T>(key:string)=>data.get(key) as T|undefined,set:(key:string,value:unknown)=>{data.set(key,value);}};
+ new SettingsStore(storage).update({phoneConnectionEnabled:false});
+ const f=fixture();f.repository.resolve(f.repo);await f.runtime.ready;
+ expect(new SettingsStore(storage).load().phoneConnectionEnabled).toBe(false);expect(f.sessions).toHaveLength(1);f.peer();
+ new SettingsStore(storage).update({phoneConnectionEnabled:true});new SettingsStore(storage).update({phoneConnectionEnabled:false});
+ await f.runtime.refresh();await f.clock.advance(30000);expect(f.sessions[0].stops).toBe(0);expect(f.runtime.state).toBe('transferring');
+ f.lifecycle('background');f.lifecycle('active');await f.runtime.refresh();expect(f.sessions).toHaveLength(1);
+ await f.runtime.dispose();
 });

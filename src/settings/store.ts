@@ -5,6 +5,7 @@ export const CACHE_OPTIONS_MB = [512, 768, 1024, 1536, 2048, 2560, 3072, 4096] a
 export const MEDIA_CACHE_OPTIONS = ["关闭", "前 4 项", "全部"] as const;
 
 export interface SettingsState {
+  /** Native dead setting: retain migration value without changing sync behavior. */
   phoneConnectionEnabled:boolean;
   llmProvider:string;
   llmModel:string;

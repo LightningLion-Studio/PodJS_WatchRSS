@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {SettingsStore} from '../../src/settings/store.ts';
 import {ipFixture,flush,deferred} from '../helpers/ip-fixture.ts';
 import {IpSyncController} from '../../src/sync/ip-controller.ts';
 import {FrameDecoder} from '../../src/sync/protocol.ts';
@@ -95,17 +96,21 @@ test('an immediately closed route queues recovery while initial selection is sti
  await controller.offer({...f.descriptor});await flush();expect(discoveries).toBe(1);await controller.dispose();
 });
 
-test('phone connection off rejects bootstrap, stops existing transport and allows re-enable',async()=>{
+test('saved native phone setting does not reject IP bootstrap or close its transport',async()=>{
+ const data=new Map<string,unknown>();
+ const storage={get:<T>(key:string)=>data.get(key) as T|undefined,set:(key:string,value:unknown)=>{data.set(key,value);}};
+ new SettingsStore(storage).update({phoneConnectionEnabled:false});
  const f=ipFixture();await f.sign();const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});
- controller.setEnabled(false);expect(await controller.offer({...f.descriptor})).toBe(false);controller.refresh(true);await flush();expect(f.opens).toHaveLength(0);
- controller.setEnabled(true);expect(await controller.offer({...f.descriptor})).toBe(true);await flush();expect(f.opens).toHaveLength(1);
- controller.setEnabled(false);await flush();expect(f.closed).toContain('stream-1');controller.setActive(true);await f.clock.advance(3000);expect(f.opens).toHaveLength(1);await controller.dispose();
+ expect(await controller.offer({...f.descriptor})).toBe(true);await flush();expect(f.opens).toHaveLength(1);
+ new SettingsStore(storage).update({phoneConnectionEnabled:true});new SettingsStore(storage).update({phoneConnectionEnabled:false});
+ controller.refresh();await flush();await f.clock.advance(3000);expect(f.closed).toHaveLength(0);
+ expect(new SettingsStore(storage).load().phoneConnectionEnabled).toBe(false);await controller.dispose();
 });
 
-test('phone disable during descriptor authentication cannot accept a late bootstrap',async()=>{
- const f=ipFixture();await f.sign();const pending=deferred<string>(),mac=f.ports.crypto.hmac;
- f.ports.crypto.hmac=(secret,payload)=>pending.result;
+test('changing saved phone setting during descriptor authentication does not reject a valid bootstrap',async()=>{
+ const data=new Map<string,unknown>();const settings=new SettingsStore({get:<T>(key:string)=>data.get(key) as T|undefined,set:(key:string,value:unknown)=>{data.set(key,value);}});
+ const f=ipFixture();await f.sign();const pending=deferred<string>();f.ports.crypto.hmac=()=>pending.result;
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});
- const offering=controller.offer({...f.descriptor});controller.setEnabled(false);pending.resolve(f.descriptor.hmac);
- expect(await offering).toBe(false);await flush();expect(f.opens).toHaveLength(0);await controller.dispose();
+ const offering=controller.offer({...f.descriptor});settings.update({phoneConnectionEnabled:false});pending.resolve(f.descriptor.hmac);
+ expect(await offering).toBe(true);await flush();expect(f.opens).toHaveLength(1);expect(settings.load().phoneConnectionEnabled).toBe(false);await controller.dispose();
 });

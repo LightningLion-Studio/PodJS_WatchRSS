@@ -15,13 +15,12 @@ import {createAnnouncementServices} from "./announcement/host.ts";
 /** Starts phone sync after the first screen so its SQLite traffic does not delay launch. */
 function deferredForegroundSync(){
  type Sync=ReturnType<typeof startApplicationForegroundSync>;
- let inner:Sync|undefined,disposed=false,mediaEnabled:boolean|undefined,connectionEnabled:boolean|undefined;
+ let inner:Sync|undefined,disposed=false,mediaEnabled:boolean|undefined;
  const observers=new Set<Parameters<Sync['bluetooth']['subscribe']>[0]>();
  const unsubscribers=new Map<unknown,()=>void>();
  void afterFirstScreen().then(()=>{
   if(disposed)return;
   inner=startApplicationForegroundSync();startApplicationCloudSync();startupMark('sync.started');
-  if(connectionEnabled!==undefined)inner.setConnectionEnabled(connectionEnabled);
   if(mediaEnabled!==undefined)inner.setMediaEnabled(mediaEnabled);
   for(const observer of observers)unsubscribers.set(observer,inner.bluetooth.subscribe(observer));
  });
@@ -33,7 +32,6 @@ function deferredForegroundSync(){
  return {
   bluetooth,
   createDebugBluetooth:(()=>{if(!inner)throw Error('蓝牙同步尚未启动');return inner.createDebugBluetooth();}) as Sync['createDebugBluetooth'],
-  setConnectionEnabled:(enabled:boolean)=>{connectionEnabled=enabled;inner?.setConnectionEnabled(enabled);},
   setMediaEnabled:(enabled:boolean)=>{mediaEnabled=enabled;inner?.setMediaEnabled(enabled);},
   dispose:async()=>{disposed=true;stopApplicationCloudSync();await inner?.dispose();},
  };
@@ -43,7 +41,7 @@ function ContentApp(){
  startupMark('content.mount');
  const sync=deferredForegroundSync();
  onCleanup(()=>{void sync.dispose();});
- return <WatchRSS services={services} createDebugBluetooth={sync.createDebugBluetooth} bluetoothSync={sync.bluetooth} announcements={createAnnouncementServices()} onPhoneConnectionEnabledChange={enabled=>sync.setConnectionEnabled(enabled)} onSyncMediaKeepAliveChange={enabled=>sync.setMediaEnabled(enabled)} />;
+ return <WatchRSS services={services} createDebugBluetooth={sync.createDebugBluetooth} bluetoothSync={sync.bluetooth} announcements={createAnnouncementServices()} onSyncMediaKeepAliveChange={enabled=>sync.setMediaEnabled(enabled)} />;
 }
 // The startup gate (activity state, onboarding) loads in parallel with the build info read;
 // only the content waits for the debug gate so debug-only UI is decided before it mounts.
