@@ -1,15 +1,17 @@
-<!-- Synthetic policy fixture: component identities from the native40 APK. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.lightningstudio.watchrss" android:versionCode="900000"
-    android:versionName="1.3.2-13-podjs-recovery">
+<!-- Synthetic recovery fixture: four nodes equal the installed v40 AXML summary. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.lightningstudio.watchrss" android:versionCode="900000" android:versionName="1.3.2-13-podjs-recovery">
   <application android:debuggable="false">
     <activity android:name="MainActivity" android:exported="true" />
-    <activity android:name=".LlmSummaryActivity" android:exported="false" />
-    <activity android:name=".debug.PerfLargeArticleActivity" android:exported="false" />
-    <activity android:name=".debug.PerfLargeListActivity" android:exported="false" />
-    <provider android:name=".debug.DebugLogProvider"
-        android:authorities="com.lightningstudio.watchrss.debuglog" android:exported="false" />
     <service android:name="androidx.work.impl.background.systemjob.SystemJobService" />
     <receiver android:name="androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver" />
+    <activity android:exported="false" android:name="com.lightningstudio.watchrss.LlmSummaryActivity" android:theme="@ref/0x7f120141" />
+    <provider android:authorities="com.lightningstudio.watchrss.debuglog" android:exported="false" android:name="com.lightningstudio.watchrss.debug.DebugLogProvider" />
+    <activity android:exported="false" android:name="com.lightningstudio.watchrss.debug.PerfLargeArticleActivity" android:theme="@ref/0x7f120141" />
+    <activity android:exported="false" android:name="com.lightningstudio.watchrss.debug.PerfLargeListActivity" android:theme="@ref/0x7f120141">
+      <intent-filter>
+        <action android:name="com.lightningstudio.watchrss.action.OPEN_PERF" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </activity>
   </application>
 </manifest>

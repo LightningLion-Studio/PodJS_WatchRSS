@@ -22,6 +22,13 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LEDGER = ROOT / 'docs/release-ledger.json'
 NATIVE40_COMPONENTS = ROOT / 'docs/release-baselines/native40-components.json'
+INSTALLED40_DEBUG_COMPONENTS = ROOT / 'docs/release-baselines/native-installed-v40-debug-components.json'
+RECOVERY_DEBUG_COMPONENTS = frozenset({
+    ('activity', 'com.lightningstudio.watchrss.LlmSummaryActivity'),
+    ('provider', 'com.lightningstudio.watchrss.debug.DebugLogProvider'),
+    ('activity', 'com.lightningstudio.watchrss.debug.PerfLargeArticleActivity'),
+    ('activity', 'com.lightningstudio.watchrss.debug.PerfLargeListActivity'),
+})
 ANDROID = '{http://schemas.android.com/apk/res/android}'
 COMPONENT_TYPES = {'activity', 'activity-alias', 'receiver', 'provider', 'service'}
 # T2 (d3a778cb) / T4 (6bbf8e5e) restore through WatchRssApplication's
@@ -118,6 +125,12 @@ def load_ledger(path):
     return ledger
 
 
+def component_node(node):
+    """Keep every AXML attribute and child; ignore only XML formatting whitespace."""
+    return {'type': node.tag, 'attributes': dict(sorted(node.attrib.items())),
+            'children': [component_node(child) for child in node]}
+
+
 def parse_manifest(xml):
     root = ET.fromstring(xml)
     if root.tag != 'manifest':
@@ -145,6 +158,7 @@ def parse_manifest(xml):
         metadata[name] = node.get(ANDROID + 'value')
     debug = []
     components = set()
+    details = []
     for node in app.iter():
         if node.tag not in COMPONENT_TYPES:
             continue
@@ -154,7 +168,11 @@ def parse_manifest(xml):
         qualified = package + name if name.startswith('.') else name
         if '.' not in qualified:
             qualified = package + '.' + qualified
-        components.add((node.tag, qualified))
+        identity = (node.tag, qualified)
+        if identity in components:
+            raise ValueError('duplicate manifest component identity')
+        components.add(identity)
+        details.append({'type': node.tag, 'name': qualified, 'node': component_node(node)})
         values = ' '.join(node.attrib.values()) + ' ' + ' '.join(
             str(v) for child in node.iter() for v in child.attrib.values())
         if (qualified in DEBUG_COMPONENTS or re.search(
@@ -164,6 +182,7 @@ def parse_manifest(xml):
             'versionName': root.get(ANDROID + 'versionName', ''),
             'debuggable': debuggable == 'true', 'metadata': metadata,
             'components': [{'type': tag, 'name': name} for tag, name in sorted(components)],
+            'componentDetails': sorted(details, key=lambda item: (item['type'], item['name'])),
             'debugExternalComponents': sorted(set(debug))}
 
 
@@ -204,6 +223,38 @@ def recovery_baseline(ledger):
     if not components:
         raise ValueError('empty native40 component baseline')
     return baseline, components
+
+
+def recovery_debug_baseline(ledger):
+    """Four exact exceptions from the installed v40 AXML, linked by ledger hashes."""
+    path = 'docs/release-baselines/native-installed-v40-debug-components.json'
+    raw = INSTALLED40_DEBUG_COMPONENTS.read_bytes()
+    baseline = load_json(raw.decode('utf-8'))
+    if (baseline.get('schemaVersion') != 1
+            or baseline.get('appId') != ledger['policy']['nativeAppId']
+            or baseline.get('versionCode') != 40
+            or not HEX.fullmatch(baseline.get('apkSha256', ''))
+            or not HEX.fullmatch(baseline.get('axmlSha256', ''))
+            or baseline.get('certSha256') != ledger['policy']['packages'][baseline['appId']]['certSha256']):
+        raise ValueError('invalid installed40 debug component baseline')
+    matches = [r for r in ledger['releases']
+               if r['package'] == baseline['appId'] and r['versionCode'] == 40
+               and r['channel'] == 'native-observation' and r['status'] == 'observed'
+               and r['apkSha256'] == baseline['apkSha256'] and r['cert'] == baseline['certSha256']
+               and r.get('axmlSha256') == baseline['axmlSha256']
+               and r.get('manifestDebugComponents') == path
+               and r.get('manifestDebugComponentsSha256') == hashlib.sha256(raw).hexdigest()]
+    if len(matches) != 1:
+        raise ValueError('installed40 debug baseline does not match ledger APK/AXML/summary')
+    components = baseline.get('components')
+    if component_set(components) != RECOVERY_DEBUG_COMPONENTS or len(components) != 4:
+        raise ValueError('installed40 debug baseline must contain exactly the four approved components')
+    for item in components:
+        node = item['node']
+        if (node['type'] != item['type'] or node['attributes'].get(ANDROID + 'name') != item['name']
+                or not isinstance(node['children'], list)):
+            raise ValueError('invalid installed40 debug component node')
+    return baseline, {(item['type'], item['name']): item['node'] for item in components}
 
 
 def sdk_tools(sdk=None):
@@ -316,6 +367,22 @@ def evaluate(facts, channel, ledger):
                 'unexpected': [{'type': tag, 'name': name} for tag, name in sorted(unexpected)]})
         except (ValueError, KeyError, TypeError, OSError) as error:
             check('recoveryComponents', False, str(error))
+        try:
+            baseline, exact = recovery_debug_baseline(ledger)
+            details = facts['componentDetails']
+            if component_set(details) != component_set(facts['components']):
+                raise ValueError('component details do not match manifest identities')
+            unexpected_debug = []
+            for name in facts['debugExternalComponents']:
+                nodes = [item for item in details if item['name'] == name]
+                if len(nodes) != 1 or nodes[0]['node'] != exact.get((nodes[0]['type'], name)):
+                    unexpected_debug.append(name)
+            check('debugExternal', not unexpected_debug, {
+                'baselineApkSha256': baseline['apkSha256'],
+                'baselineAxmlSha256': baseline['axmlSha256'],
+                'unexpectedOrChanged': unexpected_debug})
+        except (ValueError, KeyError, TypeError, AttributeError, OSError) as error:
+            check('debugExternal', False, str(error))
     else:
         check('debugExternal', not facts['debugExternalComponents'],
               facts['debugExternalComponents'])
