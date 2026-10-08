@@ -234,6 +234,22 @@
       "date": "2026-10-08",
       "notes": "P7 installed-local evidence only: frozen exact sources and preflight12/12 passed; same-signature non-debuggable upgrade32 to33 on e3aca8af. No strict private digest/no equal=true. Postinstall K8 home gate FAILED: MAE18.577214844,80physical-pixel downward shift; remaining regressions PENDING/stopped. No store or public distribution performed; tool fixed published status is not public publication evidence.",
       "status": "published"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 34,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": "58cea51fe0f9f76772289f380cd31f394f22686e",
+        "framework": "4a41b535d65a9683a63e1b24cb2e3ddcc0f98fc0",
+        "pocketjs": "78b1c8629c31b2eca8642c8c03f481783042306f"
+      },
+      "apkSha256": "fa05e5757ae0e689f23255941e72518a9591cecbc6ef1b05438e8c40badeed7f",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-08",
+      "notes": "P8 installed-local on e3aca8af: frozen v34 same-signer non-debug upgrade; K8 Home MAE0, cold2 and README3 exact references, reader scroll and refresh-all1 sampled, subscribed36kr/feed timestamp/unread updated with no XML error observed. Douyin entry stopped at platform disclosure without confirmation; other3 36kr endpoints not subscribed/unrequested. No strict private digest/equal=true claim. Not publicly distributed; record tool status label is published, evidence is local install only.",
+      "status": "published"
     }
   ]
 }
