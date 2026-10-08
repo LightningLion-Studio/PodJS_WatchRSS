@@ -117,21 +117,90 @@ class PolicyTests(unittest.TestCase):
         before = copy.deepcopy((self.facts, self.ledger))
         result = self.result()
         self.assertTrue(result['ok'])
-        self.assertNotIn('debugExternal', [c['name'] for c in result['checks']])
+        debug = next(c for c in result['checks'] if c['name'] == 'debugExternal')
+        self.assertTrue(debug['passed'])
+        self.assertEqual(debug['detail']['unexpectedOrChanged'], [])
         check = next(c for c in result['checks'] if c['name'] == 'recoveryComponents')
         self.assertEqual(check['detail']['unexpected'], [])
         self.assertEqual(check['detail']['approvedAdditions'], [])
         self.assertEqual(before, (self.facts, self.ledger))
 
-    def test_recovery_all_native40_component_types_and_names_pass(self):
+    def test_recovery_non_debug_native40_component_types_and_names_pass(self):
         self.recovery()
         baseline, components = p.recovery_baseline(self.ledger)
         self.assertEqual(len(components), 90)
         self.assertTrue(baseline['source']['debuggable'])  # local debug APK, not public release proof
-        nodes = ''.join(f'<{tag} android:name="{name}" />' for tag, name in sorted(components))
+        existing = p.component_set(self.facts['components'])
+        # Extra debug aliases/receivers are NOT covered by the four exact exceptions.
+        nodes = []
+        for tag, name in sorted(components - existing):
+            node = f'<{tag} android:name="{name}" />'
+            parsed = p.parse_manifest(RECOVERY_FIXTURE.read_text().replace('</application>', node + '</application>'))
+            if name not in parsed['debugExternalComponents']:
+                nodes.append(node)
+        nodes = ''.join(nodes)
         xml = RECOVERY_FIXTURE.read_text().replace('</application>', nodes + '</application>')
         self.facts.update(p.parse_manifest(xml))
         self.assertTrue(self.result()['ok'])
+
+    def test_recovery_exact_nodes_reject_attribute_child_and_type_changes(self):
+        self.recovery()
+        original = RECOVERY_FIXTURE.read_text()
+        for before, after in (
+            ('android:authorities="com.lightningstudio.watchrss.debuglog"',
+             'android:authorities="com.lightningstudio.watchrss.reference.debuglog"'),
+            ('android:exported="false"', 'android:exported="true"'),
+            ('android:exported="false"', 'android:exported="false" android:permission="app.permission.TEST"'),
+            ('android:exported="false"', 'android:exported="false" android:enabled="false"'),
+            ('android:theme="@ref/0x7f120141"', 'android:theme="@ref/0x7f120142"'),
+            ('com.lightningstudio.watchrss.action.OPEN_PERF', 'com.lightningstudio.watchrss.action.OTHER'),
+            ('android.intent.category.DEFAULT', 'android.intent.category.OTHER'),
+            ('<intent-filter>', '<intent-filter android:priority="1">'),
+            ('<provider', '<service'),
+        ):
+            with self.subTest(before=before, after=after):
+                self.assertIn(before, original)
+                self.facts.update(p.parse_manifest(original.replace(before, after, 1)))
+                self.failed('debugExternal')
+        self.facts.update(p.parse_manifest(original))
+        self.facts.pop('componentDetails')
+        self.failed('debugExternal')
+
+    def test_recovery_rejects_other_native_baseline_debug_entries(self):
+        self.recovery()
+        for tag, name in (('activity-alias', '.DouyinDebugEntryActivity'),
+                          ('receiver', '.debug.DouyinPlaybackDebugReceiver')):
+            self.facts.update(p.parse_manifest(RECOVERY_FIXTURE.read_text().replace('</application>',
+                f'<{tag} android:name="{name}" android:exported="false" /></application>')))
+            self.failed('debugExternal')
+            self.assertTrue(next(c for c in self.result()['checks']
+                                 if c['name'] == 'recoveryComponents')['passed'])
+
+    def test_recovery_debug_baseline_missing_tampered_and_unlinked_fail_closed(self):
+        self.recovery()
+        original = p.INSTALLED40_DEBUG_COMPONENTS.read_bytes()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'baseline.json'
+            path.write_bytes(original + b' ')
+            with patch.object(p, 'INSTALLED40_DEBUG_COMPONENTS', path):
+                self.failed('debugExternal')
+            path.write_text('[]')
+            with patch.object(p, 'INSTALLED40_DEBUG_COMPONENTS', path):
+                self.failed('debugExternal')
+        with patch.object(p, 'INSTALLED40_DEBUG_COMPONENTS', Path('/nonexistent/baseline.json')):
+            self.failed('debugExternal')
+        record = next(r for r in self.ledger['releases'] if r['channel'] == 'native-observation')
+        for field in ('apkSha256', 'cert', 'axmlSha256', 'manifestDebugComponentsSha256'):
+            saved = record[field]
+            record[field] = 'b' * 64
+            self.failed('debugExternal')
+            record[field] = saved
+
+    def test_duplicate_component_identity_rejected(self):
+        xml = RECOVERY_FIXTURE.read_text().replace('</application>',
+            '<activity android:name="com.lightningstudio.watchrss.LlmSummaryActivity" /></application>')
+        with self.assertRaisesRegex(ValueError, 'duplicate manifest component'):
+            p.parse_manifest(xml)
 
     def test_recovery_rejects_each_extra_component_kind_even_non_debug(self):
         self.recovery()

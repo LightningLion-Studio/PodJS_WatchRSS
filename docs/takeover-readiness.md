@@ -1,9 +1,61 @@
-# T8：正式接管候选与发布就绪清单
+# T9b：接管决定与现装基线（2026-10-08）
+
+本节替代下方 T8/T1 的全渠道版本未确认、并存资料合并待决和回滚优先级旧结论。
+正式安装前必须以最新 master 重建；T8 的 app `31d6612` 候选仅用于门禁复查，
+门禁通过不代替安装授权、用户数据保护和真实设备验收。本轮不安装、不执行 record。
+
+用户三项决定：
+
+1. 原生全渠道最高 versionCode 就是本机 build 最高值。用户于 2026-10-08 确认，
+   原生 `app/build.gradle.kts` 全部 git 历史58个修订的最大值为40；
+   `release-ledger.json` 的 `highestPublishedVerified=true`，证据在
+   `.codex-tmp/t9/native-gradle-history.json`。现装 APK 摘要另补，不依赖恢复组件例外获准。
+2. 接管丢弃 `.podjs` 测试包数据，不从 `com.lightningstudio.watchrss.podjs` 迁移或合并
+   任何数据。接管来源为原生包。接管后是否卸载 `.podjs` **待用户另行确认**，本轮不执行。
+3. 出问题优先前向修 PodJS，原生恢复包为最后手段；保留封存原生备份及恢复 APK。
+   ACTIVE 后新增资料只归档，不自动反向合并；前向修复仍需版本与数据保护门禁。
+
+## 现装 v40 与最终离线门禁
+
+设备 owner 从 `released` 取得 `wrss-minor` 后，仅查询目标包路径并拉取 base.apk，
+完成即释放；没有访问私有数据、run-as、安装、卸载或 record。现装原生 APK：
+
+- appId `com.lightningstudio.watchrss`，versionCode40，versionName `1.3.2-13`。
+- APK SHA256 `decf31983a9936262eb76c89987acf10d8ba49d15de747d2f6dd61be973a11b7`。
+- AXML SHA256 `4edee494056198ccf37e7fd06cafb7da2fdda38855f7b5b79128720f683cb199`。
+- 当前及 SDK30 公有 signer 均为
+  `f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`，apksig验证通过，
+  与两个候选及台账期望匹配。**现装原生 signer 匹配已验证，解除 T8 的该项 PENDING。**
+- 现装包 `debuggable=true`；这是已安装基线，不将它写成非 debug release。
+  APK/AXML/公开证书证据：`.codex-tmp/t9/native-installed-v40-facts.json`。
+
+四组件 LlmSummaryActivity、debug.DebugLogProvider、debug.PerfLargeArticleActivity、
+debug.PerfLargeListActivity 的完整属性与子节点均相同，包括 DebugLogProvider authority
+`com.lightningstudio.watchrss.debuglog`。不归一化 authority，AXML 相等不证明 DEX runtime
+门控或资源内容相等。比对证据 `.codex-tmp/t9/installed-baseline-comparison.json`。
+恢复渠道只给这四个精确组件例外，要求实际 APK 完整节点与
+[现装四组件摘要](release-baselines/native-installed-v40-debug-components.json)相等；
+台账绑定 APK、AXML、公开证书及摘要文件 SHA256。原有 recovery 全组件身份子集门禁
+继续保留；接管与并存仍拒绝 debug-external。
+
+| T8 旧候选 | T9b 当前门禁结果 | 证据 |
+|---|---|---|
+| 接管1000 | PASS 13/13 | `.codex-tmp/t9/takeover-preflight.json` |
+| 恢复900000 | PASS 14/14（含 recoveryComponents 和精确 debugExternal） | `.codex-tmp/t9/recovery-preflight.json` |
+
+Python preflight 测试45 PASS；应用完整 `bun run test` **1321 PASS / 0 FAIL**，结果见
+`.codex-tmp/t9/app-test.log`。**正式安装前仍须以最新 master 重建两个候选并重新过门禁**，
+T8 app `31d6612` 的旧 APK 不能替代重建。设备接管/用户数据保护、真实账号和功能验收仍
+PENDING；本轮未安装、不 record，也没有 protected-data/equal=true 结论。
+
+---
+
+# 历史 T8：正式接管候选与发布就绪清单
 
 2026-10-07，冻结 app `31d6612` / framework `2c0b2cd` / PocketJS
 `78b1c8629c31b2eca8642c8c03f481783042306f`；原生恢复树
 `podjs-recovery-40` 的 `8d65e148`。应用审阅分支为 `minor/takeover-candidate`。
-本节是当前状态；下面的 T1/T3 是历史证据，其中“未构建恢复包”“C15 尚无实现”
+本节是 T8 冻结时状态，当前决定与门禁以顶部 T9b 为准；下面的 T1/T3 是更早历史证据，其中“未构建恢复包”“C15 尚无实现”
 等旧结论由本节替代。**候选准备不等于允许正式安装。** T8 不操作设备、不安装、
 不执行 `record`，不把发布策略中的未知事实改成已确认。**本轮结果PARTIAL：
 两个候选均已构建，接管门禁1项失败，恢复门禁2项失败，均不得安装/发布。**
@@ -43,7 +95,8 @@
 与R1历史构建证据一致；本次离线apksig验证的当前/SDK30公有证书均为
 `f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`。
 证据 `native-existing-apk.json`。台账期望指纹相同。**该文件与现装原生APK逐字节一致
-尚无可追溯证明，因此“当前已安装原生 signer 匹配”仍 PENDING。** 本次没有读设备。
+尚无可追溯证明，因此 T8 当时“当前已安装原生 signer 匹配”仍 PENDING。**
+T9b 已从现装 APK 验证 signer，见顶部；T8 本次没有读设备。
 
 接管候选为 `.codex-tmp/t8/watchrss-takeover-v1000.apk`，121750780 bytes，
 SHA256 `41230a8fc081777bb9c6184ada42e3a3f57ff20a1ab7a90ef69f7c0d76f9bfb5`。
@@ -94,8 +147,9 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
    no_backup及迁移root计划），检查已有backup/journal/active与seal是否一致、无歧义。
    留存恢复候选和可用备份。Keystore不能当可导出的普通文件；不再落完整userdata tar。
    若正式sandbox无法安全核验，停止并报告，不能先安装再补证据。
-3. 核对并存 `.podjs` 和原生两份资料的权威/合并决定；本候选接管原生来源，不自动把
-   并存包资料覆盖进去。保护两者。确认release after摘要的授权验证入口已准备。
+3. 按 2026-10-08 用户决定，接管只用原生来源，丢弃 `.podjs` 测试数据，不从
+   该包迁移或合并任何资料。接管后 `.podjs` 是否卸载待用户另行确认，本清单不执行
+   卸载。确认 release after 摘要的授权验证入口已准备。
 4. 通过现有保护性升级入口执行同包覆盖；底层安装命令为
    `adb -s e3aca8af install -r .codex-tmp/t8/watchrss-takeover-v1000.apk`，
    不加 `-d`，不作为绕过验证的独立执行指令。当前 `acceptance.py upgrade`
@@ -110,7 +164,8 @@ runtime门控，当前T7规则要求release中缺席，不能直接放行。需�
    核对466×466尺寸/布局，以ROI/非RGB0/MAE证据判定；说明弹窗未经授权不点击。
    然后核对真实账号解密/登录、频道/正文/阅读进度/备忘录/设置/资源/手机同步；
    二启确认不重导、不覆盖新写。没观测到的项标PENDING。
-7. 若需要恢复：先停止业务写入，保留并核验当前PodJS代际和封存原生backup，明确
+7. 优先前向修 PodJS；仅在需要最后手段恢复时，先停止业务写入，保留并核验
+   当前 PodJS 代际和封存原生 backup，明确
    ACTIVE后新资料只归档、不自动合并。通过保护性安装流程覆盖
    `adb -s e3aca8af install -r .codex-tmp/t8/watchrss-native-recovery-v900000.apk`；
    启动 `com.lightningstudio.watchrss/.MainActivity`。恢复在providers前校验证书/备份、

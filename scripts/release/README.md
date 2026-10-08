@@ -34,8 +34,19 @@ APK 记录不匹配时拒绝。
 摘要路径和对应APK hash。该APK实际为debug本机候选，不声称与公开发行或现装APK
 相同。T2/T4通过 Application 的 attachBaseContext 恢复，无新增manifest组件，
 `RECOVERY_ADDED_COMPONENTS` 显式为空；以后任何新增须单独审阅并精确列出。
-基线包含的 LlmSummaryActivity、debug provider/perf activities 在恢复包中可保留。
-这项门禁比对组件身份，不比对 exported、intent-filter 或其他属性的等价性。
+T9b 为恢复渠道另外保留 `debugExternal` 检查；仅四个精确组件允许与现装 v40 的
+AXML 节点逐项相同：LlmSummaryActivity、debug.DebugLogProvider、
+debug.PerfLargeArticleActivity、debug.PerfLargeListActivity。完整属性与子节点必须
+相同，包括 exported、permission、enabled、theme、authority、intent-filter/action/category；
+不归一化 authority 或类名属性。其他 debug 组件即使在旧身份基线内也拒绝。
+
+四组件摘要在 `docs/release-baselines/native-installed-v40-debug-components.json`，
+来自 e3aca8af 只读拉取的现装 v40：APK SHA256
+`decf31983a9936262eb76c89987acf10d8ba49d15de747d2f6dd61be973a11b7`。
+台账 `native-observation` 将 APK、AXML、公有证书及摘要文件 SHA256 绑定；缺失、
+篡改或不匹配时 fail-closed。实际现装包 debuggable=true，不声称该基线是 release；
+恢复候选本身仍须非 debug。AXML 相等不证明 DEX runtime 门控、资源内容相等或
+正式接管设备验收。并存和接管渠道没有这些例外。重复组件身份拒绝。
 
 所有渠道均要求非 debug、APK 签名实际验证通过、当前和
 SDK30 公有 signer 均为期望的 Lightning Studio 单证书。v3/v3.1 lineage 若存在，
@@ -56,9 +67,9 @@ lineage 文件或 signing 配置。
 未知 hash/cert/sourceRev 记录为 null，不补造。日期表示证据登记日期；历史 source
 revision 未确认，尤其 P2 有并行构建源码漂移，不能从当时 HEAD 推定精确 APK 来源。
 
-**当前原生 `highestPublishedVerified=false`，正式接管和救援候选会失败。**
-发布负责人需要先核实全部渠道最高 code、原生已安装公有 signer、来源版本和恢复
-候选，再审阅更新 policy 与历史项。工具通过只表示列出的离线门槛通过；不代表数据
+**T9b：原生 `highestPublishedVerified=true`。** 用户 2026-10-08 确认全渠道最高
+就是本机 build 最高；Gradle 全部 git 历史最大40，现装 v40 APK 身份及公有 signer
+已只读核实，证据在台账 `highestPublishedEvidence`。工具通过只表示列出的离线门槛通过；不代表数据
 完整性、同 UID 加密账号可用、设备/功能验收或发布授权。真实升级继续遵守既有
 `acceptance.py upgrade` 与设备独占规则。
 

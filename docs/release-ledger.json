@@ -17,13 +17,35 @@
       },
       "com.lightningstudio.watchrss": {
         "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
-        "highestPublishedVerified": false,
-        "inventoryScope": "39源码基线 / 40设备观察和本机候选；全渠道最高值和原生公有证书匹配尚未核实",
+        "highestPublishedVerified": true,
+        "inventoryScope": "用户2026-10-08确认全渠道最高即本机build最高；原生Gradle全部git历史最大40；现装v40 APK证据见highestPublishedEvidence",
         "allowedLineages": [
           [
             "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
           ]
-        ]
+        ],
+        "highestPublishedEvidence": {
+          "confirmedOn": "2026-10-08",
+          "userConfirmation": "原生在所有发布渠道发过的最高 versionCode —— 就是本机build最高的",
+          "versionCode": 40,
+          "gradleHistory": {
+            "path": "Android_WatchRSS/app/build.gradle.kts",
+            "revisionsExamined": 58,
+            "maximumVersionCode": 40,
+            "maximumRevision": "6bb99ed4f5d197d44fbdc5be31e51143d19f62eb",
+            "evidence": ".codex-tmp/t9/native-gradle-history.json"
+          },
+          "installedApk": {
+            "appId": "com.lightningstudio.watchrss",
+            "versionCode": 40,
+            "versionName": "1.3.2-13",
+            "apkSha256": "decf31983a9936262eb76c89987acf10d8ba49d15de747d2f6dd61be973a11b7",
+            "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+            "axmlSha256": "4edee494056198ccf37e7fd06cafb7da2fdda38855f7b5b79128720f683cb199",
+            "debuggable": true,
+            "evidence": ".codex-tmp/t9/native-installed-v40-facts.json"
+          }
+        }
       }
     },
     "channels": {
@@ -180,11 +202,15 @@
         "app": null,
         "framework": null
       },
-      "apkSha256": null,
-      "cert": null,
-      "date": "2026-10-07",
-      "notes": "来源：设备观察/本机候选；docs/takeover-readiness.md T1、.codex-tmp/p2/previous-r1-report.md。安装40与本机40候选的公开APK hash/cert 尚未匹配；dirty源码不可作为发布修订。",
-      "status": "observed"
+      "apkSha256": "decf31983a9936262eb76c89987acf10d8ba49d15de747d2f6dd61be973a11b7",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-08",
+      "notes": "T9b: e3aca8af现装APK只读pm path/pull，真实appId/code40/1.3.2-13，公有当前及SDK30 signer与期望相同；debuggable=true，不冒充release APK。四个恢复例外组件完整AXML属性/子节点（含authority）与恢复候选逐项相同；不证明DEX runtime门控或同UID迁移验收。源码修订未知。",
+      "status": "observed",
+      "manifestDebugComponents": "docs/release-baselines/native-installed-v40-debug-components.json",
+      "manifestDebugComponentsSha256": "64d85eba9a1df056ec9081aeec0d1e1428e26cdc903c66fc22a2bddd2d9879a7",
+      "axmlSha256": "4edee494056198ccf37e7fd06cafb7da2fdda38855f7b5b79128720f683cb199",
+      "debuggable": true
     },
     {
       "package": "com.lightningstudio.watchrss.podjs",
