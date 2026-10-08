@@ -121,7 +121,9 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
   const menuWidth = () => Math.min(props.width - 36, Math.max(112, ...menuItems().map(item => { const font = item.preset ? presetContentFont(item.preset, "body") : contentFont(14, "body"); return getOps().measureText(item.name, font.fontSlot) * font.scale + (item.id === null ? 24 : 40); })));
   return <View class="absolute inset-0 bg-black">
     <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={26} gap={10} inputActive={() => props.active() && !download() && !menu()} ref={value => { scroller = value.scroller; props.ref({ ...value, goBack }); }} />
-    <Show when={menu()}>{selection => <View class="absolute inset-0" onPress={() => setMenu(undefined)}>
+    <Show when={menu()}>{selection => <View class="absolute inset-0">
+      {/* Taps resolve to the nearest focusable, so the dismiss scrim is a focusable sibling behind the menu. */}
+      <View class="absolute inset-0" focusable accessibilityRole="button" accessibilityLabel="关闭菜单" onPress={() => setMenu(undefined)}/>
       <View class="absolute left-[18] rounded-[4] bg-[#211f26] overflow-hidden" style={{ insetT: menuTop(selection().top), width: menuWidth(), height: menuHeight() }}>
         <ScrollEntries round={getDisplayMetrics().shape==='round'?{width:props.width,height:props.height,viewport:{x:18,y:menuTop(selection().top),width:menuWidth()}}:null} height={menuHeight()} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: "#211f26" }}>
           {item.preset
