@@ -185,6 +185,22 @@
       "date": "2026-10-07",
       "notes": "来源：设备观察/本机候选；docs/takeover-readiness.md T1、.codex-tmp/p2/previous-r1-report.md。安装40与本机40候选的公开APK hash/cert 尚未匹配；dirty源码不可作为发布修订。",
       "status": "observed"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 32,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": "31d66124193b876eaa3f954aed18e26b9210685c",
+        "framework": "2c0b2cd16eef363ee70aa066aaefe0e4ddfed7f7",
+        "pocketjs": "78b1c8629c31b2eca8642c8c03f481783042306f"
+      },
+      "apkSha256": "ebfb1359a31a3813ccc158f7925a0e7f40447130e28b762d35706810d602e0cc",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-07",
+      "notes": "P6 explicitly requested post-install record. Evidence: local OWW242 e3aca8af same-signature non-debug upgrade31 to32; preflight12/12 and first stable K8 home MAE0. No store/public distribution performed; installed-local evidence only. Tool fixes status=published; this label does not prove public publication. Exact APK provenance in .codex-tmp/p6/artifact-provenance.json; private digests unavailable; no equal=true claim. Regressions documented in wrss-perf-report.md.",
+      "status": "published"
     }
   ]
 }
