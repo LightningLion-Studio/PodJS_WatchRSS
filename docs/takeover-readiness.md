@@ -1,4 +1,129 @@
-# T1：原生包接管就绪审计
+# T8：正式接管候选与发布就绪清单
+
+2026-10-07，冻结 app `31d6612` / framework `2c0b2cd` / PocketJS
+`78b1c8629c31b2eca8642c8c03f481783042306f`；原生恢复树
+`podjs-recovery-40` 的 `8d65e148`。应用审阅分支为 `minor/takeover-candidate`。
+本节是当前状态；下面的 T1/T3 是历史证据，其中“未构建恢复包”“C15 尚无实现”
+等旧结论由本节替代。**候选准备不等于允许正式安装。** T8 不操作设备、不安装、
+不执行 `record`，不把发布策略中的未知事实改成已确认。**本轮结果PARTIAL：
+两个候选均已构建，接管门禁1项失败，恢复门禁2项失败，均不得安装/发布。**
+
+## T1–T8 状态与证据边界
+
+| 项目 | 已验证 | 仍 PENDING / 阻塞 |
+|---|---|---|
+| T1 / T1b：真实原生副本隔离迁移 | T1b 普通及 COPYING 中断均到 ACTIVE；独立 DB/store/file oracle、二启不重导、guest 出帧通过；原生153文件摘要不变，隔离包已回收。证据 `.codex-tmp/t1b/{ordinary-result,interrupt-result,final-safety-result}.json` | 原副本在隔离 UID 中不能验证真实 Keystore。普通首启247376ms、中断重启249447ms是当轮控制器观察值，不能作为本候选性能承诺。正式用户账号/真实数据量耗时、ANR、全部页面像素仍需验收 |
+| T2：原字节备份与恢复 | 源移到封存 backup，seal/manifest/ready 校验；恢复在 providers 前，PodJS 新数据归档；中断重试、二启保留新增数据有 JVM/进程测试。证据 `.codex-tmp/t2/summary.json` | 正式包的备份可读性与恢复入口尚未设备验收；不支持 PodJS 新写入反向合并 |
+| T3：接管 WorkManager | 同 nativeAppId 才打包旧 worker/name 配置；旧类 factory 在 ACTIVE 前等待，之后按精确身份取消，不删 workdb，不 cancelAll/prune；独立 receipt | 真实历史 WorkManager 数据及系统回收/后台唤醒顺序；本候选须核对打包配置实际出现 |
+| T4：恢复 WorkManager | 原生恢复固定2.11.2；providers 前旧路径迁移、仅撤销 WorkManager 系统 jobs、持久 receipt；562 JVM测试含12个新增调度/版本测试通过。证据 `.codex-tmp/t4-summary.json` | 物理历史2.10.1 schema23→2.11.2 schema24仍 PENDING；合成夹具同用2.11.2不能证明此项 |
+| T5：code40 基线 | 恢复树固定业务40/Room18，seed40/recovery900000及探针离线编译通过；共享 NativeBackup 与框架逐字节核对。证据 `.codex-tmp/t5-summary.json` | 固定源码不是所有原生渠道最高 code 已确认；旧 debug 隔离 APK 不作为正式候选 |
+| T6 / T6b / T6c：同 UID 合成链 | T6c round3 seed40→PodJS1000→recovery900000 保持 UID10243；Watch/Bili/Douyin三项合成凭据在迁移和恢复后解密；11探针，二启、业务/资源/旧WorkManager UUID、PodJS归档及native新note保留通过。证据 `.codex-tmp/t6c/summary.json` 和 `round3/device-results.jsonl` | 仅隔离 debug 包/合成账号证据；真实正式UID/证书/账号、LLM/TTS/cloud binding、联网登录和实际手机同步仍 PENDING |
+| 中断恢复 | T1b 验证 COPYING 中断；T6c round3 验证原生备份部分移动时 ACTIVATING 中断、ready/active缺席，新进程续同generation到ACTIVE；JVM逐持久化边界测试 | T6c round1/2的“恢复过程被中断”时机未证明，不能计为成功；native restore正在执行时的设备中断、物理断电仍 PENDING |
+| T7：离线发布门禁/台账 | 已有 `takeover-release` / `recovery` 策略，检查实际AXML、公有签名/SDK30 signer/lineage、release/debug、source/purge、打包WorkManager。台账跨渠道单调；接管1000..899999、恢复900000..999999 | `com.lightningstudio.watchrss.highestPublishedVerified=false`，全渠道最高版本未核实，两个渠道 fail-closed；不以本机code40观察替代 |
+| T8：正式两个候选 | 冻结包及逐项检查结果见下表和 `.codex-tmp/t8/` | 所有门禁通过、安装授权、保护性数据核验和设备验收完成前不能发布/安装；没有record |
+
+## 候选构建与公开证书
+
+应用候选只在独立 worktree 临时改 appId/code/signing 和冻结依赖路径，主线配置不变。
+完成后还原审阅分支的临时配置，精确输入另存 `pod.config.candidate.json`、
+`package.candidate.json` 和 `bun.candidate.lock`；不要把候选appId当并存主线默认配置合并。
+接管使用 CLI 隔离 SigningWorker，签名配置只保留原生 `keystoreProperties` 路径，
+不带并存包的 Android Debug→release lineage。`purgeBackupAfter` 在源码配置中省略，
+由 CLI 生成 manifest 明确值0；当前解析器不接受配置里显式0。保留公测备份。
+恢复只通过原生 `:app:assembleRelease` 内部读取 properties；不读取/打印内容或密码。
+
+| 候选 | appId / versionCode | 构建 / 检查结果 |
+|---|---|---|
+| 接管 | `com.lightningstudio.watchrss` / 1000 | release构建成功、非debug；source40/purge0/WorkManager配置/签名/无debug-external全部PASS，仅publicationInventory失败，见 `takeover-preflight.json` |
+| 原生恢复 | `com.lightningstudio.watchrss` / 900000 | release构建成功，非debug，实际签名/SDK30 signer通过；preflight FAIL：publicationInventory、debugExternal，见 `recovery-preflight.json` |
+
+已有本机原生 APK `Android_WatchRSS/app/build/outputs/apk/debug/app-debug.apk` 的实际身份
+为原生code40/1.3.2-13，SHA256
+`1d915427e2dce75a62fd71b229e476969ecd655176e6b32ff2e216e2f622895a`，
+与R1历史构建证据一致；本次离线apksig验证的当前/SDK30公有证书均为
+`f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`。
+证据 `native-existing-apk.json`。台账期望指纹相同。**该文件与现装原生APK逐字节一致
+尚无可追溯证明，因此“当前已安装原生 signer 匹配”仍 PENDING。** 本次没有读设备。
+
+接管候选为 `.codex-tmp/t8/watchrss-takeover-v1000.apk`，121750780 bytes，
+SHA256 `41230a8fc081777bb9c6184ada42e3a3f57ff20a1ab7a90ef69f7c0d76f9bfb5`。
+实际签名、SDK30 signer均与已有原生code40公有证书相等，无lineage；WorkManager配置
+与台账旧worker/name精确相等；hostAbi3、viewport240×240、两AndroidABI齐全。
+`main.js/main.pak/main.qbc/pod.manifest.json`与冻结dist逐字节一致，构建源码审计无漂移
+（期间唯一文档变更为本文件），见 `artifact-provenance.json`、`source-after-build.json`。
+
+恢复候选为 `.codex-tmp/t8/watchrss-native-recovery-v900000.apk`，25277224 bytes，
+SHA256 `a9747852a71ea5919b8dd7df271afdb58a195bd033409152c6835cc034cf9127`。
+第二个失败项来自固定原生main manifest：`LlmSummaryActivity`、`debug.DebugLogProvider`、
+`debug.PerfLargeArticleActivity`、`debug.PerfLargeListActivity`。即使这些组件未导出或
+runtime门控，当前T7规则要求release中缺席，不能直接放行。需要lead审查原生release
+清单的修正或有证据的策略决定；本轮不改指定原生8d65e148、不削弱检查。
+
+本轮离线验证：应用 `bun run test` **1313 pass / 0 fail**；应用typecheck PASS；
+冻结框架全套 `bun run test` / typecheck PASS（Rust105 pass、4 optional ignored）；
+离线门禁单测32 PASS；mandatory主CLI build和冻结CLI release package均PASS；
+原生 `:app:assembleRelease` PASS。首轮生成样式缺失导致的应用测试失败已在构建生成
+样式后消除；框架本地假服务测试首次request-count瞬态失败，完整复跑PASS。
+未为失败修改测试或产品源码。设备验证本轮PENDING，T6c历史证据不扩大为候选验收。
+门禁另以冻结worktree的台账重跑，结果相同，见 `*-preflight-frozen.json`；台账SHA256
+为 `b91be7189d5d90e5fc2a10f675d5d744d0e8d8a2cec2c2745bd7e0d2e5a1974c`，
+本轮没有修改它。期间其他任务在主线台账追加并存v32，本轮未改写或回退；原生policy
+和版本上界不受该条目影响。
+
+## 其他发布前门槛
+
+| 项目 | 当前状态 |
+|---|---|
+| C15 / debug-only | 已有debug alias、故障/上下文广播、provider桥、host及guest debug gate，见[debug-parity.md](debug-parity.md)。接管release须证明manifest/DEX无外部桥；真实debug冷/热启动、广播、dump行为及native诊断字段完整性仍PENDING，未提供的RAM/DouyinPreviewDL等保持unavailable |
+| C16 / C17 | 独立总结controller/route、TTS数据能力已有；lead布局及设备/backend/audio验收按debug-parity待办，不沿用T1“没有任何实现”的旧描述 |
+| 手机/同步、文件/字体/媒体、通知/后台 | Host及迁移离线测试已有；实际手机双端、断连/ACK、大正文、真实资源加载/播放、权限和系统后台仍 PENDING |
+| 全渠道版本/证书 | 发布负责人提供原生全部发行渠道最高code证据，并核对现装原生公开APK signer；更新台账policy须有证据。1000与900000是候选，不是已发布记录 |
+| 同UID用户数据保护 | 当前 `acceptance.py upgrade` 会在安装前后用run-as读取摘要；release非debug可能拒绝after读取。必须先准备可审计的保护性摘要/备份验证方案，失败不能宣布equal=true，也不能用安装成功替代 |
+| 回滚能力 | 恢复包还原封存原生基线、归档PodJS新增数据；不自动反向合并。ACTIVE后不能承诺所有新增资料在原生可见。恢复900000后不能重新安装1000；下一轮接管起1001000并仍需高于全部历史 |
+
+## 正式安装清单（仅供审阅，本轮未执行）
+
+以下步骤只由lead取得最终用户确认、授予 `DEVICE_OWNER` 后执行。任一门禁未知或
+失败即停止；不能通过卸载、clear、降级参数、手改journal或备份标记绕过。
+
+1. 固定两个APK SHA256和来源；分别跑 `scripts/release/preflight.py check`
+   的 `takeover-release`、`recovery`，必须全部PASS。核对原生实际appId/code/公开signer/
+   UID，确认code40对应受支持Room18及store版本、用户解锁、空间足够（迁移副本、
+   原字节备份、恢复stage和PodJS归档均需预留）；审核全部渠道版本上界。
+2. 安装前按保护性验证方案获取原生源的digest JSON（至少databases/files/shared_prefs/
+   no_backup及迁移root计划），检查已有backup/journal/active与seal是否一致、无歧义。
+   留存恢复候选和可用备份。Keystore不能当可导出的普通文件；不再落完整userdata tar。
+   若正式sandbox无法安全核验，停止并报告，不能先安装再补证据。
+3. 核对并存 `.podjs` 和原生两份资料的权威/合并决定；本候选接管原生来源，不自动把
+   并存包资料覆盖进去。保护两者。确认release after摘要的授权验证入口已准备。
+4. 通过现有保护性升级入口执行同包覆盖；底层安装命令为
+   `adb -s e3aca8af install -r .codex-tmp/t8/watchrss-takeover-v1000.apk`，
+   不加 `-d`，不作为绕过验证的独立执行指令。当前 `acceptance.py upgrade`
+   在非debug after拒绝run-as时不能完成保护证明，必须先解决该门槛。安装后在首启前
+   核对UID和迁移前源digest；禁止把未运行迁移时的文件一致性当迁移验收。
+5. 首启 `com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity`，
+   观察DETECTED→SNAPSHOTTED→COPYING→VERIFYING→READY→ACTIVATING→ACTIVE，
+   PAUSED/BLOCKED保留源/候选并记录固定reason；记录真实耗时、主线程/ANR、generation。
+   ACTIVE核验封存backup manifest/seal/ready逐root摘要、sourceVersion40、公有cert、
+   active指针与receipt同代际、purge=0、旧WorkManager已取消且PodJS工作不被误取消。
+6. 第一张Home截图与 `.codex-tmp/device/shots/s4-k8-home-after-cold.png`
+   核对466×466尺寸/布局，以ROI/非RGB0/MAE证据判定；说明弹窗未经授权不点击。
+   然后核对真实账号解密/登录、频道/正文/阅读进度/备忘录/设置/资源/手机同步；
+   二启确认不重导、不覆盖新写。没观测到的项标PENDING。
+7. 若需要恢复：先停止业务写入，保留并核验当前PodJS代际和封存原生backup，明确
+   ACTIVE后新资料只归档、不自动合并。通过保护性安装流程覆盖
+   `adb -s e3aca8af install -r .codex-tmp/t8/watchrss-native-recovery-v900000.apk`；
+   启动 `com.lightningstudio.watchrss/.MainActivity`。恢复在providers前校验证书/备份、
+   原字节还原及撤销旧系统WorkManager jobs；遇 `podjs_recovery_pending`停止、保留数据，
+   不清空重试。校验completion/backup seal、PodJS归档、原生业务/资源/账号/WorkManager，
+   二启不再恢复且保留恢复后新增资料。普通upgrade digest针对PodJS DB，不能直接当native
+   恢复摘要；需要对应的原生root/oracle验证方案。
+8. 实际发布成功后才 `record` 精确APK/日期/源码/渠道；只安装本机候选不能宣称公网发布。
+   公测未批准清理，保持purge=0和原生backup。结束由设备负责人回Home并释放owner。
+
+---
+
+# 历史 T1：原生包接管就绪审计
 
 > T7（2026-10-07）：新增[离线发布门禁](../scripts/release/README.md)及
 > [结构化台账](release-ledger.json)。检查实际 APK 的身份/版本、release 标志、公开
