@@ -292,6 +292,22 @@
       "date": "2026-10-08",
       "notes": "P9 installed-local OWW242 v34->v35 same-signer nondebug upgrade; no public distribution; no strict private digest/equal=true; device regression and two UI acceptances recorded separately.",
       "status": "published"
+    },
+    {
+      "package": "com.lightningstudio.watchrss.podjs",
+      "channel": "coexistence",
+      "versionCode": 36,
+      "versionName": "0.1.0",
+      "sourceRevs": {
+        "app": "e2e6bf582e735339b3695faf5084122ff090a0e3",
+        "framework": "ecc8d3ebcbc80adb24c5da5a7bbf6ee94b0264fc",
+        "pocketjs": "78b1c8629c31b2eca8642c8c03f481783042306f"
+      },
+      "apkSha256": "6e127245fb1c202d3897c9b29e0f2acc92b4c8bb1b6e01761538027acbac5c8a",
+      "cert": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
+      "date": "2026-10-08",
+      "notes": "P10 installed-local OWW242 v35->v36 same-signer nondebug upgrade; no public distribution; no strict private digest/equal=true; three device acceptances and regression separately recorded.",
+      "status": "published"
     }
   ]
 }
