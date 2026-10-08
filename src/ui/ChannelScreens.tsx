@@ -5,16 +5,16 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
+import { chunkLines } from "./round-rows.tsx";
 import { WatchSwitch } from "./AutoScrollSettingsScreen.tsx";
 import { measuredLines, watchTitleLines } from "../reader/measured-text.ts";
 import type { Channel } from "./service.ts";
 
 type Base = {width:number;height:number;channel:Channel;busy:boolean;ref?:(handle:{scroller:Scroller})=>void};
 const measure=(text:string)=>getOps().measureText(text,20);
-const textEntry=(text:string,width:number):ScrollEntry=>{
-  const lines=measuredLines(text,width,measure,100);
-  return {height:lines.length*14,render:()=> <Text class="absolute inset-0 text-[11px] leading-[14] text-center text-[#b6b6b6]">{lines.join("\n")}</Text>};
-};
+// Long intros/URLs become several rows so every line can scroll fully into view on a round screen.
+const textEntry=(text:string,width:number):ScrollEntry[]=>chunkLines(measuredLines(text,width,measure,100),14,width).map(lines=>
+  ({height:lines.length*14,render:()=> <Text class="absolute inset-0 text-[11px] leading-[14] text-center text-[#b6b6b6]">{lines.join("\n")}</Text>}));
 function button(label:string,width:number,action:()=>void,enabled=true,danger=false):ScrollEntry {
   return {height:48,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} class="absolute top-[0] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center" style={{width:Math.min(160,width),insetL:Math.max(0,(width-160)/2)}}><Text class={danger?"text-[17px] leading-[23] text-[#ff5252]":enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#939393]"}>{label}</Text></View>};
 }
@@ -26,7 +26,7 @@ export function ChannelDetailScreen(props:Base&{onSettings:()=>void;onSearch:()=
     const updated=date?`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")} ${String(date.getHours()).padStart(2,"0")}:${String(date.getMinutes()).padStart(2,"0")}`:"未更新";
     return [
       {height:title.length*26,render:()=> <Text class="absolute inset-0 text-[21px] leading-[26] text-center text-[#f5f5f5]">{title.join("\n")}</Text>},
-      textEntry(c.description??"暂无简介",width),textEntry(c.url,width),textEntry(`更新: ${updated}`,width),textEntry(`未读 ${c.unreadCount??0}`,width),
+      ...textEntry(c.description??"暂无简介",width),...textEntry(c.url,width),...textEntry(`更新: ${updated}`,width),...textEntry(`未读 ${c.unreadCount??0}`,width),
       button("设置",width,props.onSettings,!props.busy),button("搜索",width,props.onSearch,!props.busy),button("分享",width,props.onShare,!props.busy),button("标记已读",width,props.onMarkRead,!props.busy&&(c.unreadCount??0)>0)
     ];
   });

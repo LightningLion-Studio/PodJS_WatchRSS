@@ -5,6 +5,7 @@ import type {Scroller} from '@pocketjs/framework/kinetics';
 import {rfcomm} from '@podjs/framework/services';
 import {BluetoothConnectionController,type BluetoothConnectionOptions,type BluetoothConnectionPorts,type BluetoothConnectionState} from './bluetooth-connection.ts';
 import {PHONE_PAGE,phonePageText,type PhoneTextKind} from './phone-connection-layout.ts';
+import {chunkLines} from './round-rows.tsx';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
 import {WatchProgressIndicator} from './WatchProgressIndicator.tsx';
 
@@ -23,9 +24,10 @@ export function BluetoothConnectionScreen(props:BluetoothConnectionScreenProps){
  createEffect(()=>controller.setActive(props.active()));
  onCleanup(()=>controller.dispose());
  const measure=(text:string,slot:number)=>getOps().measureText(text,slot);
- const textRow=(text:string,kind:PhoneTextKind):ScrollEntry=>{
+ // Long explanations become several rows so each part can scroll fully into view on a round screen.
+ const textRow=(text:string,kind:PhoneTextKind):ScrollEntry[]=>{
   const line=phonePageText(text,kind,props.width-36,measure);
-  return {height:line.height,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:line.color}}>{line.text}</Text>};
+  return chunkLines(line.text.split('\n'),line.lineHeight,props.width-36).map(lines=>({height:lines.length*line.lineHeight,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:line.color}}>{lines.join('\n')}</Text>}));
  };
  const button=(label:string,press:()=>void):ScrollEntry=>({height:PHONE_PAGE.touchHeight,render:()=>{
   const width=Math.min(props.width-36,Math.max(58,measure(label,1)+48));
@@ -34,11 +36,11 @@ export function BluetoothConnectionScreen(props:BluetoothConnectionScreenProps){
   </View>;
  }});
  const entries=createMemo<ScrollEntry[]>(()=>{
-  const current=state(),rows=[textRow('蓝牙同步','title')];
-  if(props.abilityLabel?.trim())rows.push(textRow(`当前操作：${props.abilityLabel}`,'small'));
+  const current=state(),rows:ScrollEntry[]=[...textRow('蓝牙同步','title')];
+  if(props.abilityLabel?.trim())rows.push(...textRow(`当前操作：${props.abilityLabel}`,'small'));
   if(current.busy)rows.push({height:40,render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel="等待手机蓝牙连接"/></View>});
-  rows.push(textRow(current.status,'body'));
-  if(current.detail!==null)rows.push(textRow(current.detail,'small'));
+  rows.push(...textRow(current.status,'body'));
+  if(current.detail!==null)rows.push(...textRow(current.detail,'small'));
   if(!current.busy)rows.push(button('重新等待',()=>{void controller.retry();}),button('关闭',props.onDismiss));
   return rows;
  });

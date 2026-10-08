@@ -5,7 +5,7 @@ import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,me
 import {DebugGate} from '../src/debug/gate.ts';
 import type {RouteEntry} from '../src/ui/routes/types.ts';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'debug-tools-solid',setup(builder){builder.onLoad({filter:/\/ui\/DebugToolsScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'debug-tools-solid',setup(builder){builder.onLoad({filter:/\/ui\/(DebugToolsScreen|round-rows)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 let gate=new DebugGate(),calls:string[]=[],life:(state:string)=>void=()=>{};
@@ -13,7 +13,7 @@ mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return gate.al
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p)}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(s:string)=>s.length*7})}));
-mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set:()=>{calls.push('write');}},onLifecycleChange:(fn:typeof life)=>{life=fn;return ()=>{};}}));
+mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'rect',safeInsets:{top:0,right:0,bottom:0,left:0}}),kv:{get:()=>undefined,set:()=>{calls.push('write');}},onLifecycleChange:(fn:typeof life)=>{life=fn;return ()=>{};}}));
 mock.module('@podjs/framework/services',()=>({debugPerformance:{start:async(scenario:string)=>{calls.push(scenario);return {sessionId:7};},stop:async(id:number)=>{calls.push(`stop:${id}`);return {scenario:'test',source:'native',frames:1,jank:0,jankPct:0,avgMs:1,maxMs:1,drop:0,lastFrame:{}};}}}));
 mock.module('../src/tts/config-store.ts',()=>({TtsConfigStore:class{constructor(){calls.push('tts-store');}}}));
 mock.module('../src/debug/tts.ts',()=>({DebugTts:class{},debugTtsEngines:{local:'本地 TTS'}}));

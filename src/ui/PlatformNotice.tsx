@@ -28,7 +28,8 @@ function stack(start:number,gap:number,blocks:string[][],lineHeight:number) {
 export function platformNoticeEntry(width:number,notice:Copy):ScrollEntry {
  const inner=width-20,title=wrap(notice.title,inner,LABEL_SLOT),body=notice.paragraphs.map(text=>wrap(text,inner,SMALL_SLOT));
  const {tops,bottom}=stack(6+title.length*11+2,2,body,14);
- return {height:bottom+6,render:()=> <View class="absolute inset-0 rounded-[12]" style={{bgColor:NOTICE_BG}} accessibilityLabel={[notice.title,...notice.paragraphs].join('，')}>
+ // Visible content is the text; the rounded backdrop may meet the circle edge without hiding anything.
+ return {height:bottom+6,bounds:{x:10,y:6,width:inner,height:bottom-6},render:()=> <View class="absolute inset-0 rounded-[12]" style={{bgColor:NOTICE_BG}} accessibilityLabel={[notice.title,...notice.paragraphs].join('，')}>
   <Text class="absolute left-[10] right-[10] top-[6] text-[9px] font-bold leading-[11] text-center" style={{textColor:ON_SURFACE}}>{title.join('\n')}</Text>
   <For each={body}>{(lines,i)=> <Text class="absolute left-[10] right-[10] text-xs leading-[14] text-center" style={{insetT:tops[i()],textColor:MUTED}}>{lines.join('\n')}</Text>}</For>
  </View>};
@@ -38,7 +39,7 @@ export function platformNoticeEntry(width:number,notice:Copy):ScrollEntry {
 export function platformCardEntry(width:number,card:Copy):ScrollEntry {
  const inner=width-20,body=card.paragraphs.map(text=>wrap(text,inner,LABEL_BODY_SLOT));
  const {tops,bottom}=stack(8+17+3,3,body,11);
- return {height:bottom+8,render:()=> <View class="absolute inset-0 rounded-[12]" style={{bgColor:CARD_BG}} accessibilityLabel={[card.title,...card.paragraphs].join('，')}>
+ return {height:bottom+8,bounds:{x:10,y:8,width:inner,height:bottom-8},render:()=> <View class="absolute inset-0 rounded-[12]" style={{bgColor:CARD_BG}} accessibilityLabel={[card.title,...card.paragraphs].join('，')}>
   <Text class="absolute left-[10] right-[10] top-[8] text-sm font-bold leading-[17]" style={{textColor:ON_SURFACE}}>{card.title}</Text>
   <For each={body}>{(lines,i)=> <Text class="absolute left-[10] right-[10] text-[9px] leading-[11]" style={{insetT:tops[i()],textColor:MUTED}}>{lines.join('\n')}</Text>}</For>
  </View>};

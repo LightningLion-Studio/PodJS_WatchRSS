@@ -40,7 +40,7 @@ export function PlatformSettingsScreen(props: PlatformSettingsProps) {
     const prompt = measuredLines("下载手机端app以在手机上编辑和同步内容", width - 36 - 20, measure17, 2).join("\n");
     return [
       { height: 32, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[26] text-center text-[#f5f5f5]">设置</Text> },
-      { height: 14, render: () => <Text class="absolute left-[0] right-[0] top-[-1.5] text-xs leading-[14] text-center text-[#b6b6b6]">{loggedIn === undefined ? "" : loggedIn ? "已登录" : "未登录"}</Text> },
+      { height: 14, bounds: { x: 0, y: -1.5, width: props.width - 36, height: 14 }, render: () => <Text class="absolute left-[0] right-[0] top-[-1.5] text-xs leading-[14] text-center text-[#b6b6b6]">{loggedIn === undefined ? "" : loggedIn ? "已登录" : "未登录"}</Text> },
       ...(props.showOriginalContent
         ? [spacerEntry(7.5), switchRow("原文阅读模式", props.originalContentEnabled, props.onToggleOriginal),
            { height: 18, render: () => <Text class="absolute left-[10] right-[0] top-[4] text-xs leading-[14] text-[#b6b6b6]">刷新时抓取原文正文与图片</Text> }, spacerEntry(8)]

@@ -8,6 +8,7 @@ import {abilities,type Ability,type AcousticMode} from '../phoneconnection/proto
 import type {AcousticState} from '../phoneconnection/session.ts';
 import {debugGate} from '../debug/host.ts';
 import {PHONE_PAGE,phonePageText,type PhoneTextKind} from './phone-connection-layout.ts';
+import {chunkLines} from './round-rows.tsx';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
 import {WatchProgressIndicator} from './WatchProgressIndicator.tsx';
 import type {RouteEntry} from './routes/types.ts';
@@ -39,9 +40,10 @@ export function AcousticConnectionScreen(props:{width:number;height:number;activ
 
  const inner=()=>props.width-PHONE_PAGE.padding*2;
  const measure=(text:string,slot:number)=>getOps().measureText(text,slot);
- const textRow=(text:string,kind:PhoneTextKind):ScrollEntry=>{
+ // Long explanations become several rows so each part can scroll fully into view on a round screen.
+ const textRow=(text:string,kind:PhoneTextKind):ScrollEntry[]=>{
   const line=phonePageText(text,kind,inner(),measure);
-  return {height:line.height,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:line.color}}>{line.text}</Text>};
+  return chunkLines(line.text.split('\n'),line.lineHeight,inner()).map(lines=>({height:lines.length*line.lineHeight,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:line.color}}>{lines.join('\n')}</Text>}));
  };
  const button=(label:string,press:()=>void,primary:boolean):ScrollEntry=>({height:PHONE_PAGE.touchHeight,render:()=>{
   const width=Math.min(inner(),Math.max(58,measure(label,1)+48));
@@ -59,15 +61,15 @@ export function AcousticConnectionScreen(props:{width:number;height:number;activ
  }});
  const abilityKeys=Object.keys(abilities) as Ability[];
  const entries=createMemo<ScrollEntry[]>(()=>{
-  const current=state(),rows=[textRow(MODE_TITLE[mode()],'title'),textRow(`当前操作：${abilities[ability()].displayName}`,'small')];
+  const current=state(),rows:ScrollEntry[]=[...textRow(MODE_TITLE[mode()],'title'),...textRow(`当前操作：${abilities[ability()].displayName}`,'small')];
   if(current.busy)rows.push({height:PHONE_PAGE.progressSize,render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={PHONE_PAGE.progressSize} strokeWidth={PHONE_PAGE.progressStroke} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={current.message}/></View>});
-  rows.push(textRow(current.message,'body'));
-  if(current.detail?.trim())rows.push(textRow(current.detail,'small'));
-  if(current.durationMs)rows.push(textRow(`预计耗时 ${formatDuration(current.durationMs)}`,'small'));
+  rows.push(...textRow(current.message,'body'));
+  if(current.detail?.trim())rows.push(...textRow(current.detail,'small'));
+  if(current.durationMs)rows.push(...textRow(`预计耗时 ${formatDuration(current.durationMs)}`,'small'));
   if(current.busy)rows.push(button('停止',()=>{void session.cancel();},false));
   else if(current.canStart)rows.push(button(primaryLabel(mode(),ability()),()=>{void session.start();},true));
   if(!current.busy){
-   rows.push(textRow('调试选项','small'));
+   rows.push(...textRow('调试选项','small'));
    rows.push(pill('连接方式',MODE_TITLE[mode()],()=>{setMode(mode()==='PURE_SOUND'?'SOUND_GUIDED_WIFI':'PURE_SOUND');choose();}));
    rows.push(pill('操作',abilities[ability()].displayName,()=>{setAbility(abilityKeys[(abilityKeys.indexOf(ability())+1)%abilityKeys.length]);choose();}));
    rows.push(pill('引导 payload','Base64',()=>{void props.services.input('引导 payload Base64','').then(value=>{if(!alive||!props.active()||value===null)return;try{void session.debugGuidedPayload(base64ToBytes(value));}catch(error){setState({phase:'error',message:String(error),busy:false,canStart:true});}}).catch(error=>{if(alive)setState({phase:'error',message:String(error),busy:false,canStart:true});});}));

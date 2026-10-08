@@ -21,6 +21,7 @@ import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStat
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import { platformCardEntry, WithPlatformNotice } from "../PlatformNotice.tsx";
 import { platformScope } from "../../announcement/platform.ts";
+import { cardSlices, chunkLines } from "../round-rows.tsx";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
 import { MediaReaderDetail } from "../MediaReaderDetail.tsx";
 import { readerChrome } from "../../reader/chrome.ts";
@@ -104,17 +105,22 @@ function header(title: string, subtitle?: string): ScrollEntry {
 function button(label: string, onPress?: () => void, danger = false): ScrollEntry {
   return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[24] bg-[#2a2a2a] items-center justify-center"><Show when={danger} fallback={<Text class="text-base leading-[20] text-[#f5f5f5]">{label}</Text>}><Text class="text-base leading-[20] text-[#ff5a5f]">{label}</Text></Show></View> };
 }
-function statusCard(title: string, detail: string): ScrollEntry {
-  const wrapped = lines(detail, 165, 12);
-  return { height: 45 + wrapped.length * 14, render: () => <View class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{title}</Text><Text class="absolute left-[12] right-[12] top-[33] text-xs leading-[14] text-[#b6b6b6]">{wrapped.join("\n")}</Text></View> };
+function statusCard(title: string, detail: string): ScrollEntry[] {
+  const wrapped = lines(detail, 165, 12), box = { x: 12, width: 173 };
+  const titleRow = (rest: string[]) => ({ height: 45 + rest.length * 14, bounds: { ...box, y: 9, height: 24 + rest.length * 14 }, render: () => <>
+    <Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{title}</Text><Text class="absolute left-[12] right-[12] top-[33] text-xs leading-[14] text-[#b6b6b6]">{rest.join("\n")}</Text></> });
+  // Long details continue as further slices of the same card so every line can scroll into view.
+  const [first, ...more] = chunkLines(wrapped, 14, box.width, 24);
+  return cardSlices([titleRow(first), ...more.map(chunk => ({ height: chunk.length * 14 + 12, bounds: { ...box, y: 0, height: chunk.length * 14 }, render: () =>
+    <Text class="absolute left-[12] right-[12] top-[0] text-xs leading-[14] text-[#b6b6b6]">{chunk.join("\n")}</Text> }))], 8, "#1c1f21", 16);
 }
 
 function ChannelInfoScreen(props: DouyinScreenProps) {
   const [loggedIn,setLoggedIn]=createSignal(false);
   createEffect(()=>{void props.client.isLoggedIn().then(setLoggedIn);});
   const entries=createMemo<ScrollEntry[]>(()=>[
-    header("腕上RSS · 抖音频道"),statusCard("频道说明",loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
-    statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),platformCardEntry(props.width-36,platformScope),
+    header("腕上RSS · 抖音频道"),...statusCard("频道说明",loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
+    ...statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),platformCardEntry(props.width-36,platformScope),
     ...(!loggedIn()?[button("登录",()=>props.onNavigate({name:"login"}))]:[]),
     button("设置",()=>props.onNavigate({name:"settings"})),button("播放历史",()=>props.onNavigate({name:"history"})),button("返回",props.onBack)
   ]);
@@ -188,7 +194,7 @@ function LoginScreen(props: DouyinScreenProps) {
     finally { if (!disposed) setBusy(false); }
   };
   const detail = () => lines(message(), props.width - 60, 12);
-  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
+  const entries = createMemo<ScrollEntry[]>(() => gate() ? [header("登录抖音"), ...statusCard(gate()!.title,gate()!.detail),button("返回",props.onBack)] : [header("登录抖音", "扫码登录或输入 Cookie"), { height: 102, render: () => <View onPress={busy() ? undefined : () => void openLogin()} focusable={!busy()} class="absolute inset-0 rounded-[16] bg-[#1c1f21] items-center justify-center"><Show when={qrImage()} fallback={<View class="absolute inset-0 items-center justify-center"><View class="w-[54] h-[38] rounded-[19] bg-[#2a2a2a] items-center justify-center"><Text class="text-xs leading-[14] text-[#f5f5f5]">网页登录</Text></View><Text class="absolute left-[12] right-[12] bottom-[8] text-center text-[11px] leading-[14] text-[#f5f5f5]">打开抖音官方登录页</Text></View>}><Image src={qrImage()!} class="w-[88] h-[88] rounded-[8]" /></Show></View> }, { height: Math.max(42, detail().length * 14 + 12), render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#b6b6b6]">{detail().join("\n")}</Text> }, button(busy() ? "验证中..." : "输入 Cookie", busy() ? undefined : () => void inputCookie()), button("返回", props.onBack)]);
   return <Show when={!gate() && statusMode() && authStatus().qr} fallback={<ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />}>
     <View class="absolute inset-0 bg-black items-center justify-center">
       <Text class="absolute top-[16] text-sm text-white">请使用手机扫码</Text>
@@ -312,7 +318,7 @@ function HistoryScreen(props: DouyinScreenProps) {
   const refresh = async () => { try { setHistory(await props.client.listHistory()); } catch (e) { setError(String(e)); } };
   const openDetail = detailNavigation(props, refresh);
   createEffect(() => { if (props.route.name === "history") void refresh(); });
-  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
+  const entries = createMemo<ScrollEntry[]>(() => [header("播放历史", "保存在本地，记录最近播放内容"), ...(history().length ? [button("清空历史", async () => { await props.client.clearHistory(); await refresh(); })] : []), ...history().map(entry => { const item = entry.item, titleLines = lines(itemTitle(item), props.width - 60, 16).slice(0, 1), summaryLines = lines(`${item.authorName || "未知作者"} · ${new Date(entry.watchedAtMillis).toLocaleString()}`, props.width - 60, 12).slice(0, 2); return { height: 64, render: () => <View onPress={() => void openDetail(item).catch(error => setError(String(error)))} focusable class="absolute inset-0 rounded-[16] bg-[#1c1f21]"><Text class="absolute left-[12] right-[12] top-[9] text-base leading-[20] text-[#f5f5f5]">{titleLines.join("\n")}</Text><Text class="absolute left-[12] right-[12] top-[35] text-xs leading-[14] text-[#b6b6b6]">{summaryLines.join("\n")}</Text></View> }; }), ...(!history().length ? [...statusCard(error() ? "读取失败" : "暂无播放历史", error() || "播放过的视频会显示在这里")] : [])]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 
@@ -326,7 +332,7 @@ function ActionsScreen(props: DouyinScreenProps & { awemeId: string }) {
   onMount(() => void controller.load());
   onCleanup(() => controller.dispose());
   const toggle = (kind: "favorite" | "watchLater") => controller.toggle(kind);
-  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr);else qr();}), ...(message() ? [statusCard("状态", message())] : []), button("取消", props.onBack)]);
+  const entries = createMemo<ScrollEntry[]>(() => [button(favorite() ? "取消收藏" : "收藏", item() ? () => void toggle("favorite") : undefined), button(watchLater() ? "取消稍后再看" : "稍后再看", item() ? () => void toggle("watchLater") : undefined), button("分享", () => {const qr=()=>props.onNavigate({name:"share",awemeId:props.awemeId,item:item()});if(props.onShare)props.onShare({origin:"detail",title:wireFields.trim(item()?.description??"")||"抖音视频",link:douyinShareLink(props.awemeId)},qr);else qr();}), ...(message() ? [...statusCard("状态", message())] : []), button("取消", props.onBack)]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} padding={22} ref={props.ref} />;
 }
 
@@ -353,7 +359,7 @@ function SettingsScreen(props: DouyinScreenProps) {
 function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {
   const playing = () => props.playbackState?.playing ?? true;
   const time = () => { const p = Math.floor((props.playbackState?.positionMs || 0) / 1000), d = Math.floor((props.playbackState?.durationMs || 0) / 1000); return `${Math.floor(p / 60)}:${String(p % 60).padStart(2, "0")} / ${Math.floor(d / 60)}:${String(d % 60).padStart(2, "0")}`; };
-  const entries = createMemo<ScrollEntry[]>(() => [header("正在播放", time()), statusCard("视频画面", "视频由宿主原生媒体表面显示"), button(playing() ? "暂停" : "继续播放", () => props.onPlaybackCommand?.("toggle")), button("重播", () => props.onPlaybackCommand?.("replay")), button("上一个", () => props.onPlaybackCommand?.("previous")), button("下一个", () => props.onPlaybackCommand?.("next")), button("视频操作", () => props.onNavigate({ name: "actions", awemeId: props.awemeId }))]);
+  const entries = createMemo<ScrollEntry[]>(() => [header("正在播放", time()), ...statusCard("视频画面", "视频由宿主原生媒体表面显示"), button(playing() ? "暂停" : "继续播放", () => props.onPlaybackCommand?.("toggle")), button("重播", () => props.onPlaybackCommand?.("replay")), button("上一个", () => props.onPlaybackCommand?.("previous")), button("下一个", () => props.onPlaybackCommand?.("next")), button("视频操作", () => props.onNavigate({ name: "actions", awemeId: props.awemeId }))]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref} />;
 }
 

@@ -5,12 +5,13 @@ import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,me
 import type {ApplicationSyncEvent} from '../src/sync/application-foreground.ts';
 import type {ScrollEntry} from '../src/ui/ScrollEntries.tsx';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'phone-pages-solid',setup(builder){builder.onLoad({filter:/\/(BluetoothConnectionScreen|PhoneConnectionUnavailableScreen)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'phone-pages-solid',setup(builder){builder.onLoad({filter:/\/(BluetoothConnectionScreen|PhoneConnectionUnavailableScreen|round-rows)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>{const rendered=Object.create(props);Object.defineProperty(rendered,'children',{value:props.children,enumerable:true});return {kind,props:rendered};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(props:Node['props'])=>element('View',props),Text:(props:Node['props'])=>element('Text',props)}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string,slot:number)=>Array.from(text).length*(slot===23?21:slot===1?14:12)})}));
+mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'rect',safeInsets:{top:0,right:0,bottom:0,left:0}})}));
 mock.module('@podjs/framework/services',()=>({rfcomm:{status:async()=>({available:true,enabled:true,permission:'granted'}),requestPermission:()=>({result:Promise.resolve('granted')})}}));
 mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(props:Node['props'])=>{const children=createMemo(()=>props.entries.map((entry:ScrollEntry)=>entry.render()));return element('ScrollEntries',{...props,get entries(){return props.entries;},children});}}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(props:Node['props'])=>element('Progress',props)}));

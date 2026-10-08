@@ -8,6 +8,7 @@ import { activeReaderPreset, availableReaderPresets, type ReaderPresetState, typ
 import { formatScheduleMinutes, sunTimes, type ReaderThemeSchedule } from "../reader/theme-schedule.ts";
 import { contentFont, presetContentFont } from "../reader/content-layout.ts";
 import { watchUiLines } from "./text-layout.ts";
+import { cardSlices } from "./round-rows.tsx";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
 import { DownloadPhoneAppDialog } from "./DownloadPhoneAppDialog.tsx";
 import type { Scroller } from "@pocketjs/framework/kinetics";
@@ -86,14 +87,19 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
       const solarText = today() ? `今天 ${formatScheduleMinutes(today()!.sunrise)} 日出 · ${formatScheduleMinutes(today()!.sunset)} 日落` : "当前位置今天无法计算日出日落，将暂用固定时间。";
       const solarLines = lines(solarText, width - 20);
       const fixed = schedule().mode === "FIXED_TIME";
-      rows.push({ height: fixed ? 205 : 157 + solarLines.length * 14, render: () => <View class="absolute inset-0 rounded-[12] bg-[#23272a]">
+      // Rule header and its controls are two slices of one card so each fits the round screen.
+      rows.push(...cardSlices([
+        { height: 85, render: () => <>
         <Text class="absolute left-[10] right-[10] top-[10] text-sm leading-[17] text-[#f5f5f5]">自动切换规则</Text>
         {(["FIXED_TIME", "SUNRISE_SUNSET"] as const).map((mode, index) => <View onPress={() => { if (mode === "SUNRISE_SUNSET" && (schedule().latitude === null || schedule().longitude === null)) void updateLocation(); else props.onSchedule({ mode }); }} focusable class="absolute top-[43] h-[32] rounded-[8] items-center justify-center" style={{ insetL: 10 + index * 92, width: index ? width - 112 : 88, bgColor: schedule().mode === mode ? "#2a2a2a" : "#23272a", borderWidth: schedule().mode === mode ? 0 : 1, borderColor: "#2c3135" }}><Text class="absolute left-[16] right-[16] text-sm leading-[17] text-[#f5f5f5]">{index ? lines("日出日落", width - 144, 1).join("\n") : "固定时间"}</Text></View>)}
-        <Show when={fixed} fallback={<>
-          <Text class="absolute left-[10] right-[10] top-[91] text-xs leading-[14] text-[#f5f5f5]">{solarLines.join("\n")}</Text>
-          <View onPress={() => void updateLocation()} focusable={!locating()} class="absolute left-[10] right-[10] h-[40] rounded-[20] bg-[#ff6026] items-center justify-center" style={{ insetT: 103 + solarLines.length * 14 }}><Text class="text-sm leading-[17] text-black">{locating() ? "正在定位…" : "更新当前位置"}</Text></View>
-        </>}><View class="absolute left-[10] right-[10] top-[95] h-[96]">{outlined(`浅色开始  ${formatScheduleMinutes(schedule().lightStartMinutes)}`, () => void pickTime("lightStartMinutes"))}{outlined(`深色开始  ${formatScheduleMinutes(schedule().darkStartMinutes)}`, () => void pickTime("darkStartMinutes"), 56)}</View></Show>
-      </View> });
+        </> },
+        fixed
+          ? { height: 120, bounds: { x: 10, y: 10, width: width - 20, height: 96 }, render: () => <View class="absolute left-[10] right-[10] top-[10] h-[96]">{outlined(`浅色开始  ${formatScheduleMinutes(schedule().lightStartMinutes)}`, () => void pickTime("lightStartMinutes"))}{outlined(`深色开始  ${formatScheduleMinutes(schedule().darkStartMinutes)}`, () => void pickTime("darkStartMinutes"), 56)}</View> }
+          : { height: 72 + solarLines.length * 14, bounds: { x: 10, y: 6, width: width - 20, height: 52 + solarLines.length * 14 }, render: () => <>
+          <Text class="absolute left-[10] right-[10] top-[6] text-xs leading-[14] text-[#f5f5f5]">{solarLines.join("\n")}</Text>
+          <View onPress={() => void updateLocation()} focusable={!locating()} class="absolute left-[10] right-[10] h-[40] rounded-[20] bg-[#ff6026] items-center justify-center" style={{ insetT: 18 + solarLines.length * 14 }}><Text class="text-sm leading-[17] text-black">{locating() ? "正在定位…" : "更新当前位置"}</Text></View>
+          </> },
+      ], 10, "#23272a"));
     }
     for (const kind of ["light", "dark"] as const) {
       const rowTop = 26 + rows.reduce((total, row) => total + row.height + 10, 0);

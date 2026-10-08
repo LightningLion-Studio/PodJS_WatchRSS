@@ -14,6 +14,7 @@ import {TtsConfigStore,type TtsEngine} from '../tts/config-store.ts';
 import {summaryAccountStore} from '../llm/runtime.ts';
 import {douyinClient,mediaTransport} from '../media-services.ts';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
+import {cardSlices,chunkLines,roundRowMaxHeight} from './round-rows.tsx';
 import {RssFeedScreen} from './RssScreens.tsx';
 import {ReaderScreen} from './ReaderScreen.tsx';
 import {defaultReaderPreset} from '../reader/preset.ts';
@@ -38,6 +39,14 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
  const run=async(action:(current:()=>boolean)=>Promise<string>)=>{if(busy()||!props.active())return;debugGate.require();const generation=++version;setBusy(true);try{const message=await action(()=>alive&&generation===version&&props.active()&&debugGate.allowed);if(alive&&generation===version)setStatus(message);}catch(error){if(alive&&generation===version)setStatus(String(error));}finally{if(alive&&generation===version)setBusy(false);}};
  const input=async(label:string,value:string)=>{debugGate.require();const generation=version;const result=await props.services.input(label,value);if(!alive||!props.active()||generation!==version)return null;debugGate.require();return result;};
  const row=(label:string,action?:()=>void):ScrollEntry=>{const lines=watchUiLines(label,{width:props.width-60,measure:text=>getOps().measureText(text,1)});return {height:Math.max(62,lines.length*20+24),render:()=> <View onPress={()=>{if(!props.active()||busy()||!action)return;debugGate.require();action();}} focusable={!!action} class="absolute inset-0 rounded-[16] bg-[#1c1f21] justify-center px-[12]"><Text class="text-sm leading-[20] text-[#ffffff]">{lines.join("\n")}</Text></View>};};
+ // A long status line (e.g. a JSON snapshot) continues as slices of the same card so all of it can
+ // scroll into view on a round screen; short lines keep the ordinary row.
+ const statusRows=(label:string):ScrollEntry[]=>{
+  const width=props.width-36,lines=watchUiLines(label,{width:props.width-60,measure:text=>getOps().measureText(text,1)});
+  if(Math.max(62,lines.length*20+24)<=roundRowMaxHeight(width))return [row(label)];
+  return cardSlices(chunkLines(lines,20,width-24,24).map(chunk=>({height:chunk.length*20+24,bounds:{x:12,y:12,width:width-24,height:chunk.length*20},render:()=>
+   <Text class="absolute left-[12] right-[12] top-[12] text-sm leading-[20] text-[#ffffff]">{chunk.join("\n")}</Text>})),6,"#1c1f21",16);
+ };
  const entries=():ScrollEntry[]=>{
   const list:ScrollEntry[]=[row('调试工具 · '+tool())];
   if(tool()==='menu')list.push(...([
@@ -47,7 +56,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
   if(tool()==='tts')list.push(...Object.entries(debugTtsEngines).map(([engine,label])=>row('选择 '+label,()=>void run(async()=>{await tts.select(engine as TtsEngine);return tts.status();}))),...(['model','voiceId','baseUrl','apiKey'] as const).map(field=>row('编辑 '+({model:'模型',voiceId:'音色 ID',baseUrl:'服务地址',apiKey:'API Key'}[field]),()=>void run(async()=>{const raw=await input(field,field==='apiKey'?'':tts.fields()[field]);if(raw===null)return '';if(field==='apiKey')await tts.setApiKey(raw);else tts.update(field,raw);return tts.status();}))),row('语速设置',()=>void run(async()=>{const store=new TtsConfigStore(),raw=await input('语速（0.5–2.0）',String(store.read().speed));if(raw===null)return '';store.setSpeed(Number(raw));return `语速 ${store.read().speed}x`;})),row('刷新配置状态',()=>void run(()=>tts.status())),row('测试连接',()=>void run(()=>tts.test())));
   if(tool()==='douyin')list.push(row('播放上下文',()=>setStatus(JSON.stringify(douyinDebug.snapshot()))),row('请求下一片',()=>{douyinDebug.requestAdvance();setStatus('下一次进入播放页时换片');}),row('下一条视频故障注入',()=>{douyinDebug.armNext();setStatus('下一条视频将失败；使用播放页正常恢复逻辑');}),row('指定视频故障注入',()=>void run(async()=>{const id=await input('awemeId','');if(id===null)return '';douyinDebug.poison(id);return '已标记故障';})),row('导入 Cookie',()=>void run(async()=>{const cookie=await input('抖音 Cookie','');if(cookie===null)return '';return douyinDebug.importCookie(cookie,value=>douyinClient.applyCookie(value));})),row(`自动换片 ${auto()?`${auto()} ms`:'关闭'}`,()=>void run(async()=>{const raw=await input('换片间隔毫秒（0 关闭）',String(auto()||5000));if(raw===null)return '';douyinDebug.setAuto(Number(raw));setAuto(douyinDebug.interval);return '返回抖音播放页后生效';})),row('清除故障 / 停止自动换片',()=>{douyinDebug.reset();setAuto(0);setStatus('已清除');}));
   if(busy())list.push(row('正在执行…'));
-  if(status())for(const line of status().split('\n'))list.push(row(line));
+  if(status())for(const line of status().split('\n'))list.push(...statusRows(line));
   return list;
  };
  return <Show when={debugGate.allowed}><Show when={tool()!=='acoustic'} fallback={<AcousticConnectionScreen {...props} onUrl={props.onAcousticUrl}/>}><Show when={tool()!=='list'&&tool()!=='article'&&tool()!=='onboarding'} fallback={<Show when={tool()==='onboarding'} fallback={<DebugPerfScreen kind={tool()==='list'?'list':'article'} {...props} onStats={setStatus}/>}><DebugOnboarding onFinish={()=>open('menu')}/></Show>}><ScrollEntries height={props.height} entries={entries()} inputActive={props.active} ref={value=>{props.entry.list=value;}}/></Show></Show></Show>;

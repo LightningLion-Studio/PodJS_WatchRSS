@@ -37,6 +37,7 @@ import {ReaderBackground} from './ReaderBackground.tsx';
 import {InformationScreen,type InformationPage,type InformationSnapshot,type InformationRestorationEvent} from './InformationScreens.tsx';
 import {BackMotion} from "@podjs/framework/navigation";
 import {ScrollEntries} from './ScrollEntries.tsx';
+import {chunkLines} from './round-rows.tsx';
 import {watchUiLines} from './text-layout.ts';
 import {STARTUP_EXIT_DURATION_MS,startupExitFrame} from './startup-transition.ts';
 
@@ -133,7 +134,7 @@ function StartupFailure(props:{message:string;onRetry:()=>void}){
  const lines=()=>watchUiLines(props.message,{width:metrics.logicalWidth-36,measure:text=>getOps().measureText(text,0)});
  return <View class="absolute inset-0 bg-black"><ScrollEntries height={metrics.logicalHeight} entries={[
   {height:30,render:()=> <Text class="text-lg text-white">启动记录无法读取</Text>},
-  {height:lines().length*14,render:()=> <Text class="text-xs leading-[14] text-[#e54d4d]">{lines().join('\n')}</Text>},
+  ...chunkLines(lines(),14,metrics.logicalWidth-36).map(chunk=>({height:chunk.length*14,render:()=> <Text class="text-xs leading-[14] text-[#e54d4d]">{chunk.join('\n')}</Text>})),
   {height:48,render:()=> <View focusable onPress={props.onRetry} class="absolute inset-0 rounded-[24] bg-[#23272a] items-center justify-center"><Text class="text-sm text-white">重新读取</Text></View>}
  ]}/></View>;
 }
