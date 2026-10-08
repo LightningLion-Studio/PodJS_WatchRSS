@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
+import { centredBounds, textWidthBound } from "./round-bounds.ts";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import type { Channel } from "./service.ts";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog.tsx";
@@ -111,9 +112,8 @@ export default function HomeScreen(props: HomeScreenProps) {
     </View>};
   };
   // Narrow centred rows declare what they draw, so the round list does not treat them as full-width boxes.
-  const centred=(width:number,top:number,height:number)=>({x:(props.width-36-width)/2,y:top,width,height});
-  // 9px caption width upper bound (CJK 9, other 6) — no measurement for rows that may never mount.
-  const caption=(text:string)=>Array.from(text).reduce((width,ch)=>width+(ch.codePointAt(0)!>255?9:6),0);
+  const centred=(width:number,top:number,height:number)=>centredBounds(props.width-36,width,top,height);
+  const caption=(text:string)=>textWidthBound(text,9);
   const rows=createMemo<Array<{entry:ScrollEntry;channel?:Channel;notes?:boolean}>>(()=>[
     {entry:{height: 73, bounds:centred(Math.max(44,caption("点击进入我的")),4,65), render: () => <View class="absolute inset-0 items-center">
       <View onPress={props.onProfile} focusable style={{insetL:(props.width-36-44)/2}} class="absolute top-[4] w-[44] h-[44] rounded-full bg-[#1c1f21] border-[#ff6026] border-[0.7] items-center justify-center">

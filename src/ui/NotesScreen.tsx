@@ -14,6 +14,7 @@ import { For, Show, createEffect, createMemo, createSignal, untrack, onMount, on
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { createScroller, type Scroller } from "@pocketjs/framework/kinetics";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
+import { centredBounds, textWidthBound } from "./round-bounds.ts";
 import { DownloadPhoneAppDialog } from "./DownloadPhoneAppDialog.tsx";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog.tsx";
 import { NOTE_LIST_LAYOUT, noteAtLongPress } from "./note-list-hit.ts";
@@ -67,11 +68,11 @@ export function NotesListScreen(props: NotesListScreenProps) {
     <Text class="absolute left-[14] right-[10] overflow-hidden text-sm leading-[19] text-[#b6b6b6]" style={{insetT:15+layout.title.length*21,height:layout.summary.length*19}}>{layout.summary.join("\n")}</Text>
   </View>});
   const entries=createMemo<ScrollEntry[]>(()=>[
-    {height:headerHeight,render:()=> <View class="absolute inset-0"><Text class="absolute top-[9] text-[21px] leading-[26] text-center text-[#f5f5f5]" style={{width:props.width-2*padding}}>备忘录</Text><Text class="absolute top-[37] text-[9px] leading-[17] text-center text-[#b6b6b6]" style={{width:props.width-2*padding}}>{notes().length} 条备忘录</Text></View>},
+    {height:headerHeight,bounds:centredBounds(props.width-2*padding,Math.max(textWidthBound("备忘录",21),textWidthBound(`${notes().length} 条备忘录`,9)),9,45),render:()=> <View class="absolute inset-0"><Text class="absolute top-[9] text-[21px] leading-[26] text-center text-[#f5f5f5]" style={{width:props.width-2*padding}}>备忘录</Text><Text class="absolute top-[37] text-[9px] leading-[17] text-center text-[#b6b6b6]" style={{width:props.width-2*padding}}>{notes().length} 条备忘录</Text></View>},
     {height:promptHeight,render:()=> <View onPress={()=>setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" style={{insetT:-0.5,height:57}} class="absolute left-[0] right-[0] rounded-[16] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[10] text-[17px] leading-[20] text-[#f5f5f5]">{phonePrompt()}</Text></View>},
     ...(!notes().length?[{height:30,render:()=> <Text class="absolute left-[0] right-[0] top-[20] text-sm text-center text-[#b6b6b6]">暂无内容</Text>}]:[]),
     ...cardLayouts().map(card),
-    {height:56,render:()=> <View class="absolute inset-0 items-center"><View onPress={props.onCreateNote} focusable accessibilityRole="button" accessibilityLabel="新建备忘录" style={{insetL:(props.width-36-44)/2-0.5,insetT:4.5}} class="absolute w-[44] h-[44] rounded-[47] bg-[#23272a] items-center justify-center"><Image src="../assets/icons/speech-plus.svg" class="w-[24] h-[24]"/></View></View>}
+    {height:56,bounds:centredBounds(props.width-2*padding,44,4.5,44),render:()=> <View class="absolute inset-0 items-center"><View onPress={props.onCreateNote} focusable accessibilityRole="button" accessibilityLabel="新建备忘录" style={{insetL:(props.width-36-44)/2-0.5,insetT:4.5}} class="absolute w-[44] h-[44] rounded-[47] bg-[#23272a] items-center justify-center"><Image src="../assets/icons/speech-plus.svg" class="w-[24] h-[24]"/></View></View>}
   ]);
   const onLongPress=(screenX:number,screenY:number)=>{
     const note=noteAtLongPress(notes(),screenX,screenY-roundStart(),props.width,scroller?.offset()??0,cardLayouts().map(card=>card.height));

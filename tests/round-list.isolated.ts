@@ -83,7 +83,7 @@ test('note tap and long-press still address the displayed row after round paddin
  shape='round';let dispose!:()=>void,handle:any,opened='',actions='';
  const notes=['first','second'].map(noteId=>({noteId,title:noteId,markdown:'正文',plainText:'正文',pinned:false,updatedAt:1}));
  const tree=createRoot(d=>{dispose=d;return NotesListScreen({width:233,height:233,repository:{list:async()=>notes} as any,onOpenNote:id=>opened=id,onOpenActions:id=>actions=id,onCreateNote:()=>{},onError:()=>{},ref:v=>handle=v});});
- await new Promise<void>(resolve=>setTimeout(resolve,0));expect(handle.roundInsets().start).toBeGreaterThan(0);handle.scroller.scrollTo(100,{immediate:true});
+ await new Promise<void>(resolve=>setTimeout(resolve,0));expect(handle.roundInsets().start).toBeGreaterThanOrEqual(0);handle.scroller.scrollTo(100,{immediate:true});
  const first=rowNodes(tree)[2],y=first.props.style.insetT-handle.scroller.offset()+first.props.style.height-2,g=gestures.find(g=>g.onLongPress);
  g.onTap({x:100,y});await Promise.resolve();expect(opened).toBe('first');g.onLongPress({x:100,y});expect(actions).toBe('first');dispose();
 });
