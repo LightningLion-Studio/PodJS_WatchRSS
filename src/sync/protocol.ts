@@ -1,3 +1,4 @@
+import {createFrameFacade} from '@podjs/framework/frame-stream';
 import {encodeUtf8,encodeBase64,decodeBase64} from '@podjs/framework/bytes';
 import {encodeUtf8Async,decodeUtf8Async,type CodecWorkOptions} from '@podjs/framework/bytes';
 import {parseWireJson} from "./wire-json.ts";
@@ -49,68 +50,23 @@ export function decodeSyncUtf8(bytes: Uint8Array): string {
   flush();return parts.join("");
 }
 
-/** Android uses DataOutputStream.writeInt: signed big-endian length prefix. */
-export function encodeFrame(payload: JsonObject): Uint8Array {
-  const body = utf8Encode(JSON.stringify(payload));
-  if (body.byteLength < 1 || body.byteLength > MAX_FRAME_BYTES) {
-    throw new RangeError(`sync frame length out of range: ${body.byteLength}`);
-  }
-  const frame = new Uint8Array(LENGTH_PREFIX_BYTES + body.byteLength);
-  new DataView(frame.buffer).setInt32(0, body.byteLength, false);
-  frame.set(body, LENGTH_PREFIX_BYTES);
-  return frame;
-}
-
-/** Transport callers yield between bounded encoding pieces and can close/cancel. */
-export async function encodeFrameAsync(payload:JsonObject,options:CodecWorkOptions={}):Promise<Uint8Array>{
-  const body=await encodeUtf8Async(JSON.stringify(payload),'strict',options);
-  if(body.length<1||body.length>MAX_FRAME_BYTES)throw new RangeError(`sync frame length out of range: ${body.length}`);
-  const frame=new Uint8Array(4+body.length);new DataView(frame.buffer).setInt32(0,body.length,false);frame.set(body,4);return frame;
-}
-
-export function decodeFrame(frame: Uint8Array): JsonObject {
-  if (frame.byteLength < LENGTH_PREFIX_BYTES) throw new Error("truncated sync frame prefix");
-  const length = new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getInt32(0, false);
-  if (length < 1 || length > MAX_FRAME_BYTES) throw new RangeError(`sync frame length out of range: ${length}`);
-  if (frame.byteLength !== LENGTH_PREFIX_BYTES + length) throw new Error("truncated or trailing sync frame bytes");
-  return parseWireJson(decodeSyncUtf8(frame.subarray(LENGTH_PREFIX_BYTES)));
-}
-
-export async function decodeFrameAsync(frame:Uint8Array,options:CodecWorkOptions={}):Promise<JsonObject>{
-  if(frame.length<4)throw new Error('truncated sync frame prefix');
-  const length=new DataView(frame.buffer,frame.byteOffset,frame.byteLength).getInt32(0,false);
-  if(length<1||length>MAX_FRAME_BYTES)throw new RangeError(`sync frame length out of range: ${length}`);
-  if(frame.length!==4+length)throw new Error('truncated or trailing sync frame bytes');
-  return parseWireJson(await decodeUtf8Async(frame.subarray(4),options));
-}
-
-/** Incremental reassembler for arbitrary transport read boundaries. */
-export class FrameDecoder {
-  private readonly header=new Uint8Array(4);
-  private headerSize=0;
-  private body:Uint8Array|null=null;
-  private bodySize=0;
-  private failed=false;
-  push(bytes:Uint8Array):JsonObject[]{
-    if(this.failed)throw new Error("sync stream already failed");
-    const frames:JsonObject[]=[];let offset=0;
-    try{
-      while(offset<bytes.length){
-        if(!this.body){
-          const count=Math.min(4-this.headerSize,bytes.length-offset);this.header.set(bytes.subarray(offset,offset+count),this.headerSize);this.headerSize+=count;offset+=count;
-          if(this.headerSize<4)break;
-          const length=new DataView(this.header.buffer).getInt32(0,false);
-          if(length<1||length>MAX_FRAME_BYTES)throw new RangeError(`sync frame length out of range: ${length}`);
-          this.body=new Uint8Array(length);this.bodySize=0;
-        }
-        const count=Math.min(this.body.length-this.bodySize,bytes.length-offset);this.body.set(bytes.subarray(offset,offset+count),this.bodySize);offset+=count;this.bodySize+=count;
-        if(this.bodySize===this.body.length){frames.push(parseWireJson(decodeSyncUtf8(this.body)));this.body=null;this.headerSize=0;this.bodySize=0;}
-      }
-      return frames;
-    }catch(error){this.failed=true;this.body=null;throw error;}
-  }
-  finish():void{if(this.failed)throw new Error("sync stream already failed");if(this.headerSize||this.body)throw new Error("truncated sync stream");}
-}
+/** JSON v14 and Android signed-prefix/error/EOF compatibility remain app policy. */
+const frames=createFrameFacade<JsonObject,CodecWorkOptions>({
+ maxFrameBytes:MAX_FRAME_BYTES,prefix:'signed',
+ encodeBody:payload=>utf8Encode(JSON.stringify(payload)),
+ decodeBody:bytes=>parseWireJson(decodeSyncUtf8(bytes)),
+ encodeBodyAsync:(payload,options)=>encodeUtf8Async(JSON.stringify(payload),'strict',options),
+ decodeBodyAsync:async(bytes,options)=>parseWireJson(await decodeUtf8Async(bytes,options)),
+ errors:{length:length=>new RangeError(`sync frame length out of range: ${length}`),
+  prefix:()=>new Error('truncated sync frame prefix'),size:()=>new Error('truncated or trailing sync frame bytes'),
+  failed:()=>new Error('sync stream already failed'),truncated:()=>new Error('truncated sync stream')},
+ poisonOnPushError:true,poisonOnFinishError:false,closeOnFinish:false,
+});
+export const encodeFrame=frames.encodeFrame;
+export const decodeFrame=frames.decodeFrame;
+export const encodeFrameAsync=(payload:JsonObject,options:CodecWorkOptions={})=>frames.encodeFrameAsync(payload,options);
+export const decodeFrameAsync=(frame:Uint8Array,options:CodecWorkOptions={})=>frames.decodeFrameAsync(frame,options);
+export class FrameDecoder extends frames.FrameDecoder {}
 
 export interface NegotiatedProtocol { version: 14; remoteVersion: number; legacy: boolean; }
 

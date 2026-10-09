@@ -24,7 +24,7 @@ for(const [name,impl] of Object.entries({renderer,components,host:{getOps:()=>op
 class HostServiceError extends Error {constructor(public code:string){super(code);}}
 const listeners:Array<(event:any)=>void>=[];
 let busyDelete=false;
-const services={HostServiceError,base64ToBytes:(s:string)=>new Uint8Array(Buffer.from(s,'base64')),hostOperation:(name:string,args:any)=>{
+const services={HostServiceError,uploadTextureFile:()=>{throw new Error('unexpected file upload in sampled RGBA oracle');},base64ToBytes:(s:string)=>new Uint8Array(Buffer.from(s,'base64')),hostOperation:(name:string,args:any)=>{
  events.push([name,args]);
  if(name==='file.delete'&&busyDelete){busyDelete=false;return {result:Promise.reject(new HostServiceError('busy')),cancel(){}};}
  if(name==='image.decode'||name==='image.decodeRegion'){

@@ -32,9 +32,9 @@
 | 22 | ManagedCache | PARTIAL | DONE | `d48b5b5`；cache.FileCache：d48b5b5；U12 defaultCachePorts(options)（`packages/framework/src/cache.ts`） | app `60123df` / `src/cache/managed.ts`；managed.ts 仅 policy+facade，无 job/lease/scan 主实现；U12 host.ts 删除重复 digest/download/validate，8MiB+dimension1 留显式配置 |
 | 23 | 队列/历史/自动滚动/草稿 | DONE | DONE | `108187d`；async.SerialWriteQueue；editing.TextHistory/DraftAutosave；navigation.AutoScrollController（`packages/framework/src/editing.ts`） | app `7f532ee` / `src/notes/draft-autosave.ts`；23a progress-write-queue 只转出；23b RawTextHistory 200/500 wrapper；23c autoscroll 只转出；23d NoteDraftAutosave 仅字段/换行/ID/600ms适配 |
 | 24 | lazy regexp | DONE | DONE | `ec7fb12`；regexp.lazyRegExpTest / text-lines 复用（`packages/framework/src/regexp.ts`） | app `ba478af` / `src/core/lazy-regexp.ts`；core/lazy-regexp.ts 只转出；g/y lastIndex 语义保留，不声称设备冷启动收益 |
-| 25 | SQL/stream framing | PARTIAL | PARTIAL | `ec7fb12`；sql.querySqlPages/readSqlText；frame-stream.StreamFrameConnection（`packages/framework/src/frame-stream.ts`） | app `ba478af` / `src/sync/stream.ts`；sql-pages/sql-text/stream 已薄封装；src/sync/protocol.ts 的 encodeFrame/Async、decodeFrame/Async、FrameDecoder 仍有 framing。后续需可配置错误/poison/EOF 的 opaque facade，保留 JSON v14 和 signed prefix语义 |
+| 25 | SQL/stream framing | PARTIAL | DONE（U13） | `ec7fb12`；sql.querySqlPages/readSqlText；frame-stream.StreamFrameConnection（`packages/framework/src/frame-stream.ts`） | app `ba478af` / `src/sync/stream.ts`；sql-pages/sql-text/stream 已薄封装；U13 src/sync/protocol.ts 的 encodeFrame/Async、decodeFrame/Async、FrameDecoder 已改为 frame-stream.createFrameFacade 薄适配；JSON v14/UTF-8/error/signed prefix/EOF policy 留应用，通用 framing/reassembly 已移出 |
 
-初始21 DONE / 4 PARTIAL；本轮后24 DONE / 1 PARTIAL（#25）。#23四个子项均源码DONE；没有把业务策略或框架底座存在算作未迁通用逻辑已完成。新增U12提交见文末。
+初始21 DONE / 4 PARTIAL；U12后24 DONE / 1 PARTIAL（#25）；U13后25 DONE / 0 PARTIAL。#23四个子项均源码DONE；没有把业务策略或框架底座存在算作未迁通用逻辑已完成。新增U12提交见文末。
 
 ## U1 第217行起既有能力表：逐行复核
 
@@ -44,11 +44,11 @@
 | 2 images.decode / fileChunks | DONE（应用重复桥接） | image.tsx/tiled-image.tsx 已归框架（468c0a4/108187d）；app 无这些 decode/read/delete renderer 主实现。U12 services 增 decodeOperation/decodeRegionOperation 与完整可选结果字段，cache host 重复调用也删除；框架资源所有者仍可通过 hostOperation 管理现有取消/队列，不强行替换其资源策略。 |
 | 3 Pocket VirtualList | DONE | `ec7fb12` VariableList 实际复用 pocket createScroller/input/window primitives；app ScrollEntries 只注入变高默认/restoration/round策略。未机械套固定高 VirtualList。 |
 | 4 bytes | DONE | `468c0a4` decodeUtf8Chunk + app 5a35c0c 快路径复用；严格与 permissive fallback 明确分离，fallback不迁为平台词汇API。 |
-| 5 SystemTextLine / 低层 uploader | PARTIAL | ReaderTextRow 实际使用 SystemTextLine（ec7fb12 环境补齐）；text.tsx 与 image.tsx 已共享 services.uploadTextureFile。tiled-image 的 sampled RGBA 上传/读取与 text/image 的释放策略仍独立；下一步可做支持sample/ownership的中性低层primitive，不能以当前native helper声称所有上传/cleanup已统一。 |
+| 5 SystemTextLine / 低层 uploader | DONE（U13） | texture-upload.createTextureUploader 支持 RGBA/sample、可注入 ops/file/release，以及 take/unavailable 文件所有权策略。text/image/tiled-image 实际共享 primitive；像素不转换、sample=1 保留，GPU释放仍在原 call sites。各自读取、队列、LRU、文件清理与lease策略保持独立。 |
 | 6 activityState / textInput / restoreActivity | DONE | a610095 Hub、ec7fb12 RouteStateProvider、108187d restorable-input，U12补stack codec编排；application.activityState 和 host pending/dismiss/prompt 仍为真实来源，无新增JS native草稿副本。 |
 | 7 delay / clock.after | 不再适用（直接替换） | startup.ts 实际使用services.delay；clock.after 虚拟时钟和 wall-time fallback 不等价。没有复制第二套 timer 服务，既有引用保留。 |
 | 8 animate/spring/kinetics | 不再适用（直接替换） | variable-list 已用createScroller；BackMotion/SwipeActionCard/startup frame 已在框架，拖拽提交、forceCommit和暂停是各状态机契约，不能用通用animate替换并宣称等价。 |
-| 9 sync-framing | PARTIAL | ec7fb12已迁bounded stream；app protocol.FrameDecoder仍重复opaque reassembly。sync-framing.SyncFrameDecoder有 unsigned读取、callback poison与finish永久关闭，app为signed/error文案/EOF语义；须先参数化和差分，未直接套用。 |
+| 9 sync-framing | DONE（U13） | frame-stream.createFrameFacade 负责 signed/unsigned opaque framing/reassembly；error factories、push/finish poison 与成功 EOF 关闭均可配置。应用显式选择 signed、push poison、可恢复截断 EOF/非永久finish；已有 SyncFrameDecoder 的契约保持。冻结旧protocol差分覆盖全部分片边界及错误后的状态。 |
 
 ## 本批选择（按U1顺序13 → 18 → 22）
 
@@ -66,6 +66,21 @@ framework新增非WatchRSS namespace/path/chunk配置契约；无注入端口的
 
 ## 本轮提交与验证
 
-框架提交 `f9ce50df6bd95c5670871b0d6a738dc09f0d868b`（minor/u12），包含本轮 #13/#18/#22 和 typed image operation API。应用提交见交付报告；应用 framework.lock 已锁定该 worktree/提交，PocketJS字段纠正为实际 `c5986b0fdf7d79d3d9346b4a1f02f7c466877852`（初始字段误填框架 SHA，未用它推定 Pocket 来源）。
+框架提交 `f9ce50df6bd95c5670871b0d6a738dc09f0d868b`（minor/u12），包含本轮 #13/#18/#22 和 typed image operation API。应用提交见交付报告；U12应用 framework.lock 曾锁定该 worktree/提交；lead在ed565f5已纠正path/branch回主checkout，U13继续保持主checkout值，PocketJS字段纠正为实际 `c5986b0fdf7d79d3d9346b4a1f02f7c466877852`（初始字段误填框架 SHA，未用它推定 Pocket 来源）。
 
 CLI build PASS；应用1328 PASS/0 FAIL，应用typecheck PASS；框架Bun完整脚本与Rust PASS，框架typecheck PASS；Android runtime36 PASS/0 errors/failures/skipped。首次测试暴露 navigation barrel 提前加载 Solid 的双运行时，改用独立 pure restorable-stack 后，原17项恢复/组件差分、全测和新287断言差分均通过。未放宽测试。
+
+
+## U13：最后两项收尾
+
+基线 app `ed565f5`、framework `f9ce50d`、PocketJS `c5986b0`；两仓均在 `minor/u13` worktree 修改和提交。#25 与既有能力第5/9行已由当前源码闭合，U1共25项现为源码 DONE。此状态不代表设备像素、性能或进程重建验收。
+
+`frame-stream.createFrameFacade` 不解释 body。四字节BE framing、整帧校验、增量拼装在框架；应用仅注入 JSON.stringify/parseWireJson、同步旧strict UTF-8/异步codec、2MiB、signed prefix、原错误工厂与EOF/poison策略。`sync-framing.SyncFrameDecoder` 现有unsigned/callback/永久finish契约未修改。CLI允许独立pure frame-stream用于headless，VM执行测试确认无需host/UI bootstrap，其他入口仍受限制。
+
+`texture-upload.createTextureUploader` 原样传递RGBA/sample/PSM，sampled仅在nullish结果回退；负handle不重试。文件take在调用前执行，null可以注入返还策略，拒绝/throw不返还；release可注入，默认每次调用读取当前getOps。text保留consume-on-unavailable，image保留null返还，tiled保留sample=1。未迁移或统一读取/文件删除队列/LRU/取消/lease调度，原释放call sites与错误处理不变。
+
+`tests/fixtures/upstream-u13/protocol.ts.txt` 是ed565f5原文件逐字节副本，SHA256固定；差分比较同步/异步字节与输出、numeric tokens、UTF-8/JSON错误、signed/超长/截断/尾随、byteOffset、每个两段切分、逐字节、多帧、push poison、截断EOF后续补齐与成功EOF后续push，另比较yield/cancel调用顺序。新增框架opaque/configuration、default/injected ownership/release、sampledfallback与headlessVM测试；原text/image/tiled组件验收测试保留。
+
+按CLI build → 应用全测/typecheck、框架bun run test/typecheck、Android runtime单测执行；结果与两仓提交详见 `.codex-tmp/wrss-minor-report.md`。仅owned worktree安装依赖，Pocket/framework依赖经symlink核验。framework.lock.json 的path/branch保留主checkout值，只更新revision；PocketJS不改。无设备、ADB、安装、签名凭据读取、merge或push；设备验证PENDING。
+
+U13框架提交 `531dcfd863bf67331aa78c35eaa6e7b5ca1d403d`。CLI build PASS；应用1332 PASS/0 FAIL（234 files）、两仓typecheck PASS；框架Bun 379 PASS、Rust 106 PASS（4 optional ignored）、完整脚本PASS；Android runtime36 PASS/0 failures/errors/skipped。首次框架isolated测试路径未被Bun匹配已补`./`；首次应用U7 mock缺新增uploadTextureFile导出，补调用即报错的占位后原断言和全测通过。首次日志保留；未放宽差分断言。
