@@ -1,9 +1,13 @@
+import {base64ToBytes} from '@podjs/framework/services';
+import {utf8Decode} from '../cloud/types.ts';
+import {MAX_CREDENTIAL_BYTES,type CredentialsBackup} from './credentials.ts';
 import type {PlaybackCacheDiagnostics} from './playback-diagnostics.ts';
 import type {DebugExternalEvent} from '@podjs/framework/services';
 import type {DebugGate} from './gate.ts';
 import type {DouyinDebugController} from './douyin.ts';
 export const DEBUG_ACTION='com.lightningstudio.watchrss.debug.action.';
 export interface ExternalDebugPorts {
+ credentials?:CredentialsBackup;
  douyin:DouyinDebugController; openDouyin:(resumeAwemeId?:string)=>void; openSummary:(id:string)=>void;
  applyCookie:(raw:string)=>Promise<{ok:boolean;message?:string}>;
  playbackDiagnostics?:()=>Promise<PlaybackCacheDiagnostics>;
@@ -20,6 +24,16 @@ export class ExternalDebugActions {
    return {code:0,data:p.dumpLogs()};
   }
   const action=event.action;
+  if(action===DEBUG_ACTION+'EXPORT_CREDENTIALS'||action===DEBUG_ACTION+'IMPORT_CREDENTIALS'){
+   if(!p.credentials)return {code:1,data:'credentials_unavailable'};
+   try{
+    if(action===DEBUG_ACTION+'EXPORT_CREDENTIALS')return {code:0,data:await p.credentials.export()};
+    const encoded=event.extras.snapshot_base64;
+    if(typeof encoded!=='string'||encoded.length>Math.ceil(MAX_CREDENTIAL_BYTES/3)*4||!encoded.length||encoded.length%4!==0||! /^[A-Za-z0-9+/]*={0,2}$/.test(encoded))return {code:1,data:'credentials_invalid_input'};
+    await p.credentials.import(utf8Decode(base64ToBytes(encoded)));
+    return {code:0,data:'ok'};
+   }catch{return {code:2,data:'credentials_failed'};}
+  }
   if(action===DEBUG_ACTION+'OPEN_DOUYIN'){p.openDouyin(typeof event.extras.resume_aweme_id==='string'?event.extras.resume_aweme_id.trim()||undefined:undefined);return {code:0,data:'ok'};}
   if(action===DEBUG_ACTION+'OPEN_LLM_SUMMARY'){
    const id=String(event.extras.item_id??'');if(!/^[1-9][0-9]*$/.test(id)||!Number.isSafeInteger(Number(id)))return {code:1,data:'invalid_item_id'};

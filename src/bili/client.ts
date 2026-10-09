@@ -19,6 +19,8 @@ function item(v:Obj){return {aid:n(v.aid??v.id),bvid:s(v.bvid??v.bv_id),cid:n(v.
 export class BiliClient {
  private cfg:BiliConfig; private key:string; private session:BiliSession|null|undefined; private wbi:{imgKey:string;subKey:string}|null|undefined; private now:()=>number; private sleep:(ms:number)=>Promise<void>;
  constructor(private o:BiliClientOptions){this.cfg={...defaults,...o.config};this.key=o.storageKey??"watchrss.bili.session.v1";this.now=o.now??Date.now;this.sleep=o.sleep??(ms=>new Promise(r=>setTimeout(r,ms)))}
+ /** Forget memoized authentication/signing state after an external secure-store transaction. */
+ invalidateSession(){this.session=undefined;this.wbi=undefined;}
  async getSession(){if(this.session!==undefined)return this.session;if(!this.o.secureStore)return this.session=null;const raw=await this.o.secureStore.get(this.key);if(!raw)return this.session=null;try{return this.session=JSON.parse(raw)}catch{throw new BiliError("auth","invalid_stored_session")}}
  async getLoginState():Promise<import("./types.ts").BiliLoginState>{const session=await this.getSession();return session?.cookies?.SESSDATA?{status:"authenticated",userId:session.cookies.DedeUserID}:{status:"anonymous"}}
  async clearSession(){

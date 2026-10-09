@@ -38,8 +38,8 @@ export class DouyinClient {
   async readCookie(){const raw=await traceServiceWork("douyin.cookie.request",()=>this.options.secureStorage.get(COOKIE_KEY));return traceServiceWork("douyin.cookie.result",()=>raw?.trim()||null,raw?.length??0);}
   async isLoggedIn(){return (await this.readCookie())!==null;}
   private clearFeedCache(){this.feedCache.clear();this.feedCursor=null;this.feedHasMore=false;}
-  async applyCookie(raw:string){const value=raw.trim();if(!value)return fail<void>("NOT_LOGGED_IN","缺少有效 Cookie");await this.options.secureStorage.set(COOKIE_KEY,value);this.clearFeedCache();await this.feedStore.clear();return {ok:true,data:undefined} as DouyinResult<void>;}
-  async clearCookie(){await this.options.secureStorage.remove(COOKIE_KEY);this.clearFeedCache();await this.feedStore.clear();}
+  async applyCookie(raw:string,commitCookie:(value:string)=>Promise<void>=value=>this.options.secureStorage.set(COOKIE_KEY,value)){const value=raw.trim();if(!value)return fail<void>("NOT_LOGGED_IN","缺少有效 Cookie");await commitCookie(value);this.clearFeedCache();await this.feedStore.clear();return {ok:true,data:undefined} as DouyinResult<void>;}
+  async clearCookie(commitCookie:()=>Promise<void>=()=>this.options.secureStorage.remove(COOKIE_KEY)){await commitCookie();this.clearFeedCache();await this.feedStore.clear();}
   async logout(){await this.clearCookie();await this.options.onLogout?.();}
   async buildPlaybackHeaders(){const cookie=await this.readCookie();return {...DOUYIN_PUBLIC_MEDIA_HEADERS,...(cookie?{Cookie:cookie}:{})};}
   private async get(path:string,params:Record<string,string>,method:"GET"|"POST"):Promise<DouyinResult<string>> {

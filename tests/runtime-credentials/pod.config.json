@@ -1,0 +1,55 @@
+{
+  "entry": "src/main.tsx",
+  "appId": "dev.podjs.credentials.rehearsal",
+  "versionName": "T21",
+  "versionCode": 1,
+  "name": "Credentials rehearsal",
+  "capabilities": [
+    "data.secure",
+    "data.kv",
+    "data.files.chunks",
+    "runtime.timer",
+    "crypto.basic"
+  ],
+  "android": {
+    "cleartextTraffic": true,
+    "debugExternal": {
+      "activities": [
+        {
+          "name": "com.lightningstudio.watchrss.DouyinDebugEntryActivity",
+          "action": "com.lightningstudio.watchrss.debug.action.OPEN_DOUYIN"
+        },
+        {
+          "name": "com.lightningstudio.watchrss.LlmSummaryActivity",
+          "action": "com.lightningstudio.watchrss.debug.action.OPEN_LLM_SUMMARY"
+        }
+      ],
+      "receiver": {
+        "name": "com.lightningstudio.watchrss.debug.DouyinPlaybackDebugReceiver",
+        "actions": [
+          "com.lightningstudio.watchrss.debug.action.EXPORT_CREDENTIALS",
+          "com.lightningstudio.watchrss.debug.action.IMPORT_CREDENTIALS",
+          "com.lightningstudio.watchrss.debug.action.IMPORT_DOUYIN_COOKIE",
+          "com.lightningstudio.watchrss.debug.action.FORCE_FAIL_NEXT_DOUYIN_VIDEO",
+          "com.lightningstudio.watchrss.debug.action.FORCE_FAIL_CURRENT_DOUYIN_VIDEO",
+          "com.lightningstudio.watchrss.debug.action.ADVANCE_TO_NEXT_DOUYIN_VIDEO",
+          "com.lightningstudio.watchrss.debug.action.REPORT_DOUYIN_PLAYBACK_CONTEXT",
+          "com.lightningstudio.watchrss.debug.action.REHEARSAL_CLEAR",
+          "com.lightningstudio.watchrss.debug.action.REHEARSAL_STATE"
+        ]
+      },
+      "provider": {
+        "name": "com.lightningstudio.watchrss.debug.DebugLogProvider",
+        "authority": "dev.podjs.credentials.rehearsal.debuglog"
+      }
+    }
+  },
+  "resources": {
+    "fontRegular": "../../assets/fonts/watch_sans.ttf",
+    "fontBold": "../../assets/fonts/reader_default_bold.ttf",
+    "glyphCache": {
+      "warmChars": "",
+      "preseedScanned": true
+    }
+  }
+}
