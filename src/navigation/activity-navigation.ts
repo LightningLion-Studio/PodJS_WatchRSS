@@ -1,3 +1,4 @@
+import {createRestorableStack,createRouteMemoryAllocator} from '@podjs/framework/restorable-stack';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {stringToUtf8} from '@podjs/framework/bytes';
 import type {ActivityState} from '@podjs/framework/services';
@@ -11,8 +12,8 @@ export type ActivityRoute=RouteEntry&{memory?:RouteMemory;articleId?:string;vide
 export type VideoTarget={kind:'bili';aid?:number|string;bvid?:string;cid:number|string;title?:string}
  |{kind:'douyin';awemeId:string;immersive?:boolean;detailPlayback?:boolean}|{kind:'rss';articleId:string;url:string};
 interface Descriptor {page:Page;id:string;args:Record<string,unknown>;ui:Record<string,unknown>}
-let sequence=0;
-export function routeMemory(entry:ActivityRoute):RouteMemory{return entry.memory??=( {id:`r${++sequence}`,saved:{},retained:{}} );}
+const identities=createRouteMemoryAllocator<ActivityRoute>('r');
+export const routeMemory=identities.memory;
 const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const text=(v:unknown,max=2048):v is string=>typeof v==='string'&&v.length<=max;
 const identifier=(v:unknown):v is string=>text(v,256)&&!!v.trim();
@@ -77,51 +78,22 @@ function decodedRoute(raw:Descriptor,retained:unknown,debug:boolean):ActivityRou
  return entry;
 }
 
-function captureActivityNavigationImpl(prior:ActivityState,entries:readonly ActivityRoute[]):ActivityState {
- const saved={...prior.saved},retained={...prior.retained};
- // Limit Android Bundle metadata; never serialize live handles, cookies or media headers.
- const descriptors:Descriptor[]=[],live:Record<string,unknown>={};
- for(const entry of entries.slice(0,24)){
-  const memory=routeMemory(entry),args=argsFor(entry);
-  if(!json(args))break;
-  const descriptor={page:entry.page,id:memory.id,args,ui:data(memory.saved,16384)};
-  if(!decodedRoute(descriptor,{},true))break;
-  if(stringToUtf8(JSON.stringify([...descriptors,descriptor])).length>24576)break;
-  descriptors.push(descriptor);
-  const ui=data(memory.retained,524288);
-  if(stringToUtf8(JSON.stringify({...live,[memory.id]:ui})).length<=640*1024)live[memory.id]=ui;
- }
- saved[CONTENT_ACTIVITY_KEY]={version:1,entries:descriptors};
- retained[CONTENT_ACTIVITY_KEY]={version:1,entries:live};
- return {saved,retained};
-}
-
-/** Unknown versions, malformed metadata and missing targets fall back to the
- * last valid prefix. This is Activity task restoration, separate from KV resume. */
-export function restoreActivityNavigation(state:ActivityState,debug=false):ActivityRoute[]|null {
- const saved=state.saved[CONTENT_ACTIVITY_KEY],retained=state.retained[CONTENT_ACTIVITY_KEY];
- if(!object(saved)||saved.version!==1||!Array.isArray(saved.entries)||saved.entries.length>24)return null;
- const live=object(retained)&&retained.version===1&&object(retained.entries)?retained.entries:{};
- const result:ActivityRoute[]=[],ids=new Set<string>();
- for(const raw of saved.entries){
-  const e=decodedRoute(raw,object(raw)?live[String(raw.id)]:undefined,debug);
-  if(!e||ids.has(e.memory!.id))break;ids.add(e.memory!.id);result.push(e);
- }
- if(!result.length||result[0].page!=='home')return null;
- // New routes allocated after restore must not reuse saved IDs.
- for(const id of ids){const match=/^r(\d+)$/.exec(id);if(match)sequence=Math.max(sequence,Number(match[1]));}
- return result;
-}
-
-export async function resolveActivityNavigation(entries:ActivityRoute[],resolver:{hasChannel:(id:string)=>boolean;article:(id:string)=>Promise<RouteEntry['readerArticle']|null>;canRestore?:(entry:ActivityRoute)=>boolean}):Promise<ActivityRoute[]>{
- const result:ActivityRoute[]=[];
- for(const entry of entries){
-  if(resolver.canRestore&&!resolver.canRestore(entry))break;
-  if(entry.channelId&&!resolver.hasChannel(entry.channelId))break;
-  if(entry.articleId){const article=await resolver.article(entry.articleId);if(!article)break;entry.readerArticle=article;}
-  result.push(entry);
- }
- return result.length?result:[{page:'home'}];
+const stack=createRestorableStack<ActivityRoute,Descriptor,boolean>({
+ namespace:CONTENT_ACTIVITY_KEY,version:1,maxEntries:24,maxSavedBytes:24576,maxRetainedBytes:640*1024,
+ memory:routeMemory,captureContext:true,decode:(raw,retained,debug)=>decodedRoute(raw as Descriptor,retained,debug),
+ encode(entry,memory){const args=argsFor(entry);return json(args)?{page:entry.page,id:memory.id,args,ui:data(memory.saved,16384)}:null;},
+ retained:memory=>data(memory.retained,524288),isRoot:entry=>entry.page==='home',restoredIds:ids=>identities.observe(ids),
+});
+const captureActivityNavigationImpl=stack.capture;
+/** Recover the last valid prefix; routes, debug policy and entity validation stay here. */
+export function restoreActivityNavigation(state:ActivityState,debug=false):ActivityRoute[]|null {return stack.restore(state,debug);}
+export function resolveActivityNavigation(entries:ActivityRoute[],resolver:{hasChannel:(id:string)=>boolean;article:(id:string)=>Promise<RouteEntry['readerArticle']|null>;canRestore?:(entry:ActivityRoute)=>boolean}):Promise<ActivityRoute[]>{
+ return stack.resolve<RouteEntry['readerArticle']|null>(entries,entry=>{
+  if(resolver.canRestore&&!resolver.canRestore(entry))return false;
+  if(entry.channelId&&!resolver.hasChannel(entry.channelId))return false;
+  if(entry.articleId)return {result:resolver.article(entry.articleId),accept(article){if(!article)return false;entry.readerArticle=article;return true;}};
+  return true;
+ },()=>({page:'home'}));
 }
 
 export function captureActivityNavigation(...args:Parameters<typeof captureActivityNavigationImpl>) {return traceServiceWork("reader.captureActivity",()=>captureActivityNavigationImpl(...args));}

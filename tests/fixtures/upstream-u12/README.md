@@ -1,0 +1,1 @@
+Original bytes from app ba59997: the listed source paths. The test loader only transpiles TypeScript and resolves relative imports against the original application directories. These files do not import the new helpers.
