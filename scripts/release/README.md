@@ -97,7 +97,7 @@ bun test tests/release-preflight.test.ts
 路径确认 unsigned 被拒绝。不生成签名 key，不访问网络；SDK 不可用时该一项明确
 SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`。
 
-## T22/T23/T25 internal-debug（仅内部检查）
+## T22/T23/T25/T28 internal-debug（仅内部检查）
 
 `check --channel internal-debug` 是唯一允许 debuggable=true 的通道，且要求该属性为 true。
 仅允许正式包名，保留 takeover 的签名/谱系、版本、source=40、purge 和 WorkManager 全部门槛。
@@ -105,12 +105,12 @@ SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`�
 四个外部组件必须 exported=true 且 permission=android.permission.DUMP，provider 不允许 URI 授权或更宽读写权限。
 默认/常规 takeover-release 仍拒绝 debug APK 和这些组件。
 
-T25现装v1006身份来自 `.codex-tmp/t23/device/after-identity.json`：
-UID10132、debuggable=true、APK SHA256 `5a027af71d8a6d8e7e35c3d16bfab0b505b7dd8cb3e9d3c7976994a3e2c5936c`。
+T28现装v1007身份来自 `.codex-tmp/t25/device/installed-identity.json`：
+UID10132、debuggable=true、APK SHA256 `f226634db89c6ddc413ee7c63742044882f85927a65c16c13b7733d45d3dcd83`。
 本轮只核对归档公有身份及APK哈希，不操作设备或重做数据验收。
-版本必须严格大于1006，所有≤1006内部候选拒绝。
-`installedObservation.postObservation` 保留v1003历史PARTIAL，不作为v1006数据验收证据。
-台账policy的 `internalDebugVersionCode=1007` 预留含T24快路径的内部候选，不是发布/安装记录。
-所有后续正式release必须 **>1007**（最早1008），即使内部候选未安装也不能复用1007。
+版本必须严格大于1007，所有≤1007内部候选拒绝。
+`installedObservation.postObservation` 保留v1003历史PARTIAL，不作为v1007数据验收证据。
+台账policy的 `internalDebugVersionCode=1008` 预留含T26/T27的内部候选，不是发布/安装记录。
+所有后续正式release必须 **>1008**（最早1009），即使内部候选未安装也不能复用1008。
 内部 debug 包不得公开发布，`record --channel internal-debug` 在读取 APK/创建台账锁前即拒绝；
 台账 releases 数组也不接受 internal-debug 条目。仅 `check` 返回 PASS 不表示发布授权。
