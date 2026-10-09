@@ -18,7 +18,7 @@
       "com.lightningstudio.watchrss": {
         "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
         "highestPublishedVerified": true,
-        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1001已安装但首启PAUSED，见installedObservation及t14/device/summary.json；不作为公网发布记录",
+        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1002已安装但首启BLOCKED/unknown_user_files，见installedObservation及t16/device/v7-report.md；不作为公网发布记录",
         "allowedLineages": [
           [
             "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
@@ -47,15 +47,15 @@
           }
         },
         "installedObservation": {
-          "versionCode": 1001,
-          "apkSha256": "72fce61794fb25ec8ae5cc5ab0cfeb3fa9adab6e0742f12a0922d3114ec3efec",
+          "versionCode": 1002,
+          "apkSha256": "ca4ca71f2c68850bcebd519b5c95cb2674e4c94e3f123567569323cd8f85fee9",
           "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
           "debuggable": false,
           "uid": 10132,
           "serial": "e3aca8af",
           "observedOn": "2026-10-08",
-          "migrationStatus": "PAUSED",
-          "evidence": ".codex-tmp/t14/device/after-identity.json"
+          "migrationStatus": "BLOCKED",
+          "evidence": ".codex-tmp/t16/device/after-identity.json"
         }
       }
     },

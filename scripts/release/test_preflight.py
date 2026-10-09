@@ -122,6 +122,25 @@ class PolicyTests(unittest.TestCase):
         self.recovery()
         self.assertTrue(self.result()['ok'])
 
+    def test_v1002_blocked_requires_strictly_higher_forward_code(self):
+        self.installed_paused()
+        self.channel = 'takeover-release'
+        self.ledger['policy']['packages'][NATIVE]['installedObservation'].update(
+            versionCode=1002, migrationStatus='BLOCKED')
+        for code in (40, 999, 1000, 1001, 1002):
+            with self.subTest(code=code):
+                self.facts['versionCode'] = code
+                self.failed('versionCode')
+        self.facts['versionCode'] = 1003
+        self.assertTrue(self.result()['ok'])
+        self.facts['signature']['watchCertificatesSha256'] = [OLD]
+        self.failed('certificate')
+        self.facts['signature']['watchCertificatesSha256'] = [CERT]
+        self.facts['versionCode'] = 900000
+        self.failed('reservedVersionRange')
+        self.recovery()
+        self.assertTrue(self.result()['ok'])
+
     def test_paused_forward_keeps_signature_and_range_gates(self):
         self.installed_paused()
         self.facts['versionCode'] = 1001
