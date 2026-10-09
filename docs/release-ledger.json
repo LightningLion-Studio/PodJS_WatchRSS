@@ -18,7 +18,7 @@
       "com.lightningstudio.watchrss": {
         "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
         "highestPublishedVerified": true,
-        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1003已ACTIVE，post为legacy PARTIAL/equal=false（files保护限制保留），见installedObservation；不作为公网发布记录",
+        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1004已ACTIVE，见installedObservation；post保留v1003历史观察，不作为v1004重新验收或公网发布记录",
         "allowedLineages": [
           [
             "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
@@ -47,15 +47,15 @@
           }
         },
         "installedObservation": {
-          "versionCode": 1003,
-          "apkSha256": "01b8f6dd73686e0b2f9f8c9a0acf461674fe35864b2b6890dc12c6e384af3460",
+          "versionCode": 1004,
+          "apkSha256": "cc09f237705586e9b82af0b21b3dd07b88d2c081567f840c043bb009decbb906",
           "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
           "debuggable": false,
           "uid": 10132,
           "serial": "e3aca8af",
-          "observedOn": "2026-10-08",
+          "observedOn": "2026-10-09",
           "migrationStatus": "ACTIVE",
-          "evidence": ".codex-tmp/t18/device/after-identity.json",
+          "evidence": ".codex-tmp/t20/device/v9b/identity.json",
           "postObservation": {
             "status": "PARTIAL",
             "equal": false,
@@ -66,7 +66,9 @@
             "reason": "legacy_files_subset_unavailable",
             "evidence": ".codex-tmp/t18/device/takeover-post.json"
           }
-        }
+        },
+        "internalDebugVersionCode": 1005,
+        "internalDebugVersionNotes": "T22 预留内部正式签名 debug 候选v1005；未安装、未公开发布、不得record。之后正式release必须>1005；此字段不是release记录或installedObservation。"
       }
     },
     "channels": {
@@ -121,6 +123,17 @@
         ],
         "sourceVersionCodes": [
           0
+        ],
+        "betaAccepted": false,
+        "approvedPurgeBackupAfter": null
+      },
+      "internal-debug": {
+        "kind": "takeover",
+        "packages": [
+          "com.lightningstudio.watchrss"
+        ],
+        "sourceVersionCodes": [
+          40
         ],
         "betaAccepted": false,
         "approvedPurgeBackupAfter": null

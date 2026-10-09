@@ -650,5 +650,144 @@ class SdkIntegrationTests(unittest.TestCase):
             self.assertFalse(next(c for c in check['checks'] if c['name'] == 'signatureVerified')['passed'])
 
 
+
+class InternalDebugTests(unittest.TestCase):
+    result = PolicyTests.result
+    failed = PolicyTests.failed
+
+    def setUp(self):
+        PolicyTests.setUp(self)
+        PolicyTests.native(self)
+        self.channel = 'internal-debug'
+        self.ledger['policy']['channels']['internal-debug'] = copy.deepcopy(self.ledger['policy']['channels']['takeover-prebeta'])
+        package = self.ledger['policy']['packages'][NATIVE]
+        package['internalDebugVersionCode'] = 1005
+        package['installedObservation'] = {
+            'versionCode': 1004, 'apkSha256': 'cc09f237705586e9b82af0b21b3dd07b88d2c081567f840c043bb009decbb906',
+            'certSha256': CERT, 'debuggable': False, 'uid': 10132, 'serial': 'e3aca8af',
+            'observedOn': '2026-10-09', 'migrationStatus': 'ACTIVE',
+            'evidence': '.codex-tmp/t20/device/v9b/identity.json'}
+        self.facts['versionCode'] = 1005
+        self.facts['debuggable'] = True
+        self.facts['signature']['lineage'] = []
+        self.facts['podManifest']['androidWorkManagerTakeover'] = copy.deepcopy(self.ledger['policy']['workManagerTakeover'])
+        details = []
+        for tag, name in sorted(p.INTERNAL_DEBUG_COMPONENTS):
+            attrs = {p.ANDROID + 'name': name, p.ANDROID + 'exported': 'false' if tag == 'activity' else 'true'}
+            if tag != 'activity':
+                attrs[p.ANDROID + 'permission'] = 'android.permission.DUMP'
+            details.append({'type': tag, 'name': name, 'node': {'type': tag, 'attributes': attrs, 'children': []}})
+        self.facts['componentDetails'] = details
+        self.facts['components'] = [{'type': item['type'], 'name': item['name']} for item in details]
+        self.facts['debugExternalComponents'] = sorted(item['name'] for item in details)
+
+    # Deliberately do not inherit generic policy tests with a different baseline.
+    def test_internal_debug_pass_and_immutable(self):
+        before = copy.deepcopy((self.facts, self.ledger))
+        self.assertTrue(self.result()['ok'], self.result())
+        self.assertEqual(before, (self.facts, self.ledger))
+
+    def test_installed_1004_and_public_reserved_1005(self):
+        package = self.ledger['policy']['packages'][NATIVE]
+        self.assertEqual(package['installedObservation']['versionCode'], 1004)
+        self.assertEqual(package['installedObservation']['migrationStatus'], 'ACTIVE')
+        self.assertEqual(package['installedObservation']['apkSha256'], 'cc09f237705586e9b82af0b21b3dd07b88d2c081567f840c043bb009decbb906')
+        for code in (40, 1000, 1003, 1004):
+            self.facts['versionCode'] = code
+            self.failed('versionCode')
+        self.facts.update(versionCode=1005, debuggable=False, debugExternalComponents=[])
+        self.channel = 'takeover-release'
+        self.failed('versionCode')
+        self.facts['versionCode'] = 1006
+        self.assertTrue(self.result()['ok'])
+
+    def test_debug_requires_explicit_channel(self):
+        self.facts['versionCode'] = 1006
+        for channel in ('takeover-release', 'takeover-beta', 'takeover-prebeta'):
+            self.channel = channel
+            self.failed('nonDebuggable')
+        self.channel = 'internal-debug'
+        self.facts['debuggable'] = False
+        self.failed('internalDebuggable')
+
+    def test_external_permissions_and_unexpected_components_rejected(self):
+        original = copy.deepcopy(self.facts)
+        for item in original['componentDetails']:
+            for field, value in (('permission', None), ('permission', 'android.permission.INTERNET'), ('exported', 'false')):
+                if item['type'] == 'activity':
+                    continue
+                self.facts = copy.deepcopy(original)
+                node = next(v for v in self.facts['componentDetails'] if v['name'] == item['name'])
+                if value is None:
+                    node['node']['attributes'].pop(p.ANDROID + field)
+                else:
+                    node['node']['attributes'][p.ANDROID + field] = value
+                self.failed('debugExternal')
+        self.facts = copy.deepcopy(original)
+        self.facts['debugExternalComponents'].append('unexpected.debug.Component')
+        self.facts['componentDetails'].append({'type': 'receiver', 'name': 'unexpected.debug.Component', 'node': {}})
+        self.failed('debugExternal')
+        self.facts = copy.deepcopy(original)
+        self.facts['componentDetails'][0]['node']['attributes'][p.ANDROID + 'exported'] = 'true'
+        self.failed('debugExternal')
+        for field in ('readPermission', 'writePermission', 'grantUriPermissions'):
+            self.facts = copy.deepcopy(original)
+            provider = next(v for v in self.facts['componentDetails'] if v['type'] == 'provider')
+            provider['node']['attributes'][p.ANDROID + field] = 'true' if field == 'grantUriPermissions' else 'android.permission.INTERNET'
+            self.failed('debugExternal')
+
+    def test_other_gates_remain_required(self):
+        original = copy.deepcopy(self.facts)
+        mutations = [('certificate', lambda f: f['signature'].update(certificatesSha256=[OLD])),
+                     ('signatureVerified', lambda f: f['signature'].update(verified=False)),
+                     ('v3Lineage', lambda f: f['signature'].update(lineage=[{'sha256': OLD, 'installedData': True}])),
+                     ('takeoverSourceVersionCode', lambda f: f['metadata'].update({'dev.podjs.takeover.sourceVersionCode': '41'})),
+                     ('purgeBackupAfter', lambda f: f['metadata'].update({'dev.podjs.takeover.purgeBackupAfter': '1005'})),
+                     ('workManagerTakeover', lambda f: f['podManifest'].pop('androidWorkManagerTakeover')),
+                     ('appId', lambda f: f.update(appId=COEXIST))]
+        for gate, mutate in mutations:
+            self.facts = copy.deepcopy(original)
+            mutate(self.facts)
+            self.failed(gate)
+        self.facts = original
+        self.ledger['policy']['packages'][NATIVE]['highestPublishedVerified'] = False
+        self.failed('publicationInventory')
+
+    def test_malformed_internal_policy_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'ledger.json'
+            for value in (None, [], 'takeover', {'kind': 'recovery', 'packages': [NATIVE]},
+                          {'kind': 'takeover', 'packages': [COEXIST]}):
+                ledger = copy.deepcopy(self.ledger)
+                ledger['policy']['channels']['internal-debug'] = value
+                path.write_text(json.dumps(ledger))
+                with self.assertRaises(ValueError):
+                    p.load_ledger(path)
+            for value in (True, 0, '1005'):
+                ledger = copy.deepcopy(self.ledger)
+                ledger['policy']['packages'][NATIVE]['internalDebugVersionCode'] = value
+                path.write_text(json.dumps(ledger))
+                with self.assertRaises(ValueError):
+                    p.load_ledger(path)
+
+    def test_internal_record_rejected_without_inspection_or_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / 'ledger.json'
+            ledger.write_text(json.dumps(self.ledger))
+            before = ledger.read_bytes()
+            with patch.object(p, 'inspect_apk') as inspect:
+                with self.assertRaisesRegex(ValueError, 'check-only'):
+                    p.record('nonexistent.apk', 'internal-debug', ledger, {'app': 'rev'}, '2026-10-09', 'internal')
+                inspect.assert_not_called()
+            self.assertEqual(before, ledger.read_bytes())
+            self.assertFalse(ledger.with_suffix('.json.lock').exists())
+            entry = copy.deepcopy(self.ledger['releases'][0])
+            entry['channel'] = 'internal-debug'
+            self.ledger['releases'].append(entry)
+            ledger.write_text(json.dumps(self.ledger))
+            with self.assertRaisesRegex(ValueError, 'cannot be release records'):
+                p.load_ledger(ledger)
+
+
 if __name__ == '__main__':
     unittest.main()

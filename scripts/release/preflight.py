@@ -36,6 +36,13 @@ COMPONENT_TYPES = {'activity', 'activity-alias', 'receiver', 'provider', 'servic
 RECOVERY_ADDED_COMPONENTS = frozenset()
 MAX_CODE = 2_100_000_000
 HEX = re.compile(r'^[0-9a-f]{64}$')
+INTERNAL_DEBUG_COMPONENTS = frozenset({
+    ('activity', 'dev.podjs.debug.DebugEntry'),
+    ('activity-alias', 'com.lightningstudio.watchrss.DouyinDebugEntryActivity'),
+    ('activity-alias', 'com.lightningstudio.watchrss.LlmSummaryActivity'),
+    ('receiver', 'com.lightningstudio.watchrss.debug.DouyinPlaybackDebugReceiver'),
+    ('provider', 'com.lightningstudio.watchrss.debug.DebugLogProvider'),
+})
 DEBUG_COMPONENTS = {
     'com.lightningstudio.watchrss.DouyinDebugEntryActivity',
     'com.lightningstudio.watchrss.LlmSummaryActivity',
@@ -95,12 +102,18 @@ def load_ledger(path):
             integer(observation['versionCode'], 1)
             integer(observation['uid'], 1)
             dt.date.fromisoformat(observation['observedOn'])
+        if 'internalDebugVersionCode' in package:
+            integer(package['internalDebugVersionCode'], 1)
         for chain in package['allowedLineages']:
             if (not isinstance(chain, list) or not chain or len(set(chain)) != len(chain)
                     or not all(HEX.fullmatch(cert) for cert in chain)
                     or chain[-1] != package['certSha256']):
                 raise ValueError('invalid approved lineage')
-    for channel in policy['channels'].values():
+    for channel_name, channel in policy['channels'].items():
+        if channel_name == 'internal-debug' and (not isinstance(channel, dict)
+                or channel.get('kind') != 'takeover'
+                or channel.get('packages') != [policy['nativeAppId']]):
+            raise ValueError('internal-debug must use the native takeover policy')
         if (not isinstance(channel, dict) or channel['kind'] not in ('coexistence', 'takeover', 'recovery')
                 or not isinstance(channel['packages'], list) or not channel['packages']
                 or any(pkg not in policy['packages'] for pkg in channel['packages'])
@@ -125,6 +138,8 @@ def load_ledger(path):
                      'apkSha256', 'cert', 'date', 'notes', 'status'):
             if name not in entry:
                 raise ValueError(f'missing release field: {name}')
+        if entry['channel'] == 'internal-debug':
+            raise ValueError('internal-debug artifacts cannot be release records')
         integer(entry['versionCode'], 1)
         identity = (entry['package'], entry['channel'], entry['versionCode'])
         if identity in seen:
@@ -345,10 +360,12 @@ def evaluate(facts, channel, ledger):
 
     history = [r['versionCode'] for r in ledger['releases'] if r['package'] == app_id]
     installed = package.get('installedObservation', {}).get('versionCode', 0)
-    highest = max([installed, *history])
+    internal_debug = channel == 'internal-debug'
+    reserved = package.get('internalDebugVersionCode', 0)
+    highest = max([installed, *history, *([] if internal_debug else [reserved])])
     code = facts['versionCode']
     check('versionCode', code > highest,
-          f'{code} must be > {highest} (all channels and current installed observation; codes remain reserved)')
+          f'{code} must be > {highest} (history, installed observation and public-release internal-debug reservation; codes remain reserved)')
     check('publicationInventory', package['highestPublishedVerified'] is True,
           'all-channel highest must be confirmed in ledger policy')
     kind = target['kind']
@@ -358,7 +375,11 @@ def evaluate(facts, channel, ledger):
         low, high = ranges[kind]
         check('reservedVersionRange', low <= code % stride <= high,
               f'{kind}: code modulo {stride} in {low}..{high}')
-    check('nonDebuggable', facts['debuggable'] is False, 'release APK must be non-debuggable')
+    if internal_debug:
+        check('internalDebuggable', facts['debuggable'] is True,
+              'internal-debug requires debuggable=true; check-only, never publish or record')
+    else:
+        check('nonDebuggable', facts['debuggable'] is False, 'release APK must be non-debuggable')
     signature = facts['signature']
     check('signatureVerified', signature.get('verified') is True,
           f'cryptographic verification across APK SDK range and SDK {policy["watchSdk"]}')
@@ -372,7 +393,31 @@ def evaluate(facts, channel, ledger):
         and chain in package['allowedLineages'] and chain[-1] == expected
         and all(c.get('installedData') is True for c in lineage))
     check('v3Lineage', lineage_ok, 'if embedded: verified, approved ordered chain, installed-data capability')
-    if kind == 'recovery':
+    if internal_debug:
+        try:
+            details = facts['componentDetails']
+            if component_set(details) != component_set(facts['components']):
+                raise ValueError('component details do not match manifest identities')
+            debug = [item for item in details if item['name'] in facts['debugExternalComponents']]
+            if component_set(debug) != INTERNAL_DEBUG_COMPONENTS or len(debug) != len(INTERNAL_DEBUG_COMPONENTS):
+                raise ValueError('internal-debug requires exactly the approved debug components')
+            for item in debug:
+                attrs = item['node']['attributes']
+                if item['type'] == 'activity':
+                    if attrs.get(ANDROID + 'exported') != 'false':
+                        raise ValueError('DebugEntry must remain private')
+                elif (attrs.get(ANDROID + 'permission') != 'android.permission.DUMP'
+                        or attrs.get(ANDROID + 'exported') != 'true'
+                        or any(attrs.get(ANDROID + key, 'android.permission.DUMP') != 'android.permission.DUMP'
+                               for key in ('readPermission', 'writePermission'))
+                        or (item['type'] == 'provider' and (
+                            attrs.get(ANDROID + 'grantUriPermissions', 'false') != 'false'
+                            or item['node']['children']))):
+                    raise ValueError('all debug external components must be shell-only (DUMP)')
+            check('debugExternal', True, facts['debugExternalComponents'])
+        except (ValueError, KeyError, TypeError, AttributeError) as error:
+            check('debugExternal', False, str(error))
+    elif kind == 'recovery':
         try:
             baseline, allowed = recovery_baseline(ledger)
             unexpected = component_set(facts.get('components')) - (allowed | RECOVERY_ADDED_COMPONENTS)
@@ -445,6 +490,8 @@ def record(apk, channel, ledger_path, source_revs, date, notes, sdk=None):
     Serialize writers with a stable sidecar lock; atomic replace, no policy edits.
     A preflight receipt alone is deliberately insufficient for recording.
     """
+    if channel == 'internal-debug':
+        raise ValueError('internal-debug is check-only; public publication and release record are forbidden')
     ledger_path = Path(ledger_path).resolve()
     dt.date.fromisoformat(date)
     if not notes.strip() or not source_revs or any(not v.strip() for v in source_revs.values()):

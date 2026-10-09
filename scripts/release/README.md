@@ -48,7 +48,7 @@ debug.PerfLargeArticleActivity、debug.PerfLargeListActivity。完整属性与�
 恢复候选本身仍须非 debug。AXML 相等不证明 DEX runtime 门控、资源内容相等或
 正式接管设备验收。并存和接管渠道没有这些例外。重复组件身份拒绝。
 
-所有渠道均要求非 debug、APK 签名实际验证通过、当前和
+除显式 `internal-debug` 外，所有渠道均要求非 debug。所有渠道要求 APK 签名实际验证通过、当前和
 SDK30 公有 signer 均为期望的 Lightning Studio 单证书。v3/v3.1 lineage 若存在，
 必须通过 apksig 校验、顺序与台账允许链完全一致、末端为当前证书、链内每个证书
 保留 installed-data capability。并存包允许历史 Android Debug → Lightning Studio
@@ -96,3 +96,18 @@ bun test tests/release-preflight.test.ts
 `aapt2` 生成 unsigned binary AXML APK，通过生产默认 SDK discovery/Java/apksig
 路径确认 unsigned 被拒绝。不生成签名 key，不访问网络；SDK 不可用时该一项明确
 SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`。
+
+## T22 internal-debug（仅内部检查）
+
+`check --channel internal-debug` 是唯一允许 debuggable=true 的通道，且要求该属性为 true。
+仅允许正式包名，保留 takeover 的签名/谱系、版本、source=40、purge 和 WorkManager 全部门槛。
+要求五个精确 debug 组件：私有 DebugEntry，加两个 activity-alias、receiver、provider；
+四个外部组件必须 exported=true 且 permission=android.permission.DUMP，provider 不允许 URI 授权或更宽读写权限。
+默认/常规 takeover-release 仍拒绝 debug APK 和这些组件。
+
+v1004 ACTIVE 身份来自 `.codex-tmp/t20/device/v9b/identity.json`，版本必须严格大于1004。
+`installedObservation.postObservation` 保留 v1003 的历史 PARTIAL 结果，未重新验证 v1004 数据。
+台账 policy 的 `internalDebugVersionCode=1005` 只预留内部候选，不是发布/安装记录。
+所有后续正式 release 版本必须 **>1005**，即使该候选尚未安装也不能复用1005。
+内部 debug 包不得公开发布，`record --channel internal-debug` 在读取 APK/创建台账锁前即拒绝；
+台账 releases 数组也不接受 internal-debug 条目。仅 `check` 返回 PASS 不表示发布授权。
