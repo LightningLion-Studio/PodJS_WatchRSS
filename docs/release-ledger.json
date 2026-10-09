@@ -18,7 +18,7 @@
       "com.lightningstudio.watchrss": {
         "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
         "highestPublishedVerified": true,
-        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1002已安装但首启BLOCKED/unknown_user_files，见installedObservation及t16/device/v7-report.md；不作为公网发布记录",
+        "inventoryScope": "原生全渠道最高40的历史核验仍有效；本机正式接管v1003已ACTIVE，post为legacy PARTIAL/equal=false（files保护限制保留），见installedObservation；不作为公网发布记录",
         "allowedLineages": [
           [
             "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
@@ -47,15 +47,25 @@
           }
         },
         "installedObservation": {
-          "versionCode": 1002,
-          "apkSha256": "ca4ca71f2c68850bcebd519b5c95cb2674e4c94e3f123567569323cd8f85fee9",
+          "versionCode": 1003,
+          "apkSha256": "01b8f6dd73686e0b2f9f8c9a0acf461674fe35864b2b6890dc12c6e384af3460",
           "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
           "debuggable": false,
           "uid": 10132,
           "serial": "e3aca8af",
           "observedOn": "2026-10-08",
-          "migrationStatus": "BLOCKED",
-          "evidence": ".codex-tmp/t16/device/after-identity.json"
+          "migrationStatus": "ACTIVE",
+          "evidence": ".codex-tmp/t18/device/after-identity.json",
+          "postObservation": {
+            "status": "PARTIAL",
+            "equal": false,
+            "generation": "g-c479e595-a6ec-4759-82c8-15a6669ee345",
+            "strictRootsVerified": true,
+            "nonPlatformFilesVerified": false,
+            "knownDifference": "platform-metadata",
+            "reason": "legacy_files_subset_unavailable",
+            "evidence": ".codex-tmp/t18/device/takeover-post.json"
+          }
         }
       }
     },

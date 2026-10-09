@@ -1,3 +1,128 @@
+# T20：v1003 ACTIVE → v1004 升级候选（2026-10-08；本轮设备验收 PENDING）
+
+冻结 app `b9075fd` / framework `5e6fa1b` / PocketJS `c5986b0`（T19 系统字体缺字回退）。
+本节替代下方 T18/T16/T14 当前候选；历史迁移清单只保留来源，本次不能按 BLOCKED 新代际流程执行。
+当前现装观察是 v1003 / UID10132 / 非 debuggable / **ACTIVE**，依据
+`.codex-tmp/t18/device/after-identity.json`、`takeover-post.json`、`v8-report.md` 和 V8b 报告；
+T20 只离线复核归档 APK/公开签名与 receipt，不重新查询设备。
+完整固定代际 **`g-c479e595-a6ec-4759-82c8-15a6669ee345`**（任务简称 g-c479e595）。
+
+| 候选 | 路径 / SHA256 | T20 离线结果 |
+|---|---|---|
+| ACTIVE 后升级 | `.codex-tmp/t20/watchrss-takeover-v1004.apk`；`cc09f237705586e9b82af0b21b3dd07b88d2c081567f840c043bb009decbb906`；122070268 bytes | `takeover-release` PASS 13/13；正式 appId / 1004；非 debug；sourceVersionCode40 / purgeBackupAfter0 |
+| 原生恢复 | `.codex-tmp/t20/watchrss-native-recovery-v900000.apk`；`a9747852a71ea5919b8dd7df271afdb58a195bd033409152c6835cc034cf9127`；25277224 bytes | `recovery` PASS 14/14；复用 t12 原字节，SHA256 不变 |
+
+现装 v1003 APK SHA256 `01b8f6dd73686e0b2f9f8c9a0acf461674fe35864b2b6890dc12c6e384af3460`。
+当前及 SDK30 signer 在现装/候选/恢复包相同：
+`f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d`。
+**1003 < 1004 < 900000**。台账 installedObservation 更新为 v1003 ACTIVE，并附旧 postObservation：
+legacy PARTIAL / equal=false、strictRootsVerified=true、nonPlatformFilesVerified=false。
+门禁拒绝 ≤1003，签名/lineage/非 debug/保留版本区间不放宽；没有 release/publication 新记录，没有 record。
+
+实际 APK 核对：DEX 精确保留 `dev.podjs.runtime.PodSystemFontFallback.raster`
+`(Ljava/lang/String;FIIIII)[B`；native .so 定义 `pod_runtime_set_system_font_fallback`；
+packaged pod.manifest.json 的 PocketJS revision 是完整 `c5986b0fdf7d79d3d9346b4a1f02f7c466877852`，
+该 manifest 的 pakHash/integrity 与本轮 main.pak 对应（原始 PAK header 无 revision 字段）。
+consumer keep rule 从 release AAR 读回并做独立 R8 shrink/obfuscation 检查；候选 release 本身未启用 R8，
+分别记录实际 APK 保留结果和隔离 R8 规则证明，不能冒称候选跑过 R8 优化。
+全部离线结果见 `.codex-tmp/t20/summary.json`、`artifact-provenance.json`、
+`release-font-fallback-audit.json`、`r8-keep-audit.json`。实际缺字显示与滚动表现仍 PENDING。
+
+## v1003 ACTIVE → v1004 升级清单（仅供后续获授权设备负责人执行）
+
+1. 按 DEVICE_OWNER 规则取得设备使用权，仅 `e3aca8af` / `com.lightningstudio.watchrss`。
+   只读核对现装 code1003、UID10132、非 debug、APK SHA、公有 signer、设备解锁/空间；
+   若现装身份/迁移终态不符合归档基线，停止并报告。本轮不操作设备、不安装、不 record、不 commit。
+
+   ```sh
+   (cd .codex-tmp/t20 && sha256sum -c SHA256SUMS)
+   python3 scripts/release/preflight.py check .codex-tmp/t20/watchrss-takeover-v1004.apk --channel takeover-release --ledger docs/release-ledger.json
+   python3 scripts/release/preflight.py check .codex-tmp/t20/watchrss-native-recovery-v900000.apk --channel recovery --ledger docs/release-ledger.json
+   ```
+
+   preflight/台账用 `minor/takeover-t20` 待审文件；APK 在主仓库 `.codex-tmp/`。
+   lead 集成前，将 preflight 与台账换为
+   `/home/wilf/data/OPPO_Develop/PodJS_WatchRSS.wt-minor-t20/` 下绝对路径。
+
+2. **保持 ACTIVE 代际，不执行新的 pre/post 迁移验收。** 不运行要求 run-as pre 的
+   `acceptance.py upgrade`；不能使用 T18 的 SNAPSHOTTED/ACTIVE 新代际 helper。
+   旧 T12 v1 pre 与 T18 takeover-post.json 原样保留，post 仍 legacy PARTIAL。
+   V8 已证明三根相等，但缺历史 files subset，故 files 完整性限制不会因本次 UI 升级消失。
+   本次比较基线为 `.codex-tmp/t20/active-baseline.json`：只读投影自 V8b 已归档六项 ACTIVE digest，
+   不是新 pre、不修改旧 receipt、不代表当前 PodJS 业务写入的快照。
+
+3. 安装前在独立终端持续日志捕获，输出 `.codex-tmp/t20/device/`：
+
+   ```sh
+   mkdir -p .codex-tmp/t20/device
+   adb -s e3aca8af logcat -v epoch -T 1 > .codex-tmp/t20/device/logcat.txt
+   ```
+
+   另一终端同包升级，不加降级参数、不卸载、不清数据：
+
+   ```sh
+   adb -s e3aca8af shell am force-stop com.lightningstudio.watchrss
+   adb -s e3aca8af install -r .codex-tmp/t20/watchrss-takeover-v1004.apk
+   adb -s e3aca8af shell am force-stop com.lightningstudio.watchrss
+   ```
+
+   必须 Success，并只读核对 code1004、UID10132、非 debug、候选 SHA、公有 signer；
+   身份失败不首启。安装 Success 仅证明升级身份。
+
+4. 日志已捕获后首启一次：
+
+   ```sh
+   adb -s e3aca8af shell am start -W -n com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity
+   adb -s e3aca8af shell pidof com.lightningstudio.watchrss
+   ```
+
+   以本次启动 epoch 和实际 PID 区分历史日志。预期终态校验后进入既有 Home，
+   **无新 DETECTED/SNAPSHOTTED/COPYING/VERIFYING/READY/ACTIVATING**，无新 generation；
+   只允许同完整代际的 ACTIVE 六项 digest。短暂“正在检查数据0%”准入校验画面本身不证明重迁移，
+   以真实日志为准。
+   **出现任一迁移阶段日志立即停止并原样报告该行**，不等它完成、不点重试、不二启、不擅自恢复。
+   PAUSED/BLOCKED、PodTakeover 失败诊断、digest unavailable/malformed、代际改变也必须停止。
+
+   ACTIVE 六项数据库/files/shared_prefs/no_backup/manifest/files_without_platform_metadata 的
+   files/bytes/SHA256 必须与 active-baseline.json 一致；这是对 sealed native backup 摘要的比较，
+   不要求 live PodJS 新业务数据与原生 pre 相等。预期原生备份、activation/native-backup receipt 和
+   active pointer 不重新生成/移动/封存，代际不变，purgeBackupAfter0 不清备份。
+   coordinator ACTIVE 分支只校验既有 pointer、打开终态并调用 afterActive；不重新 beforePublish。
+   receipt 实体没有可用公开读取路径时，将逐文件/内容验证标 PENDING，不绕过 non-debuggable 限制；
+   不以相同 generation 单独冒充已直接读回私有 receipt。
+
+5. 首启到 Home 后先做 **首页 K8 RGB MAE=0**，基准
+   `.codex-tmp/device/shots/s4-k8-home-after-cold.png`（466×466），保存 screenshot、diff、统计；
+   若不为0，停止后续验收并报告实际差异，不用失败/过渡页代替 Home。
+   随后只读导航并留截图，确认“旅行者号①”（① U+2460）和收藏作者
+   **“UP主：蒸気火鸡”**（気 U+6C17）可见、无方框，不能把相似字形或预种/原生参照截图当正式结果。
+   不改字体/字号/预设、文章、收藏或账号来制造通过。
+
+6. 做一次第二冷启动，继续同 PID/epoch 分段日志检查；同代际 ACTIVE、六项 backup digest 一致，
+   不出现任何新迁移阶段，Home 仍 K8 MAE=0，旧 receipt/backup 预期不变。
+
+   ```sh
+   adb -s e3aca8af shell am force-stop com.lightningstudio.watchrss
+   adb -s e3aca8af shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.lightningstudio.watchrss/dev.podjs.androidwatch.MainActivity
+   ```
+
+   记录 PID、启动耗时、观察时窗、ACTIVE 行、Home 图。进入 Home/频道列表做真实滚动，
+   记录路径/持续时间/画面是否出现明显卡顿；缺量化性能数据时只写视觉观察，不能给出虚构 FPS/jank。
+   检查崩溃/ANR/字体回退相关失败，完成后回 Home，停止日志并释放 DEVICE_OWNER。
+   所有不能真实观察的项标 PENDING；本轮以上设备项全部 PENDING。
+
+## ACTIVE 后的原生恢复边界
+
+恢复包仍是同签名900000，离线可覆盖1003/1004，字节未改。
+与先前 PAUSED/BLOCKED 不同，ACTIVE 已有 native sealed backup；恢复要严格验证既有 manifest/seal/证书/字节，
+恢复原生基线并归档 PodJS 新增数据，不能保证新增业务资料自动合并回原生。
+缺失/损坏 backup/receipt 继续 fail-closed。恢复不属于本轮操作；以后单独授权任务才可执行。
+恢复到900000后不能正常降级装1004。正式恢复数据/账号/Keystore/WorkManager 接受仍 PENDING。
+
+---
+
+## 历史 T18（已被上方 T20 ACTIVE 升级清单替代）
+
 # T18：v1002 BLOCKED → v1003 前向修复候选（2026-10-08；正式设备验收 PENDING）
 
 冻结 app `b923a62` / framework `a3842dc` / PocketJS `78b1c86`。
