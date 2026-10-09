@@ -1,29 +1,30 @@
-# Non-debuggable platform-metadata rehearsal
+# Non-debuggable takeover classification rehearsal
 
-Use a dedicated app/framework checkout and only `com.lightningstudio.watchrss.podjs.rehearsal` on `e3aca8af`. The fixture refuses any other package, a debuggable target, or an existing native database/journal. It writes synthetic data inside the non-debuggable target using same-signature instrumentation, without using run-as or reading another package. The fixture class is packaged only in `.rehearsal.test`.
+Use a dedicated app/framework worktree and only `com.lightningstudio.watchrss.podjs.rehearsal` on `e3aca8af`. The fixture refuses every other package, a debuggable target, or an existing native database/journal. It writes synthetic data inside the non-debuggable target using same-signature instrumentation. Its class is packaged only in `.rehearsal.test`.
 
-Prepare the isolated app configuration with the rehearsal applicationId, remove native signing and debugExternal configuration, and set the WorkManager nativeAppId to the rehearsal package. Install dependencies with all local framework/PocketJS paths verified as source symlinks. Run the CLI build before packaging to generate styles and assets. Build the Android runtime for the watch ABI.
+In an isolated app config, use the rehearsal applicationId, remove native signing/debugExternal configuration, set WorkManager nativeAppId to the rehearsal package, and set versionCode 1701. Verify local dependencies are source symlinks to the isolated framework and its exact PocketJS revision. Run the CLI build before packaging. Restore the ordinary app configuration after building assets; neither signing properties nor formal data are needed. T17 uses unchanged native runtime bytes from the exact T15 source/PocketJS revision; changes are Java-only.
 
-With `T15_FRAMEWORK`, `T15_APP`, and `T15_DIST` set to those isolated paths and generated android-watch assets:
+With `T17_FRAMEWORK`, `T17_APP`, and `T17_DIST` set to the isolated paths and generated rehearsal android-watch assets:
 
 ```bash
 ANDROID_SDK_ROOT=/home/wilf/Android/Sdk \
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
-"$T15_FRAMEWORK/platforms/android/gradlew" -p "$T15_FRAMEWORK/platforms/android" --offline \
+"$T17_FRAMEWORK/platforms/android/gradlew" -p "$T17_FRAMEWORK/platforms/android" --offline \
   :androidApp:assembleRelease :androidApp:assembleReleaseAndroidTest \
+  :runtime:testDebugUnitTest \
   -PpodAppId=com.lightningstudio.watchrss.podjs.rehearsal \
-  -PpodVersionCode=1501 -PpodVersionName=T15 \
+  -PpodVersionCode=1701 -PpodVersionName=T17 \
   -PpodAbis=armeabi-v7a -PpodReleaseDebuggable=false \
-  -PpodDistDir="$T15_DIST" -PpodResDir="$T15_APP/android/res" \
+  -PpodDistDir="$T17_DIST" -PpodResDir="$T17_APP/android/res" \
   -PpodAppTheme=@style/Theme.WatchRSS.PodJS.Splash \
   -PpodTakeoverSourceVersionCode=40 -PpodCleartextTraffic=true \
-  -PpodTestSourceDir="$T15_APP/tests/android/release-rehearsal" \
-  -I "$T15_APP/scripts/migration/release-rehearsal.init.gradle"
+  -PpodTestSourceDir="$T17_APP/tests/android/release-rehearsal" \
+  -I "$T17_APP/scripts/migration/release-rehearsal.init.gradle"
 ```
 
-The init script rejects any other applicationId, uses only the Android debug signing configuration, and sets the tested build type to release. Inspect both actual APK manifests and matching certificates before installation; release debuggable must be absent/false, instrumentation targetPackage must be the isolated app, and ProfileInstallerInitializer/WorkManagerInitializer must be absent from startup metadata. Confirm release baseline profile assets are present.
+The init script rejects other applicationIds, uses only Android debug signing, and tests the release build type. Inspect both APK manifests and matching certificates before installation. Release debuggable must be absent/false; instrumentation targetPackage must be the isolated app; ProfileInstallerInitializer/WorkManagerInitializer must be absent from startup metadata. Require release baseline profile assets and absence of the fixture class from release DEX.
 
-After the device owner is released, acquire `DEVICE_OWNER=wrss-impl`, install only these two APKs and run:
+After verifying DEVICE_OWNER is released, acquire it as wrss-impl, check for existing rehearsal packages, install only these two inspected APKs, and run:
 
 ```bash
 adb -s e3aca8af shell am instrument -w -r \
@@ -31,6 +32,8 @@ adb -s e3aca8af shell am instrument -w -r \
   com.lightningstudio.watchrss.podjs.rehearsal.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-The test seeds a migrated Room v18 layout with real native ALTER defaults, business rows/body, identity preferences, no_backup data and both ProfileInstaller markers. It waits beyond the old initializer delay, seeds two synthetic partial candidates plus a legacy PAUSED/stage_failed/DETECTED journal, then starts the production MainActivity. It verifies ACTIVE, retention of both candidates, converted content consumption, marker exclusion from business files, and exact fixture-root equality in the sealed backup. Finally it requires the real skip marker to contain the package's lastUpdateTime after ProfileInstaller runs, and confirms the original marker is still intact in the backup.
+The fixture seeds a historical migrated Room v18 layout, body/identity/no_backup data, both ProfileInstaller markers, offline RSS/Bili, reader and note assets, a private test protobuf, native log, exact AndroidX locale/history filenames, and 17 cache files. Cache includes Coil default and explicit RSS cache, generic/Room/Typeface/NanoHTTPD/Guava/provider temporary shapes, named media/TTS/update caches and an exact database lock. Nine cache paths are outside the legacy named-cache shapes.
 
-Capture only this target PID's digest/ProfileInstaller/test logs. The pre fixture projection uses `T15RehearsalPre`, not the production digest tag; it is synthetic instrumentation evidence, not a debug-source pre receipt. Uninstall only the rehearsal app/test afterwards and restore `DEVICE_OWNER=released`. This does not authorize formal/native/.podjs package operations.
+It waits beyond the old initializer delay, seeds three retained synthetic candidates plus a legacy `BLOCKED/unknown_user_files` journal and a files-3 report containing only that blocker, then starts production MainActivity. It requires a fresh files-4 generation at ACTIVE; all three candidates unchanged; zero unknown files, nine unrecognized caches and one exact database lock; consumed body/SQLite content; no imported cache/private platform state; and exact pre/SNAPSHOTTED/ACTIVE native backup root equality. It then requires a real post-admission ProfileInstaller marker matching PackageInfo.lastUpdateTime and confirms the old marker is intact in sealed backup. This is synthetic isolated evidence, not formal sandbox equality or an exact diagnosis of formal v1002's unknown file.
+
+Capture logs for this target PID only, including `T17RehearsalPre`, `T17Rehearsal`, `PodTakeoverDigest`, `PodTakeoverFiles`, and `ProfileInstaller`. Uninstall only the rehearsal app/test, verify cleanup, and restore DEVICE_OWNER to released. This does not authorize formal/native/.podjs package operations.
