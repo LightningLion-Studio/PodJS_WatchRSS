@@ -97,20 +97,20 @@ bun test tests/release-preflight.test.ts
 路径确认 unsigned 被拒绝。不生成签名 key，不访问网络；SDK 不可用时该一项明确
 SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`。
 
-## T22/T23/T25/T28/T30 internal-debug（仅内部检查）
+## T22/T23/T25/T28/T30/T34 internal-debug（仅内部检查）
 
 `check --channel internal-debug` 是唯一允许 debuggable=true 的通道，且要求该属性为 true。
 仅允许正式包名，保留 takeover 的签名/谱系、版本、source=40、purge 和 WorkManager 全部门槛。
-要求五个精确 debug 组件：私有 DebugEntry，加两个 activity-alias、receiver、provider；
-四个外部组件必须 exported=true 且 permission=android.permission.DUMP，provider 不允许 URI 授权或更宽读写权限。
+要求七个精确 debug 组件：私有 DebugEntry，加四个 activity-alias（含两个声波入口）、receiver、provider；
+六个外部组件必须 exported=true 且 permission=android.permission.DUMP，provider 不允许 URI 授权或更宽读写权限。
 默认/常规 takeover-release 仍拒绝 debug APK 和这些组件。
 
-T30现装v1008身份来自 `.codex-tmp/t28/device/installed-identity.json`：
-UID10132、debuggable=true、APK SHA256 `b366eea96a39be2c1ebd972ce07e75482e8db8f308847d05b6f810bec13bc660`。
+T34现装v1009身份来自 `.codex-tmp/t30/device/installed-identity.json`：
+UID10132、debuggable=true、APK SHA256 `ef487b5b7f579dc8fd30ee6ed30ca0b25384d314660f8eaa1d9c62356ff2fc4d`。
 本轮只核对归档公有身份及APK哈希，不操作设备或重做数据验收。
-版本必须严格大于1008，所有≤1008内部候选拒绝。
-`installedObservation.postObservation` 保留v1003历史PARTIAL，不作为v1008数据验收证据。
-台账policy的 `internalDebugVersionCode=1009` 预留含T29（保留T26/T27）的内部候选，不是发布/安装记录。
-所有后续正式release必须 **>1009**（最早1010），即使内部候选未安装也不能复用1009。
+版本必须严格大于1009，所有≤1009内部候选拒绝。
+`installedObservation.postObservation` 保留v1003历史PARTIAL，不作为v1009数据验收证据。
+台账policy的 `internalDebugVersionCode=1010` 预留含T31/T32/T33的内部候选，不是发布/安装记录。
+所有后续正式release必须 **>1010**（最早1011），即使内部候选未安装也不能复用1010。
 内部 debug 包不得公开发布，`record --channel internal-debug` 在读取 APK/创建台账锁前即拒绝；
 台账 releases 数组也不接受 internal-debug 条目。仅 `check` 返回 PASS 不表示发布授权。

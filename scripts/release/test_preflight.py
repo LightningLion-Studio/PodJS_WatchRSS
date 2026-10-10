@@ -1005,5 +1005,82 @@ class InternalDebugV1009Tests(unittest.TestCase):
         self.failed('internalDebuggable')
 
 
+class InternalDebugV1010Tests(unittest.TestCase):
+    """Frozen T34 policy boundary; does not depend on a future live ledger."""
+    result = PolicyTests.result
+    failed = PolicyTests.failed
+
+    def setUp(self):
+        InternalDebugTests.setUp(self)
+        package = self.ledger['policy']['packages'][NATIVE]
+        package['internalDebugVersionCode'] = 1010
+        package['installedObservation'].update(
+            versionCode=1009, debuggable=True,
+            apkSha256='ef487b5b7f579dc8fd30ee6ed30ca0b25384d314660f8eaa1d9c62356ff2fc4d',
+            evidence='.codex-tmp/t30/device/installed-identity.json')
+        self.facts['versionCode'] = 1010
+
+    def test_internal_1010_pass_and_installed_1009_immutable(self):
+        before = copy.deepcopy((self.facts, self.ledger))
+        self.assertTrue(self.result()['ok'], self.result())
+        self.assertEqual(before, (self.facts, self.ledger))
+        observation = self.ledger['policy']['packages'][NATIVE]['installedObservation']
+        self.assertEqual((observation['versionCode'], observation['debuggable']), (1009, True))
+        self.assertEqual(observation['apkSha256'], 'ef487b5b7f579dc8fd30ee6ed30ca0b25384d314660f8eaa1d9c62356ff2fc4d')
+
+    def test_internal_rejects_all_codes_through_installed_1009(self):
+        for code in (40, 999, 1000, 1003, 1004, 1005, 1006, 1007, 1008, 1009):
+            with self.subTest(code=code):
+                self.facts['versionCode'] = code
+                self.failed('versionCode')
+        self.facts['versionCode'] = 1010
+        self.assertTrue(self.result()['ok'])
+
+    def test_public_1010_reserved_and_1011_is_first_eligible_code(self):
+        self.facts.update(debuggable=False, debugExternalComponents=[])
+        for channel in ('takeover-release', 'takeover-beta', 'takeover-prebeta'):
+            self.channel = channel
+            for code in (1004, 1005, 1006, 1007, 1008, 1009, 1010):
+                with self.subTest(channel=channel, code=code):
+                    self.facts['versionCode'] = code
+                    self.failed('versionCode')
+            self.facts['versionCode'] = 1011
+            self.assertTrue(self.result()['ok'], self.result())
+
+    def test_1010_debug_still_requires_explicit_internal_channel(self):
+        self.facts['versionCode'] = 1011
+        for channel in ('takeover-release', 'takeover-beta', 'takeover-prebeta'):
+            self.channel = channel
+            self.failed('nonDebuggable')
+            self.failed('debugExternal')
+        self.channel = 'internal-debug'
+        self.assertTrue(self.result()['ok'])
+        self.facts['debuggable'] = False
+        self.failed('internalDebuggable')
+
+
+class AcousticDebugComponentsTests(unittest.TestCase):
+    result = PolicyTests.result
+    failed = PolicyTests.failed
+    setUp = InternalDebugTests.setUp
+
+    def test_both_acoustic_aliases_require_shell_permission_and_export(self):
+        for name in ('com.lightningstudio.watchrss.AcousticConnectionActivity', 'com.lightningstudio.watchrss.DebugAcousticConnectionActivity'):
+            for field, value in (('permission', None), ('permission', 'android.permission.INTERNET'), ('exported', 'false')):
+                with self.subTest(name=name, field=field, value=value):
+                    self.setUp()
+                    item = next(item for item in self.facts['componentDetails'] if item['name'] == name)
+                    if value is None:
+                        item['node']['attributes'].pop(p.ANDROID + field)
+                    else:
+                        item['node']['attributes'][p.ANDROID + field] = value
+                    self.failed('debugExternal')
+
+    def test_extra_debug_alias_is_not_implicitly_allowed(self):
+        self.facts['componentDetails'].append({'type': 'activity-alias', 'name': 'com.lightningstudio.watchrss.debug.Other', 'node': {'attributes': {p.ANDROID+'name': 'com.lightningstudio.watchrss.debug.Other'}, 'children': []}})
+        self.facts['debugExternalComponents'].append('com.lightningstudio.watchrss.debug.Other')
+        self.failed('debugExternal')
+
+
 if __name__ == '__main__':
     unittest.main()

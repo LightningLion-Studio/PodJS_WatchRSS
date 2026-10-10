@@ -38,12 +38,16 @@ MAX_CODE = 2_100_000_000
 HEX = re.compile(r'^[0-9a-f]{64}$')
 INTERNAL_DEBUG_COMPONENTS = frozenset({
     ('activity', 'dev.podjs.debug.DebugEntry'),
+    ('activity-alias', 'com.lightningstudio.watchrss.AcousticConnectionActivity'),
+    ('activity-alias', 'com.lightningstudio.watchrss.DebugAcousticConnectionActivity'),
     ('activity-alias', 'com.lightningstudio.watchrss.DouyinDebugEntryActivity'),
     ('activity-alias', 'com.lightningstudio.watchrss.LlmSummaryActivity'),
     ('receiver', 'com.lightningstudio.watchrss.debug.DouyinPlaybackDebugReceiver'),
     ('provider', 'com.lightningstudio.watchrss.debug.DebugLogProvider'),
 })
 DEBUG_COMPONENTS = {
+    'com.lightningstudio.watchrss.AcousticConnectionActivity',
+    'com.lightningstudio.watchrss.DebugAcousticConnectionActivity',
     'com.lightningstudio.watchrss.DouyinDebugEntryActivity',
     'com.lightningstudio.watchrss.LlmSummaryActivity',
     'com.lightningstudio.watchrss.debug.DouyinPlaybackDebugReceiver',
