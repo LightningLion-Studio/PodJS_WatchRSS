@@ -1,16 +1,7 @@
-import { expect, test } from "bun:test";
-import {
-  STARTUP_EXIT_DURATION_MS,
-  startupExitFrame,
-} from "../src/ui/startup-transition.ts";
-
-test("startup overlay exits with the user-set 300ms fade and 1.08x scale", () => {
-  expect(STARTUP_EXIT_DURATION_MS).toBe(300);
-  expect(startupExitFrame(0)).toEqual({opacity:1,scale:1,finished:false});
-  const middle = startupExitFrame(150);
-  expect(middle.opacity).toBeCloseTo(0.5);
-  expect(middle.scale).toBeCloseTo(1.04);
-  expect(middle.finished).toBe(false);
-  expect(startupExitFrame(300)).toEqual({opacity:0,scale:1.08,finished:true});
-  expect(startupExitFrame(5000)).toEqual({opacity:0,scale:1.08,finished:true});
+import {expect,test} from 'bun:test';
+import {readFileSync,existsSync} from 'node:fs';
+import config from '../pod.config.json';
+test('WatchRSS delegates black system splash and native 80ms/1.12 exit to the framework',()=>{
+ expect(config.android.splash).toEqual({background:'#000000',icon:'@drawable/watchrss_splash_icon',iconBackground:'#000000',exit:{fade:true,scale:1.12,durationMs:80}});
+ const gate=readFileSync(new URL('../src/ui/StartupGate.tsx',import.meta.url),'utf8');expect(gate).not.toContain('launch-native');expect(gate).not.toContain('StartupOverlayTransition');expect(existsSync(new URL('../src/ui/startup-transition.ts',import.meta.url))).toBe(false);
 });

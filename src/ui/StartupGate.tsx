@@ -1,5 +1,3 @@
-import {StartupOverlayTransition} from "@podjs/framework/startup-overlay";
-import {restoreIfOwned} from "@podjs/framework/startup";
 import {activityStateHub} from '../navigation/activity-host.ts';
 import {ONBOARDING_DRAFT_KEY} from '../onboarding/restoration.ts';
 import {STARTUP_LEGAL_KEY} from '../onboarding/legal-restoration.ts';
@@ -10,12 +8,12 @@ import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('StartupGate');
 import {openBrowserUrl} from "../browser/open.ts";
 import {For,Show,createEffect,createMemo,createSignal,onCleanup,untrack,type JSX} from 'solid-js';
-import {Image,Text,View} from '@pocketjs/framework/components';
+import {Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {createGesture} from '@pocketjs/framework/gesture';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import type {Scroller} from '@pocketjs/framework/kinetics';
-import {getDisplayMetrics,kv,onAxisDelta,onSystemBack,onLifecycleChange,lifecycle,RelativeAxis,RelativeAxisUnits,setNavigationState,navigationStateSnapshot} from '@podjs/framework/watch';
+import {getDisplayMetrics,kv,onAxisDelta,onSystemBack,onLifecycleChange,lifecycle,RelativeAxis,RelativeAxisUnits,setNavigationState} from '@podjs/framework/watch';
 import {application,type ActivityState} from '@podjs/framework/services';
 import {captureIntro,restoreIntro,captureCustomization,restoreCustomization,type CustomizationDraft} from '../onboarding/restoration.ts';
 import {captureLegalNavigation,hydrateLegalNavigation,prepareLegalNavigation,type LegalNavigation,type StartupLegalPage} from '../onboarding/legal-restoration.ts';
@@ -39,13 +37,15 @@ import {BackMotion} from "@podjs/framework/navigation";
 import {ScrollEntries} from './ScrollEntries.tsx';
 import {chunkLines} from './round-rows.tsx';
 import {watchUiLines} from './text-layout.ts';
-import {STARTUP_EXIT_DURATION_MS,startupExitFrame} from './startup-transition.ts';
+import * as splash from '@podjs/framework/splash';
 
 /** Content is a factory so it cannot mount or start foreground work before the
  * native startup version gates have resolved. Storage injection is for isolated
  * fixtures; normal callers use the app's existing KV namespace. */
 export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;storage?:OnboardingStorage;legalBaseUrl?:string;onLegalRestorationEvent?:(page:StartupLegalPage,event:InformationRestorationEvent)=>void}){
  const storage=props.storage??kv,store=new OnboardingStore(storage);
+ const splashOwner="startup";void splash.hold(splashOwner).catch(()=>{});
+ onCleanup(()=>{void splash.release(splashOwner).catch(()=>{});});
  const [session,setSession]=createSignal<OnboardingSession>();
  const [fatal,setFatal]=createSignal('');
  let controller:OnboardingController|undefined;
@@ -99,30 +99,14 @@ export function StartupGate(props:{content:()=>JSX.Element;onExit?:()=>void;stor
  })().catch(error=>{if(current===generation)setFatal(String(error));});};
  load();
  const destination=createMemo(()=>session()?.destination);
- // Like native, keep the launch surface until the first content screen has data, but never
+ // The host retains the native splash; hold it for the first screen's data, but never
  // longer than 1.5s: a resumed non-home route may not load the channel list at all.
  const [contentReady,setContentReady]=createSignal(false);
- void afterFirstScreen(1500).then(()=>{startupMark('overlay.contentReady');setContentReady(true);});
- return <StartupTransition ready={()=>!!fatal()||!!session()} exit={()=>!!fatal()||(!!session()&&(destination()!=='content'||contentReady()))} render={()=><Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost onExit={props.onExit} session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
+ void afterFirstScreen(1500).then(()=>{startupMark('splash.contentReady');setContentReady(true);});
+ createEffect(()=>{if(fatal()||(session()&&(destination()!=='content'||contentReady())))void splash.release(splashOwner).catch(()=>{});});
+ return <Show when={!fatal()} fallback={<StartupFailure message={fatal()} onRetry={load}/>}><Show when={destination()==='content'} fallback={<Show when={session()}>{value=><OnboardingHost onExit={props.onExit} session={value()} controller={controller!} legalBaseUrl={props.legalBaseUrl} restoreCustomization={()=>restoreCustomization(activityState)} saveCustomization={saveCustomization} restoreLegal={()=>restoredLegal} saveLegal={saveLegal} onLegalRestorationEvent={props.onLegalRestorationEvent}/>}</Show>}>
    <StartupContent render={props.content}/>
-  </Show></Show>}/>;
-}
-
-function StartupTransition(props:{ready:()=>boolean;exit:()=>boolean;render:()=>JSX.Element}){
- return <StartupOverlayTransition ready={props.ready} exit={props.exit} content={props.render} overlay={elapsed=><StartupLoading exitElapsedMs={elapsed()}/>} durationMs={STARTUP_EXIT_DURATION_MS} onExitStart={()=>startupMark('overlay.exitStart')} onFinished={()=>startupMark('overlay.finished')}/>;
-}
-
-function StartupLoading(props:{exitElapsedMs:number}){
- // The overlay now outlives the content mount: only undo our own navigation state,
- // never the stack state the content published while the overlay was fading.
- onCleanup(restoreIfOwned(()=>setNavigationState({canGoBack:false,rootSwipeEnabled:false}),navigationStateSnapshot,()=>setNavigationState({canGoBack:false})));
- const metrics=getDisplayMetrics(),frame=()=>startupExitFrame(props.exitElapsedMs);
- // Pod apps cannot own the host Android splash window; animate the first app
- // surface while the resolved destination is already mounted underneath.
- return <View debugName="WatchRssLaunchOverlay" accessibilityLabel="腕上RSS正在启动" accessibilityHidden={props.exitElapsedMs>0} onPress={()=>{}} class="absolute inset-0 bg-black" style={{opacity:frame().opacity,scale:frame().scale}}>
-  {/* Native LaunchScreenOverlay frame captured on OWW242 (466px) padded to 512px; drawn 1:1. */}
-  <Image src="../assets/icons/launch-native.png" class="absolute w-[256] h-[256]" style={{insetL:(metrics.logicalWidth-256)/2,insetT:(metrics.logicalHeight-256)/2}}/>
- </View>;
+  </Show></Show>;
 }
 
 function StartupContent(props:{render:()=>JSX.Element}){return props.render();}

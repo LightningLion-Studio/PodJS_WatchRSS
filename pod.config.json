@@ -9,7 +9,7 @@
   },
   "android": {
     "resources": "android/res",
-    "theme": "@style/Theme.WatchRSS.PodJS.Splash",
+    "theme": "@style/Theme.WatchRSS.PodJS",
     "signing": {
       "keystoreProperties": "/home/wilf/data/OPPO_Develop/Android_WatchRSS/keystore.properties",
       "lineage": "/home/wilf/.config/podjs-signing/watchrss.lineage",
@@ -59,6 +59,16 @@
         "watchrss-watch-cloud-sync-6h"
       ],
       "tags": []
+    },
+    "splash": {
+      "background": "#000000",
+      "icon": "@drawable/watchrss_splash_icon",
+      "iconBackground": "#000000",
+      "exit": {
+        "fade": true,
+        "scale": 1.12,
+        "durationMs": 80
+      }
     }
   },
   "capabilities": [
