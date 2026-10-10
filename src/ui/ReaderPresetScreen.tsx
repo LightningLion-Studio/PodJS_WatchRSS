@@ -31,7 +31,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
   const [download, setDownload] = createSignal(false), [message, setMessage] = createSignal("");
   const [locating, setLocating] = createSignal(false), [pickingTime, setPickingTime] = createSignal(false);
   const [now, setNow] = createSignal(new Date());
-  let scroller: Scroller | undefined, disposed = false, pending: HostOperation<unknown> | undefined;
+  let scroller: Scroller | undefined, roundStart = () => 0, disposed = false, pending: HostOperation<unknown> | undefined;
   const width = props.width - 36;
   const presets = createMemo(() => availableReaderPresets(props.state));
   const active = createMemo(() => activeReaderPreset(props.state, now()));
@@ -106,7 +106,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
       const selectedName = () => kind === "dark" && props.state.selection.darkFollowsLight ? "跟随浅色" : presets().find(preset => preset.id === (kind === "light" ? props.state.selection.lightPresetId : props.state.selection.darkPresetId))?.name ?? "请选择";
       rows.push({ height: 69, render: () => <View class="absolute inset-0">
         <Text class="absolute left-[0] top-[0] text-sm leading-[17] text-[#f5f5f5]">{kind === "light" ? "浅色预设" : "深色预设"}</Text>
-        <View onPress={() => { scroller?.stop(); setMenu({ kind, top: rowTop + 65 - (scroller?.offset() ?? 0) }); }} focusable class="absolute left-[0] right-[0] top-[25] h-[40] rounded-[20]" style={{ borderWidth: 1, borderColor: "#2c3135" }}><Text class="absolute left-[24] right-[48] top-[11.5] text-sm leading-[17] text-[#ff6026]">{selectedName()}</Text><Image src="../assets/icons/reader-preset-down.svg" class="absolute right-[24] top-[8] w-[24] h-[24]"/></View>
+        <View onPress={() => { scroller?.stop(); setMenu({ kind, top: roundStart() + rowTop + 65 - (scroller?.offset() ?? 0) }); }} focusable class="absolute left-[0] right-[0] top-[25] h-[40] rounded-[20]" style={{ borderWidth: 1, borderColor: "#2c3135" }}><Text class="absolute left-[24] right-[48] top-[11.5] text-sm leading-[17] text-[#ff6026]">{selectedName()}</Text><Image src="../assets/icons/reader-preset-down.svg" class="absolute right-[24] top-[8] w-[24] h-[24]"/></View>
       </View> });
     }
     if (message()) { const text = lines(message(), width, 1); rows.push({ height: text.length * 17, render: () => <Text class="absolute inset-0 text-sm leading-[17] text-[#ff6026]">{text.join("\n")}</Text> }); }
@@ -120,7 +120,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
   const menuTop = (anchorBottom: number) => { const h = menuHeight(), below = anchorBottom + 4, above = anchorBottom - 40 - 4 - h; return Math.max(8, Math.min(props.height - 8 - h, below + h <= props.height - 8 ? below : above)); };
   const menuWidth = () => Math.min(props.width - 36, Math.max(112, ...menuItems().map(item => { const font = item.preset ? presetContentFont(item.preset, "body") : contentFont(14, "body"); return getOps().measureText(item.name, font.fontSlot) * font.scale + (item.id === null ? 24 : 40); })));
   return <View class="absolute inset-0 bg-black">
-    <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={26} gap={10} inputActive={() => props.active() && !download() && !menu()} ref={value => { scroller = value.scroller; props.ref({ ...value, goBack }); }} />
+    <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={26} gap={10} inputActive={() => props.active() && !download() && !menu()} ref={value => { scroller = value.scroller; roundStart = () => value.roundInsets().start; props.ref({ ...value, goBack }); }} />
     <Show when={menu()}>{selection => <View class="absolute inset-0">
       {/* Taps resolve to the nearest focusable, so the dismiss scrim is a focusable sibling behind the menu. */}
       <View class="absolute inset-0" focusable accessibilityRole="button" accessibilityLabel="关闭菜单" onPress={() => setMenu(undefined)}/>
