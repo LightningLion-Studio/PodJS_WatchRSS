@@ -1,3 +1,4 @@
+import {AcousticExternalRequest,parseAcousticLaunch} from '../phoneconnection/external.ts';
 import {base64ToBytes} from '@podjs/framework/services';
 import {utf8Decode} from '../cloud/types.ts';
 import {MAX_CREDENTIAL_BYTES,type CredentialsBackup} from './credentials.ts';
@@ -11,12 +12,13 @@ export interface ExternalDebugPorts {
  douyin:DouyinDebugController; openDouyin:(resumeAwemeId?:string)=>void; openSummary:(id:string)=>void;
  applyCookie:(raw:string)=>Promise<{ok:boolean;message?:string}>;
  playbackDiagnostics?:()=>Promise<PlaybackCacheDiagnostics>;
+ openAcoustic?:(request:AcousticExternalRequest)=>void;
  dumpLogs:()=>string;clearLogs:()=>void;
 }
 /** Application ABI; transport and bounded replies belong to the framework. */
 export class ExternalDebugActions {
  constructor(private gate:DebugGate,private ports:ExternalDebugPorts){}
- async handle(event:DebugExternalEvent):Promise<{code:number;data:string}>{
+ async handle(event:DebugExternalEvent):Promise<import('../phoneconnection/external.ts').AcousticReply>{
   this.gate.require();const p=this.ports;
   if(event.kind==='dump'){
    if(event.args.includes('--douyin-playback'))return {code:0,data:await p.douyin.dumpPlayback(p.playbackDiagnostics)};
@@ -33,6 +35,10 @@ export class ExternalDebugActions {
     await p.credentials.import(utf8Decode(base64ToBytes(encoded)));
     return {code:0,data:'ok'};
    }catch{return {code:2,data:'credentials_failed'};}
+  }
+  if(action===DEBUG_ACTION+'OPEN_ACOUSTIC'){
+   if(!p.openAcoustic)return {code:1,data:'acoustic_unavailable',result:{code:0}};
+   try{const request=new AcousticExternalRequest(parseAcousticLaunch(event.extras),event.deadline??Date.now()+120000);p.openAcoustic(request);return request.result;}catch{return {code:1,data:'invalid_acoustic_input',result:{code:0}};}
   }
   if(action===DEBUG_ACTION+'OPEN_DOUYIN'){p.openDouyin(typeof event.extras.resume_aweme_id==='string'?event.extras.resume_aweme_id.trim()||undefined:undefined);return {code:0,data:'ok'};}
   if(action===DEBUG_ACTION+'OPEN_LLM_SUMMARY'){

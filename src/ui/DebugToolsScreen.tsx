@@ -26,7 +26,7 @@ import type {RouteEntry} from './routes/types.ts';
 type Tool='acoustic'|'menu'|'bluetooth'|'tts'|'douyin'|'list'|'article'|'onboarding';
 export function DebugToolsScreen(props:{width:number;height:number;active:()=>boolean;services:AppServices;entry:RouteEntry;createBluetooth?:()=>DebugBluetoothSession;onAcousticUrl?:(url:string)=>void}){
  if(!debugGate.allowed)return null;
- const [tool,setTool]=createSignal<Tool>('menu'),[status,setStatus]=createSignal(''),[timeout,setTimeout]=createSignal(120000),[busy,setBusy]=createSignal(false);
+ const [tool,setTool]=createSignal<Tool>(props.entry.acousticRequest?'acoustic':'menu'),[status,setStatus]=createSignal(''),[timeout,setTimeout]=createSignal(120000),[busy,setBusy]=createSignal(false);
  const [auto,setAuto]=createSignal(douyinDebug.interval);
  const tts=new DebugTts(debugGate,new TtsConfigStore(),mediaTransport,()=>summaryAccountStore.read());
  let bluetooth:DebugBluetoothSession|undefined,alive=true,version=0;
@@ -34,7 +34,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
  onCleanup(onLifecycleChange(state=>{if(state!=="active"){version++;void closeBluetooth();setBusy(false);}}));
  onCleanup(()=>{alive=false;version++;closeBluetooth();});
  createEffect(()=>{if(!props.active()){version++;closeBluetooth();setBusy(false);}});
- const open=(next:Tool)=>{debugGate.require();version++;closeBluetooth();setBusy(false);setStatus('');setTool(next);};
+ const open=(next:Tool)=>{debugGate.require();if(tool()==='acoustic')props.entry.acousticRequest?.cancel();version++;closeBluetooth();setBusy(false);setStatus('');setTool(next);};
  props.entry.internalBack=()=>{if(tool()==='menu')return false;open('menu');return true;};
  const run=async(action:(current:()=>boolean)=>Promise<string>)=>{if(busy()||!props.active())return;debugGate.require();const generation=++version;setBusy(true);try{const message=await action(()=>alive&&generation===version&&props.active()&&debugGate.allowed);if(alive&&generation===version)setStatus(message);}catch(error){if(alive&&generation===version)setStatus(String(error));}finally{if(alive&&generation===version)setBusy(false);}};
  const input=async(label:string,value:string)=>{debugGate.require();const generation=version;const result=await props.services.input(label,value);if(!alive||!props.active()||generation!==version)return null;debugGate.require();return result;};

@@ -1269,7 +1269,7 @@ export default function WatchRSS(props: {
     });
     onCleanup(unsubscribe);
     if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
-    void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",debugAutoEnterFlow:true,resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));});
+    void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",debugAutoEnterFlow:true,resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}),request=>{if(stack().some(entry=>entry.acousticRequest&&!entry.acousticRequest.closed)){request.cancel();return;}setPage("debug-tools",{acousticRequest:request});const entry=current();if(entry.acousticRequest!==request){request.cancel();return;}void request.result.then(()=>{if(current()===entry)popPage(true);else setStack(entries=>entries.filter(value=>value!==entry));});});});
   });
   createEffect(() => setNavigationState({ canGoBack: stack().length > 1 }));
   const removeHostEvent = __onHostEvent((event) => {

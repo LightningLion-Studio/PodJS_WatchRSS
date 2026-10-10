@@ -2,6 +2,8 @@ import {createSignal,createEffect,createMemo,onCleanup} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {onLifecycleChange} from '@podjs/framework/watch';
+import {delay} from '@podjs/framework/services';
+import {executeAcousticLaunch} from '../phoneconnection/external.ts';
 import {base64ToBytes} from '@podjs/framework/services';
 import {createAcousticConnection} from '../phoneconnection/host.ts';
 import {abilities,type Ability,type AcousticMode} from '../phoneconnection/protocol.ts';
@@ -25,18 +27,26 @@ function primaryLabel(mode:AcousticMode,ability:Ability){
 
 /** Native AcousticConnectionScreen (debug only): pure-black page, centred titleMedium mode title,
  * bodySmall current ability, bodyMedium status + bodySmall detail/ETA, Material3 pill buttons.
- * The mode/ability pickers below replace the native intent extras this debug entry cannot pass. */
+ * Debug external launches reuse this session and the same mode/ability controls. */
 export function AcousticConnectionScreen(props:{width:number;height:number;active:()=>boolean;entry:RouteEntry;services:AppServices;onUrl?:(url:string)=>void}){
  debugGate.require();
- const [mode,setMode]=createSignal<AcousticMode>('SOUND_GUIDED_WIFI'),[ability,setAbility]=createSignal<Ability>('REMOTE_INPUT');
+ const request=props.entry.acousticRequest;
+ const [mode,setMode]=createSignal<AcousticMode>(request?.launch.mode??'SOUND_GUIDED_WIFI'),[ability,setAbility]=createSignal<Ability>(request?.launch.preferredAbility??'REMOTE_INPUT');
  const [state,setState]=createSignal<AcousticState>({phase:'idle',message:'选择声波连接方式',busy:false,canStart:true});
- let alive=true;
- const session=createAcousticConnection(next=>{if(alive)setState(next);},props.onUrl);
+ let alive=true,started=false;
+ const session=createAcousticConnection(next=>{if(alive)setState(next);},url=>{if(request)request.remoteUrl(url,value=>props.onUrl?.(value));else props.onUrl?.(url);});
+ const cancel=()=>{request?.cancel();void session.cancel();};
  const choose=()=>{if(props.active())void session.select(mode(),ability());};
- onCleanup(onLifecycleChange(value=>{if(value!=='active')void session.cancel();}));
- createEffect(()=>{if(!props.active())void session.cancel();});
- onCleanup(()=>{alive=false;void session.cancel();});
- choose();
+ onCleanup(onLifecycleChange(value=>{if(value!=='active'&&(!request||started))cancel();}));
+ createEffect(()=>{if(!props.active()&&(!request||started))cancel();});
+ onCleanup(()=>{alive=false;cancel();});
+ if(request){
+  const remaining=Math.min(120000,Math.max(1,request.deadline-Date.now()));
+  const timeout=delay(remaining);
+  void timeout.result.then(()=>cancel()).catch(()=>{});
+  onCleanup(()=>timeout.cancel());
+  createEffect(()=>{if(!props.active()||started||request.closed)return;started=true;void executeAcousticLaunch(session,request.launch,base64ToBytes,()=>alive&&!request.closed&&props.active(),setAbility).catch(()=>{if(alive)setState({phase:'error',message:'调试连接参数无效',busy:false,canStart:true});});});
+ }else choose();
 
  const inner=()=>props.width-PHONE_PAGE.padding*2;
  const measure=(text:string,slot:number)=>getOps().measureText(text,slot);
@@ -66,7 +76,7 @@ export function AcousticConnectionScreen(props:{width:number;height:number;activ
   rows.push(...textRow(current.message,'body'));
   if(current.detail?.trim())rows.push(...textRow(current.detail,'small'));
   if(current.durationMs)rows.push(...textRow(`预计耗时 ${formatDuration(current.durationMs)}`,'small'));
-  if(current.busy)rows.push(button('停止',()=>{void session.cancel();},false));
+  if(current.busy)rows.push(button('停止',cancel,false));
   else if(current.canStart)rows.push(button(primaryLabel(mode(),ability()),()=>{void session.start();},true));
   if(!current.busy){
    rows.push(...textRow('调试选项','small'));
