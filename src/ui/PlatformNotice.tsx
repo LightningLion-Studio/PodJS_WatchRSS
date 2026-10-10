@@ -1,11 +1,8 @@
-import {For,Show,onCleanup,untrack} from 'solid-js';
+import {For,Show,onCleanup} from 'solid-js';
 import {FocusScope,Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {watchUiLines} from './text-layout.ts';
 import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
-import {platformNotice} from '../announcement/platform.ts';
-import {safeTopBlock} from '@podjs/framework/round-layout';
-import type {JSX} from 'solid-js';
 
 /** Native ThirdPartyPlatformNotice.kt. Notice: surfaceVariant #23272A at .72, 12dp radius,
  * 10dp horizontal padding; compact 6dp vertical / 2dp rows, title labelSmall 9/11 SemiBold,
@@ -72,31 +69,4 @@ export function TransparencyDialog(props:{width:number;height:number;copy:Copy&{
 /** Owner-side helper: shows whichever disclosure the route still owes, in native order. */
 export function PendingDisclosure(props:{width:number;height:number;pending:()=>(Copy&{confirm:string})|undefined;onConfirm:()=>void;ref?:(list:DialogList|undefined)=>void}) {
  return <Show when={props.pending()} keyed>{copy=> <TransparencyDialog width={props.width} height={props.height} copy={copy} onConfirm={props.onConfirm} ref={props.ref}/>}</Show>;
-}
-
-/** Native entry/login/player/actions header: a compact notice fixed above a weight(1) page.
- * On the round screen the notice is the highest block whose corners stay inside the circle,
- * so its width follows the chord there and no text is ever clipped. */
-export type NoticePlatform='bili'|'douyin';
-function noticeHeader(width:number,height:number,platform:NoticePlatform) {
- const copy=platformNotice(platform==='bili'?'哔哩哔哩':'抖音',true);
- const block=safeTopBlock(width,height,w=>platformNoticeEntry(w,copy).height,{minTop:4,maxWidth:width-16})
-  ??{x:8,y:4,width:width-16,height:platformNoticeEntry(width-16,copy).height};
- return {block,entry:platformNoticeEntry(block.width,copy),bottom:block.y+block.height+4};
-}
-export const platformNoticeHeaderHeight=(width:number,height:number,platform:NoticePlatform)=>noticeHeader(width,height,platform).bottom;
-export function PlatformNoticeHeader(props:{width:number;height:number;platform:NoticePlatform}) {
- const header=()=>noticeHeader(props.width,props.height,props.platform);
- return <View class="absolute left-[0] right-[0] top-[0] bg-[#000000]" style={{height:header().bottom}}>
-  <View class="absolute" style={{insetL:header().block.x,insetT:header().block.y,width:header().block.width,height:header().block.height}}>{header().entry.render()}</View>
- </View>;
-}
-/** Page below the fixed notice; the page is built once with the remaining height (the screen never resizes). */
-export function WithPlatformNotice(props:{width:number;height:number;platform:NoticePlatform;children:(height:number)=>JSX.Element}) {
- const top=platformNoticeHeaderHeight(props.width,props.height,props.platform),height=props.height-top;
- const page=untrack(()=>props.children(height));
- return <View class="absolute inset-0 bg-[#000000]">
-  <PlatformNoticeHeader width={props.width} height={props.height} platform={props.platform}/>
-  <View class="absolute left-[0] right-[0]" style={{insetT:top,height}}>{page}</View>
- </View>;
 }

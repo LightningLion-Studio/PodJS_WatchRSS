@@ -19,7 +19,7 @@ import { observeHostInternet } from "../../onboarding/network-host.ts";
 import type { InternetStatus } from "../../onboarding/state.ts";
 import { loginGate, loginError, initialLoginStatus, updateLoginStatus, loginStatusMessage, DOUYIN_QR_WAIT, finishLoginStatus } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
-import { platformCardEntry, WithPlatformNotice } from "../PlatformNotice.tsx";
+import { platformCardEntry } from "../PlatformNotice.tsx";
 import { platformScope } from "../../announcement/platform.ts";
 import { cardSlices, chunkLines } from "../round-rows.tsx";
 import {douyinShareLink,type ShareHandler} from "../../sharing/policy.ts";
@@ -29,7 +29,7 @@ import { readerColor } from "../../reader/content-layout.ts";
 import {wireFields} from "../../sync/article-batches.ts";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
-import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untrack } from "solid-js";
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RssFeedScreen, feedEmptyStateEntry, feedPillEntry } from "../RssScreens.tsx";
@@ -364,17 +364,15 @@ function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {
 }
 
 function DouyinScreenImpl(props: DouyinScreenProps) {
-  // Native DouyinEntry/Login/VideoActions Activities: fixed platform notice above the page.
-  const framed = (page: (height: number) => JSX.Element) => <WithPlatformNotice width={props.width} height={props.height} platform="douyin">{page}</WithPlatformNotice>;
   return <Show when={props.route} keyed>{route => {
     switch (route.name) {
-      case "entry": return <Show when={props.settings.originalContentEnabled} fallback={framed(height => <FeedScreen {...props} height={height} />)}><ImmersiveEntry {...props} /></Show>;
+      case "entry": return <Show when={props.settings.originalContentEnabled} fallback={<FeedScreen {...props} />}><ImmersiveEntry {...props} /></Show>;
       case "channel-info": return <ChannelInfoScreen {...props} />;
-      case "login": return framed(height => <LoginScreen {...props} height={height} />);
-      case "feed": return <Show when={props.settings.originalContentEnabled} fallback={framed(height => <FeedScreen {...props} height={height} />)}><ImmersiveEntry {...props} /></Show>;
+      case "login": return <LoginScreen {...props} />;
+      case "feed": return <Show when={props.settings.originalContentEnabled} fallback={<FeedScreen {...props} />}><ImmersiveEntry {...props} /></Show>;
       case "detail": return <DetailScreen {...props} awemeId={route.awemeId} />;
       case "history": return <HistoryScreen {...props} />;
-      case "actions": return framed(height => <ActionsScreen {...props} height={height} awemeId={route.awemeId} />);
+      case "actions": return <ActionsScreen {...props} awemeId={route.awemeId} />;
       case "share": return <ShareScreen {...props} awemeId={route.awemeId} />;
       case "settings": return <SettingsScreen {...props} />;
       case "player": return <PlayerScreen {...props} awemeId={route.awemeId} />;

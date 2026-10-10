@@ -6,7 +6,6 @@ import { getOps } from "@pocketjs/framework/host";
 import { createGesture } from "@pocketjs/framework/gesture";
 import type { DouyinScreenProps } from "./index.tsx";
 import { formatDouyinError } from "../../douyin/errors.ts";
-import { PlatformNoticeHeader, platformNoticeHeaderHeight } from "../PlatformNotice.tsx";
 import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 
@@ -65,16 +64,14 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       void untrack(enter);
     }
   });
-  // Native DouyinEntryActivity: compact platform notice above a weight(1) title page.
-  const top=platformNoticeHeaderHeight(props.width,props.height,"douyin");
-  const gesture=createGesture({region:{rect:()=>active()?{x:0,y:top,w:props.width,h:props.height-top}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
+  const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
   createEffect(()=>{if(props.active??true)void untrack(()=>load());else{generation++;setBusy(false);}});onCleanup(()=>{disposed=true;generation++;gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
   const hint=()=>busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
-  return <View class="absolute inset-0 bg-black"><PlatformNoticeHeader width={props.width} height={props.height} platform="douyin"/>
-   <View class="absolute left-[0] right-[0]" style={{insetT:top,height:props.height-top}}>
+  return <View class="absolute inset-0 bg-black">
+   <View class="absolute inset-0">
     <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
       <Text class="absolute top-[0] text-[21px] leading-[26] text-[#f5f5f5]" style={{insetL:groupLeft-18}}>抖音</Text>
       <Image src="../assets/icons/info-hint.svg" class="absolute top-[3.4]" style={{insetL:groupLeft-18+titleWidth+hintGap-3.6,width:hintBox,height:hintBox}}/>

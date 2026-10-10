@@ -2,7 +2,7 @@ import type { ReaderPreset } from "../../reader/preset.ts";
 import type { BrowserOrigin } from "../../browser/open.ts";
 import { Show, createRenderEffect, onCleanup } from "solid-js";
 import { entryDisclosure } from "../entry-disclosure.ts";
-import { PendingDisclosure, PlatformNoticeHeader, platformNoticeHeaderHeight } from "../PlatformNotice.tsx";
+import { PendingDisclosure } from "../PlatformNotice.tsx";
 import type { ShareHandler } from "../../sharing/policy.ts";
 import {
   biliClient,
@@ -87,12 +87,6 @@ export function MediaRoutes(props: MediaRoutesProps) {
     return (route?.name ?? "entry") === "entry" ? entryDisclosure(props.entry, { page, name: "entry" }) : undefined;
   };
   const blocked = (page: "bili" | "douyin") => !!disclosure(page)?.pending();
-  // Native Bili/Douyin players: a compact platform notice above a weight(1) player.
-  const playerPlatform = () => {
-    const platform = props.entry.playback?.platform;
-    return platform === "bili" || platform === "douyin" ? platform : undefined;
-  };
-  const playerTop = () => (playerPlatform() ? platformNoticeHeaderHeight(props.width, props.height, playerPlatform()!) : 0);
   // A blocking dialog swallows Back, like native AlertDialog with an empty onDismissRequest.
   createRenderEffect(() => {
     if (props.page() === "douyin") props.entry.internalBack = () => blocked("douyin");
@@ -174,14 +168,10 @@ export function MediaRoutes(props: MediaRoutesProps) {
         <PendingDisclosure width={props.width} height={props.height} pending={() => props.active() ? disclosure("douyin")?.pending() : undefined} onConfirm={() => disclosure("douyin")?.confirm()} ref={value => { props.entry.disclosureList = value; }} />
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
-        <Show when={playerPlatform()} keyed>
-          {(platform) => <PlatformNoticeHeader width={props.width} height={props.height} platform={platform} />}
-        </Show>
         <VideoPlayerScreen
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}
           width={props.width}
-          height={props.height - playerTop()}
-          top={playerTop()}
+          height={props.height}
           source={
             props.active()
               ? (props.playingSource() ?? props.entry.playback!)
