@@ -115,23 +115,27 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
   });
   type MenuItem = { id: string | null; name: string; height: number; preset?: ReaderPreset };
   const menuItems = (): MenuItem[] => [...(menu()?.kind === "dark" ? [{ id: null, name: "跟随浅色", height: 48 }] : []), ...presets().map(preset => ({ id: preset.id, name: `${preset.name} · 正文预览`, height: 52, preset }))];
-  const menuHeight = () => Math.min(props.height - 16, menuItems().reduce((sum, item) => sum + item.height, 16));
-  /** Compose DropdownMenu: below the anchor button, flipped above when it does not fit, clamped to the window. */
-  const menuTop = (anchorBottom: number) => { const h = menuHeight(), below = anchorBottom + 4, above = anchorBottom - 40 - 4 - h; return Math.max(8, Math.min(props.height - 8 - h, below + h <= props.height - 8 ? below : above)); };
+  /** Compose DropdownMenu: below the anchor button, flipped above when it does not fit. A list too long
+   * for either side scrolls inside the larger one, so the menu never covers the button it opened from. */
+  const menuBox = (anchorBottom: number) => {
+    const content = menuItems().reduce((sum, item) => sum + item.height, 16), below = props.height - 8 - (anchorBottom + 4), above = anchorBottom - 40 - 4 - 8;
+    const side = content <= below || (content > above && below >= above) ? "below" : "above", height = Math.max(0, Math.min(content, side === "below" ? below : above));
+    return { top: side === "below" ? anchorBottom + 4 : anchorBottom - 40 - 4 - height, height };
+  };
   const menuWidth = () => Math.min(props.width - 36, Math.max(112, ...menuItems().map(item => { const font = item.preset ? presetContentFont(item.preset, "body") : contentFont(14, "body"); return getOps().measureText(item.name, font.fontSlot) * font.scale + (item.id === null ? 24 : 40); })));
   return <View class="absolute inset-0 bg-black">
     <ScrollEntries height={props.height} entries={entries()} padding={18} verticalPadding={26} gap={10} inputActive={() => props.active() && !download() && !menu()} ref={value => { scroller = value.scroller; roundStart = () => value.roundInsets().start; props.ref({ ...value, goBack }); }} />
-    <Show when={menu()}>{selection => <View class="absolute inset-0">
+    <Show when={menu()}>{selection => { const box = () => menuBox(selection().top); return <View class="absolute inset-0">
       {/* Taps resolve to the nearest focusable, so the dismiss scrim is a focusable sibling behind the menu. */}
       <View class="absolute inset-0" focusable accessibilityRole="button" accessibilityLabel="关闭菜单" onPress={() => setMenu(undefined)}/>
-      <View class="absolute left-[18] rounded-[4] bg-[#211f26] overflow-hidden" style={{ insetT: menuTop(selection().top), width: menuWidth(), height: menuHeight() }}>
-        <ScrollEntries round={getDisplayMetrics().shape==='round'?{width:props.width,height:props.height,viewport:{x:18,y:menuTop(selection().top),width:menuWidth()}}:null} height={menuHeight()} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: "#211f26" }}>
+      <View class="absolute left-[18] rounded-[4] bg-[#211f26] overflow-hidden" style={{ insetT: box().top, width: menuWidth(), height: box().height }}>
+        <ScrollEntries round={getDisplayMetrics().shape==='round'?{width:props.width,height:props.height,viewport:{x:18,y:box().top,width:menuWidth()}}:null} height={box().height} padding={12} verticalPadding={8} gap={0} entries={menuItems().map(item => ({ height: item.height, render: () => <View onPress={() => { props.onSelect(selection().kind, item.id); setMenu(undefined); }} focusable class="absolute left-[0] right-[0] top-[0] overflow-hidden" style={{ height: item.height, bgColor: "#211f26" }}>
           {item.preset
             ? <ReaderPresetSingleLinePreview preset={item.preset} snapshot={backgrounds()} fonts={fonts()} width={menuWidth() - 24} height={item.height} active={props.active() && !!menu()}/>
             : <Text class="absolute left-[0] right-[0] text-sm leading-[17] text-[#f5f5f5]" style={{ insetT: (item.height - 17) / 2 }}>{item.name}</Text>}
         </View> }))} />
       </View>
-    </View>}</Show>
+    </View>; }}</Show>
     <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="同步阅读器预设" onDismiss={() => setDownload(false)} onError={props.onError} /></Show>
   </View>;
 }
