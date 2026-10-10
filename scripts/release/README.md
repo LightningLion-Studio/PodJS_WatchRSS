@@ -117,5 +117,6 @@ UID10132、debuggable=true、APK SHA256 `ef487b5b7f579dc8fd30ee6ed30ca0b25384d31
 
 T36：应用已废弃声波，PodJS 包不得声明 RECORD_AUDIO，preflight 的
 `noRecordingPermission` 会拒绝遗漏的包；原生 recovery 不受此规则影响。
-使用 `bun run package:android`，应用 Gradle 合并规则会移除框架的录音权限；
-直接调用裸框架 CLI 的 package 不会应用此应用权限规则。
+标准框架 CLI build/package 按应用 pod.config capabilities 生成 Android/Wear OS 宿主 manifest；
+仅显式声明 debug.acoustic 才注入录音与声波引导 Wi-Fi 专用权限。
+package:android 使用原 CLI 入口，不需要应用包装或 Gradle init 脚本。
