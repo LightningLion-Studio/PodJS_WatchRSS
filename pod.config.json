@@ -19,8 +19,6 @@
     "cleartextTraffic": true,
     "debugExternal": {
       "activities": [
-        {"name":"com.lightningstudio.watchrss.AcousticConnectionActivity","action":"com.lightningstudio.watchrss.debug.action.OPEN_ACOUSTIC","result":true},
-        {"name":"com.lightningstudio.watchrss.DebugAcousticConnectionActivity","action":"com.lightningstudio.watchrss.debug.action.OPEN_ACOUSTIC","result":true},
         {
           "name": "com.lightningstudio.watchrss.DouyinDebugEntryActivity",
           "action": "com.lightningstudio.watchrss.debug.action.OPEN_DOUYIN"
@@ -104,8 +102,7 @@
     "net.discovery",
     "display.power",
     "system.share",
-    "host.lifecycle",
-    "debug.acoustic"
+    "host.lifecycle"
   ],
   "resources": {
     "preloadFontSlots": [

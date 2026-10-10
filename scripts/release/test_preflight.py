@@ -1059,22 +1059,41 @@ class InternalDebugV1010Tests(unittest.TestCase):
         self.failed('internalDebuggable')
 
 
-class AcousticDebugComponentsTests(unittest.TestCase):
+class RetiredAcousticComponentsTests(unittest.TestCase):
+    native = PolicyTests.native
     result = PolicyTests.result
     failed = PolicyTests.failed
     setUp = InternalDebugTests.setUp
 
-    def test_both_acoustic_aliases_require_shell_permission_and_export(self):
+    def test_recording_permission_rejected_but_playback_and_network_preserved(self):
+        self.facts['usesPermissions'] = ['android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.BLUETOOTH_CONNECT']
+        self.assertTrue(self.result()['ok'], self.result())
+        self.facts['usesPermissions'].append('android.permission.RECORD_AUDIO')
+        self.failed('noRecordingPermission')
+
+    def test_parser_recognizes_both_permission_forms(self):
+        xml = FIXTURE.read_text().replace('</manifest>', '<uses-permission android:name="android.permission.INTERNET"/><uses-permission-sdk-23 android:name="android.permission.RECORD_AUDIO"/></manifest>')
+        self.assertIn('android.permission.RECORD_AUDIO', p.parse_manifest(xml)['usesPermissions'])
+
+    def test_native_recovery_does_not_require_retired_component_identity(self):
+        PolicyTests.recovery(self)
+        retired = {'com.lightningstudio.watchrss.AcousticConnectionActivity', 'com.lightningstudio.watchrss.DebugAcousticConnectionActivity'}
+        baseline, _ = p.recovery_baseline(self.ledger)
+        self.assertTrue(retired.issubset({c['name'] for c in baseline['components']}))
+        self.facts['components'] = [c for c in self.facts['components'] if c['name'] not in retired]
+        self.facts['componentDetails'] = [c for c in self.facts['componentDetails'] if c['name'] not in retired]
+        self.facts['debugExternalComponents'] = [name for name in self.facts['debugExternalComponents'] if name not in retired]
+        self.facts['usesPermissions'] = ['android.permission.RECORD_AUDIO']
+        self.assertTrue(self.result()['ok'], self.result())
+
+    def test_retired_aliases_are_not_approved_for_internal_debug(self):
         for name in ('com.lightningstudio.watchrss.AcousticConnectionActivity', 'com.lightningstudio.watchrss.DebugAcousticConnectionActivity'):
-            for field, value in (('permission', None), ('permission', 'android.permission.INTERNET'), ('exported', 'false')):
-                with self.subTest(name=name, field=field, value=value):
-                    self.setUp()
-                    item = next(item for item in self.facts['componentDetails'] if item['name'] == name)
-                    if value is None:
-                        item['node']['attributes'].pop(p.ANDROID + field)
-                    else:
-                        item['node']['attributes'][p.ANDROID + field] = value
-                    self.failed('debugExternal')
+            with self.subTest(name=name):
+                self.setUp()
+                self.facts['componentDetails'].append({'type': 'activity-alias', 'name': name, 'node': {'attributes': {p.ANDROID+'name': name, p.ANDROID+'exported': 'true', p.ANDROID+'permission': 'android.permission.DUMP'}, 'children': []}})
+                self.facts['components'].append({'type': 'activity-alias', 'name': name})
+                self.facts['debugExternalComponents'].append(name)
+                self.failed('debugExternal')
 
     def test_extra_debug_alias_is_not_implicitly_allowed(self):
         self.facts['componentDetails'].append({'type': 'activity-alias', 'name': 'com.lightningstudio.watchrss.debug.Other', 'node': {'attributes': {p.ANDROID+'name': 'com.lightningstudio.watchrss.debug.Other'}, 'children': []}})

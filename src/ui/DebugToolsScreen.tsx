@@ -1,4 +1,3 @@
-import {AcousticConnectionScreen} from "./AcousticConnectionScreen.tsx";
 import {getOps} from '@pocketjs/framework/host';
 import {watchUiLines} from './text-layout.ts';
 import {Show,createSignal,createEffect,onCleanup,onMount} from 'solid-js';
@@ -23,10 +22,10 @@ import {ONBOARDING_KEY} from '../onboarding/store.ts';
 import type {AppServices} from './service.ts';
 import type {RouteEntry} from './routes/types.ts';
 
-type Tool='acoustic'|'menu'|'bluetooth'|'tts'|'douyin'|'list'|'article'|'onboarding';
-export function DebugToolsScreen(props:{width:number;height:number;active:()=>boolean;services:AppServices;entry:RouteEntry;createBluetooth?:()=>DebugBluetoothSession;onAcousticUrl?:(url:string)=>void}){
+type Tool='menu'|'bluetooth'|'tts'|'douyin'|'list'|'article'|'onboarding';
+export function DebugToolsScreen(props:{width:number;height:number;active:()=>boolean;services:AppServices;entry:RouteEntry;createBluetooth?:()=>DebugBluetoothSession}){
  if(!debugGate.allowed)return null;
- const [tool,setTool]=createSignal<Tool>(props.entry.acousticRequest?'acoustic':'menu'),[status,setStatus]=createSignal(''),[timeout,setTimeout]=createSignal(120000),[busy,setBusy]=createSignal(false);
+ const [tool,setTool]=createSignal<Tool>('menu'),[status,setStatus]=createSignal(''),[timeout,setTimeout]=createSignal(120000),[busy,setBusy]=createSignal(false);
  const [auto,setAuto]=createSignal(douyinDebug.interval);
  const tts=new DebugTts(debugGate,new TtsConfigStore(),mediaTransport,()=>summaryAccountStore.read());
  let bluetooth:DebugBluetoothSession|undefined,alive=true,version=0;
@@ -34,7 +33,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
  onCleanup(onLifecycleChange(state=>{if(state!=="active"){version++;void closeBluetooth();setBusy(false);}}));
  onCleanup(()=>{alive=false;version++;closeBluetooth();});
  createEffect(()=>{if(!props.active()){version++;closeBluetooth();setBusy(false);}});
- const open=(next:Tool)=>{debugGate.require();if(tool()==='acoustic')props.entry.acousticRequest?.cancel();version++;closeBluetooth();setBusy(false);setStatus('');setTool(next);};
+ const open=(next:Tool)=>{debugGate.require();version++;closeBluetooth();setBusy(false);setStatus('');setTool(next);};
  props.entry.internalBack=()=>{if(tool()==='menu')return false;open('menu');return true;};
  const run=async(action:(current:()=>boolean)=>Promise<string>)=>{if(busy()||!props.active())return;debugGate.require();const generation=++version;setBusy(true);try{const message=await action(()=>alive&&generation===version&&props.active()&&debugGate.allowed);if(alive&&generation===version)setStatus(message);}catch(error){if(alive&&generation===version)setStatus(String(error));}finally{if(alive&&generation===version)setBusy(false);}};
  const input=async(label:string,value:string)=>{debugGate.require();const generation=version;const result=await props.services.input(label,value);if(!alive||!props.active()||generation!==version)return null;debugGate.require();return result;};
@@ -50,7 +49,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
  const entries=():ScrollEntry[]=>{
   const list:ScrollEntry[]=[row('调试工具 · '+tool())];
   if(tool()==='menu')list.push(...([
-   ['acoustic','声波连接 / 引导式 WiFi'],['bluetooth','蓝牙单次同步'],['onboarding','重新进入新手引导'],['list','性能测试：超大列表'],['article','性能测试：超大文章'],['tts','详细 TTS 配置'],['douyin','抖音调试'],
+   ['bluetooth','蓝牙单次同步'],['onboarding','重新进入新手引导'],['list','性能测试：超大列表'],['article','性能测试：超大文章'],['tts','详细 TTS 配置'],['douyin','抖音调试'],
   ] as [Tool,string][]).map(([target,label])=>row(label,()=>open(target))));
   if(tool()==='bluetooth')list.push(row(`超时 ${timeout()} ms`,()=>void run(async()=>{const raw=await input('蓝牙超时（毫秒）',String(timeout()));if(raw===null)return '';const value=Number(raw);if(!Number.isSafeInteger(value)||value<=0)throw Error('超时必须为正整数毫秒');setTimeout(value);return '超时已设置';})),row('等待手机蓝牙连接',()=>void run(async current=>{if(!props.createBluetooth)throw Error('调试蓝牙监听不可用');await closeBluetooth();if(!current())return '';bluetooth=props.createBluetooth();return bluetooth.run(timeout());})));
   if(tool()==='tts')list.push(...Object.entries(debugTtsEngines).map(([engine,label])=>row('选择 '+label,()=>void run(async()=>{await tts.select(engine as TtsEngine);return tts.status();}))),...(['model','voiceId','baseUrl','apiKey'] as const).map(field=>row('编辑 '+({model:'模型',voiceId:'音色 ID',baseUrl:'服务地址',apiKey:'API Key'}[field]),()=>void run(async()=>{const raw=await input(field,field==='apiKey'?'':tts.fields()[field]);if(raw===null)return '';if(field==='apiKey')await tts.setApiKey(raw);else tts.update(field,raw);return tts.status();}))),row('语速设置',()=>void run(async()=>{const store=new TtsConfigStore(),raw=await input('语速（0.5–2.0）',String(store.read().speed));if(raw===null)return '';store.setSpeed(Number(raw));return `语速 ${store.read().speed}x`;})),row('刷新配置状态',()=>void run(()=>tts.status())),row('测试连接',()=>void run(()=>tts.test())));
@@ -59,7 +58,7 @@ export function DebugToolsScreen(props:{width:number;height:number;active:()=>bo
   if(status())for(const line of status().split('\n'))list.push(...statusRows(line));
   return list;
  };
- return <Show when={debugGate.allowed}><Show when={tool()!=='acoustic'} fallback={<AcousticConnectionScreen {...props} onUrl={props.onAcousticUrl}/>}><Show when={tool()!=='list'&&tool()!=='article'&&tool()!=='onboarding'} fallback={<Show when={tool()==='onboarding'} fallback={<DebugPerfScreen kind={tool()==='list'?'list':'article'} {...props} onStats={setStatus}/>}><DebugOnboarding onFinish={()=>open('menu')}/></Show>}><ScrollEntries height={props.height} entries={entries()} inputActive={props.active} ref={value=>{props.entry.list=value;}}/></Show></Show></Show>;
+ return <Show when={debugGate.allowed}><Show when={tool()!=='list'&&tool()!=='article'&&tool()!=='onboarding'} fallback={<Show when={tool()==='onboarding'} fallback={<DebugPerfScreen kind={tool()==='list'?'list':'article'} {...props} onStats={setStatus}/>}><DebugOnboarding onFinish={()=>open('menu')}/></Show>}><ScrollEntries height={props.height} entries={entries()} inputActive={props.active} ref={value=>{props.entry.list=value;}}/></Show></Show>;
 }
 function DebugOnboarding(props:{onFinish:()=>void}){
  debugGate.require();let completed=false;

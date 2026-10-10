@@ -85,7 +85,6 @@ export type RouteEntry = {
   exportMode?: HttpExportMode;
   phoneAbilityLabel?: string;
   returnRemoteUrl?: boolean;
-  acousticRequest?: import("../../phoneconnection/external.ts").AcousticExternalRequest;
   unavailableMessage?: string;
   recommendationGroup?: string;
   list?: Pick<VirtualListHandle, "scroller">;
