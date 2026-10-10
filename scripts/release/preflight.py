@@ -38,8 +38,6 @@ MAX_CODE = 2_100_000_000
 HEX = re.compile(r'^[0-9a-f]{64}$')
 INTERNAL_DEBUG_COMPONENTS = frozenset({
     ('activity', 'dev.podjs.debug.DebugEntry'),
-    ('activity-alias', 'com.lightningstudio.watchrss.AcousticConnectionActivity'),
-    ('activity-alias', 'com.lightningstudio.watchrss.DebugAcousticConnectionActivity'),
     ('activity-alias', 'com.lightningstudio.watchrss.DouyinDebugEntryActivity'),
     ('activity-alias', 'com.lightningstudio.watchrss.LlmSummaryActivity'),
     ('receiver', 'com.lightningstudio.watchrss.debug.DouyinPlaybackDebugReceiver'),
@@ -215,6 +213,7 @@ def parse_manifest(xml):
     return {'appId': package, 'versionCode': integer(int(code), 1),
             'versionName': root.get(ANDROID + 'versionName', ''),
             'debuggable': debuggable == 'true', 'metadata': metadata,
+            'usesPermissions': sorted({node.get(ANDROID + 'name', '') for node in root if node.tag in ('uses-permission', 'uses-permission-sdk-23')}),
             'components': [{'type': tag, 'name': name} for tag, name in sorted(components)],
             'componentDetails': sorted(details, key=lambda item: (item['type'], item['name'])),
             'debugExternalComponents': sorted(set(debug))}
@@ -373,6 +372,10 @@ def evaluate(facts, channel, ledger):
     check('publicationInventory', package['highestPublishedVerified'] is True,
           'all-channel highest must be confirmed in ledger policy')
     kind = target['kind']
+    # Native recovery APKs retain their historical permissions; PodJS does not record.
+    if kind != 'recovery':
+        check('noRecordingPermission', 'android.permission.RECORD_AUDIO' not in facts.get('usesPermissions', []),
+              'WatchRSS acoustic retired; no remaining microphone consumer')
     if kind in ('takeover', 'recovery'):
         ranges = policy['versionRanges']
         stride = integer(ranges['stride'], 1)

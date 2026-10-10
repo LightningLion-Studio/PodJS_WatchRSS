@@ -101,7 +101,7 @@ SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`�
 
 `check --channel internal-debug` 是唯一允许 debuggable=true 的通道，且要求该属性为 true。
 仅允许正式包名，保留 takeover 的签名/谱系、版本、source=40、purge 和 WorkManager 全部门槛。
-要求七个精确 debug 组件：私有 DebugEntry，加四个 activity-alias（含两个声波入口）、receiver、provider；
+要求五个精确 debug 组件：私有 DebugEntry，加两个 activity-alias（抖音与摘要）、receiver、provider；声波别名于 2026-10-10 废弃，不再允许出现在 internal-debug 包中；
 六个外部组件必须 exported=true 且 permission=android.permission.DUMP，provider 不允许 URI 授权或更宽读写权限。
 默认/常规 takeover-release 仍拒绝 debug APK 和这些组件。
 
@@ -114,3 +114,9 @@ UID10132、debuggable=true、APK SHA256 `ef487b5b7f579dc8fd30ee6ed30ca0b25384d31
 所有后续正式release必须 **>1010**（最早1011），即使内部候选未安装也不能复用1010。
 内部 debug 包不得公开发布，`record --channel internal-debug` 在读取 APK/创建台账锁前即拒绝；
 台账 releases 数组也不接受 internal-debug 条目。仅 `check` 返回 PASS 不表示发布授权。
+
+T36：应用已废弃声波，PodJS 包不得声明 RECORD_AUDIO，preflight 的
+`noRecordingPermission` 会拒绝遗漏的包；原生 recovery 不受此规则影响。
+标准框架 CLI build/package 按应用 pod.config capabilities 生成 Android/Wear OS 宿主 manifest；
+仅显式声明 debug.acoustic 才注入录音与声波引导 Wi-Fi 专用权限。
+package:android 使用原 CLI 入口，不需要应用包装或 Gradle init 脚本。

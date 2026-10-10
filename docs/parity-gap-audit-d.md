@@ -13,7 +13,7 @@
 | ID / 优先级 / 规模 | 当前差异 | 原生与当前实现证据 | 影响 / 待补齐边界 |
 |---|---|---|---|
 | C14 / P3 / M | 系统 Splash 退出动画仍部分对齐；guest 品牌层已实现 | `N/MainActivity.kt:33`；`N/MainActivity.kt:105`；`P/src/ui/StartupGate.tsx:120`；`F/platforms/android/app/src/main/java/dev/podjs/androidwatch/MainActivity.java:11` | native 系统 Splash 的缩放/淡出退出未在当前 host 接线；应用层遮罩动画不能证明系统层交接一致。不是由历史 cold-start 时延反推的功能缺口。 |
-| D01（C15 声波附项） / P3 / M | debug 声波外部自动启动 / intent 配置 / Activity result 契约未迁移；声波主功能已实现 | `N/AcousticConnectionActivity.kt:104`；`N/AcousticConnectionActivity.kt:133`；`N/AcousticConnectionActivity.kt:140`；`N/AcousticConnectionActivity.kt:527`；`P/src/ui/AcousticConnectionScreen.tsx:28`；`P/src/ui/AcousticConnectionScreen.tsx:31`；`P/src/debug/external.ts:50`；`P/pod.config.json:20` | UI 手选模式/能力、手动 payload、回调入应用已可用；外部无法传 debug_auto_listen、debug_guided_payload_base64、preferred_ability 并自动执行，且无 return_remote_url 的 Android result。旧 C 附项曾提及，但不能随抖音 C15 关闭而一起消失。仅 debug 自动化兼容，非正式手机同步阻塞。 |
+| D01（C15 声波附项） / N/A | 用户决策（2026-10-10）：声波废弃并删除 | T36：移除应用声波页面、协议、外部启动与别名 | N/A；不再作为功能或 ABI 迁移缺口。原生组件快照保留历史证据，不要求 PodJS 保留声波入口。 |
 | D02（本轮设置补扫） / P3 / S | 阅读预设菜单的锚点漏计圆屏列表 start inset | `N/ReaderPresetActivity.kt:317`；`N/ReaderPresetActivity.kt:323`；`P/src/ui/ReaderPresetScreen.tsx:105`；`P/src/ui/ReaderPresetScreen.tsx:109`；`P/src/ui/ReaderPresetScreen.tsx:123`；`F/packages/framework/src/variable-list.tsx:39`；`F/packages/framework/src/variable-list.tsx:92` | 当前菜单虽然会翻转/夹紧位置（A:44fe2d7），按钮真实位置包含 roundInsets().start，而手工锚点仅 rawRowTop+65-scrollOffset；调用 ref 未消费 roundInsets。菜单可选择，仍不能宣称贴住所点行。纯源码几何夹具（233逻辑圆屏、首行 top26/height28/padding18）得到至少 32.121922 的漏计位移，非新设备测量。 |
 
 D02 几何推导使用当前纯布局函数，不运行宿主：`.codex-tmp/a10/menu-anchor-check.ts` / `menu-anchor-check.json`。原 V4 “菜单居中”历史失败已有翻转定位补丁；这里确认的是补丁之后仍存在的圆屏 inset 漏计，不能把两个问题混写。
