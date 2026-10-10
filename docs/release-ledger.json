@@ -18,7 +18,7 @@
       "com.lightningstudio.watchrss": {
         "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
         "highestPublishedVerified": true,
-        "inventoryScope": "原生全渠道最高40的历史核验仍有效；已装正式签名internal-debug v1009的公有身份见T30归档installedObservation；postObservation仅保留v1003历史PARTIAL，不作为v1009数据证据或公网发布记录",
+        "inventoryScope": "原生全渠道最高40的历史核验仍有效；已装正式签名internal-debug v1010的公有身份见T34/V17归档installedObservation；postObservation仅保留v1003历史PARTIAL，不作为v1010数据证据或公网发布记录",
         "allowedLineages": [
           [
             "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d"
@@ -47,15 +47,15 @@
           }
         },
         "installedObservation": {
-          "versionCode": 1009,
-          "apkSha256": "ef487b5b7f579dc8fd30ee6ed30ca0b25384d314660f8eaa1d9c62356ff2fc4d",
+          "versionCode": 1010,
+          "apkSha256": "16bf6f37032483f966765717fcf56feca43fe2412fdff527fa9b3ad7b195e87d",
           "certSha256": "f06d28ffff88ed9ac41bbb3e0cd845a05773f8536cf1095dfe7cacfabedb831d",
           "debuggable": true,
           "uid": 10132,
           "serial": "e3aca8af",
           "observedOn": "2026-10-10",
           "migrationStatus": "ACTIVE",
-          "evidence": ".codex-tmp/t30/device/installed-identity.json",
+          "evidence": ".codex-tmp/t34/device/installed-identity.json",
           "postObservation": {
             "status": "PARTIAL",
             "equal": false,
@@ -67,8 +67,8 @@
             "evidence": ".codex-tmp/t18/device/takeover-post.json"
           }
         },
-        "internalDebugVersionCode": 1010,
-        "internalDebugVersionNotes": "T34预留含T31/T32/T33的内部正式签名debug候选v1010；本轮未安装、未公开发布、不得record。现装v1009公有身份来自T30归档；之后正式release必须>1010。预留字段不是release记录或installedObservation。"
+        "internalDebugVersionCode": 1011,
+        "internalDebugVersionNotes": "T37预留声波废弃后及新menuBox菜单定位的内部正式签名debug候选v1011；本轮未安装、未公开发布、不得record。现装v1010公有身份来自T34/V17归档；之后正式release必须>1011。预留字段不是release记录或installedObservation。"
       }
     },
     "channels": {
