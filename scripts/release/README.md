@@ -97,7 +97,7 @@ bun test tests/release-preflight.test.ts
 路径确认 unsigned 被拒绝。不生成签名 key，不访问网络；SDK 不可用时该一项明确
 SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`。
 
-## T22/T23/T25/T28/T30/T34/T37 internal-debug（仅内部检查）
+## T22/T23/T25/T28/T30/T34/T37/T38 internal-debug（仅内部检查）
 
 `check --channel internal-debug` 是唯一允许 debuggable=true 的通道，且要求该属性为 true。
 仅允许正式包名，保留 takeover 的签名/谱系、版本、source=40、purge 和 WorkManager 全部门槛。
@@ -105,13 +105,13 @@ SKIP，其他离线测试仍执行。此 Python suite 也接入 `bun run test`�
 四个外部组件必须 exported=true 且 permission=android.permission.DUMP，provider 不允许 URI 授权或更宽读写权限。
 默认/常规 takeover-release 仍拒绝 debug APK 和这些组件。
 
-T37现装v1010身份来自 `.codex-tmp/t34/device/installed-identity.json`：
-UID10132、debuggable=true、APK SHA256 `16bf6f37032483f966765717fcf56feca43fe2412fdff527fa9b3ad7b195e87d`。
-本轮只核对T34/V17归档公有身份及APK哈希，不操作设备或重做数据验收。
-版本必须严格大于1010，所有≤1010内部候选拒绝。
-`installedObservation.postObservation` 保留v1003历史PARTIAL，不作为v1010数据验收证据。
-台账policy的 `internalDebugVersionCode=1011` 预留声波废弃后及新menuBox定位的内部候选，不是发布/安装记录。
-所有后续正式release必须 **>1011**（最早1012），即使内部候选未安装也不能复用1011。
+T38现装v1011身份来自 `.codex-tmp/t37/device/installed-identity.json`：
+UID10132、debuggable=true、APK SHA256 `71fed5c289f376473266c81c5b84c33cc93138a4f08098ce00acd3634a0cfad1`。
+本轮只核对T37归档公有身份及APK哈希，不操作设备或重做数据验收。
+版本必须严格大于1011，所有≤1011内部候选拒绝。
+`installedObservation.postObservation` 保留v1003历史PARTIAL，不作为v1011数据验收证据。
+台账policy的 `internalDebugVersionCode=1012` 预留搜索防抖及B站预加载host delay修复内部候选，不是发布/安装记录。
+所有后续正式release必须 **>1012**（最早1013），即使内部候选未安装也不能复用1012。
 内部 debug 包不得公开发布，`record --channel internal-debug` 在读取 APK/创建台账锁前即拒绝；
 台账 releases 数组也不接受 internal-debug 条目。仅 `check` 返回 PASS 不表示发布授权。
 

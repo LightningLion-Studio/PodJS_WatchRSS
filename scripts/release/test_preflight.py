@@ -1155,5 +1155,59 @@ class InternalDebugV1011Tests(unittest.TestCase):
         self.failed('internalDebuggable')
 
 
+class InternalDebugV1012Tests(unittest.TestCase):
+    """Frozen T38 policy boundary; does not depend on a future live ledger."""
+    result = PolicyTests.result
+    failed = PolicyTests.failed
+
+    def setUp(self):
+        InternalDebugTests.setUp(self)
+        package = self.ledger['policy']['packages'][NATIVE]
+        package['internalDebugVersionCode'] = 1012
+        package['installedObservation'].update(
+            versionCode=1011, debuggable=True,
+            apkSha256='71fed5c289f376473266c81c5b84c33cc93138a4f08098ce00acd3634a0cfad1',
+            evidence='.codex-tmp/t37/device/installed-identity.json')
+        self.facts['versionCode'] = 1012
+
+    def test_internal_1012_pass_and_installed_1011_immutable(self):
+        before = copy.deepcopy((self.facts, self.ledger))
+        self.assertTrue(self.result()['ok'], self.result())
+        self.assertEqual(before, (self.facts, self.ledger))
+        observation = self.ledger['policy']['packages'][NATIVE]['installedObservation']
+        self.assertEqual((observation['versionCode'], observation['debuggable']), (1011, True))
+        self.assertEqual(observation['apkSha256'], '71fed5c289f376473266c81c5b84c33cc93138a4f08098ce00acd3634a0cfad1')
+
+    def test_internal_rejects_all_codes_through_installed_1011(self):
+        for code in range(1, 1012):
+            with self.subTest(code=code):
+                self.facts['versionCode'] = code
+                self.failed('versionCode')
+        self.facts['versionCode'] = 1012
+        self.assertTrue(self.result()['ok'])
+
+    def test_public_1012_reserved_and_1013_is_first_eligible_code(self):
+        self.facts.update(debuggable=False, debugExternalComponents=[])
+        for channel in ('takeover-release', 'takeover-beta', 'takeover-prebeta'):
+            self.channel = channel
+            for code in (1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012):
+                with self.subTest(channel=channel, code=code):
+                    self.facts['versionCode'] = code
+                    self.failed('versionCode')
+            self.facts['versionCode'] = 1013
+            self.assertTrue(self.result()['ok'], self.result())
+
+    def test_1012_debug_still_requires_explicit_internal_channel(self):
+        self.facts['versionCode'] = 1013
+        for channel in ('takeover-release', 'takeover-beta', 'takeover-prebeta'):
+            self.channel = channel
+            self.failed('nonDebuggable')
+            self.failed('debugExternal')
+        self.channel = 'internal-debug'
+        self.assertTrue(self.result()['ok'])
+        self.facts['debuggable'] = False
+        self.failed('internalDebuggable')
+
+
 if __name__ == '__main__':
     unittest.main()
