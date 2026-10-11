@@ -360,16 +360,16 @@ export default function WatchRSS(props: {
   const [searchResults, setSearchResults] = createSignal<Article[]>([]);
   const [searchLoading, setSearchLoading] = createSignal(false);
   let searchRequestVersion = 0;
-  let searchDebounce: ReturnType<typeof setTimeout> | undefined;
+  let searchDebounce: ReturnType<typeof delay> | undefined;
   createEffect(() => {
     if (page() !== "search" && searchDebounce) {
-      clearTimeout(searchDebounce);
+      searchDebounce.cancel();
       searchDebounce = undefined;
       searchRequestVersion++;
     }
   });
   onCleanup(() => {
-    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce?.cancel();
   });
   const [feedVisibleCount, setFeedVisibleCount] = createSignal(12);
   const [feedHasMore, setFeedHasMore] = createSignal(false);
@@ -1102,7 +1102,7 @@ export default function WatchRSS(props: {
     }
   }
   function searchChannel(id: string) {
-    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce?.cancel();
     searchDebounce = undefined;
     searchRequestVersion++;
     setQuery("");
@@ -1110,18 +1110,20 @@ export default function WatchRSS(props: {
     setPage("search", { channelId: id });
   }
   function updateSearchKeyword(channelId: string, value: string) {
-    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce?.cancel();
     searchRequestVersion++;
     setQuery(value);
     if(current().page==='search'){routeMemory(current()).retained.query=value;saveActivity();}
     setSearchResults([]);
     setSearchLoading(false);
     if (!value.trim()) return;
-    searchDebounce = setTimeout(() => {
+    const timer = (searchDebounce = delay(180));
+    void timer.result.then(() => {
+      if (searchDebounce !== timer) return;
       searchDebounce = undefined;
       if (current().page === "search" && current().channelId === channelId)
         void searchChannelArticles(channelId, value);
-    }, 180);
+    }, () => {});
   }
   async function searchChannelArticles(channelId: string, keyword: string) {
     const version = ++searchRequestVersion;

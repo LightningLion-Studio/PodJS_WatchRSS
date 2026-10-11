@@ -1,3 +1,4 @@
+import { delay as hostDelay } from '@podjs/framework/services';
 import type { BiliClient } from './client.ts';
 import type { BiliPlayUrl } from './types.ts';
 
@@ -6,7 +7,7 @@ export interface DetailPreloadClock {
   now(): number;
   schedule(callback: () => void, delay: number): () => void;
 }
-const defaultClock: DetailPreloadClock = { now: Date.now, schedule(callback, delay) { const timer = setTimeout(callback, delay); return () => clearTimeout(timer); } };
+const defaultClock: DetailPreloadClock = { now: Date.now, schedule(callback, delay) { const timer = hostDelay(delay); void timer.result.then(callback, () => {}); return () => timer.cancel(); } };
 const key = (target: Target) => `${target.aid ?? ''}:${target.bvid?.toLowerCase() ?? ''}:${target.cid}`;
 /** Native timing: 750 ms delay, five minute source TTL. Cancellation discards in-flight results. */
 export class BiliDetailPreload {
