@@ -27,8 +27,17 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         // Native restores the title page immediately; a small/incomplete bootstrap
         // needs a 16-item feed request. Expired detail refresh is background work.
         if(cached.items.length>=3&&(!hasMore||!!cursor?.trim())){
-          void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(result=>{
-            traceServiceWork("douyin.entry.resolveResult",()=>{if(current()&&result.ok)setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item));});
+          void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(async result=>{
+            if(!current())return;
+            if(result.ok){traceServiceWork("douyin.entry.resolveResult",()=>setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item)));return;}
+            // Old queues can contain only expired/unresolvable detail URLs. Keep
+            // immediate navigation, but replenish from a fresh feed in the background
+            // so the preload window does not retry the same stale identities forever.
+            if(result.code==='CANCELLED'||result.code==='NOT_LOGGED_IN')return;
+            appLogger.i('DouyinEntry','expired queue anchor failed; refreshing feed');
+            const fresh=await props.client.fetchFeedPage({count:16});
+            if(!current()||!fresh.ok)return;
+            cursor=fresh.data.nextCursor;hasMore=fresh.data.hasMore;anchor=null;setItems(fresh.data.items);
           }).catch(()=>{});
           return;
         }
@@ -56,6 +65,9 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true});
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
+  const preloadOwner={};
+  createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor);else props.onPreloadStop?.(preloadOwner);});
+  onCleanup(()=>props.onPreloadStop?.(preloadOwner));
   let debugEntered=false;
   createEffect(()=>{
     const route=props.route;
@@ -78,7 +90,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
     </View>
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text></Show>
-    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Text class="text-base text-[#f5f5f5]">{logged()?"↑":"登录"}</Text></View>
+    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">登录</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
   </View></View>;
 }
 

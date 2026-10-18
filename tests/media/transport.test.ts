@@ -11,7 +11,7 @@ function fixture(){
     download:async value=>{args.push(value);if(error)throw error;return {path:value.path as string,size:body.length,status,headers:{}} as DownloadResult;},
     read:async(_path,offset)=>body.slice(offset,offset+3),remove:async path=>{removed.push(path);},base64:bytes=>Buffer.from(bytes).toString('base64'),
   });
-  const client=new DouyinClient({transport,signer:{sign:()=> 'PRIVATE_SIGNATURE'},secureStorage:{get:async()=> 'sessionid=PRIVATE_COOKIE',set:async()=>{},remove:async()=>{}}});
+  const client=new DouyinClient({transport,signer:{sign:()=> 'PRIVATE_SIGNATURE'},secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=PRIVATE_COOKIE':null,set:async()=>{},remove:async()=>{}}});
   return {transport,client,args,removed,setStatus:(value:number)=>status=value,setError:(value:unknown)=>error=value,setBody:(value:string)=>body=utf8Encode(value)};
 }
 
@@ -36,7 +36,7 @@ test('request logs retain status and error category without raw signing, token, 
   const f=fixture();
   f.setStatus(403);await f.client.fetchFeedPage();
   f.setError({code:'host_error',message:'SocketTimeoutException: https://www.douyin.com/?a_bogus=PRIVATE_SIGNATURE&msToken=PRIVATE_TOKEN Cookie: sessionid=PRIVATE_COOKIE'});await f.client.fetchFeedPage();
-  const signerFailure=new DouyinClient({transport:f.transport,signer:{sign(){throw Error('SIGNER_PRIVATE_DETAIL');}},secureStorage:{get:async()=> 'sessionid=PRIVATE_COOKIE',set:async()=>{},remove:async()=>{}}});
+  const signerFailure=new DouyinClient({transport:f.transport,signer:{sign(){throw Error('SIGNER_PRIVATE_DETAIL');}},secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=PRIVATE_COOKIE':null,set:async()=>{},remove:async()=>{}}});
   await signerFailure.fetchFeedPage();await logger.flush();
   expect(log).toContain('category=http status=403');expect(log).toContain('category=timeout');expect(log).toContain('category=signing');
   expect(log).not.toMatch(/PRIVATE|a_bogus|msToken|sessionid|Cookie:/);

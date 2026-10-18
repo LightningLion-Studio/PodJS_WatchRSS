@@ -72,6 +72,8 @@ export interface DouyinScreenProps {
   onNavigate: (route: DouyinRoute) => void;
   onBack: () => void;
   onPlay: (request: DouyinPlayRequest) => void;
+  onPreloadWindow?:(owner:unknown,items:DouyinItem[],anchor:string|null)=>void;
+  onPreloadStop?:(owner:unknown)=>void;
   onPlaybackCommand?: (command: DouyinPlaybackCommand) => void;
   playbackState?: { playing: boolean; positionMs?: number; durationMs?: number };
   loginQrImage?: string;

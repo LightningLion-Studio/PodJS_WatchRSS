@@ -1,7 +1,7 @@
 import type { InternetStatus } from '../../onboarding/state.ts';
 
 export function douyinSourceNeedsInternet(url?: string): boolean {
-  return !!url && /^https?:\/\//i.test(url.trim());
+  return !!url && /^(?:https?:\/\/|podjs-media-cache:\/\/)/i.test(url.trim());
 }
 
 /** Only classify actual host error codes; a slow request is not proof of being offline. */

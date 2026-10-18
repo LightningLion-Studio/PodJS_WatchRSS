@@ -1,0 +1,1771 @@
+{
+  "nativePath": "/home/wilf/data/OPPO_Develop/Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackPreviewCache.kt",
+  "nativeSha256": "9833e670d698ac66a985194ab81310089b299158516973291ca9b02d0b1dd4b6",
+  "extraction": "verbatim top-level estimate functions and constants; Android cache object excluded",
+  "cases": [
+    {
+      "length": null,
+      "duration": -1,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": -1,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": -1,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": null,
+      "duration": -1,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": -1,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": -1,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": -1,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 0,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": -1,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": 0,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": 1,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": 2,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": 3,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": 4,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 1000,
+      "order": 7,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 16000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 30000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": null,
+      "duration": 60000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": -1,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 0,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": -1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": 0,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": 1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": 2,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": 3,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": 4,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 1000,
+      "order": 7,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": -1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": 0,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": 1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": 2,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": 3,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": 4,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 16000,
+      "order": 7,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": -1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": 0,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": 1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": 2,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": 3,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": 4,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 30000,
+      "order": 7,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": -1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": 0,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": 1,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": 2,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": 3,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": 4,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 1,
+      "duration": 60000,
+      "order": 7,
+      "preview": 1,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": -1,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 0,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": -1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": 0,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": 1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": 2,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": 3,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": 4,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 1000,
+      "order": 7,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": -1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": 0,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": 1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": 2,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": 3,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": 4,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 16000,
+      "order": 7,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": -1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": 0,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": 1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": 2,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": 3,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": 4,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 30000,
+      "order": 7,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": -1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": 0,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": 1,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": 2,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": 3,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": 4,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 4096,
+      "duration": 60000,
+      "order": 7,
+      "preview": 4096,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": -1,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 0,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": -1,
+      "preview": 1048576,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": 0,
+      "preview": 1048576,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": 1,
+      "preview": 1048576,
+      "prefetch": 786432
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": 2,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": 3,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": 4,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 1000,
+      "order": 7,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": -1,
+      "preview": 1048576,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": 0,
+      "preview": 1048576,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": 1,
+      "preview": 1048576,
+      "prefetch": 786432
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": 2,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": 3,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": 4,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 16000,
+      "order": 7,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": -1,
+      "preview": 1048576,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": 0,
+      "preview": 1048576,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": 1,
+      "preview": 1048576,
+      "prefetch": 786432
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": 2,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": 3,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": 4,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 30000,
+      "order": 7,
+      "preview": 1048576,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": -1,
+      "preview": 524288,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": 0,
+      "preview": 524288,
+      "prefetch": 1048576
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": 1,
+      "preview": 524288,
+      "prefetch": 786432
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": 2,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": 3,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": 4,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": 1048576,
+      "duration": 60000,
+      "order": 7,
+      "preview": 524288,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": -1,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 0,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 1000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 16000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 30000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 10485760,
+      "duration": 60000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": -1,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 0,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 1000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 16000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 30000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": -1,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": 0,
+      "preview": 4194304,
+      "prefetch": 2097152
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": 1,
+      "preview": 4194304,
+      "prefetch": 1572864
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": 2,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": 3,
+      "preview": 4194304,
+      "prefetch": 1048576
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": 4,
+      "preview": 4194304,
+      "prefetch": 524288
+    },
+    {
+      "length": 5368709120,
+      "duration": 60000,
+      "order": 7,
+      "preview": 4194304,
+      "prefetch": 524288
+    }
+  ]
+}

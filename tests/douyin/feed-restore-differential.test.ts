@@ -8,7 +8,7 @@ test('default restore scheduler preserves complete items and old malformed/shape
  '{"items":[{"awemeId":"x","playUrl":"y","__proto__":{"safe":true},"n":-0,"n":1e400}],"resolved":{"__proto__":1,"n":-0}}',
  JSON.stringify({items:Array.from({length:205},(_,i)=>({awemeId:String(i),playUrl:'v'+i,unknown:'z'.repeat(2000)})),anchorAwemeId:'204',cursor:null,hasMore:1,savedAtMillis:0,resolved:{}})];
  for(const raw of raws)for(const key of [FEED_KEY,QUEUE_KEY]){
-  let reads=0;const store=new DouyinFeedStore({get:async()=>{reads++;return raw;},set:async()=>{},remove:async()=>{}});
+  let reads=0;const store=new DouyinFeedStore({get:async requested=>{if(requested!==key)return null;reads++;return raw;},set:async()=>{},remove:async()=>{}});
   const work=store.read(key);expect(reads).toBe(0);expect(await work).toEqual(prior(raw,key));expect(reads).toBe(1);
  }
 });

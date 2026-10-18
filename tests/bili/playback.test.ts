@@ -20,7 +20,7 @@ test('retry consumes MP4 backup, re-resolves expired source, and rejects a repea
  const retry=createBiliPlaybackRetry(make('primary',['primary','backup']),async()=>{resolves++;return make('fresh')},'Title',{Cookie:'session'});
  expect(await retry()).toMatchObject({url:'backup',headers:{Cookie:'session'}});expect(resolves).toBe(0);
  expect((await retry()).url).toBe('fresh');expect(resolves).toBe(1);
- await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(resolves).toBe(2);
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(resolves).toBe(1);
 });
 test('DASH retry covers video and audio backups and retains muxed MP4 segment semantics',async()=>{
  const {biliPlaybackCandidates}=await import('../../src/playback.ts');
@@ -31,5 +31,34 @@ test('failed refresh is retryable and backup-only streams are playable',async()=
  const {createBiliPlaybackRetry,biliPlaybackCandidates}=await import('../../src/playback.ts');let calls=0;
  const source={acceptQuality:[],acceptDescription:[],durl:[{backupUrl:['backup-only']}]};expect(biliPlaybackCandidates(source,'',{})[0]?.url).toBe('backup-only');
  const retry=createBiliPlaybackRetry(source,async()=>{if(++calls===1)throw Error('offline');return {...source,durl:[{url:'fresh',backupUrl:[]}]};},'',{});
- await expect(retry()).rejects.toThrow('offline');expect((await retry()).url).toBe('fresh');
+ await expect(retry()).rejects.toThrow('offline');
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(calls).toBe(1);
+ expect((await retry({manual:true})).url).toBe('fresh');expect(calls).toBe(2);
+});
+
+test('explicit retry can replay an unchanged URL after the automatic cycle is exhausted',async()=>{
+ const {createBiliPlaybackRetry}=await import('../../src/playback.ts');let calls=0;
+ const source={acceptQuality:[],acceptDescription:[],durl:[{url:'same',backupUrl:[]}]};
+ const retry=createBiliPlaybackRetry(source,async()=>{calls++;return source},'Title',{},async()=>undefined,{url:'same',title:'Title'});
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(calls).toBe(1);
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(calls).toBe(1);
+ expect((await retry({manual:true})).url).toBe('same');expect(calls).toBe(2);
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(calls).toBe(2);
+ expect((await retry({manual:true})).url).toBe('same');expect(calls).toBe(3);
+});
+
+test('manual retry survives resolver failure using a known URL, without restarting automatic loops',async()=>{
+ const {createBiliPlaybackRetry}=await import('../../src/playback.ts');let calls=0;
+ const source={acceptQuality:[],acceptDescription:[],durl:[{url:'known',backupUrl:[]}]};
+ const retry=createBiliPlaybackRetry(source,async()=>{calls++;throw Error('offline')},'Title',{},async()=>undefined);
+ expect((await retry({manual:true})).url).toBe('known');
+ await expect(retry()).rejects.toThrow('未取得新的可播放地址');expect(calls).toBe(1);
+});
+
+test('concurrent retries share resolution and a successful empty result does not resurrect a rejected stream',async()=>{
+ const {createBiliPlaybackRetry}=await import('../../src/playback.ts');let calls=0,release!:(value:any)=>void;
+ const source={acceptQuality:[],acceptDescription:[],durl:[{url:'old',backupUrl:[]}]};
+ const retry=createBiliPlaybackRetry(source,()=>{calls++;return new Promise(yes=>release=yes)},'Title',{},async()=>undefined);
+ const a=retry({manual:true}),b=retry({manual:true});expect(calls).toBe(1);
+ release({...source,durl:[]});await expect(a).rejects.toThrow('未取得新的可播放地址');await expect(b).rejects.toThrow('未取得新的可播放地址');
 });

@@ -1,3 +1,4 @@
+import {snapshotRecordKey} from '../src/douyin/feed-store.ts';
 import { expect, test } from 'bun:test';
 import { BiliClient } from '../src/bili/client.ts';
 import { DouyinClient } from '../src/douyin/client.ts';
@@ -53,7 +54,7 @@ test('Douyin logout clears cookie and window/media but retains history, watched 
   const options={transport:unusedTransport,secureStorage:secure,historyStorage:local,onLogout:()=>clearDouyinLogoutData({async clearBucket(bucket){buckets.push(bucket);}})};
   const client=new DouyinClient(options);await client.applyCookie('sessionid=test');await client.recordHistory(video);await client.setSaved(video,'favorite',true);await client.setSaved(video,'watchLater',true);
   await client.saveRecentWindow([video],video.awemeId,'tail',true);await local.set('douyin.original-content','true');
-  expect(await local.get(RECENT_KEY)).not.toBeNull();expect(await local.get(FEED_KEY)).not.toBeNull();
+  expect(await local.get(snapshotRecordKey(RECENT_KEY))).not.toBeNull();expect(await local.get(snapshotRecordKey(FEED_KEY))).not.toBeNull();
   await client.logout();
   expect(await secure.get('douyin.cookie')).toBeNull();expect(await local.get(RECENT_KEY)).toBeNull();expect(await local.get(FEED_KEY)).toBeNull();
   expect(client.feedSnapshot().items).toEqual([]);

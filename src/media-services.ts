@@ -1,3 +1,5 @@
+import {DouyinSqlStateStorage} from './douyin/state-storage.ts';
+import {createHostDouyinPreload} from './douyin/preload-host.ts';
 import {createHostBiliPreview} from './bili/preview-host.ts';
 import {appLogger} from './logs/app-logger.ts';
 import {createMediaTransport} from './media/transport.ts';
@@ -28,8 +30,10 @@ export const douyinClient=new DouyinClient({
  transport:mediaTransport,
  savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
  secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
- historyStorage:{get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}}
+ historyStorage:new DouyinSqlStateStorage(async()=>(await getExternalSavedStore()).db,{get:async key=>kv.get<string>(key)??null,set:async()=>{throw Error("Legacy Douyin data is read-only");},remove:async key=>{kv.delete(key);}})
 });
+
+export const douyinPreload=createHostDouyinPreload(douyinClient);
 
 export async function loadLocalBiliDetail(target: import('./bili/detail.ts').DetailTarget) {
  return readLocalBiliDetail((await getExternalSavedStore()).db, target);

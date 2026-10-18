@@ -73,7 +73,7 @@ export type RouteEntry = {
   douyinRoute?: DouyinRoute;
   playback?: PlaybackSource;
   checkpoint?: BiliPlaybackCheckpointController;
-  retryPlayback?: (positionMs: number) => Promise<void>;
+  retryPlayback?: (positionMs: number, options?: import("../../playback.ts").BiliPlaybackRetryOptions) => Promise<void>;
   queue?: DouyinPlaybackQueue;
   rssDouyinRecovery?: DouyinRssRecovery;
   douyinRecovering?: boolean;
