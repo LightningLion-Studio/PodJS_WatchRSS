@@ -1,3 +1,4 @@
+import {applyPreferredDouyinPlayback,selectPreferredDouyinVariant,normalizedDouyinResolution} from './playback-selector.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
@@ -24,6 +25,7 @@ export class DouyinClient {
   private readonly now:()=>number;
   private readonly signer:DouyinSigner;
   private readonly saved:NonNullable<DouyinClientOptions["savedStore"]>;
+  private readonly playbackResolutions=new Map<string,Promise<DouyinResult<DouyinItem>>>();
   private readonly feedCache=new Map<string,{item:DouyinItem;resolvedAtMillis:number}>();
   private readonly feedStore:DouyinFeedStore;
   private feedCursor:string|null=null;
@@ -71,7 +73,12 @@ export class DouyinClient {
   async fetchFeedPage(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>>{const count=Math.max(1,Math.min(20,Math.floor(input.count??10))),params:Record<string,string>={...baseParams,count:String(count)};const cursor=input.cursor?.trim();if(cursor){params.cursor=cursor;params.max_cursor=cursor;}const r=await this.get("/aweme/v2/web/module/feed/",params,"POST");if(!r.ok)return r;try{const data=await parseDouyinFeedAsync(r.data),resolvedAtMillis=this.now();for(const item of data.items)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});this.feedCursor=data.nextCursor;this.feedHasMore=data.hasMore;await this.feedStore.save(FEED_KEY,{items:data.items.slice(0,20),cursor:data.nextCursor,hasMore:data.hasMore,anchorAwemeId:null,savedAtMillis:resolvedAtMillis,resolved:Object.fromEntries(data.items.map(item=>[item.awemeId,resolvedAtMillis]))});return {ok:true,data,source:"network"};}catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail("PARSE_FAILED",formatDouyinError("PARSE_FAILED"));}}
   feedSnapshot(){const items:DouyinItem[]=[];for(const id of this.feedCache.keys()){const item=this.freshFeedItem(id);if(item)items.push(item);}return {items:items.slice(-40),cursor:this.feedCursor,hasMore:this.feedHasMore};}
   async fetchDetail(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinContent>>{const id=awemeId.trim();if(!id)return fail("PARSE_FAILED","缺少 awemeId");const initialCached=this.freshFeedItem(id);if(initialCached&&!options.forceRefresh)return {ok:true,data:{kind:"video",item:initialCached},source:"feed-cache"};const r=await this.get("/aweme/v1/web/aweme/detail/",{...baseParams,aweme_id:id},"GET");if(!r.ok){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:r;}try{const data=traceServiceWork("douyin.detail.parse",()=>parseDouyinDetail(r.data));if(data.kind==="video")this.feedCache.set(id,{item:data.item,resolvedAtMillis:this.now()});return {ok:true,data,source:"network"};}catch(e){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:fail("PARSE_FAILED",String(e));}}
-  async resolvePlayback(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinItem>>{const id=awemeId.trim();if(options.forceRefresh)this.feedCache.delete(id);const cached=this.freshFeedItem(id);if(cached)return {ok:true,data:cached,source:"feed-cache"};const r=await this.fetchDetail(id);return !r.ok?r:r.data.kind==="video"?{ok:true,data:r.data.item,source:r.source}:fail("UNSUPPORTED","图文内容没有视频播放流");}
+  private async resolvePlaybackInner(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinItem>>{const id=awemeId.trim();if(options.forceRefresh)this.feedCache.delete(id);const cached=this.freshFeedItem(id);if(cached)return {ok:true,data:cached,source:"feed-cache"};const r=await this.fetchDetail(id);return !r.ok?r:r.data.kind==="video"?{ok:true,data:r.data.item,source:r.source}:fail("UNSUPPORTED","图文内容没有视频播放流");}
+  async resolvePlayback(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinItem>>{
+    const start=Date.now(),id=awemeId.trim();let pending=this.playbackResolutions.get(id);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(id,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(id)===pending)this.playbackResolutions.delete(id);}
+    if(result.ok){const item=applyPreferredDouyinPlayback(result.data);if(!item.playUrl.trim())return fail('UNSUPPORTED','没有可用的视频播放流');const v=selectPreferredDouyinVariant(item.variants??[]);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);return {...result,data:item};}
+    appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=${result.code}`);return result;
+  }
   async clearPlaybackWindow(){this.clearFeedCache();await this.feedStore.clear();}
   async restoreFeed(){const snapshot=await this.feedStore.bootstrap();traceServiceWork("douyin.restore.result",()=>{for(const item of snapshot.items){const resolvedAtMillis=Number(snapshot.resolved[item.awemeId]);if(Number.isFinite(resolvedAtMillis)&&this.now()-resolvedAtMillis<PLAY_URL_TTL_MS)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});}this.feedCursor=snapshot.cursor;this.feedHasMore=snapshot.hasMore;});return snapshot;}
   async saveRecentWindow(items:DouyinItem[],anchorAwemeId:string,cursor:string|null,hasMore:boolean){
@@ -97,16 +104,16 @@ export class DouyinClient {
       await store.set(HISTORY_KEY,JSON.stringify(entries));await this.writeWatchedId(id);
     });
   }
-  async listHistory():Promise<DouyinHistoryEntry[]>{const raw=await (this.options.historyStorage??this.options.secureStorage).get(HISTORY_KEY);if(!raw)return [];try{const v=JSON.parse(raw);return Array.isArray(v)?v.filter(x=>x&&typeof x==="object"&&x.item?.awemeId&&Number.isFinite(Number(x.watchedAtMillis))):[];}catch{return [];}}
+  async listHistory():Promise<DouyinHistoryEntry[]>{const raw=await (this.options.historyStorage??this.options.secureStorage).get(HISTORY_KEY);if(!raw)return [];try{const v=JSON.parse(raw);return Array.isArray(v)?v.filter(x=>x&&typeof x==="object"&&x.item?.awemeId&&Number.isFinite(Number(x.watchedAtMillis))).map(x=>({...x,item:applyPreferredDouyinPlayback(x.item)})):[];}catch{return [];}}
   async clearHistory(){await this.writeHistory(async()=>{const store=this.options.historyStorage??this.options.secureStorage;await store.remove(HISTORY_KEY);await store.remove(WATCHED_KEY);});}
   async markWatchedId(awemeId:string){await this.writeHistory(()=>this.writeWatchedId(awemeId));}
   private async writeWatchedId(awemeId:string){const id=awemeId.trim();if(!id)return;const store=this.options.historyStorage??this.options.secureStorage,ids=(await this.listWatchedIds()).filter(x=>x!==id);ids.push(id);await store.set(WATCHED_KEY,JSON.stringify(ids.slice(-1000)));}
   async listWatchedIds():Promise<string[]>{const raw=await (this.options.historyStorage??this.options.secureStorage).get(WATCHED_KEY);if(!raw)return [];try{const value=JSON.parse(raw);return Array.isArray(value)?value.map(String).map(x=>x.trim()).filter(Boolean).slice(-1000):[];}catch{return [];}}
   async clearWatchActivity(){await this.clearHistory();}
   async getSavedState(awemeId:string){return this.saved.state(awemeId);}
-  async listSaved(kind?:DouyinSavedKind){return this.saved.list(kind);}
-  async setSaved(item:DouyinItem,kind:DouyinSavedKind,saved:boolean){return this.saved.set(item,kind,saved);}
-  async toggleSaved(item:DouyinItem,kind:DouyinSavedKind){return this.saved.toggle(item,kind);}
+  async listSaved(kind?:DouyinSavedKind){return (await this.saved.list(kind)).map(entry=>({...entry,item:applyPreferredDouyinPlayback(entry.item)}));}
+  async setSaved(item:DouyinItem,kind:DouyinSavedKind,saved:boolean){return this.saved.set(applyPreferredDouyinPlayback(item),kind,saved);}
+  async toggleSaved(item:DouyinItem,kind:DouyinSavedKind){return this.saved.toggle(applyPreferredDouyinPlayback(item),kind);}
   async search(_query:string):Promise<DouyinResult<never>>{return fail("UNSUPPORTED","原 Android 抖音仓库没有搜索契约，未发送网络请求");}
   async interact(_awemeId:string,_action:DouyinInteraction):Promise<DouyinResult<never>>{return fail("UNSUPPORTED","原 Android 抖音仓库没有互动写入契约，未发送网络请求");}
 }

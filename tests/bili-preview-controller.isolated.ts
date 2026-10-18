@@ -26,6 +26,7 @@ mock.module('../src/cache/host.ts', () => ({ managedCache: {} }));
 mock.module('../src/debug/douyin-host.ts', () => ({ douyinDebug: {} }));
 let resolveRemote: () => Promise<any>, lookup: () => Promise<any>, reports = 0;
 mock.module('../src/media-services.ts', () => ({
+  douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},
   biliClient: { detail:async()=>{throw Error('offline_detail');}, getSession: async () => ({ cookies: { SESSDATA: 'fixture' } }), resolvePlayback: () => resolveRemote(), reportHistory: async () => { reports++; } },
   biliPreviewCache: { lookup: () => lookup() }, douyinClient: {}, loadLocalBiliDetail: async () => undefined,
 }));
@@ -87,6 +88,18 @@ test('late offline preview lookup cannot navigate after the owning route changed
   const f = fixture(), pending = f.controller.biliNavigate(route);
   await waiting; f.navigate(); release(local); await pending;
   expect(f.entry.page).toBe('settings'); expect(f.errors.filter(Boolean)).toEqual([]);
+});
+
+test('explicit production UI retry resets exhaustion, accepts unchanged URL, and preserves position', async () => {
+ let resolutions=0;
+ resolveRemote=async()=>{resolutions++;return remote;};lookup=async()=>undefined;
+ const f=fixture();await f.controller.biliNavigate(route);const props=f.render();
+ props.onPlaybackFailure(4321);await flush();
+ props.onPlaybackFailure(4321);await flush();
+ props.onPlaybackFailure(4321);await flush();
+ expect(f.errors.filter(Boolean)).toHaveLength(2);expect(resolutions).toBe(2);
+ await props.onRetry(4321);await flush();
+ expect(resolutions).toBe(3);expect(f.entry.playback).toMatchObject({url:remote.durl[0].url,resumePositionMs:4321,platform:'bili'});
 });
 
 

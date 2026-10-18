@@ -27,8 +27,17 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         // Native restores the title page immediately; a small/incomplete bootstrap
         // needs a 16-item feed request. Expired detail refresh is background work.
         if(cached.items.length>=3&&(!hasMore||!!cursor?.trim())){
-          void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(result=>{
-            traceServiceWork("douyin.entry.resolveResult",()=>{if(current()&&result.ok)setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item));});
+          void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(async result=>{
+            if(!current())return;
+            if(result.ok){traceServiceWork("douyin.entry.resolveResult",()=>setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item)));return;}
+            // Old queues can contain only expired/unresolvable detail URLs. Keep
+            // immediate navigation, but replenish from a fresh feed in the background
+            // so the preload window does not retry the same stale identities forever.
+            if(result.code==='CANCELLED'||result.code==='NOT_LOGGED_IN')return;
+            appLogger.i('DouyinEntry','expired queue anchor failed; refreshing feed');
+            const fresh=await props.client.fetchFeedPage({count:16});
+            if(!current()||!fresh.ok)return;
+            cursor=fresh.data.nextCursor;hasMore=fresh.data.hasMore;anchor=null;setItems(fresh.data.items);
           }).catch(()=>{});
           return;
         }
@@ -56,6 +65,9 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true});
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
+  const preloadOwner={};
+  createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor);else props.onPreloadStop?.(preloadOwner);});
+  onCleanup(()=>props.onPreloadStop?.(preloadOwner));
   let debugEntered=false;
   createEffect(()=>{
     const route=props.route;

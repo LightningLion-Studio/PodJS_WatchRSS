@@ -106,3 +106,14 @@ for(const debug of [false,true])test(`external auto-enter obeys build gate debug
  debugAllowed=debug;const f=mount({cacheCount:4,autoEnter:true,resume:'2'});await settled(f);await settle();
  expect(f.plays.length).toBe(debug?1:0);if(debug){expect(f.plays[0].item.awemeId).toBe('2');expect(f.plays[0].immersive).toBe(true);}
 });
+
+
+test('failed expired anchor replenishes the preload window with fresh feed without gating entry or clearing login',async()=>{
+ const f=mount({cacheCount:4});await requestReady(f);expect(f.text()).not.toContain('刷新中...');
+ f.requests[0]!.reply.resolve(response([],403));await requestReady(f,2);
+ expect(new URL(f.requests[1]!.request.url).pathname).toBe('/aweme/v2/web/module/feed/');
+ expect(f.text()).not.toContain('刷新中...');expect(f.data.has('douyin.cookie')).toBe(true);
+ f.requests[1]!.reply.resolve(response(['fresh-preload']));
+ for(let n=0;n<30;n++)await settle();f.swipe(-80);await settle();
+ expect(f.plays.at(-1)?.item.awemeId).toBe('fresh-preload');expect(f.data.has('douyin.cookie')).toBe(true);
+});

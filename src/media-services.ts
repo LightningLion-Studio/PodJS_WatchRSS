@@ -1,3 +1,4 @@
+import {createHostDouyinPreload} from './douyin/preload-host.ts';
 import {createHostBiliPreview} from './bili/preview-host.ts';
 import {appLogger} from './logs/app-logger.ts';
 import {createMediaTransport} from './media/transport.ts';
@@ -30,6 +31,8 @@ export const douyinClient=new DouyinClient({
  secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
  historyStorage:{get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}}
 });
+
+export const douyinPreload=createHostDouyinPreload(douyinClient);
 
 export async function loadLocalBiliDetail(target: import('./bili/detail.ts').DetailTarget) {
  return readLocalBiliDetail((await getExternalSavedStore()).db, target);

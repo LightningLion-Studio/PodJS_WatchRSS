@@ -155,7 +155,7 @@ test('production immersive player keeps restored mode through prepare and next s
 
 
 let resolveCurrent!:(id:string)=>Promise<any>,queueSnapshot:any;
-mock.module('../src/media-services.ts',()=>({biliClient:{},biliPreviewCache:{lookup:async()=>undefined},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
+mock.module('../src/media-services.ts',()=>({douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},biliClient:{},biliPreviewCache:{lookup:async()=>undefined},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:()=>{throw Error('unexpected login');}}));
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');

@@ -1,3 +1,4 @@
+import {applyPreferredDouyinPlayback} from './playback-selector.ts';
 import {projectJsonAsync} from "@podjs/framework/json";
 import {yieldWorkTurn} from "@podjs/framework/text-layout";
 import {traceServiceWork} from "@podjs/framework/service-trace";
@@ -11,7 +12,7 @@ export const QUEUE_KEY = "douyin.playback-queue.v1";
 export const FEED_KEY = "douyin.feed.v1", RECENT_KEY = "douyin.recent-window.v1";
 export function normalizeItems(items: DouyinItem[]): DouyinItem[] {
   const seen = new Set<string>();
-  return items.filter(item => { const id = typeof item?.awemeId === "string" ? item.awemeId.trim() : ""; if (!id || typeof item.playUrl !== "string" || !item.playUrl.trim() || seen.has(id)) return false; seen.add(id); return true; }).map(item => ({ ...item, awemeId: item.awemeId.trim(), playUrl: item.playUrl.trim() }));
+  return items.map(applyPreferredDouyinPlayback).filter(item => { const id = typeof item?.awemeId === "string" ? item.awemeId.trim() : ""; if (!id || typeof item.playUrl !== "string" || !item.playUrl.trim() || seen.has(id)) return false; seen.add(id); return true; }).map(item => ({ ...item, awemeId: item.awemeId.trim(), playUrl: item.playUrl.trim() }));
 }
 export class DouyinFeedStore {
   private writes: Promise<void> = Promise.resolve();

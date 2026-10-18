@@ -7,6 +7,7 @@ import type { ShareHandler } from "../../sharing/policy.ts";
 import {
   biliClient,
   douyinClient,
+  douyinPreload,
   loadLocalBiliDetail,
 } from "../../media-services.ts";
 import { BiliScreen, type BiliRoute } from "../bili/index.tsx";
@@ -75,7 +76,8 @@ interface MediaRoutesProps {
 
 export function MediaRoutes(props: MediaRoutesProps) {
   const batteryTelemetry=props.createBatteryTelemetry?.();
-  onCleanup(()=>{void batteryTelemetry?.stop();});
+  onCleanup(()=>{void batteryTelemetry?.stop();douyinPreload.stop(props.entry);});
+  createRenderEffect(()=>{if(!props.active())douyinPreload.stop(props.entry);});
   const updateBackground = (platform: "bili" | "douyin", value: boolean) => {
     props.saveMediaSetting(platform, "background-playback", value);
     if (platform === "bili") props.setBiliBackground(value);
@@ -147,6 +149,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
           height={props.height}
           route={props.entry.douyinRoute ?? { name: "entry" }}
           client={douyinClient}
+          onPreloadWindow={(owner,items,anchor)=>douyinPreload.start(owner,items,anchor??undefined,'entry')}
+          onPreloadStop={owner=>douyinPreload.stop(owner)}
           settings={{
             originalContentEnabled: props.douyinOriginal(),
             onOriginalContentChange: (value) =>
@@ -169,6 +173,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <VideoPlayerScreen
+          onAdjacentPoster={direction=>{const state=props.entry.queue?.snapshot();return state?.playlist[state.index+(direction==='next'?1:-1)]?.coverUrl;}}
+          onBluetoothAllowed={value=>douyinPreload.allowBluetooth(value,props.entry)}
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}
           width={props.width}
           height={props.height}
@@ -211,7 +217,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           }
           onRetry={
             props.entry.retryPlayback
-              ? props.entry.retryPlayback
+              ? position => props.entry.retryPlayback!(position, {manual:true})
               : props.entry.queue
                 ? () => props.recoverDouyinVideo(props.entry, true)
                 : props.entry.rssDouyinRecovery
@@ -221,11 +227,6 @@ export function MediaRoutes(props: MediaRoutesProps) {
           onActions={
             props.entry.queue
               ? () => props.douyinActions(props.entry)
-              : undefined
-          }
-          onHeader={
-            props.entry.queue
-              ? () => void props.openDouyin({ name: "channel-info" })
               : undefined
           }
           onNext={
