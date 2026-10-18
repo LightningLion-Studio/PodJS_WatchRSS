@@ -90,7 +90,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
     </View>
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text></Show>
-    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Text class="text-base text-[#f5f5f5]">{logged()?"↑":"登录"}</Text></View>
+    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">登录</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
   </View></View>;
 }
 
