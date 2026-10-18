@@ -62,7 +62,9 @@ test('U6 file logger exact FIFO/trim/output/pull differential including failure 
   logger.w('T','warning',error);logger.e('T','error',42);
   await logger.flush();const read=await logger.readLogs();const pulls=[];for(const size of [1,0,-1,12,1.5,'5','bad'])pulls.push(await logger.pull(size));
   await logger.clearLogs();await logger.flush();
-  return {ops:m.ops,output:m.output,read,pulls,final:m.text()};
+  // Rotation now stats the committed file instead of synchronously re-encoding it.
+  // Keep exact read/write order, content, offsets and outputs; ignore only size probes.
+  return {ops:m.ops.filter(op=>(op as unknown[])[0]!=='size'),output:m.output,read,pulls,final:m.text()};
  }
  const over=Array.from({length:10},(_,i)=>`${i}:`+'中'.repeat(175000)).join('\r\n')+'\r\n';
  for(const [initial,scan,fail] of [['',true,false],['token=PRIVATE\n',true,false],['unchanged\n',false,false],['',false,true],['a'.repeat(MAX_LOG_BYTES-1)+'\n',false,false],[over,false,false]] as const){
