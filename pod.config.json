@@ -160,7 +160,7 @@
     "watchrss-cloud-sync": "src/cloud/background.ts"
   },
   "backgroundServices": [
-    "debug.cloudHost",
+    "cloud.host",
     "kv.get"
   ]
 }

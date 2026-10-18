@@ -1,3 +1,5 @@
+import {discovery} from '@podjs/framework/services';
+import {hasCapability} from '@podjs/framework/watch';
 import { createMemo, createSignal, Show } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
@@ -16,6 +18,7 @@ export function PhoneConnectionScreen(props: { width: number; height: number; ac
       { height: 26, render: () => <Text class="absolute inset-0 text-[21px] leading-[26] text-center text-[#f5f5f5]">连接手机</Text> },
       { height: 9, render: () => null },
       { height: description.length * 17, render: () => <Text class="absolute inset-0 text-sm leading-[17] text-center text-[#b6b6b6]">{description.join("\n")}</Text> },
+      ...(hasCapability('net.discovery')?[{height:52,render:()=> <View class="absolute inset-0 rounded-[26] bg-[#2a2a2a]" onPress={()=>{if(props.active())void discovery.requestPermission().then(value=>{if(value!=='granted')props.onError('请允许附近设备发现权限后重试');}).catch(()=>props.onError('附近设备发现权限申请失败'));}} focusable accessibilityRole="button" accessibilityLabel="启用附近手机发现"><Text class="absolute inset-0 text-sm leading-[17] text-center text-[#f5f5f5]">启用附近手机发现</Text></View>}]:[]),
       { height: 9, render: () => null },
       { height: Math.max(52, prompt.length * 21 + 16), render: () => <View onPress={() => setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[8] text-[17px] leading-[21] text-[#f5f5f5]">{prompt.join("\n")}</Text></View> },
       { height: 52, render: () => null },

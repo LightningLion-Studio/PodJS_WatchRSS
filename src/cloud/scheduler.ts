@@ -6,7 +6,7 @@ export interface CloudSchedulerPorts {sync(manual:boolean,mode?:'all'|'recent128
 export class WatchCloudScheduler {
  private last=-Infinity;private active=false;private disposed=false;private dirty=false;private running:Promise<boolean>|undefined;private cancelTimer?:()=>void;
  constructor(private ports:CloudSchedulerPorts,private guard:CloudGuard=cloudDisabled){}
- async start(debug:boolean){if(!debug){await this.ports.cancelWorker();return;}this.guard.require();await this.ports.scheduleWorker();}
+ async start(enabled:boolean){if(!enabled){await this.ports.cancelWorker();return;}this.guard.require();await this.ports.scheduleWorker();}
  foreground(active:boolean){this.guard.require();this.active=active;if(active)this.trigger();else{this.cancelTimer?.();this.cancelTimer=undefined;}}
  trigger(){this.guard.require();if(this.disposed)return;this.dirty=true;this.pump();}
  private pump(){if(this.disposed||!this.active||!this.dirty||this.running||this.cancelTimer)return;const remaining=CLOUD_INTERVAL-(this.ports.now()-this.last);

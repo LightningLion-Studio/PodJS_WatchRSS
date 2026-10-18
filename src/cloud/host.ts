@@ -1,9 +1,11 @@
 import {hostOperation} from '@podjs/framework/services';
-import {debugGate,initializeDebugBuild} from '../debug/host';
+import {cloudGate} from './gate';
 import {createCloudHostPorts} from './host-ports';
 import type {CloudClientOptions,HttpTransport} from './types';
-export const cloudHostPorts=createCloudHostPorts(<T>(method:string,args:Record<string,unknown>)=>{debugGate.require();return hostOperation<T>(method,args).result;},debugGate);
+export const cloudHostPorts=createCloudHostPorts(<T>(method:string,args:Record<string,unknown>)=>{cloudGate.require();return hostOperation<T>(method,args).result;},cloudGate);
 export async function createHostCloudFoundation(userId:string,deviceId:string,http:HttpTransport,options:CloudClientOptions){
- if(!await initializeDebugBuild())return undefined;
+ if(!await initializeCloudHost())return undefined;
  return cloudHostPorts.foundation(userId,deviceId,http,options);
 }
+
+export function initializeCloudHost(){return cloudGate.initialize(()=>hostOperation('app.buildInfo',{}).result);}

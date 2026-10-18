@@ -10,7 +10,7 @@ test('foreground/account/network/data bursts coalesce at five minutes; inactive 
  now=CLOUD_INTERVAL;timers[0].fn();await settle();expect(calls).toEqual([false,false]);scheduler.foreground(false);scheduler.trigger();expect(calls).toHaveLength(2);
  expect(await scheduler.manual()).toBe(true);expect(calls).toEqual([false,false,true]);scheduler.dispose();expect(scheduled).toBe(1);expect(cancelled).toBe(0);
 });
-test('release cancels old worker without calling guarded sync or schedule; default gate fails closed',async()=>{
+test('explicitly disabled scheduler cancels old worker; default uninitialized host gate fails closed',async()=>{
  const calls:string[]=[];const ports={now:()=>0,delay:()=>()=>{},sync:async()=>{calls.push('sync');return true;},scheduleWorker:async()=>{calls.push('schedule');},cancelWorker:async()=>{calls.push('cancel');}};
  const s=new WatchCloudScheduler(ports);await s.start(false);expect(calls).toEqual(['cancel']);expect(()=>s.foreground(true)).toThrow();await expect(s.start(true)).rejects.toThrow();
 });

@@ -1,8 +1,9 @@
+import {hasCapability} from '@podjs/framework/watch';
 import {createEffect,createMemo,createSignal,onCleanup} from 'solid-js';
 import {Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import type {Scroller} from '@pocketjs/framework/kinetics';
-import {rfcomm} from '@podjs/framework/services';
+import {rfcomm,discovery} from '@podjs/framework/services';
 import {BluetoothConnectionController,type BluetoothConnectionOptions,type BluetoothConnectionPorts,type BluetoothConnectionState} from './bluetooth-connection.ts';
 import {PHONE_PAGE,phonePageText,type PhoneTextKind} from './phone-connection-layout.ts';
 import {chunkLines} from './round-rows.tsx';
@@ -20,7 +21,7 @@ export interface BluetoothConnectionScreenProps extends BluetoothConnectionOptio
 /** Standalone export; no navigation registration or listener ownership. */
 export function BluetoothConnectionScreen(props:BluetoothConnectionScreenProps){
  const [state,setState]=createSignal<BluetoothConnectionState>({status:'等待手机蓝牙连接…',detail:null,busy:false});
- const controller=new BluetoothConnectionController({sync:props.sync,radio:props.radio??{status:()=>rfcomm.status(),requestPermission:()=>rfcomm.requestPermission().result}},props,setState);
+ const controller=new BluetoothConnectionController({sync:props.sync,radio:props.radio??{status:()=>rfcomm.status(),requestPermission:async()=>{const value=await rfcomm.requestPermission().result;if(value==='granted'&&hasCapability('net.discovery'))await discovery.requestPermission();return value;}}},props,setState);
  createEffect(()=>controller.setActive(props.active()));
  onCleanup(()=>controller.dispose());
  const measure=(text:string,slot:number)=>getOps().measureText(text,slot);

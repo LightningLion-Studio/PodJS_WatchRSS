@@ -8,7 +8,7 @@ async function verify(){
   const foundation=createHostCloudFoundation('user','device',{request:async()=>{throw Error('network forbidden');}},{baseUrl:'https://fixture.invalid',accessToken:'fixture'});
   await Promise.resolve();await Promise.resolve();expect(commands).toHaveLength(1);expect(commands[0].method).toBe('app.buildInfo');
   batch=JSON.stringify([{t:'service.result',id:commands[0].id,ok:true,value:{debugBuild:false}}]);__pumpPodEvents();
-  expect(await foundation).toBeUndefined();expect(commands).toHaveLength(1);
+  expect(await foundation).toBeDefined();expect(commands).toHaveLength(1);
  }finally{(globalThis as {pod?:unknown}).pod=previous;}
 }
 await verify();

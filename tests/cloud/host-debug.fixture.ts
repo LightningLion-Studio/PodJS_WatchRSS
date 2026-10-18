@@ -12,7 +12,7 @@ const encode=(b:Uint8Array)=>Buffer.from(b).toString('base64');
 function resultFile(bytes:Uint8Array){const path=`cloud-crypto/.pod-write-${++next}.part`;files.set(path,bytes);return {path,size:bytes.length,sha256:hash(bytes)};}
 async function execute(method:string,a:any):Promise<any>{
  switch(method){
-  case 'app.buildInfo':return {debugBuild:true};
+  case 'app.buildInfo':return {debugBuild:process.env.CLOUD_RELEASE!=='1'};
   case 'file.createTemp':{const path=`${a.directory}/.pod-write-${++next}.part`;files.set(path,new Uint8Array());return {path};}
   case 'file.write':{const old=files.get(a.path)!,part=decode(a.dataBase64);expect(part.length).toBeLessThanOrEqual(65536);expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
   case 'file.read':{const file=files.get(a.path)!;return {dataBase64:encode(file.slice(a.offset,a.offset+a.maxBytes)),offset:a.offset,size:file.length,eof:a.offset+a.maxBytes>=file.length};}

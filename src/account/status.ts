@@ -14,7 +14,7 @@ export interface AccountStatusSnapshot {
   diagnosticsEnabled: boolean;
   accessTokenExpired: boolean;
   refreshTokenStatus: 'legacy' | 'expired' | 'valid';
-  /** Absent when no real watch cloud-sync service is connected, matching native release behavior. */
+  /** Absent when no real watch cloud-sync service is connected. */
   cloud?: AccountCloudStatus;
 }
 
