@@ -91,13 +91,15 @@ export class ArticleBatchReceiver {
  private failure:Error|null=null;
  private tail:Promise<unknown>=Promise.resolve();
  private readonly selected=new Map<string,RequestedArticleBody>();
- constructor(selected:readonly RequestedArticleBody[],private readonly commit:(article:ReceivedArticle)=>Promise<void>,private readonly options:{ignoreIncoming?:boolean}={}){
+ constructor(selected:readonly RequestedArticleBody[],private readonly commit:(article:ReceivedArticle)=>Promise<void>,private readonly options:{ignoreIncoming?:boolean;flushCompleteArticles?:boolean}={}){
   for(const request of selected){if(this.selected.has(request.articleId))throw new Error("duplicate selected article");this.selected.set(request.articleId,{...request,chunkIndexes:[...request.chunkIndexes]});}
  }
  consume(frame:JsonObject):Promise<ArticleBatchReceipt|null>{
   const next=this.tail.then(()=>this.consumeNext(frame));this.tail=next.catch(()=>{});return next;
  }
  abort(reason="article transfer aborted"):void{this.failure??=new Error(reason);this.pending=null;}
+ get committedArticles(){return this.committed;}
+ get checkpointReady(){return this.pending===null;}
  finish():void{if(this.failure)throw this.failure;if(!this.done)throw new Error("truncated article batches");}
  private check():void{if(this.failure)throw this.failure;}
  private async consumeNext(frame:JsonObject):Promise<ArticleBatchReceipt|null>{
@@ -117,6 +119,14 @@ export class ArticleBatchReceiver {
      if(this.completed.has(entry.article.articleId))throw new Error("noncontiguous article batches");
      if(this.pending){this.completed.add(this.pending.article.articleId);ready.push(this.pending);}
      this.pending=entry;this.received++;
+    }
+   }
+   if(this.options.flushCompleteArticles&&this.pending){
+    const body=this.pending.body;
+    const indexes=this.selected.get(this.pending.article.articleId)?.chunkIndexes??[];
+    const expected=indexes.length?indexes:body.chunkHashes.map((_,i)=>i);
+    if(body.metadataOnly||expected.every(index=>body.chunks.some(chunk=>chunk.index===index))){
+     this.completed.add(this.pending.article.articleId);ready.push(this.pending);this.pending=null;
     }
    }
    this.requests.push(...requests);

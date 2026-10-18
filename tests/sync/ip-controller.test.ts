@@ -81,10 +81,10 @@ test('network-style refresh does not scan in background or during a live transfe
 test('unexpected route EOF schedules fresh discovery without needing a network event',async()=>{
  const f=ipFixture();await f.sign();const pending=deferred<null>();let discoveries=0;
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,acquireDescriptor:()=>{discoveries++;return {result:pending.result,cancel:()=>pending.reject(new Error('disposed'))};}});
- await controller.offer({...f.descriptor});await flush();await f.ports.streams.close('stream-1');await flush();expect(discoveries).toBe(1);await controller.dispose();
+ await controller.offer({...f.descriptor});await flush();await f.ports.streams.close('stream-1');await flush();expect(discoveries).toBe(0);await f.clock.advance(500);expect(discoveries).toBe(1);await controller.dispose();
 });
 test('cached-bootstrap recovery debounces and backgrounding cancels the pending retry',async()=>{
- for(const background of [false,true]){const f=ipFixture();await f.sign();const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});await controller.offer({...f.descriptor});await flush();await f.ports.streams.close('stream-1');await flush();expect(f.opens).toHaveLength(1);if(background)controller.setActive(false);await f.clock.advance(349);expect(f.opens).toHaveLength(1);await f.clock.advance(1);expect(f.opens).toHaveLength(background?1:2);await controller.dispose();}
+ for(const background of [false,true]){const f=ipFixture();await f.sign();const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});await controller.offer({...f.descriptor});await flush();await f.ports.streams.close('stream-1');await flush();expect(f.opens).toHaveLength(1);if(background)controller.setActive(false);await f.clock.advance(499);expect(f.opens).toHaveLength(1);await f.clock.advance(1);expect(f.opens).toHaveLength(background?1:2);await controller.dispose();}
 });
 test('normal persistent completion never triggers failure recovery',async()=>{
  const f=ipFixture();await f.sign();let discoveries=0;const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,acquireDescriptor:()=>{discoveries++;return {result:Promise.resolve(null),cancel:()=>{}};}});
@@ -93,7 +93,7 @@ test('normal persistent completion never triggers failure recovery',async()=>{
 test('an immediately closed route queues recovery while initial selection is still settling',async()=>{
  const f=ipFixture();await f.sign();await f.ports.streams.close('stream-1');let discoveries=0;const pending=deferred<null>();
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,acquireDescriptor:()=>{discoveries++;return {result:pending.result,cancel:()=>pending.reject(new Error('disposed'))};}});
- await controller.offer({...f.descriptor});await flush();expect(discoveries).toBe(1);await controller.dispose();
+ await controller.offer({...f.descriptor});await flush();expect(discoveries).toBe(0);await f.clock.advance(500);expect(discoveries).toBe(1);await controller.dispose();
 });
 
 import {foregroundRequestFilter} from '../../src/sync/action-policy.ts';

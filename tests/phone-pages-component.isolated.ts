@@ -11,8 +11,8 @@ const element=(kind:string,props:Node['props']):Node=>{const rendered=Object.cre
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(props:Node['props'])=>element('View',props),Text:(props:Node['props'])=>element('Text',props)}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string,slot:number)=>Array.from(text).length*(slot===23?21:slot===1?14:12)})}));
-mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'rect',safeInsets:{top:0,right:0,bottom:0,left:0}})}));
-mock.module('@podjs/framework/services',()=>({rfcomm:{status:async()=>({available:true,enabled:true,permission:'granted'}),requestPermission:()=>({result:Promise.resolve('granted')})}}));
+mock.module('@podjs/framework/watch',()=>({hasCapability:()=>false,getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'rect',safeInsets:{top:0,right:0,bottom:0,left:0}})}));
+mock.module('@podjs/framework/services',()=>({discovery:{requestPermission:async()=> 'granted',status:async()=>({available:true,enabled:true,permission:'granted'})},rfcomm:{status:async()=>({available:true,enabled:true,permission:'granted'}),requestPermission:()=>({result:Promise.resolve('granted')})}}));
 mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(props:Node['props'])=>{const children=createMemo(()=>props.entries.map((entry:ScrollEntry)=>entry.render()));return element('ScrollEntries',{...props,get entries(){return props.entries;},children});}}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(props:Node['props'])=>element('Progress',props)}));
 const {BluetoothConnectionScreen}=await import('../src/ui/BluetoothConnectionScreen.tsx');

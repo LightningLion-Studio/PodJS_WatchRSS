@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger.ts';
 import {base64ToBytes,type discovery,type HostOperation} from '@podjs/framework/services';
 import {decodeSyncUtf8,type JsonObject} from './protocol.ts';
 import {parseWireJson} from './wire-json.ts';
@@ -16,7 +17,7 @@ export function acquireIpDescriptor(radio:Pick<typeof discovery,'status'|'bleRea
  const check=()=>{if(cancelled)throw new Error('IP discovery cancelled');};
  const result=(async()=>{
   const timer=delay(350);pending=timer;try{await timer.result;}finally{if(pending===timer)pending=undefined;}check();
-  const state=await radio.status();check();if(!state.available||!state.enabled||state.permission!=='granted')return null;
+  const state=await radio.status();check();if(!state.available||!state.enabled||state.permission!=='granted'){appLogger.i('WatchRSS_IpSync',`BLE discovery unavailable stage=${state.permission!=='granted'?'permission':!state.enabled?'radio':'unsupported'} source=ble`);return null;}
   const read=radio.bleReadCharacteristic({...IP_BLE_DISCOVERY});pending=read;
   try{const value=await read.result;check();if(!value.bonded)throw new Error('IP discovery requires a bonded phone');return parseWireJson(decodeSyncUtf8(base64ToBytes(value.dataBase64)));}
   finally{if(pending===read)pending=undefined;}

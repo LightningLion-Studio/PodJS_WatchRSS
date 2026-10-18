@@ -68,13 +68,13 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   }
   throw new Error('Library changed repeatedly while preparing sync');
  }
- deviceId(){return this.run(()=>{this.snapshotCache=undefined;return this.identity();});}
+ deviceId(){return this.run(()=>this.identity());}
  cursor(peer:string){return this.run(()=>this.snapshot(()=>this.sequence.cursor(peer)));}
  mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean){return this.run(async()=>this.sources.merge(sources,remote,await this.migrate(),authoritative));}
- prepareWindow(peer:string,peerAppliedLocalSeq:number):Promise<LibraryWindow>{return this.run(()=>this.snapshot((articles,sources,id)=>this.sequence.prepareWindow(peer,id,articles.map(a=>a.manifest),async urls=>urls?sources.filter(s=>urls.includes(s.url)):sources,peerAppliedLocalSeq)));}
+ prepareWindow(peer:string,peerAppliedLocalSeq:number):Promise<LibraryWindow>{return this.run(()=>this.snapshot((articles,sources,id)=>this.sequence.prepareWindow(peer,id,articles.map(a=>a.manifest),async urls=>urls?sources.filter(s=>urls.includes(s.url)):sources,peerAppliedLocalSeq,{snapshotReconciled:true})));}
  exportSources(){return this.run(()=>this.snapshot(async(_a,sources)=>sources));}
  receiveArticle(entry:ReceivedArticle,remote:string,authoritative:boolean){return this.run(async()=>{await this.migrate();return entry.article.deleted?this.deletion.receive(entry.article,entry.body,remote,authoritative):this.receiver.receiveWithStats(entry.article,entry.body,remote,authoritative);});}
- exportRequested(requests:readonly RequestedArticleBody[]){return this.run(async()=>{try{if(requests.length===0)return [];return await this.snapshot(async articles=>{const ids=new Set(requests.map(r=>r.articleId));const selected=articles.filter(a=>ids.has(a.article.articleId)&&a.manifest.bodyAvailable);const outgoing:PreparedArticle[]=[];for(const article of selected)outgoing.push(await this.local.materializeRequested(article));return outgoing;});}finally{this.snapshotCache=undefined;}});}
+ exportRequested(requests:readonly RequestedArticleBody[]){return this.run(async()=>{try{if(requests.length===0)return [];return await this.snapshot(async articles=>{const ids=new Set(requests.map(r=>r.articleId));const selected=articles.filter(a=>ids.has(a.article.articleId)&&a.manifest.bodyAvailable);const outgoing:PreparedArticle[]=[];for(let start=0;start<selected.length;start+=32)outgoing.push(...await this.local.materializeRequestedBatch(selected.slice(start,start+32)));return outgoing;});}finally{if(this.snapshotCache&&this.snapshotCache.articles.reduce((n,a)=>n+(a.encodedBody?.length??0)+2*(a.article.contentHtml?.length??0)+2*a.article.contentText.length,0)>32*1024*1024)this.snapshotCache=undefined;}});}
  /** Cloud uses the same serialization lane and transactional entity merge as phone sync. */
  cloudSnapshot(full:boolean){return this.run(()=>this.snapshot(async(articles,sources)=>{
   const exported:ExportedArticle[]=[];

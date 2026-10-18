@@ -1,4 +1,4 @@
-import {test,expect} from 'bun:test';
+import {test,expect,beforeEach,afterEach} from 'bun:test';
 import {LibrarySyncSession,type LibrarySessionRepository,type TransferByteProgress} from '../../src/sync/session.ts';
 import {StreamFrameConnection,TRANSFER_CHUNK_BYTES} from '../../src/sync/stream.ts';
 import {FrameDecoder,encodeFrame,type JsonObject} from '../../src/sync/protocol.ts';
@@ -70,19 +70,23 @@ test('probe capabilities follow bound handlers and publish only known media data
   expect((await handler({action:'syncReader'})).success).toBe(wired);expect((await handler({action:'previewReader'})).success).toBe(wired);
  }
 });
-test('16 KiB body chunks and prefix deltas match native for both transfer directions',async()=>{
- const frame={text:'中'.repeat(15000)},raw=encodeFrame(frame),p=phone([frame]),progress:TransferByteProgress[]=[];
+test('64 KiB app chunks preserve framed bytes and exact progress in both directions',async()=>{
+ const frame={text:'中'.repeat(50000)},raw=encodeFrame(frame),p=phone([frame]),progress:TransferByteProgress[]=[];
  p.connection.setTransferProgress(x=>progress.push(x));expect(await p.connection.readFrame(1000)).toEqual(frame);await p.connection.writeFrame(frame);
- const chunks=[4,16384,16384,raw.length-4-32768];expect(p.reads).toEqual(chunks);expect(p.writes).toEqual(chunks);expect(TRANSFER_CHUNK_BYTES).toBe(16384);
+ const chunks=[4,65536,65536,raw.length-4-131072];expect(p.reads).toEqual(chunks);expect(p.writes).toEqual(chunks);expect(TRANSFER_CHUNK_BYTES).toBe(16384);
  for(const direction of ['read','write'])expect(progress.filter(x=>x.direction===direction).map(x=>x.bytes)).toEqual(chunks);await p.connection.close();
 });
 test('interrupted writes count only completed chunks and close once',async()=>{
  const progress:TransferByteProgress[]=[];let count=0,closed=0;
  const c=new StreamFrameConnection({read:async()=>null,write:async()=>{if(++count===3)throw Error('disconnected');},close:async()=>{closed++;}});c.setTransferProgress(p=>progress.push(p));
- await expect(c.writeFrame({text:'x'.repeat(40000)})).rejects.toThrow('disconnected');expect(progress.map(p=>p.bytes)).toEqual([4,16384]);expect(closed).toBe(1);await expect(c.writeFrame({})).rejects.toThrow('closed');
+ await expect(c.writeFrame({text:'x'.repeat(140000)})).rejects.toThrow('disconnected');expect(progress.map(p=>p.bytes)).toEqual([4,65536]);expect(closed).toBe(1);await expect(c.writeFrame({})).rejects.toThrow('closed');
 });
 test('truncated body reports prefix and actual bytes without a completed frame',async()=>{
  const raw=encodeFrame({text:'x'.repeat(40000)}).slice(0,17000),progress:TransferByteProgress[]=[];let offset=0,closed=0;
  const c=new StreamFrameConnection({read:async max=>{if(offset===raw.length)return null;const bytes=raw.slice(offset,offset+max);offset+=bytes.length;return bytes;},write:async()=>{},close:async()=>{closed++;}},()=>0);c.setTransferProgress(p=>progress.push(p));
- await expect(c.readFrame(1000)).rejects.toThrow('Truncated');expect(progress.map(p=>p.bytes)).toEqual([4,16384,612]);expect(closed).toBe(1);
+ await expect(c.readFrame(1000)).rejects.toThrow('Truncated');expect(progress.map(p=>p.bytes)).toEqual([4,16996]);expect(closed).toBe(1);
 });
+
+let originalYield:(()=>Promise<void>)|undefined;
+beforeEach(()=>{originalYield=(globalThis as any).__podYieldCodecTurn;(globalThis as any).__podYieldCodecTurn=()=>new Promise<void>(resolve=>setTimeout(resolve,1));});
+afterEach(()=>{(globalThis as any).__podYieldCodecTurn=originalYield;});

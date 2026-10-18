@@ -1,3 +1,4 @@
+import {subscribeLibraryProgress,libraryProgressText,libraryProgressDetail} from '../sync/progress.ts';
 import type {ApplicationForegroundSync,ApplicationSyncEvent} from '../sync/application-foreground.ts';
 import {remoteInputUrl,subscribeRemoteInput} from '../remote-input/inbox.ts';
 
@@ -26,6 +27,11 @@ export class BluetoothConnectionController {
  private disposed=false;
  private stops:(()=>void)[]=[];
  constructor(private ports:BluetoothConnectionPorts,private options:BluetoothConnectionOptions,private changed:(state:BluetoothConnectionState)=>void){
+  this.stops.push(subscribeLibraryProgress(progress=>{
+   if(!this.active||!this.awaiting||progress.phase==='request')return;
+   if(progress.phase==='error')this.fail(libraryProgressDetail(progress),'资料库同步失败');
+   else this.set({status:libraryProgressText(progress),detail:libraryProgressDetail(progress),busy:progress.phase!=='complete'});
+  }));
   this.stops.push(ports.sync.subscribe(event=>this.event(event)));
   this.stops.push((ports.subscribeInput??subscribeRemoteInput)(value=>{
    if(!this.active||!this.awaiting)return;

@@ -1,3 +1,4 @@
+import {quoteAndroidJsonString as javaJsonQuote} from '@podjs/framework/json-string';
 /** Port of the validation/reconstruction contract in native ArticleSyncBody. */
 export interface SyncArticleBody {contentHtml:string|null;contentText:string}
 export interface SyncBodyChunk {index:number;hash:string;bytes:Uint8Array}
@@ -54,15 +55,7 @@ export async function rebuildArticleBody(payload:SyncBodyPayload,local:SyncArtic
 export function encodeBodyJson(body:SyncArticleBody):string {
   return `{${body.contentHtml===null?"":`"contentHtml":${javaJsonQuote(body.contentHtml)},`}"contentText":${javaJsonQuote(body.contentText)}}`;
 }
-export function javaJsonQuote(s:string):string {
-    const pieces:string[]=['"'];let start=0;
-    const escapes:Record<string,string>={'"':'\\"','\\':'\\\\','/':'\\/','\b':'\\b','\f':'\\f','\n':'\\n','\r':'\\r','\t':'\\t'};
-    for(let i=0;i<s.length;i++){
-      const c=s[i]!,escaped=escapes[c]??(c.charCodeAt(0)<32?`\\u00${c.charCodeAt(0).toString(16).padStart(2,"0")}`:undefined);
-      if(escaped!==undefined){pieces.push(s.slice(start,i),escaped);start=i+1;}
-    }
-    pieces.push(s.slice(start),'"');return pieces.join("");
-}
+export {quoteAndroidJsonString as javaJsonQuote} from '@podjs/framework/json-string';
 
 const whitespace=(c:string)=>/[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.test(c);
 /** Reject duplicate body fields, type mismatches, malformed unknown values and trailing data. */

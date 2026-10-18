@@ -1,4 +1,7 @@
-import { createMemo, createSignal, Show } from "solid-js";
+import {discovery} from '@podjs/framework/services';
+import {hasCapability} from '@podjs/framework/watch';
+import {subscribeLibraryProgress,libraryProgressSnapshot,libraryProgressText,libraryProgressDetail} from '../sync/progress.ts';
+import { createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
 import type { Scroller } from "@pocketjs/framework/kinetics";
@@ -7,6 +10,8 @@ import { watchUiLines } from "./text-layout.ts";
 import { DownloadPhoneAppDialog } from "./DownloadPhoneAppDialog.tsx";
 
 export function PhoneConnectionScreen(props: { width: number; height: number; active: () => boolean; onError: (message: string) => void; ref: (value: { scroller: Scroller; onRootBack: () => boolean }) => void }) {
+  const [progress,setProgress]=createSignal(libraryProgressSnapshot());
+  onCleanup(subscribeLibraryProgress(setProgress));
   const [download, setDownload] = createSignal(false);
   const back = () => { if (!download()) return false; setDownload(false); return true; };
   const entries = createMemo<ScrollEntry[]>(() => {
@@ -16,8 +21,13 @@ export function PhoneConnectionScreen(props: { width: number; height: number; ac
       { height: 26, render: () => <Text class="absolute inset-0 text-[21px] leading-[26] text-center text-[#f5f5f5]">连接手机</Text> },
       { height: 9, render: () => null },
       { height: description.length * 17, render: () => <Text class="absolute inset-0 text-sm leading-[17] text-center text-[#b6b6b6]">{description.join("\n")}</Text> },
+      ...(hasCapability('net.discovery')?[{height:52,render:()=> <View class="absolute inset-0 rounded-[26] bg-[#2a2a2a]" onPress={()=>{if(props.active())void discovery.requestPermission().then(value=>{if(value!=='granted')props.onError('请允许附近设备发现权限后重试');}).catch(()=>props.onError('附近设备发现权限申请失败'));}} focusable accessibilityRole="button" accessibilityLabel="启用附近手机发现"><Text class="absolute inset-0 text-sm leading-[17] text-center text-[#f5f5f5]">启用附近手机发现</Text></View>}]:[]),
       { height: 9, render: () => null },
       { height: Math.max(52, prompt.length * 21 + 16), render: () => <View onPress={() => setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[8] text-[17px] leading-[21] text-[#f5f5f5]">{prompt.join("\n")}</Text></View> },
+      ...[libraryProgressText(progress()),libraryProgressDetail(progress())].flatMap(text=> {
+        const lines=watchUiLines(text,{width:props.width-56,measure:line=>getOps().measureText(line,1)});
+        return [{height:lines.length*17+8,render:()=> <Text class="absolute inset-0 text-sm leading-[17] text-center text-[#b6b6b6]">{lines.join("\n")}</Text>}];
+      }),
       { height: 52, render: () => null },
     ];
   });

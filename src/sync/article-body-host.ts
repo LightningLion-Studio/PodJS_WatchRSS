@@ -1,5 +1,6 @@
+import {decodeSyncUtf8} from './protocol.ts';
+import {encodeUtf8Async,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
 import {fileChunks,uri,hostOperation,bytesToBase64,base64ToBytes} from "@podjs/framework/services";
-import {javaUtf8Chunks} from "../reader/imported-text-writer.ts";
 import {encodeBodyJson,MAX_BODY_JSON_BYTES,type SyncBodyCodec} from "./article-body.ts";
 
 async function temporary(chunks:Iterable<Uint8Array>):Promise<string>{
@@ -28,16 +29,15 @@ async function readBytes(path:string,size:number):Promise<Uint8Array>{
 export const hostArticleBodyCodec:SyncBodyCodec={
  async sha256(bytes){
   if(bytes.length<=256*1024){
-   const result=await hostOperation<{digestBase64:string}>("crypto.hash",{dataBase64:bytesToBase64(bytes),algorithm:"SHA-256"}).result;
-   const digest=base64ToBytes(result.digestBase64);if(digest.length!==32)throw new Error("同步正文哈希服务返回无效结果");
+   const digest=sha256Bytes(bytes)??base64ToBytes((await hostOperation<{digestBase64:string}>("crypto.hash",{dataBase64:bytesToBase64(bytes),algorithm:"SHA-256"}).result).digestBase64);if(digest.length!==32)throw new Error("同步正文哈希服务返回无效结果");
    return Array.from(digest,b=>b.toString(16).padStart(2,"0")).join("");
   }
   const path=await temporary([bytes]);try{return (await fileChunks.hash(path)).sha256;}finally{await fileChunks.remove(path);}
  },
  async encode(body){
-  const chunks=[...javaUtf8Chunks(encodeBodyJson(body))],size=chunks.reduce((sum,part)=>sum+part.length,0);
+  const encoded=await encodeUtf8Async(encodeBodyJson(body),'question'),chunks=[encoded],size=encoded.length;
   if(size<=64*1024){
-   const bytes=new Uint8Array(size);let offset=0;for(const part of chunks){bytes.set(part,offset);offset+=part.length;}
+   const bytes=encoded;
    try{return base64ToBytes((await fileChunks.gzipBytes(bytesToBase64(bytes))).dataBase64);}
    catch(error){if(!/unsupported|unknown method/i.test(String(error)))throw error;}
   }
@@ -46,6 +46,7 @@ export const hostArticleBodyCodec:SyncBodyCodec={
   finally{if(output)await fileChunks.remove(output);await fileChunks.remove(input);}
  },
  async decode(bytes){
+  const plain=gunzipBytes(bytes);if(plain)return decodeSyncUtf8(plain);
   const input=await temporary([bytes]);let output:string|undefined,reader:string|undefined;
   try{
    const result=await fileChunks.gunzip(input,MAX_BODY_JSON_BYTES,true);output=result.path;
@@ -60,7 +61,7 @@ export const hostArticleBodyCodec:SyncBodyCodec={
 export const hostSyncText={
  parseUri:uri.parse,
  async htmlText(html:string):Promise<string>{
-  const input=await temporary(javaUtf8Chunks(html));let output:string|undefined,reader:string|undefined;
+  const input=await temporary([await encodeUtf8Async(html,'question')]);let output:string|undefined,reader:string|undefined;
   try{
    output=(await fileChunks.htmlText(input,MAX_BODY_JSON_BYTES)).path;
    reader=(await fileChunks.openText(output)).id;const pieces:string[]=[];

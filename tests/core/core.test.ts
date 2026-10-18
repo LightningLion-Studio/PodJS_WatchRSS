@@ -249,3 +249,18 @@ test('cancelled refresh closes sliced work before its atomic database transactio
  const db=new FakeDb();const repo=new WatchRssRepository(db,async()=>'<rss><channel><title>F</title><item><title>A</title></item></channel></rss>');let cancelled=false;
  const work=repo.refreshChannel(1,undefined,()=>cancelled);cancelled=true;await expect(work).rejects.toThrow('刷新已取消');expect(db.executed).toHaveLength(0);
 });
+
+test('v2 to v3 adds per-article chunk revision without changing existing library data',async()=>{
+ const raw=new Database(':memory:');try{
+  raw.run('PRAGMA foreign_keys=ON');for(const sql of SCHEMA)raw.run(sql);raw.run('PRAGMA user_version=2');
+  raw.run("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'https://book.test','Book',1,1)");
+  raw.run("INSERT INTO articles(id,channel_id,title,content,dedup_key,fetched_at) VALUES(1,1,'Chapter','plain','chapter',123)");
+  raw.run("INSERT INTO article_original_chunks(article_id,chunk_index,body) VALUES(1,0,'original A')");
+  const before=raw.query('SELECT * FROM articles').all();
+  await initializeSchema({query:async(q,p=[])=>raw.query(q).all(...p as any[]) as any,transaction:async statements=>raw.transaction(()=>{for(const s of statements)raw.query(s.sql).run(...(s.params??[]) as any[]);})()});
+  expect(raw.query('SELECT * FROM articles').all()).toEqual(before);
+  raw.run("UPDATE article_original_chunks SET body='original B' WHERE article_id=1");
+  expect(raw.query('SELECT revision FROM sync_body_revision WHERE item_id=1').get()).toEqual({revision:1});
+  raw.run('DELETE FROM articles WHERE id=1');expect(raw.query('SELECT * FROM sync_body_revision').all()).toEqual([]);
+ }finally{raw.close();}
+});

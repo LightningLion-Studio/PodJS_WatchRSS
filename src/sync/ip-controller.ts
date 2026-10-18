@@ -16,6 +16,10 @@ export interface IpSyncControllerPorts extends IpConnectionPorts {
  mediaLease?(active:boolean):Promise<unknown>;
  now?():number;
 }
+export function ipFailureStage(error:unknown):string {
+ const message=error instanceof Error?error.message:String(error);
+ return /hmac|认证|HELLO|nonce|challenge/i.test(message)?'authentication':/timed|timeout|超时/i.test(message)?'timeout':/permission|权限/i.test(message)?'permission':/unsupported|capability/i.test(message)?'capability':'connection';
+}
 /** RFCOMM-bootstrap IP route owner. Discovery providers can offer the same
  * authenticated descriptor; they must not insert unverified endpoints. */
 export class IpSyncController {
@@ -24,6 +28,7 @@ export class IpSyncController {
  private descriptor:IpDescriptor|undefined;private route:OpenIpRoute|undefined;private probe:IpConnectionProbe|undefined;
  private refreshJob:Promise<void>|undefined;private refreshQueued=false;private queuedBootstrap=false;private routeGeneration=0;private serving:Promise<void>|undefined;private session:LibrarySyncSession|undefined;
  private active=true;private disposed=false;private transferring=false;private lastAckSeq=0;private cooldown=new Map<string,number>();
+ private recoveryAttempts=0;private descriptorSource='bootstrap';
  private recoveryTimer:ForegroundTimer|undefined;
  private stopTimer:ForegroundTimer|undefined;private mediaTimer:ForegroundTimer|undefined;private mediaOwned=false;private resources:Promise<void>=Promise.resolve();
  private readonly now:()=>number;
@@ -36,9 +41,9 @@ export class IpSyncController {
  private scheduleStop(ms:number){this.stopTimer?.cancel();const timer=this.ports.delay(ms);this.stopTimer=timer;void timer.result.then(()=>{if(this.stopTimer!==timer)return;this.stopTimer=undefined;if(!this.active&&!this.transferring)this.stopRoute();},()=>{});}
  async offer(raw:JsonObject):Promise<boolean>{
   if(this.disposed)return false;let descriptor:IpDescriptor;try{descriptor=parseIpDescriptor(raw);}catch{return false;}
-  if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return false;this.descriptor=descriptor;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
+  if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return false;this.descriptor=descriptor;this.descriptorSource='bootstrap';this.recoveryAttempts=0;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
  }
- refresh(bootstrap=false){if(this.disposed||(!this.active&&!bootstrap))return;if(this.transferring){appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
+ refresh(bootstrap=false,recovery=false){if(!recovery)this.recoveryAttempts=0;if(this.disposed||(!this.active&&!bootstrap))return;if(this.transferring){appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
  private async select(bootstrap=false){
   const generation=this.routeGeneration;
   if(!bootstrap&&this.ports.acquireDescriptor){
@@ -46,7 +51,7 @@ export class IpSyncController {
    try{
     const raw=await acquisition.result;
     if(this.disposed||generation!==this.routeGeneration||this.descriptor!==previousDescriptor||this.transferring)return;
-    if(raw){const discovered=parseIpDescriptor(raw),verified=await verifyIpDescriptor(discovered,this.ports.crypto,this.now());if(this.disposed||generation!==this.routeGeneration||this.descriptor!==previousDescriptor||this.transferring)return;if(verified)this.descriptor=discovered;}
+    if(raw){const discovered=parseIpDescriptor(raw),verified=await verifyIpDescriptor(discovered,this.ports.crypto,this.now());if(this.disposed||generation!==this.routeGeneration||this.descriptor!==previousDescriptor||this.transferring)return;if(verified){this.descriptor=discovered;this.descriptorSource='ble';appLogger.i('WatchRSS_IpSync','BLE endpoint verified source=ble');}else appLogger.w('WatchRSS_IpSync',`BLE descriptor rejected stage=${discovered.expiresAt<this.now()?'expired':'authentication'} source=ble`);}
    }catch(error){if(this.disposed||generation!==this.routeGeneration||this.descriptor!==previousDescriptor)return;appLogger.w("WatchRSS_IpSync","BLE 端点发现失败，保留已有通道");this.error(error);}
    finally{if(this.acquisition===acquisition)this.acquisition=undefined;}
   }
@@ -58,6 +63,7 @@ export class IpSyncController {
    try{
     const additional=await discovery.result;
     // Keep the signed descriptor untouched; HELLO_ACK authenticates every route.
+    if(additional.length)appLogger.i('WatchRSS_IpSync',`IP candidates discovered source=mdns count=${additional.length}`);
     const addresses=new Set(endpoints.map(e=>e.address));endpoints=[...endpoints];
     for(const endpoint of additional)if(!addresses.has(endpoint.address)){addresses.add(endpoint.address);endpoints.push(endpoint);}
    }catch(error){if(!this.disposed&&generation===this.routeGeneration&&this.descriptor===descriptor)this.error(error);}
@@ -69,30 +75,30 @@ export class IpSyncController {
    if(this.disposed||generation!==this.routeGeneration||this.transferring||this.descriptor!==descriptor)return;
    const probe=new IpConnectionProbe(this.ports);this.probe=probe;let selected:OpenIpRoute;
    try{selected=await probe.connect(descriptor,endpoint,await this.ports.repository.deviceId(),previous?.ack.sessionId??null,this.lastAckSeq);}
-   catch(error){if(this.disposed||generation!==this.routeGeneration||this.descriptor!==descriptor)return;this.cooldown.set(endpoint.endpointId,this.now()+10000);appLogger.w("WatchRSS_IpSync",`IP candidate failed kind=${logIpRoute(endpoint.transportKind)} endpoint=<redacted>`);this.error(error);continue;}
+   catch(error){if(this.disposed||generation!==this.routeGeneration||this.descriptor!==descriptor)return;this.cooldown.set(endpoint.endpointId,this.now()+10000);appLogger.w("WatchRSS_IpSync",`IP candidate failed kind=${logIpRoute(endpoint.transportKind)} stage=${ipFailureStage(error)} endpoint=<redacted>`);this.error(error);continue;}
    finally{if(this.probe===probe)this.probe=undefined;}
    if(this.disposed||generation!==this.routeGeneration||this.transferring||this.descriptor!==descriptor||(previous&&previous.endpoint.priority>selected.endpoint.priority)){if(this.transferring)appLogger.i("WatchRSS_IpSync","IP route switch deferred after probe because sync started");await selected.connection.close();return;}
-   appLogger.i("WatchRSS_IpSync",`IP route ready reason=${bootstrap?"rfcomm_bootstrap":"refresh"} route=${logIpRoute(selected.endpoint.transportKind)} endpoint=<redacted> resume=${previous!=null}`);this.route=selected;if(previous)await previous.connection.close();this.routeChanged(selected);if(!this.active)this.scheduleStop(2500);
+   appLogger.i("WatchRSS_IpSync",`IP route ready reason=${bootstrap?"rfcomm_bootstrap":"refresh"} route=${logIpRoute(selected.endpoint.transportKind)} source=${selected.endpoint.endpointId.startsWith('mdns-')?'mdns':this.descriptorSource} endpoint=<redacted> resume=${previous!=null}`);this.route=selected;if(previous)await previous.connection.close();this.routeChanged(selected);if(!this.active)this.scheduleStop(2500);
    const job=this.serve(selected);this.serving=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.serving===job)this.serving=undefined;});return;
   }
+  if(!this.route&&this.recoveryAttempts>0)this.recover();
  }
  private recover(){
   if(this.disposed||!this.active)return;
-  const refresh=()=>{if(this.disposed||!this.active)return;if(this.refreshJob)this.refreshQueued=true;else this.refresh();};
-  // BLE acquisition already owns the native 350 ms debounce. Older hosts with
-  // only a cached bootstrap still need that delay to avoid immediate retry loops.
-  if(this.ports.acquireDescriptor){refresh();return;}
-  this.recoveryTimer?.cancel();const timer=this.ports.delay(350);this.recoveryTimer=timer;
-  void timer.result.then(()=>{if(this.recoveryTimer!==timer)return;this.recoveryTimer=undefined;refresh();},()=>{});
+  if(this.recoveryAttempts>=3){appLogger.w('WatchRSS_IpSync','IP reconnect exhausted attempts=3; waiting for network change or phone bootstrap');return;}
+  const pause=[500,1500,4000][this.recoveryAttempts++]!;
+  appLogger.i('WatchRSS_IpSync',`IP reconnect scheduled attempt=${this.recoveryAttempts} delayMs=${pause}`);
+  this.recoveryTimer?.cancel();const timer=this.ports.delay(pause);this.recoveryTimer=timer;
+  void timer.result.then(()=>{if(this.recoveryTimer!==timer)return;this.recoveryTimer=undefined;if(this.disposed||!this.active)return;if(this.refreshJob)this.refreshQueued=true;else this.refresh(false,true);},()=>{});
  }
  private async serve(route:OpenIpRoute){
   let completed=false;const diagnosticLog=new SyncEventLog("watchIpSync");
   try{while(!this.disposed&&this.route===route){
    // Each nonpersistent action completes a session but retains this WebSocket.
    // This owner always closes the underlying transport on cancellation/failure.
-   const connection={setTransferProgress:route.connection.setTransferProgress.bind(route.connection),readFrame:async(timeout:number)=>{const frame=await route.connection.readFrame(timeout);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;},writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
+   const connection={setFrameTiming:route.connection.setFrameTiming.bind(route.connection),setTransferProgress:route.connection.setTransferProgress.bind(route.connection),readFrame:async(timeout:number)=>{const frame=await route.connection.readFrame(timeout);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;},writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
    const session=new LibrarySyncSession(connection,this.ports.repository,{...this.options,diagnosticLog,initialRequestTimeoutMs:600000,responseAckTimeoutMs:600000});this.session=session;
-   const results=await session.run();if(this.session===session)this.session=undefined;this.transferring=false;this.releaseLater();if(!this.active)this.scheduleStop(30000);this.lastAckSeq++;
+   const results=await session.run();if(this.session===session)this.session=undefined;this.transferring=false;this.releaseLater();if(!this.active)this.scheduleStop(30000);this.lastAckSeq++;this.recoveryAttempts=0;
    if(results.some(r=>r.response.fatalSession===true))throw new Error('IP library exchange failed');
    if(results.at(-1)?.request.action==='syncSession'){appLogger.i("WatchRSS_IpSync","IP sync session closed phase=<redacted>");completed=true;break;}
    this.refresh();

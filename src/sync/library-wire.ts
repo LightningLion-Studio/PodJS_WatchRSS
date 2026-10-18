@@ -1,3 +1,4 @@
+import {androidJsonQuotedByteLength} from '@podjs/framework/json-string';
 import {ACTION_SYNC_LIBRARY,PROTOCOL_VERSION,MAX_FRAME_BYTES,encodeChunkData,type JsonObject} from './protocol.ts';
 import {wireFields,parseBodyRequests,type RequestedArticleBody} from './article-batches.ts';
 import {bodyForRequest,type PreparedArticle} from './article-export.ts';
@@ -23,20 +24,7 @@ export function parseSources(frame:JsonObject):SyncedSource[]{
 /** Exact byte count for javaJsonQuote, including slash escapes and Java's
  * ASCII '?' replacement for unmatched UTF-16 surrogates. Response bodies are
  * mostly Base64; avoid constructing a second 40-MB JSON string just to size it. */
-function quotedBytes(value:string):number {
- let bytes=2;
- for(let i=0;i<value.length;i++){
-  const code=value.charCodeAt(i);
-  if(code===34||code===92||code===47||code===8||code===12||code===10||code===13||code===9){bytes+=2;continue;}
-  if(code<32){bytes+=6;continue;}
-  if(code>=0xd800&&code<=0xdbff){
-   const low=value.charCodeAt(i+1);
-   if(low>=0xdc00&&low<=0xdfff){bytes+=4;i++;}else bytes++;
-  }else if(code>=0xdc00&&code<=0xdfff)bytes++;
-  else bytes+=code<0x80?1:code<0x800?2:3;
- }
- return bytes;
-}
+function quotedBytes(value:string):number {return androidJsonQuotedByteLength(value);}
 /** Android JSONObject representation for native size estimates. Undefined
  * object fields are omitted; null remains a literal JSON null. */
 function jsonBytes(value:unknown):number {

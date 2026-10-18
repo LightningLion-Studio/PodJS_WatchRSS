@@ -25,11 +25,15 @@ export class SqlLibrarySequenceStore {
    [this.peer(pending.remoteDeviceId),Math.max(0,pending.localSeqToInclusive),Math.max(0,pending.remoteSeqToInclusive),pending.fullSnapshot?now:0,pending.remoteProtocolVersion,now,pending.fullSnapshot?1:0]);
  }
  async reset():Promise<void>{await this.db.execute('DELETE FROM sync_peer_state');}
- async prepareWindow(peer:string,localDeviceId:string,full:readonly ArticleManifest[],exportSources:(urls?:readonly string[])=>Promise<readonly SyncedSource[]>,peerAppliedLocalSeq?:number):Promise<LibraryWindow>{
+ async prepareWindow(peer:string,localDeviceId:string,full:readonly ArticleManifest[],exportSources:(urls?:readonly string[])=>Promise<readonly SyncedSource[]>,peerAppliedLocalSeq?:number,options:{snapshotReconciled?:boolean}={}):Promise<LibraryWindow>{
   const state=(await this.db.query('SELECT * FROM sync_peer_state WHERE peer_device_id=?',[this.peer(peer)]))[0],now=exact(this.now());
+  // The production repository has already reconciled exact signatures under
+  // the revision guard. Standalone stores retain native timestamp repair.
+  if(!options.snapshotReconciled){
   const unique=new Map<string,ArticleManifest>();for(const a of full)if(!a.deleted&&!unique.has(a.articleId)&&Math.max(a.updatedAt,a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt,a.deletedAt)>0)unique.set(a.articleId,a);
   const repair=[...unique.values()].map(a=>{const changed=exact(Math.max(a.updatedAt,a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt,a.deletedAt));return {sql:`INSERT INTO sync_change_log(kind,entity_id,changed_at,origin_device_id,reason,created_at) SELECT 'article',?,?,?,'repairState',? WHERE ?>COALESCE((SELECT MAX(changed_at) FROM sync_change_log WHERE kind='article' AND entity_id=?),0)`,params:[a.articleId,changed,nativeTrim(a.sourceDeviceId)?a.sourceDeviceId:localDeviceId,now,changed,a.articleId]};});
   for(let i=0;i<repair.length;i+=512)await this.db.transaction(repair.slice(i,i+512));
+  }
   const max=(await this.cursor(peer)).localMaxSeq,cached=Number(state?.last_local_seq_acked??0),acked=peerAppliedLocalSeq===undefined?cached:Math.max(0,exact(peerAppliedLocalSeq));
   const reason=!state?'newPeer':Number(state.last_protocol_version)<13?'peerProtocol':peerAppliedLocalSeq!==undefined&&acked<cached?'peerCursorBehind':peerAppliedLocalSeq!==undefined&&acked>max?'peerCursorAhead':Number(state.last_full_sync_at)<=0?'noFullSnapshot':now-Number(state.last_full_sync_at)>=WEEK?'periodicFull':'';
   if(reason)return {articleManifest:full,fullArticleManifest:full,rssSources:await exportSources(),fullSnapshot:true,fromSeqExclusive:0,toSeqInclusive:max,peerAckedSeq:acked,fallbackReason:reason};

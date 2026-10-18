@@ -45,16 +45,18 @@ test('one exchange reuses its unchanged article snapshot and invalidates after a
  await f.repo.prepareWindow('phone',0);expect(metadataReads).toBeGreaterThan(initial);
  const afterEdit=metadataReads;const exported=await f.repo.exportRequested([{articleId:f.id,bodyHash:'',chunkIndexes:[],metadataOnly:false}]);
  expect(exported[0]?.article.title).toBe('New title');expect(metadataReads).toBe(afterEdit);
- await f.repo.cursor('phone');expect(metadataReads).toBeGreaterThan(afterEdit);
+ await f.repo.deviceId();await f.repo.cursor('phone');expect(metadataReads).toBe(afterEdit);
+ await f.db.execute("UPDATE articles SET title='Second edit' WHERE id=1");await f.repo.cursor('phone');expect(metadataReads).toBeGreaterThan(afterEdit);
  }finally{f.sql.close();}});
-test('empty body request skips the full library snapshot and releases the previous one',async()=>{const f=await setup();try{
+test('empty body request skips scanning and keeps revision-validated metadata for the next sync',async()=>{const f=await setup();try{
  await f.repo.cursor('phone');
  const query=f.db.query;let queries=0,metadataReads=0;
  f.db.query=async(q,p)=>{queries++;if(q.startsWith('SELECT a.id,a.channel_id')&&q.includes(' ORDER BY a.fetched_at'))metadataReads++;return query(q,p);};
  expect(await f.repo.exportRequested([])).toEqual([]);
  expect(queries).toBe(0);
  await f.repo.cursor('phone');
- expect(metadataReads).toBeGreaterThan(0);
+ expect(metadataReads).toBe(0);
+ await f.db.execute("UPDATE articles SET content='changed body' WHERE id=1");await f.repo.cursor('phone');expect(metadataReads).toBeGreaterThan(0);
  }finally{f.sql.close();}});
 test('adapter sends same-clock reading and source edits after the previous ACK',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess(ack(w.toSeqInclusive));expect((await f.repo.prepareWindow('phone',w.toSeqInclusive)).articleManifest).toEqual([]);
  await f.db.execute('UPDATE articles SET reading_progress=?,is_read=1 WHERE id=1',[Math.fround(.75)]);await f.db.execute("INSERT INTO channels(url,title,created_at,sort_order) VALUES('https://feed.example/rss','Feed',20,-20)");const delta=await f.repo.prepareWindow('phone',w.toSeqInclusive);expect(delta.fullSnapshot).toBe(false);expect(delta.articleManifest).toHaveLength(1);expect(delta.articleManifest[0]).toMatchObject({articleId:f.id,readingProgress:.75,isRead:true,updatedAt:100});expect(delta.rssSources.map(s=>s.url)).toEqual(['https://feed.example/rss']);expect(delta.toSeqInclusive).toBeGreaterThan(w.toSeqInclusive);
@@ -127,5 +129,34 @@ test('remote article deletion cleans only a committed removed item',async()=>{
   const deleted={article:{...item.article,deleted:true,deletedAt:500},body:{articleId:f.id,bodyHash:item.manifest.bodyHash,bodyByteCount:item.manifest.bodyByteCount,chunkSize:item.manifest.chunkSize,chunkHashes:item.manifest.chunkHashes,metadataOnly:true,chunks:[]}};
   await f.db.execute("CREATE TRIGGER fail_article_delete BEFORE DELETE ON articles BEGIN SELECT RAISE(ABORT,'disk failure'); END");await expect(f.repo.receiveArticle(deleted,'phone',false)).rejects.toThrow('disk failure');expect(f.cleaned).toEqual([]);
   await f.db.execute('DROP TRIGGER fail_article_delete');await f.repo.receiveArticle(deleted,'phone',false);expect(f.cleaned).toEqual([{itemIds:[1],channels:[]}]);expect(await f.db.query('SELECT id FROM articles')).toEqual([]);
+ }finally{f.sql.close();}
+});
+test('warm imported library rebuilds only the edited row and invalidates equal-length chunk edits',async()=>{
+ const f=await setup();try{
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(2,'https://watchrss.local/import-txt-novel/39393939393939393939393939393939','Book',1,1)");
+  for(let i=2;i<=4;i++)await f.db.execute('INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(?,2,?,?,?,?,?)',[i,'Chapter '+i,'inline '+i,'https://book.test/'+i,'chapter-'+i,100+i]);
+  await f.db.execute("INSERT INTO article_original_chunks(article_id,chunk_index,body) VALUES(3,0,'original A')");
+  let encodes=0;const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,codec:{...codec,encode:async a=>{encodes++;return codec.encode(a);}}});
+  await repo.cursor('phone');encodes=0;await repo.cursor('phone');expect(encodes).toBe(0);
+  await f.db.execute("UPDATE articles SET title='one edit',fetched_at=fetched_at+1 WHERE id=2");
+  await repo.cursor('phone');expect(encodes).toBe(1);
+  encodes=0;const before=await repo.prepareWindow('phone',0);
+  await f.db.execute("UPDATE article_original_chunks SET body='original B' WHERE article_id=3");
+  const after=await repo.prepareWindow('phone',0);expect(encodes).toBe(1);
+  const changed=after.fullArticleManifest.filter(a=>a.bodyHash!==before.fullArticleManifest.find(b=>b.articleId===a.articleId)?.bodyHash);
+  expect(changed).toHaveLength(1);
+ }finally{f.sql.close();}
+});
+
+test('warm windows reuse reconciled signatures without a full-library timestamp repair transaction',async()=>{
+ const f=await setup();try{
+  let repairs=0;const db={...f.db,transaction:async (statements:Parameters<SqlDatabase['transaction']>[0])=>{repairs+=statements.filter(s=>s.sql.includes("'repairState'")).length;return f.db.transaction(statements);}};
+  const repo=new SqlLibrarySessionRepository(db,f.ports);
+  const first=await repo.prepareWindow('phone',0);expect(first.toSeqInclusive).toBeGreaterThan(0);
+  await repo.markSuccess(ack(first.toSeqInclusive));
+  const unchanged=await repo.prepareWindow('phone',first.toSeqInclusive);expect(unchanged.articleManifest).toHaveLength(0);
+  await db.execute("UPDATE articles SET title='same clock changed' WHERE id=1");
+  const edited=await repo.prepareWindow('phone',first.toSeqInclusive);expect(edited.articleManifest).toHaveLength(1);expect(edited.toSeqInclusive).toBeGreaterThan(first.toSeqInclusive);
+  expect(repairs).toBe(0);
  }finally{f.sql.close();}
 });

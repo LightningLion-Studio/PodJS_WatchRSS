@@ -52,7 +52,18 @@ export const SCHEMA = [
   ...['articles','channels','article_body_chunks','article_original_chunks','article_previews','article_original_previews','article_original_meta','article_saved_states','article_saved_entry_times','sync_saved_states','sync_article_ids','sync_article_aliases','sync_local_identity','local_article_deletions','sync_source_states','sync_article_deletions','article_reading_state'].flatMap(table=>['INSERT','UPDATE','DELETE'].map(operation=>
     `CREATE TRIGGER IF NOT EXISTS sync_revision_${table}_${operation.toLowerCase()} AFTER ${operation} ON ${table} BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END`)),
 ];
-export const SCHEMA_VERSION=2;
+// Per-item chunk revisions make warm sync caches safe when chunk text changes
+// without touching the article row (including equal-length replacements).
+const syncChunkRevisions = [
+  `CREATE TABLE IF NOT EXISTS sync_body_revision (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,revision INTEGER NOT NULL)`,
+  ...['article_body_chunks','article_original_chunks'].flatMap(table=>['INSERT','UPDATE','DELETE'].map(operation=>
+    `CREATE TRIGGER IF NOT EXISTS sync_body_revision_${table}_${operation.toLowerCase()} AFTER ${operation} ON ${table} BEGIN
+      INSERT INTO sync_body_revision(item_id,revision) SELECT ${operation==='DELETE'?'OLD':'NEW'}.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=${operation==='DELETE'?'OLD':'NEW'}.article_id)
+      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;
+      ${operation==='UPDATE'?`INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE OLD.article_id!=NEW.article_id AND EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;`:''}
+    END`)),
+];
+export const SCHEMA_VERSION=3;
 
 function pragmaVersion(row:Record<string,unknown>|undefined):number{
   const value=row?.user_version??(row?Object.values(row)[0]:undefined),version=Number(value);
@@ -83,5 +94,6 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
     statements.push(...dedupKeyMigration(now));
     statements.push({sql:`PRAGMA user_version=${SCHEMA_VERSION}`});
   }
+  if(current<3)statements.push(...syncChunkRevisions.map(sql=>({sql})),{sql:`PRAGMA user_version=${SCHEMA_VERSION}`});
   await db.transaction(statements);
 }

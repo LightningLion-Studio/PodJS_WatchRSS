@@ -28,10 +28,15 @@ export async function stableArticleId(value:string,uri:SyncTextPort['parseUri'],
 type Row=Record<string,unknown>;
 const str=(v:unknown)=>v==null?'':String(v),nullable=(v:unknown)=>v==null?null:String(v),num=(v:unknown)=>Number(v??0);
 const ROW_SELECT=`SELECT a.id,a.channel_id,a.title,a.link,a.guid,a.pub_date,a.image_url,a.audio_url,a.video_url,a.is_read,a.is_saved,a.reading_progress,a.dedup_key,a.fetched_at,
+ CASE WHEN a.content IS NULL OR length(CAST(a.content AS BLOB))<=4096 THEN 1 ELSE 0 END AS content_inline,
+ CASE WHEN a.description IS NULL OR length(CAST(a.description AS BLOB))<=4096 THEN 1 ELSE 0 END AS description_inline,
+ CASE WHEN length(CAST(a.content AS BLOB))<=4096 THEN a.content END AS content,
+ CASE WHEN length(CAST(a.description AS BLOB))<=4096 THEN a.description END AS description,
  (SELECT article_id FROM sync_article_ids WHERE item_id=a.id) AS bound_id,(SELECT url FROM sync_article_ids WHERE item_id=a.id) AS bound_url,
  ch.url AS channel_url,ch.title AS channel_title,ch.is_pinned AS channel_pinned,ch.sort_order AS channel_sort,ch.created_at AS channel_created,p.summary,p.image_url AS preview_image,
  COALESCE(NULLIF(c.body_hash,''),n.body_hash,'') AS cached_body_hash,n.body_hash AS native_body_hash,c.body_hash AS encoded_body_hash,c.body_bytes,c.chunk_size,c.chunk_hashes,e.body_hash AS local_encoded_body_hash,
  r.progress,r.changed_at AS position_changed_at,r.position_bytes,r.position_hash,
+ COALESCE((SELECT revision FROM sync_body_revision WHERE item_id=a.id),0) AS chunk_revision,
  EXISTS(SELECT 1 FROM article_original_chunks o WHERE o.article_id=a.id) AS has_original_chunks
  FROM articles a JOIN channels ch ON ch.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id
  LEFT JOIN article_sync_content c ON c.item_id=a.id LEFT JOIN article_sync_encoding_cache e ON e.item_id=a.id AND e.body_hash=c.body_hash LEFT JOIN article_native_sync_hash n ON n.item_id=a.id LEFT JOIN article_reading_state r ON r.article_id=a.id`;
@@ -51,6 +56,8 @@ interface State {articleId:string;type:string;url:string;saved:boolean;changedAt
  * A changed snapshot fails instead of advertising mixed metadata generations. */
 export class LocalArticleManifestStore {
  private bodySourceIds=new Map<string,number>();
+ private rowCache=new Map<string,{stamp:string;prepared:PreparedArticle;bytes:number}>();
+ private rowCacheBytes=0;
  private readonly stableIds=new Map<string,string>();
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec,private readonly text:SyncTextPort,
   private readonly files:ArticleReceiveFiles,private readonly migrateReading:(id:number)=>Promise<void>,private readonly migrateReadingMany?:(ids:readonly number[])=>Promise<void>){ }
@@ -101,11 +108,12 @@ export class LocalArticleManifestStore {
   const queries=[ROWS,SAVES,STATES,DELETES,SYNC_DELETES],data:Row[][]=[];for(const q of queries)data.push(await querySyncPages(this.db,q,[],q===ROWS?100:400));
   const [metadata,saves,persisted,deletions,syncDeletions]=data as [Row[],Row[],Row[],Row[],Row[]],rows=metadata.map(r=>({...r}));
   const byItem=new Map(rows.map(r=>[num(r.id),r]));
+  const rowsBySource=new Map(rows.map(r=>[str(r.channel_url)+'\0'+str(r.dedup_key),r]));
   const sourceRows=new Map<string,Row|null>();
   const sourceRow=async(channel:string,id:string):Promise<Row|undefined>=>{
    const key=channel+'\0'+id,known=sourceRows.get(key);
    if(known!==undefined)return known??undefined;
-   const row=rows.find(r=>str(r.channel_url)===channel&&str(r.dedup_key)===id)??
+   const row=rowsBySource.get(key)??
     (await this.db.query(ROW_SELECT+` WHERE ch.url=? AND a.dedup_key=? LIMIT 1`,[channel,id]))[0]??null;
    sourceRows.set(key,row);if(row)byItem.set(num(row.id),row);
    return row??undefined;
@@ -133,10 +141,17 @@ export class LocalArticleManifestStore {
    // item tombstones keep native's separate saved-entry behavior.
    out.push(await this.prepareRow(row,id,device,{savedAt:num(representative.saved_at),favorite:f?.itemId!=null?f.saved:!!favorite,later:l?.itemId!=null?l.saved:!!later,favoriteChanged:f?.changedAt??num(favorite?.saved_at),favoriteOrder:f?.sortOrder??num(favorite?.saved_at),laterChanged:l?.changedAt??num(later?.saved_at),laterOrder:l?.sortOrder??num(later?.saved_at)},bodySource??row));this.bodySourceIds.set(id,num(bodySource?.id??row.id));preparedRowIds.set(id,num(row.id));active.add(id);
   }
+  const imports:{row:Row;id:string}[]=[];
   for(const independent of [true,false])for(const row of [...rows].sort((a,b)=>num(b.channel_pinned)-num(a.channel_pinned)||num(a.channel_sort)-num(b.channel_sort)||num(b.channel_created)-num(a.channel_created)||num(a.channel_id)-num(b.channel_id)||num(b.fetched_at)-num(a.fetched_at)||num(b.id)-num(a.id))){const channel=str(row.channel_url);if(independent?channel!=='watchrss://phone-imports':!isImportedContentUrl(channel))continue;const id=ids.get(num(row.id))!;if(active.has(id))continue;
-   // Clearing the last saved list keeps these channel rows active, so their
-   // cancellation cannot be exported by the separate tombstone branch.
-   out.push(await this.prepareRow(row,id,device,undefined,row,{favorite:states.get(id+'\0favorite'),later:states.get(id+'\0watchLater')}));this.bodySourceIds.set(id,num(row.id));preparedRowIds.set(id,num(row.id));usedRows.add(num(row.id));active.add(id);}
+   this.bodySourceIds.set(id,num(row.id));preparedRowIds.set(id,num(row.id));usedRows.add(num(row.id));active.add(id);imports.push({row,id});
+  }
+  // Only small inline bodies share a bounded host-service window. Large or
+  // external text remains serialized; preserve native article order exactly.
+  for(let start=0;start<imports.length;){let end=start+1;
+   const small=(r:Row)=>num(r.content_inline)===1&&num(r.description_inline)===1&&!num(r.has_original_chunks);
+   if(small(imports[start]!.row))while(end<imports.length&&end-start<4&&small(imports[end]!.row))end++;
+   out.push(...await Promise.all(imports.slice(start,end).map(({row,id})=>this.prepareRow(row,id,device,undefined,row,{favorite:states.get(id+'\0favorite'),later:states.get(id+'\0watchLater')}))));start=end;
+  }
   const tombstones=new Map<string,State[]>();for(const s of states.values()){if(s.saved||active.has(s.articleId))continue;const list=tombstones.get(s.articleId)??[];list.push(s);tombstones.set(s.articleId,list);}
   for(const [id,list] of tombstones){const url=list[0]!.url;if(blank(url))continue;let latest=list[0]!;for(const s of list)if(s.changedAt>latest.changedAt)latest=s;const deleted=list.find(s=>s.type==='delete');const normalized=nativeTrim(url),host=nativeTrim(((await this.text.parseUri(normalized.startsWith('http://')||normalized.startsWith('https://')?normalized:'https://'+normalized)).host??'').replace(/^www\./,''));
    const article:ExportedArticle={articleId:id,sourceDeviceId:latest.device||device,url,title:url,siteName:host,excerpt:'',contentHtml:null,contentText:'',imageUrl:null,contentHash:await hashJavaText(url,this.codec),importedAt:Math.min(...list.map(s=>s.changedAt)),updatedAt:latest.changedAt,independentSaved:false,independentChangedAt:deleted?.changedAt??0,independentSortOrder:0,rssSourceUrl:null,rssSourceTitle:null,favoriteSaved:false,favoriteChangedAt:list.find(s=>s.type==='favorite')?.changedAt??0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:list.find(s=>s.type==='watchLater')?.changedAt??0,watchLaterSortOrder:0,deleted:!!deleted,deletedAt:deleted?.changedAt??latest.changedAt,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false};out.push(await prepareArticle(article,this.codec));
@@ -154,14 +169,14 @@ export class LocalArticleManifestStore {
     // Imported chapter dedup keys need not equal the hashed sync ID. A native
     // body hash keeps contentHash stable when this derived cache is published.
     const itemId=this.bodySourceIds.get(a.articleId),candidate=itemId===undefined?undefined:byItem.get(itemId);
-    if(candidate&&str(candidate.native_body_hash))target=candidate;
+    if(candidate)target=candidate;
    }
    if(!target)target=await sourceRow(a.rssSourceUrl??'watchrss://phone-imports',a.articleId);
    if(target){const sameBodySource=this.bodySourceIds.get(a.articleId)===num(target.id);this.bodySourceIds.set(a.articleId,num(target.id));const cached=this.cachedBody(target);
     // prepareRow already hashed this exact cached source. Rehashing every
     // chapter here costs a second host SHA-256 round trip per manifest entry.
     if(cached){if(!(sameBodySource&&current.encodedBody===null&&current.manifest.bodyHash===cached.bodyHash))out[i]=await prepareCachedArticle({...a,contentHtml:null,contentText:''},this.codec,cached);}
-    else if(localImport&&str(target.native_body_hash)&&preparedRowIds.get(a.articleId)===num(target.id)&&current.encodedBody){cacheUpdates.push({row:target,prepared:current});}
+    else if(localImport&&preparedRowIds.get(a.articleId)===num(target.id)&&current.encodedBody){if(str(target.native_body_hash))cacheUpdates.push({row:target,prepared:current});}
     else{await this.hydrateRow(target);const actual=await this.bodyFromRow(target);out[i]=await prepareArticle({...a,contentHtml:actual.contentHtml,contentText:actual.contentText},this.codec,actual.available);if(actual.available)cacheUpdates.push({row:target,prepared:out[i]!});}}
    // Production toManifest derives this default from deletedAt even for a
    // nondeleted saved-state tombstone; preserve that observed wire behavior.
@@ -189,11 +204,21 @@ export class LocalArticleManifestStore {
   for(const update of cacheUpdates)await this.cacheMetadata(update.row,update.prepared,revision);
   return out;
  }
- async materializeRequested(prepared:PreparedArticle):Promise<PreparedArticle>{
+ async materializeRequested(prepared:PreparedArticle,prefetched?:Row):Promise<PreparedArticle>{
   if(prepared.encodedBody||!prepared.manifest.bodyAvailable)return prepared;
   const itemId=this.bodySourceIds.get(prepared.article.articleId);if(itemId===undefined)throw new Error('Cached sync body source is missing');
-  const row=(await this.db.query(ROW_SELECT+' WHERE a.id=?',[itemId]))[0];if(!row)throw new Error('Cached sync body source disappeared');
-  await this.hydrateRow(row);const body=await this.bodyFromRow(row);if(!body.available)throw new Error('Cached sync body file is unavailable');
+  const row=prefetched??(await this.db.query(ROW_SELECT+' WHERE a.id=?',[itemId]))[0];if(!row)throw new Error('Cached sync body source disappeared');
+  let body:{available:boolean;contentHtml:string|null;contentText:string};
+  if(this.cachedBody(row)?.bodyHash===prepared.manifest.bodyHash){
+   // This cache was produced by local encoding, and body edits invalidate it.
+   // Reuse its hydrated body rather than extracting/Jsoup-parsing every live
+   // article a second time. Re-encoding and all manifest/hash checks still run.
+   const html=num(row.cache_inline_html)===1?nullable(row.cache_html):await readSyncSqlText(this.db,'SELECT content_html AS value FROM article_sync_content WHERE item_id=?',[itemId]);
+   const text=typeof row.cache_text==='string'?row.cache_text:await readSyncSqlText(this.db,'SELECT content_text AS value FROM article_sync_content WHERE item_id=?',[itemId]);
+   if(text===null)throw new Error('Cached sync body source disappeared');
+   body={available:true,contentHtml:html===null?null:await this.files.hydrate(html),contentText:await this.files.hydrate(text)};
+  }else{await this.hydrateRow(row);body=await this.bodyFromRow(row);}
+  if(!body.available)throw new Error('Cached sync body file is unavailable');
   const actual=await prepareArticle({...prepared.article,contentHtml:body.contentHtml,contentText:body.contentText},this.codec,true);
   actual.manifest.deleted=prepared.manifest.deleted;
   if(JSON.stringify(actual.manifest)!==JSON.stringify(prepared.manifest)){
@@ -201,6 +226,25 @@ export class LocalArticleManifestStore {
    throw new Error('Cached sync body changed during export: '+changed.join(','));
   }
   return actual;
+ }
+ async materializeRequestedBatch(prepared:readonly PreparedArticle[]):Promise<PreparedArticle[]> {
+  if(prepared.length>32)throw new Error('Requested materialization batch too large');
+  const ids=[...new Set(prepared.filter(p=>!p.encodedBody&&p.manifest.bodyAvailable).map(p=>{
+   const id=this.bodySourceIds.get(p.article.articleId);if(id===undefined)throw new Error('Cached sync body source is missing');return id;
+  }))];
+  const select=ROW_SELECT.replace(' FROM articles a JOIN channels ch',`,c.content_bytes AS cached_content_bytes,
+   CASE WHEN c.content_html IS NULL OR length(CAST(c.content_html AS BLOB))<=8192 THEN 1 ELSE 0 END AS cache_inline_html,
+   CASE WHEN length(CAST(c.content_html AS BLOB))<=8192 THEN c.content_html END AS cache_html,
+   CASE WHEN length(CAST(c.content_text AS BLOB))<=8192 THEN c.content_text END AS cache_text FROM articles a JOIN channels ch`);
+  const rows=ids.length?await querySyncPages(this.db,select+` WHERE a.id IN (${ids.map(()=>'?').join(',')})`,ids,16):[];
+  const byId=new Map(rows.map(r=>[num(r.id),r]));const out:PreparedArticle[]=[];
+  for(let start=0;start<prepared.length;){
+   let end=start,bytes=0;
+   while(end<prepared.length&&end-start<4){const p=prepared[end]!,row=byId.get(this.bodySourceIds.get(p.article.articleId)!);const size=row?Math.max(1,num(row.cached_content_bytes)):512*1024;
+    if(end>start&&bytes+size>512*1024)break;bytes+=size;end++;
+   }
+   out.push(...await Promise.all(prepared.slice(start,end).map(p=>this.materializeRequested(p,byId.get(this.bodySourceIds.get(p.article.articleId)!)))));start=end;
+  }return out;
  }
  private cachedBody(row:Row):CachedBodyManifest|null{
   const bodyHash=str(row.encoded_body_hash),bodyByteCount=num(row.body_bytes),chunkSize=num(row.chunk_size);
@@ -213,8 +257,8 @@ export class LocalArticleManifestStore {
  }
  private async hydrateRow(r:Row):Promise<void>{
   if(r.body_hydrated)return;
-  r.content=await readSyncSqlText(this.db,'SELECT content AS value FROM articles WHERE id=?',[r.id]);
-  r.description=await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);
+  r.content=num(r.content_inline)===1?nullable(r.content):await readSyncSqlText(this.db,'SELECT content AS value FROM articles WHERE id=?',[r.id]);
+  r.description=num(r.description_inline)===1?nullable(r.description):await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);
   const chunks=async(table:'article_body_chunks'|'article_original_chunks')=>{
    const indexes=await querySyncPages(this.db,`SELECT chunk_index FROM ${table} WHERE article_id=? ORDER BY chunk_index`,[r.id]);
    if(!indexes.length)return null;const parts:string[]=[];
@@ -248,8 +292,22 @@ export class LocalArticleManifestStore {
  }
 
  private async prepareRow(r:Row,id:string,device:string,saved?:{savedAt:number;favorite:boolean;later:boolean;favoriteChanged:number;favoriteOrder:number;laterChanged:number;laterOrder:number},bodySource:Row=r,clocks?:{favorite?:State;later?:State}):Promise<PreparedArticle>{
+  // Row fields cover metadata/inline text, and chunk_revision covers external
+  // chunk mutations. Reuse body work across a one-article edit or source merge.
+  const key=id+'\0'+str(r.id),stamp=await hashJavaText(JSON.stringify([r,id,device,saved,bodySource===r?null:bodySource,clocks]),this.codec);
+  const previous=this.rowCache.get(key);if(previous?.stamp===stamp)return previous.prepared;
+  const prepared=await this.buildRow(r,id,device,saved,bodySource,clocks);
+  const bytes=128+(prepared.encodedBody?.length??0)+2*(prepared.article.contentText.length+(prepared.article.contentHtml?.length??0));
+  if(previous){this.rowCacheBytes-=previous.bytes;this.rowCache.delete(key);}
+  if(bytes<=32*1024*1024){
+   while(this.rowCacheBytes+bytes>32*1024*1024||this.rowCache.size>=8192){const oldest=this.rowCache.keys().next().value!;this.rowCacheBytes-=this.rowCache.get(oldest)!.bytes;this.rowCache.delete(oldest);}
+   this.rowCache.set(key,{stamp,prepared,bytes});this.rowCacheBytes+=bytes;
+  }
+  return prepared;
+ }
+ private async buildRow(r:Row,id:string,device:string,saved?:{savedAt:number;favorite:boolean;later:boolean;favoriteChanged:number;favoriteOrder:number;laterChanged:number;laterOrder:number},bodySource:Row=r,clocks?:{favorite?:State;later?:State}):Promise<PreparedArticle>{
   const cached=blank(str(r.cached_body_hash))?null:this.cachedBody(bodySource);
-  if(cached){if(r.summary==null)r.description=await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);}
+  if(cached){if(r.summary==null)r.description=num(r.description_inline)===1?nullable(r.description):await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);}
   else await this.hydrateRow(r);
   const {available,contentHtml,contentText}=cached?{available:true,contentHtml:null,contentText:''}:await this.bodyFromRow(r);
   const channel=str(r.channel_url),independent=channel==='watchrss://phone-imports',source=saved?(/^https?:\/\//i.test(nativeTrim(channel))?channel:null):independent?null:channel;
