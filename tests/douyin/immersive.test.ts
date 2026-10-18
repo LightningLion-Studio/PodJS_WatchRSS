@@ -74,7 +74,7 @@ test("persistent cache tolerates corruption, deduplicates, bounds windows and pr
   const store=new Store(),feed=new DouyinFeedStore(store);store.values.set(FEED_KEY,"{");store.values.set(RECENT_KEY,JSON.stringify({items:[null,{},item("1"),item("1"),{...item("2"),playUrl:""}],anchorAwemeId:"missing"}));
   expect(await feed.bootstrap()).toMatchObject({items:[item("1")],anchorAwemeId:null});
   const f=fixture(),client=f.make(),items=Array.from({length:90},(_,i)=>item(String(i)));
-  await client.saveRecentWindow(items,"80","cursor",true);const snapshot=await f.make().restoreFeed();expect(snapshot.items.length).toBeLessThanOrEqual(40);expect(JSON.parse(f.store.values.get(RECENT_KEY)!).items).toHaveLength(4);expect(snapshot.anchorAwemeId).toBe("80");
+  await client.saveRecentWindow(items,"80","cursor",true);const snapshot=await f.make().restoreFeed();expect(snapshot.items.length).toBeLessThanOrEqual(40);expect((await new DouyinFeedStore(f.store).read(RECENT_KEY)).items).toHaveLength(4);expect(snapshot.anchorAwemeId).toBe("80");
   const queue=new DouyinPlaybackQueue(client,{items,selectedAwemeId:"80"});expect(queue.snapshot().playlist).toHaveLength(40);expect(queue.snapshot().item?.awemeId).toBe("80");
 });
 

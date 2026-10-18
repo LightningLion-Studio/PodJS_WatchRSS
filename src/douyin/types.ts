@@ -5,7 +5,7 @@ export interface DouyinHistoryStorage extends DouyinSecureStorage {}
 export interface DouyinSavedStorage extends DouyinSecureStorage {}
 export interface DouyinSigner { sign(params: Readonly<Record<string, string>>): Promise<string> | string; }
 export interface DouyinClientOptions {
-  onLogout?:()=>Promise<void>; transport: HttpTransport; secureStorage: DouyinSecureStorage; signer?: DouyinSigner; historyStorage?: DouyinHistoryStorage; savedStorage?: DouyinSavedStorage; savedStore?: Pick<import("./saved.ts").DouyinSavedStore,"list"|"state"|"set"|"toggle">; now?: () => number; }
+  onLogout?:()=>Promise<void>; transport: HttpTransport; secureStorage: DouyinSecureStorage; signer?: DouyinSigner; historyStorage?: import("./state-storage.ts").DouyinStateStorage; savedStorage?: DouyinSavedStorage; savedStore?: Pick<import("./saved.ts").DouyinSavedStore,"list"|"state"|"set"|"toggle">; now?: () => number; }
 export type DouyinCodec = "h264" | "h265" | "unknown";
 export interface DouyinVideoVariant { playUrl: string; codec: DouyinCodec; bitrate: number; width: number; height: number; definition?: string; quality?: string; gearName?: string; }
 export interface DouyinItem { awemeId: string; description: string; createdAtSeconds: number; authorId: string; authorName: string; authorAvatar?: string; likeCount: number; commentCount: number; shareCount: number; collectCount: number; playUrl: string; coverUrl?: string; durationMs: number; variants: DouyinVideoVariant[]; }
