@@ -1,3 +1,4 @@
+import {traceDouyinVariants} from './playback-diagnostics.ts';
 import {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
 import {discovery,onNetworkChange} from '@podjs/framework/services';
 import {managedCache} from '../cache/host.ts';
@@ -56,7 +57,7 @@ export function createHostDouyinPreload(client:DouyinClient) {
  return {
   // A proxy is not a complete local file; queue resolution must continue enforcing URL TTL.
   lookup:async(_id:string):Promise<string|undefined>=>undefined,
-  async playback(item:DouyinItem,headers:Record<string,string>){await cleanupOldFiles();const resolved=await client.resolvePlayback(item.awemeId);if(!resolved.ok){appLogger.i('DouyinProxy',`foreground resolve failed category=${resolved.code}`);throw new Error(resolved.message);}try{return await register(resolved.data,headers)??resolved.data.playUrl;}catch{appLogger.w('DouyinProxy','registration failed; using network');return resolved.data.playUrl;}},
+  async playback(item:DouyinItem,headers:Record<string,string>){await cleanupOldFiles();const resolved=await client.resolvePlayback(item.awemeId);if(!resolved.ok){appLogger.i('DouyinProxy',`foreground resolve failed category=${resolved.code}`);throw new Error(resolved.message);}traceDouyinVariants(resolved.data,'foreground',resolved.source==='feed-cache'?'feed-cache':'network');try{return await register(resolved.data,headers)??resolved.data.playUrl;}catch{appLogger.w('DouyinProxy','registration failed; using network');return resolved.data.playUrl;}},
   async invalidate(_id:string){await mediaPrefixCache.clear().result;},stop,stats,
   allowBluetooth(value:boolean,expected:unknown){if(bluetoothOwners.has(expected)===value)return;if(value)bluetoothOwners.add(expected);else bluetoothOwners.delete(expected);if(expected===owner)networkChanged();},
   start(next:unknown,items:readonly DouyinItem[],anchor:string|undefined,mode:'active'|'entry'){

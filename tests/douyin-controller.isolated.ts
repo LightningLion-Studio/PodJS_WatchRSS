@@ -4,6 +4,8 @@ import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
 let client:DouyinClient;
+let paintRelease:(value:{committed:boolean})=>void;
+mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
 mock.module('../src/media-services.ts',()=>({douyinPreload:{playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},start(){},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined}}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
@@ -126,4 +128,12 @@ test('failed proxy registration after successful selection rolls the anchor back
  await expect(f.controller.changeDouyinVideo(entry,'next')).rejects.toThrow('HTTP 403');
  expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(f.source()).toBe(source);expect((await client.restorePlaybackQueue()).anchorAwemeId).toBe('a');
  proxyOverride=async()=> 'podjs-media-cache://play/b.mp4';await f.controller.changeDouyinVideo(entry,'next');expect(f.source().awemeId).toBe('b');expect(entry.queue!.snapshot().item?.awemeId).toBe('b');expect(f.error()).toBe('');
+});
+
+
+test('ready persists only after the paint barrier, and a departed route cannot write late history',async()=>{
+ const f=fixture(),a=item('a');f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let writes=0;entry.queue!.settled=async()=>{writes++;};
+ f.controller.douyinReady(entry);await Promise.resolve();expect(writes).toBe(0);paintRelease({committed:true});for(let i=0;i<20;i++)await Promise.resolve();expect(writes).toBe(1);
+ f.controller.douyinReady(entry);await f.controller.douyinNavigate({name:'history'});paintRelease({committed:true});for(let i=0;i<20;i++)await Promise.resolve();expect(writes).toBe(1);
 });

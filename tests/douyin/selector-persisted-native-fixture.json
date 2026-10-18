@@ -1,0 +1,6364 @@
+{
+  "nativeSources": [
+    {
+      "path": "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackSelector.kt",
+      "sha256": "7b5f6b83358b9d8dd815940db8b81912f757752f7c614507329ae9a205a8e2ac"
+    },
+    {
+      "path": "app/src/main/java/com/lightningstudio/watchrss/data/douyin/DouyinCodecRuntimePolicy.kt",
+      "sha256": "e2dca3c919624f5cff9fc098b03c6fcbbd5de35c07eb40752c2222005ea9d46e"
+    },
+    {
+      "path": "app/src/test/java/com/lightningstudio/watchrss/data/douyin/DouyinPlaybackSelectorTest.kt",
+      "sha256": "2614f68414a488c6695eb8117ea43a1dd9ff19bf6677945e41a76e94594bd633"
+    },
+    {
+      "path": "app/src/test/java/com/lightningstudio/watchrss/data/douyin/DouyinCodecRuntimePolicyTest.kt",
+      "sha256": "2463acfcb88a48de2cf1a8014222d889c5601a77b8467c7b3e34141ba1722164"
+    },
+    {
+      "path": "sdk/douyin/src/main/java/com/lightningstudio/watchrss/sdk/douyin/DouyinModels.kt",
+      "sha256": "f1537b83546ed1e602a97e10410ea648542697a9ed85a50bc4c4cea0700d1085"
+    }
+  ],
+  "cases": [
+    {
+      "name": "persisted-feed_0",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1123690,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 1117127,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 1070170,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "unknown",
+          "bitrate": 1061923,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 906853,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 879927,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 801978,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 746750,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 728245,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "h265",
+          "bitrate": 706159,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 673025,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 652638,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 618431,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 596788,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 564911,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "unknown",
+          "bitrate": 500952,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "unknown",
+          "bitrate": 445717,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 352472,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 338514,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 298952,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 285747,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 250915,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 244101,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-23",
+          "codec": "h265",
+          "bitrate": 197707,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-24",
+          "codec": "h265",
+          "bitrate": 190145,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 4,
+      "outlet": "persisted-feed",
+      "expected": "candidate-4"
+    },
+    {
+      "name": "persisted-feed_1",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 2956556,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 2165985,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 1887295,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 1649683,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 1189974,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 1007336,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 981732,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 904474,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 809880,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 797655,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "h265",
+          "bitrate": 776793,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 714389,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 678259,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 660452,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "unknown",
+          "bitrate": 535511,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 494859,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "unknown",
+          "bitrate": 461717,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 2811453,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 2020852,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 1742151,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 1504530,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 1044805,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "unknown",
+          "bitrate": 926704,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-23",
+          "codec": "h265",
+          "bitrate": 900713,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-24",
+          "codec": "h265",
+          "bitrate": 759288,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-25",
+          "codec": "h265",
+          "bitrate": 670161,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-26",
+          "codec": "unknown",
+          "bitrate": 659377,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-27",
+          "codec": "unknown",
+          "bitrate": 605434,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-28",
+          "codec": "h265",
+          "bitrate": 571624,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-29",
+          "codec": "unknown",
+          "bitrate": 406682,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-30",
+          "codec": "h265",
+          "bitrate": 388217,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-feed",
+      "expected": "candidate-8"
+    },
+    {
+      "name": "persisted-feed_2",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 805376,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 781556,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 755752,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "unknown",
+          "bitrate": 731563,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 558385,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 491323,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 441323,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 431028,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 381027,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "h265",
+          "bitrate": 358486,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 317232,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 312916,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 308860,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "h265",
+          "bitrate": 266725,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "unknown",
+          "bitrate": 262910,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 217099,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 203409,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 154501,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-feed",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-feed_3",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 508740,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 453623,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 434135,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 432718,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 400251,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 396902,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 376700,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 352179,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 351198,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 345135,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "h265",
+          "bitrate": 341915,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 330828,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 297063,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 287268,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 274809,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 257353,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "unknown",
+          "bitrate": 239352,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "unknown",
+          "bitrate": 232152,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 207641,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 201334,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 152454,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-feed",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-feed_4",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 792508,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 777020,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 737413,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 722249,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 680646,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 594827,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 523931,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 468808,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 467606,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 453984,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 412482,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 391860,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 344172,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "h265",
+          "bitrate": 337084,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 308994,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "unknown",
+          "bitrate": 289035,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 254216,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 224968,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 219444,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 213919,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 170189,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 165421,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 160025,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 4,
+      "outlet": "persisted-feed",
+      "expected": "candidate-4"
+    },
+    {
+      "name": "persisted-feed_5",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 3263530,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 3212811,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 1911046,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "unknown",
+          "bitrate": 1854526,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 1800586,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 1749852,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 1454060,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 1408641,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h265",
+          "bitrate": 1360250,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "h265",
+          "bitrate": 1309032,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 1301611,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 1245073,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 1172291,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 1115750,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "unknown",
+          "bitrate": 933356,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 913760,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 862542,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "unknown",
+          "bitrate": 759935,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 705732,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "unknown",
+          "bitrate": 703381,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 654513,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 507144,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 455926,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-feed",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-feed_6",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 1600783,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 1544835,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 1204401,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "unknown",
+          "bitrate": 1120493,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 1114534,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 1093497,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 1057111,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 1037533,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 1016964,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 961017,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 730495,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 686860,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 630884,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "h265",
+          "bitrate": 607515,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 550092,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 496245,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 438821,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 389924,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 332500,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 311954,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 273333,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 254552,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 216794,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 3,
+      "outlet": "persisted-feed",
+      "expected": "candidate-3"
+    },
+    {
+      "name": "persisted-feed_7",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 1117476,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 1063959,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 1030131,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 981701,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 864447,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 856683,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 813213,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 789948,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 736448,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 717092,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 663597,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 629317,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 605690,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "h265",
+          "bitrate": 580878,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 554451,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "unknown",
+          "bitrate": 548852,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 519883,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "unknown",
+          "bitrate": 490217,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 468642,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "unknown",
+          "bitrate": 436696,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 316341,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 265095,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 9,
+      "outlet": "persisted-feed",
+      "expected": "candidate-9"
+    },
+    {
+      "name": "persisted-feed_8",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 2324928,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 1563804,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 1402174,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 1138853,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 863808,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 690932,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 641146,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 595303,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h265",
+          "bitrate": 531963,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 491255,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 476741,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 472407,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 431030,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 389678,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 349818,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "unknown",
+          "bitrate": 314794,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "unknown",
+          "bitrate": 293559,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 2182260,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 1421106,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 1259497,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 996151,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 721104,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 586770,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-23",
+          "codec": "unknown",
+          "bitrate": 539681,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-24",
+          "codec": "h265",
+          "bitrate": 498440,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-25",
+          "codec": "h265",
+          "bitrate": 427824,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-26",
+          "codec": "unknown",
+          "bitrate": 375401,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-27",
+          "codec": "h265",
+          "bitrate": 368268,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-28",
+          "codec": "unknown",
+          "bitrate": 334058,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-29",
+          "codec": "h265",
+          "bitrate": 245653,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-30",
+          "codec": "unknown",
+          "bitrate": 237921,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 10,
+      "outlet": "persisted-feed",
+      "expected": "candidate-10"
+    },
+    {
+      "name": "persisted-feed_9",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 2148279,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 2094577,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 1590048,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "unknown",
+          "bitrate": 1544442,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 1540600,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 1460903,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 1407103,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 1364743,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 1310951,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 901159,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 899736,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 897648,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 848184,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 847345,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 618459,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 568989,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 479649,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 470056,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 430175,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 421159,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-feed",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-feed_10",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 3962169,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 2644582,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 2468648,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 1985153,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 1420849,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 1175831,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 1151761,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 1041360,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 921960,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "h265",
+          "bitrate": 856965,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 834211,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 762437,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 743308,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 521710,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 521175,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 3816929,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 2499324,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 2323390,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 1839895,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 1275590,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "unknown",
+          "bitrate": 1118963,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 1045185,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 896100,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-23",
+          "codec": "unknown",
+          "bitrate": 777326,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-24",
+          "codec": "h265",
+          "bitrate": 750388,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-25",
+          "codec": "unknown",
+          "bitrate": 705560,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-26",
+          "codec": "h265",
+          "bitrate": 636732,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-27",
+          "codec": "unknown",
+          "bitrate": 464826,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-28",
+          "codec": "h265",
+          "bitrate": 414598,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 11,
+      "outlet": "persisted-feed",
+      "expected": "candidate-11"
+    },
+    {
+      "name": "persisted-feed_11",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 637117,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 581997,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 479666,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 471479,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 452084,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 417988,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 402434,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 396969,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 392996,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 347319,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 302398,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 258787,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 247278,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "h265",
+          "bitrate": 215394,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 174134,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 161903,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 155436,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 120643,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 102605,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-feed",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-feed_12",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 641629,
+          "width": 2340,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 634000,
+          "width": 2340,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 586880,
+          "width": 2340,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 582153,
+          "width": 2340,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 533900,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 525205,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 510254,
+          "width": 3120,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 470151,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h265",
+          "bitrate": 459336,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "h265",
+          "bitrate": 459244,
+          "width": 3120,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 429626,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 415399,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "h265",
+          "bitrate": 407489,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 374878,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "unknown",
+          "bitrate": 349429,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 349286,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "unknown",
+          "bitrate": 320412,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 297439,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 269280,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "unknown",
+          "bitrate": 265655,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 224416,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-21",
+          "codec": "h265",
+          "bitrate": 217428,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-22",
+          "codec": "h265",
+          "bitrate": 199434,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-23",
+          "codec": "h265",
+          "bitrate": 173307,
+          "width": 1248,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-24",
+          "codec": "h265",
+          "bitrate": 147586,
+          "width": 1560,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 5,
+      "outlet": "persisted-feed",
+      "expected": "candidate-5"
+    },
+    {
+      "name": "persisted-feed_13",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 1929431,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 1869896,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 1395982,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 1369395,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 1329456,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 1313862,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 1300531,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 1241004,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 1213120,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 1153630,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "unknown",
+          "bitrate": 877382,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "unknown",
+          "bitrate": 817876,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 758351,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "h265",
+          "bitrate": 696774,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 641241,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 471865,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 416331,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 400642,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 345108,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 4,
+      "outlet": "persisted-feed",
+      "expected": "candidate-4"
+    },
+    {
+      "name": "persisted-feed_14",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 543769,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 490987,
+          "width": 3840,
+          "height": 2160,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "unknown",
+          "bitrate": 452019,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "unknown",
+          "bitrate": 403808,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 394776,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 375880,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 342107,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 338947,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h265",
+          "bitrate": 323076,
+          "width": 2560,
+          "height": 1440,
+          "definition": "1440p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 308608,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "h265",
+          "bitrate": 297136,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 288790,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 281689,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 251355,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "h265",
+          "bitrate": 243811,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "unknown",
+          "bitrate": 242116,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 230966,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "unknown",
+          "bitrate": 184843,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 177640,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-19",
+          "codec": "h265",
+          "bitrate": 168841,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-20",
+          "codec": "h265",
+          "bitrate": 115520,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 9,
+      "outlet": "persisted-feed",
+      "expected": "candidate-9"
+    },
+    {
+      "name": "persisted-feed_15",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "unknown",
+          "bitrate": 2607325,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "unknown",
+          "bitrate": 2548769,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 2280169,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 2225673,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "unknown",
+          "bitrate": 1955249,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "unknown",
+          "bitrate": 1881980,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "unknown",
+          "bitrate": 1848471,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "unknown",
+          "bitrate": 1789799,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "unknown",
+          "bitrate": 1692335,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-9",
+          "codec": "unknown",
+          "bitrate": 1633647,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-10",
+          "codec": "h265",
+          "bitrate": 1360830,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-11",
+          "codec": "h265",
+          "bitrate": 1306218,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-12",
+          "codec": "unknown",
+          "bitrate": 1219434,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-13",
+          "codec": "unknown",
+          "bitrate": 1099614,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-14",
+          "codec": "unknown",
+          "bitrate": 1040844,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-15",
+          "codec": "h265",
+          "bitrate": 1021701,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-16",
+          "codec": "h265",
+          "bitrate": 967046,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-17",
+          "codec": "h265",
+          "bitrate": 691417,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-18",
+          "codec": "h265",
+          "bitrate": 636720,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 5,
+      "outlet": "persisted-feed",
+      "expected": "candidate-5"
+    },
+    {
+      "name": "persisted-history_0",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 723113,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 325538,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 242592,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 217843,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 169248,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 163148,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-history_1",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 601506,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 437979,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 354523,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 338963,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 295086,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 227977,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-history_2",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 583115,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 311870,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 266342,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 197391,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 195808,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 169370,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 152286,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 144385,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-history",
+      "expected": "candidate-8"
+    },
+    {
+      "name": "persisted-history_3",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 564657,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 429094,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 342626,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 319687,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 280124,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 235351,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 213647,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-history",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-history_4",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 547175,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 277401,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 240956,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 218496,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 209275,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 196178,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 132877,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-history",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-history_5",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 722011,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 494709,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 415058,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 350825,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 334972,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 292886,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 273186,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 185675,
+          "width": 960,
+          "height": 540,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-history",
+      "expected": "candidate-8"
+    },
+    {
+      "name": "persisted-history_6",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1016056,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 744732,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 666288,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 577032,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 468325,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 385031,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-history_7",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1012313,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 717072,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 603972,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 560676,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 463341,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 391179,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 323471,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-history",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-history_8",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 906645,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 586304,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 514260,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 415423,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 339648,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 308457,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-history_9",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1294576,
+          "width": 1080,
+          "height": 1920,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 925486,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 772376,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 613731,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 371306,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 358819,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1080,
+          "height": 1920,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-history_10",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 489532,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 370586,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 297068,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 285494,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 218381,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 214460,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-history_11",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1004948,
+          "width": 1080,
+          "height": 1920,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 723753,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 623207,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 585480,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 374476,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 367946,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1080,
+          "height": 1920,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-history",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_0",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1004948,
+          "width": 1080,
+          "height": 1920,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 723753,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 623207,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 585480,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 374476,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 367946,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1080,
+          "height": 1920,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_1",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 489532,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 370586,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 297068,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 285494,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 218381,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 214460,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_2",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1294576,
+          "width": 1080,
+          "height": 1920,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 925486,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 772376,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 613731,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 371306,
+          "width": 720,
+          "height": 1280,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 358819,
+          "width": 576,
+          "height": 1024,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1080,
+          "height": 1920,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_3",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 906645,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 586304,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 514260,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 415423,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 339648,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 308457,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_4",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1012313,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 717072,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 603972,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 560676,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 463341,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 391179,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 323471,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-queue",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-queue_5",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1016056,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 744732,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 666288,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 577032,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 468325,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 385031,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_6",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 722011,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 494709,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 415058,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 350825,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 334972,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 292886,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 273186,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 185675,
+          "width": 960,
+          "height": 540,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-queue",
+      "expected": "candidate-8"
+    },
+    {
+      "name": "persisted-queue_7",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 547175,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 277401,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 240956,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 218496,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 209275,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 196178,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 132877,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-queue",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-queue_8",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 564657,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 429094,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 342626,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 319687,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 280124,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 235351,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 213647,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 7,
+      "outlet": "persisted-queue",
+      "expected": "candidate-7"
+    },
+    {
+      "name": "persisted-queue_9",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 583115,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 311870,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 266342,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 197391,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 195808,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 169370,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 152286,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 144385,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-queue",
+      "expected": "candidate-8"
+    },
+    {
+      "name": "persisted-queue_10",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 723113,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 325538,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 242592,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 217843,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 169248,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 163148,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_11",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 601506,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 437979,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 354523,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 338963,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 295086,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 227977,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_12",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1083447,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 672230,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 585652,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 563336,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 443852,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 361554,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-queue",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-queue_13",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1940512,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 1315562,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 920573,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 907466,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 804879,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 732314,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 651187,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 464018,
+          "width": 960,
+          "height": 540,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-queue",
+      "expected": "candidate-8"
+    },
+    {
+      "name": "persisted-recent_0",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 723113,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 325538,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 242592,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 217843,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 169248,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 163148,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-recent",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-recent_1",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 601506,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 437979,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 354523,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 338963,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 295086,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 227977,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-recent",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-recent_2",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1083447,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 672230,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 585652,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 563336,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 443852,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 361554,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 6,
+      "outlet": "persisted-recent",
+      "expected": "candidate-6"
+    },
+    {
+      "name": "persisted-recent_3",
+      "variants": [
+        {
+          "playUrl": "candidate-0",
+          "codec": "h265",
+          "bitrate": 1940512,
+          "width": 1920,
+          "height": 1080,
+          "definition": "1080p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-1",
+          "codec": "h265",
+          "bitrate": 1315562,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-2",
+          "codec": "h265",
+          "bitrate": 920573,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-3",
+          "codec": "h265",
+          "bitrate": 907466,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-4",
+          "codec": "h265",
+          "bitrate": 804879,
+          "width": 1024,
+          "height": 576,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-5",
+          "codec": "h265",
+          "bitrate": 732314,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-6",
+          "codec": "h265",
+          "bitrate": 651187,
+          "width": 1280,
+          "height": 720,
+          "definition": "720p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-7",
+          "codec": "h265",
+          "bitrate": 464018,
+          "width": 960,
+          "height": 540,
+          "definition": "540p",
+          "quality": "",
+          "gearName": ""
+        },
+        {
+          "playUrl": "candidate-8",
+          "codec": "h264",
+          "bitrate": 0,
+          "width": 1920,
+          "height": 1080,
+          "definition": "",
+          "quality": "",
+          "gearName": ""
+        }
+      ],
+      "observedSelectedIndex": 8,
+      "outlet": "persisted-recent",
+      "expected": "candidate-8"
+    }
+  ]
+}

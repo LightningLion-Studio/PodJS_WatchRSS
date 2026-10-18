@@ -1,3 +1,4 @@
+import {afterPaint} from '@podjs/framework/render';
 import {appLogger} from '../../logs/app-logger.ts';
 import {applyPreferredDouyinPlayback} from '../../douyin/playback-selector.ts';
 import {onFrame} from '@pocketjs/framework/lifecycle';
@@ -570,11 +571,17 @@ export function createMediaRouteController(
     }
   };
 
+  const paintCheckpoints=new WeakMap<RouteEntry,number>();
   const douyinReady = (entry: RouteEntry) => {
     if (dependencies.current() !== entry || !entry.queue) return;
-    void entry.queue
-      .settled()
-      .catch((error) => dependencies.setError(String(error)));
+    const queue=entry.queue,id=queue.snapshot().item?.awemeId,revision=(paintCheckpoints.get(entry)??0)+1;
+    paintCheckpoints.set(entry,revision);
+    // The first frame must get a window commit before history JSON/KV work can occupy this completion turn.
+    void afterPaint().result.then(async result=>{
+      if(dependencies.current()!==entry||entry.queue!==queue||queue.snapshot().item?.awemeId!==id||paintCheckpoints.get(entry)!==revision)return;
+      appLogger.i('DouyinTiming',`persistenceBegin committed=${result.committed}`);
+      await queue.settled();
+    }).catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
     const state=entry.queue.snapshot();
     if(entry.playback?.immersive)douyinPreload.start(entry,state.playlist,state.item?.awemeId,'active');
   };
