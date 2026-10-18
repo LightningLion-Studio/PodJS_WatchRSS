@@ -5,16 +5,19 @@ import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,me
 import type {ApplicationSyncEvent} from '../src/sync/application-foreground.ts';
 import type {ScrollEntry} from '../src/ui/ScrollEntries.tsx';
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
-plugin({name:'phone-pages-solid',setup(builder){builder.onLoad({filter:/\/(BluetoothConnectionScreen|PhoneConnectionUnavailableScreen|round-rows)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+plugin({name:'phone-pages-solid',setup(builder){builder.onLoad({filter:/\/(BluetoothConnectionScreen|PhoneConnectionScreen|PhoneConnectionUnavailableScreen|round-rows)\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+let nearby=true,discoveryRequests=0,discoveryPermission="granted";
 type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>{const rendered=Object.create(props);Object.defineProperty(rendered,'children',{value:props.children,enumerable:true});return {kind,props:rendered};};
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(props:Node['props'])=>element('View',props),Text:(props:Node['props'])=>element('Text',props)}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string,slot:number)=>Array.from(text).length*(slot===23?21:slot===1?14:12)})}));
-mock.module('@podjs/framework/watch',()=>({hasCapability:()=>false,getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'rect',safeInsets:{top:0,right:0,bottom:0,left:0}})}));
-mock.module('@podjs/framework/services',()=>({discovery:{requestPermission:async()=> 'granted',status:async()=>({available:true,enabled:true,permission:'granted'})},rfcomm:{status:async()=>({available:true,enabled:true,permission:'granted'}),requestPermission:()=>({result:Promise.resolve('granted')})}}));
+mock.module('@podjs/framework/watch',()=>({hasCapability:()=>nearby,getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'rect',safeInsets:{top:0,right:0,bottom:0,left:0}})}));
+mock.module('@podjs/framework/services',()=>({discovery:{requestPermission:async()=>{discoveryRequests++;return discoveryPermission;},status:async()=>({available:true,enabled:true,permission:discoveryPermission})},rfcomm:{status:async()=>({available:true,enabled:true,permission:'granted'}),requestPermission:()=>({result:Promise.resolve('granted')})}}));
 mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(props:Node['props'])=>{const children=createMemo(()=>props.entries.map((entry:ScrollEntry)=>entry.render()));return element('ScrollEntries',{...props,get entries(){return props.entries;},children});}}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(props:Node['props'])=>element('Progress',props)}));
+mock.module('../src/ui/DownloadPhoneAppDialog.tsx',()=>({DownloadPhoneAppDialog:()=>null}));
+const {PhoneConnectionScreen}=await import('../src/ui/PhoneConnectionScreen.tsx');
 const {BluetoothConnectionScreen}=await import('../src/ui/BluetoothConnectionScreen.tsx');
 const {PhoneConnectionUnavailableScreen}=await import('../src/ui/PhoneConnectionUnavailableScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))stop();});
@@ -54,4 +57,15 @@ test('long unavailable reason wraps at safe bounds with Start alignment; empty m
  const root=createRoot(stop=>{stops.push(stop);return PhoneConnectionUnavailableScreen({width:160,height:160,message:'这是一个用于检查安全边距的很长不可用原因'});});
  const message=nodes(root).filter(n=>n.kind==='Text')[1]!;expect(message.props.children).toContain('\n');expect(message.props.style.width).toBeLessThanOrEqual(124);expect(message.props.class).not.toContain('text-center');
  const empty=createRoot(stop=>{stops.push(stop);return PhoneConnectionUnavailableScreen({width:233,height:233,message:''});});expect(text(empty)).toEqual(['暂不可用','']);
+});
+
+test('nearby discovery permission requires an active explicit UI action and reports denial',async()=>{
+ nearby=true;discoveryRequests=0;discoveryPermission='granted';const errors:string[]=[];const [active,setActive]=createSignal(true);
+ const mountPhone=()=>createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active,onError:e=>errors.push(e),ref:()=>{}});});
+ const root=mountPhone();expect(discoveryRequests).toBe(0);
+ const button=nodes(root).find(n=>n.props.accessibilityLabel==='启用附近手机发现')!;expect(button).toBeDefined();
+ button.props.onPress();await settle();expect(discoveryRequests).toBe(1);expect(errors).toEqual([]);
+ discoveryPermission='denied';button.props.onPress();await settle();expect(discoveryRequests).toBe(2);expect(errors).toEqual(['请允许附近设备发现权限后重试']);
+ setActive(false);button.props.onPress();await settle();expect(discoveryRequests).toBe(2);
+ nearby=false;expect(nodes(mountPhone()).some(n=>n.props.accessibilityLabel==='启用附近手机发现')).toBe(false);nearby=true;
 });

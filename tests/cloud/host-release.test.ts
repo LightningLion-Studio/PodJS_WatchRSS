@@ -1,12 +1,14 @@
 import {test,expect} from 'bun:test';
 import {fileURLToPath} from 'node:url';
-test('host cloud factory reads application.buildInfo and exits release before any other I/O',()=>{
+test('release cloud factory initializes without import-time network or data access',()=>{
  // Existing UI tests mock framework modules globally; verify the real bridge in isolation.
  const result=Bun.spawnSync([process.execPath,fileURLToPath(new URL('./host-release.fixture.ts',import.meta.url))]);
  expect({code:result.exitCode,error:result.stderr.toString()}).toEqual({code:0,error:''});
 });
-test('debug host codec uses bounded file operations for incompressible 4 MiB chunks and cleans all temporary files',()=>{
- const result=Bun.spawnSync([process.execPath,fileURLToPath(new URL('./host-debug.fixture.ts',import.meta.url))]);
+test('release and debug host codecs preserve encrypted 4 MiB round trips and temporary cleanup',()=>{
+ for(const release of ['0','1']){
+ const result=Bun.spawnSync([process.execPath,fileURLToPath(new URL('./host-debug.fixture.ts',import.meta.url))],{env:{...process.env,CLOUD_RELEASE:release}});
  expect({code:result.exitCode,error:result.stderr.toString()}).toEqual({code:0,error:''});
+ }
 // This is a 4 MiB correctness subprocess, not a five-second performance gate.
 },60_000);

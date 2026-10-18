@@ -6,12 +6,17 @@ import {utf8Encode,utf8Decode} from '../../src/cloud/types';
 import {initializeSchema} from '../../src/core/schema';
 import type {BackgroundContext} from '@podjs/framework/background-handler';
 const b64=(b:Uint8Array)=>Buffer.from(b).toString('base64'),unb64=(s:string)=>new Uint8Array(Buffer.from(s,'base64'));
-test('background release reads buildInfo only; unbound debug worker skips successfully',async()=>{
- const calls:string[]=[];let debug=false;
- const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{expect(m).toBe('debug.cloudHost');calls.push(a.method);if(a.method==='app.buildInfo')return {debugBuild:debug};if(a.method==='secure.get')return {exists:false};throw Error('unexpected '+a.method);}};
- expect(await handler(context)).toBe('success');expect(calls).toEqual(['app.buildInfo']);debug=true;calls.length=0;expect(await handler(context)).toBe('success');expect(calls).toEqual(['app.buildInfo','secure.get']);
+test('release and debug workers require explicit persisted consent, then skip unbound accounts without network',async()=>{
+ for(const debug of [false,true])for(const consent of [false,true]){
+  const calls:string[]=[];
+  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{
+   if(m==='kv.get'){expect(a.key).toBe('watchrss.onboarding');calls.push('consent');return {exists:consent,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};}
+   expect(m).toBe('cloud.host');calls.push(a.method);if(a.method==='app.buildInfo')return {debugBuild:debug};if(a.method==='secure.get')return {exists:false};throw Error('unexpected '+a.method);
+  }};
+  expect(await handler(context)).toBe('success');expect(calls).toEqual(consent?['app.buildInfo','consent','secure.get']:['app.buildInfo','consent']);
+ }
 });
-test('headless handler uses actual SQLite/codec/coordinator: registers and uploads with durable state, no UI or real HTTP',async()=>{
+test('release headless handler uses actual SQLite/codec/coordinator: registers and uploads with durable state, no UI or real HTTP',async()=>{
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
@@ -19,7 +24,7 @@ test('headless handler uses actual SQLite/codec/coordinator: registers and uploa
  const request=async(method:string,a:any):Promise<any>=>{
   calls.push(method);expect(JSON.stringify(a).length).toBeLessThan(1024*1024);
   switch(method){
-   case 'app.buildInfo':return {debugBuild:true};
+   case 'app.buildInfo':return {debugBuild:false};
    case 'cloud.acquire':expect(leased).toBe(false);leased=true;return {acquired:true};
    case 'cloud.release':leased=false;return {};
    case 'discovery.networkSnapshot':return {active:true,validated:true,wifi:true,metered:false};
@@ -61,7 +66,7 @@ test('headless handler uses actual SQLite/codec/coordinator: registers and uploa
   await initializeSchema({query:async q=>sql.query(q).all() as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
-  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('debug.cloudHost');return request(a.method,a.args);}})).toBe('success');
+  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
   expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(2);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.largeAesGcmEncrypt');
  }finally{sql.close();}
 });
