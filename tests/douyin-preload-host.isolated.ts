@@ -18,3 +18,13 @@ test('production factory cleans whole files once, preserves pre-READY consent, b
  await producer.clear();expect(clears).toBe(1);host.stop();
  const count=registrations.length;(client as any).resolvePlayback=async()=>({ok:false,code:'REQUEST_FAILED',message:'请求失败，状态码：403'});await expect(host.playback(items[0] as any,{})).rejects.toThrow('403');expect(registrations).toHaveLength(count);
 });
+
+
+test('route exit empties proxy window and late resolution cannot restart prefetch',async()=>{
+ windows=[];registrations=[];let resolve!:(value:any)=>void;
+ const slow={buildPlaybackHeaders:client.buildPlaybackHeaders,resolvePlayback:()=>new Promise(r=>resolve=r)};
+ const host=createHostDouyinPreload(slow as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'a','active');await flush();
+ expect(resolve).toBeDefined();host.stop(owner);const stopped=windows.length;expect(windows.at(-1).items).toEqual([]);
+ resolve({ok:true,data:items[0]});await flush();change();await flush();
+ expect(windows).toHaveLength(stopped);expect(registrations).toHaveLength(0);
+});

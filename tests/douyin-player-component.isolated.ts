@@ -16,21 +16,22 @@ mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,pressNode(){}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:(props:any)=>element('Poster',props)}));
 mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
-mock.module('@podjs/framework/watch',()=>({hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
+let sessionsCapable=false,decoderLimit=1,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
+mock.module('@podjs/framework/watch',()=>({hasCapability:()=>sessionsCapable,lifecycle:()=>lifecycleState,onLifecycleChange:(listener:(value:string)=>void)=>{lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
 let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
 let network:(s:InternetStatus)=>void,initial:InternetStatus='available';
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(fn:typeof network)=>{network=fn;fn(initial);return()=>{};}}));
 let prepares:any[]=[],plays=0,retries=0,failures=0,nextError:unknown,current:any;
 let heldPrepare:Promise<any>|undefined;
-let pauses=0;const boundsCalls:any[]=[];
+let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any[]=[];
 let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
 const video={prepare:(options:any)=>{prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
- play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current};
-mock.module('@podjs/framework/services',()=>({video,videoSessions:{},hostOperation:()=>{throw Error('unexpected session operation');},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+ play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current};
+mock.module('@podjs/framework/services',()=>({video,videoSessions:{prepare:(options:any)=>({result:Promise.resolve({...state('ready'),sessionId:options.sessionId}),cancel(){}}),play:async()=>state('playing'),state:async()=>current,setTransform:async()=>state('playing'),setBounds:async()=>state('playing'),release:async()=>{sessionReleases++;return {released:true};}},hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];});
+const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
 function mount(status:InternetStatus,url='https://video/current',immersive=false,platform:'douyin'|'bili'='douyin'){
@@ -149,4 +150,79 @@ test('ready without a decoded frame keeps the cover until the subsequent state p
   await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(1);
   current={...state('playing'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
  }finally{video.play=originalPlay;}
+});
+
+// Run the real component with the production capability advertised but the
+// watch's one-decoder response, rather than bypassing the session probe.
+function mountRetained(platform:'douyin'|'bili'|'rss'='douyin',backgroundPlayback=false){
+ initial='available';prepares=[];plays=0;legacyStops=0;sessionReleases=0;gestures.length=0;
+ let setActive!:(active:boolean)=>void,dispose!:()=>void;
+ const root=createRoot(stop=>{dispose=stop;stops.push(stop);const [active,set]=createSignal(true);setActive=set;
+  return VideoPlayerScreen({source:{platform,immersive:platform==='douyin',url:'https://video/retained',title:'retained',backgroundPlayback},width:233,height:233,get active(){return active();},offset:0,round:true});
+ });
+ return {setActive,dispose,root};
+}
+test('one-decoder fallback stops the legacy player when its screen is disposed',async()=>{
+ sessionsCapable=true;const f=mountRetained();await flush();expect(plays).toBe(1);
+ f.dispose();await flush();expect(legacyStops).toBe(1);
+});
+test('leaving Douyin before prepare completes stops immediately and ignores the late result',async()=>{
+ let resolve!:(value:any)=>void;heldPrepare=new Promise(r=>resolve=r);
+ const f=mountRetained();await flush();expect(prepares).toHaveLength(1);expect(plays).toBe(0);
+ f.setActive(false);await flush();expect(legacyStops).toBe(1);
+ resolve(state('ready'));await flush();expect(plays).toBe(0);
+ f.setActive(true);await flush();expect(prepares).toHaveLength(2);expect(plays).toBe(1);
+});
+test('leaving a ready Douyin player releases playback rather than retaining a paused session',async()=>{
+ const f=mountRetained('douyin',true);await flush();expect(plays).toBe(1);
+ f.setActive(false);await flush();expect(legacyStops).toBe(1);
+ network('unavailable');network('available');ticks.splice(0).forEach(t=>t());await flush();expect(plays).toBe(1);
+});
+test('leaving during an outstanding play stops and cannot resume from its late completion',async()=>{
+ const original=video.play;let resolve!:(value:any)=>void;
+ video.play=()=>{plays++;return new Promise(r=>resolve=r);};
+ try{const f=mountRetained();await flush();expect(plays).toBe(1);f.setActive(false);await flush();expect(legacyStops).toBe(1);
+ resolve(state('playing'));await flush();expect(plays).toBe(1);expect(legacyStops).toBe(1);
+ }finally{video.play=original;}
+});
+test('an old screen cleanup cannot stop a new legacy owner',async()=>{
+ sessionsCapable=true;const old=mountRetained();await flush();const next=mountRetained('bili');await flush();
+ old.dispose();await flush();expect(legacyStops).toBe(0);next.dispose();await flush();expect(legacyStops).toBe(1);
+});
+for(const platform of ['bili','rss'] as const)test(`${platform} retains its existing background-capable inactive path`,async()=>{
+ const f=mountRetained(platform,true);await flush();expect(plays).toBe(1);const before=pauses;
+ f.setActive(false);await flush();expect(legacyStops).toBe(0);expect(pauses).toBe(before+1);
+ f.setActive(true);await flush();expect(plays).toBe(2);expect(prepares).toHaveLength(1);
+});
+test('handoff failure arriving after exit cannot pause the next screen player',async()=>{
+ initial='available';gestures.length=0;legacyStops=0;const now=Date.now;let time=1000;Date.now=()=>time;
+ let reject!:(e:Error)=>void,started=false,dispose!:()=>void;
+ try{
+  createRoot(stop=>{dispose=stop;stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://video/handoff',title:'handoff'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{started=true;return new Promise((_,r)=>reject=r);}});});await flush();
+  const surface=gestures[0];surface.onPanStart();surface.onPanMove({dy:-110});surface.onPanEnd({vy:-2});await flush();
+  for(let i=0;i<15&&!started;i++){time+=60;ticks.splice(0).forEach(t=>t());await flush();}expect(started).toBe(true);
+  dispose();await flush();mountRetained('bili');await flush();const before=pauses;
+  reject(Error('HTTP 403'));await flush();expect(pauses).toBe(before);expect(current.state).toBe('playing');
+ }finally{Date.now=now;}
+});
+
+for(const platform of ['bili','rss'] as const)test(`${platform} background permission survives host lifecycle background`,async()=>{
+ mountRetained(platform,true);await flush();const before=pauses;lifecycleState='background';
+ lifecycleListeners.forEach(listener=>listener('background'));await flush();expect(pauses).toBe(before);expect(legacyStops).toBe(0);expect(current.state).toBe('playing');
+});
+test('fallback disposal cancels pending prepare and ignores its late completion',async()=>{
+ sessionsCapable=true;let resolve!:(value:any)=>void;heldPrepare=new Promise(r=>resolve=r);const f=mountRetained();await flush();
+ f.dispose();await flush();expect(legacyStops).toBe(1);resolve(state('ready'));await flush();expect(plays).toBe(0);
+});
+test('an old prepare completing after a new owner cannot start or stop that owner',async()=>{
+ let resolve!:(value:any)=>void;heldPrepare=new Promise(r=>resolve=r);const f=mountRetained();await flush();f.setActive(false);await flush();
+ mountRetained('bili');await flush();resolve(state('ready'));await flush();expect(plays).toBe(1);expect(legacyStops).toBe(0);
+});
+test('real session playback releases sessions without stopping the shared legacy player',async()=>{
+ sessionsCapable=true;decoderLimit=2;const f=mountRetained();await flush();expect(prepares).toHaveLength(0);
+ f.dispose();await flush();expect(sessionReleases).toBeGreaterThanOrEqual(2);expect(legacyStops).toBe(0);
+});
+test('returning to the retained Douyin page prepares again at the observed position',async()=>{
+ const f=mountRetained();await flush();f.setActive(false);await flush();f.setActive(true);await flush();
+ expect(prepares).toHaveLength(2);expect(prepares[1].resumePositionMs).toBe(321);expect(plays).toBe(2);
 });

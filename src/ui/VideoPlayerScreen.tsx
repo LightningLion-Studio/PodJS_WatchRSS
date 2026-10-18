@@ -99,6 +99,7 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
   const watchFirstFrame = async (ownGeneration: number) => { if (usingSessions() || !props.source.immersive || props.source.platform !== "douyin") return; while (!disposed && ownGeneration === generation && videoSessionOwner === sessionOwner && !firstFrame() && !ready()) { try { const next = await media.state(); if (disposed || ownGeneration !== generation || videoSessionOwner !== sessionOwner || next.state === "error") return; if (next.hasRenderedFirstFrame) { appLogger.i('DouyinTiming',`firstFrameObserved prepareMs=${Date.now()-prepareStarted}`);setFirstFrame(true); if (dragSettling) setDragPoster(null); return; } await delay(32).result; } catch { return; } } };
   const poll = async (ownGeneration: number) => { if (disposed || ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if(!props.active||videoSessionOwner!==sessionOwner){pollTimer=delay(400);void pollTimer.result.then(()=>void poll(ownGeneration)).catch(()=>{});return;} try { const next = await media.state(); if (ownGeneration !== generation || videoSessionOwner!==sessionOwner) return; if (next.state === "error") { if (lastPlaybackState !== "error") { failed({code:next.errorCode}); recoverPlaybackFailure({code:next.errorCode}); } lastPlaybackState = "error"; return; } setState(next); if(next.hasRenderedFirstFrame){setFirstFrame(true);} if (!volumeRunning) virtualVolume = next.volume; checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; props.onProgress?.(next.positionMs, next.durationMs); if (next.state === "ended" && lastPlaybackState !== "ended") props.onCheckpoint?.("ended", next.positionMs, next.durationMs); lastPlaybackState = next.state; } catch (value) { if(usingSessions())void degradeSessions(value);else failed(value); } if (!disposed && ownGeneration === generation && lastPlaybackState !== "error") { pollTimer = delay(handoff()?32:400); void pollTimer.result.then(() => void poll(ownGeneration)).catch(() => {}); } };
   const prepare = (retryNetwork = false) => {
+    if(disposed||!props.active)return;
     appLogger.d('VideoPlayer',`prepare platform=${props.source.platform??'rss'} source=${props.source.url?.startsWith('podjs-media-cache:')?'proxy':douyinSourceNeedsInternet(props.source.url??props.source.videoUrl)?'network':'local'}`);if(networkPrompt()&&!retryNetwork)return;
     if(sessionPool&&sessionCapacity==="unchecked"){
       sessionCapacity="checking";
@@ -224,7 +225,7 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     // A native pager keeps the current page playing while it is dragged; only prewarmed sessions pause to free the decoder.
     if(ready()&&usingSessions()){pausedForDrag=true;void media.pause().then(setState).catch(value=>{if(!cancelledSessionError(value))void degradeSessions(value);});}
   };
-  const resumeAfterDrag=async()=>{if(!pausedForDrag)return;pausedForDrag=false;if(ready())setState(await media.play());};
+  const resumeAfterDrag=async()=>{if(!pausedForDrag)return;pausedForDrag=false;if(disposed||!props.active||videoSessionOwner!==sessionOwner)return;const ownGeneration=generation;if(ready()){const next=await media.play();if(!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner)setState(next);}};
   const moveDouyinDrag=(distanceY:number)=>{
     if(props.source.platform!=="douyin"||dragSettling||distanceY===0)return;
     const direction:DouyinPagerDirection=distanceY<0?"up":"down",progress=douyinPagerProgress(distanceY,props.height),revision=dragRevision;
@@ -244,7 +245,7 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
     return true;
   };
   const finishDouyinDrag=async(velocityY:number,forceCancel=false)=>{
-    if(props.source.platform!=="douyin"||dragSettling)return;
+    if(disposed||!props.active||videoSessionOwner!==sessionOwner||props.source.platform!=="douyin"||dragSettling)return;
     const revision=dragRevision,direction=dragDirection,progress=dragProgress();if(!direction){void resumeAfterDrag().catch(failed);clearDrag();return;}
     dragSettling=true;const move=direction==="up"?props.onNext:props.onPrevious;
     const wantsSettle=!forceCancel&&!!move&&shouldSettleDouyinPager(progress,velocityY,direction);
@@ -260,25 +261,41 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
       if(!wantsSettle){await resumeAfterDrag();clearDrag();neighborRevision++;if(usingSessions())void warmForward();return;}
       if(usingSessions()){
         const promoted=await sessionPool!.promote(direction,bounds(),props.active&&lifecycle()==="active");
+        if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
         if(!await props.onPromoteAdjacent?.(promoted.source))throw new Error("video session queue promotion was cancelled");
+        if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
         forwardTarget=undefined;
         preparedSource=promoted.source.source;setState(promoted.state);setReady(true);setError("");checkpointPosition=promoted.state.positionMs;checkpointDuration=promoted.state.durationMs;virtualVolume=promoted.state.volume;
         props.onCheckpoint?.("ready",promoted.state.positionMs,promoted.state.durationMs);clearDrag();neighborRevision++;void requestTransform();void warmForward();
       }else{
         // The surface has left the screen: hide it, keep the arrived poster until the next item takes over, then rewind.
         const from=preparedSource;setHandoff(true);
-        await Promise.resolve(move!());clearDrag();if(preparedSource===from)setHandoff(false);
+        await Promise.resolve(move!());if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;clearDrag();if(preparedSource===from)setHandoff(false);
       }
-    }catch(value){if(!usingSessions()){
+    }catch(value){if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;if(!usingSessions()){
       // Resolution failed before a new source was published. Stop motion/audio first, then show the selected old frame with Retry.
       failedMove=move;setHandoff(true);
-      try{const paused=await media.pause();if(!disposed)setState(paused);}catch{await media.stop().catch(()=>{});}
+      try{const paused=await media.pause();if(!disposed&&revision===dragRevision&&videoSessionOwner===sessionOwner)setState(paused);}catch{if(!disposed&&revision===dragRevision&&videoSessionOwner===sessionOwner)await media.stop().catch(()=>{});}
       if(disposed||revision!==dragRevision)return;
       clearDrag();failed(value);
     }else if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);}
   };
+  // The capability probe can leave a pool object behind while playback uses
+  // the legacy host. Release the backend that actually owns playback.
+  const releaseOwnedPlayback=()=>{
+    const owns=videoSessionOwner===sessionOwner,legacy=!usingSessions();
+    if(owns)videoSessionOwner=undefined;
+    if(sessionPool)void sessionPool.releaseAll().catch(()=>{});
+    if(owns&&legacy)void video.stop().catch(()=>{});
+  };
   let resumeAfterOverlay=false;
-  createEffect(()=>{const active=props.active;if(!active){resumeAfterOverlay=autoplayAllowed&&untrack(()=>!ready()||state()?.state==="playing");autoplayAllowed=false;if(usingSessions()){const value=untrack(state);if(value)props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});}else if(untrack(ready)&&videoSessionOwner===sessionOwner)void media.pause().catch(()=>{});}else if(videoSessionOwner!==sessionOwner||usingSessions()&&!untrack(ready)){untrack(prepare);}else if(resumeAfterOverlay){resumeAfterOverlay=false;autoplayAllowed=lifecycle()==="active"||props.source.backgroundPlayback===true;if(autoplayAllowed&&untrack(ready))void media.play().then(setState).catch(failed);}});
+  createEffect(()=>{const active=props.active;if(!active){if(props.source.platform==='douyin'){
+    resumeAfterOverlay=false;autoplayAllowed=false;generation++;neighborRevision++;dragRevision++;
+    prepareOp?.cancel();pollTimer?.cancel();tapTimer?.cancel();volumeTimer?.cancel();
+    const current=untrack(state);if(videoSessionOwner===sessionOwner&&current)props.onCheckpoint?.("pause_or_exit",current.positionMs,current.durationMs);
+    forwardTarget=undefined;pausedForDrag=false;clearDrag();setReady(false);setFirstFrame(false);
+    untrack(releaseOwnedPlayback);return;
+  }resumeAfterOverlay=autoplayAllowed&&untrack(()=>!ready()||state()?.state==="playing");autoplayAllowed=false;if(usingSessions()){const value=untrack(state);if(value)props.onCheckpoint?.("pause_or_exit",value.positionMs,value.durationMs);preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});}else if(untrack(ready)&&videoSessionOwner===sessionOwner)void media.pause().catch(()=>{});}else if(videoSessionOwner!==sessionOwner||usingSessions()&&!untrack(ready)){untrack(prepare);}else if(resumeAfterOverlay){resumeAfterOverlay=false;autoplayAllowed=lifecycle()==="active"||props.source.backgroundPlayback===true;if(autoplayAllowed&&untrack(ready))void media.play().then(setState).catch(failed);}});
   const surfaceGesture = createGesture({ region: { node: () => surface, rect: () => props.active && props.offset === 0 ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
     onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
@@ -293,7 +310,7 @@ export function VideoPlayerScreen(props: { source: PlaybackSource; width: number
   const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await media.setVolume(target); if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
   const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; setVolumeVisible(true); volumeTimer?.cancel(); void submitVolume(); volumeTimer = delay(900); void volumeTimer.result.then(() => setVolumeVisible(false)).catch(() => {}); return true; };
   props.ref?.({ onCrown: adjustVolume, canSwipeBack: () => { const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; } });
-  onCleanup(() => { removeLifecycle();disposed = true; generation++; const current = state(); if (ready() && current) props.onCheckpoint?.("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); if(videoSessionOwner===sessionOwner){videoSessionOwner=undefined;if(sessionPool)void sessionPool.releaseAll();else void video.stop().catch(() => {});} });
+  onCleanup(() => { removeLifecycle();disposed = true; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) props.onCheckpoint?.("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233) / 2, uiTop = () => (props.height - 233) / 2;
   const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
   const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));
