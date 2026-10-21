@@ -20,7 +20,6 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
    guard.require();const stored=await accounts.read();if(!stored)return undefined;
    const assertCurrent=async()=>{guard.require();const current=await accounts.read();if(!current||current.userId!==stored.userId||current.backendBaseUrl!==stored.backendBaseUrl)throw Error('账号已变更');};
    const tokens=new WatchTokenManager(accounts,{backendBaseUrl:stored.backendBaseUrl,transport,appVersion:watchAppVersion});
-   await accounts.assertLibraryOwner(stored);
    const account=stored.watchRefreshToken?await tokens.freshAccount():stored;await assertCurrent();if(account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())throw Error("登录已过期，请从手机重新同步账号");
    const repo=await repository(),deviceId=await repo.deviceId();
    const foundation=ports.foundation(account.userId,deviceId,transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent,onUnauthorized:async()=>{const current=await accounts.read();if(current?.userId===account.userId&&current.backendBaseUrl===account.backendBaseUrl)await accounts.clear(current);},

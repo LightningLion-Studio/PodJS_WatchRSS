@@ -99,3 +99,12 @@ test('R8 watch never publishes legacy commitments when server commitment table i
 test('R20: sync surfaces device key conflict as explicit re-registration and preserves trust until local agreement',async()=>{
  const f=await fixture(),bootstrap=f.session.client.bootstrap.bind(f.session.client);let cleared=0;f.session.client.bootstrap=async()=>({...await bootstrap(),devices:[]});f.session.client.registerDevice=async()=>{throw Error('Cloud HTTP 409 device_key_conflict');};f.session.invalidate=async()=>{cleared++;};expect(await f.service.syncNow()).toBe(false);expect(f.service.status).toMatchObject({phase:'waiting-approval',message:'本机云设备公钥冲突，请重新登记本机'});expect(cleared).toBe(0);expect(f.calls.some(r=>r.url.endsWith('/heads'))).toBe(false);
 });
+
+test('recheck low 8: binding after logout succeeds but real persisted ownership blocks export/reservation until explicit choice',async()=>{
+ const {WatchAccountStore}=await import('../../src/account/store');const values=new Map<string,string>(),accounts=new WatchAccountStore({get:k=>values.get(k)??null,set:(k,v)=>{values.set(k,v);},remove:k=>{values.delete(k);}});
+ const state=(userId:string)=>({userId,backendBaseUrl:'https://backend.invalid',watchDeviceToken:'token',watchRefreshToken:'',tokenExpiresAtMillis:9e15,refreshTokenExpiresAtMillis:0,phoneMasked:'',installId:'i',posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},telemetryConfig:{anonymousEnabled:true,diagnosticsEnabled:false,sampleRate:1},updatedAtMillis:1});
+ await accounts.save(state('old-owner'));await accounts.clear();const owner=values.get('watchrss.library.owner');await accounts.save(state('user'));expect((await accounts.read())?.userId).toBe('user');expect(values.get('watchrss.library.owner')).toBe(owner);
+ const f=await fixture();await f.phone();let exports=0;const exportPayloads=f.session.library.exportPayloads;f.session.library.exportPayloads=async full=>{exports++;return exportPayloads(full);};f.session.assertUpload=()=>accounts.assertLibraryOwner(state('user'));
+ expect(await f.service.syncNow()).toBe(false);expect(f.merged.length).toBeGreaterThan(0);expect(exports).toBe(0);expect(f.reservations.size).toBe(0);expect(values.get('watchrss.library.owner')).toBe(owner);
+ await accounts.resolveLibraryOwner(state('user'),'merge');expect(await f.service.syncNow()).toBe(true);expect(exports).toBe(1);expect(f.reservations.size).toBe(1);
+});

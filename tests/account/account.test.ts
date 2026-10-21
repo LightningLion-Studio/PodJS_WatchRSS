@@ -22,3 +22,10 @@ test("transient refresh failure keeps the good session", async () => {
   const storage = new MemoryStorage(); const store = new WatchAccountStore(storage); await store.save(state); const transport: HttpTransport = { async request() { return { status: 503, headers: {}, body: utf8Encode("temporary") }; } }; const manager = new WatchTokenManager(store, { backendBaseUrl: "https://cloud.test", transport }, () => 0);
   await expect(manager.freshAccessToken()).rejects.toThrow(); expect((await store.read())?.watchRefreshToken).toBe("refresh"); expect((await store.read())?.watchDeviceToken).toBe("old");
 });
+
+test('recheck low 8: runtime opens the signed-in account independently of the local library owner',async()=>{
+ const {createCloudRuntime}=await import('../../src/cloud/runtime');const storage=new MemoryStorage(),store=new WatchAccountStore(storage);await store.save({...state,tokenExpiresAtMillis:9e15});storage.values.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl,'another-owner']));let opened=false,ownerChecks=0;
+ store.assertLibraryOwner=async()=>{ownerChecks++;throw Error('library_owner_mismatch');};
+ const runtime=createCloudRuntime(async<T>(method:string)=>{if(method==='cloud.acquire')return{acquired:true} as T;if(method==='cloud.release')return{} as T;if(method==='file.list')return{entries:[]} as T;if(method==='discovery.networkSnapshot')return{active:true,validated:true,wifi:true,metered:false} as T;throw Error('unexpected '+method);},async()=>{opened=true;throw Error('fixture stops before cloud I/O');},{require(){}},store);
+ expect(await runtime.service.syncNow()).toBe(false);expect(opened).toBe(true);expect(ownerChecks).toBe(0);expect((await store.read())?.userId).toBe(state.userId);
+});

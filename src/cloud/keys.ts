@@ -38,12 +38,12 @@ export class WatchCloudKeyManager {
   return this.host.unwrap({keyId:this.keyId(userId,deviceId),publicKeySpki:e.ephemeralPublicKeySpki,saltBase64:bytesToBase64(Uint8Array.from(hash.match(/../g)!,v=>parseInt(v,16))),infoBase64:bytesToBase64(utf8Encode(`watchrss/device-envelope/v${e.keyVersion}/${deviceId}`)),nonceBase64:e.nonceBase64,ciphertextBase64:e.wrappedKeyBase64,aadBase64:bytesToBase64(utf8Encode(`watchrss-account-key:${userId}:${e.keyVersion}:${deviceId}`))});
  }
  /** QR/approval must pass ALL envelopes as a batch. Nothing is persisted until the entire chain and attestation pass. */
- async acceptDelivery(userId:string,deviceId:string,envelopes:CloudKeyEnvelope[],trust:CloudTrust,attestation:{keyVersion:number;mac:string}){
+ async acceptDelivery(userId:string,deviceId:string,envelopes:CloudKeyEnvelope[],trust:CloudTrust,attestation:{keyVersion:number;mac:string},beforeCommit?:()=>void){
   this.guard.require();if(new Set(envelopes.map(e=>e.keyVersion)).size!==envelopes.length)throw Error('duplicate_key_version');
-  return this.acceptBootstrap(userId,deviceId,envelopes.map((envelope,i)=>({id:String(i),recipientType:'device',recipientDeviceId:deviceId,envelope})),trust,attestation,true);
+  return this.acceptBootstrap(userId,deviceId,envelopes.map((envelope,i)=>({id:String(i),recipientType:'device',recipientDeviceId:deviceId,envelope})),trust,attestation,true,beforeCommit);
  }
  async acceptEnvelope(userId:string,deviceId:string,envelope:CloudKeyEnvelope):Promise<void>{this.guard.require();throw Error('client_upgrade_required: use authenticated batch delivery');}
- async acceptBootstrap(userId:string,deviceId:string,envelopes:StoredCloudKeyEnvelope[],trust?:CloudTrust,attestation?:{keyVersion:number;mac:string},requireAll=false):Promise<'ready'|'waiting-approval'>{
+ async acceptBootstrap(userId:string,deviceId:string,envelopes:StoredCloudKeyEnvelope[],trust?:CloudTrust,attestation?:{keyVersion:number;mac:string},requireAll=false,beforeCommit?:()=>void):Promise<'ready'|'waiting-approval'>{
   this.guard.require();const task=this.tail.then(async()=>{
    this.guard.require();const commitments=validateTrust(trust!);const t=trust!;
    if(this.trust&&this.trust.libraryEpoch!==t.libraryEpoch)await this.clear(userId);
@@ -70,7 +70,10 @@ export class WatchCloudKeyManager {
     if(!pending.size)return 'waiting-approval' as const;
     const highest=Math.max(...pending.keys()),attested=attestation&&pending.get(attestation.keyVersion);if(!attestation||!attested||(requireAll&&attestation.keyVersion!==highest)||await attest(this.crypto(),attested,userId,t.libraryEpoch,deviceId,await this.publicKeySpki(userId,deviceId))!==attestation.mac)throw Error('device_attestation_invalid');
     if(!this.secure.update)throw Error('client_upgrade_required');
-    await this.secure.update({...Object.fromEntries([...pending].map(([v,k])=>[`${prefix}${t.libraryEpoch}.${v}`,bytesToBase64(k)])),[await this.legacyName(userId)]:null});
+    const values={...Object.fromEntries([...pending].map(([v,k])=>[`${prefix}${t.libraryEpoch}.${v}`,bytesToBase64(k)])),[await this.legacyName(userId)]:null};
+    // Last synchronous authorization check. No await between this boundary and submitting the atomic batch.
+    beforeCommit?.();
+    await this.secure.update(values);
     this.verifiedUser=userId;for(const c of commitments)if(pending.has(c.keyVersion))this.verified.set(c.keyVersion,c.commitment);
     return 'ready' as const;
    }catch(error){if(!invalidated){this.verified=retained;this.verifiedUser=retained.size?userId:'';}throw error;}finally{for(const key of pending.values())key.fill(0);}

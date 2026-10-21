@@ -3,6 +3,7 @@ import type {WatchCloudKeyManager} from './keys';
 import type {WatchCloudStateStore} from './state';
 import type {CloudKeyEnvelope,CloudTrust} from './types';
 import type {V2Crypto} from './v2';
+import {canonicalSpki} from './v2';
 import {WatchCloudApproval} from './approval';
 /** UI-independent adapter shared by the Lead's QR page and requester approval page.
  * bootstrap is always read from the signed-in backend, never trusted from QR input. */
@@ -11,6 +12,8 @@ export function createCloudAuthorization(p:{userId:string;deviceId:string;client
  async function bootstrap(reactivate=false){await p.assertCurrent();const b=await p.client.bootstrap();await p.assertCurrent();if(await p.state.acceptEpoch(b.libraryEpoch)){await p.invalidate();throw Error('library_epoch_mismatch');}p.client.setEpoch(b.libraryEpoch);const d=b.devices.find(d=>d.deviceId===p.deviceId);if(d?.revokedAt){await p.invalidate();if(!reactivate)throw Error('device_revoked');await register(b.keyVersionFloor+1);const fresh=await p.client.bootstrap();await p.assertCurrent();if(fresh.libraryEpoch!==b.libraryEpoch||fresh.devices.some(d=>d.deviceId===p.deviceId&&d.revokedAt))throw Error('device_reactivation_failed');return fresh;}return b;}
  const verifiedReady=async()=>{const b=await bootstrap(),d=b.devices.find(d=>d.deviceId===p.deviceId);return await p.keys.acceptBootstrap(p.userId,p.deviceId,b.keyEnvelopes,b,d?.attestation&&d.attestationKeyVersion?{keyVersion:d.attestationKeyVersion,mac:d.attestation}:undefined)==='ready';};
  return {
+ /** Construct this adapter from the saved watch account; registration carries its own watch bearer. */
+ async registerSelf(){const b=await bootstrap(true);let d=b.devices.find(d=>d.deviceId===p.deviceId);if(!d){await register(b.keyVersionFloor+1);const fresh=await bootstrap();if(fresh.libraryEpoch!==b.libraryEpoch)throw Error('library_epoch_mismatch');d=fresh.devices.find(d=>d.deviceId===p.deviceId);}await p.assertCurrent();if(!d||d.revokedAt)throw Error('device_registration_failed');if(canonicalSpki(d.publicKeySpki)!==canonicalSpki(await p.keys.publicKeySpki(p.userId,p.deviceId)))throw Error('device_key_conflict: 重新登记本机');},
  publicKey:async()=>p.keys.publicKeySpki(p.userId,p.deviceId),trust:()=>bootstrap(),verifiedReady,currentKeyVersion:()=>p.keys.currentKeyVersion(p.userId),
  acceptDelivery:async(_userId:string,envelopes:CloudKeyEnvelope[],_qrTrust:CloudTrust,attestation:{keyVersion:number;mac:string})=>{const b=await bootstrap();await p.assertCurrent();return p.keys.acceptDelivery(p.userId,p.deviceId,envelopes,b,attestation);},
  /** R20: UI must obtain explicit agreement before revoking the active local registration. */

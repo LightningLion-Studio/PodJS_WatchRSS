@@ -4,10 +4,10 @@ import type {WatchCloudClient} from './client';
 import type {WatchCloudKeyManager} from './keys';
 import type {CloudTrust} from './types';
 const serverExpired=(e:unknown)=>/^(?:Error: )?(?:Cloud HTTP 409 )?approval_expired$/.test(String(e));
-export type ApprovalStatus={phase:'idle'|'pending'|'code'|'complete'|'cancelled'|'expired'|'error';code?:string;confirmed?:boolean;message?:string};
+export type ApprovalStatus={phase:'idle'|'pending'|'code'|'committing'|'complete'|'cancelled'|'expired'|'error';code?:string;confirmed?:boolean;message?:string};
 /** Requester polling pauses in background; nonce and pinned identity stay in this instance until terminal state. */
 export class WatchCloudApproval {
- status:ApprovalStatus={phase:'idle'};private nonce='';private id='';private expires=0;private transcript?:ApprovalTranscript;private confirmed=false;private stopped=false;private busy=false;private foreground=true;
+ status:ApprovalStatus={phase:'idle'};private nonce='';private id='';private expires=0;private transcript?:ApprovalTranscript;private confirmed=false;private stopped=false;private busy=false;private foreground=true;private committing=false;
  constructor(private p:{userId:string;deviceId:string;trust:CloudTrust;crypto:V2Crypto;keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'acceptDelivery'>;client:Pick<WatchCloudClient,'approvalCreate'|'approvalGet'|'approvalReveal'|'approvalCancel'|'bootstrap'>;assertCurrent():Promise<void>;now():number;changed?(s:ApprovalStatus):void}){}
  private set(s:ApprovalStatus){this.status=s;this.p.changed?.(s);}
  private async check(){await this.p.assertCurrent();if(this.stopped)throw Error('approval_cancelled');}
@@ -35,13 +35,14 @@ export class WatchCloudApproval {
   if(!this.foreground)return;const payload=JSON.parse(r.payload),bootstrap=await this.p.client.bootstrap();await this.check();if(!this.foreground)return;if(bootstrap.libraryEpoch!==t.libraryEpoch)throw Error('library_epoch_mismatch');
   if(!Array.isArray(payload.envelopes)||new Set(payload.envelopes.map((x:any)=>x.keyVersion)).size!==payload.envelopes.length)throw Error('invalid_approval_payload');
   const envelopes=payload.envelopes.map((x:any)=>{if(x.keyVersion!==x.envelope?.keyVersion)throw Error('invalid_approval_payload');return x.envelope;});
-  if(await this.p.keys.acceptDelivery(this.p.userId,this.p.deviceId,envelopes,bootstrap,payload.attestation)!=='ready')throw Error('waiting_approval');await this.check();this.nonce='';this.transcript=undefined;this.stopped=true;this.set({phase:'complete'});
+  await this.check();if(!this.foreground)return;
+  if(await this.p.keys.acceptDelivery(this.p.userId,this.p.deviceId,envelopes,bootstrap,payload.attestation,()=>{if(this.stopped||!this.confirmed)throw Error('approval_cancelled');this.committing=true;this.set({phase:'committing'});})!=='ready')throw Error('waiting_approval');await this.check();this.nonce='';this.transcript=undefined;this.stopped=true;this.set({phase:'complete'});
  }catch(e){
   // An in-flight transport can fail after onHide. Keep the requester intact for foreground retry.
   if(!this.foreground&&!this.stopped&&!serverExpired(e)){try{await this.check();return;}catch(current){this.fail(current);throw current;}}
   this.fail(e);throw e;
- }finally{this.busy=false;}}
- async confirmCode(matches:boolean){await this.check();if(this.status.phase!=='code')throw Error('approval_code_not_ready');if(!matches){await this.cancel();return;}this.confirmed=true;this.set({...this.status,confirmed:true});await this.poll();}
- async cancel(){if(this.stopped)return;this.stopped=true;this.nonce='';this.transcript=undefined;this.set({phase:'cancelled'});if(this.id)await this.p.client.approvalCancel(this.id);}
- dispose(){this.stopped=true;this.nonce='';this.transcript=undefined;}
+ }finally{this.committing=false;this.busy=false;}}
+ async confirmCode(matches:boolean){if(this.committing)throw Error('approval_commit_started');if(!matches){if(this.status.phase!=='code')throw Error('approval_code_not_ready');await this.cancel();return;}await this.check();if(this.status.phase!=='code')throw Error('approval_code_not_ready');this.confirmed=true;this.set({...this.status,confirmed:true});await this.poll();}
+ async cancel(){if(this.committing)throw Error('approval_commit_started');if(this.stopped)return;this.stopped=true;this.nonce='';this.transcript=undefined;this.set({phase:'cancelled'});if(this.id)await this.p.client.approvalCancel(this.id);}
+ dispose(){if(this.committing)return;this.stopped=true;this.nonce='';this.transcript=undefined;}
 }

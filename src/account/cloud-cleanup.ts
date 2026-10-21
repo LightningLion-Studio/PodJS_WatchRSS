@@ -1,3 +1,4 @@
+import {refreshWatchAccount} from './token';
 import {createCloudTransport} from '../cloud/transport';
 import {WatchCloudClient} from '../cloud/client';
 import type {HttpTransport} from '../cloud/types';
@@ -15,10 +16,12 @@ export async function clearAccountCloud(host:CloudHostRequest,account:Pick<Watch
  await clear(`watch-cloud-cache/${scoped.slice(0,32)}`);await clear(`watch-cloud-cache/${legacy.slice(0,32)}`);
 }
 
-/** Logout first attempts remote revocation, with a bounded transport; caller always continues local cleanup. */
+/** Refresh without saving under the logout lock, then revoke self with a fresh bearer.
+ * The caller continues local cleanup on either refresh or revocation failure. */
 export async function revokeAccountCloud(host:CloudHostRequest,account:WatchAccountState,http?:HttpTransport){
  const rows=await host<{device_id:string}[]>('sql.query',{sql:'SELECT device_id FROM sync_local_identity WHERE id=1',params:[]});const deviceId=rows[0]?.device_id;if(!deviceId)return;
  const guard={require(){}},transport=http??createCloudTransport(host,guard,{callTimeoutMs:5000});
- const client=new WatchCloudClient(transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken},{sha256:async()=>{throw Error('unused');}},guard);
+ const fresh=account.watchRefreshToken?await refreshWatchAccount(account,{backendBaseUrl:account.backendBaseUrl,transport}):account;
+ const client=new WatchCloudClient(transport,{baseUrl:account.backendBaseUrl,accessToken:fresh.watchDeviceToken},{sha256:async()=>{throw Error('unused');}},guard);
  const bootstrap=await client.bootstrap();if(!bootstrap.libraryEpoch)throw Error('client_upgrade_required');client.setEpoch(bootstrap.libraryEpoch);await client.revokeDevice(deviceId);
 }

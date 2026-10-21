@@ -1,0 +1,103 @@
+{
+  "provenance": {
+    "contract": "SPEC R6/R7; mini-program watch-setup configure/key receipt checks; native MiniProgramPairingActivity configure/key response fields; SPEC R28 self-registration before bound",
+    "note": "Frozen synthetic protocol transcript. No sibling checkout is loaded. Private key is test-only."
+  },
+  "now": 1700000000000,
+  "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
+  "deviceId": "a1b2c3d4-0000-4000-8000-000000000001",
+  "installId": "22222222-2222-4222-8222-222222222222",
+  "pairing": {
+    "sessionId": "abcdefghijklmnopqrstuv",
+    "secretBase64": "arnx6499M4j0+dWG9m6Z/VQIDfLERvDlhmiwnAihbdA="
+  },
+  "receiverPrivateKeyPkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgIaLmTwsj19oZEAFeKetd5WvQsLoOhSLioDNE17hOBz+hRANCAARliQ/JoY8aNjjrinzfKsbcfY/iUeJIFkpF3GTRGNUrZk3XfFr5btepNe5OX+nalaqALk4xVS1uP94NMW2PAwFe",
+  "trust": {
+    "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+    "keyVersionFloor": 0,
+    "keyCommitments": [
+      {
+        "keyVersion": 1,
+        "commitment": "ad33cd5c08efb48742d36f4188d1bcaea2b5f2ccc2f2814720223a98cc67a66c",
+        "rotationProof": null
+      },
+      {
+        "keyVersion": 2,
+        "commitment": "95c4aa80d6facfc5f0df3e52327da45d8251283c6f31d12831e9bafdef6bdf05",
+        "rotationProof": "112d63233b8f4655925d4309f2a109d8255e4447c5c2a6079c101856ff5cf547"
+      },
+      {
+        "keyVersion": 3,
+        "commitment": "ca3968bcf132ba48410e82ad72458bab64bce10566659532c6ad422586e3c7d9",
+        "rotationProof": "4bb0ecfae00d8c4902ea90755c4d1656bf9fbb386038db49712cbd1ecd5dca0e"
+      }
+    ]
+  },
+  "exchanges": [
+    {
+      "request": {
+        "action": "prepare",
+        "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
+        "phoneMasked": "138****0000"
+      },
+      "response": {
+        "success": true,
+        "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
+        "deviceId": "a1b2c3d4-0000-4000-8000-000000000001",
+        "publicKeySpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZYkPyaGPGjY464p83yrG3H2P4lHiSBZKRdxk0RjVK2ZN13xa+W7XqTXuTl/p2pWqgC5OMVUtbj/eDTFtjwMBXg=="
+      }
+    },
+    {
+      "request": {
+        "action": "configure",
+        "account": {
+          "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
+          "installId": "22222222-2222-4222-8222-222222222222",
+          "backendBaseUrl": "https://sly-data-plane.watchrss.cn",
+          "watchAccessToken": "fixture-watch-token",
+          "accessTokenExpiresAt": 4102444800000,
+          "watchRefreshToken": "fixture-watch-refresh"
+        }
+      },
+      "response": {
+        "success": true,
+        "bound": true,
+        "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
+        "deviceId": "a1b2c3d4-0000-4000-8000-000000000001",
+        "cloudReady": false
+      }
+    },
+    {
+      "request": {
+        "action": "key",
+        "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "payload": "{\"envelopes\":[{\"keyVersion\":1,\"envelope\":{\"algorithm\":\"P-256+HKDF-SHA256+A256GCM\",\"keyVersion\":1,\"wrappedKeyBase64\":\"k5F9sz+Rh0rzv9UibUw2+kDGgMnXBVkR79r/QA9vQcoyvjglRpDU2+5PzAe+Fqk9\",\"nonceBase64\":\"okv4UIPYSluggFnD\",\"ephemeralPublicKeySpki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nUChJMGPvfmHHjo+Gy8HldImCr39T3aqPK7Z9p226EzJZ62JP19WrIMPkvbhEkc6oFFUgiyGCxoQYUEL9kLCA==\"}},{\"keyVersion\":2,\"envelope\":{\"algorithm\":\"P-256+HKDF-SHA256+A256GCM\",\"keyVersion\":2,\"wrappedKeyBase64\":\"TO8jkoyZWz8Nh1+RLnwMnGAyvGnYzJqRFfBJDzAgCgYaLtBZF49kFy0p9yrCf7q0\",\"nonceBase64\":\"lnb5hNwCaiWEzKnW\",\"ephemeralPublicKeySpki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEUTbykst9f9K3upKx83wVI1WegnpwuuKsFTtZ0ILtKawCOSvV/jh0RNasSl4mKytQvYViB0hnJn6K9KImQSawsQ==\"}},{\"keyVersion\":3,\"envelope\":{\"algorithm\":\"P-256+HKDF-SHA256+A256GCM\",\"keyVersion\":3,\"wrappedKeyBase64\":\"mnzpAZ15zGKvHdZGHM9QqSCGDaLoN94bEk/m1cUFTBnrbkKSg55ZR2uVAo7/YrGi\",\"nonceBase64\":\"6/qeU8xKMJhyjVNy\",\"ephemeralPublicKeySpki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELsGbrpdp1hc32C17aGaaUW5sb4bgsYNL3pyzkh3RPOCkj1iG/u8KHMKmCrkVRB7uWohOLqco5k8VQS2zuRr6GA==\"}}],\"attestation\":{\"keyVersion\":3,\"mac\":\"4d9fa6d1688e03e5a450647335be90ca0036e11072de3e75a2bc8274e3725389\"}}"
+      },
+      "response": {
+        "success": true,
+        "cloudReady": true,
+        "deviceId": "a1b2c3d4-0000-4000-8000-000000000001",
+        "keyVersion": 3
+      }
+    },
+    {
+      "request": {
+        "action": "finish",
+        "cloudReady": true
+      },
+      "response": {
+        "success": true,
+        "deviceId": "a1b2c3d4-0000-4000-8000-000000000001",
+        "cloudReady": true
+      }
+    }
+  ],
+  "expectedConfigureOperations": [
+    "save-account",
+    "bootstrap",
+    "register-self",
+    "bootstrap",
+    "verified-ready"
+  ]
+}

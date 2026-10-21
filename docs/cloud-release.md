@@ -28,12 +28,13 @@ PodJS currently implements encrypted snapshot schema 2, **not records v1**. Its
 registration deliberately omits `rssRecordsVersion`; a participating PodJS watch
 therefore keeps the mini-program on the compatible snapshot channel. Epoch,
 verified commitments/rotation chains and own-device attestation gate snapshot
-reads/writes. A new account library requires an explicit local clear or merge
-choice; logging out retains its owner while clearing that account's cloud secrets,
+reads/writes. After logout a new account can bind while the old library owner
+is retained. Upload/export requires an explicit local clear or merge choice
+when the owners differ; logging out retains its owner while clearing that account's cloud secrets,
 sequence/applied/hash state and encrypted cache.
 
 `createCloudAuthorization` exposes `verifiedReady`, fresh backend `trust`, batch
-`acceptDelivery`, `currentKeyVersion`, confirmed `reregister`, and an `approval()` requester state machine.
+`acceptDelivery`, `currentKeyVersion`, `registerSelf`, confirmed `reregister`, and an `approval()` requester state machine.
 The QR handler requires these functions instead of a `cloudKeyVersion > 0`
 shortcut. A single anonymous legacy `key` envelope is rejected with
 `client_upgrade_required`. Bind the Lead's pairing panel to the new handler;
@@ -41,11 +42,11 @@ its layout is not part of this implementation. `phoneMasked` remains a peer
 label, not an authenticated identity proof. The QR secret, session and userId
 bind the pairing SAS under R6.
 
-Approval UI consumes `idle/pending/code/complete/cancelled/expired/error` and the
+Approval UI consumes `idle/pending/code/committing/complete/cancelled/expired/error` and the
 8-digit `code` (display as `1234 5678`). Start only on an explicit user action,
 use `setForeground(false)` on background and `setForeground(true)` on resume,
 and poll only in foreground. Retain this instance across background; explicit
-abandonment/logout calls cancel/dispose. `expiresAt` is display-only; only server
+abandonment/logout calls cancel/dispose before committing. `expiresAt` is display-only; only server
 `expired` or `409 approval_expired` ends the session as expired (R22/R23). Show
 “请在已登录设备上核对此码”; the watch never approves another device. Membership
 changes do not alter the authorization owner identity.
@@ -91,10 +92,9 @@ Storage URLs expire under the accepted R18 migration boundary.
 Configure receipts include `userId`, `deviceId`, `bound: true` and verified
 `cloudReady`. Key receipts include `deviceId`, `cloudReady: true` and the highest
 locally verified `keyVersion` (the native receiver shape). The shape regression
-runs the production mini-program `lib/watch-setup.js` against the PodJS handler,
-with real ECIES envelopes and local crypto, and checks that dropping either
-required field is detected. It reads the sibling cloud-v2 checkout without
-writing to it or making network requests.
+loads the frozen `tests/cloud/fixtures/setup-shape.json` transcript and checks
+every handler receipt, including required fields, using real ECIES and local
+crypto. It loads no mini-program source or sibling checkout.
 
 A failed rotation/envelope/attestation candidate leaves the still-valid scoped
 key prefix available, including after manager restart. All retained keys are
@@ -111,3 +111,39 @@ performs no I/O. This revokes self, clears account cloud trust and registers the
 preserved local public key, without attestation; approval is still required.
 Epoch reset clears cloud trust without logging out the account (R25).
 R24/R27 have no PodJS configuration-client or phone-change path.
+
+
+### Recheck: cancellation, account ownership, logout, R28
+
+Disagreement marks the requester cancelled synchronously, before any identity or
+HTTP await. It remains effective during signature verification, bootstrap,
+unwrap and commit preparation. Key acceptance invokes a synchronous cancellation
+guard after all async work and immediately before submitting `secure.update`.
+That guard changes the phase to `committing`, the explicit irreversible
+submission boundary. Show “正在保存授权”; disable agreement, disagreement and
+cancel then. Calls to confirm/cancel reject with `approval_commit_started`;
+dispose leaves the in-flight commit to finish. Never display cancelled after
+this boundary. A successful batch completes; a failed batch reports error.
+
+Saving an account still rejects switching away from an active signed-in account,
+but a retained library owner never blocks saving after logout, credential
+refresh or opening the cloud session. The existing upload guards check owner
+before export/reservation/upload completion. An explicit clear or merge changes
+owner; saving a different account never changes an existing owner.
+
+Logout refreshes its watch bearer before bootstrap and self-revocation. This
+uses `refreshWatchAccount`, which does not save the rotated session or call
+clear recursively while the account lock is held. Refresh/revocation failures
+continue to session/key/state/cache cleanup. Legacy accounts without a refresh
+token use their existing bearer for best-effort revocation.
+
+R28 QR sequence: prepare returns the device SPKI; configure saves the issued
+watch account, awaits `SetupPorts.registerSelf(savedAccount)`, and only then
+returns bound. Build that callback's client from the saved account's backend and
+watch bearer, then invoke `createCloudAuthorization(...).registerSelf()`. It
+bootstraps first, self-registers if absent (without attestation), verifies the
+resulting device/SPKI, and reuses an active matching DER identity. A registration
+failure returns no bound receipt, keeps the saved account for configure retry,
+and blocks key delivery. The scanner next bootstraps and checks the prepared
+SPKI before adding attestation and the key payload; it never creates the watch
+device. The frozen transcript tests the watch bearer and exact configure order.
