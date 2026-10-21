@@ -67,7 +67,8 @@
         "scale": 1.12,
         "durationMs": 80
       }
-    }
+    },
+    "bleProvisioning": false
   },
   "capabilities": [
     "input.touch",
