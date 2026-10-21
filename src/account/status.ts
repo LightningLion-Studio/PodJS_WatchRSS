@@ -35,13 +35,8 @@ export function accountStatusSnapshot(state: WatchAccountState | null, now = Dat
 /** Native hides the whole cloud section when the service is unavailable. */
 export function accountCloudLines(status: AccountStatusSnapshot): string[] {
   if (!status.cloud) return [];
-  if (status.plan === 'member' && status.active) {
-    const lines = [`云中继：${status.cloud.message}`];
-    if (status.cloud.quotaBytes > 0) {
-      lines.push(`空间：${Math.floor(status.cloud.usedBytes / 1048576)} / ${Math.floor(status.cloud.quotaBytes / 1048576)} MiB`);
-    }
-    lines.push('首次使用需在手机会员云空间中批准这块手表。');
-    return lines;
-  }
-  return ['云存储：会员可用；本地资料与蓝牙同步不受影响。'];
+  const lines = [`云中继：${status.cloud.message}`];
+  if (status.cloud.quotaBytes > 0) lines.push(`空间：${Math.floor(status.cloud.usedBytes / 1048576)} / ${Math.floor(status.cloud.quotaBytes / 1048576)} MiB`);
+  lines.push('首次使用需在已登录设备上批准这块手表。');
+  return lines;
 }

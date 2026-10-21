@@ -3,7 +3,7 @@ import { WatchAccountStore, WatchTokenManager, WatchAccountState, SecureStorage 
 import { utf8Encode } from "../../src/cloud";
 import type { HttpTransport, HttpResponse } from "../../src/cloud";
 
-class MemoryStorage implements SecureStorage { value: string | null = null; async get() { return this.value; } async set(_: string, value: string) { this.value = value; } async remove() { this.value = null; } }
+class MemoryStorage implements SecureStorage { values=new Map<string,string>();async get(key:string){return this.values.get(key)??null;}async set(key:string,value:string){this.values.set(key,value);}async remove(key:string){this.values.delete(key);} }
 const state: WatchAccountState = { userId: "u", phoneMasked: "1****", installId: "i", watchDeviceToken: "old", tokenExpiresAtMillis: 1, watchRefreshToken: "refresh", refreshTokenExpiresAtMillis: 999999, backendBaseUrl: "https://cloud.test", posthogHost: "", posthogProjectApiKey: "", entitlement: { plan: "free", active: true, expiresAtMillis: 0, features: [] }, telemetryConfig: { anonymousEnabled: true, diagnosticsEnabled: false, sampleRate: 1 }, updatedAtMillis: 1 };
 const ok = (value: unknown): HttpResponse => ({ status: 200, headers: {}, body: utf8Encode(JSON.stringify(value)) });
 

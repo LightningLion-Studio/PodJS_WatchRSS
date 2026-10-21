@@ -24,7 +24,7 @@ test('account status uses the native expiry boundaries and never exposes credent
   expect(accountStatusSnapshot(null)).toBeNull();
 });
 
-test('account status only presents real cloud-service data with native member behavior', () => {
+test('account status only presents real cloud-service data with free quota semantics', () => {
   const withoutCloud = accountStatusSnapshot(account, 99)!;
   expect(withoutCloud.cloud).toBeUndefined();
   expect(accountCloudLines(withoutCloud)).toEqual([]);
@@ -33,12 +33,10 @@ test('account status only presents real cloud-service data with native member be
     message: '同步完成', usedBytes: 3 * 1048576 + 123, quotaBytes: 10 * 1048576,
   })!;
   expect(accountCloudLines(member)).toEqual([
-    '云中继：同步完成', '空间：3 / 10 MiB', '首次使用需在手机会员云空间中批准这块手表。',
+    '云中继：同步完成', '空间：3 / 10 MiB', '首次使用需在已登录设备上批准这块手表。',
   ]);
   expect(accountCloudLines({...member, cloud: {...member.cloud!, quotaBytes: 0}})).toEqual([
-    '云中继：同步完成', '首次使用需在手机会员云空间中批准这块手表。',
+    '云中继：同步完成', '首次使用需在已登录设备上批准这块手表。',
   ]);
-  expect(accountCloudLines({...member, plan: 'free'})).toEqual([
-    '云存储：会员可用；本地资料与蓝牙同步不受影响。',
-  ]);
+  expect(accountCloudLines({...member, plan: 'free'})).toEqual(accountCloudLines(member));
 });

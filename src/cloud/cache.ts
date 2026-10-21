@@ -1,11 +1,12 @@
 import {utf8Encode,utf8Decode} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
-export interface CloudBlobStore {read(path:string):Promise<Uint8Array|undefined>;writeAtomic(path:string,bytes:Uint8Array):Promise<void>;}
+export interface CloudBlobStore {read(path:string):Promise<Uint8Array|undefined>;writeAtomic(path:string,bytes:Uint8Array):Promise<void>;removeTree?(path:string):Promise<void>;}
 /** Encrypted bytes only. Chunk reads verify hashes; the coordinator must verify
  * cached manifests against their remote head before passing them to the AEAD codec. */
 export class WatchCloudCache {
- constructor(private files:CloudBlobStore,private hash:(b:Uint8Array)=>Promise<string>,private guard:CloudGuard=cloudDisabled){}
- private async root(userId:string){return `watch-cloud-cache/${(await this.hash(utf8Encode(userId))).slice(0,32)}`;}
+ constructor(private files:CloudBlobStore,private hash:(b:Uint8Array)=>Promise<string>,private guard:CloudGuard=cloudDisabled,private backendBaseUrl=''){}
+ private async root(userId:string){return `watch-cloud-cache/${(await this.hash(utf8Encode(JSON.stringify([this.backendBaseUrl.replace(/\/+$/,''),userId])))).slice(0,32)}`;}
+ async clear(userId:string){this.guard.require();if(!this.files.removeTree)throw Error('cache_cleanup_unavailable');await this.files.removeTree(await this.root(userId));}
  private id(id:string){if(!/^[a-zA-Z0-9-]{1,128}$/.test(id))throw Error('无效快照 ID');return id;}
  private digest(hash:string){if(!/^[0-9a-f]{64}$/.test(hash))throw Error('无效块哈希');return hash;}
  async manifest(userId:string,id:string){this.guard.require();return this.files.read(`${await this.root(userId)}/manifests/${this.id(id)}.bin`);}

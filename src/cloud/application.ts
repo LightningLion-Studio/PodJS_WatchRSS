@@ -1,3 +1,4 @@
+import {cloudAccountIdentity} from './identity';
 import {hostOperation,delay,onNetworkChange} from '@podjs/framework/services';
 import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import {subscribeLibraryMutations} from '../core/library-mutations';
@@ -21,7 +22,7 @@ function start(){
   scheduler=new WatchCloudScheduler({sync:(manual,mode)=>runtime.service.syncNow(manual,mode),now:Date.now,delay:(ms,fn)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return ()=>timer.cancel();},scheduleWorker:()=>host<void>('cloud.schedule',{}),cancelWorker:()=>host<void>('cloud.cancel',{})},guard);
   cleanups.push(connectCloudAccountStatus(()=>cloudGate.allowed&&!disposed?runtime.service.status:undefined),runtime.service.subscribe(notifyCloudAccountStatus));
   let identity='';
-  const account=async()=>{const state=await summaryAccountStore.read(),next=JSON.stringify([state?.userId,state?.backendBaseUrl,state?.entitlement]);if(disposed||next===identity)return;identity=next;runtime.service.reset();scheduler?.accountChanged();};
+  const account=async()=>{const state=await summaryAccountStore.read(),next=cloudAccountIdentity(state);if(disposed||next===identity)return;identity=next;runtime.service.reset();scheduler?.accountChanged();};
   cleanups.push(summaryAccountStore.subscribe(()=>{void account().catch(()=>{});}),subscribeLibraryMutations(()=>scheduler?.trigger()),services.subscribeChannel(e=>{if(e.kind!=='notes')scheduler?.trigger();}),onNetworkChange(()=>scheduler?.trigger()),onLifecycleChange(state=>scheduler?.foreground(state==='active')));
   await account();if(!disposed)scheduler.foreground(lifecycle()==='active');await scheduler.start(true);
  })();void ready.catch(()=>{});

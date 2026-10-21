@@ -52,16 +52,22 @@ export interface CloudClientOptions {
   apikey?: string;
   deviceAccessToken?: string;
   appVersion?: string;
+  libraryEpoch?: string;
+  assertCurrent?:()=>Promise<void>;
+  onUnauthorized?: ()=>Promise<void>;
+  onEpochMismatch?: ()=>Promise<void>;
   refreshToken?: (force:boolean)=>Promise<string>;
 }
 
 export interface CloudMemberState { plan: string; active: boolean; writable: boolean; readable: boolean; quotaBytes: number; usedBytes: number; reservedBytes: number; retentionDays: number | null; readOnlyAt: string | null; deleteAfter: string | null; }
-export interface RegisteredCloudDevice { deviceId: string; platform: string; displayName: string; publicKeySpki: string; keyVersion: number; lastSequence: number; revokedAt: string | null; }
+export interface RegisteredCloudDevice { deviceId: string; platform: string; displayName: string; publicKeySpki: string; keyVersion: number; lastSequence: number; revokedAt: string | null; attestation?:string|null; attestationKeyVersion?:number|null; }
 export interface StoredCloudKeyEnvelope { id: string; recipientType: string; recipientDeviceId: string | null; envelope: CloudKeyEnvelope; }
 export interface CloudKeyEnvelope { algorithm: string; keyVersion: number; wrappedKeyBase64: string; nonceBase64: string; ephemeralPublicKeySpki: string | null; }
-export interface CloudBootstrap { member: CloudMemberState; devices: RegisteredCloudDevice[]; keyEnvelopes: StoredCloudKeyEnvelope[]; }
+export interface KeyCommitment {keyVersion:number;commitment:string;rotationProof:string|null;}
+export interface CloudTrust {libraryEpoch:string;keyVersionFloor:number;keyCommitments:KeyCommitment[];}
+export interface CloudBootstrap extends CloudTrust { member: CloudMemberState; devices: RegisteredCloudDevice[]; keyEnvelopes: StoredCloudKeyEnvelope[]; }
 export interface CloudSnapshotHead { id: string; sourceDeviceId: string; deviceSequence: number; keyVersion: number; manifestSha256: string; manifestSizeBytes: number; parentHeads: Record<string, string>; observedHeads: Record<string, number>; }
-export interface CloudUploadObject { kind: string; sha256: string; sizeBytes: number; objectPath: string; signedUrl: string; token: string; tusEndpoint: string; bucketName: string; }
+export interface CloudUploadObject {transport?:string;uploadUrl?:string;uploadMethod?:string;reservationId?:string; kind: string; sha256: string; sizeBytes: number; objectPath: string; signedUrl: string; token: string; tusEndpoint: string; bucketName: string; }
 export interface CloudSnapshotReservation { snapshotId: string; reservedBytes: number; missingObjects: CloudUploadObject[]; }
 export interface CloudChunkDescriptor { ciphertextSha256: string; ciphertextBytes: number; }
 export interface EncryptedCloudSnapshot { manifest: { snapshotId: string; sourceDeviceId: string; deviceSequence: number; keyVersion: number; parentHeads: Record<string, string>; observedHeads: Record<string, number>; allChunks: CloudChunkDescriptor[] }; encryptedManifest: Uint8Array; }

@@ -9,7 +9,7 @@ test('syncAccount writes through the actual LLM singleton secureStorage adapter 
   mock.module('@podjs/framework/services',()=>({
    secureStorage:{get:async key=>values.get(key),set:async(key,value)=>{writes++;await committed;values.set(key,value);},delete:async key=>values.delete(key)},
    uri:{parse:async value=>{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname};}},
-   hostOperation(){throw Error('unexpected network');},fileChunks:{},
+   hostOperation(method,args){return {result:(async()=>{if(method==='crypto.hash')return{digestBase64:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='};if(method==='file.list')return{entries:[]};if(method==='secure.update')return {};throw Error('unexpected network');})()};},fileChunks:{},
    bytesToBase64:b=>Buffer.from(b).toString('base64'),base64ToBytes:s=>new Uint8Array(Buffer.from(s,'base64'))
   }));
   const {summaryAccountStore}=await import('./src/llm/runtime.ts');
@@ -18,10 +18,10 @@ test('syncAccount writes through the actual LLM singleton secureStorage adapter 
   const handler=createApplicationActionHandler({notes:{},deviceId:async()=>'watch',notesChanged(){},accountStore:summaryAccountStore});
   let resolved=false,notified=0;summaryAccountStore.subscribe(()=>notified++);
   const task=handler(fixture.cases[0].frames[3]).then(reply=>{resolved=true;return reply;});
-  for(let i=0;i<10;i++)await Promise.resolve();
+  for(let i=0;i<100&&writes===0;i++)await Promise.resolve();
   assert.equal(writes,1);assert.equal(resolved,false);assert.equal(notified,0);assert.equal(await summaryAccountStore.read(),null);
   release();const reply=await task;
-  assert.equal(reply.boundUserId,'user-1');assert.equal(notified,1);assert.equal(values.size,1);assert.ok(values.has('state_json'));
+  assert.equal(reply.boundUserId,'user-1');assert.equal(notified,1);assert.equal(values.size,2);assert.ok(values.has('state_json'));
   const account=await summaryAccountStore.read();assert.equal(account.watchDeviceToken,'fixture-access');assert.equal(account.watchRefreshToken,'fixture-refresh');
   await summaryAccountStore.clear();assert.equal(await summaryAccountStore.read(),null);
  `],{cwd:new URL('../..',import.meta.url).pathname,stdout:'pipe',stderr:'pipe'});

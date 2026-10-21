@@ -59,15 +59,8 @@ async function envelope(publicKey:string,user:string,device:string,version:numbe
  const derived=await crypto.hkdf(secret,Buffer.from(await crypto.sha256(utf8Encode(user)),'hex'),utf8Encode(`watchrss/device-envelope/v${version}/${device}`));const sealed=await crypto.encrypt(derived,utf8Encode(`watchrss-account-key:${user}:${version}:${device}`),key);
  return {algorithm:'P-256+HKDF-SHA256+A256GCM',keyVersion:version,wrappedKeyBase64:Buffer.from(sealed.ciphertext).toString('base64'),nonceBase64:Buffer.from(sealed.nonce).toString('base64'),ephemeralPublicKeySpki:(phone.publicKey.export({format:'der',type:'spki'}) as Buffer).toString('base64')};
 }
-test('phone approval, P-256 envelope context, multiple versions, restart and account isolation',async()=>{
- const host=deviceHost(),store=new Store(),manager=new WatchCloudKeyManager(host,store,guard),publicKey=await manager.publicKeySpki('u','w');
- expect(await manager.acceptBootstrap('u','w',[])).toBe('waiting-approval');
- const one=await envelope(publicKey,'u','w',1),two=await envelope(publicKey,'u','w',2);
- await Promise.all([manager.acceptEnvelope('u','w',two),manager.acceptEnvelope('u','w',one)]);
- expect(await manager.currentKeyVersion('u')).toBe(2);expect(await manager.keyVersions('u')).toEqual([1,2]);expect(await manager.accountKey('u',1)).toEqual(key);
- const reopened=new WatchCloudKeyManager(host,store,guard);expect(await reopened.publicKeySpki('u','w')).toBe(publicKey);expect(await reopened.accountKey('u',2)).toEqual(key);expect(await reopened.accountKey('other')).toBeUndefined();
- await expect(manager.acceptEnvelope('other','w',one)).rejects.toThrow();await expect(manager.acceptEnvelope('u','w',{...one,keyVersion:3})).rejects.toThrow();
- expect(await manager.acceptBootstrap('u','w',[{id:'x',recipientType:'device',recipientDeviceId:'other',envelope:{...one,keyVersion:9}}])).toBe('ready');expect(await manager.keyVersions('u')).toEqual([1,2]);
+test('legacy unauthenticated envelope API fails closed',async()=>{
+ const manager=new WatchCloudKeyManager(deviceHost(),new Store(),guard);await expect(manager.acceptEnvelope('u','w',{} as any)).rejects.toThrow('client_upgrade_required');
 });
 test('durable monotonic sequence, separate full/state applied hashes, write failure and account isolation',async()=>{
  const store=new Store(),state=new WatchCloudStateStore(store,'u','w',guard);
@@ -96,7 +89,7 @@ test('release/unknown defaults reject every public side-effect entry before I/O'
 test('watch registration and signed downloads preserve credentials boundary and integrity',async()=>{
  const requests:HttpRequest[]=[],body=utf8Encode('snapshot');let bad=false;
  const client=new WatchCloudClient({async request(r){requests.push(r);return {status:200,headers:{},body:r.url.includes('/register')?utf8Encode('{}'):bad?new Uint8Array():body};}},{baseUrl:'https://fixture.invalid',accessToken:'secret'},crypto,guard);
- await client.registerDevice('w','Watch','spki',1);expect(JSON.parse(utf8Decode(requests[0].body!))).toMatchObject({platform:'watch',capabilities:{rtosProtocolReserved:true}});
+ client.setEpoch('9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff');await client.registerDevice('w','Watch','spki',1);expect(JSON.parse(utf8Decode(requests[0].body!))).toMatchObject({platform:'watch',capabilities:{rtosProtocolReserved:true}});expect(JSON.parse(utf8Decode(requests[0].body!)).capabilities).not.toHaveProperty('rssRecordsVersion');
  expect(await client.download('https://objects.invalid/signed',body.length,await crypto.sha256(body))).toEqual(body);expect(requests[1].headers).toEqual({});bad=true;await expect(client.download('https://objects.invalid/signed',body.length,await crypto.sha256(body))).rejects.toThrow('校验');
 });
 test('TUS 409 reconciles offset and cannot falsely mark partial upload complete',async()=>{
@@ -104,4 +97,23 @@ test('TUS 409 reconciles offset and cannot falsely mark partial upload complete'
  const source=new Uint8Array([1,2]),hash=await crypto.sha256(source);
  await new SupabaseTusUploader({async request(r){requests.push(r);return {...responses.shift()!,body:new Uint8Array()};}},crypto,{guard}).upload({kind:'chunk',sha256:hash,sizeBytes:2,objectPath:'x',signedUrl:'',token:'sig',tusEndpoint:'https://fixture.invalid/tus',bucketName:'b'},source);
  expect(requests.map(r=>r.method)).toEqual(['POST','HEAD','PATCH','HEAD','PATCH']);expect(requests.at(-1)!.body).toEqual(new Uint8Array([2]));
+});
+
+test('authenticated P-256 device envelope batch validates native context, restart and isolation',async()=>{
+ const {createHmac}=await import('node:crypto');const {commit,rotation,attest}=await import('../../src/cloud/v2');
+ const hmac=async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex');const host={...deviceHost(),hmac},store=new Store();
+ const atomic={get:store.get.bind(store),set:store.set.bind(store),update:async(values:Record<string,string|null>)=>{for(const [k,v] of Object.entries(values))if(v===null)store.values.delete(k);else store.values.set(k,v);}};
+ const manager=new WatchCloudKeyManager(host,atomic,guard,'https://backend.invalid'),publicKey=await manager.publicKeySpki('u','w');
+ const epoch='9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff',c={...crypto,hmac},one=await envelope(publicKey,'u','w',1),two=await envelope(publicKey,'u','w',2),first=await commit(c,key,'u',epoch,1),second=await commit(c,key,'u',epoch,2);
+ const trust={libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:first,rotationProof:null},{keyVersion:2,commitment:second,rotationProof:await rotation(c,key,'u',epoch,2,second)}]},attestation={keyVersion:2,mac:await attest(c,key,'u',epoch,'w',publicKey)};
+ expect(await manager.acceptDelivery('u','w',[two,one],trust,attestation)).toBe('ready');expect(await manager.accountKey('u',2)).toEqual(key);
+ const reopened=new WatchCloudKeyManager(host,atomic,guard,'https://backend.invalid');expect(await reopened.accountKey('u')).toBeUndefined();await reopened.acceptBootstrap('u','w',[],trust,attestation);expect(await reopened.accountKey('u',1)).toEqual(key);expect(await reopened.accountKey('other')).toBeUndefined();
+ await expect(reopened.acceptDelivery('other','w',[one,two],trust,attestation)).rejects.toThrow();
+});
+
+test('R4 deterministic manifest-v3 vector writes exact bytes, reads v2/v3 and binds snapshotId in HKDF',async()=>{
+ const vector=(await import('./fixtures/manifest-v3.json')).default,key=new Uint8Array(Buffer.from(vector.accountKeyHex,'hex'));
+ const fixed:SnapshotCrypto={...crypto,random:async()=>new Uint8Array(Buffer.from(vector.saltHex,'hex')),encrypt:async(k,aad,p)=>{const nonce=Buffer.from(vector.nonceHex,'hex'),c=createCipheriv('aes-256-gcm',k,nonce);c.setAAD(aad);return{nonce:new Uint8Array(nonce),ciphertext:new Uint8Array(Buffer.concat([c.update(p),c.final(),c.getAuthTag()]))};}};
+ const codec=new WatchCloudCodec(fixed,guard),m=vector.manifest,snapshot=await codec.create({accountKey:key,keyVersion:m.keyVersion,sourceDeviceId:m.sourceDeviceId,sequence:m.deviceSequence,snapshotId:m.snapshotId,createdAtMillis:m.createdAtMillis,objects:[],parentHeads:{},observedHeads:{}});
+ expect(Buffer.from(snapshot.encryptedManifest).toString('hex')).toBe(vector.encryptedManifestHex);expect(await codec.decryptManifest(key,m.snapshotId,snapshot.encryptedManifest)).toEqual({...m,format:'watchrss-cloud-snapshot' as const,schemaVersion:2 as const});await expect(codec.decryptManifest(key,'00000000-0000-4000-8000-000000000004',snapshot.encryptedManifest)).rejects.toThrow();
 });

@@ -49,7 +49,7 @@ for(const failure of ['storage','invalid','received-only'])test(`account frame $
  const request=structuredClone(phoneFixture.cases[0]!.frames[3]) as JsonObject;
  if(failure==='invalid')(request.account as JsonObject).watchAccessToken=(request.account as JsonObject).watchDeviceToken='';
  let writes=0,events=0;
- const store=new WatchAccountStore({get:()=>null,set:()=>{if(failure==='storage')throw Error('secure unavailable');writes++;},remove:()=>{}});
+ const store=new WatchAccountStore({get:()=>null,set:(key)=>{if(failure==='storage')throw Error('secure unavailable');if(key==='state_json')writes++;},remove:()=>{}});
  const handler=createApplicationActionHandler({notes:{} as never,deviceId:async()=>'watch-fixture',notesChanged:()=>{},accountStore:store,accountUriParse:parseJava,accountTelemetry:{recordSyncAccount:()=>{events++;},backlogCount:()=>1}});
  const p=phone([request,{action:'ack',phase:'received',success:true,applied:false}]),r=repository();
  const result=await new LibrarySyncSession(p.connection,r.repo,{handleAction:handler}).run();

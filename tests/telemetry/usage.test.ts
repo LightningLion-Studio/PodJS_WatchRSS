@@ -54,7 +54,7 @@ test('a capture during upload schedules exactly one follow-up, carrying the newe
 });
 test('expired access token refresh completes before rollup, and rejected refresh never sends rollup',async()=>{
  for(const refreshStatus of [200,401,503]){
-  let raw:string|null=null;const disk=storage(),store=new WatchAccountStore({get:()=>raw,set:(_,v)=>{raw=v;},remove:()=>{raw=null;}});
+  const stateValues=new Map<string,string>();const disk=storage(),store=new WatchAccountStore({get:k=>stateValues.get(k)??null,set:(k,v)=>{stateValues.set(k,v);},remove:k=>{stateValues.delete(k);}});
   await store.save({...account,backendBaseUrl:'https://telemetry.invalid',tokenExpiresAtMillis:0});
   const paths:string[]=[],timers:Array<()=>void>=[];
   const transport:HttpTransport={async request(r){expect(r.url.startsWith('https://telemetry.invalid/')).toBe(true);paths.push(r.url);if(r.url.endsWith('/refresh')){expect(JSON.parse(utf8Decode(r.body!))).toEqual({refreshToken:'fixture-refresh'});return {status:refreshStatus,headers:{},body:utf8Encode(JSON.stringify({watchAccessToken:'rotated',accessTokenExpiresAt:9e15,watchRefreshToken:'rotated-refresh',refreshTokenExpiresAt:9e15,entitlement:{}}))};}expect(r.headers?.Authorization).toBe('Bearer rotated');return {status:200,headers:{},body:new Uint8Array()};}};

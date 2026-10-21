@@ -74,10 +74,11 @@ export async function parseAccountSyncRequest(request: JsonObject, parseJava?:Ac
 }
 
 /** A successful response means the secure-store write has completed. */
-export async function syncAccount(request: JsonObject, store: Pick<WatchAccountStore,'save'>,
+export async function syncAccount(request: JsonObject, store: Pick<WatchAccountStore,'save'>&Partial<Pick<WatchAccountStore,'read'>>,
   deviceId: () => Promise<string>, parseJava?:AccountUriParse, onSaved?: () => void, telemetry?:AccountSyncTelemetry): Promise<JsonObject> {
   const localDeviceId = await deviceId();
   const state = await parseAccountSyncRequest(request,parseJava);
+  const previous=await store.read?.();if(previous&&previous.userId!==state.userId)throw Error('account_switch_rejected: 手表已绑定其他账号，请先退出原账号');
   await store.save(state);
   await telemetry?.recordSyncAccount();
   onSaved?.();

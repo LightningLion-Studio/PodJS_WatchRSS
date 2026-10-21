@@ -22,8 +22,8 @@ const request = {
 };
 
 test('phone syncAccount commits secure storage before acknowledging and exposes no token in its reply', async () => {
-  let stored:string|null=null,notifications=0;
-  const store=new WatchAccountStore({get:()=>stored,set:(_,value)=>{stored=value;},remove:()=>{stored=null;}});
+  const values=new Map<string,string>();let notifications=0;
+  const store=new WatchAccountStore({get:key=>values.get(key)??null,set:(key,value)=>{values.set(key,value);},remove:key=>{values.delete(key);}});
   store.subscribe(()=>notifications++);
   const handle=createApplicationActionHandler({notes:{} as never,deviceId:async()=> 'watch-device',
     notesChanged:()=>{},accountStore:store,accountUriParse:parseJava});
@@ -38,8 +38,8 @@ test('phone syncAccount commits secure storage before acknowledging and exposes 
 });
 
 test('invalid account frames preserve the previous binding and never acknowledge success', async () => {
-  let stored:string|null=null,writes=0,notifications=0;
-  const store=new WatchAccountStore({get:()=>stored,set:(_,value)=>{writes++;stored=value;},remove:()=>{stored=null;}});
+  const values=new Map<string,string>();let writes=0,notifications=0;
+  const store=new WatchAccountStore({get:key=>values.get(key)??null,set:(key,value)=>{if(key==='state_json')writes++;values.set(key,value);},remove:key=>{values.delete(key);}});
   await store.save({userId:'old-user',phoneMasked:'',installId:'',watchDeviceToken:'old',
     tokenExpiresAtMillis:1,watchRefreshToken:'',refreshTokenExpiresAtMillis:0,backendBaseUrl:'https://old.example',
     posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},
@@ -64,16 +64,16 @@ test('invalid account frames preserve the previous binding and never acknowledge
 });
 
 test('write failure returns failure, keeps old account and does not notify observers', async () => {
-  let stored:string|null=null,fail=false,notifications=0;
-  const store=new WatchAccountStore({get:()=>stored,set:(_,value)=>{if(fail)throw Error('secure storage unavailable');stored=value;},remove:()=>{stored=null;}});
-  await store.save({...request.account,userId:'old-user',phoneMasked:'',installId:'',watchDeviceToken:'old',
-    tokenExpiresAtMillis:1,watchRefreshToken:'',refreshTokenExpiresAtMillis:0,backendBaseUrl:'https://old.example',
+  const values=new Map<string,string>();let fail=false,notifications=0;
+  const store=new WatchAccountStore({get:key=>values.get(key)??null,set:(key,value)=>{if(fail)throw Error('secure storage unavailable');values.set(key,value);},remove:key=>{values.delete(key);}});
+  await store.save({...request.account,userId:'user-1',phoneMasked:'',installId:'',watchDeviceToken:'old',
+    tokenExpiresAtMillis:1,watchRefreshToken:'',refreshTokenExpiresAtMillis:0,backendBaseUrl:'https://api.example.com',
     posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},
     telemetryConfig:{anonymousEnabled:true,diagnosticsEnabled:false,sampleRate:1},updatedAtMillis:1});
   store.subscribe(()=>notifications++);fail=true;
   const handle=createApplicationActionHandler({notes:{} as never,deviceId:async()=> 'watch-device',
     notesChanged:()=>{},accountStore:store,accountUriParse:parseJava});
   expect(await handle(request)).toEqual({success:false,message:'secure storage unavailable'});
-  expect((await store.read())?.userId).toBe('old-user');
+  expect((await store.read())?.userId).toBe('user-1');
   expect(notifications).toBe(0);
 });

@@ -1,3 +1,5 @@
+import {createHmac} from 'node:crypto';
+import {commit,attest} from '../../src/cloud/v2';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import handler from '../../src/cloud/background';
@@ -19,6 +21,8 @@ test('release and debug workers require explicit persisted consent, then skip un
 test('release headless handler uses actual SQLite/codec/coordinator: registers and uploads with durable state, no UI or real HTTP',async()=>{
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
+ const epoch='9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff',v2={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
+ secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode(JSON.stringify(['https://backend.invalid','user'])))+'.'+epoch+'.1',b64(key));
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
  const resultFile=async(data:Uint8Array,directory='cloud-crypto')=>{const path=`${directory}/.pod-write-${++id}.part`;files.set(path,data);return {path,size:data.length,sha256:await crypto.sha256(data)};};
  const request=async(method:string,a:any):Promise<any>=>{
@@ -30,6 +34,8 @@ test('release headless handler uses actual SQLite/codec/coordinator: registers a
    case 'discovery.networkSnapshot':return {active:true,validated:true,wifi:true,metered:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
    case 'secure.set':secure.set(a.key,a.value);return {};
+   case 'secure.update':for(const [k,v] of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {};
+   case 'file.list':return {entries:[]};
    case 'secure.delete':secure.delete(a.key);return {};
    case 'file.createTemp':return resultFile(new Uint8Array(),a.directory);
    case 'file.write':{const old=a.append?files.get(a.path)!:new Uint8Array(),part=unb64(a.dataBase64);if(a.append)expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
@@ -43,6 +49,7 @@ test('release headless handler uses actual SQLite/codec/coordinator: registers a
    case 'file.gzip':return resultFile(await crypto.gzip(files.get(a.path)!));
    case 'file.gunzip':return resultFile(await crypto.gunzip(files.get(a.path)!,a.maxOutputBytes));
    case 'crypto.random':return {bytesBase64:b64(await crypto.random(a.bytes))};
+   case 'crypto.hmacSha256':return {digestBase64:createHmac('sha256',unb64(a.keyBase64)).update(unb64(a.dataBase64)).digest('base64')};
    case 'crypto.hash':return {digestBase64:Buffer.from(await crypto.sha256(unb64(a.dataBase64)),'hex').toString('base64')};
    case 'crypto.ecdhPublicKey':return {publicKeySpki:'fixture-spki'};
    case 'crypto.hkdfSha256':return {keyBase64:b64(await crypto.hkdf(unb64(a.inputBase64),unb64(a.saltBase64),unb64(a.infoBase64)))};
@@ -53,7 +60,7 @@ test('release headless handler uses actual SQLite/codec/coordinator: registers a
    case 'sql.transaction':return sql.transaction(()=>{const changes=a.statements.map((s:any)=>{sql.query(s.sql).run(...(s.params??[]));return (sql.query('SELECT changes() AS n').get() as any).n;});return a.reportChanges?changes:null;})();
    case 'http.download':{
     const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');
-    if(a.url.endsWith('/bootstrap'))response={member:{plan:'member',active:true,readable:true,writable:true,quotaBytes:1e9},devices:[],keyEnvelopes:[]};
+    if(a.url.endsWith('/bootstrap'))response={member:{plan:'member',active:true,readable:true,writable:true,quotaBytes:1e9},libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],devices:[{deviceId:(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,publicKeySpki:'fixture-spki',attestationKeyVersion:1,attestation:await attest(v2,key,'user',epoch,(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,'fixture-spki')}],keyEnvelopes:[]};
     else if(a.url.endsWith('/heads'))response={heads:[]};
     else if(a.url.endsWith('/reserve')){reserved=j;response={snapshotId:j.snapshotId,reservedBytes:0,missingObjects:[]};}
     else if(a.url.endsWith('/complete'))expect(j.snapshotId).toBe(reserved.snapshotId);

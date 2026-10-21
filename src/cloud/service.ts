@@ -1,22 +1,24 @@
+import {canonicalSpki} from './v2';
 import type {WatchCloudClient} from './client';
 import type {WatchCloudCodec,CloudManifest} from './codec';
 import type {WatchCloudKeyManager} from './keys';
 import type {WatchCloudCache} from './cache';
 import {cloudMergeNeeded,type WatchCloudStateStore} from './state';
-import type {SupabaseTusUploader} from './tus';
 import type {WatchCloudLibraryAdapter} from './library';
-import {utf8Encode,type CloudMemberState,type CloudSnapshotHead} from './types';
+import {utf8Encode,type CloudUploadObject,type CloudMemberState,type CloudSnapshotHead} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
 export interface WatchCloudStatus {phase:WatchCloudPhase;message:string;usedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState}
 export interface CloudSession {
  userId:string;deviceId:string;displayName:string;
- client:Pick<WatchCloudClient,'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
- keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'currentKeyVersion'|'acceptBootstrap'|'accountKey'>;
- codec:WatchCloudCodec;cache:WatchCloudCache;state:WatchCloudStateStore;uploader:Pick<SupabaseTusUploader,'upload'>;
+ client:Pick<WatchCloudClient,'setEpoch'|'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
+ keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'currentKeyVersion'|'acceptBootstrap'|'accountKey'>&Partial<Pick<WatchCloudKeyManager,'prepareLegacyUpgrade'>>;
+ codec:WatchCloudCodec;cache:WatchCloudCache;state:WatchCloudStateStore;uploader:{upload(target:CloudUploadObject,bytes:Uint8Array):Promise<void>};
  library:Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
  /** Account identity/revocation must be rechecked after asynchronous IO. */
  assertCurrent():Promise<void>;
+ assertUpload?():Promise<void>;
+ invalidate?():Promise<void>;
 }
 export interface CloudSyncPorts {
  open():Promise<CloudSession|undefined>;
@@ -38,12 +40,13 @@ export class WatchCloudSyncService {
  private emit(){for(const fn of this.listeners)try{fn();}catch{}}
  private set(phase:WatchCloudPhase,message:string,member?:CloudMemberState){this.value={...this.value,phase,message,...(member?{member,usedBytes:member.usedBytes,quotaBytes:member.quotaBytes}:{}),...(phase==='complete'?{lastCompletedAt:(this.ports.now??Date.now)()}:{} )};this.emit();}
  syncNow(manual=false,mode:'all'|'recent128'='recent128'):Promise<boolean>{
-  this.guard.require();const run=this.tail.then(()=>this.ports.exclusive(()=>this.run(manual,mode))).catch(()=>{this.set('error','云同步失败，请稍后重试');return false;});this.tail=run;return run;
+  this.guard.require();const run=this.tail.then(()=>this.ports.exclusive(()=>this.run(manual,mode))).catch(error=>{const reason=String(error);if(reason.includes('client_upgrade_required'))this.set('error','请升级腕上RSS以继续云同步');else if(reason.includes('library_epoch_mismatch'))this.set('waiting-approval','资料库已重置，请重新批准');else if(reason.includes('rotation_proof_invalid')||reason.includes('device_attestation_invalid'))this.set('waiting-approval','密钥验证失败，请重新批准');else if(reason.includes('device_key_conflict'))this.set('waiting-approval','本机云设备公钥冲突，请重新登记本机');else if(reason.includes('library_owner_mismatch'))this.set('error','本机资料属于其他账号，请先选择清空或合并');else this.set('error','云同步失败，请稍后重试');return false;});this.tail=run;return run;
  }
  private async manifest(s:CloudSession,h:CloudSnapshotHead,bytes:Uint8Array){
   headValid(h);if(bytes.length!==h.manifestSizeBytes||await this.ports.hash(bytes)!==h.manifestSha256)throw Error('云 manifest 哈希或长度不符');
   const key=await s.keys.accountKey(s.userId,h.keyVersion);if(!key)throw Error('缺少账号密钥，请在手机端重新批准');
   try{const m=await s.codec.decryptManifest(key,h.id,bytes);
+   if(h.sourceDeviceId.startsWith('reader-migration-')&&m.objects.some(o=>!o.name.startsWith('reader/')))throw Error('无效阅读器迁移对象');
    if(m.sourceDeviceId!==h.sourceDeviceId||m.deviceSequence!==h.deviceSequence||m.keyVersion!==h.keyVersion||!sameRecord(m.parentHeads,h.parentHeads)||!sameRecord(m.observedHeads,h.observedHeads))throw Error('云 manifest 身份不符');return m;
   }finally{key.fill(0);}
  }
@@ -53,17 +56,26 @@ export class WatchCloudSyncService {
   const full=manual||(network.wifi&&!network.metered);
   const s=await this.ports.open();if(!s){this.reset();return false;}
   const current=async()=>{this.guard.require();await s.assertCurrent();};await current();
-  this.set('registering','正在登记手表');const publicKey=await s.keys.publicKeySpki(s.userId,s.deviceId);
-  await s.client.registerDevice(s.deviceId,s.displayName,publicKey,await s.keys.currentKeyVersion(s.userId));
+  this.set('registering','正在核对云空间');
   let bootstrap=await s.client.bootstrap();await current();
-  this.set('registering','正在核对云空间',bootstrap.member);
-  if(!bootstrap.member.readable&&!bootstrap.member.writable){this.set('idle','会员云空间不可用',bootstrap.member);return false;}
-  if(bootstrap.devices.some(d=>d.deviceId===s.deviceId&&d.revokedAt))throw Error('云设备已撤销');
-  if(await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes)==='waiting-approval'){this.set('waiting-approval','请在手机会员云空间中批准此手表',bootstrap.member);return false;}
-  await current();await s.client.registerDevice(s.deviceId,s.displayName,publicKey,await s.keys.currentKeyVersion(s.userId));
-  bootstrap=await s.client.bootstrap();await current();await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes);
-  const member=bootstrap.member;if(!member.readable){this.set('idle','云空间暂不可读取',member);return false;}
-  if(bootstrap.devices.some(d=>d.deviceId===s.deviceId&&d.revokedAt))throw Error('云设备已撤销');
+  const changedEpoch=await s.state.acceptEpoch(bootstrap.libraryEpoch);if(changedEpoch){await s.invalidate?.();this.set('waiting-approval','资料库已重置，请重新批准',bootstrap.member);return false;}
+  s.client.setEpoch(bootstrap.libraryEpoch);
+  let device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
+  if(device?.revokedAt){await s.invalidate?.();this.set('waiting-approval','云设备已撤销，请重新批准',bootstrap.member);return false;}
+  const publicKey=await s.keys.publicKeySpki(s.userId,s.deviceId);
+  // Reading cloud state does not depend on registration or subscription entitlement.
+  if(!device){await current();await s.client.registerDevice(s.deviceId,s.displayName,publicKey,Math.max(bootstrap.keyVersionFloor+1,1));}
+  const upgrade=await s.keys.prepareLegacyUpgrade?.(s.userId,s.deviceId,bootstrap);
+  if(upgrade&&!device?.attestation){
+   if(device&&canonicalSpki(device.publicKeySpki)!==canonicalSpki(publicKey))throw Error('device_key_conflict');
+   await s.client.registerDevice(s.deviceId,s.displayName,publicKey,upgrade.keyVersion,upgrade.attestation);
+   const epoch=bootstrap.libraryEpoch;bootstrap=await s.client.bootstrap();await current();if(bootstrap.libraryEpoch!==epoch){await s.invalidate?.();throw Error('library_epoch_mismatch');}device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
+  }
+  let ready:string;
+  try{ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,device?.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);}
+  catch(error){if(String(error).includes('library_epoch_mismatch'))await s.invalidate?.();throw error;}
+  if(ready==='waiting-approval'){this.set('waiting-approval','请在已登录设备上批准此手表',bootstrap.member);return false;}
+  await current();const member=bootstrap.member;
   const heads=await s.client.snapshotHeads();heads.forEach(headValid);
   if(new Set(heads.map(h=>h.sourceDeviceId)).size!==heads.length)throw Error('重复云设备 head');
   let changed=false;
@@ -97,7 +109,7 @@ export class WatchCloudSyncService {
    await current();try{const inventory=await s.client.resolveRssSource(source.url,mode);await current();changed=(await s.library.mergeInventory(inventory)>0)||changed;}catch{inventoryFailures++;}
   }}
   if(changed)this.ports.onChanged?.();await current();
-  if(!member.writable){this.set('complete','云资料已恢复；云空间只读',member);return true;}
+  await s.assertUpload?.();
   const version=await s.keys.currentKeyVersion(s.userId),payload=await s.library.exportPayloads(full);
   const hash=async(prefix:string,parts:Uint8Array[])=>{const header=utf8Encode(prefix);const out=new Uint8Array(header.length+parts.reduce((n,b)=>n+b.length,0));out.set(header);let at=header.length;for(const b of parts){out.set(b,at);at+=b.length;}return this.ports.hash(out);};
   const stateHash=await hash(`keyVersion:${version};state;`,[payload.state]);
@@ -118,7 +130,7 @@ export class WatchCloudSyncService {
    try{
     const snapshot=await s.codec.create({accountKey:key,keyVersion:version,sourceDeviceId:s.deviceId,sequence:await s.state.nextSequence(Math.max(bootstrap.devices.find(d=>d.deviceId===s.deviceId)?.lastSequence??0,...fresh.filter(h=>h.sourceDeviceId===s.deviceId).map(h=>h.deviceSequence))),snapshotId:await this.ports.uuid(),createdAtMillis:(this.ports.now??Date.now)(),objects:[{name:'rss-state.json',bytes:payload.state},...(payload.relay?[{name:'library-sync.json',bytes:payload.relay}]:[])],parentHeads:Object.fromEntries(fresh.map(h=>[h.sourceDeviceId,h.id])),observedHeads:Object.fromEntries(await Promise.all(fresh.map(async h=>[h.sourceDeviceId,Math.min(h.deviceSequence,await s.state.applied(h.sourceDeviceId,full))]))),previous,carried:full?[]:previous?.objects.filter(o=>o.name==='library-sync.json')??[]});
     for(const [hash,bytes] of snapshot.newChunks)await s.cache.storeChunk(s.userId,hash,bytes);
-    await current();this.set('uploading','正在上传手表状态',member);
+    await current();await s.assertUpload?.();this.set('uploading','正在上传手表状态',member);
     const reservation=await s.client.reserveSnapshot(snapshot,30);if(reservation.snapshotId!==snapshot.manifest.snapshotId)throw Error('云预留 ID 不匹配');
     const allowed=new Map(snapshot.manifest.allChunks.map(c=>[c.ciphertextSha256,c.ciphertextBytes]));
     const manifestHash=await this.ports.hash(snapshot.encryptedManifest);
@@ -126,7 +138,7 @@ export class WatchCloudSyncService {
      await current();if(target.kind==='manifest'?(target.sha256!==manifestHash||target.sizeBytes!==snapshot.encryptedManifest.length):(target.kind!=='chunk'||allowed.get(target.sha256)!==target.sizeBytes))throw Error('无效上传目标');
      const bytes=target.kind==='manifest'?snapshot.encryptedManifest:await s.cache.chunk(s.userId,target.sha256);if(!bytes)throw Error('待上传中继块缺失');await s.uploader.upload(target,bytes);
     }
-    await current();await s.client.completeSnapshot(snapshot.manifest.snapshotId,[...allowed.keys()]);
+    await current();await s.assertUpload?.();await s.client.completeSnapshot(snapshot.manifest.snapshotId,[...allowed.keys()]);
     await current();await s.cache.storeManifest(s.userId,snapshot.manifest.snapshotId,snapshot.encryptedManifest,true);
     await s.state.markApplied(s.deviceId,snapshot.manifest.deviceSequence,false);await s.state.markUploaded(stateHash,false);
     if(full){await s.state.markApplied(s.deviceId,snapshot.manifest.deviceSequence,true);await s.state.markUploaded(contentHash,true);}
