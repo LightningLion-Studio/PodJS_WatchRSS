@@ -113,7 +113,7 @@ test('Home crown scroll reaches disclosure instead of the inactive Home list',as
  expect(dialog.scrolls.length).toBe(1);expect(home.scrolls).toEqual([]);
 });
 
-for(const platform of ['bili','douyin'] as const)test(`${platform}: initial then platform, fresh instance confirms again, child return stays confirmed`,async()=>{
+for(const platform of ['bili','douyin'] as const)test(`${platform}: initial then platform, confirmation persists across fresh instances and child returns`,async()=>{
  await mount(undefined,[{page:'home'},{page:platform,[platform+'Route']:{name:'entry'}}]);
  expect(button('我已了解')).toBeDefined();expect(button('知道了，继续')).toBeUndefined();
  for(const paragraph of initialDisclosure.paragraphs)expect(text()).toContain(paragraph);
@@ -132,5 +132,5 @@ for(const platform of ['bili','douyin'] as const)test(`${platform}: initial then
  expect(state()).toEqual(['home',platform]);expect(button('知道了，继续')).toBeUndefined();
  events.push({t:'back'});for(let n=0;n<30;n++)await tick();expect(state()).toEqual(['home']);
  confirm(platform+'，');await settle();
- expect(button('我已了解')).toBeUndefined();expect(button('知道了，继续')).toBeDefined();
+ expect(button('我已了解')).toBeUndefined();expect(button('知道了，继续')).toBeUndefined();expect(currentMedia()).toBeDefined();
 });

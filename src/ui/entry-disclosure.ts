@@ -6,7 +6,7 @@ import type {DisclosureStorage} from '@podjs/framework/disclosure';
 export type DisclosureCopy={title:string;paragraphs:readonly string[];confirm:string};
 export interface EntryDisclosure {pending(homeNoticeVisible?:boolean):DisclosureCopy|undefined;confirm():void}
 
-/** One disclosure session per owner (route entry), like native per-Activity `remember`. */
+/** Retain dialog state per route; confirmed platform notices persist across entries. */
 const sessions=new WeakMap<object,EntryDisclosure>();
 export function entryDisclosure(owner:object,target:PlatformNoticeTarget,storage:DisclosureStorage=kv):EntryDisclosure {
  const existing=sessions.get(owner);

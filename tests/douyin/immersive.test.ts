@@ -15,7 +15,7 @@ const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:
 const wire=(id:string)=>({aweme_id:id,desc:id,video:{play_addr:{url_list:[`https://video/${id}`]}}});
 function fixture(){
   const store=new Store();store.values.set("douyin.cookie","sessionid=test");let now=1000,calls=0,fail=false;
-  const make=()=>new DouyinClient({secureStorage:store,now:()=>now,signer:{sign:()=>"test"},transport:{async request(request){calls++;return {status:fail?403:200,headers:{},body:utf8Encode(JSON.stringify(request.method==="POST"?{aweme_list:[wire("1"),wire("2"),wire("3")],cursor:"tail",has_more:1}:{aweme_detail:wire(new URL(request.url).searchParams.get("aweme_id")!)}))};}}});
+  const make=()=>new DouyinClient({secureStorage:store,now:()=>now,signer:{sign:()=>"test"},transport:{async request(request){calls++;return {status:fail?503:200,headers:{},body:utf8Encode(JSON.stringify(request.method==="POST"?{aweme_list:[wire("1"),wire("2"),wire("3")],cursor:"tail",has_more:1}:{aweme_detail:wire(new URL(request.url).searchParams.get("aweme_id")!)}))};}}});
   return {store,make,advance:()=>now+=300_000,calls:()=>calls,fail:()=>fail=true};
 }
 

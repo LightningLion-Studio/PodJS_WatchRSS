@@ -17,6 +17,7 @@ mock.module('@podjs/framework/services',()=>({discovery:{requestPermission:async
 mock.module('../src/ui/ScrollEntries.tsx',()=>({ScrollEntries:(props:Node['props'])=>{const children=createMemo(()=>props.entries.map((entry:ScrollEntry)=>entry.render()));return element('ScrollEntries',{...props,get entries(){return props.entries;},children});}}));
 mock.module('../src/ui/WatchProgressIndicator.tsx',()=>({WatchProgressIndicator:(props:Node['props'])=>element('Progress',props)}));
 mock.module('../src/ui/DownloadPhoneAppDialog.tsx',()=>({DownloadPhoneAppDialog:()=>null}));
+mock.module('../src/ui/MiniProgramPairingPanel.tsx',()=>({MiniProgramPairingPanel:(props:Node['props'])=>element('PairingPanel',props)}));
 const {PhoneConnectionScreen}=await import('../src/ui/PhoneConnectionScreen.tsx');
 const {BluetoothConnectionScreen}=await import('../src/ui/BluetoothConnectionScreen.tsx');
 const {PhoneConnectionUnavailableScreen}=await import('../src/ui/PhoneConnectionUnavailableScreen.tsx');
@@ -63,9 +64,22 @@ test('nearby discovery permission requires an active explicit UI action and repo
  nearby=true;discoveryRequests=0;discoveryPermission='granted';const errors:string[]=[];const [active,setActive]=createSignal(true);
  const mountPhone=()=>createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active,onError:e=>errors.push(e),ref:()=>{}});});
  const root=mountPhone();expect(discoveryRequests).toBe(0);
+ expect(nodes(root).some(n=>n.props.accessibilityLabel==='启用附近手机发现')).toBe(false);
+ nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();
  const button=nodes(root).find(n=>n.props.accessibilityLabel==='启用附近手机发现')!;expect(button).toBeDefined();
  button.props.onPress();await settle();expect(discoveryRequests).toBe(1);expect(errors).toEqual([]);
  discoveryPermission='denied';button.props.onPress();await settle();expect(discoveryRequests).toBe(2);expect(errors).toEqual(['请允许附近设备发现权限后重试']);
  setActive(false);button.props.onPress();await settle();expect(discoveryRequests).toBe(2);
- nearby=false;expect(nodes(mountPhone()).some(n=>n.props.accessibilityLabel==='启用附近手机发现')).toBe(false);nearby=true;
+ setActive(true);nearby=false;const plain=mountPhone();nodes(plain).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();expect(nodes(plain).some(n=>n.props.accessibilityLabel==='启用附近手机发现')).toBe(false);nearby=true;
+});
+
+test('landing starts nothing by itself; scan opens the pairing page and the download code stays folded away',async()=>{
+ nearby=true;const [active]=createSignal(true);
+ const root=createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active,onError:()=>{},ref:()=>{}});});
+ expect(nodes(root).some(n=>n.kind==='PairingPanel')).toBe(false);
+ expect(nodes(root).some(n=>n.props.accessibilityLabel==='下载手机端App')).toBe(false);
+ nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();
+ expect(nodes(root).some(n=>n.props.accessibilityLabel==='下载手机端App')).toBe(true);
+ nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('微信扫码连接'))!.props.onPress();
+ expect(nodes(root).some(n=>n.kind==='PairingPanel')).toBe(true);
 });

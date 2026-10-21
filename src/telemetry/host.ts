@@ -26,7 +26,7 @@ const transport:HttpTransport={async request(request){
 let deviceId:(()=>Promise<string>)|undefined;
 export function setTelemetryDeviceId(provider:()=>Promise<string>){deviceId=provider;}
 let identityPromise:Promise<string>|undefined;
-async function installationId(){
+export async function installationId(){
   const existing=kv.get<string>('watchrss.telemetry.install-id');if(existing?.trim())return existing;
   return identityPromise??=(async()=>{
     const bytes=base64ToBytes((await hostOperation<{bytesBase64:string}>('crypto.random',{bytes:16}).result).bytesBase64);

@@ -27,12 +27,16 @@ export function createPlatformNoticeRoute(storage:DisclosureStorage,target:Platf
  const platform:ThirdPartyPlatform|undefined=target.page==='bili'||target.page==='video'&&target.platform==='bili'?'哔哩哔哩':target.page==='douyin'||target.page==='video'&&target.platform==='douyin'?'抖音':undefined;
  const entry=(target.page==='bili'||target.page==='douyin')&&target.name==='entry';
  const initial=entry||target.page==='home'||target.page==='oobe';
- const session=initial?new DisclosureSession(storage,INITIAL_DISCLOSURE_KEY,entry):undefined;
+ const platformKey=entry?`watchrss.transparency.${target.page}_disclosure_v1`:undefined;
+ const session=initial?new DisclosureSession(storage,INITIAL_DISCLOSURE_KEY,entry&&storage.get<boolean>(platformKey!)!==true):undefined;
  const notice=platform?platformNotice(platform,true):undefined;
  const notices=target.page==='account-status'?[platformNotice('哔哩哔哩',true),platformNotice('抖音',true)]:notice?[notice]:[];
  return {kind:'platform-notice' as const,target,notice,notices,
   scope:(target.page==='bili'||target.page==='douyin')&&target.name==='channel-info'?platformScope:undefined,
   access:target.page==='account-status'?accessBoundary:undefined,
   pending(homeNoticeVisible=false){const pending=session?.pending(target.page==='home'&&homeNoticeVisible);return pending==='initial'?initialDisclosure:pending==='platform'&&platform?platformDisclosure(platform):undefined;},
-  acknowledge(){session?.acknowledge();},dismiss(){return false;}};
+  acknowledge(){
+   if(session?.pending()==='platform'&&platformKey)storage.set(platformKey,true);
+   session?.acknowledge();
+  },dismiss(){return false;}};
 }

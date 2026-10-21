@@ -1,0 +1,110 @@
+import {miniProgramPairingHostPorts} from './mini-program-pairing-host';
+import type {Scroller} from '@pocketjs/framework/kinetics';
+import {createEffect,createMemo,createSignal,onCleanup} from 'solid-js';
+import {Image,Text,View} from '@pocketjs/framework/components';
+import {getOps} from '@pocketjs/framework/host';
+import {delay} from '@podjs/framework/services';
+import {getDisplayMetrics} from '@podjs/framework/watch';
+import {QRCode as FrameworkQRCode,qrPixels} from '@podjs/framework/qr';
+import {chunkLines} from './round-rows.tsx';
+import {ScrollEntries,type ScrollEntry} from './ScrollEntries.tsx';
+import {PHONE_PAGE,phonePageText,type PhoneTextKind} from './phone-connection-layout.ts';
+import {WatchProgressIndicator} from './WatchProgressIndicator.tsx';
+import {MiniProgramPairing,PAIRING_STEPS,isLivePairing,pairingCountdown,pairingDoneDetail,pairingDoneTitle,pairingScanHint,pairingStartingLabel,type PairingPorts,type PairingState,type PairingTransport} from './mini-program-pairing.ts';
+
+/** White tile edge; corners stay inside the round viewport. Quiet zone keeps scanners locked on. */
+const QR_QUIET=8;
+/** Dark-on-white, low error correction: the fewest, largest modules for the one-time payload. */
+const pairingRaster=(value:string,dimension:number)=>qrPixels(value,dimension,{encoding:'byte',bitmapSize:dimension,errorCorrection:'L',margin:0,invert:false,messages:{content:'配对码生成失败',raster:'配对码生成失败',capacity:'配对码生成失败'}});
+
+/** Foreground-only pairing page; starts once when opened by an explicit tap and owns its session. */
+export function MiniProgramPairingPanel(props:{width:number;height:number;active:()=>boolean;transport?:PairingTransport;onClose:()=>void;ref:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void;ports?:PairingPorts}){
+ const [state,setState]=createSignal<PairingState>({kind:'idle'});
+ const [transport,setTransport]=createSignal<PairingTransport>('internet');
+ const pairing=new MiniProgramPairing(props.ports??miniProgramPairingHostPorts(),setState,transport());
+ const act=(fn:()=>void)=>()=>{if(props.active())fn();};
+ const close=()=>{pairing.dispose();props.onClose();};
+ const cancel=()=>{if(pairing.cancel())close();};
+ const back=()=>{if(isLivePairing(state()))cancel();else close();return true;};
+ onCleanup(()=>pairing.dispose());
+ createEffect(()=>pairing.setForeground(props.active()));
+ pairing.start();
+
+ const [now,setNow]=createSignal(Date.now());
+ createEffect(()=>{
+  if(state().kind!=='scan'||!props.active())return;
+  let alive=true;
+  const tick=()=>{if(!alive)return;setNow(Date.now());const task=delay(1000);void task.result.then(tick,()=>{});cancelTick=()=>task.cancel();};
+  let cancelTick=()=>{};tick();
+  onCleanup(()=>{alive=false;cancelTick();});
+ });
+
+ const measure=(text:string,slot:number)=>getOps().measureText(text,slot);
+ const inner=()=>props.width-36;
+ // Rounded white corners (16dp) and the quiet zone stay 2dp inside the screen circle.
+ const qrTile=()=>Math.floor(Math.SQRT2*(Math.min(props.width,props.height)/2-2-16)+32);
+ const qrCode=()=>qrTile()-QR_QUIET*2;
+ const text=(value:string,kind:PhoneTextKind,color?:string):ScrollEntry[]=>{
+  const line=phonePageText(value,kind,inner(),measure);
+  return chunkLines(line.text.split('\n'),line.lineHeight,inner()).map(lines=>({height:lines.length*line.lineHeight,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:color??line.color}}>{lines.join('\n')}</Text>}));
+ };
+ const gap=(height:number):ScrollEntry=>({height,render:()=>null});
+ const pill=(label:string,press:()=>void,primary=false):ScrollEntry=>({height:PHONE_PAGE.touchHeight,render:()=>
+  <View class="absolute inset-0 rounded-[24] items-center justify-center" style={{bgColor:primary?PHONE_PAGE.primary:'#2a2a2a'}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
+   <Text style={{fontSlot:22,lineHeight:21,textColor:primary?PHONE_PAGE.onPrimary:PHONE_PAGE.foreground}}>{label}</Text>
+  </View>});
+ const spinner=(label:string):ScrollEntry=>({height:40,render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
+ const mark=(success:boolean):ScrollEntry=>({height:52,render:()=>
+  <View class="absolute top-[0] w-[52] h-[52] rounded-full items-center justify-center" style={{insetL:(inner()-52)/2,bgColor:success?PHONE_PAGE.primary:'#23272a'}}>
+   {success?<Image src="../assets/icons/onboarding-check.svg" style={{width:32,height:32}}/>:<Text style={{fontSlot:23,lineHeight:26,textColor:PHONE_PAGE.foreground}}>!</Text>}
+  </View>});
+
+ const entries=createMemo<ScrollEntry[]>(()=>{
+  const current=state();
+  switch(current.kind){
+   case 'permission':case 'idle':case 'starting':return [spinner(pairingStartingLabel(transport())),gap(12),...text(pairingStartingLabel(transport()),'body'),gap(16),pill('取消',cancel)];
+   case 'scan':return [
+    gap(Math.max(0,(props.height-qrTile())/2-18)),
+    {height:qrTile(),render:()=> <View class="absolute top-[0] rounded-[16] bg-white" style={{insetL:(inner()-qrTile())/2,width:qrTile(),height:qrTile()}} accessibilityLabel="配对二维码">
+     <View class="absolute" style={{insetL:QR_QUIET,insetT:QR_QUIET,width:qrCode(),height:qrCode()}}><FrameworkQRCode value={current.qr} size={qrCode()} pixelSize={Math.min(512,Math.max(1,Math.round(qrCode()*getDisplayMetrics().density)))} raster={pairingRaster} invalidSizeMessage="配对码生成失败" uploadErrorMessage="配对码生成失败"/></View>
+    </View>},
+    {height:(props.height-qrTile())/2,render:()=> <Text class="absolute left-[0] right-[0] top-[8] text-center" style={{fontSlot:0,lineHeight:14,textColor:PHONE_PAGE.secondary}}>下滑查看操作</Text>},
+    ...text('用小程序扫码','body',PHONE_PAGE.foreground),gap(6),...text(pairingScanHint(current.transport),'body',PHONE_PAGE.secondary),gap(4),
+    ...text(`${pairingCountdown(current.expiresAt-now())}，仅限本次使用`,'small'),gap(12),
+    pill('取消',cancel),
+   ];
+   case 'confirm':{
+    // The digits come from the QR secret; the account label is only what the scanner claims.
+    const sas=current.sas?.length===8?`${current.sas.slice(0,4)} ${current.sas.slice(4)}`:'';
+    return [
+     ...text(sas?'与微信上的数字一致才绑定':'等待核对数字…','body',PHONE_PAGE.secondary),gap(4),
+     ...(sas?[{height:30,render:()=> <Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${current.sas}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{sas}</Text>} as ScrollEntry]:[]),
+     gap(4),...text(`账号 ${current.account} · 确认后手表将登录`,'small'),gap(14),
+     {height:48,render:()=> <View class="absolute inset-0">
+      <View class="absolute top-[0] w-[48] h-[48] rounded-full bg-[#23272a] items-center justify-center" style={{insetL:(inner()-168)/2}} focusable accessibilityRole="button" accessibilityLabel="不一致，不绑定" onPress={act(()=>pairing.confirmSas(false))}><Image src="../assets/icons/close.svg" style={{width:26,height:26}}/></View>
+      <View class="absolute top-[0] w-[112] h-[48] rounded-[24] items-center justify-center" style={{insetL:(inner()-168)/2+56,bgColor:sas?PHONE_PAGE.primary:'#2a2a2a'}} focusable={!!sas} accessibilityRole="button" accessibilityState={{disabled:!sas}} accessibilityLabel="一致，绑定" onPress={sas?act(()=>pairing.confirmSas(true)):undefined}><Text style={{fontSlot:22,lineHeight:21,textColor:sas?PHONE_PAGE.onPrimary:PHONE_PAGE.secondary}}>一致，绑定</Text></View>
+     </View>},
+    ];
+   }
+   case 'working':{
+    const at=PAIRING_STEPS.findIndex(item=>item.step===current.step);
+    return [...text('正在设置手表','title'),gap(12),...PAIRING_STEPS.map(({label},index):ScrollEntry=>({height:28,render:()=>
+     <View class="absolute top-[0] h-[28] w-[140]" style={{insetL:(inner()-140)/2}} accessibilityLabel={index<at?`${label}，已完成`:index===at?`${label}，进行中`:label}>
+      {index===at?<View class="absolute left-[0] top-[4] w-[20] h-[20]"><WatchProgressIndicator size={20} strokeWidth={2.5} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active}/></View>
+       :<View class="absolute left-[0] top-[4] w-[20] h-[20] rounded-full items-center justify-center" style={index<at?{bgColor:PHONE_PAGE.primary}:{bgColor:'#00000000',borderWidth:1.5,borderColor:'#5b5b5b'}}>{index<at?<Image src="../assets/icons/onboarding-check.svg" style={{width:14,height:14}}/>:null}</View>}
+      <Text class="absolute left-[30] top-[3]" style={{fontSlot:22,lineHeight:21,textColor:index<=at?PHONE_PAGE.foreground:'#7a7a7a'}}>{label}</Text>
+     </View>})),gap(10),...text('请保持本页打开','body',PHONE_PAGE.secondary),gap(12),pill('停止',cancel)];
+   }
+   case 'done':return [mark(true),gap(12),...text(pairingDoneTitle(current.cloudReady),'title'),gap(6),...text(pairingDoneDetail(current.cloudReady),'body',PHONE_PAGE.secondary),gap(14),pill('完成',close,true)];
+   case 'failed':return [mark(false),gap(12),...text(current.title,'title'),gap(6),...text(current.detail,'body',PHONE_PAGE.secondary),gap(14),pill('重试',()=>pairing.start(),true),gap(8),pill('返回',close)];
+   case 'cancelled':case 'paused':return [
+    ...text(current.kind==='cancelled'?'已取消配对':'配对已暂停','title'),gap(6),
+    ...text(current.kind==='cancelled'?'本次配对已结束':'离开页面后配对码已失效，需要时重新生成','body',PHONE_PAGE.secondary),gap(14),
+    pill('重新开始',()=>pairing.start(),true),gap(8),pill('返回',close),
+   ];
+  }
+ });
+ // Short pages sit in the middle of the round face; long ones scroll from the top.
+ const rows=createMemo(()=>{const list=entries();if(state().kind==='scan')return list;const room=props.height-36-list.reduce((sum,row)=>sum+row.height,0);return room>0?[gap(room/2),...list]:[gap(8),...list];});
+ return <View class="absolute inset-0 bg-black"><ScrollEntries round={null} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>props.ref({...value,onRootBack:back})} accessibilityLabel="微信扫码连接"/></View>;
+}

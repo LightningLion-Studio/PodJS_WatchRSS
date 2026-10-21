@@ -108,3 +108,38 @@ test('recheck low 8: binding after logout succeeds but real persisted ownership 
  expect(await f.service.syncNow()).toBe(false);expect(f.merged.length).toBeGreaterThan(0);expect(exports).toBe(0);expect(f.reservations.size).toBe(0);expect(values.get('watchrss.library.owner')).toBe(owner);
  await accounts.resolveLibraryOwner(state('user'),'merge');expect(await f.service.syncNow()).toBe(true);expect(exports).toBe(1);expect(f.reservations.size).toBe(1);
 });
+test('account reset suppresses a late approval or failure from the previous account',async()=>{
+ for(const fail of [false,true,'ready']){
+  const f=await fixture();let finish!:(v:'waiting-approval'|'ready')=>void,abort!:(e:Error)=>void,entered!:()=>void;
+  const ready=new Promise<void>(r=>entered=r);
+  f.session.keys.acceptBootstrap=async()=>{entered();return new Promise<'waiting-approval'|'ready'>((resolve,reject)=>{finish=resolve;abort=reject;});};
+  const run=f.service.syncNow();await ready;f.service.reset();
+  if(fail===true)abort(Error('old account request failed'));else finish(fail==='ready'?'ready':'waiting-approval');
+  await run;expect(f.service.status).toEqual({phase:'idle',message:'尚未同步',usedBytes:0,quotaBytes:0,lastCompletedAt:0});expect(f.calls.some(r=>r.url.endsWith('/heads'))).toBe(false);
+ }
+});
+
+test('failed upload survives guest restart and resumes only missing chunks with the same snapshot id',async()=>{
+ const f=await fixture();const upload=f.session.uploader.upload.bind(f.session.uploader);let sent=0;
+ f.session.uploader.upload=async(target,data)=>{if(++sent===3)throw Error('network interrupted');await upload(target,data);};
+ expect(await f.service.syncNow()).toBe(false);expect(f.reservations.size).toBe(1);
+ const pending=await f.cache.pending('user');expect(pending).toBeDefined();
+ const uploaded=new Set(f.objects.keys());expect(uploaded.size).toBe(2);
+ f.session.cache=new WatchCloudCache({read:async p=>f.blobs.get(p),writeAtomic:async(p,b)=>{f.blobs.set(p,b.slice());}},crypto.sha256,enabled);
+ f.session.codec=new WatchCloudCodec(crypto,enabled);
+ const retried:string[]=[];f.session.uploader.upload=async(target,data)=>{retried.push(target.sha256);await upload(target,data);};
+ const restarted=new WatchCloudSyncService({open:async()=>f.session,network:async()=>f.network,hash:crypto.sha256,uuid:async()=> 'fresh-id-not-used',exclusive:async fn=>fn(),now:()=>10},enabled);
+ expect(await restarted.syncNow()).toBe(true);expect(f.reservations.size).toBe(1);
+ expect(retried.length).toBe(1);expect(retried.every(hash=>!uploaded.has(hash))).toBe(true);
+ expect((await f.cache.latest('user'))!.id).toBe(pending!.id);
+ expect(await f.cache.pending('user')).toBeUndefined();expect(await f.cache.pending('another-user')).toBeUndefined();
+});
+
+test('lost completion response retries the existing identity without uploading blocks again',async()=>{
+ const f=await fixture();f.flags({failComplete:true});expect(await f.service.syncNow()).toBe(false);
+ const id=(await f.cache.pending('user'))!.id;
+ const puts=f.calls.filter(c=>c.method==='PUT').length;
+ f.flags({failComplete:false});expect(await f.service.syncNow()).toBe(true);
+ expect(f.reservations.size).toBe(1);expect((await f.cache.latest('user'))!.id).toBe(id);
+ expect(f.calls.filter(c=>c.method==='PUT').length).toBe(puts);
+});

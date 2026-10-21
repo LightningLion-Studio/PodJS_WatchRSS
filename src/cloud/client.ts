@@ -11,8 +11,11 @@ function header(headers: Record<string, string>, name: string): string | undefin
   for (const key of Object.keys(headers)) if (key.toLowerCase() === wanted) return headers[key];
   return undefined;
 }
+export class CloudRequestError extends Error {
+  constructor(readonly status:number,readonly code:string){super(`Cloud HTTP ${status}${code?' '+code:''}`);}
+}
 function requireOk(response: HttpResponse): any {
-  if (response.status < 200 || response.status >= 300) {let code='';try{const e=parse(response);if(['key_version_exists','approval_expired','device_key_conflict'].includes(e.error))code=' '+e.error;}catch{}throw new Error(`Cloud HTTP ${response.status}${code}`);};
+  if (response.status < 200 || response.status >= 300) {let code='';try{const e=parse(response);const value=typeof e.error==='string'?e.error:typeof e.error?.code==='string'?e.error.code:e.code;if(typeof value==='string'&&/^[a-z_]{1,80}$/.test(value))code=value;}catch{}throw new CloudRequestError(response.status,code.trim());};
   return parse(response);
 }
 function member(v: any) { return { plan: v.plan || "free", active: !!v.active, writable: !!v.writable, readable: !!v.readable, quotaBytes: Number(v.quotaBytes || 0), usedBytes: Number(v.usedBytes || 0), reservedBytes: Number(v.reservedBytes || 0), retentionDays: v.retentionDays == null ? null : Number(v.retentionDays), readOnlyAt: v.readOnlyAt == null ? null : String(v.readOnlyAt), deleteAfter: v.deleteAfter == null ? null : String(v.deleteAfter) }; }

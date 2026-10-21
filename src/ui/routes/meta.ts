@@ -1,4 +1,5 @@
 import type { Page } from "./types.ts";
+import type { ProfileEntryKey } from "../profile-entries.ts";
 
 const routeTitles: Record<Page, string> = {
   "debug-summary": "AI 总结",
@@ -12,6 +13,7 @@ const routeTitles: Record<Page, string> = {
   "reader-preview": "预设实时预览",
   "phone-connection": "连接手机",
   "account-status": "账号",
+  "cloud-sync": "云同步",
   "speech-playback": "朗读播控",
   "settings-reader-presets": "阅读器预设",
   "settings-llm-usage": "Token 消耗",
@@ -54,6 +56,7 @@ const titledByScreen = new Set<Page>([
   "reader-preview",
   "phone-connection",
   "account-status",
+  "cloud-sync",
   "speech-playback",
   "settings-reader-presets",
   "settings-llm-usage",
@@ -95,3 +98,9 @@ export function routeIsSelfTitled(page: Page): boolean {
 }
 
 export function routeIsKnown(value:unknown):value is Page { return typeof value==="string"&&Object.hasOwn(routeTitles,value); }
+
+/** 我的 entries open a route page, or an information document for about/contact. */
+export function profileDestination(key: ProfileEntryKey): { page: Page } | { information: "about" | "contact-developer" } {
+  if (key === "about" || key === "contact-developer") return { information: key };
+  return { page: key === "account" ? "account-status" : key };
+}

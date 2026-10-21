@@ -366,6 +366,9 @@ function PlayerScreen(props: DouyinScreenProps & { awemeId: string }) {
 }
 
 function DouyinScreenImpl(props: DouyinScreenProps) {
+  onCleanup(props.client.onAuthExpired(()=>{
+    if((props.active??true)&&props.route.name!=='login')props.onNavigate({name:'login'});
+  }));
   return <Show when={props.route} keyed>{route => {
     switch (route.name) {
       case "entry": return <Show when={props.settings.originalContentEnabled} fallback={<FeedScreen {...props} />}><ImmersiveEntry {...props} /></Show>;

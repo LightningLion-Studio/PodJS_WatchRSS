@@ -1,9 +1,28 @@
 import type {WatchAccountState} from './types.ts';
+import type {WatchCloudPhase} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
   message: string;
   usedBytes: number;
   quotaBytes: number;
+  /** Optional so older providers stay valid; the cloud page reads them when present. */
+  phase?: WatchCloudPhase;
+  lastCompletedAt?: number;
+  /** Account the status was produced for. Used for filtering only, never displayed. */
+  accountId?: string;
+  accountScope?: string;
+}
+
+const NEUTRAL_CLOUD: AccountCloudStatus = {message: '尚未同步', usedBytes: 0, quotaBytes: 0, phase: 'idle'};
+
+/** Display fields only; a status from another account is replaced by the neutral one. */
+function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl:string): AccountCloudStatus {
+  const own = (cloud.accountId === undefined || cloud.accountId === userId)&&(!cloud.accountScope||cloud.accountScope===JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])) ? cloud : NEUTRAL_CLOUD;
+  return {
+    message: own.message, usedBytes: own.usedBytes, quotaBytes: own.quotaBytes,
+    ...(own.phase ? {phase: own.phase} : {}),
+    ...(own.lastCompletedAt ? {lastCompletedAt: own.lastCompletedAt} : {}),
+  };
 }
 
 /** The account page receives display data only; credentials stay in secure storage. */
@@ -28,7 +47,7 @@ export function accountStatusSnapshot(state: WatchAccountState | null, now = Dat
     accessTokenExpired: state.tokenExpiresAtMillis > 0 && state.tokenExpiresAtMillis <= now,
     refreshTokenStatus: !state.watchRefreshToken ? 'legacy'
       : state.refreshTokenExpiresAtMillis > 0 && state.refreshTokenExpiresAtMillis <= now ? 'expired' : 'valid',
-    ...(cloud ? {cloud} : {}),
+    ...(cloud ? {cloud: ownCloudStatus(state.userId, cloud,state.backendBaseUrl)} : {}),
   };
 }
 

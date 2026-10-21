@@ -1,6 +1,6 @@
 import { Image } from "@pocketjs/framework/components";
 
-export type ProfileIconName = "person" | "star" | "play-circle" | "phone-android" | "settings" | "info";
+export type ProfileIconName = "person" | "star" | "play-circle" | "phone-android" | "settings" | "info" | "cloud";
 
 export interface ProfileIconProps {
   name: ProfileIconName;
@@ -11,7 +11,8 @@ export interface ProfileIconProps {
 const sources: Record<ProfileIconName, string> = {
   person: "../assets/icons/person.svg", star: "../assets/icons/star.svg",
   "play-circle": "../assets/icons/play-circle.svg", "phone-android": "../assets/icons/phone-android.svg",
-  settings: "../assets/icons/settings.svg", info: "../assets/icons/info.svg"
+  settings: "../assets/icons/settings.svg", info: "../assets/icons/info.svg",
+  cloud: "../assets/icons/cloud.svg"
 };
 /** Material Icons paths baked by the PocketJS SVG asset pipeline. */
 export function ProfileIcon(props: ProfileIconProps) {

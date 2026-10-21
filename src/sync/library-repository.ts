@@ -101,14 +101,17 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  resetPeerState(){return this.run(()=>this.sequence.reset());}
  markSuccess(pending:PendingSyncSuccess){return this.run(()=>this.sequence.markSuccess(pending));}
  /** Phone clearLibrary removes the RSS library and sync cursors while keeping
-  * the watch identity, standalone notes, account and reader configuration. */
- clearLibrary(){return this.run(async()=>{
+  * the watch identity, standalone notes, account and reader configuration.
+  * privateData is reserved for the explicit local ownership-clear service. */
+ clearLibrary(options:{privateData?:boolean}={}){return this.run(async()=>{
   const revision=await libraryRevision(this.db);
+  const privateTables=options.privateData?(await this.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('douyin_local_state','external_saved_migrations','sync_snapshot_retained')")).map(row=>String(row.name)):[];
   const channels=(await querySyncPages(this.db,'SELECT id,url FROM channels ORDER BY id')).map(r=>({id:Number(r.id),url:String(r.url)}));
   const itemIds=(await querySyncPages(this.db,'SELECT id FROM articles ORDER BY id')).map(r=>Number(r.id));
   await this.db.transaction([revisionGuard(revision),{sql:'DELETE FROM channels'},
    ...['sync_saved_states','sync_article_deletions','sync_article_ids','sync_article_aliases','local_article_deletions',
     'sync_source_states','sync_change_log','sync_peer_state','sync_snapshot_fingerprints'].map(table=>({sql:`DELETE FROM ${table}`})),
+   ...(options.privateData?['memo_notes','memo_folders','llm_token_usage','article_deletion_cleanup',...privateTables].map(table=>({sql:`DELETE FROM ${table}`})):[]),
    {sql:'UPDATE sync_library_revision SET revision=revision+1 WHERE id=1'}]);
   this.snapshotCache=undefined;
   await this.ports.cleanupRemovedContent({itemIds,channels});

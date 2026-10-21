@@ -39,7 +39,7 @@ const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function nodes(value: any): Node[] { if (typeof value === 'function') return nodes(value()); if (Array.isArray(value)) return value.flatMap(nodes); if (!value || typeof value !== 'object' || !('props' in value)) return []; return [value, ...nodes(value.props.children)]; }
 function mount() {
   calls = []; capability = true; statusCapability = true;
-  const root = createRoot(stop => { stops.push(stop); return DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); });
+  const root = createRoot(stop => { stops.push(stop); return DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {onAuthExpired:()=>()=>{}}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); });
   return { root, press: () => nodes(root).find(n => n.kind === 'View' && n.props.focusable && n.props.onPress)!.props.onPress(), text: () => nodes(root).filter(n => n.kind === 'Text').map(n => n.props.children).join('\n') };
 }
 for (const status of ['no_provider', 'initialization_failed'] as const) test(`${status} renders B6 unavailable page without authorizing`, async () => {
@@ -66,7 +66,7 @@ test('probe errors reuse B6 unavailable handling', async () => {
 });
 test('successful settings logout delegates clear-task navigation to the route owner',async()=>{
  let returned=0,navigated=0,logout=0;
- const client={isLoggedIn:async()=>true,logout:async()=>{logout++;}};
+ const client={onAuthExpired:()=>()=>{},isLoggedIn:async()=>true,logout:async()=>{logout++;}};
  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'settings'},client,onBack(){},onNavigate(){navigated++;},onLogoutSuccess(){returned++;},onPlay(){},settings:{originalContentEnabled:false,onOriginalContentChange(){},continuePlaybackInBackgroundEnabled:false,onContinuePlaybackInBackgroundChange(){},onDeleteChannel(){}},input:async()=>null} as unknown as DouyinScreenProps);});
  await settle();
  const exit=nodes(root).find(node=>node.kind==='View'&&node.props.onPress&&nodes(node.props.children).some(child=>child.kind==='Text'&&child.props.children==='退出登录'))!;
@@ -79,7 +79,7 @@ test('detail passes selected reader preset and offline metadata to the common re
   const {defaultReaderPreset}=await import('../src/reader/preset.ts');
   const preset=defaultReaderPreset('custom','自定义',false,23),item=sample('1'),playlist=[item,sample('2')];
   let request: any, destination: any;
-  const client={resolvePlayback:async()=>({ok:true,data:item}),feedSnapshot:()=>({items:[sample('feed')],cursor:'feed-cursor',hasMore:true})};
+  const client={onAuthExpired:()=>()=>{},resolvePlayback:async()=>({ok:true,data:item}),feedSnapshot:()=>({items:[sample('feed')],cursor:'feed-cursor',hasMore:true})};
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,preset,route:{name:'detail',awemeId:'1',item,playlist},client,onPlay:(value:any)=>request=value,onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
   await settle();expect(readerProps.preset).toBe(preset);expect(readerProps.fontSize).toBe(23);expect(readerProps.title).toBe('title 1');
   readerProps.onMedia({type:'video'});await settle();
@@ -87,21 +87,21 @@ test('detail passes selected reader preset and offline metadata to the common re
 });
 test('history row marks before navigation without passing a history playback queue', async () => {
   const history=[sample('3'),sample('2'),sample('1')].map(item=>({item,watchedAtMillis:1}));let destination:any;const writes:any[]=[];let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
-  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'history'},client:{listHistory:async()=>history,recordHistory:async(item:any)=>{writes.push(item);await gate;}},onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
+  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'history'},client:{onAuthExpired:()=>()=>{},listHistory:async()=>history,recordHistory:async(item:any)=>{writes.push(item);await gate;}},onNavigate:(value:any)=>destination=value,settings:{}} as unknown as DouyinScreenProps);});
   await settle();const row=nodes(root).find(n=>n.props.onPress&&nodes(n).some(child=>child.kind==='Text'&&String(child.props.children).includes('title 2')))!;
   row.props.onPress();row.props.onPress();expect(writes).toEqual([sample('2')]);expect(destination).toBeUndefined();release();await settle();expect(destination.item).toEqual(sample('2'));expect(destination.playlist).toBeUndefined();
 });
 
 test('feed row marks watched even without playback before opening offline detail', async () => {
   let destination:any;const writes:any[]=[];
-  const client={restorePlaybackQueue:async()=>({items:[]}),fetchFeedPage:async()=>({ok:true,data:{items:[sample('list')],hasMore:false}}),recordHistory:async(item:any)=>{expect(destination).toBeUndefined();writes.push(item);}};
+  const client={onAuthExpired:()=>()=>{},restorePlaybackQueue:async()=>({items:[]}),fetchFeedPage:async()=>({ok:true,data:{items:[sample('list')],hasMore:false}}),recordHistory:async(item:any)=>{expect(destination).toBeUndefined();writes.push(item);}};
   const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'feed'},client,onNavigate:(value:any)=>destination=value,settings:{originalContentEnabled:false}} as unknown as DouyinScreenProps);});
   await settle();const row=nodes(root).find(n=>n.props.onPress&&nodes(n).some(child=>child.kind==='Text'&&String(child.props.children).includes('title list')))!;
   row.props.onPress();await settle();expect(writes).toEqual([sample('list')]);expect(destination.item).toEqual(sample('list'));
 });
 test('saved detail metadata lookup does not create Douyin watched history on reader entry', async () => {
   let writes=0;
-  const client={listHistory:async()=>[],listSaved:async()=>[{item:sample('saved')}],recordHistory:async()=>{writes++;}};
+  const client={onAuthExpired:()=>()=>{},listHistory:async()=>[],listSaved:async()=>[{item:sample('saved')}],recordHistory:async()=>{writes++;}};
   createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:'saved'},client,settings:{}} as unknown as DouyinScreenProps);});
   await settle();expect(readerProps.title).toBe('title saved');expect(writes).toBe(0);
 });
@@ -180,7 +180,7 @@ test('D2 failed authorization clears QR and can retry without exposing raw excep
 
 test('D2 history detail initial refresh failure retains the native direct-URL fallback as a single item',async()=>{
  const item=sample('stored');let request:any;
- const client={resolvePlayback:async()=>({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'})};
+ const client={onAuthExpired:()=>()=>{},resolvePlayback:async()=>({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'})};
  createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:item.awemeId,item},client,onPlay:(value:any)=>request=value,onNavigate(){},settings:{}} as unknown as DouyinScreenProps);});
  await settle();readerProps.onMedia({type:'video'});await settle();
  expect(request).toMatchObject({playback:item,playlist:[item],hasMore:false,detailPlayback:true});

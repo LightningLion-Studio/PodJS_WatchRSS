@@ -43,6 +43,7 @@ export class OriginalContentCache {
     for(const job of this.jobs.values())if(job.channelId===Number(channelId)){job.cancelled=true;job.cancel?.();}
     this.setPaused(channelId,false);
   }
+  cancelAll():Promise<void>{return this.cancelItems([...this.jobs.keys()]);}
   async cancelItems(ids:readonly string[]):Promise<void> {
     const removed=new Set(ids),jobs=[...this.jobs.values()].filter(job=>removed.has(job.id));
     for(const job of jobs){

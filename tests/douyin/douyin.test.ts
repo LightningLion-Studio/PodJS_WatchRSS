@@ -18,7 +18,17 @@ test("cookie import follows Android rule: trimmed non-empty header, no sessionid
 
 test("blocked and malformed responses are typed failures",async()=>{const store=new MemoryStore();await store.set("douyin.cookie","x");const replies=["blocked","{"];const client=new DouyinClient({transport:{async request(){return {status:200,headers:{},body:utf8Encode(replies.shift()!) };}},secureStorage:store,signer:{sign:()=>"x"}});expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:"NOT_LOGGED_IN"});expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:"PARSE_FAILED"});});
 
-test("detail prefers fresh feed data, while forced 403 falls back without hiding uncached errors",async()=>{let now=1000;const store=new MemoryStore();await store.set("douyin.cookie","x");const requests:HttpRequest[]=[];const client=new DouyinClient({transport:{async request(request){requests.push(request);return requests.length===1?{status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_list:[item],has_more:0}))}:{status:403,headers:{},body:utf8Encode("forbidden")};}},secureStorage:store,signer:{sign:()=>"x"},now:()=>now});await client.fetchFeedPage();const detail=await client.fetchDetail("7");expect(detail).toMatchObject({ok:true,source:"feed-cache",data:{kind:"video",item:{awemeId:"7",playUrl:"https://video/h264"}}});expect(requests).toHaveLength(1);expect(await client.fetchDetail("7",{forceRefresh:true})).toMatchObject({ok:true,source:"feed-cache"});expect(requests).toHaveLength(2);const callsBeforePlayback=requests.length;expect(await client.resolvePlayback("7")).toMatchObject({ok:true,source:"feed-cache",data:{awemeId:"7"}});expect(requests).toHaveLength(callsBeforePlayback);now+=5*60*1000;expect(await client.fetchDetail("7")).toMatchObject({ok:false,code:"REQUEST_FAILED",message:"请求失败，状态码：403（仅支持200）"});});
+test("403 expires the session and notifies login navigation, including thrown HTTP failures",async()=>{
+ for(const thrown of [false,true]){
+  const store=new MemoryStore();await store.set('douyin.cookie','x');let redirects=0;
+  const client=new DouyinClient({secureStorage:store,signer:{sign:()=>"x"},transport:{async request(){if(thrown)throw new Error('http_status:403');return {status:403,headers:{},body:utf8Encode('forbidden')};}}});
+  const unsubscribe=client.onAuthExpired(()=>redirects++);
+  expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'NOT_LOGGED_IN'});
+  expect(await client.isLoggedIn()).toBe(false);expect(redirects).toBe(1);
+  expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'NOT_LOGGED_IN'});expect(redirects).toBe(1);
+  unsubscribe();
+ }
+});
 
 test("resolvePlayback refreshes when the feed cache is expired",async()=>{let now=0,calls=0;const store=new MemoryStore();await store.set("douyin.cookie","x");const client=new DouyinClient({transport:{async request(){calls++;return {status:200,headers:{},body:utf8Encode(JSON.stringify(calls===1?{aweme_list:[item]}:{aweme_detail:{...item,desc:"fresh"}}))};}},secureStorage:store,signer:{sign:()=>"x"},now:()=>now});await client.fetchFeedPage();now=5*60*1000;const result=await client.resolvePlayback("7");expect(result).toMatchObject({ok:true,source:"network",data:{description:"fresh"}});expect(calls).toBe(2);});
 

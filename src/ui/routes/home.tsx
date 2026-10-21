@@ -1,14 +1,24 @@
 import { Show } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
+import { manualCloudSync, applicationCloudApproval, applicationCloudActions } from "../../cloud/application.ts";
+import { cloudRemediationActions } from "../cloud-sync-view.ts";
+import { clearLocalPrivateLibrary } from "../../services.ts";
+import { readCloudAccountStatus } from "../../cloud/status.ts";
+import { CloudSyncScreen } from "../CloudSyncScreen.tsx";
+import { coalescedRequest } from "../cloud-sync-view.ts";
 import HomeScreen, { type HomeScreenProps } from "../HomeScreen.tsx";
 import { PhoneConnectionScreen } from "../PhoneConnectionScreen.tsx";
 import { ProfileScreen } from "../ProfileScreen.tsx";
+import type { ProfileEntryKey } from "../profile-entries.ts";
 import type { BiliRoute } from "../bili/index.tsx";
 import type { DouyinRoute } from "../douyin/index.tsx";
 import type { HomePlatformLoginState } from "../home-extras.ts";
 import type { AppServices, Channel } from "../service.ts";
+import { profileDestination } from "./meta.ts";
 import type { Page, RouteEntry } from "./types.ts";
+
+const cloudActions = cloudRemediationActions(applicationCloudActions);
 
 type ChannelAction = (
   id: string,
@@ -43,6 +53,9 @@ interface HomeRoutesProps {
   setError: (message: string) => void;
 }
 
+/** App-wide so leaving and reopening 云同步 joins the running manual sync instead of queueing another. */
+const manualCloud = coalescedRequest(() => manualCloudSync());
+
 export function HomeRoutes(props: HomeRoutesProps) {
   const openChannel = (channel: Channel) => {
     if (channel.url === "builtin:bili") {
@@ -54,15 +67,10 @@ export function HomeRoutes(props: HomeRoutesProps) {
     }
   };
 
-  const selectProfileItem = (index: number) => {
-    if (index === 0) void props.go("account-status");
-    else if (index === 1) void props.go("saved");
-    else if (index === 2) void props.go("watch-later");
-    else if (index === 3) void props.go("phone-connection");
-    else if (index === 4) void props.go("settings");
-    else if (index === 5) props.openInformation("about");
-    else if (index === 6) props.openInformation("contact-developer");
-    else props.setError("此页面尚未迁移");
+  const selectProfileItem = (key: ProfileEntryKey) => {
+    const target = profileDestination(key);
+    if ("information" in target) props.openInformation(target.information);
+    else void props.go(target.page);
   };
 
   return (
@@ -127,6 +135,23 @@ export function HomeRoutes(props: HomeRoutesProps) {
             props.entry.list = value;
             props.entry.internalBack = value.onRootBack;
           }}
+        />
+      </Show>
+      <Show when={props.page() === "cloud-sync"}>
+        <CloudSyncScreen
+          width={props.width}
+          height={props.height}
+          active={props.active}
+          load={props.services.readAccountStatus}
+          subscribe={props.services.subscribeAccountStatus}
+          available={() => readCloudAccountStatus() !== undefined}
+          sync={manualCloud}
+          approval={applicationCloudApproval}
+          actions={cloudActions}
+          clearLocal={clearLocalPrivateLibrary}
+          onPhone={() => void props.go("phone-connection")}
+          onError={props.setError}
+          ref={(value) => (props.entry.list = value)}
         />
       </Show>
       <Show when={props.page() === "phone-connection"}>

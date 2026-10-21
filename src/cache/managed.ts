@@ -19,6 +19,6 @@ export class ManagedCache {
  inspect(){return this.core.inspect();}
  stats(){return this.core.stats();}
  maintain(){return this.core.maintain();}
- clearBucket(bucket:'bili-preview'|'douyin-preload'){return this.core.clearBucket(bucket);}
+ clearBucket(bucket:'bili-preview'|'douyin-preload'|'images'){return this.core.clearBucket(bucket);}
  acquire(url:string,headers:Record<string,string>={},inline=false,bucket:'images'|'bili-preview'='images'){return this.core.acquire(url,headers,{bucket,variant:inline?'inline':'image'});}
 }

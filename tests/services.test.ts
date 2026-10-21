@@ -9,6 +9,9 @@ const feedResponses=new Map<string,Promise<Uint8Array>[]>();
 let feedCancels=0;
 let originalHtml="",originalDownloads=0;
 const downloaded = new Map<string, Uint8Array>();
+let failedRemoval:string|undefined;
+const localKv=new Map<string,unknown>();
+const cloudOps:string[]=[];let cloudBusy=false;
 
 function paramsOf(params: readonly (string | number | null)[] = []): (string | number | null)[] { return [...params]; }
 const sqlite = {
@@ -34,6 +37,8 @@ function mockFeedDownload(url:string,path:string) {
     return {result,cancel:()=>{cancelled=true;feedCancels++;reject(new Error("cancelled"));}};
 }
 
+const realWatch=await import('@podjs/framework/watch');
+mock.module('@podjs/framework/watch',()=>({...realWatch,kv:{get:(key:string)=>localKv.get(key),set:(key:string,value:unknown)=>{localKv.set(key,value);},delete:(key:string)=>localKv.delete(key),keys:()=>[...localKv.keys()],batch:(action:()=>unknown)=>action()}}));
 const frameworkServices = await import("@podjs/framework/services");
 mock.module("@podjs/framework/services", () => ({
   ...frameworkServices,
@@ -44,6 +49,9 @@ mock.module("@podjs/framework/services", () => ({
   bytesToBase64:(value:Uint8Array)=>Buffer.from(value).toString("base64"),
   stringToUtf8:(value:string)=>new TextEncoder().encode(value),
   hostOperation: (method:string,args:Record<string,unknown>)=>{
+    if(method==='cloud.acquire'){cloudOps.push(method);return {result:Promise.resolve({acquired:!cloudBusy})};}
+    if(method==='cloud.release'){cloudOps.push(method);return {result:Promise.resolve()};}
+    if(method==='secure.update'){cloudOps.push(method);expect(args).toEqual({values:{},removePrefixes:['watchrss.cloud.state.']});return {result:Promise.resolve()};}
     if(method==='crypto.random')return {result:Promise.resolve({bytesBase64:Buffer.alloc(Number(args.bytes)).toString('base64')})};
     if(method==='crypto.hash')return {result:Promise.resolve({digestBase64:Buffer.from(new Bun.CryptoHasher('sha256').update(Buffer.from(String(args.dataBase64),'base64')).digest('hex'),'hex').toString('base64')})};
     if(method === "http.download" && String(args.path).startsWith("feeds/")) {
@@ -58,13 +66,13 @@ mock.module("@podjs/framework/services", () => ({
   http: { download: mockFeedDownload },
   fileChunks: {
     stat: async (path:string) => ({exists:downloaded.has(path),file:downloaded.has(path),directory:false,size:downloaded.get(path)?.length??0,modified:0}),
-    list: async (path:string) => ({entries:[...downloaded.keys()].filter(key=>key.startsWith(path+'/')).map(key=>({path:key,file:true,directory:false,size:downloaded.get(key)!.length,modified:0}))}),
+    list: async (path:string) => {const children=new Map<string,{path:string;file:boolean;directory:boolean;size:number;modified:number}>();for(const key of downloaded.keys()){if(!key.startsWith(path+'/'))continue;const name=key.slice(path.length+1).split('/')[0]!,child=path+'/'+name;const file=key===child;children.set(child,{path:child,file,directory:!file,size:downloaded.get(child)?.length??0,modified:0});}return{entries:[...children.values()]};},
     read: async (path: string, offset = 0, maxBytes = 65536) => {
       const bytes = downloaded.get(path) ?? feedBytes;
       const part = bytes.slice(offset, offset + maxBytes);
       return { dataBase64: Buffer.from(part).toString("base64"), offset, size: bytes.length, eof: offset + part.length >= bytes.length };
     },
-    remove: async (path: string) => { downloaded.delete(path); },
+    remove: async (path: string) => { if(path===failedRemoval)throw Error("fixture deletion failed");downloaded.delete(path); },
     touch: async () => {},
   },
   base64ToBytes: (value: string) => new Uint8Array(Buffer.from(value, "base64")),
@@ -596,4 +604,55 @@ test("single imported article deletion service cleans owned files and leaves its
   const before=database.query("SELECT count(*) n FROM sync_change_log WHERE reason='delete'").get();
   await services.services.deleteArticle(String(item.id));
   expect(database.query("SELECT count(*) n FROM sync_change_log WHERE reason='delete'").get()).toEqual(before);
+});
+
+
+test('private library clear removes RSS, cursors, memo tombstones/assets, reader caches and pending refresh before ownership can change',async()=>{
+ const channel=await services.services.addChannel('https://example.test/private-clear');
+ const item=(await services.services.listArticles({channelId:channel.id}))[0]!;
+ await services.memoRepository.initialize();
+ await services.memoRepository.createFolder('private folder');
+ const memo=await services.memoRepository.save({markdown:'private memo'});await services.memoRepository.delete(memo.noteId);
+ await sqlite.execute('INSERT INTO notes(article_id,body,created_at,updated_at) VALUES(?,?,1,1)',[Number(item.id),'private attached note']);
+ await sqlite.execute("INSERT OR REPLACE INTO sync_peer_state(peer_device_id) VALUES('old-peer')");
+ const identity=await sqlite.query('SELECT * FROM sync_local_identity');
+ await sqlite.execute('CREATE TABLE IF NOT EXISTS douyin_local_state(key TEXT PRIMARY KEY,value TEXT NOT NULL)');
+ await sqlite.execute("INSERT OR REPLACE INTO douyin_local_state VALUES('douyin.history.row.v2.0','private')");
+ const privatePaths=['article_content/orphan.txt','offline/rss/9999/nested/image.png','notes/assets/private.png','sync_body/old.part','feeds/old.xml','original/old.html','watch-cloud-cache/scope/manifests/private.bin','cloud-crypto/.pod-write-fixture.part','managed-cache/rss-offline/book/chapter.txt','managed-cache/images/'+('a'.repeat(64))+'.img'];
+ for(const path of privatePaths)downloaded.set(path,new Uint8Array([1]));
+ downloaded.set('reader_assets/fonts/user.ttf',new Uint8Array([7]));downloaded.set('logs/keep.log',new Uint8Array([8]));
+ localKv.set('watchrss.reader.progress.9999',{offset:100});localKv.set('douyin.saved.v1','old saved item');localKv.set('watchrss.settings',{fontSize:22});localKv.set('watchrss.reader-presets',{fixture:'retain configuration'});
+ let finish!:(bytes:Uint8Array)=>void;feedResponses.set(channel.url,[new Promise(resolve=>{finish=resolve;})]);
+ const refresh=services.services.refresh(channel.id);for(let n=0;n<20&&feedResponses.get(channel.url)!.length;n++)await Promise.resolve();
+ cloudOps.length=0;const beforeCancels=feedCancels;const first=services.clearLocalPrivateLibrary();expect(services.clearLocalPrivateLibrary()).toBe(first);await first;await refresh;expect(cloudOps).toEqual(['cloud.acquire','secure.update','cloud.release']);
+ expect(feedCancels).toBeGreaterThan(beforeCancels);finish(new TextEncoder().encode(feed(3)));await Promise.resolve();
+ for(const table of ['channels','articles','notes','memo_notes','memo_folders','llm_token_usage','douyin_local_state','external_saved_migrations','sync_peer_state','sync_change_log','sync_source_states','sync_saved_states','sync_article_deletions','article_reading_state','article_original_chunks','article_deletion_cleanup'])expect(await sqlite.query('SELECT * FROM '+table)).toEqual([]);
+ expect(await sqlite.query('SELECT * FROM sync_local_identity')).toEqual(identity);
+ for(const path of privatePaths)expect(downloaded.has(path)).toBe(false);
+ expect(downloaded.has('reader_assets/fonts/user.ttf')).toBe(true);expect(downloaded.has('logs/keep.log')).toBe(true);
+ expect(localKv.has('watchrss.reader.progress.9999')).toBe(false);expect(localKv.has('douyin.saved.v1')).toBe(false);expect(localKv.get('watchrss.settings')).toEqual({fontSize:22});expect(localKv.has('watchrss.reader-presets')).toBe(true);
+ await services.clearLocalPrivateLibrary();expect(await sqlite.query('PRAGMA foreign_key_check')).toEqual([]);
+});
+
+test('private clear rolls back RSS and memo together on SQL failure and leaves owner unchanged on file failure until retry',async()=>{
+ const channel=await services.services.addChannel('https://example.test/private-clear-retry');
+ await services.memoRepository.initialize();const memo=await services.memoRepository.save({markdown:'rollback memo'});
+ await sqlite.execute("CREATE TRIGGER fail_private_clear BEFORE DELETE ON memo_notes BEGIN SELECT RAISE(ABORT,'fixture SQL failure'); END");
+ await expect(services.clearLocalPrivateLibrary()).rejects.toThrow('fixture SQL failure');
+ expect((await services.services.listChannels()).some(value=>value.id===channel.id)).toBe(true);expect(await services.memoRepository.get(memo.noteId)).not.toBeNull();
+ await sqlite.execute('DROP TRIGGER fail_private_clear');
+ const {WatchAccountStore}=await import('../src/account/store');const secure=new Map<string,string>([['watchrss.library.owner','old-owner'],['credentials','keep']]);const store=new WatchAccountStore({get:async key=>secure.get(key)??null,set:async(key,value)=>{secure.set(key,value);},remove:async key=>{secure.delete(key);}});
+ failedRemoval='notes/assets/retry.png';downloaded.set(failedRemoval,new Uint8Array([1]));
+ try{await expect(store.resolveLibraryOwner({userId:'new',backendBaseUrl:'https://fixture.test'},'clear',services.clearLocalPrivateLibrary)).rejects.toThrow('fixture deletion failed');expect(secure.get('watchrss.library.owner')).toBe('old-owner');expect(downloaded.has(failedRemoval)).toBe(true);}finally{failedRemoval=undefined;}
+ await store.resolveLibraryOwner({userId:'new',backendBaseUrl:'https://fixture.test'},'clear',services.clearLocalPrivateLibrary);
+ expect(secure.get('watchrss.library.owner')).toBe(JSON.stringify(['https://fixture.test','new']));expect(secure.get('credentials')).toBe('keep');expect(downloaded.has('notes/assets/retry.png')).toBe(false);
+});
+
+
+test('private clear refuses a concurrent cloud writer before touching the library and always releases after failure',async()=>{
+ const channel=await services.services.addChannel('https://example.test/private-busy');cloudBusy=true;cloudOps.length=0;
+ try{await expect(services.clearLocalPrivateLibrary()).rejects.toThrow('云同步正在运行');expect((await services.services.listChannels()).some(value=>value.id===channel.id)).toBe(true);expect(cloudOps).toEqual(['cloud.acquire']);}finally{cloudBusy=false;}
+ failedRemoval='notes/assets/busy-retry.png';downloaded.set(failedRemoval,new Uint8Array([1]));cloudOps.length=0;
+ try{await expect(services.clearLocalPrivateLibrary()).rejects.toThrow('fixture deletion failed');expect(cloudOps).toEqual(['cloud.acquire','cloud.release']);}finally{failedRemoval=undefined;}
+ await services.clearLocalPrivateLibrary();
 });

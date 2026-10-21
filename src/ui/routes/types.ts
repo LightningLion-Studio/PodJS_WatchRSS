@@ -25,6 +25,7 @@ export type Page =
   | "reader-preview"
   | "phone-connection"
   | "account-status"
+  | "cloud-sync"
   | "speech-playback"
   | "settings-reader-presets"
   | "settings-llm-usage"

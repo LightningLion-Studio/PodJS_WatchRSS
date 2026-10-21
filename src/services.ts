@@ -1,3 +1,4 @@
+import {clearPrivateContentFiles} from './core/clear-private-files';
 import {requestFeedText} from "./rss/site-challenge.ts";
 import { feedRequest } from "./core/feed-request";
 import {decodeUtf8Async} from "@podjs/framework/bytes";
@@ -339,6 +340,7 @@ function emitChannel(event:ChannelEvent){for(const listener of channelListeners)
 type RefreshJob=OriginalDownload&{promise:Promise<void>};
 const refreshJobs=new Map<string,RefreshJob>();
 function refreshChannel(id:string,replace=false):Promise<void> {
+  if(privateLibraryClear)return Promise.reject(Error("本机资料正在清空"));
   const previous=refreshJobs.get(id);if(previous&&!replace)return previous.promise;
   if(previous){previous.cancelled=true;previous.cancel?.();}
   const job:RefreshJob={cancelled:false,promise:Promise.resolve()};
@@ -368,6 +370,7 @@ const originalCache=new OriginalContentCache(db,async(sourceUrl,job)=>{
 },2,id=>emitChannel({id,kind:"original"}));
 const originalRequests=new Map<string,Promise<Article>>();
 function originalArticle(id:string):Promise<Article>{
+  if(privateLibraryClear)return Promise.reject(Error("本机资料正在清空"));
   const current=originalRequests.get(id);if(current)return current;
   const request=loadOriginalArticle(id).finally(()=>originalRequests.delete(id));originalRequests.set(id,request);return request;
 }
@@ -417,3 +420,39 @@ async function cleanupRemovedContent(content:RemovedLibraryContent):Promise<void
 export function notifyLibraryChanged(){emitChannel({id:"*",kind:"library"});}
 
 export function notifyNotesChanged(){emitChannel({id:"*",kind:"notes"});}
+
+
+let privateLibraryClear:Promise<void>|undefined;
+/** Explicit local account-ownership clear; resolves only after all private content is removed.
+ * The account store publishes its new owner after this promise, never on partial failure. */
+export function clearLocalPrivateLibrary():Promise<void>{
+ if(privateLibraryClear)return privateLibraryClear;
+ const work=(async()=>{
+  await init();
+  // Shares the foreground/background cloud writer lease: no cursor/cache writer
+  // may race the local wipe. This is local host IO, never a remote deletion.
+  if(!(await hostOperation<{acquired:boolean}>('cloud.acquire',{}).result).acquired)throw Error('云同步正在运行，请稍后清空');
+  try{
+  const jobs=[...refreshJobs.values()];
+  for(const job of jobs){job.cancelled=true;job.cancel?.();}
+  pendingAddPreviews.clear();
+  await Promise.allSettled(jobs.map(job=>job.promise));
+  await originalCache.cancelAll();await Promise.allSettled([...originalRequests.values()]);
+  await readerSpeech.stop();
+  await memoRepository.initialize();
+  await (await getLibrarySyncRepository()).clearLibrary({privateData:true});
+  for(const bucket of ['images','bili-preview','douyin-preload'] as const)await managedCache.clearBucket(bucket);
+  await clearPrivateContentFiles(fileChunks);
+  // Applied heads/hashes must be forgotten or a newly chosen library could be
+  // treated as already restored. Preserve cloud keys, epoch, identity and login.
+  await hostOperation('secure.update',{values:{},removePrefixes:['watchrss.cloud.state.']}).result;
+  const prefixes=['watchrss.reader.progress.','douyin.feed.','douyin.recent-window.','douyin.playback-','douyin.history.','douyin.watched.','douyin.saved.','bili.history.'];
+  kv.batch(()=>{for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))kv.delete(key);});
+  for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))throw Error('private_library_kv_remains');
+  notifyLibraryChanged();notifyNotesChanged();
+  }finally{await hostOperation('cloud.release',{}).result;}
+ })();
+ privateLibraryClear=work;
+ void work.finally(()=>{if(privateLibraryClear===work)privateLibraryClear=undefined;}).catch(()=>{});
+ return work;
+}

@@ -100,6 +100,7 @@
     "net.stream",
     "net.websocket",
     "net.discovery",
+    "net.ble.provision",
     "display.power",
     "system.share",
     "host.lifecycle"

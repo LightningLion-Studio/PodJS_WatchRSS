@@ -22,6 +22,13 @@ const baseParams:Record<string,string>={device_platform:"webapp",aid:"6383",chan
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:"NOT_LOGGED_IN"|"REQUEST_FAILED"|"PARSE_FAILED"|"UNSUPPORTED"|"CANCELLED",message:string):DouyinResult<T>=>({ok:false,code,message});
 export class DouyinClient {
+  private readonly authExpiredListeners=new Set<()=>void>();
+  onAuthExpired(listener:()=>void){this.authExpiredListeners.add(listener);return ()=>{this.authExpiredListeners.delete(listener);};}
+  private async expireAuthentication(){
+    await this.clearCookie();
+    for(const listener of this.authExpiredListeners)listener();
+    return fail<never>('NOT_LOGGED_IN','登录已失效，请重新登录');
+  }
   private readonly now:()=>number;
   private readonly signer:DouyinSigner;
   private readonly saved:NonNullable<DouyinClientOptions["savedStore"]>;
@@ -51,6 +58,7 @@ export class DouyinClient {
       const r=await this.options.transport.request({method,url,headers:{...DOUYIN_PUBLIC_MEDIA_HEADERS,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
         timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
       appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
+      if(r.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);return await this.expireAuthentication();}
       if(r.status!==200){appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
       const body=await decodeMediaText(r.body);
       if(!body.trim()||body==='blocked'){
@@ -61,6 +69,7 @@ export class DouyinClient {
       return {ok:true,data:body};
     }catch(error){
       const failure=mediaRequestFailure(error);
+      if(failure.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category} status=403`);return await this.expireAuthentication();}
       appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
       return fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`);
     }
