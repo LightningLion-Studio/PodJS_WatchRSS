@@ -57,7 +57,7 @@ export function PhoneConnectionScreen(props: { width: number; height: number; ac
     return [
       { height: 26, render: () => <Text class="absolute inset-0 text-center" style={{ fontSlot: 23, lineHeight: 26, textColor: PHONE_PAGE.foreground }}>连接手机</Text> },
       gap(12),
-      option("微信扫码连接", "用腕上RSS小程序扫一扫", () => setPairing(true), true),
+      option("扫码绑定", "用手机 App 或小程序扫一扫", () => setPairing(true), true),
       gap(8),
       option("手机App连接", appOpen() ? "按以下步骤操作" : "用腕上RSS手机端同步", () => setAppOpen(!appOpen()), false, appOpen() ? "收起" : "展开"),
       ...(appOpen() ? [

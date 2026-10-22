@@ -34,7 +34,7 @@ export interface PairingPorts{
 export const PAIRING_LIFETIME_MS=300_000,PAIRING_CONFIRM_MS=90_000,PAIRING_FINISH_GRACE_MS=20_000;
 
 export const pairingStartingLabel=(_transport:PairingTransport)=>'正在生成配对码…';
-export const pairingScanHint=(_transport:PairingTransport)=>'在微信打开腕上RSS小程序，点“添加手表”扫码';
+export const pairingScanHint=(_transport:PairingTransport)=>'在手机 App 或小程序里点“扫码绑定手表”';
 export const pairingDoneTitle=(cloudReady:boolean)=>cloudReady?'全部设置完成':'手表已绑定';
 export const pairingDoneDetail=(cloudReady:boolean)=>cloudReady?'账号已登录，云同步已开启':'账号已登录，可在“我的 → 云同步”查看当前状态';
 export function pairingCountdown(remainingMs:number){const seconds=Math.max(0,Math.ceil(remainingMs/1000));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} 后失效`;}
@@ -46,7 +46,7 @@ export function pairingFailure(error:unknown,transport:PairingTransport,qrShown:
  if(reason.includes('device_key_conflict'))return{kind:'failed',title:'需要重新登记本机',detail:'请先在云同步中确认重新登记，再重新配对',suggestOther:false,needsReregistration:true};
  if(code==='provision_offline')return{kind:'failed',title:'手表没连上网络',detail:'请检查手表网络后重试',suggestOther:false};
  if(code==='provision_expired')return{kind:'failed',title:'配对码已过期',detail:'重新生成一个即可',suggestOther:false};
- if(code==='provision_closed'||qrShown)return{kind:'failed',title:'连接已断开',detail:'请重新开始，再用小程序扫码',suggestOther:false};
+ if(code==='provision_closed'||qrShown)return{kind:'failed',title:'连接已断开',detail:'请重新开始，再用手机扫码',suggestOther:false};
  return{kind:'failed',title:'配对没有完成',detail:'请重新开始配对',suggestOther:false};
 }
 

@@ -69,7 +69,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
      <View class="absolute" style={{insetL:QR_QUIET,insetT:QR_QUIET,width:qrCode(),height:qrCode()}}><FrameworkQRCode value={current.qr} size={qrCode()} pixelSize={Math.min(512,Math.max(1,Math.round(qrCode()*getDisplayMetrics().density)))} raster={pairingRaster} invalidSizeMessage="配对码生成失败" uploadErrorMessage="配对码生成失败"/></View>
     </View>},
     {height:(props.height-qrTile())/2,render:()=> <Text class="absolute left-[0] right-[0] top-[8] text-center" style={{fontSlot:0,lineHeight:14,textColor:PHONE_PAGE.secondary}}>下滑查看操作</Text>},
-    ...text('用小程序扫码','body',PHONE_PAGE.foreground),gap(6),...text(pairingScanHint(current.transport),'body',PHONE_PAGE.secondary),gap(4),
+    ...text('用手机扫码绑定','body',PHONE_PAGE.foreground),gap(6),...text(pairingScanHint(current.transport),'body',PHONE_PAGE.secondary),gap(4),
     ...text(`${pairingCountdown(current.expiresAt-now())}，仅限本次使用`,'small'),gap(12),
     pill('取消',cancel),
    ];
@@ -77,7 +77,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
     // The digits come from the QR secret; the account label is only what the scanner claims.
     const sas=current.sas?.length===8?`${current.sas.slice(0,4)} ${current.sas.slice(4)}`:'';
     return [
-     ...text(sas?'与微信上的数字一致才绑定':'等待核对数字…','body',PHONE_PAGE.secondary),gap(4),
+     ...text(sas?'与手机上的数字一致才绑定':'等待核对数字…','body',PHONE_PAGE.secondary),gap(4),
      ...(sas?[{height:30,render:()=> <Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${current.sas}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{sas}</Text>} as ScrollEntry]:[]),
      gap(4),...text(`账号 ${current.account} · 确认后手表将登录`,'small'),gap(14),
      {height:48,render:()=> <View class="absolute inset-0">
@@ -106,5 +106,5 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  });
  // Short pages sit in the middle of the round face; long ones scroll from the top.
  const rows=createMemo(()=>{const list=entries();if(state().kind==='scan')return list;const room=props.height-36-list.reduce((sum,row)=>sum+row.height,0);return room>0?[gap(room/2),...list]:[gap(8),...list];});
- return <View class="absolute inset-0 bg-black"><ScrollEntries round={null} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>props.ref({...value,onRootBack:back})} accessibilityLabel="微信扫码连接"/></View>;
+ return <View class="absolute inset-0 bg-black"><ScrollEntries round={null} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>props.ref({...value,onRootBack:back})} accessibilityLabel="扫码绑定"/></View>;
 }

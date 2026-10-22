@@ -80,6 +80,6 @@ test('landing starts nothing by itself; scan opens the pairing page and the down
  expect(nodes(root).some(n=>n.props.accessibilityLabel==='下载手机端App')).toBe(false);
  nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();
  expect(nodes(root).some(n=>n.props.accessibilityLabel==='下载手机端App')).toBe(true);
- nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('微信扫码连接'))!.props.onPress();
+ nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('扫码绑定'))!.props.onPress();
  expect(nodes(root).some(n=>n.kind==='PairingPanel')).toBe(true);
 });
