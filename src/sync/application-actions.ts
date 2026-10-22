@@ -1,7 +1,8 @@
 import type {SyncEventLog} from '../logs/sync-events.ts';
 import {remoteInputUrl} from "../remote-input/inbox.ts";
 import {tokenUsageOptInt} from './token-usage.ts';
-import type {JsonObject} from './protocol.ts';
+import {ACTION_OPEN_PAIRING,type JsonObject} from './protocol.ts';
+import type {SyncActionContext} from './session.ts';
 import {syncNotes,type NoteSyncRepository} from './note-actions.ts';
 import {syncAccount,type AccountUriParse} from './account-actions.ts';
 import {pullSavedItems,type SavedLinkType} from './saved-links.ts';
@@ -9,11 +10,17 @@ import type {AccountSyncTelemetry} from './account-telemetry.ts';
 import type {WatchAccountStore} from '../account/store.ts';
 import {debugLogMaxChars,type DebugLogReply} from './diagnostic-log.ts';
 import {watchAccountBinding} from './account-binding.ts';
-export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;deviceId():Promise<string>;notesChanged():void;clearLibrary?:()=>Promise<void>;accountStore?:Pick<WatchAccountStore,'save'>&Partial<Pick<WatchAccountStore,'read'>>;accountBindingHash?:(bytes:Uint8Array)=>string|Promise<string>;accountUriParse?:AccountUriParse;accountChanged?:()=>void;accountTelemetry?:AccountSyncTelemetry;readSavedLinks?:(type:SavedLinkType)=>Promise<string[]>;readDebugLog?:(maxChars:unknown)=>DebugLogReply|Promise<DebugLogReply>;noteAssets?:{apply(request:JsonObject):Promise<JsonObject>};readTokenUsage?(limit:number):Promise<JsonObject[]>;readerSync?:{apply(request:JsonObject):Promise<JsonObject>};previewReader?(request:JsonObject):JsonObject}){
+export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;deviceId():Promise<string>;notesChanged():void;requestPairingPage?:(session:object)=>boolean|Promise<boolean>;clearLibrary?:()=>Promise<void>;accountStore?:Pick<WatchAccountStore,'save'>&Partial<Pick<WatchAccountStore,'read'>>;accountBindingHash?:(bytes:Uint8Array)=>string|Promise<string>;accountUriParse?:AccountUriParse;accountChanged?:()=>void;accountTelemetry?:AccountSyncTelemetry;readSavedLinks?:(type:SavedLinkType)=>Promise<string[]>;readDebugLog?:(maxChars:unknown)=>DebugLogReply|Promise<DebugLogReply>;noteAssets?:{apply(request:JsonObject):Promise<JsonObject>};readTokenUsage?(limit:number):Promise<JsonObject[]>;readerSync?:{apply(request:JsonObject):Promise<JsonObject>};previewReader?(request:JsonObject):JsonObject}){
+ const fallbackSession={};
  const accountBinding=ports.accountStore?.read&&ports.accountBindingHash
   ?()=>watchAccountBinding({read:()=>ports.accountStore!.read!()},ports.accountBindingHash!)
   :undefined;
- const handler=async(request:JsonObject,diagnostic?:SyncEventLog):Promise<JsonObject>=>{
+ const handler=async(request:JsonObject,diagnostic?:SyncEventLog,context?:SyncActionContext):Promise<JsonObject>=>{
+  if(request.action===ACTION_OPEN_PAIRING){
+   let opened=false;
+   try{opened=await ports.requestPairingPage?.(context?.session??fallbackSession)===true;}catch{}
+   return {success:true,action:ACTION_OPEN_PAIRING,opened};
+  }
   try{
    if(request.action==='ping')return {success:true,action:'pong',nonce:typeof request.nonce==='string'?request.nonce:''};
    if(request.action==='remoteInput'){if(!remoteInputUrl(request.url))throw new Error('缺少 RSS URL');return {success:true,action:'remoteInput'};}

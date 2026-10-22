@@ -1,8 +1,8 @@
 import {createRequestAllowlist} from '@podjs/framework/request-policy';
-import type {JsonObject} from './protocol.ts';
+import {ACTION_OPEN_PAIRING,type JsonObject} from './protocol.ts';
 /** Native automatic Bluetooth and IP listeners share this list. Active connection
  * pages/debug listeners omit the policy and retain their existing permissions. */
-export const FOREGROUND_SYNC_ACTIONS = Object.freeze(['syncLibrary','clearLibrary','syncNotes','syncNoteAsset','syncReader','previewReader','syncAccount','syncLlmTokenUsage']);
+export const FOREGROUND_SYNC_ACTIONS = Object.freeze(['syncLibrary','clearLibrary','syncNotes','syncNoteAsset','syncReader','previewReader','syncAccount','syncLlmTokenUsage',ACTION_OPEN_PAIRING]);
 export const foregroundRequestFilter = createRequestAllowlist<JsonObject, JsonObject>(
  request=>String(request.action??''), FOREGROUND_SYNC_ACTIONS,
  ()=>({success:false,message:'当前前台自动同步不支持此操作，请在手表上打开对应连接页面'}),

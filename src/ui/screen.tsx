@@ -123,6 +123,7 @@ import { entryDisclosure } from "./entry-disclosure.ts";
 import { PendingDisclosure } from "./PlatformNotice.tsx";
 import type { Announcement, PushMessage } from "../announcement/models.ts";
 import { HomeNoticeDialog } from "./HomeNoticeDialog.tsx";
+import { bindPairingRequestRoute } from "./routes/pairing.ts";
 
 type Entry = RouteEntry;
 const bg = "#050507",
@@ -834,6 +835,12 @@ export default function WatchRSS(props: {
     setFeedLoadingMore(true);
     void loadFeedArticles(channelId, limit);
   }
+  // A phone starting scan binding asks the watch to open its pairing code; only when idle and in front.
+  onCleanup(bindPairingRequestRoute({
+    active: () => foreground() && motion.phase === "idle" && !busy(),
+    page,
+    go: () => go("phone-connection"),
+  }));
   async function go(next: Page) {
     if (motion.phase !== "idle") return;
     if (next === "notes") {

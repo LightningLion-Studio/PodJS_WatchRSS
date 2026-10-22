@@ -12,6 +12,7 @@ export const ACTION_SYNC_LIBRARY = "syncLibrary";
 export const ACTION_SYNC_SESSION = "syncSession";
 export const ACTION_ACK = "ack";
 export const ACTION_CLEAR_LIBRARY = "clearLibrary";
+export const ACTION_OPEN_PAIRING = "openPairing";
 export const LIBRARY_MODE_MERGE = "merge";
 export const LIBRARY_MODE_PHONE_TO_WATCH_REPLACE = "phoneToWatchReplace";
 export const LIBRARY_MODE_WATCH_TO_PHONE_REPLACE = "watchToPhoneReplace";

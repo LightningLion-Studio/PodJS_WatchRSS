@@ -10,8 +10,8 @@ function replay(frames:JsonObject[],filterRequest:typeof foregroundRequestFilter
  const session=new LibrarySyncSession({readFrame:async()=>{const next=input.shift();if(!next)throw Error('EOF');return next;},writeFrame:async frame=>{output.push(frame);},close:async()=>{}},repo,{filterRequest,handleAction:async request=>{handled.push(String(request.action));return {success:true,action:request.action};}});
  return {run:()=>session.run(),output,handled,cursors:()=>cursors};
 }
-test('automatic allowlist exactly matches native Bluetooth/IP eight actions',()=>{
- expect(FOREGROUND_SYNC_ACTIONS).toEqual(['syncLibrary','clearLibrary','syncNotes','syncNoteAsset','syncReader','previewReader','syncAccount','syncLlmTokenUsage']);
+test('automatic allowlist retains native Bluetooth/IP actions and allows the pairing UI request',()=>{
+ expect(FOREGROUND_SYNC_ACTIONS).toEqual(['syncLibrary','clearLibrary','syncNotes','syncNoteAsset','syncReader','previewReader','syncAccount','syncLlmTokenUsage','openPairing']);
  for(const action of FOREGROUND_SYNC_ACTIONS)expect(foregroundRequestFilter({action})).toBeUndefined();
 });
 for(const action of ['ping','remoteInput','pullSavedItems','pullDebugLog','unknown'])test(`automatic rejects ${action} with native reply; active/debug default still dispatches`,async()=>{

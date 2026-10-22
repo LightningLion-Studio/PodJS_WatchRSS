@@ -24,6 +24,7 @@ export const isLivePairing=(state:PairingState)=>state.kind==='starting'||state.
 export interface PairingOperation<T>{result:Promise<T>;cancel():void}
 export interface PairingHandler{handle(message:Record<string,any>):Promise<Record<string,unknown>>}
 export interface PairingPorts{
+ acquirePairingActivity?():()=>void;
  op<T>(method:string,args:Record<string,unknown>):PairingOperation<T>;
  available():boolean;
  identity():Promise<{deviceId:string;installId:string}>;
@@ -58,6 +59,7 @@ export class MiniProgramPairing{
  private approval:((value:boolean)=>void)|undefined;private cancelTimers:(()=>void)[]=[];
  private outcome:'pending'|'approved'|'declined'|'timeout'='pending';
  private bound=false;private cloud=false;
+ private releaseActivity:(()=>void)|undefined;
  constructor(private readonly ports:PairingPorts,private readonly onState:(state:PairingState)=>void,transport:PairingTransport='internet'){this.transport='internet';}
  current(){return this.state;}
  private emit(state:PairingState){this.state=state;this.onState(state);}
@@ -67,6 +69,7 @@ export class MiniProgramPairing{
   if(this.disposed||!this.foreground)return;
   this.stop();
   if(!this.ports.available()){this.emit({kind:'failed',title:'暂不支持扫码配对',detail:'请更新手表上的腕上RSS后再试',suggestOther:false});return;}
+  this.releaseActivity=this.ports.acquirePairingActivity?.();
   const epoch=this.epoch;this.bound=false;this.cloud=false;this.outcome='pending';
   this.emit({kind:'starting',transport:this.transport});
   void this.run(epoch);
@@ -93,6 +96,7 @@ export class MiniProgramPairing{
 
  /** Ends the owned session and rejects a pending confirmation. */
  private stop(next?:PairingState){
+  this.releaseActivity?.();this.releaseActivity=undefined;
   this.epoch++;this.secret?.fill(0);this.secret=undefined;
   this.approval?.(false);
   for(const cancel of this.cancelTimers.splice(0))cancel();

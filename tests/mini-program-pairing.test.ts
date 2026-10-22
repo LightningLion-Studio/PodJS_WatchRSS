@@ -1,5 +1,6 @@
 import {expect,test} from 'bun:test';
 import {MiniProgramPairing,PAIRING_FINISH_GRACE_MS,type PairingPorts,type PairingState} from '../src/ui/mini-program-pairing.ts';
+import {PairingRequestBus} from '../src/ui/pairing-request.ts';
 
 const qr='wrss-pair:'+Buffer.from(JSON.stringify({sessionId:'s1',deviceId:'d',installId:'i',secret:Buffer.alloc(32,9).toString('base64')})).toString('base64url');
 type Call={method:string;args:Record<string,unknown>;cancelled:boolean};
@@ -35,6 +36,26 @@ function host(options:{permission?:string;startError?:{code:string};existingClou
  return {ports,calls,states,deliver,fail,settle,fire,label:()=>confirmLabel,methods:()=>calls.map(c=>c.method),responses:()=>calls.filter(c=>c.method==='provision.respond').map(c=>c.args.result as Record<string,unknown>)};
 }
 const last=(h:{states:PairingState[]})=>h.states.at(-1)!;
+
+test('manual pairing blocks remote UI requests through QR and finish grace, then releases after close',async()=>{
+ const h=host(),bus=new PairingRequestBus(()=>0);bus.setForeground(true);bus.subscribe(()=>bus.consumePending());
+ h.ports.acquirePairingActivity=()=>bus.acquireActivity();const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));
+ p.start();expect(await bus.request({})).toBe(false);await h.settle();expect(last(h).kind).toBe('scan');expect(await bus.request({})).toBe(false);
+ await h.deliver({action:'prepare',phoneMasked:'x',_sequence:0});p.confirmSas(true);await h.settle();
+ await h.deliver({action:'configure',_sequence:1});await h.deliver({action:'key',_sequence:2});await h.deliver({action:'finish',_sequence:3});
+ expect(last(h).kind).toBe('done');expect(await bus.request({})).toBe(false);
+ h.fire(PAIRING_FINISH_GRACE_MS);await h.settle();expect(await bus.request({})).toBe(true);p.dispose();
+});
+
+test('cancel, background, failure and disposal release the pairing UI activity lease',async()=>{
+ for(const reason of ['cancel','background','failure','dispose'] as const){
+  const h=host(),bus=new PairingRequestBus(()=>0);bus.setForeground(true);bus.subscribe(()=>bus.consumePending());
+  h.ports.acquirePairingActivity=()=>bus.acquireActivity();const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.settle();
+  expect(await bus.request({})).toBe(false);
+  if(reason==='cancel')p.cancel();else if(reason==='background')p.setForeground(false);else if(reason==='failure')await h.fail({code:'provision_network'});else p.dispose();
+  expect(await bus.request({})).toBe(true);p.dispose();
+ }
+});
 
 test('internet pairing never asks for nearby permission and reaches cloud-ready only after receipts',async()=>{
  const h=host();const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));

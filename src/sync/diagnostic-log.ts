@@ -5,7 +5,7 @@ export interface DebugLogReply { [key:string]:unknown;success:true;action:"pullD
 
 const KEY="watchrss.sync.diagnostics.v1";
 const MAX_STORED_CHARS=700_000;
-const allowedActions=new Set(["ping","remoteInput","pullSavedItems","syncAccount","syncReader","previewReader","syncLlmTokenUsage","pullDebugLog","clearLibrary","syncLibrary","syncNotes","syncNoteAsset","syncSession"]);
+const allowedActions=new Set(["ping","remoteInput","pullSavedItems","syncAccount","syncReader","previewReader","syncLlmTokenUsage","pullDebugLog","clearLibrary","syncLibrary","syncNotes","syncNoteAsset","syncSession","openPairing"]);
 const safeToken=(value:string)=>/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(value)?value:"unknown";
 
 /** A bounded, persistent sync timeline. Payloads, peer IDs, URLs and exception messages never enter it. */

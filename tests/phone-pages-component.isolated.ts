@@ -60,26 +60,23 @@ test('long unavailable reason wraps at safe bounds with Start alignment; empty m
  const empty=createRoot(stop=>{stops.push(stop);return PhoneConnectionUnavailableScreen({width:233,height:233,message:''});});expect(text(empty)).toEqual(['暂不可用','']);
 });
 
-test('nearby discovery permission requires an active explicit UI action and reports denial',async()=>{
- nearby=true;discoveryRequests=0;discoveryPermission='granted';const errors:string[]=[];const [active,setActive]=createSignal(true);
- const mountPhone=()=>createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active,onError:e=>errors.push(e),ref:()=>{}});});
- const root=mountPhone();expect(discoveryRequests).toBe(0);
- expect(nodes(root).some(n=>n.props.accessibilityLabel==='启用附近手机发现')).toBe(false);
- nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();
- const button=nodes(root).find(n=>n.props.accessibilityLabel==='启用附近手机发现')!;expect(button).toBeDefined();
- button.props.onPress();await settle();expect(discoveryRequests).toBe(1);expect(errors).toEqual([]);
- discoveryPermission='denied';button.props.onPress();await settle();expect(discoveryRequests).toBe(2);expect(errors).toEqual(['请允许附近设备发现权限后重试']);
- setActive(false);button.props.onPress();await settle();expect(discoveryRequests).toBe(2);
- setActive(true);nearby=false;const plain=mountPhone();nodes(plain).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();expect(nodes(plain).some(n=>n.props.accessibilityLabel==='启用附近手机发现')).toBe(false);nearby=true;
-});
-
-test('landing starts nothing by itself; scan opens the pairing page and the download code stays folded away',async()=>{
+test('landing starts nothing by itself; one scan route and a download link, no extra phone-App route',async()=>{
  nearby=true;const [active]=createSignal(true);
  const root=createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active,onError:()=>{},ref:()=>{}});});
  expect(nodes(root).some(n=>n.kind==='PairingPanel')).toBe(false);
- expect(nodes(root).some(n=>n.props.accessibilityLabel==='下载手机端App')).toBe(false);
- nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))!.props.onPress();
+ expect(nodes(root).some(n=>String(n.props.accessibilityLabel).startsWith('手机App连接'))).toBe(false);
  expect(nodes(root).some(n=>n.props.accessibilityLabel==='下载手机端App')).toBe(true);
  nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('扫码绑定'))!.props.onPress();
  expect(nodes(root).some(n=>n.kind==='PairingPanel')).toBe(true);
+});
+
+test('a phone scan request opens the pairing code on an open connection page; a manual visit does not',async()=>{
+ const bus=await import('../src/ui/pairing-request.ts');
+ bus.setPairingRequestForeground(true);
+ const [active]=createSignal(true);
+ const manual=createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active,onError:()=>{},ref:()=>{}});});
+ expect(nodes(manual).some(n=>n.kind==='PairingPanel')).toBe(false);
+ expect(await bus.requestPairingPage({})).toBe(true);
+ expect(nodes(manual).some(n=>n.kind==='PairingPanel')).toBe(true);
+ bus.setPairingRequestForeground(false);
 });

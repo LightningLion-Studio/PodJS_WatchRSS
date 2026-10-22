@@ -35,7 +35,10 @@ export interface LibrarySessionRepository {
 }
 export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number;sentArticles?:number;totalArticles?:number}
 export interface SessionActionResult {request:JsonObject;response:JsonObject;ack:ResponseAck|null;libraryApplied:boolean}
+/** Opaque connection identity generated locally; never taken from wire fields. */
+export interface SyncActionContext {readonly session:object}
 export interface LibrarySessionOptions {
+ actionSession?:object;
  filterRequest?:RequestFilter<JsonObject,JsonObject>;
  diagnosticLog?:SyncEventLog;
  now?:()=>number;
@@ -45,7 +48,7 @@ export interface LibrarySessionOptions {
  onActionCompleted?:(result:SessionActionResult)=>void;
  capabilities?:ProbeCapabilities;
  watchCapabilities?:JsonObject;
- handleAction?:((request:JsonObject,diagnostic?:SyncEventLog)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>};
+ handleAction?:((request:JsonObject,diagnostic?:SyncEventLog,context?:SyncActionContext)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>};
  offerIpEndpoint?:(descriptor:JsonObject)=>Promise<boolean>;
  initialRequestTimeoutMs?:number;
  responseAckTimeoutMs?:number;
@@ -54,6 +57,7 @@ const persistentFields={supportsPersistentSession:true,persistentSessionAccepted
 /** Watch-side phase coordinator shared by Bluetooth and IP byte transports.
  * One instance owns and closes one connection. There are no automatic retries. */
 export class LibrarySyncSession {
+ private readonly actionContext:SyncActionContext;
  private readonly log:SyncEventLog;
  private checkpointRequested=false;private checkpointed=false;
  private used=false;
@@ -62,7 +66,7 @@ export class LibrarySyncSession {
  private aborting=false;
  private readonly now:()=>number;
  private readonly monotonic:()=>number;
- constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.log=options.diagnosticLog??new SyncEventLog();this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());this.connection.setTransferProgress?.(options.onTransferProgress);this.connection.setFrameTiming?.(sample=>{this.log.event(sample.direction==='read'?'frame.read.complete':'frame.write.complete',{frameBytes:sample.bytes,readMs:sample.readMs,decodeMs:sample.decodeMs,encodeMs:sample.encodeMs,writeMs:sample.writeMs});});}
+ constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.actionContext={session:options.actionSession??{}};this.log=options.diagnosticLog??new SyncEventLog();this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());this.connection.setTransferProgress?.(options.onTransferProgress);this.connection.setFrameTiming?.(sample=>{this.log.event(sample.direction==='read'?'frame.read.complete':'frame.write.complete',{frameBytes:sample.bytes,readMs:sample.readMs,decodeMs:sample.decodeMs,encodeMs:sample.encodeMs,writeMs:sample.writeMs});});}
  cancel():void {this.cancelled??=new Error('Sync session cancelled');void this.close().catch(()=>{});}
  private async timed<T>(event:string,action:()=>Promise<T>):Promise<T>{const start=this.monotonic();try{return await action();}finally{this.log.event(event,{elapsedMs:Math.max(0,Math.round(this.monotonic()-start))});}}
  private check():void {if(this.cancelled)throw this.cancelled;}
@@ -121,7 +125,7 @@ export class LibrarySyncSession {
       response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
      }
      else if(this.options.handleAction){
-      try{response=await this.options.handleAction(request,this.log);}catch(error){this.log.event("request.handle.failed",{message:"<redacted>"},"E");throw error;}
+      try{response=await this.options.handleAction(request,this.log,this.actionContext);}catch(error){this.log.event("request.handle.failed",{message:"<redacted>"},"E");throw error;}
       if(response.success===true){
        if(request.action==="pullSavedItems")this.log.event("request.pullSavedItems.built",{items:Array.isArray(response.items)?response.items.length:0});
        else if(request.action==="syncAccount")this.log.event("request.syncAccount.saved",{userId:"<redacted>",plan:"<redacted>"});
@@ -146,7 +150,7 @@ export class LibrarySyncSession {
  private async previewStream(initial:JsonObject):Promise<SessionActionResult>{
   let request=initial,lastAcknowledgedAt:number|undefined;
   while(true){
-   const response=this.options.filterRequest?.(request)??(this.options.handleAction?await this.options.handleAction(request):{success:false,applied:false,message:'当前同步操作尚未接入'});
+   const response=this.options.filterRequest?.(request)??(this.options.handleAction?await this.options.handleAction(request,undefined,this.actionContext):{success:false,applied:false,message:'当前同步操作尚未接入'});
    this.check();const phase=string(request.phase),terminal=phase==='stop'||phase==='resourceHandoff',handledAt=this.monotonic();
    if(lastAcknowledgedAt===undefined||terminal||!bool(response.applied,true)||response.success===false||handledAt-lastAcknowledgedAt>=50){await this.write(response);lastAcknowledgedAt=this.monotonic();}
    if(terminal)return {request:initial,response,ack:null,libraryApplied:false};
