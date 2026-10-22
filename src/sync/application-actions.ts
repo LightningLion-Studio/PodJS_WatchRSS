@@ -8,7 +8,11 @@ import {pullSavedItems,type SavedLinkType} from './saved-links.ts';
 import type {AccountSyncTelemetry} from './account-telemetry.ts';
 import type {WatchAccountStore} from '../account/store.ts';
 import {debugLogMaxChars,type DebugLogReply} from './diagnostic-log.ts';
-export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;deviceId():Promise<string>;notesChanged():void;clearLibrary?:()=>Promise<void>;accountStore?:Pick<WatchAccountStore,'save'>;accountUriParse?:AccountUriParse;accountChanged?:()=>void;accountTelemetry?:AccountSyncTelemetry;readSavedLinks?:(type:SavedLinkType)=>Promise<string[]>;readDebugLog?:(maxChars:unknown)=>DebugLogReply|Promise<DebugLogReply>;noteAssets?:{apply(request:JsonObject):Promise<JsonObject>};readTokenUsage?(limit:number):Promise<JsonObject[]>;readerSync?:{apply(request:JsonObject):Promise<JsonObject>};previewReader?(request:JsonObject):JsonObject}){
+import {watchAccountBinding} from './account-binding.ts';
+export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;deviceId():Promise<string>;notesChanged():void;clearLibrary?:()=>Promise<void>;accountStore?:Pick<WatchAccountStore,'save'>&Partial<Pick<WatchAccountStore,'read'>>;accountBindingHash?:(bytes:Uint8Array)=>string|Promise<string>;accountUriParse?:AccountUriParse;accountChanged?:()=>void;accountTelemetry?:AccountSyncTelemetry;readSavedLinks?:(type:SavedLinkType)=>Promise<string[]>;readDebugLog?:(maxChars:unknown)=>DebugLogReply|Promise<DebugLogReply>;noteAssets?:{apply(request:JsonObject):Promise<JsonObject>};readTokenUsage?(limit:number):Promise<JsonObject[]>;readerSync?:{apply(request:JsonObject):Promise<JsonObject>};previewReader?(request:JsonObject):JsonObject}){
+ const accountBinding=ports.accountStore?.read&&ports.accountBindingHash
+  ?()=>watchAccountBinding({read:()=>ports.accountStore!.read!()},ports.accountBindingHash!)
+  :undefined;
  const handler=async(request:JsonObject,diagnostic?:SyncEventLog):Promise<JsonObject>=>{
   try{
    if(request.action==='ping')return {success:true,action:'pong',nonce:typeof request.nonce==='string'?request.nonce:''};
@@ -25,5 +29,5 @@ export function createApplicationActionHandler(ports:{notes:NoteSyncRepository;d
    return {success:false,message:'未知蓝牙同步动作：'+String(request.action??''),errorCode:'unsupported_action'};
   }catch(error){diagnostic?.event("request.handle.failed",{message:"<redacted>"},"E");return {success:false,message:error instanceof Error?error.message:String(error)};}
  };
- return Object.assign(handler,{capabilities:{supportsReaderPresets:!!ports.readerSync,supportsReaderAssets:!!ports.readerSync,supportsResourceChunkAck:!!ports.readerSync,supportsReaderPresetPreview:!!ports.previewReader}});
+ return Object.assign(handler,{accountBinding,capabilities:{supportsReaderPresets:!!ports.readerSync,supportsReaderAssets:!!ports.readerSync,supportsResourceChunkAck:!!ports.readerSync,supportsReaderPresetPreview:!!ports.previewReader}});
 }

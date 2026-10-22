@@ -45,7 +45,7 @@ export interface LibrarySessionOptions {
  onActionCompleted?:(result:SessionActionResult)=>void;
  capabilities?:ProbeCapabilities;
  watchCapabilities?:JsonObject;
- handleAction?:((request:JsonObject,diagnostic?:SyncEventLog)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities};
+ handleAction?:((request:JsonObject,diagnostic?:SyncEventLog)=>Promise<JsonObject>) & {capabilities?:ProbeCapabilities;accountBinding?:()=>Promise<JsonObject>};
  offerIpEndpoint?:(descriptor:JsonObject)=>Promise<boolean>;
  initialRequestTimeoutMs?:number;
  responseAckTimeoutMs?:number;
@@ -117,7 +117,8 @@ export class LibrarySyncSession {
       let ipUpgradeAccepted=false;const descriptor=wireFields.object(request.ipEndpointDescriptor);
       if(descriptor&&this.options.offerIpEndpoint)try{ipUpgradeAccepted=await this.options.offerIpEndpoint(descriptor);}catch{}
       this.log.event("request.syncLibrary.probe",{remoteDeviceId:request.deviceId,ipUpgradeAccepted});
-      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),sentAt:this.now(),ipUpgradeAccepted};
+      const account=await this.options.handleAction?.accountBinding?.();this.check();
+      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
      }
      else if(this.options.handleAction){
       try{response=await this.options.handleAction(request,this.log);}catch(error){this.log.event("request.handle.failed",{message:"<redacted>"},"E");throw error;}

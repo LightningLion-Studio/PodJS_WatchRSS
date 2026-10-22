@@ -16,6 +16,7 @@ import {ReaderResources} from "./reader-resources.ts";
 import {hostReaderResourceFiles} from "./reader-resources-host.ts";
 import {NoteAssetReceiver} from './note-assets.ts';
 import {createApplicationActionHandler} from './application-actions.ts';
+import {hostArticleBodyCodec} from './article-body-host.ts';
 import {usageTelemetry} from '../telemetry/host.ts';
 import {SyncDiagnosticLog} from './diagnostic-log.ts';
 import {summaryAccountStore} from '../llm/runtime.ts';
@@ -34,7 +35,7 @@ export function startApplicationForegroundSync(){
  const storage={get:(key:string)=>kv.get<string>(key),set:(key:string,value:string)=>kv.set(key,value)};
  const diagnostics=new SyncDiagnosticLog(storage,undefined,message=>hostAppLogger.d('WatchSync',message));
  const accountTelemetry=usageTelemetry;
- const handleAction=createApplicationActionHandler({previewReader:request=>handleReaderPreview(request,readerPreviewSession,requestReaderPreviewOpen),readerSync:hasCapability('data.files.chunks')&&hasCapability('crypto.basic')?new ReaderSyncActions(new ReaderPresetStore(),new ReaderResources(hostReaderResourceFiles),notifyReaderPresetsChanged,()=>{readerPreviewSession.refreshResourceTransfer();}):undefined,readTokenUsage:getTokenUsageForSync,readSavedLinks:getSavedLinksForSync,readDebugLog:maxChars=>hostAppLogger.pull(maxChars),clearLibrary:async()=>{await (await getLibrarySyncRepository()).clearLibrary();notifyLibraryChanged();},notes:memoRepository,deviceId:async()=>(await getLibrarySyncRepository()).deviceId(),notesChanged:notifyNotesChanged,accountStore:summaryAccountStore,accountTelemetry,noteAssets:new NoteAssetReceiver(fileChunks)});
+ const handleAction=createApplicationActionHandler({previewReader:request=>handleReaderPreview(request,readerPreviewSession,requestReaderPreviewOpen),readerSync:hasCapability('data.files.chunks')&&hasCapability('crypto.basic')?new ReaderSyncActions(new ReaderPresetStore(),new ReaderResources(hostReaderResourceFiles),notifyReaderPresetsChanged,()=>{readerPreviewSession.refreshResourceTransfer();}):undefined,readTokenUsage:getTokenUsageForSync,readSavedLinks:getSavedLinksForSync,readDebugLog:maxChars=>hostAppLogger.pull(maxChars),clearLibrary:async()=>{await (await getLibrarySyncRepository()).clearLibrary();notifyLibraryChanged();},notes:memoRepository,deviceId:async()=>(await getLibrarySyncRepository()).deviceId(),notesChanged:notifyNotesChanged,accountStore:summaryAccountStore,accountBindingHash:hostArticleBodyCodec.sha256,accountTelemetry,noteAssets:new NoteAssetReceiver(fileChunks)});
  const watchCapabilities=buildWatchMediaCapabilities(getDisplayMetrics());
  diagnostics.state('bluetooth','starting');
  let disposed=false,ip:IpSyncController|undefined;
