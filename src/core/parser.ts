@@ -38,8 +38,10 @@ function* feedSteps(root:XmlNode,fetchedAt:number,baseUrl?:string):Generator<voi
     const content = child(e,"encoded") ?? child(e,"content") ?? child(e,"description" ) ?? child(e,"summary");
     const nativeVal = (n: Node | undefined) => n ? nativeRssTrim(decodeHtml(textContent(n))) : "";
     const guid = nativeVal(child(e,"guid")) || nativeVal(child(e,"id"));
-    const identityLink = rawLink(e), itemLink = resolveUrl(identityLink,baseUrl), title = nativeVal(child(e,"title")) || identityLink || "未命名内容", pubDate = val(child(e,"pubdate")) || val(child(e,"published")) || val(child(e,"updated")), enclosure=child(e,"enclosure"), mediaUrl=resolveUrl(enclosure?.attrs.url,baseUrl), resolvedGuid=guid || null;
-    return { title, description: val(child(e,"description") ?? child(e,"summary")) || null, content: content ? textContent(content).trim() : null, link: itemLink, guid: resolvedGuid, pubDate: pubDate || null, imageUrl: enclosure?.attrs.type?.startsWith("image/") ? mediaUrl : null, audioUrl: enclosure?.attrs.type?.startsWith("audio/") ? mediaUrl : null, videoUrl: enclosure?.attrs.type?.startsWith("video/") ? mediaUrl : null, readingProgress: 0, dedupKey: rssDedupKey(resolvedGuid,identityLink,title), fetchedAt };
+    const identityLink = rawLink(e), itemLink = resolveUrl(identityLink,baseUrl), title = nativeVal(child(e,"title")) || identityLink || "未命名内容", pubDate = val(child(e,"pubdate")) || val(child(e,"published")) || val(child(e,"updated")), resolvedGuid=guid || null;
+    const media=(type:string)=>resolveUrl(children(e,"enclosure").find(n=>n.attrs.type?.startsWith(type))?.attrs.url,baseUrl);
+    const poolEntryId=val(child(e,'watchrss:dedup-key'));
+    return { ...(/^[a-f0-9]{64}$/.test(poolEntryId)?{poolEntryId}:{}),title, description: val(child(e,"description") ?? child(e,"summary")) || null, content: content ? textContent(content).trim() : null, link: itemLink, guid: resolvedGuid, pubDate: pubDate || null, imageUrl:media("image/"),audioUrl:media("audio/"),videoUrl:media("video/"), readingProgress: 0, dedupKey: rssDedupKey(resolvedGuid,identityLink,title), fetchedAt };
   }));yield;}return feed;
 }
 export function parseFeed(xml:string,fetchedAt=Date.now(),baseUrl?:string):ParsedFeed {const steps=feedSteps(traceServiceWork("refresh.parseXml",()=>parseXml(xml)),fetchedAt,baseUrl);for(;;){const next=steps.next();if(next.done)return next.value;}}

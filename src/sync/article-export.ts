@@ -3,7 +3,10 @@ import {javaJsonQuote,type SyncArticleBody,type SyncBodyCodec,type SyncBodyPaylo
 import type {WireIncomingArticle,RequestedArticleBody} from "./article-batches.ts";
 import type {ArticleManifest} from "./manifest.ts";
 import {isImportedContentUrl} from "../core/imported-content.ts";
-export interface ExportedArticle extends WireIncomingArticle,SyncArticleBody {}
+export interface ExportedArticle extends WireIncomingArticle,SyncArticleBody {
+ /** Local cloud projection only; excluded from records/archives and native wire metadata. */
+ cloudRssArticleId?:string;cloudLegacyArticleIds?:string[];
+}
 export const BODY_CHUNK_SIZE=128*1024;
 const integerFields=["importedAt","updatedAt","independentChangedAt","independentSortOrder","favoriteChangedAt","favoriteSortOrder","watchLaterChangedAt","watchLaterSortOrder","deletedAt"] as const;
 /** JSONObject insertion order, omitted Java null fields, slash escaping and UTF-8 replacement are significant. */

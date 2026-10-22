@@ -1,3 +1,5 @@
+import {utf8Encode} from '../cloud/types';
+import {tryRssArticleId,canonicalRssUrl,isLocalOnlyRssSource} from '../cloud/rss-identity';
 import {readSyncSqlText} from "./sql-text.ts";
 import {libraryRevision,revisionGuard} from "./revision.ts";
 import {querySyncPages} from './sql-pages.ts';
@@ -25,9 +27,11 @@ export async function stableArticleId(value:string,uri:SyncTextPort['parseUri'],
  const p=await uri(normalized);if(p.valid&&p.scheme!==null)key=p.scheme.toLowerCase()+'://'+(p.host??'').toLowerCase().replace(/^www\./,'')+(blank(p.rawPath)?'/':p.rawPath)+(blank(p.rawQuery)?'':'?'+p.rawQuery);
  return hashJavaText(key,codec);
 }
+export interface CloudRssIdentity {itemId:number;articleId:string;localArticleId:string;nativeArticleId:string;legacyMaterialized:boolean;url:string;sourceUrl:string}
 type Row=Record<string,unknown>;
 const str=(v:unknown)=>v==null?'':String(v),nullable=(v:unknown)=>v==null?null:String(v),num=(v:unknown)=>Number(v??0);
 const ROW_SELECT=`SELECT a.id,a.channel_id,a.title,a.link,a.guid,a.pub_date,a.image_url,a.audio_url,a.video_url,a.is_read,a.is_saved,a.reading_progress,a.dedup_key,a.fetched_at,
+ (SELECT article_id FROM cloud_rss_article_ids WHERE item_id=a.id) AS cloud_rss_id,
  CASE WHEN a.content IS NULL OR length(CAST(a.content AS BLOB))<=4096 THEN 1 ELSE 0 END AS content_inline,
  CASE WHEN a.description IS NULL OR length(CAST(a.description AS BLOB))<=4096 THEN 1 ELSE 0 END AS description_inline,
  CASE WHEN length(CAST(a.content AS BLOB))<=4096 THEN a.content END AS content,
@@ -68,10 +72,10 @@ export class LocalArticleManifestStore {
   this.stableIds.set(value,id);return id;
  }
  /** Native lookup uses each saved-type binding before source/dedup fallback. */
- async resolveIncomingBody(article:IncomingArticle):Promise<LocalReceiveBody|null>{
-  const revision=await libraryRevision(this.db);let row:Row|undefined;
+ async resolveIncomingBody(article:IncomingArticle,targetItemId?:number):Promise<LocalReceiveBody|null>{
+  const revision=await libraryRevision(this.db);let row:Row|undefined=targetItemId?(await this.db.query(ROW_SELECT+` WHERE a.id=?`,[targetItemId]))[0]:undefined;
   const states=await this.db.query(`SELECT item_id FROM sync_saved_states WHERE article_id=? AND item_id IS NOT NULL ORDER BY CASE save_type WHEN 'favorite' THEN 0 ELSE 1 END`,[article.articleId]);
-  for(const state of states){row=(await this.db.query(ROW_SELECT+` WHERE a.id=?`,[state.item_id]))[0];if(row)break;}
+  for(const state of row?[]:states){row=(await this.db.query(ROW_SELECT+` WHERE a.id=?`,[state.item_id]))[0];if(row)break;}
   if(!row){const source=article.rssSourceUrl&&/^https?:\/\//i.test(nativeTrim(article.rssSourceUrl))?article.rssSourceUrl:'watchrss://phone-imports';row=(await this.db.query(ROW_SELECT+` WHERE ch.url=? AND a.dedup_key=?`,[source,article.articleId]))[0];}
   if(!row)return null;await this.hydrateRow(row);const actual=await this.bodyFromRow(row);
   if(await libraryRevision(this.db)!==revision)throw new Error("Local library changed during body lookup");
@@ -91,13 +95,32 @@ export class LocalArticleManifestStore {
   if(this.migrateReadingMany)await this.migrateReadingMany(migrationIds);
   else for(const id of migrationIds)await this.migrateReading(id);
  }
+ /** Cloud identities remain separate from native-wire bindings. Pool IDs are authoritative. */
+ private async cloudIdentity(r:Row):Promise<CloudRssIdentity|undefined>{
+  try{
+  if(isImportedContentUrl(str(r.channel_url))||isLocalOnlyRssSource(str(r.channel_url)))return;
+  const pool=nullable(r.cloud_rss_id);
+  const legacyMaterialized=!!r.bound_id&&r.guid===r.bound_id&&r.dedup_key===r.bound_id&&!pool,guid=legacyMaterialized?null:nullable(r.guid);
+  let contentHash:string|undefined;
+  if(!pool&&!str(guid).trim()){let web=false;try{canonicalRssUrl(str(r.link),false);web=true;}catch{}if(!web){await this.hydrateRow(r);const body=await this.bodyFromRow(r);if(!body.available)return;if(body.contentHtml||body.contentText)contentHash=await this.codec.sha256(utf8Encode(body.contentHtml??body.contentText));}}
+  const articleId=await tryRssArticleId({dedupKey:pool??undefined,link:nullable(r.link),guid,title:str(r.title),contentHash},this.codec.sha256);if(!articleId)return;
+  const url=str(r.link)||str(r.guid)||str(r.dedup_key);
+  // A transport binding can be retained even when its URL normalization predates R41.
+  let nativeArticleId:string;try{nativeArticleId=await this.stableId(r.link==null?str(r.dedup_key):str(r.link));}catch{return;}const localArticleId=str(r.bound_id)||articleId;
+  return {itemId:num(r.id),articleId,localArticleId,nativeArticleId,legacyMaterialized,url,sourceUrl:str(r.channel_url)};
+  }catch{return undefined;}
+ }
+ async cloudRssIdentities():Promise<CloudRssIdentity[]>{
+  const rows=await querySyncPages(this.db,ROW_SELECT+" WHERE ch.url LIKE 'http://%' OR ch.url LIKE 'https://%' ORDER BY a.id",[],100),out:CloudRssIdentity[]=[];
+  for(const r of rows){const identity=await this.cloudIdentity(r);if(identity)out.push(identity);}return out;
+ }
  /** Ordinary read RSS rows are absent from saved-article snapshots. */
- async cloudReadingStates():Promise<ExportedArticle[]>{
+ async cloudReadingStates(all=false):Promise<ExportedArticle[]>{
   const device=String((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id??'');
-  const rows=await querySyncPages(this.db,ROW_SELECT+" WHERE (a.is_read=1 OR a.reading_progress>0 OR r.progress>0) AND (ch.url LIKE 'http://%' OR ch.url LIKE 'https://%') ORDER BY a.id",[],100);
+  const rows=await querySyncPages(this.db,ROW_SELECT+" WHERE ("+(all?"1":"a.is_read=1 OR a.reading_progress>0 OR r.progress>0 OR r.changed_at>0")+") AND (ch.url LIKE 'http://%' OR ch.url LIKE 'https://%') ORDER BY a.id",[],100);
   const out:ExportedArticle[]=[];
-  for(const r of rows){if(isImportedContentUrl(str(r.channel_url)))continue;const url=str(r.link)||str(r.dedup_key);
-   out.push({articleId:await this.stableId(url),sourceDeviceId:device,url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:str(r.cached_body_hash)||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url),rssSourceTitle:str(r.channel_title),independentSaved:false,independentChangedAt:0,independentSortOrder:0,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:num(r.progress??r.reading_progress),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)});
+  for(const r of rows){const identity=await this.cloudIdentity(r);if(!identity)continue;const {url,articleId}=identity;
+   out.push({articleId,cloudRssArticleId:articleId,sourceDeviceId:device,url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:str(r.cached_body_hash)||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url),rssSourceTitle:str(r.channel_title),independentSaved:false,independentChangedAt:0,independentSortOrder:0,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:num(r.progress??r.reading_progress),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)});
   }return out;
  }
  async snapshot(readingPrepared=false):Promise<PreparedArticle[]> {

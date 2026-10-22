@@ -1,3 +1,4 @@
+import {WatchCloudRecords} from './records';
 import {clearAccountCloud,revokeAccountCloud} from '../account/cloud-cleanup';
 import {WatchAccountStore} from '../account/store';
 import {WatchTokenManager} from '../account/token';
@@ -8,7 +9,7 @@ import {WatchCloudSyncService} from './service';
 import {createCloudHostPorts,type CloudHostRequest} from './host-ports';
 import {createCloudTransport} from './transport';
 import {cloudDisabled,type CloudGuard} from './guard';
-import {stableArticleId,type SyncTextPort} from '../sync/local-manifest';
+import {legacyWebArticleId} from './rss-identity';
 import {watchAppVersion} from '../core/app-version';
 /** Same coordinator and writer lease in foreground and verified background guest. */
 export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void){
@@ -22,9 +23,9 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
    const repo=await repository(),deviceId=await repo.deviceId();
    const foundation=ports.foundation(account.userId,deviceId,transport,{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent,onUnauthorized:async()=>{const current=await accounts.read();if(current?.userId===account.userId&&current.backendBaseUrl===account.backendBaseUrl)await accounts.clear(current);},
     refreshToken:async force=>{await assertCurrent();const next=account.watchRefreshToken?await tokens.freshAccount(force):await accounts.read();if(!next)throw Error('账号已解绑');await assertCurrent();return next.watchDeviceToken;}});
-   const text:SyncTextPort['parseUri']=value=>host('uri.parse',{value});
+   const library=new WatchCloudLibraryAdapter({cloudReadingCandidates:repo.cloudReadingCandidates?()=>repo.cloudReadingCandidates!():undefined,cloudSnapshot:full=>{guard.require();return repo.cloudSnapshot(full);},mergeCloud:async(...args)=>{await assertCurrent();return repo.mergeCloud(...args);}},deviceId,{...ports.crypto,stableId:url=>legacyWebArticleId(url,ports.crypto.sha256)},guard);
    return {...foundation,userId:account.userId,deviceId,displayName:'手表 · WatchRSS',assertCurrent,assertUpload:async()=>{await assertCurrent();await accounts.assertLibraryOwner(account);},
-    library:new WatchCloudLibraryAdapter({cloudSnapshot:full=>{guard.require();return repo.cloudSnapshot(full);},mergeCloud:async(...args)=>{await assertCurrent();return repo.mergeCloud(...args);}},deviceId,{...ports.crypto,stableId:url=>stableArticleId(url,text,ports.crypto)},guard)};
+    library,records:async(bootstrap:import('./types').CloudBootstrap,current:()=>Promise<void>)=>new WatchCloudRecords({userId:account.userId,epoch:bootstrap.libraryEpoch,anchorVersion:Math.min(...bootstrap.keyCommitments.map(c=>c.keyVersion)),version:await foundation.keys.currentKeyVersion(account.userId),crypto:{...ports.crypto,hmac:ports.v2Crypto.hmac},key:version=>foundation.keys.accountKey(account.userId,version),readState:()=>foundation.cache.records(account.userId),writeState:value=>foundation.cache.storeRecords(account.userId,value),get:async after=>{const page=await foundation.client.records(after,deviceId);if(page.libraryEpoch!==bootstrap.libraryEpoch){await foundation.invalidate();throw Error('library_epoch_mismatch');}if(page.keyVersionFloor!==bootstrap.keyVersionFloor||JSON.stringify(page.keyCommitments.map(c=>[c.keyVersion,c.commitment,c.rotationProof]))!==JSON.stringify(bootstrap.keyCommitments.map(c=>[c.keyVersion,c.commitment,c.rotationProof])))throw Error('cloud_key_commitment_mismatch');return page;},push:items=>foundation.client.pushRecords(items),refreshKeys:async()=>{await current();const b=await foundation.client.bootstrap();await current();if(b.libraryEpoch!==bootstrap.libraryEpoch){await foundation.invalidate();throw Error('library_epoch_mismatch');}const d=b.devices.find(d=>d.deviceId===deviceId);await foundation.keys.acceptBootstrap(account.userId,deviceId,b.keyEnvelopes,b,d?.attestation&&d.attestationKeyVersion?{keyVersion:d.attestationKeyVersion,mac:d.attestation}:undefined);},current,assertUpload:async()=>{await current();await accounts.assertLibraryOwner(account);},apply:documents=>library.applyRecords(documents),export:()=>library.exportRecords()})};
 
  };
  const service=new WatchCloudSyncService({

@@ -1,0 +1,24 @@
+import {expect} from 'bun:test';
+import {Database} from 'bun:sqlite';
+import {WatchCloudLibraryAdapter,privateCloudBody} from '../../src/cloud/library';
+import {SqlLibrarySessionRepository} from '../../src/sync/library-repository';
+import {initializeSchema} from '../../src/core/schema';
+import {SyncSavedStateStore} from '../../src/sync/saved-state';
+import {legacyWebArticleId} from '../../src/cloud/rss-identity';
+import {stableArticleId} from '../../src/sync/local-manifest';
+import type {ExportedArticle} from '../../src/sync/article-export';
+import {encodeBodyJson} from '../../src/sync/article-body';
+import type {SqlDatabase} from '../../src/core/types';
+import {utf8Encode,utf8Decode} from '../../src/cloud/types';
+import {crypto,enabled} from './k2-crypto';
+const parseUri=async(value:string)=>{try{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};}catch{return {valid:false,scheme:null,host:null,rawPath:null,rawQuery:null};}};
+const codec={sha256:crypto.sha256,encode:async(b:any)=>crypto.gzip(utf8Encode(encodeBodyJson(b))),decode:async(b:Uint8Array)=>utf8Decode(await crypto.gunzip(b,32*1024*1024))};
+export const cloudCrypto={...crypto,stableId:(url:string)=>legacyWebArticleId(url,crypto.sha256)};
+export const article=(p:Partial<ExportedArticle>={}):ExportedArticle=>({articleId:'a',sourceDeviceId:'phone',url:'https://example.com/private',title:'Private',siteName:'Example',excerpt:'Preview',contentHtml:'<p>private</p>',contentText:'private',imageUrl:null,contentHash:'h',importedAt:1,updatedAt:2,rssSourceUrl:null,rssSourceTitle:null,independentSaved:true,independentChangedAt:2,independentSortOrder:1,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:.25,readingPositionBytes:1,readingPositionContentHash:'h',readingPositionChangedAt:2,isRead:false,...p});
+export async function dbFixture(){const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');let fail=false;
+ const exec=(s:{sql:string;params?:readonly unknown[]})=>{sql.query(s.sql).run(...(s.params??[]) as any[]);if(fail&&s.sql.includes('INSERT INTO article_reading_state'))throw Error('disk fault');};
+ const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as any,execute:async(q,p=[])=>{exec({sql:q,params:p});},transaction:async ss=>{sql.transaction(()=>ss.forEach(exec))();},transactionChanges:async ss=>sql.transaction(()=>ss.map(s=>{exec(s);return (sql.query('SELECT changes() AS n').get() as any).n;}))()};
+ await initializeSchema(db,{seedBuiltinChannels:false});await new SyncSavedStateStore(db).initializeDevice('watch');
+ const repo=new SqlLibrarySessionRepository(db,{codec,text:{parseUri,htmlText:async s=>s.replace(/<[^>]*>/g,'')},uri:{parseUri,parseAndroid:parseUri},files:{storeText:async(_,v)=>v,hydrate:async v=>v},migrateReading:async()=>{},cleanupRemovedContent:async()=>{},now:()=>100});
+ const adapter=new WatchCloudLibraryAdapter(repo,'watch',cloudCrypto,enabled);return {db,sql,repo,adapter,fail:()=>{fail=true;}};
+}

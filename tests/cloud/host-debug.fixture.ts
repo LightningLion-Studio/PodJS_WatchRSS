@@ -46,7 +46,7 @@ const foundation=await createHostCloudFoundation('user','device',{request:async(
 expect(foundation).toBeDefined();expect(commands).toEqual(['app.buildInfo']);
 const original=new Uint8Array(randomBytes(4*1024*1024+33)),key=new Uint8Array(randomBytes(32));
 const snapshot=await foundation!.codec.create({accountKey:key,keyVersion:1,sourceDeviceId:'w',sequence:1,snapshotId:'host-fixture',createdAtMillis:1,parentHeads:{},observedHeads:{},objects:[{name:'library-sync.json',bytes:original}]});
-expect(snapshot.manifest.objects[0].chunks).toHaveLength(2);
+expect(snapshot.manifest.objects[0].chunks.length).toBeGreaterThanOrEqual(5);expect(snapshot.manifest.objects[0].chunks.every(c=>c.plaintextBytes<=1049000)).toBe(true);
 const opened=await foundation!.codec.decryptManifest(key,'host-fixture',snapshot.encryptedManifest);
 expect((await foundation!.codec.restore(key,opened,async h=>snapshot.newChunks.get(h)!)).get('library-sync.json')).toEqual(original);
 expect(files.size).toBe(0); // All input/output/verification temporary files removed.

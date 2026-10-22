@@ -25,3 +25,7 @@ test('committed reading/save/source mutations notify scheduling without UI refre
  notifyLibrarySqlCommit([{sql:'UPDATE articles SET is_read=1 WHERE id=?'}]);notifyLibrarySqlCommit([{sql:'INSERT INTO article_reading_state VALUES(?)'}]);notifyLibrarySqlCommit([{sql:'DELETE FROM article_saved_states WHERE article_id=?'}]);expect(calls).toBe(3);
  notifyLibrarySqlCommit([{sql:'INSERT INTO article_sync_encoding_cache VALUES(?)'}]);notifyLibrarySqlCommit([{sql:'CREATE TABLE IF NOT EXISTS articles(id)'}]);expect(calls).toBe(3);stop();notifyLibrarySqlCommit([{sql:'DELETE FROM channels'}]);expect(calls).toBe(3);
 });
+test('R35 deferred deadline wins normal debounce; pausing preserves it, account replacement cancels it',async()=>{
+ let now=0,runs=0;const timers:{at:number;fn:()=>void;cancelled:boolean}[]=[];const s=new WatchCloudScheduler({now:()=>now,sync:async()=>{runs++;return true;},delay:(ms,fn)=>{const t={at:now+ms,fn,cancelled:false};timers.push(t);return()=>{t.cancelled=true;};},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ s.foreground(true);await settle();now=590000;await s.manual();s.deferUntil(600000);await settle();expect(timers.at(-1)!.at).toBe(600000);s.foreground(false);expect(timers.at(-1)!.cancelled).toBe(true);s.foreground(true);expect(timers.at(-1)!.at).toBe(600000);s.accountChanged();await settle();expect(timers.at(-1)!.cancelled).toBe(true);expect(runs).toBe(3);s.dispose();
+});

@@ -1,3 +1,7 @@
+import {isLocalOnlyRssSource} from './cloud/rss-identity';
+import {resolvePoolFeed,poolFeedXml} from './cloud/rss-pool';
+import {createCloudTransport} from './cloud/transport';
+import {watchAppVersion} from './core/app-version';
 import {clearPrivateContentFiles} from './core/clear-private-files';
 import {requestFeedText} from "./rss/site-challenge.ts";
 import { feedRequest } from "./core/feed-request";
@@ -102,6 +106,11 @@ let downloadSequence = 0;
 let addPreviewSequence=0;
 const pendingAddPreviews=new Map<string,{url:string;xml:string|null;builtin:BuiltinChannel|undefined}>();
 async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string> {
+  const parsed=await uri.parse(url,'android');
+  if(!builtinForInput(url,parsed.host)&&/^https?:\/\//i.test(url)&&!isImportedContentUrl(url)&&!isLocalOnlyRssSource(url)){
+    const pool=await resolvePoolFeed(summaryAccountStore,createCloudTransport(<T>(method:string,args:Record<string,unknown>)=>{const task=hostOperation<T>(method,args);if(method==='http.download'&&job){job.cancel=()=>task.cancel();if(job.cancelled)task.cancel();}return task.result;},{require(){}}),url,watchAppVersion,job);
+    if(job?.cancelled)throw Error('刷新已取消');return poolFeedXml(pool);
+  }
   const request=requestFeedText(url,(cookie,userAgent)=>{
     const download:OriginalDownload={cancelled:false};
     return {result:downloadFeedText(url,download,cookie,userAgent),cancel(){download.cancelled=true;download.cancel?.();}};
@@ -273,8 +282,7 @@ export const services: AppServices = {
     const parsed=parseFeed(xml,Date.now(),input);
     const channel=await repo.addChannel(input,parsed.title);
     const result=await repo.refreshChannel(channel.id,xml);
-    // Native addChannel uses its preview/confirm path: initial items are read.
-    await db.execute('UPDATE articles SET is_read=1 WHERE channel_id=?',[channel.id]);
+
     return {id:String(channel.id),title:result.channel.title,url:channel.url,description:result.channel.description};
   },
   async previewChannel(url):Promise<AddChannelPreview> {
@@ -302,8 +310,7 @@ export const services: AppServices = {
     if(preview.builtin){const channel=await insertBuiltin(preview.builtin);pendingAddPreviews.delete(token);return channel;}
     const channel=await repo.addChannel(preview.url);
     const result=await repo.refreshChannel(channel.id,preview.xml!);
-    // Native confirmAddChannel inserts the preview's initial articles as read.
-    await db.execute('UPDATE articles SET is_read=1 WHERE channel_id=?',[channel.id]);
+
     pendingAddPreviews.delete(token);
     return {id:String(channel.id),url:channel.url,title:result.channel.title,description:result.channel.description};
   },
@@ -352,7 +359,7 @@ function refreshChannel(id:string,replace=false):Promise<void> {
     const xml=await fetchFeedText(url,job);if(job.cancelled)return;
     const current=(await db.query("SELECT url FROM channels WHERE id=?",[Number(id)]))[0];
     if(job.cancelled||String(current?.url??"")!==url)return;
-    await repo.refreshChannel(Number(id),xml,()=>job.cancelled);if(!job.cancelled)emitChannel({id,kind:"refresh"});
+    await repo.refreshChannel(Number(id),xml,()=>job.cancelled,true);if(!job.cancelled)emitChannel({id,kind:"refresh"});
   })().catch(error=>{if(!job.cancelled)throw error;}).finally(()=>{if(refreshJobs.get(id)===job)refreshJobs.delete(id);});
   return job.promise;
 }

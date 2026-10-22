@@ -18,7 +18,7 @@ export interface ArticleReceiveFiles {
  hydrate(text:string):Promise<string>;
 }
 export interface LocalReceiveBody {itemId:number;body:SyncArticleBody|null;available:boolean;hasStoredBody:boolean}
-export type LocalBodyResolver=(article:IncomingArticle)=>Promise<LocalReceiveBody|null>;
+export type LocalBodyResolver=(article:IncomingArticle,targetItemId?:number)=>Promise<LocalReceiveBody|null>;
 type Statement={sql:string;params?:SqlParams};
 const nonblank=(text:string)=>/[^\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.test(text);
 function byteLength(text:string){let count=0;for(const bytes of javaUtf8Chunks(text))count+=bytes.length;return count;}
@@ -31,11 +31,11 @@ export class SyncArticleReceiver {
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec,private readonly files:ArticleReceiveFiles,
   private readonly migrateReading:(id:number)=>Promise<void>,private readonly now=Date.now,private readonly resolveLocal?:LocalBodyResolver){this.saved=new SyncSavedStateStore(db);}
  async receive(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false):Promise<void>{await this.apply(article,payload,remoteDeviceId,authoritative,false);}
- async receiveWithStats(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false):Promise<number>{
+ async receiveWithStats(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false,targetItemId?:number):Promise<number>{
   if(!this.db.transactionChanges)throw new Error("Counted article receive requires transactionChanges");
-  return this.apply(article,payload,remoteDeviceId,authoritative,true);
+  return this.apply(article,payload,remoteDeviceId,authoritative,true,targetItemId);
  }
- private async apply(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative:boolean,counted:boolean):Promise<number>{
+ private async apply(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative:boolean,counted:boolean,targetItemId?:number):Promise<number>{
   if(article.deleted)throw new Error("Deleted article requires the deletion coordinator");
   if(article.articleId!==payload.articleId)throw new Error("Article/body identity mismatch");
   for(const field of ["importedAt","updatedAt","favoriteChangedAt","favoriteSortOrder","watchLaterChangedAt","watchLaterSortOrder","readingPositionBytes","readingPositionChangedAt"] as const){if(!Number.isSafeInteger(article[field]))throw new Error(`Invalid ${field}`);}
@@ -45,14 +45,16 @@ export class SyncArticleReceiver {
   const channelUrl=source??"watchrss://phone-imports",imported=isImportedContentUrl(channelUrl);
   // A schema migration may have folded the SHA materialization into its RSS
   // row. Reuse only that durable binding in the same source and at the same URL.
-  const existing=(await this.db.query(`SELECT a.id,a.dedup_key,a.guid FROM articles a JOIN channels ch ON ch.id=a.channel_id
+  // Only the local cloud coordinator can pass a verified target; transport callers cannot.
+  const target=targetItemId&&(remoteDeviceId==='cloud-records'||remoteDeviceId==='cloud-rss-inventory'||remoteDeviceId.startsWith('cloud-'))?(await this.db.query('SELECT a.id,a.dedup_key,a.guid FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id=? AND c.url=?',[targetItemId,channelUrl]))[0]:undefined;
+  const existing=target??(await this.db.query(`SELECT a.id,a.dedup_key,a.guid FROM articles a JOIN channels ch ON ch.id=a.channel_id
    WHERE ch.url=? AND (a.dedup_key=? OR ((a.link=? OR (a.link IS NULL AND EXISTS(SELECT 1 FROM sync_article_ids m WHERE m.item_id=a.id AND m.article_id=? AND m.url=?))) AND
     (a.dedup_key LIKE 'guid:%' OR a.dedup_key LIKE 'link:%' OR a.dedup_key LIKE 'title:%') AND
     EXISTS(SELECT 1 FROM sync_article_ids m WHERE m.item_id=a.id AND m.article_id=?)))
    ORDER BY CASE WHEN a.dedup_key=? THEN 0 ELSE 1 END,a.id LIMIT 1`,[channelUrl,article.articleId,article.url,article.articleId,article.url,article.articleId,article.articleId]))[0];
   const dedupKey=existing?String(existing.dedup_key):article.articleId;
   let local:SyncArticleBody|null=null,available=false,storedBody=false;
-  if(this.resolveLocal){const resolved=await this.resolveLocal(article);local=resolved?.body??null;available=resolved?.available??false;storedBody=resolved?.hasStoredBody??false;}
+  if(this.resolveLocal){const resolved=await this.resolveLocal(article,target?Number(target.id):undefined);local=resolved?.body??null;available=resolved?.available??false;storedBody=resolved?.hasStoredBody??false;}
   else if(existing){
    try{const cachedText=await readSyncSqlText(this.db,'SELECT content_text AS value FROM article_sync_content WHERE item_id=?',[existing.id]);
     if(cachedText!==null){const cachedHtml=await readSyncSqlText(this.db,'SELECT content_html AS value FROM article_sync_content WHERE item_id=?',[existing.id]);local={contentHtml:cachedHtml===null?null:await this.files.hydrate(cachedHtml),contentText:await this.files.hydrate(cachedText)};available=true;storedBody=nonblank(local.contentHtml??"")||nonblank(local.contentText);}}
@@ -80,20 +82,27 @@ export class SyncArticleReceiver {
    {sql:`INSERT INTO articles(channel_id,title,description,content,link,guid,image_url,dedup_key,fetched_at,is_read,reading_progress)
     SELECT id,?,?,?,?,?,?,?,?,?,? FROM channels WHERE url=? ON CONFLICT(channel_id,dedup_key) DO UPDATE SET
     title=excluded.title,description=excluded.description,content=CASE WHEN ?=1 THEN excluded.content ELSE articles.content END,
-    link=excluded.link,image_url=excluded.image_url,fetched_at=excluded.fetched_at,is_read=CASE WHEN ?=1 THEN excluded.is_read ELSE articles.is_read OR excluded.is_read END`,params:[title,excerpt,stored,article.url,existing?.guid??article.articleId,article.imageUrl,dedupKey,fetched,article.isRead?1:0,progress,channelUrl,hasBody?1:0,authoritative?1:0]},
+    link=excluded.link,image_url=excluded.image_url,fetched_at=excluded.fetched_at,is_read=CASE WHEN ?=1 THEN excluded.is_read WHEN ?=2 THEN articles.is_read ELSE articles.is_read OR excluded.is_read END`,params:[title,excerpt,stored,article.url,existing?.guid??article.articleId,article.imageUrl,dedupKey,fetched,article.isRead?1:0,progress,channelUrl,hasBody?1:0,authoritative?1:0,remoteDeviceId==='cloud-records'?2:0]},
   ];
   // SQLite evaluates all SET expressions against the pre-update reading row.
   // Update reading before replacing the content hash used by this decision.
-  const wins=`(?=1 OR (?=1 AND ?!=COALESCE((SELECT body_hash FROM article_sync_content WHERE item_id=article_reading_state.article_id),'')) OR excluded.changed_at>article_reading_state.changed_at OR (excluded.changed_at=0 AND article_reading_state.changed_at=0 AND excluded.progress>article_reading_state.progress))`;
-  const flags=[authoritative?1:0,hasBody?1:0,payload.bodyHash];
+  let wins=`(?=1 OR (?=1 AND ?!=COALESCE((SELECT body_hash FROM article_sync_content WHERE item_id=article_reading_state.article_id),'')) OR excluded.changed_at>article_reading_state.changed_at OR (excluded.changed_at=0 AND article_reading_state.changed_at=0 AND excluded.progress>article_reading_state.progress))`;
+  const cloud=remoteDeviceId==='cloud-records';
+  const clock=article.readingPositionChangedAt||article.updatedAt;
+  // Compare against the live SQL clock, not a pre-transaction JS read.
+  const localSource=`COALESCE((SELECT reading_source FROM cloud_article_state WHERE article_id=? AND reading_clock=article_reading_state.changed_at),(SELECT device_id FROM sync_local_identity WHERE id=1),'')`;
+  if(cloud)wins=`(excluded.changed_at>article_reading_state.changed_at OR (excluded.changed_at=article_reading_state.changed_at AND (? > ${localSource} OR (? = ${localSource} AND ?=0))))`;
+  const flags=cloud?[article.sourceDeviceId,article.articleId,article.sourceDeviceId,article.articleId,article.isRead?1:0]:[authoritative?1:0,hasBody?1:0,payload.bodyHash];
+  if(cloud)statements.push({sql:`UPDATE articles SET is_read=? WHERE id=${idSql} AND (NOT EXISTS(SELECT 1 FROM article_reading_state WHERE article_id=articles.id) OR EXISTS(SELECT 1 FROM article_reading_state WHERE article_id=articles.id AND (? > changed_at OR (?=changed_at AND (? > ${localSource} OR (?=${localSource} AND ?=0))))))`,params:[article.isRead?1:0,...idParams,clock,clock,article.sourceDeviceId,article.articleId,article.sourceDeviceId,article.articleId,article.isRead?1:0]});
   statements.push({sql:`INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash,state_json)
    VALUES(${idSql},?,?,?,?,NULL) ON CONFLICT(article_id) DO UPDATE SET
    progress=CASE WHEN ${wins} THEN excluded.progress ELSE article_reading_state.progress END,
    position_bytes=CASE WHEN ${wins} THEN excluded.position_bytes ELSE article_reading_state.position_bytes END,
    position_hash=CASE WHEN ${wins} THEN excluded.position_hash ELSE article_reading_state.position_hash END,
    state_json=CASE WHEN ${wins} THEN NULL ELSE article_reading_state.state_json END,
-   changed_at=CASE WHEN ?=1 THEN excluded.changed_at ELSE max(article_reading_state.changed_at,excluded.changed_at) END`,params:[...idParams,progress,article.readingPositionChangedAt,article.readingPositionBytes,article.readingPositionContentHash,...flags,...flags,...flags,...flags,authoritative?1:0]});
+   changed_at=CASE WHEN ?=1 THEN excluded.changed_at ELSE max(article_reading_state.changed_at,excluded.changed_at) END`,params:[...idParams,progress,cloud?clock:article.readingPositionChangedAt,article.readingPositionBytes,article.readingPositionContentHash,...flags,...flags,...flags,...flags,authoritative?1:0]});
   statements.push({sql:`UPDATE articles SET reading_progress=(SELECT progress FROM article_reading_state WHERE article_id=articles.id) WHERE id=${idSql}`,params:idParams});
+  if(cloud)statements.push({sql:`INSERT INTO cloud_article_state(article_id,content_hash,body_hash,reading_clock,reading_source) SELECT ?,?,'',?,? WHERE EXISTS(SELECT 1 FROM article_reading_state WHERE article_id=${idSql} AND changed_at=?) ON CONFLICT(article_id) DO UPDATE SET reading_clock=excluded.reading_clock,reading_source=excluded.reading_source WHERE excluded.reading_clock>cloud_article_state.reading_clock OR (excluded.reading_clock=cloud_article_state.reading_clock AND excluded.reading_source>=cloud_article_state.reading_source)`,params:[article.articleId,(article as IncomingArticle&{contentHash?:string}).contentHash??'',clock,article.sourceDeviceId,...idParams,clock]});
   const cacheStatement:Statement={sql:`INSERT INTO article_sync_content(item_id,content_html,content_text,body_hash,body_bytes,chunk_size,chunk_hashes,content_bytes)
    VALUES(${idSql},?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET content_html=excluded.content_html,content_text=excluded.content_text,body_hash=excluded.body_hash,body_bytes=excluded.body_bytes,chunk_size=excluded.chunk_size,chunk_hashes=excluded.chunk_hashes,content_bytes=excluded.content_bytes WHERE ?=1`,params:[...idParams,html,text,payload.bodyHash,payload.bodyByteCount,payload.chunkSize,JSON.stringify(payload.chunkHashes),byteLength(chosen??""),hasBody?1:0]};
   statements.push({sql:`INSERT INTO article_previews(article_id,summary,image_url) VALUES(${idSql},?,?) ON CONFLICT(article_id) DO UPDATE SET summary=excluded.summary,image_url=excluded.image_url`,params:[...idParams,excerpt,article.imageUrl]});
@@ -115,7 +124,7 @@ export class SyncArticleReceiver {
   statements.push({sql:`INSERT INTO sync_saved_states(article_id,save_type,item_id,url,saved,changed_at,sort_order,source_device_id,source_order)
    SELECT m.article_id,s.save_type,s.article_id,m.url,s.saved,s.changed_at,-s.sort_order,i.device_id,i.device_order FROM article_saved_states s JOIN sync_article_ids m ON m.item_id=s.article_id CROSS JOIN sync_local_identity i WHERE m.article_id=? AND i.id=1 ON CONFLICT(article_id,save_type) DO NOTHING`,params:[article.articleId]});
   const countedIndexes:number[]=[];
-  for(const type of ["favorite","watchLater"] as const){const state:RemoteSavedState={articleId:article.articleId,url:article.url,type,saved:article[`${type}Saved`],changedAt:article[`${type}ChangedAt`],sortOrder:article[`${type}SortOrder`],sourceDeviceId:remoteDeviceId};const savedStatements=this.saved.remoteStatements(state,{authoritative});if(savedStatements.length)countedIndexes.push(statements.length);statements.push(...savedStatements);}
+  for(const type of ["favorite","watchLater"] as const){const state:RemoteSavedState={articleId:article.articleId,url:article.url,type,saved:article[`${type}Saved`],changedAt:article[`${type}ChangedAt`],sortOrder:article[`${type}SortOrder`],sourceDeviceId:cloud?article.sourceDeviceId:remoteDeviceId};const savedStatements=this.saved.remoteStatements(state,{authoritative});if(savedStatements.length)countedIndexes.push(statements.length);statements.push(...savedStatements);}
   if(existing)await this.migrateReading(Number(existing.id));
   if(counted){const changes=await this.db.transactionChanges!(statements);if(changes.length!==statements.length)throw new Error("Invalid committed transaction change receipt");return countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);}
   await this.db.transaction(statements);return 0;

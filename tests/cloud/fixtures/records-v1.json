@@ -1,0 +1,113 @@
+{
+  "provenance": "Synthetic mini-program cloud-records.encode vectors; runtime tests use this JSON only.",
+  "userId": "record-fixture-user",
+  "keyBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "nonceBase64": "BwcHBwcHBwcHBwcH",
+  "vectors": [
+    {
+      "doc": {
+        "format": "watchrss-rss-record",
+        "kind": "article",
+        "value": {
+          "articleId": "article-fixture",
+          "contentHash": "",
+          "deleted": false,
+          "deletedAt": 0,
+          "excerpt": "",
+          "favoriteChangedAt": 0,
+          "favoriteSaved": true,
+          "favoriteSortOrder": 0,
+          "importedAt": 0,
+          "independentChangedAt": 0,
+          "independentSaved": false,
+          "independentSortOrder": 0,
+          "isRead": false,
+          "readingPositionBytes": 0,
+          "readingPositionChangedAt": 0,
+          "readingPositionContentHash": "",
+          "readingProgress": 0,
+          "siteName": "",
+          "sourceDeviceId": "",
+          "title": "你好 RSS",
+          "updatedAt": 1,
+          "url": "https://example.com/article-fixture",
+          "watchLaterChangedAt": 0,
+          "watchLaterSaved": false,
+          "watchLaterSortOrder": 0
+        },
+        "version": 1
+      },
+      "recordId": "218ef24506c44d0941adbdb19e548fda1a65ded3456d63efd53b4ca82e48ea80",
+      "hash": "7ce97067ba638a04733cb6eb8cbe619c19e4fcbcfe8e749c940cc65e256889da",
+      "envelope": {
+        "algorithm": "A256GCM",
+        "keyVersion": 3,
+        "nonceBase64": "BwcHBwcHBwcHBwcH",
+        "ciphertextBase64": "kKSwUYej9q5BaPBOmG4YxeifETBt6SzhJWGjwJttQcyYQmxRQLlf+phmxCfbMdJnD56KtkKPG8W6578JSLJLNdGtZtubGwKe+MfzYMVo/vbrKLQpFruarEPndeLJ+B94I84PP4MyZxSYZwqQZWg+FJGnb0kNF/cAoSPBronjsGUe0gBInpi9sFLWxUC5/0j5XAqL7QWuR2M0cyYuUsWjrWENwjNHpuFGFYa7tAz7gJrj5DONYP4CHEegLM4KvkoOY6QAax+mXP1AHxjvIdVLEQsmw1CB5Vu+JIdIvfh8V/XI0I0AZUFEhUNX2SHKULGuynsDNvUDqOyQUAza7wuhHpBDdLga+FujeOloLa5xcl1BZ47t1s4CnA0izZ5s6v2/7vSZWPMFYxqtQ34n89XOLudJnvMTNr6N6hLYmJc4BxUXy2Dwf9YcIfXojmvEyOS4y6jF8/m4fEzLhm22guQ4+DsVOKWZmEiRmDPYkiBuSeXDg6d6GZdV2qebGKqsVvnNiEErHHAIpZwYwyXvjE7re6JlLfrp7YGhYtmQUKwfkfImZakMwRq6QS5dpbnAFR+Nov0tT2zTu58xMl5PFXeShs/8Ln5/7xLujQtsNmOeHwloFbH+4KdLAykwh3eO8WalupktN/d0OepxFf0DUbY4IyAmnKLQ0Hdoq2Mp6508lpgWjsPQvZ3bdjvsIPVxqEgTX/RY+P16FDvCg1LQHvYxJ0zRQTMvuGe8Aq58THZ1EYMAV5fUi3FOFNcgT0dp875zBR5X9EQY7umVmJtqRv9acdDa2v0S6weC5Xz5vrtyJ7dKAYwCul7YuhJqPPP3l3on1KtUxPrIQiI0koQRFQE="
+      }
+    },
+    {
+      "doc": {
+        "format": "watchrss-rss-record",
+        "kind": "source",
+        "value": {
+          "continuePlaybackInBackground": false,
+          "createdAt": 0,
+          "deleted": false,
+          "deletedAt": 0,
+          "description": "",
+          "isPinned": true,
+          "sortOrder": 2,
+          "sourceDeviceId": "",
+          "sourceId": "pool-fixture",
+          "title": "My Feed",
+          "updatedAt": 4,
+          "url": "https://example.com/feed",
+          "useOriginalContent": false
+        },
+        "version": 1
+      },
+      "recordId": "731d4a37797f74e774dec45d90e377eb51a2cb71eebdbba5848390fbab59ebe4",
+      "hash": "14ae7fe1b6ef77887054da689b6dae5dcaeefad5bc546b2eaeb853c852bfe02e",
+      "envelope": {
+        "algorithm": "A256GCM",
+        "keyVersion": 3,
+        "nonceBase64": "BwcHBwcHBwcHBwcH",
+        "ciphertextBase64": "kKSwUYej9q5BaPBOmG4YxeifETBt6SzhJWGjwJttQcyYQmxRQLlf+op7xTzbOJVpAcqdu1ufXN37vv4HVLJLOMitf9PYWEKe6djTbetssPvlIq8pCrqaugfldv/YsVNvGcodI8RsBEKWf17ZK2kvHZDxMEtOQeIE4XLA58fioWwf5xEO5dyzqAeChEGu/F+pD1jdqEimBC95I2N4XvWbpWEEwjMk6LcOUM+18B7inZzF4jK7c6pdSkm4K9MKqQVJQaAAbQ6qYfwxSki5QoVcGwx2mgXkoxDpdphVpvE1cOiSnsheIgoGw1JOyCPLF+X4xGpCHvcDqI/IUEOap0i8FZBncP9OqBLvechlefE3OBNTdpGknM1FjQIr2IJsqvq17a+sUuQVDkTrU39ghpeLa+dUrfoxPfLD6R3AychyRAsBz3m1M8cpPPXolWyJnJe8sXOhSEdO+6UCilcFXI5+XQ=="
+      }
+    },
+    {
+      "doc": {
+        "format": "watchrss-rss-record",
+        "kind": "rss-state",
+        "value": {
+          "articleIdHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "deleted": false,
+          "deletedAt": 0,
+          "favoriteChangedAt": 0,
+          "favoriteSaved": false,
+          "favoriteSortOrder": 0,
+          "isRead": false,
+          "readingPositionBytes": 10,
+          "readingPositionChangedAt": 8,
+          "readingPositionContentHash": "hash",
+          "readingProgress": 0.25,
+          "sourceDeviceId": "phone-fixture",
+          "sourceId": "pool-fixture",
+          "watchLaterChangedAt": 0,
+          "watchLaterSaved": false,
+          "watchLaterSortOrder": 0
+        },
+        "version": 1
+      },
+      "recordId": "1de94ce705a9f72d74a6f325bf17d1f804e1de0becb4f1b686998d2261e1f7d4",
+      "hash": "73a6fd9655ed0d9829bb01303eaa39fc61766e7c68a75e244321aa64ab348519",
+      "envelope": {
+        "algorithm": "A256GCM",
+        "keyVersion": 3,
+        "nonceBase64": "BwcHBwcHBwcHBwcH",
+        "ciphertextBase64": "kKSwUYej9q5BaPBOmG4YxeifETBt6SzhJWGjwJttQcyYQmxRQLlf+otnw2PLKdYxRp7Q9VibEpLlvqcTGKdQItSrQ9rwRWie+du4OYtvsfLgMqI+Brza4gPmeO7f/xNuCc0eNcNqJ1TWJwyXa28oE5fnN00OGeYH72PHqYfkpmIY8RYIxsrz8FXMxEeprRD5Ak3FpFOtQjdhZy42ROPn7msPyzJyt6c9UYij4kGviYn8/yS3de0kEAT0P9kbmhIOP/VaJguuXvdhGR7+PcZZER0mwwbMq0G2eMpcqOt3ZOiej+5DNVxlk0JCzm2UBfP44GAwPfMC7peCE1qZpgXqApFHYLQa+26if9N9MqR7Eh5TY5G8idMQ2UE0zY9t7fe90O+5XvUYQwaKTm1rroCGTfoY9q5ecO7S7RfdhZVEShQb3m32f/IjIPLklHbjx9WpnfeUuaL7OEyVwX63iu42xjM2I76XhUOhg3CMxWs4Pb3DyvgjSYZV/6aEH66ZcO6Gxgo0GlwJrsUbxCnTmE/me7RlfLm+7YelT9TcDd4dkfo4LbwWm1T/H2kM4O/SOgqDr5N2GSuN2oQ/KUtJFHKD0pyvZxVsrFyvx2svNm+YIA08Svc4Z2HPyud1+Qaqsj7kp6UoIuZjDsR3Q4hAGfE/c3Y026ya0mZqqzBpqtp+xoj8g8GOsr4fcKBfBs1MLZBY"
+      }
+    }
+  ]
+}

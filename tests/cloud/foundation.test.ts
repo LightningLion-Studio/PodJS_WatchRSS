@@ -26,10 +26,10 @@ test('JVM native manifest/chunk fixture decrypts and restores in app',async()=>{
  expect(manifest).toMatchObject({keyVersion:2,deviceSequence:7,sourceDeviceId:'phone'});
  expect((await codec.restore(key,manifest,async()=>new Uint8Array(Buffer.from(fixture.chunk,'base64')))).get('rss-state.json')).toEqual(new Uint8Array(Buffer.from(fixture.plaintext,'base64')));
 });
-test('4 MiB boundaries, empty input, identity, gzip, reuse and key rotation',async()=>{
+test('content-defined boundaries, empty input, identity, gzip, reuse and key rotation',async()=>{
  const codec=new WatchCloudCodec(crypto,guard),large=new Uint8Array(CLOUD_CHUNK_BYTES+1).fill(13);
  const snap=await codec.create(input({objects:[{name:'large',bytes:large},{name:'empty',bytes:new Uint8Array()},{name:'identity',bytes:utf8Encode('raw'),compress:false}]}));
- expect(snap.manifest.objects[0].chunks.length).toBe(2);
+ expect(snap.manifest.objects[0].chunks.length).toBe(5);
  const restored=await codec.restore(key,snap.manifest,async h=>snap.newChunks.get(h)!);expect(restored.get('large')).toEqual(large);expect(restored.get('empty')!.length).toBe(0);expect(utf8Decode(restored.get('identity')!)).toBe('raw');
  const same=await codec.create(input({previous:snap.manifest,objects:[{name:'large',bytes:large}]}));expect(same.newChunks.size).toBe(0);
  const rotate=await codec.create(input({accountKey:new Uint8Array(32).fill(9),keyVersion:2,previous:snap.manifest,objects:[{name:'large',bytes:large}]}));expect(rotate.newChunks.size).toBe(2);

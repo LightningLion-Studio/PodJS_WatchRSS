@@ -64,7 +64,7 @@ async function assertClock(p:Peer,id:string,type:'favorite'|'watchLater',saved:b
  const m=(await manifest(p)).find(a=>a.articleId===id)!;expect(m[`${type}ChangedAt`]).toBe(at);
  const entry=await exported(p,id);expect(entry.article[`${type}ChangedAt`]).toBe(at);expect(entry.article[`${type}Saved`]).toBe(saved);
  const row=(await p.db.query('SELECT saved,changed_at FROM sync_saved_states WHERE article_id=? AND save_type=?',[id,type]))[0];expect(row).toEqual({saved:saved?1:0,changed_at:at});
- const cloud=await p.repository.cloudSnapshot(true);expect(cloud.articles.find(a=>a.articleId===id)?.[`${type}ChangedAt`]).toBe(at);
+ const cloud=await p.repository.cloudSnapshot(true),projected=cloud.articles.find(a=>a.articleId===id||a.cloudLegacyArticleIds?.includes(id));expect(projected?.[`${type}ChangedAt`]).toBe(at);if(projected?.cloudRssArticleId)expect(projected.articleId).toBe(projected.cloudRssArticleId);
 }
 for(const source of [null,'https://watchrss.local/import-txt-novel/book','https://feed.test/rss'])for(const type of ['favorite','watchLater'] as const){
  test(`file SQLite A→B→C / A→B→A preserves ${type} cancellation and re-save (${source??'independent'})`,async()=>trio(async([a,b,c])=>{

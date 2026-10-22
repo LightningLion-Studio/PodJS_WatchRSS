@@ -71,5 +71,5 @@ export interface CloudUploadObject {transport?:string;uploadUrl?:string;uploadMe
 export interface CloudSnapshotReservation { snapshotId: string; reservedBytes: number; missingObjects: CloudUploadObject[]; }
 export interface CloudChunkDescriptor { ciphertextSha256: string; ciphertextBytes: number; }
 export interface EncryptedCloudSnapshot { manifest: { snapshotId: string; sourceDeviceId: string; deviceSequence: number; keyVersion: number; parentHeads: Record<string, string>; observedHeads: Record<string, number>; allChunks: CloudChunkDescriptor[] }; encryptedManifest: Uint8Array; }
-export interface RssInventoryItem { url: string; title: string; excerpt: string; contentHtml: string | null; contentText: string; imageUrl: string | null; guid: string; contentHash: string | null; }
-export interface RssInventory { url: string; title: string; description: string; siteUrl: string | null; imageUrl: string | null; items: RssInventoryItem[]; }
+export interface RssInventoryItem { dedupKey?:string; identityLink?:string|null; audioUrl?:string|null;videoUrl?:string|null;publishedAt?:string|null; url: string; title: string; excerpt: string; contentHtml: string | null; contentText: string; imageUrl: string | null; guid: string; contentHash: string | null; }
+export interface RssInventory { sourceId?:string; url: string; title: string; description: string; siteUrl: string | null; imageUrl: string | null; items: RssInventoryItem[]; }

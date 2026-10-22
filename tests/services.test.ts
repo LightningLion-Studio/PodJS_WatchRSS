@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 const database = new Database(":memory:");
 const speechCalls:unknown[]=[];
 let feedBytes = new Uint8Array();
-const feedRequests:string[]=[];
+const feedRequests:string[]=[];const poolRequests:string[]=[];
 const feedResponses=new Map<string,Promise<Uint8Array>[]>();
 let feedCancels=0;
 let originalHtml="",originalDownloads=0;
@@ -37,6 +37,9 @@ function mockFeedDownload(url:string,path:string) {
     return {result,cancel:()=>{cancelled=true;feedCancels++;reject(new Error("cancelled"));}};
 }
 
+// This suite tests local service/SQL behavior; the public-pool protocol has an
+// independent real-client fixture. Keep its deferred feed/cancellation boundary.
+mock.module('../src/cloud/rss-pool',()=>({resolvePoolFeed:async(_accounts:unknown,_transport:unknown,url:string,_version:string,job?:{cancelled:boolean;cancel?:()=>void})=>{poolRequests.push(url);const path='feeds/pool-fixture-'+feedRequests.length,request=mockFeedDownload(url,path);if(job)job.cancel=()=>request.cancel();await request.result;return {fixtureXml:new TextDecoder().decode(downloaded.get(path))};},poolFeedXml:(value:{fixtureXml:string})=>value.fixtureXml}));
 const realWatch=await import('@podjs/framework/watch');
 mock.module('@podjs/framework/watch',()=>({...realWatch,kv:{get:(key:string)=>localKv.get(key),set:(key:string,value:unknown)=>{localKv.set(key,value);},delete:(key:string)=>localKv.delete(key),keys:()=>[...localKv.keys()],batch:(action:()=>unknown)=>action()}}));
 const frameworkServices = await import("@podjs/framework/services");
@@ -98,7 +101,7 @@ beforeAll(() => { feedBytes = new TextEncoder().encode(feed(35)); });
 afterAll(() => { database.close(); });
 
 describe("application services adapter", () => {
-  test("direct add follows native URL, duplicate and initial-read semantics",async()=>{
+  test("direct add resolves the pool first, preserves duplicate semantics and does not mark unseen entries read",async()=>{
     await services.services.listChannels();
     const url="http://example.test/direct-native-feed";
     const before=feedRequests.length;
@@ -107,7 +110,7 @@ describe("application services adapter", () => {
       expect(channel.url).toBe(url);
       expect(feedRequests.length).toBe(before+1);
       expect((database.query("SELECT count(*) total FROM articles WHERE channel_id=?").get(Number(channel.id)) as {total:number}).total).toBe(35);
-      expect((database.query("SELECT count(*) total FROM articles WHERE channel_id=? AND is_read=0").get(Number(channel.id)) as {total:number}).total).toBe(0);
+      expect((database.query("SELECT count(*) total FROM articles WHERE channel_id=? AND is_read=0").get(Number(channel.id)) as {total:number}).total).toBe(35);
       expect((await services.services.addChannel(url)).id).toBe(channel.id);
       expect(feedRequests.length).toBe(before+1);
       await expect(services.services.addChannel("builtin:douyin")).rejects.toThrow("URL 不合法");
@@ -136,7 +139,7 @@ describe("application services adapter", () => {
       expect(count()).toBe(1);
       expect(feedRequests.length).toBe(fetched+1);
       const unread=database.query("SELECT count(*) total FROM articles WHERE channel_id=? AND is_read=0").get(Number(channel.id)) as {total:number};
-      expect(unread.total).toBe(0);
+      expect(unread.total).toBe(35);
       expect((database.query("SELECT count(*) total FROM articles WHERE channel_id=?").get(Number(channel.id)) as {total:number}).total).toBe(35);
       const duplicate=await services.services.previewChannel!(url);
       expect(duplicate.kind).toBe("existing");
@@ -263,7 +266,7 @@ describe("application services adapter", () => {
     expect(channels.map(channel=>channel.url)).toContain('builtin:bili');
     expect(channels.map(channel=>channel.url)).toContain('builtin:douyin');
     expect(channels).toHaveLength(3);
-    expect(channels.find(item=>item.id===channel.id)).toMatchObject({ title: "测试订阅", description: "集成测试", isPinned: false, unreadCount: 0 });
+    expect(channels.find(item=>item.id===channel.id)).toMatchObject({ title: "测试订阅", description: "集成测试", isPinned: false, unreadCount: 35 });
     expect(channels.find(item=>item.id===channel.id)?.lastFetchedAt).toEqual(expect.any(Number));
 
     const page0 = await services.services.listArticles({ channelId: channel.id, page: 0, pageSize: 30 });
@@ -276,7 +279,7 @@ describe("application services adapter", () => {
     const article = await services.services.getArticle(page0[0].id);
     expect(article?.rawContent).toContain("<strong>");
     expect(article?.contentBlocks).toEqual([{type:"text",style:"body",text:"正文 35"}]);
-    expect(article).toMatchObject({ id: page0[0].id, content: "正文 35", read: true, saved: false });
+    expect(article).toMatchObject({ id: page0[0].id, content: "正文 35", read: false, saved: false });
     const offlinePath=`offline/rss/${article!.id}/image_0.jpg`;
     downloaded.set(offlinePath,new Uint8Array([1,2,3]));
     await sqlite.execute('INSERT INTO offline_media(item_id,media_type,origin_url,relative_path,created_at) VALUES(?,?,?,?,?)',[Number(article!.id),'IMAGE','https://example.test/image.jpg',offlinePath,1]);
@@ -344,7 +347,7 @@ test("preexisting favorites are backfilled without duplication or resurrection",
   expect((await services.services.listArticles({saveType:"favorite"})).map(a=>a.id)).not.toContain(id);
 });
 
-test("feed refresh persists native-shaped content previews and replaces stale image previews",async()=>{
+test("pool refresh preserves retained original/preview until watch-later is cancelled",async()=>{
   const previous=feedBytes;
   try {
     feedBytes=new TextEncoder().encode('<rss><channel><title>预览</title><item><guid>preview</guid><title>标题</title><link>https://example.test/news/item</link><description>描述</description><content:encoded><![CDATA[<p>正文优先</p><img src="../cover.png">]]></content:encoded></item></channel></rss>');
@@ -354,7 +357,9 @@ test("feed refresh persists native-shaped content previews and replaces stale im
     await services.services.setSaveState(items[0]!.id,"watchLater",true);
     feedBytes=new TextEncoder().encode('<rss><channel><title>预览</title><item><guid>preview</guid><title>更新标题</title><description>更新描述</description></item></channel></rss>');
     await services.services.refresh(channel.id);
-    expect((await services.services.listArticles({channelId:channel.id}))[0]).toMatchObject({excerpt:"更新描述",imageUrl:"",watchLater:true});
+    expect((await services.services.listArticles({channelId:channel.id}))[0]).toMatchObject({title:"标题",excerpt:"正文优先",imageUrl:"https://example.test/cover.png",watchLater:true});
+    await services.services.setSaveState(items[0]!.id,"watchLater",false);await services.services.refresh(channel.id);
+    expect((await services.services.listArticles({channelId:channel.id}))[0]).toMatchObject({title:"更新标题",excerpt:"更新描述",imageUrl:"",watchLater:false});
   } finally {feedBytes=previous;}
 });
 
@@ -506,7 +511,7 @@ test("mode changes commit before background refresh, notify data changes, and co
     const refresh=services.services.refresh(channel.id);await new Promise(r=>setTimeout(r,0));expect(feedRequests.length).toBe(before+1);
     expect(events).toHaveLength(0);
     response.resolve(new TextEncoder().encode(feed(2).replace("测试订阅","后台更新")));await refresh;
-    expect((await services.services.listChannels()).find(c=>c.id===channel.id)?.title).toBe("后台更新");
+    expect((await services.services.listChannels()).find(c=>c.id===channel.id)?.title).toBe("测试订阅");
     expect(await services.services.listArticles({channelId:channel.id})).toHaveLength(2);
     expect(events).toEqual([{id:channel.id,kind:"refresh"}]);
   }finally{unsubscribe();}
@@ -519,7 +524,7 @@ test("rapid mode changes cancel superseded refresh and never apply an older resp
   expect(feedCancels).toBe(cancelBefore+1);
   const latest=services.services.refresh(channel.id);second.resolve(new TextEncoder().encode(feed(1).replace("测试订阅","最新响应")));await latest;
   first.resolve(new TextEncoder().encode(feed(1).replace("测试订阅","过时响应")));await new Promise(r=>setTimeout(r,0));
-  expect((await services.services.listChannels()).find(c=>c.id===channel.id)).toMatchObject({title:"最新响应",useOriginalContent:false});
+  expect((await services.services.listChannels()).find(c=>c.id===channel.id)).toMatchObject({title:"测试订阅",useOriginalContent:false});
 });
 test("deleting a channel cancels its pending background refresh without affecting another source",async()=>{
   feedBytes=new TextEncoder().encode(feed(1));const channel=await services.services.addChannel("https://example.test/delete-refresh");
@@ -655,4 +660,12 @@ test('private clear refuses a concurrent cloud writer before touching the librar
  failedRemoval='notes/assets/busy-retry.png';downloaded.set(failedRemoval,new Uint8Array([1]));cloudOps.length=0;
  try{await expect(services.clearLocalPrivateLibrary()).rejects.toThrow('fixture deletion failed');expect(cloudOps).toEqual(['cloud.acquire','cloud.release']);}finally{failedRemoval=undefined;}
  await services.clearLocalPrivateLibrary();
+});
+
+test('R36 local-only direct add, preview and refresh use the existing local feed downloader and never the public pool',async()=>{
+ const original=feedBytes;feedBytes=new TextEncoder().encode(feed(1));
+ try{for(const url of ['http://192.168.1.10/private-rss','https://user:secret@example.test/credential-rss']){
+  const start=poolRequests.length,preview=await services.services.previewChannel!(url);expect(preview.kind).toBe('ready');if(preview.kind!=='ready')throw Error('missing preview');
+  const channel=await services.services.confirmAddChannel!(preview.token);try{await services.services.refresh(channel.id);expect(poolRequests.length).toBe(start);expect(feedRequests.filter(v=>v===url).length).toBeGreaterThanOrEqual(2);}finally{await services.services.deleteChannel(channel.id);}
+ }}finally{feedBytes=original;}
 });
