@@ -34,7 +34,7 @@ export interface PairingPorts{
 export const PAIRING_LIFETIME_MS=300_000,PAIRING_CONFIRM_MS=90_000,PAIRING_FINISH_GRACE_MS=20_000;
 
 export const pairingStartingLabel=(_transport:PairingTransport)=>'正在生成配对码…';
-export const pairingScanHint=(_transport:PairingTransport)=>'在手机 App 或小程序里点“扫码绑定手表”';
+export const pairingScanHint=(_transport:PairingTransport)=>'打开腕上RSS手机 App 或小程序扫码';
 export const pairingDoneTitle=(cloudReady:boolean)=>cloudReady?'全部设置完成':'手表已绑定';
 export const pairingDoneDetail=(cloudReady:boolean)=>cloudReady?'账号已登录，云同步已开启':'账号已登录，可在“我的 → 云同步”查看当前状态';
 export function pairingCountdown(remainingMs:number){const seconds=Math.max(0,Math.ceil(remainingMs/1000));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} 后失效`;}
