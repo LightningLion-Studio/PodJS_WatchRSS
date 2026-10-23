@@ -44,9 +44,11 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  // Rounded white corners (16dp) and the quiet zone stay 2dp inside the screen circle.
  const qrTile=()=>Math.floor(Math.SQRT2*(Math.min(props.width,props.height)/2-2-16)+32);
  const qrCode=()=>qrTile()-QR_QUIET*2;
+ // Text is wrapped narrower than the row so lines near the top and bottom of the face stay inside the circle.
+ const TEXT_WIDTH=172;
  const text=(value:string,kind:PhoneTextKind,color?:string):ScrollEntry[]=>{
-  const line=phonePageText(value,kind,inner(),measure);
-  return chunkLines(line.text.split('\n'),line.lineHeight,inner()).map(lines=>({height:lines.length*line.lineHeight,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:color??line.color}}>{lines.join('\n')}</Text>}));
+  const width=Math.min(TEXT_WIDTH,inner()),line=phonePageText(value,kind,width,measure);
+  return chunkLines(line.text.split('\n'),line.lineHeight,width).map(lines=>({height:lines.length*line.lineHeight,render:()=> <Text class="absolute top-[0] text-center" style={{insetL:(inner()-width)/2,width,fontSlot:line.slot,lineHeight:line.lineHeight,textColor:color??line.color}}>{lines.join('\n')}</Text>}));
  };
  const gap=(height:number):ScrollEntry=>({height,render:()=>null});
  // Narrower than the row: these pills often sit low on the face, where the circle is tight.
@@ -61,9 +63,9 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
    <Text style={{fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.secondary}}>{label}</Text>
   </View>});
  const spinner=(label:string):ScrollEntry=>({height:40,render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
- const mark=(success:boolean):ScrollEntry=>({height:52,render:()=>
-  <View class="absolute top-[0] w-[52] h-[52] rounded-full items-center justify-center" style={{insetL:(inner()-52)/2,bgColor:success?PHONE_PAGE.primary:'#23272a'}}>
-   {success?<Image src="../assets/icons/onboarding-check.svg" style={{width:32,height:32}}/>:<Text style={{fontSlot:23,lineHeight:26,textColor:PHONE_PAGE.foreground}}>!</Text>}
+ const mark=(success:boolean):ScrollEntry=>({height:40,render:()=>
+  <View class="absolute top-[0] w-[40] h-[40] rounded-full items-center justify-center" style={{insetL:(inner()-40)/2,bgColor:success?PHONE_PAGE.primary:'#23272a'}}>
+   {success?<Image src="../assets/icons/onboarding-check.svg" style={{width:24,height:24}}/>:<Text style={{fontSlot:23,lineHeight:26,textColor:PHONE_PAGE.foreground}}>!</Text>}
   </View>});
 
  const entries=createMemo<ScrollEntry[]>(()=>{
@@ -102,7 +104,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
       <Text class="absolute left-[30] top-[3]" style={{fontSlot:22,lineHeight:21,textColor:index<=at?PHONE_PAGE.foreground:'#7a7a7a'}}>{label}</Text>
      </View>})),gap(10),...text('请保持本页打开','body',PHONE_PAGE.secondary),gap(12),pill('停止',cancel)];
    }
-   case 'done':return [mark(true),gap(12),...text(pairingDoneTitle(current.cloudReady),'title'),gap(6),...text(pairingDoneDetail(current.cloudReady),'body',PHONE_PAGE.secondary),gap(14),pill('完成',close,true)];
+   case 'done':return [mark(true),gap(8),...text(pairingDoneTitle(current.cloudReady),'title'),gap(6),...text(pairingDoneDetail(current.cloudReady),'body',PHONE_PAGE.secondary),gap(14),pill('完成',close,true)];
    case 'failed':return [...text(current.title,'title'),gap(6),...text(current.detail,'body',PHONE_PAGE.secondary),gap(14),pill('重试',()=>pairing.start(),true),gap(2),link('返回',close)];
    case 'cancelled':case 'paused':return [
     ...text(current.kind==='cancelled'?'已取消配对':'配对已暂停','title'),gap(6),
