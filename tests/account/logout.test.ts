@@ -32,6 +32,6 @@ test('recheck low 9a: logout refreshes once before self-revoke under the store l
 test('recheck low 9a: refresh 401/503/malformed/network failure and revoke failure all finish local cleanup',async()=>{
  for(const mode of ['401','503','malformed','network','revoke-fails'] as const){const f=await fixture(mode);await f.store.clear();expect(f.events).toEqual(mode==='revoke-fails'?['refresh','bootstrap','revoke','session-clear','cloud-clear']:['refresh','session-clear','cloud-clear']);expect(await f.store.read()).toBeNull();expect(f.accountWrites).toBe(1);expect(f.values.has(f.legacy)).toBe(false);expect(f.values.get('another-account-key')).toBe('keep');}
 });
-test('401 token invalidation with refresh-before-revoke cleanup cannot recursively clear or deadlock',async()=>{
- const f=await fixture('401'),tokens=new WatchTokenManager(f.store,{backendBaseUrl:account.backendBaseUrl,transport:f.http});await expect(tokens.freshAccount(true)).rejects.toThrow('401');expect(f.events).toEqual(['refresh','refresh','session-clear','cloud-clear']);expect(await f.store.read()).toBeNull();expect(f.accountWrites).toBe(1);
+test('401 token invalidation clears locally without the explicit logout refresh/revoke flow',async()=>{
+ const f=await fixture('401'),tokens=new WatchTokenManager(f.store,{backendBaseUrl:account.backendBaseUrl,transport:f.http});await expect(tokens.freshAccount(true)).rejects.toThrow('401');expect(f.events).toEqual(['refresh','session-clear','cloud-clear']);expect(await f.store.read()).toBeNull();expect(f.accountWrites).toBe(1);
 });

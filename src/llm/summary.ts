@@ -10,7 +10,7 @@ export interface SummarySource {title:string;content:string;contentHash?:string;
 export interface SummaryDependencies {
  source:(waiting:()=>void)=>Promise<SummarySource>;
  account:()=>Promise<WatchAccountState|null>;
- freshAccount:(account:WatchAccountState,force:boolean)=>Promise<WatchAccountState>;
+ freshAccount:(account:WatchAccountState,force:boolean,rejectedAccessToken?:string)=>Promise<WatchAccountState>;
  transport:HttpTransport;
  recordUsage:(model:string,usage:unknown)=>Promise<void>;
  cancel?:()=>void;
@@ -75,7 +75,7 @@ export class SummarySession {
    const selected=this.preset(),body={title:source.title,content:summarySourceText(source.content,source.plainText),...(/^[0-9a-f]{64}$/.test(source.contentHash??"")?{contentHash:source.contentHash}:{}),promptPreset:Number.isInteger(selected)&&selected>=1&&selected<=4?selected:1,stream:false};
    const request=(value:WatchAccountState)=>this.deps.transport.request({method:"POST",url:value.backendBaseUrl.replace(/\/+$/,"")+"/api/v1/llm/default-model/article-summary",headers:{"Authorization":`Bearer ${value.watchDeviceToken}`,"Content-Type":"application/json","X-WatchRSS-App-Version":watchAppVersion},body:utf8Encode(JSON.stringify(body))});
    let response=await request(current);if(!this.alive)return;
-   if(response.status===401||response.status===403){current=await this.deps.freshAccount(current,true);if(!this.alive)return;response=await request(current);if(!this.alive)return;}
+   if(response.status===401||response.status===403){current=await this.deps.freshAccount(current,true,current.watchDeviceToken);if(!this.alive)return;response=await request(current);if(!this.alive)return;}
    const raw=utf8Decode(response.body);let data:any;
    if(response.status<200||response.status>=300){try{data=JSON.parse(raw);}catch{data={};}throw new Error(response.status===402?"AI 总结仅限已购买 6 元授权的用户":response.status===401||response.status===403?"账号授权已失效，请从手机重新同步":String(data.detail||data.error||`HTTP ${response.status}`));}
    data=JSON.parse(raw);if(!data||typeof data!=="object"||Array.isArray(data))throw new Error("总结响应格式错误");

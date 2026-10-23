@@ -39,7 +39,7 @@ export class WatchCloudClient {
     else if (body !== undefined) headers["content-type"] = "application/json; charset=utf-8";
     const request={ method, url: this.options.baseUrl.replace(/\/$/, "") + path, headers, body: raw??(body === undefined ? undefined : jsonBytes(body)) };
     let response=await this.http.request(request);
-    if(response.status===401&&this.options.refreshToken){this.guard.require();headers.authorization=`Bearer ${await this.options.refreshToken(true)}`;response=await this.http.request(request);}
+    if(response.status===401&&this.options.refreshToken){this.guard.require();headers.authorization=`Bearer ${await this.options.refreshToken(true,headers.authorization.slice(7))}`;response=await this.http.request(request);}
     if(response.status===401)await this.options.onUnauthorized?.();
     if(response.status===409){let error='';try{error=parse(response).error;}catch{}if(error==='library_epoch_mismatch'){this.epoch=undefined;await this.options.onEpochMismatch?.();throw Error('library_epoch_mismatch');}}
     if(response.status===426)throw Error('client_upgrade_required');

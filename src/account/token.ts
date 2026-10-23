@@ -16,21 +16,23 @@ export async function refreshWatchAccount(state:WatchAccountState,options:Accoun
 }
 
 export class WatchTokenManager {
-  private refreshPromise:Promise<WatchAccountState>|null=null;
   constructor(private readonly store:WatchAccountStore,private readonly options:AccountClientOptions,private readonly now:()=>number=()=>Date.now()){}
-  async freshAccessToken(forceRefresh=false):Promise<string>{return(await this.freshAccount(forceRefresh)).watchDeviceToken;}
-  async freshAccount(forceRefresh=false):Promise<WatchAccountState>{
+  async freshAccessToken(forceRefresh=false,rejectedAccessToken?:string):Promise<string>{return(await this.freshAccount(forceRefresh,rejectedAccessToken)).watchDeviceToken;}
+  async freshAccount(forceRefresh=false,rejectedAccessToken?:string):Promise<WatchAccountState>{
     const state=await this.store.read();if(!state)throw Error('手表尚未绑定腕上RSS账号');
+    if(rejectedAccessToken&&rejectedAccessToken!==state.watchDeviceToken)forceRefresh=false;
     if(!forceRefresh&&state.tokenExpiresAtMillis>this.now()+60000)return state;
     if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=this.now()))throw Error('登录已过期，请用手机重新同步账号');
-    if(!this.refreshPromise)this.refreshPromise=this.refresh(state).finally(()=>{this.refreshPromise=null;});return this.refreshPromise;
+    return this.refresh(state);
   }
   async logout():Promise<void>{await this.store.clear();}
   private async refresh(state:WatchAccountState):Promise<WatchAccountState>{
-    let updated:WatchAccountState;
-    try{updated=await refreshWatchAccount(state,this.options,this.now);}
-    catch(error){const current=await this.store.read();if(error instanceof WatchTokenRefreshError&&error.status===401&&current?.userId===state.userId&&current.backendBaseUrl===state.backendBaseUrl&&current.watchRefreshToken===state.watchRefreshToken)await this.store.clear(state);throw error;}
-    const current=await this.store.read();if(!current||current.userId!==state.userId||current.watchRefreshToken!==state.watchRefreshToken)throw Error('账号已变更，请重试');
-    await this.store.save(updated,state);return updated;
+    try{return await this.store.refresh(state,current=>refreshWatchAccount(current,this.options,this.now),error=>error instanceof WatchTokenRefreshError&&error.status===401);}
+    catch(error){
+      const current=await this.store.read();
+      // A newer committed pair wins over an old request's rejection.
+      if(current?.userId===state.userId&&current.backendBaseUrl===state.backendBaseUrl&&current.watchRefreshToken!==state.watchRefreshToken)return current;
+      throw error;
+    }
   }
 }

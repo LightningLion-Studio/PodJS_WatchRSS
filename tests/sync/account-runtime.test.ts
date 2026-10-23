@@ -9,7 +9,7 @@ test('syncAccount writes through the actual LLM singleton secureStorage adapter 
   mock.module('@podjs/framework/services',()=>({
    secureStorage:{get:async key=>values.get(key),set:async(key,value)=>{writes++;await committed;values.set(key,value);},delete:async key=>values.delete(key)},
    uri:{parse:async value=>{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname};}},
-   hostOperation(method,args){return {result:(async()=>{if(method==='crypto.hash')return{digestBase64:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='};if(method==='file.list')return{entries:[]};if(method==='secure.update')return {};throw Error('unexpected network');})()};},fileChunks:{},
+   hostOperation(method,args){return {result:(async()=>{if(method==='crypto.hash')return{digestBase64:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='};if(method==='file.list')return{entries:[]};if(method==='secure.update'||method==='secure.release')return {};if(method==='secure.acquire')return{acquired:true};throw Error('unexpected network');})()};},fileChunks:{},
    bytesToBase64:b=>Buffer.from(b).toString('base64'),base64ToBytes:s=>new Uint8Array(Buffer.from(s,'base64'))
   }));
   const {summaryAccountStore}=await import('./src/llm/runtime.ts');

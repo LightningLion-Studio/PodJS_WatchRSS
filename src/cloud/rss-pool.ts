@@ -7,7 +7,7 @@ export async function resolvePoolFeed(accounts:WatchAccountStore,transport:HttpT
  const account=await accounts.read();if(!account)throw Error('请先连接手机并绑定账号以添加公共 RSS');
  const tokens=new WatchTokenManager(accounts,{backendBaseUrl:account.backendBaseUrl,transport,appVersion});
  const current=async()=>{if(signal?.cancelled)throw Error('刷新已取消');const next=await accounts.read();if(!next||next.userId!==account.userId||next.backendBaseUrl!==account.backendBaseUrl)throw Error('账号已变更');};
- const client=new WatchCloudClient({request:async r=>{await current();const response=await transport.request(r);await current();return response;}},{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion,refreshToken:account.watchRefreshToken?async force=>{await current();return tokens.freshAccessToken(force);}:undefined},{sha256:()=>{throw Error('unused_public_pool_hash');}},{require(){}});
+ const client=new WatchCloudClient({request:async r=>{await current();const response=await transport.request(r);await current();return response;}},{baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion,refreshToken:account.watchRefreshToken?async (force,rejectedAccessToken)=>{await current();return tokens.freshAccessToken(force,rejectedAccessToken);}:undefined},{sha256:()=>{throw Error('unused_public_pool_hash');}},{require(){}});
  await current();const inventory=await client.resolveRssSource(url);await current();return inventory;
 }
 const escape=(value:string)=>value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

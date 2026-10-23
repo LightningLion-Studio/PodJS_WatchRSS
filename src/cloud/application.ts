@@ -21,7 +21,7 @@ function start(){
  const ready=(async()=>{
   if(!await initializeCloudHost()||disposed)return;
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
-  const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
+  const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
   runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,notifyLibraryChanged);approvals=runtime.approvals;foreground();cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   scheduler=new WatchCloudScheduler({sync:async(manual,mode)=>{const result=await runtime!.service.syncNow(manual,mode),retry=runtime!.service.status.retryAtMillis;if(retry)scheduler?.deferUntil(retry);return result;},now:Date.now,delay:(ms,fn)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return()=>timer.cancel();},scheduleWorker:()=>host<void>('cloud.schedule',{}),cancelWorker:()=>host<void>('cloud.cancel',{})},guard);
   let identity='',accountId='',accountScope='';

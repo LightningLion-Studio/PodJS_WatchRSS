@@ -1,3 +1,4 @@
+import {withAccountLease} from '../account/lease';
 import {clearAccountCloud,revokeAccountCloud} from '../account/cloud-cleanup';
 import {hostOperation,secureStorage,fileChunks,bytesToBase64,base64ToBytes,type DownloadResult,type HostOperation} from "@podjs/framework/services";
 import {WatchAccountStore} from "../account/store.ts";
@@ -9,7 +10,7 @@ import {SummarySession,type SummaryState} from "./summary.ts";
 import {loadSummarySource} from "./source.ts";
 import {appendUsage} from "./usage.ts";
 
-export const summaryAccountStore=new WatchAccountStore({revokeCloudScope:state=>revokeAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,state),clearCloudScope:state=>clearAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,state),get:async key=>(await secureStorage.get(key))??null,set:secureStorage.set,remove:secureStorage.delete});
+export const summaryAccountStore=new WatchAccountStore({exclusive:action=>withAccountLease(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,action),revokeCloudScope:state=>revokeAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,state),clearCloudScope:state=>clearAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,state),get:async key=>(await secureStorage.get(key))??null,set:secureStorage.set,remove:secureStorage.delete});
 let sequence=0;
 export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,original:()=>Promise<unknown>,changed:(state:SummaryState)=>void):SummarySession {
  const requests=new Set<HostOperation<DownloadResult>>();let disposed=false;
@@ -26,7 +27,7 @@ export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,
   }finally{requests.delete(task);await fileChunks.remove(path).catch(()=>{});}
  }};
  let tokens:WatchTokenManager|undefined;
- return new SummarySession({source:waiting=>loadSummarySource(db,id,original,waiting),account:()=>summaryAccountStore.read(),freshAccount:(account,force)=>{tokens??=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport,appVersion:watchAppVersion});return tokens.freshAccount(force);},transport,
+ return new SummarySession({source:waiting=>loadSummarySource(db,id,original,waiting),account:()=>summaryAccountStore.read(),freshAccount:(account,force,rejectedAccessToken)=>{tokens??=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport,appVersion:watchAppVersion});return tokens.freshAccount(force,rejectedAccessToken);},transport,
   recordUsage:async(model,usage)=>{const createdAt=Date.now();await appendUsage(db,{provider:"WatchRSS",model,requestId:`${createdAt}_${++sequence}_server_summary`,usage,createdAt});},
   cancel:()=>{disposed=true;for(const task of requests)task.cancel();requests.clear();}
  },preset,changed);

@@ -56,7 +56,7 @@ export interface CloudClientOptions {
   assertCurrent?:()=>Promise<void>;
   onUnauthorized?: ()=>Promise<void>;
   onEpochMismatch?: ()=>Promise<void>;
-  refreshToken?: (force:boolean)=>Promise<string>;
+  refreshToken?: (force:boolean,rejectedAccessToken?:string)=>Promise<string>;
 }
 
 export interface CloudMemberState { plan: string; active: boolean; writable: boolean; readable: boolean; quotaBytes: number; usedBytes: number; reservedBytes: number; retentionDays: number | null; readOnlyAt: string | null; deleteAfter: string | null; }
