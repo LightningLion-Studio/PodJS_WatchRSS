@@ -18,7 +18,7 @@ const QR_QUIET=8;
 const pairingRaster=(value:string,dimension:number)=>qrPixels(value,dimension,{encoding:'byte',bitmapSize:dimension,errorCorrection:'L',margin:0,invert:false,messages:{content:'配对码生成失败',raster:'配对码生成失败',capacity:'配对码生成失败'}});
 
 /** Foreground-only pairing page; starts once when opened by an explicit tap and owns its session. */
-export function MiniProgramPairingPanel(props:{width:number;height:number;active:()=>boolean;transport?:PairingTransport;onClose:()=>void;ref:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void;ports?:PairingPorts}){
+export function MiniProgramPairingPanel(props:{width:number;height:number;active:()=>boolean;transport?:PairingTransport;onClose:()=>void;onDone?:()=>void;ref:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void;ports?:PairingPorts}){
  const [state,setState]=createSignal<PairingState>({kind:'idle'});
  const [transport,setTransport]=createSignal<PairingTransport>('internet');
  const pairing=new MiniProgramPairing(props.ports??miniProgramPairingHostPorts(),setState,transport());
@@ -90,8 +90,8 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
      ...(sas?[{height:30,render:()=> <Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${current.sas}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{sas}</Text>} as ScrollEntry]:[]),
      gap(4),...text(`账号 ${current.account} · 确认后手表将登录`,'small'),gap(14),
      {height:48,render:()=> <View class="absolute inset-0">
-      <View class="absolute top-[0] w-[48] h-[48] rounded-full bg-[#23272a] items-center justify-center" style={{insetL:(inner()-168)/2}} focusable accessibilityRole="button" accessibilityLabel="不一致，不绑定" onPress={act(()=>pairing.confirmSas(false))}><Image src="../assets/icons/close.svg" style={{width:26,height:26}}/></View>
-      <View class="absolute top-[0] w-[112] h-[48] rounded-[24] items-center justify-center" style={{insetL:(inner()-168)/2+56,bgColor:sas?PHONE_PAGE.primary:'#2a2a2a'}} focusable={!!sas} accessibilityRole="button" accessibilityState={{disabled:!sas}} accessibilityLabel="一致，绑定" onPress={sas?act(()=>pairing.confirmSas(true)):undefined}><Text style={{fontSlot:22,lineHeight:21,textColor:sas?PHONE_PAGE.onPrimary:PHONE_PAGE.secondary}}>一致，绑定</Text></View>
+      <View class="absolute w-[44] h-[44] rounded-full bg-[#23272a] items-center justify-center" style={{insetL:(inner()-156)/2,insetT:2}} focusable accessibilityRole="button" accessibilityLabel="不一致，不绑定" onPress={act(()=>pairing.confirmSas(false))}><Image src="../assets/icons/close.svg" style={{width:26,height:26}}/></View>
+      <View class="absolute top-[0] w-[104] h-[48] rounded-[24] items-center justify-center" style={{insetL:(inner()-156)/2+52,bgColor:sas?PHONE_PAGE.primary:'#2a2a2a'}} focusable={!!sas} accessibilityRole="button" accessibilityState={{disabled:!sas}} accessibilityLabel="一致，绑定" onPress={sas?act(()=>pairing.confirmSas(true)):undefined}><Text style={{fontSlot:22,lineHeight:21,textColor:sas?PHONE_PAGE.onPrimary:PHONE_PAGE.secondary}}>一致，绑定</Text></View>
      </View>},
     ];
    }
@@ -104,7 +104,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
       <Text class="absolute left-[30] top-[3]" style={{fontSlot:22,lineHeight:21,textColor:index<=at?PHONE_PAGE.foreground:'#7a7a7a'}}>{label}</Text>
      </View>})),gap(10),...text('请保持本页打开','body',PHONE_PAGE.secondary),gap(12),pill('停止',cancel)];
    }
-   case 'done':return [mark(true),gap(8),...text(pairingDoneTitle(current.cloudReady),'title'),gap(6),...text(pairingDoneDetail(current.cloudReady),'body',PHONE_PAGE.secondary),gap(14),pill('完成',close,true)];
+   case 'done':return [mark(true),gap(8),...text(pairingDoneTitle(current.cloudReady),'title'),gap(6),...text(pairingDoneDetail(current.cloudReady),'body',PHONE_PAGE.secondary),gap(14),pill('完成',()=>{pairing.dispose();(props.onDone??props.onClose)();},true)];
    case 'failed':return [...text(current.title,'title'),gap(6),...text(current.detail,'body',PHONE_PAGE.secondary),gap(14),pill('重试',()=>pairing.start(),true),gap(2),link('返回',close)];
    case 'cancelled':case 'paused':return [
     ...text(current.kind==='cancelled'?'已取消配对':'配对已暂停','title'),gap(6),
@@ -114,6 +114,8 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
   }
  });
  // Short pages sit in the middle of the round face; long ones scroll from the top.
- const rows=createMemo(()=>{const list=entries();if(state().kind==='scan')return list;const room=props.height-36-list.reduce((sum,row)=>sum+row.height,0);return room>0?[gap(room/2),...list]:[gap(8),...list];});
+ // Long pages scroll; generous top and bottom spacers keep their first and last rows off the narrow edge.
+ const EDGE=40;
+ const rows=createMemo(()=>{const list=entries();if(state().kind==='scan')return [...list,gap(EDGE)];const room=props.height-36-list.reduce((sum,row)=>sum+row.height,0);return room>0?[gap(room/2),...list]:[gap(EDGE),...list,gap(EDGE)];});
  return <View class="absolute inset-0 bg-black"><ScrollEntries round={null} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>props.ref({...value,onRootBack:back})} accessibilityLabel="扫码绑定"/></View>;
 }

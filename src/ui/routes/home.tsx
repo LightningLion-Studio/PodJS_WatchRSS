@@ -40,6 +40,8 @@ interface HomeRoutesProps {
   speechSpectrum: () => readonly number[];
   services: AppServices;
   go: (page: Page) => Promise<void>;
+  /** Pops back to the home page, dropping intermediate pages. */
+  goHome: () => void;
   openSpeech: () => void;
   openAdd: () => void;
   refresh: () => Promise<void>;
@@ -160,6 +162,7 @@ export function HomeRoutes(props: HomeRoutesProps) {
           height={props.height}
           active={props.active}
           onError={props.setError}
+          onPaired={props.goHome}
           ref={(value) => {
             props.entry.list = value;
             props.entry.internalBack = value.onRootBack;

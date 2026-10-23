@@ -841,6 +841,14 @@ export default function WatchRSS(props: {
     page,
     go: () => go("phone-connection"),
   }));
+  // Finishing a flow (for example watch pairing) returns to the home page instead of the page it started from.
+  function goHome() {
+    if (motion.phase !== "idle") return;
+    if (stack()[0]?.page === "home") setStack((entries) => entries.slice(0, 1));
+    else setStack([{ page: "home" }]);
+    kv.set("page", "home");
+    void loadChannels();
+  }
   async function go(next: Page) {
     if (motion.phase !== "idle") return;
     if (next === "notes") {
@@ -1546,6 +1554,7 @@ export default function WatchRSS(props: {
             }
           >
             <HomeRoutes
+              goHome={goHome}
               entry={entry}
               page={entryPage}
               active={() => active() && !(entryPage() === "home" && (homeNoticeVisible() || !!homeDisclosurePending()))}

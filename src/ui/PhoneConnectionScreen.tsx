@@ -14,7 +14,7 @@ import { PHONE_PAGE } from './phone-connection-layout.ts';
  * Landing page: scan binding is the one route; the phone App syncs over Bluetooth on its own while
  * WatchRSS is open. Nothing starts until the user picks it.
  */
-export function PhoneConnectionScreen(props: { width: number; height: number; active: () => boolean; onError: (message: string) => void; ref: (value: { scroller: Scroller; onRootBack: () => boolean }) => void }) {
+export function PhoneConnectionScreen(props: { width: number; height: number; active: () => boolean; onError: (message: string) => void; onPaired?: () => void; ref: (value: { scroller: Scroller; onRootBack: () => boolean }) => void }) {
   const [progress, setProgress] = createSignal(libraryProgressSnapshot());
   onCleanup(subscribeLibraryProgress(setProgress));
   const [pairing, setPairing] = createSignal(false);
@@ -65,7 +65,7 @@ export function PhoneConnectionScreen(props: { width: number; height: number; ac
   });
   return <View class="absolute inset-0 bg-black">
     <ScrollEntries height={props.height} entries={entries()} padding={18} gap={0} inputActive={() => props.active() && !download() && !pairing()} ref={value => { mainRef = value; if (!pairing()) props.ref({ ...value, onRootBack: back }); }} />
-    <Show when={pairing()}><MiniProgramPairingPanel width={props.width} height={props.height} active={props.active} onClose={closePairing} ref={value => props.ref(value)} /></Show>
+    <Show when={pairing()}><MiniProgramPairingPanel width={props.width} height={props.height} active={props.active} onClose={closePairing} onDone={props.onPaired} ref={value => props.ref(value)} /></Show>
     <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation="手机连接同步" onDismiss={() => setDownload(false)} onError={props.onError} /></Show>
   </View>;
 }
