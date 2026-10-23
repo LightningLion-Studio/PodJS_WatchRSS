@@ -55,6 +55,11 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
   <View class="absolute top-[0] rounded-[24] items-center justify-center" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner()),height:PHONE_PAGE.touchHeight,bgColor:primary?PHONE_PAGE.primary:'#2a2a2a'}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
    <Text style={{fontSlot:22,lineHeight:21,textColor:primary?PHONE_PAGE.onPrimary:PHONE_PAGE.foreground}}>{label}</Text>
   </View>});
+ // Secondary actions are text links: a second stacked pill would fall below the round edge.
+ const link=(label:string,press:()=>void):ScrollEntry=>({height:40,render:()=>
+  <View class="absolute top-[0] h-[40] items-center justify-center" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner())}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
+   <Text style={{fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.secondary}}>{label}</Text>
+  </View>});
  const spinner=(label:string):ScrollEntry=>({height:40,render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
  const mark=(success:boolean):ScrollEntry=>({height:52,render:()=>
   <View class="absolute top-[0] w-[52] h-[52] rounded-full items-center justify-center" style={{insetL:(inner()-52)/2,bgColor:success?PHONE_PAGE.primary:'#23272a'}}>
@@ -98,11 +103,11 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
      </View>})),gap(10),...text('请保持本页打开','body',PHONE_PAGE.secondary),gap(12),pill('停止',cancel)];
    }
    case 'done':return [mark(true),gap(12),...text(pairingDoneTitle(current.cloudReady),'title'),gap(6),...text(pairingDoneDetail(current.cloudReady),'body',PHONE_PAGE.secondary),gap(14),pill('完成',close,true)];
-   case 'failed':return [mark(false),gap(12),...text(current.title,'title'),gap(6),...text(current.detail,'body',PHONE_PAGE.secondary),gap(14),pill('重试',()=>pairing.start(),true),gap(8),pill('返回',close)];
+   case 'failed':return [...text(current.title,'title'),gap(6),...text(current.detail,'body',PHONE_PAGE.secondary),gap(14),pill('重试',()=>pairing.start(),true),gap(2),link('返回',close)];
    case 'cancelled':case 'paused':return [
     ...text(current.kind==='cancelled'?'已取消配对':'配对已暂停','title'),gap(6),
     ...text(current.kind==='cancelled'?'本次配对已结束':'离开页面后配对码已失效，需要时重新生成','body',PHONE_PAGE.secondary),gap(14),
-    pill('重新开始',()=>pairing.start(),true),gap(8),pill('返回',close),
+    pill('重新开始',()=>pairing.start(),true),gap(2),link('返回',close),
    ];
   }
  });
