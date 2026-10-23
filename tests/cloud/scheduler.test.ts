@@ -30,3 +30,9 @@ test('R35 deferred deadline wins normal debounce; pausing preserves it, account 
  s.foreground(true);await settle();now=590000;await s.manual();s.deferUntil(600000);await settle();expect(timers.at(-1)!.at).toBe(600000);s.foreground(false);expect(timers.at(-1)!.cancelled).toBe(true);s.foreground(true);expect(timers.at(-1)!.at).toBe(600000);s.accountChanged();await settle();expect(timers.at(-1)!.cancelled).toBe(true);expect(runs).toBe(3);s.dispose();
 });
 test('R45 upgrade response cancels automatic/worker retries; explicit manual retry and a new account remain possible',async()=>{let count=0,cancelled=0,scheduled=0;const s=new WatchCloudScheduler({now:()=>0,sync:async()=>{count++;return true;},delay:()=>()=>{},scheduleWorker:async()=>{scheduled++;},cancelWorker:async()=>{cancelled++;}},enabled);await s.start(true);s.foreground(true);await settle();await s.setUpgradeRequired(true);for(let i=0;i<20;i++){s.trigger();s.foreground(true);}expect(count).toBe(1);expect(cancelled).toBe(1);expect(await s.manual()).toBe(true);expect(count).toBe(2);s.accountChanged();await settle();expect(scheduled).toBe(2);expect(count).toBe(3);s.dispose();});
+
+test('an unbound/empty sync result does not create a retry timer or a background spin',async()=>{
+ let runs=0,timers=0;const s=new WatchCloudScheduler({now:()=>0,sync:async()=>{runs++;return false;},delay:()=>{timers++;return()=>{};},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ s.foreground(true);await settle();for(let i=0;i<100;i++)await settle();expect(runs).toBe(1);expect(timers).toBe(0);
+ s.foreground(false);for(let i=0;i<100;i++)s.trigger();await settle();expect(runs).toBe(1);expect(timers).toBe(0);s.dispose();
+});

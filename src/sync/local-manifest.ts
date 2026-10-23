@@ -1,3 +1,4 @@
+import {orderImportedRows} from './import-order';
 import {matchGzipHash} from '@podjs/framework/crypto';
 import {articleState} from './article-provenance';
 import {utf8Encode} from '../cloud/types';
@@ -101,6 +102,9 @@ export class LocalArticleManifestStore {
   if(this.migrateReadingMany)await this.migrateReadingMany(migrationIds);
   else for(const id of migrationIds)await this.migrateReading(id);
  }
+ /** Native hash/cache hits can settle synchronously. Budget the whole caller,
+  * rather than assuming an await necessarily gives Android's looper a turn. */
+ private workCheckpoint(check?:()=>void){let work=0,slice=Date.now();return async(weight=1)=>{check?.();work+=weight;if(work>=32||Date.now()-slice>=2){await this.db.query('SELECT 1');check?.();work=0;slice=Date.now();}};}
  /** Cloud identities remain separate from native-wire bindings. Pool IDs are authoritative. */
  private async cloudIdentity(r:Row):Promise<CloudRssIdentity|undefined>{
   try{
@@ -116,29 +120,31 @@ export class LocalArticleManifestStore {
   return {itemId:num(r.id),articleId,localArticleId,nativeArticleId,legacyMaterialized,canonicalBinding:!!pool,url,sourceUrl:str(r.channel_url)};
   }catch{return undefined;}
  }
- async cloudRssIdentities(filter?:{sourceUrl:string;url:string;ids:readonly string[]}):Promise<CloudRssIdentity[]>{
-  const marks=filter?.ids.map(()=>'?').join(',');
+ async cloudRssIdentities(filter?:{sourceUrl:string;url:string;ids:readonly string[]},check?:()=>void):Promise<CloudRssIdentity[]>{
+  const checkpoint=this.workCheckpoint(check);const marks=filter?.ids.map(()=>'?').join(',');
   const where=filter?`ch.url=? AND (a.link=? OR a.dedup_key IN (${marks}) OR a.id IN (SELECT item_id FROM sync_article_ids WHERE article_id IN (${marks})) OR a.id IN (SELECT item_id FROM cloud_rss_article_ids WHERE article_id IN (${marks})))`:"ch.url LIKE 'http://%' OR ch.url LIKE 'https://%'";
   const rows=await querySyncPages(this.db,IDENTITY_SELECT+" WHERE ("+where+") AND ch.url NOT LIKE 'https://watchrss.local/import-%' ORDER BY a.id",filter?[filter.sourceUrl,filter.url,...filter.ids,...filter.ids,...filter.ids]:[],100),out:CloudRssIdentity[]=[];
-  for(const r of rows){const identity=await this.cloudIdentity(r);if(identity)out.push(identity);}return out;
+  for(const r of rows){await checkpoint();const identity=await this.cloudIdentity(r);if(identity)out.push(identity);}return out;
  }
- async cloudRssIdentitiesForUrls(urls:readonly string[]):Promise<CloudRssIdentity[]>{const out=new Map<number,CloudRssIdentity>();for(let at=0;at<urls.length;at+=100){const part=urls.slice(at,at+100),marks=part.map(()=>'?').join(',');for(const r of await querySyncPages(this.db,IDENTITY_SELECT+` WHERE (a.link IN (${marks}) OR a.guid IN (${marks}) OR a.dedup_key IN (${marks})) AND ch.url NOT LIKE 'https://watchrss.local/import-%' ORDER BY a.id`,[...part,...part,...part],100)){const identity=await this.cloudIdentity(r);if(identity)out.set(identity.itemId,identity);}}return [...out.values()].sort((a,b)=>a.itemId-b.itemId);}
+ async cloudRssIdentitiesForUrls(urls:readonly string[],check?:()=>void):Promise<CloudRssIdentity[]>{const checkpoint=this.workCheckpoint(check),out=new Map<number,CloudRssIdentity>();for(let at=0;at<urls.length;at+=100){const part=urls.slice(at,at+100),marks=part.map(()=>'?').join(',');for(const r of await querySyncPages(this.db,IDENTITY_SELECT+` WHERE (a.link IN (${marks}) OR a.guid IN (${marks}) OR a.dedup_key IN (${marks})) AND ch.url NOT LIKE 'https://watchrss.local/import-%' ORDER BY a.id`,[...part,...part,...part],100)){await checkpoint();const identity=await this.cloudIdentity(r);if(identity)out.set(identity.itemId,identity);}}return [...out.values()].sort((a,b)=>a.itemId-b.itemId);}
  /** Ordinary read RSS rows are absent from saved-article snapshots. */
- async cloudReadingStates(all=false):Promise<ExportedArticle[]>{
+ async cloudReadingStates(all=false,check?:()=>void):Promise<ExportedArticle[]>{
+  const checkpoint=this.workCheckpoint(check);
   const device=String((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id??'');
   const rows=await querySyncPages(this.db,ROW_SELECT+" WHERE ("+(all?"1":"a.is_read=1 OR a.reading_progress>0 OR r.progress>0 OR r.changed_at>0")+") AND (ch.url LIKE 'http://%' OR ch.url LIKE 'https://%') ORDER BY a.id",[],100);
   const out:ExportedArticle[]=[];
-  for(const r of rows){const identity=await this.cloudIdentity(r);if(!identity)continue;const {url,articleId}=identity;
+  for(const r of rows){await checkpoint();const identity=await this.cloudIdentity(r);if(!identity)continue;const {url,articleId}=identity;
    out.push({articleId,cloudRssArticleId:articleId,sourceDeviceId:device,url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:str(r.cached_body_hash)||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url),rssSourceTitle:str(r.channel_title),independentSaved:false,independentChangedAt:0,independentSortOrder:0,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:num(r.progress??r.reading_progress),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)});
   }return out;
  }
- async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false):Promise<PreparedArticle[]> {
+ async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void):Promise<PreparedArticle[]> {
   const started=Date.now(),stats={sqlMs:0,sqlCalls:0,sqlTransactionMs:0,sqlTransactionCalls:0,htmlMs:0,htmlCalls:0,hashMs:0,hashCalls:0,encodeMs:0,encodeCalls:0};
   const originalText=this.text;this.text={...originalText,htmlText:async html=>{const at=Date.now();try{return await originalText.htmlText(html);}finally{stats.htmlMs+=Date.now()-at;stats.htmlCalls++;}}};
   const originalCodec=this.codec;this.codec={...originalCodec,sha256:async bytes=>{const at=Date.now();try{return await originalCodec.sha256(bytes);}finally{stats.hashMs+=Date.now()-at;stats.hashCalls++;}},encode:async body=>{const at=Date.now();try{return await originalCodec.encode(body);}finally{stats.encodeMs+=Date.now()-at;stats.encodeCalls++;}}};
   const trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started,...stats});
   const originalDb=this.db;this.db={...originalDb,query:async(q,p,label)=>{const at=Date.now();try{return await originalDb.query(q,p,label);}finally{stats.sqlMs+=Date.now()-at;stats.sqlCalls++;}},execute:(q,p,label)=>originalDb.execute(q,p,label),transaction:async ss=>{const at=Date.now();try{return await originalDb.transaction(ss);}finally{stats.sqlTransactionMs+=Date.now()-at;stats.sqlTransactionCalls++;}}};
   try{
+  check?.();const checkpoint=this.workCheckpoint(check);
   this.bodySourceIds.clear();
   const identity=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!identity)throw new Error('Initialize sync identity first');const device=str(identity.device_id);
   if(!readingPrepared)await this.prepareReadingForSnapshot();
@@ -147,7 +153,7 @@ export class LocalArticleManifestStore {
   // evaluated every preceding chapter's body/cache joins on the watch SQLite.
   const orderedIds=await querySyncPages(this.db,'SELECT a.id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE ('+ROW_CONDITION+')'+(bookMode?' AND NOT EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=a.id AND b.registration_complete=1)':'')+' ORDER BY a.fetched_at DESC,a.id DESC');
   const selected=new Map<number,Row>();
-  for(let at=0;at<orderedIds.length;at+=100){const ids=orderedIds.slice(at,at+100).map(r=>num(r.id));for(const row of await querySyncPages(this.db,ROW_SELECT+' WHERE a.id IN ('+ids.map(()=>'?').join(',')+')',ids,100))selected.set(num(row.id),row);}
+  for(let at=0;at<orderedIds.length;at+=100){check?.();const ids=orderedIds.slice(at,at+100).map(r=>num(r.id));for(const row of await querySyncPages(this.db,ROW_SELECT+' WHERE a.id IN ('+ids.map(()=>'?').join(',')+')',ids,100))selected.set(num(row.id),row);}
   const metadataRows=orderedIds.map(r=>{const row=selected.get(num(r.id));if(!row)throw Error('Local library changed during sync snapshot');return row;});
   const queries=[SAVES,STATES,DELETES,SYNC_DELETES],data:Row[][]=[metadataRows];for(const q of queries)data.push(await querySyncPages(this.db,q));
   const bookIds=bookMode?new Set((await querySyncPages(this.db,'SELECT m.article_id FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE b.registration_complete=1 ORDER BY m.article_id')).map(r=>str(r.article_id))):new Set<string>();
@@ -168,8 +174,8 @@ export class LocalArticleManifestStore {
   };
   const neededIds=new Set<number>([...saves.map(row=>num(row.article_id)),...persisted.filter(row=>row.item_id!=null).map(row=>num(row.item_id)),
    ...rows.filter(row=>str(row.channel_url)==='watchrss://phone-imports'||isImportedContentUrl(str(row.channel_url))).map(row=>num(row.id))]);
-  const publicIdentities:CloudRssIdentity[]=[];for(const r of rows)if(neededIds.has(num(r.id))&&/^https?:\/\//i.test(str(r.channel_url))){const identity=await this.cloudIdentity(r);if(identity)publicIdentities.push(identity);}const nativeCounts=new Map<string,Set<string>>();for(const r of publicIdentities){const ids=nativeCounts.get(r.url)??new Set<string>();ids.add(r.articleId);nativeCounts.set(r.url,ids);}const publicByItem=new Map(publicIdentities.map(r=>[r.itemId,r]));
-  const ids=new Map<number,string>();for(const id of neededIds){const row=byItem.get(id);if(row)ids.set(id,canonicalIds||(nativeCounts.get(publicByItem.get(id)?.url??'')?.size??0)>1?(await this.cloudIdentity(row))?.articleId??(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))):(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))));}
+  const publicIdentities:CloudRssIdentity[]=[];for(const r of rows)if(neededIds.has(num(r.id))&&/^https?:\/\//i.test(str(r.channel_url))){await checkpoint();const identity=await this.cloudIdentity(r);if(identity)publicIdentities.push(identity);}const nativeCounts=new Map<string,Set<string>>();for(const r of publicIdentities){const ids=nativeCounts.get(r.url)??new Set<string>();ids.add(r.articleId);nativeCounts.set(r.url,ids);}const publicByItem=new Map(publicIdentities.map(r=>[r.itemId,r]));
+  const ids=new Map<number,string>();for(const id of neededIds){await checkpoint();const row=byItem.get(id);if(row)ids.set(id,canonicalIds||(nativeCounts.get(publicByItem.get(id)?.url??'')?.size??0)>1?(await this.cloudIdentity(row))?.articleId??(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))):(row.link==null&&row.bound_id?str(row.bound_id):await this.stableId(row.link==null?str(row.dedup_key):str(row.link))));}
   // A confirmed keep can arrive under the normalized URL ID after an older
   // reader journaled its deletion under another ID. Re-advertising that stale
   // alias as deleted makes the phone ask for the same decision on a full sync.
@@ -182,7 +188,7 @@ export class LocalArticleManifestStore {
    receipts.set(url,receipt);
   }
   const supersededAliases=new Set<string>();
-  for(const d of syncDeletions){const receipt=receipts.get(str(d.url));if(receipt?.ids.size===1&&!receipt.ids.has(str(d.article_id))&&receipt.clock>num(d.changed_at)&&(receipt.pooled||receipt.ids.has(await this.stableId(str(d.url)))))supersededAliases.add(str(d.article_id));}
+  for(const d of syncDeletions){await checkpoint();const receipt=receipts.get(str(d.url));if(receipt?.ids.size===1&&!receipt.ids.has(str(d.article_id))&&receipt.clock>num(d.changed_at)&&(receipt.pooled||receipt.ids.has(await this.stableId(str(d.url)))))supersededAliases.add(str(d.article_id));}
   trace('snapshot.identities');
   const states=new Map<string,State>();
   const put=(s:State)=>{const key=s.articleId+'\0'+s.type,old=states.get(key);if(!old||s.changedAt>old.changedAt||(s.changedAt===old.changedAt&&s.device>old.device))states.set(key,s);};
@@ -190,11 +196,11 @@ export class LocalArticleManifestStore {
   // Persisted clocks retain remote provenance; UI rows only seed missing state.
   for(const s of persisted){if(supersededAliases.has(str(s.article_id))&&num(s.changed_at)<(receipts.get(str(s.url))?.clock??0))continue;const id=s.item_id==null?str(s.article_id):ids.get(num(s.item_id))??str(s.article_id);states.set(id+'\0'+str(s.save_type),{articleId:id,type:str(s.save_type),url:str(s.url),saved:!!num(s.saved),changedAt:num(s.changed_at),sortOrder:num(s.sort_order),device:str(s.source_device_id),itemId:s.item_id==null?null:num(s.item_id)});}
   for(const d of syncDeletions)if(!supersededAliases.has(str(d.article_id)))put({articleId:str(d.article_id),type:'delete',url:str(d.url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device:str(d.source_device_id)});
-  for(const d of deletions){const id=await this.stableId(str(d.article_url));for(const type of ['delete',...(num(d.was_favorite)?['favorite']:[]),...(num(d.was_watch_later)?['watchLater']:[])])put({articleId:id,type,url:str(d.article_url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device});}
+  for(const d of deletions){await checkpoint();const id=await this.stableId(str(d.article_url));for(const type of ['delete',...(num(d.was_favorite)?['favorite']:[]),...(num(d.was_watch_later)?['watchLater']:[])])put({articleId:id,type,url:str(d.article_url),saved:false,changedAt:num(d.changed_at),sortOrder:0,device});}
   const groups=new Map<string,Row[]>();
   for(const type of ['favorite','watchLater'])for(const s of saves){if(str(s.save_type)!==type||!num(s.saved)||!byItem.has(num(s.article_id)))continue;const id=ids.get(num(s.article_id))!,list=groups.get(id)??[];list.push(s);groups.set(id,list);}
   const out:PreparedArticle[]=[],active=new Set<string>(),usedRows=new Set<number>(),preparedRowIds=new Map<string,number>();
-  for(const [id,entries] of groups){let representative=entries[0]!;for(const s of entries)if(num(s.saved_at)>num(representative.saved_at))representative=s;
+  for(const [id,entries] of groups){await checkpoint();let representative=entries[0]!;for(const s of entries)if(num(s.saved_at)>num(representative.saved_at))representative=s;
    const row=byItem.get(num(representative.article_id))!,favorite=entries.find(s=>s.save_type==='favorite'),later=entries.find(s=>s.save_type==='watchLater');usedRows.add(num(row.id));
    const f=states.get(id+'\0favorite'),l=states.get(id+'\0watchLater');
    let bodySource:Row|undefined;
@@ -205,7 +211,8 @@ export class LocalArticleManifestStore {
    out.push(await this.prepareRow(row,id,device,{savedAt:num(representative.saved_at),favorite:f?.itemId!=null?f.saved:!!favorite,later:l?.itemId!=null?l.saved:!!later,favoriteChanged:f?.changedAt??num(favorite?.saved_at),favoriteOrder:f?.sortOrder??num(favorite?.saved_at),laterChanged:l?.changedAt??num(later?.saved_at),laterOrder:l?.sortOrder??num(later?.saved_at)},bodySource??row));this.bodySourceIds.set(id,num(bodySource?.id??row.id));preparedRowIds.set(id,num(row.id));active.add(id);
   }
   const imports:{row:Row;id:string}[]=[];
-  for(const independent of [true,false])for(const row of [...rows].sort((a,b)=>num(b.channel_pinned)-num(a.channel_pinned)||num(a.channel_sort)-num(b.channel_sort)||num(b.channel_created)-num(a.channel_created)||num(a.channel_id)-num(b.channel_id)||num(b.fetched_at)-num(a.fetched_at)||num(b.id)-num(a.id))){const channel=str(row.channel_url);if(independent?channel!=='watchrss://phone-imports':!isImportedContentUrl(channel))continue;const id=ids.get(num(row.id))!;if(active.has(id))continue;
+  const importRows=await orderImportedRows(rows,{yieldTurn:()=>this.db.query('SELECT 1'),check});
+  for(const independent of [true,false])for(const row of importRows){const channel=str(row.channel_url);if(independent?channel!=='watchrss://phone-imports':!isImportedContentUrl(channel))continue;const id=ids.get(num(row.id))!;if(active.has(id))continue;
    this.bodySourceIds.set(id,num(row.id));preparedRowIds.set(id,num(row.id));usedRows.add(num(row.id));active.add(id);imports.push({row,id});
   }
   // Only small inline bodies share a bounded host-service window. Large or
@@ -213,10 +220,10 @@ export class LocalArticleManifestStore {
   for(let start=0;start<imports.length;){let end=start+1;
    const small=(r:Row)=>num(r.content_inline)===1&&num(r.description_inline)===1&&!num(r.has_original_chunks);
    if(small(imports[start]!.row))while(end<imports.length&&end-start<4&&small(imports[end]!.row))end++;
-   out.push(...await Promise.all(imports.slice(start,end).map(({row,id})=>this.prepareRow(row,id,device,undefined,row,{favorite:states.get(id+'\0favorite'),later:states.get(id+'\0watchLater')}))));start=end;
+   await checkpoint(end-start);out.push(...await Promise.all(imports.slice(start,end).map(({row,id})=>this.prepareRow(row,id,device,undefined,row,{favorite:states.get(id+'\0favorite'),later:states.get(id+'\0watchLater')}))));start=end;
   }
   const tombstones=new Map<string,State[]>();for(const s of states.values()){if(s.saved||active.has(s.articleId))continue;const list=tombstones.get(s.articleId)??[];list.push(s);tombstones.set(s.articleId,list);}
-  for(const [id,list] of tombstones){const url=list[0]!.url;if(blank(url))continue;let latest=list[0]!;for(const s of list)if(s.changedAt>latest.changedAt)latest=s;const deleted=list.find(s=>s.type==='delete');const normalized=nativeTrim(url),host=nativeTrim(((await this.text.parseUri(normalized.startsWith('http://')||normalized.startsWith('https://')?normalized:'https://'+normalized)).host??'').replace(/^www\./,''));
+  for(const [id,list] of tombstones){await checkpoint();const url=list[0]!.url;if(blank(url))continue;let latest=list[0]!;for(const s of list)if(s.changedAt>latest.changedAt)latest=s;const deleted=list.find(s=>s.type==='delete');const normalized=nativeTrim(url),host=nativeTrim(((await this.text.parseUri(normalized.startsWith('http://')||normalized.startsWith('https://')?normalized:'https://'+normalized)).host??'').replace(/^www\./,''));
    const article:ExportedArticle={articleId:id,sourceDeviceId:latest.device||device,url,title:url,siteName:host,excerpt:'',contentHtml:null,contentText:'',imageUrl:null,contentHash:await hashJavaText(url,this.codec),importedAt:Math.min(...list.map(s=>s.changedAt)),updatedAt:latest.changedAt,independentSaved:false,independentChangedAt:deleted?.changedAt??0,independentSortOrder:0,rssSourceUrl:null,rssSourceTitle:null,favoriteSaved:false,favoriteChangedAt:list.find(s=>s.type==='favorite')?.changedAt??0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:list.find(s=>s.type==='watchLater')?.changedAt??0,watchLaterSortOrder:0,deleted:!!deleted,deletedAt:deleted?.changedAt??0,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false};out.push(await prepareArticle(article,this.codec));
   }
   const cacheUpdates:{row:Row;prepared:PreparedArticle}[]=[];
@@ -224,7 +231,7 @@ export class LocalArticleManifestStore {
   // back to source-channel/dedup identity; the resolved body can differ from
   // the saved-entry representative when one URL exists in several feeds.
   for(let i=0;i<out.length;i++){
-   const current=out[i]!,a=current.article;if(a.deleted||!current.manifest.bodyAvailable)continue;
+   await checkpoint();const current=out[i]!,a=current.article;if(a.deleted||!current.manifest.bodyAvailable)continue;
    let target:Row|undefined;
    for(const type of ['favorite','watchLater']){const state=persistedByKey.get(a.articleId+'\0'+type);if(state?.item_id!=null)target=byItem.get(num(state.item_id));if(target)break;}
    const localImport=!!a.rssSourceUrl?.toLowerCase().startsWith('https://watchrss.local/import-');
@@ -262,7 +269,7 @@ export class LocalArticleManifestStore {
    }
   }
   if(await libraryRevision(this.db)!==revision)throw new Error("Local library changed during sync snapshot");
-  for(const update of cacheUpdates)await this.cacheMetadata(update.row,update.prepared,revision);
+  for(const update of cacheUpdates){await checkpoint();await this.cacheMetadata(update.row,update.prepared,revision);}
   trace('snapshot.complete');
   return out;
   }finally{this.db=originalDb;this.codec=originalCodec;this.text=originalText;}

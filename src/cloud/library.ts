@@ -16,11 +16,11 @@ import {rssSourceKey,rssArticleId,legacyWebArticleId,tryRssArticleId,isLocalOnly
 import {canonical,type RecordDocument} from './records';
 export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sources:readonly SyncedSource[];stateArticles:readonly ExportedArticle[];pendingPrivateBodies?:boolean;pendingPrivateArticleIds?:readonly string[]}
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
- cloudSnapshot(full:boolean):Promise<CloudLibrarySnapshot>;
- cloudReadingCandidates?():Promise<readonly ExportedArticle[]>;
+ cloudSnapshot(full:boolean,check?:()=>void):Promise<CloudLibrarySnapshot>;
+ cloudReadingCandidates?(check?:()=>void):Promise<readonly ExportedArticle[]>;
  /** Each entity commits its source/body/saved/reading state transactionally. No
   * applied cursor or ACK may be advanced until this entire operation succeeds. */
- mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string):Promise<number>;
+ mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void):Promise<number>;
 }
 export interface CloudLibraryCrypto {gzip(bytes:Uint8Array):Promise<Uint8Array>;gunzip(bytes:Uint8Array,max:number):Promise<Uint8Array>;sha256(bytes:Uint8Array):Promise<string>;stableId(url:string):Promise<string>}
 export const privateCloudBody=(a:Pick<ExportedArticle,'url'|'rssSourceUrl'>)=>isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim();

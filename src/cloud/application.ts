@@ -1,4 +1,5 @@
 import {cloudAccountIdentity} from './identity';
+import {CloudForegroundExecution} from './execution';
 import {hostOperation,delay,onNetworkChange} from '@podjs/framework/services';
 import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import {subscribeLibraryMutations} from '../core/library-mutations';
@@ -14,15 +15,17 @@ let owner:ReturnType<typeof start>|undefined;let approvalPageActive=false;
 const approvalListeners=new Set<()=>void>();
 const notifyApproval=()=>{for(const fn of approvalListeners)try{fn();}catch{}};
 function start(){
+ const execution=new CloudForegroundExecution(lifecycle()==='active');
  let disposed=false,scheduler:WatchCloudScheduler|undefined,runtime:ReturnType<typeof createCloudRuntime>|undefined,approvals:CloudApprovalController|undefined,pageActive=approvalPageActive,polling=false,cancelPoll=()=>{};
  const cleanups:(()=>void)[]=[];
+ cleanups.push(onLifecycleChange(state=>execution.foreground(state==='active')));
  const arm=()=>{cancelPoll();cancelPoll=()=>{};if(disposed||!approvals?.active||!['pending','code'].includes(approvals.state.phase))return;const timer=delay(1500);cancelPoll=()=>timer.cancel();void timer.result.then(async()=>{if(polling||disposed||!approvals?.active)return;polling=true;try{await approvals.poll();}finally{polling=false;arm();}}).catch(()=>{});};
  const foreground=()=>{approvals?.setForeground(pageActive&&lifecycle()==='active');arm();};
  const ready=(async()=>{
   if(!await initializeCloudHost()||disposed)return;
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
   const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
-  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,notifyLibraryChanged);approvals=runtime.approvals;foreground();cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
+  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,notifyLibraryChanged,execution);approvals=runtime.approvals;foreground();cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   scheduler=new WatchCloudScheduler({sync:async(manual,mode)=>{const result=await runtime!.service.syncNow(manual,mode);if(runtime!.service.status.retryable===false)await scheduler?.setUpgradeRequired(true);else if(result)await scheduler?.setUpgradeRequired(false);const retry=runtime!.service.status.retryAtMillis;if(retry)scheduler?.deferUntil(retry);return result;},now:Date.now,delay:(ms,fn)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return()=>timer.cancel();},scheduleWorker:()=>host<void>('cloud.schedule',{}),cancelWorker:()=>host<void>('cloud.cancel',{})},guard);
   let identity='',accountId='',accountScope='';
   cleanups.push(connectCloudAccountStatus(()=>cloudGate.allowed&&!disposed?{...runtime!.service.status,accountId,accountScope}:undefined),runtime.service.subscribe(notifyCloudAccountStatus));

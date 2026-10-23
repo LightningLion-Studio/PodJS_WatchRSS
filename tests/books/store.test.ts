@@ -21,3 +21,11 @@ test('one 100-state reading page commits once, projects the book once and replay
  expect(await f.store.mergeReadingBatch(states)).toBe(100);expect(commits).toBe(1);expect(projections).toBe(1);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles WHERE is_read=1')).toEqual([{n:100}]);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles WHERE is_saved=1')).toEqual([{n:50}]);const before=f.changes();expect(await f.store.mergeReadingBatch(states)).toBe(0);expect(f.changes()).toBe(before);
  const count=(await f.store.readingStates()).length;expect(count).toBe(100);const invalid=states.map(s=>({...s,readingPositionChangedAt:2000}));invalid[99]!.chapterIndex=101;const at=f.changes();await expect(f.store.mergeReadingBatch(invalid)).rejects.toThrow('book_chapter_out_of_range');expect(f.changes()).toBe(at);expect((await f.store.readingStates()).every(s=>s.readingPositionChangedAt===1000)).toBe(true);
  }finally{f.sql.close();}},30000);
+test('suspending a legacy directory slice closes registration without caching a partial directory; resume remains valid',async()=>{
+ const f=await bookFixture();try{
+  await seedChapters(f,source,vector.chapters);const query=f.db.query.bind(f.db);let paused=false,yields=0;
+  f.db.query=async(q,p)=>{const rows=await query(q,p);if(q==='SELECT 1'){yields++;paused=true;}return rows;};
+  await expect(f.store.registerLocal([],()=>{if(paused)throw Error('cloud_sync_suspended');})).rejects.toThrow('cloud_sync_suspended');expect(yields).toBe(1);expect(await f.db.query('SELECT * FROM sync_book_registration_cache')).toEqual([]);expect(await f.store.manifests()).toEqual([]);
+  f.db.query=query;await f.store.registerLocal();expect((await f.store.manifests())[0]?.bookId).toBe(vector.bookId);
+ }finally{f.sql.close();}
+});

@@ -27,6 +27,8 @@ async function execute(method:string,a:any):Promise<any>{
   case 'file.gunzip':return resultFile(new Uint8Array(gunzipSync(files.get(a.path)!,{maxOutputLength:Math.max(1,a.maxOutputBytes)})));
   case 'crypto.gzip':return resultFile(new Uint8Array(gzipSync(files.get(a.inputPath)!)));
   case 'crypto.gunzip':return resultFile(new Uint8Array(gunzipSync(files.get(a.inputPath)!,{maxOutputLength:Math.max(1,a.maxBytes)})));
+  case 'crypto.aesGcmEncrypt':{const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',decode(a.keyBase64),nonce);cipher.setAAD(decode(a.aadBase64));return {nonceBase64:encode(nonce),ciphertextBase64:encode(Buffer.concat([cipher.update(decode(a.dataBase64)),cipher.final(),cipher.getAuthTag()]))};}
+  case 'crypto.aesGcmDecrypt':{const input=decode(a.ciphertextBase64),cipher=createDecipheriv('aes-256-gcm',decode(a.keyBase64),decode(a.nonceBase64));cipher.setAAD(decode(a.aadBase64));cipher.setAuthTag(input.slice(-16));return {dataBase64:encode(Buffer.concat([cipher.update(input.slice(0,-16)),cipher.final()]))};}
   case 'crypto.largeAesGcmEncrypt':{const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',decode(a.keyBase64),nonce);cipher.setAAD(decode(a.aadBase64));return {...resultFile(new Uint8Array(Buffer.concat([cipher.update(files.get(a.inputPath)!),cipher.final(),cipher.getAuthTag()]))),nonceBase64:encode(nonce)};}
   case 'crypto.largeAesGcmDecrypt':{const input=files.get(a.inputPath)!,cipher=createDecipheriv('aes-256-gcm',decode(a.keyBase64),decode(a.nonceBase64));cipher.setAAD(decode(a.aadBase64));cipher.setAuthTag(input.slice(-16));return resultFile(new Uint8Array(Buffer.concat([cipher.update(input.slice(0,-16)),cipher.final()])));}
   case 'secure.get':return {exists:stored.has(a.key),value:stored.get(a.key)};
@@ -55,3 +57,15 @@ expect((await foundation!.cache.latest('user'))!.bytes).toEqual(snapshot.encrypt
 expect(await foundation!.state.nextSequence(99)).toBe(100);
 expect(commands).toContain('crypto.largeAesGcmEncrypt');expect(commands).toContain('crypto.largeAesGcmDecrypt');
 expect([...files.keys()].every(path=>!path.includes('.pod-write-'))).toBe(true);
+
+// Small record envelopes use the existing bounded authenticated memory service.
+// Large snapshots keep the streamed path. Identical bytes/AAD across the boundary.
+for(const size of [0,1,32768,32769]){
+ const input=new Uint8Array(randomBytes(size)),aad=new TextEncoder().encode('record fixture');
+ const before=commands.length,encrypted=await foundation!.crypto.encrypt(key,aad,input),plain=await foundation!.crypto.decrypt(key,aad,encrypted.nonce,encrypted.ciphertext);
+ expect(plain).toEqual(input);const used=commands.slice(before);
+ if(size<=32768){expect(used).toEqual(['crypto.aesGcmEncrypt','crypto.aesGcmDecrypt']);}
+ else{expect(used).toContain('crypto.largeAesGcmEncrypt');expect(used).toContain('crypto.largeAesGcmDecrypt');}
+ const wrong=aad.slice();wrong[0]^=1;await expect(foundation!.crypto.decrypt(key,wrong,encrypted.nonce,encrypted.ciphertext)).rejects.toThrow();
+ expect([...files.keys()].every(path=>!path.includes('.pod-write-'))).toBe(true);
+}

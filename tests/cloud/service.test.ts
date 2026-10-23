@@ -9,6 +9,11 @@ import {SupabaseTusUploader} from '../../src/cloud/tus';
 import {utf8Encode,utf8Decode,type HttpRequest,type CloudMemberState,type CloudSnapshotHead} from '../../src/cloud/types';
 const bytes=(v:unknown)=>utf8Encode(JSON.stringify(v));
 import {fixture} from './service-fixture';
+test('missing host crypto stops the records lane and worker retries without clearing data, then resumes after repair',async()=>{
+ const f=await fixture(),records=f.session.records;let invalidations=0;f.session.invalidate=async()=>{invalidations++;};f.session.records=async()=>{throw Error('cloud_host_capability_unavailable');};
+ expect(await f.service.syncNow()).toBe(false);expect(f.service.status.retryable).toBe(false);expect(f.service.status.message).toContain('请升级');expect(f.calls.some(r=>r.url.endsWith('/heads'))).toBe(false);expect(f.reservations.size).toBe(0);expect(invalidations).toBe(0);
+ f.session.records=records;expect(await f.service.syncNow()).toBe(true);expect(f.service.status.retryable).not.toBe(false);
+});
 test('bootstrap precedes registration and pending approval stops content IO',async()=>{
  const f=await fixture();f.flags({approve:false});expect(await f.service.syncNow()).toBe(false);expect(f.service.status.phase).toBe('waiting-approval');expect(f.calls.some(r=>r.url.endsWith('/heads'))).toBe(false);
  expect(f.calls[0].url).toContain('/bootstrap');expect(f.calls.some(r=>r.url.endsWith('/register'))).toBe(false);f.flags({approve:true});f.member.readable=false;f.member.writable=false;expect(await f.service.syncNow()).toBe(true);

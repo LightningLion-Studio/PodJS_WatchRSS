@@ -6,6 +6,12 @@ import {CloudRecordCodec,WatchCloudRecords,revision,validateRecord,type RecordDo
 import {rssSourceKey,rssArticleId} from '../../src/cloud/rss-identity';
 import {utf8Encode} from '../../src/cloud/types';
 const c={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
+test('unavailable or paused host crypto stops at the first record without ACK, and a repaired host can retry',async()=>{for(const code of ['cloud_host_capability_unavailable','cloud_sync_suspended']){
+ const f=env();for(let i=0;i<3;i++)await f.put(doc('host-repair-'+i));const original=f.ports.crypto;let attempts=0;
+ f.ports.crypto={...original,decrypt:async()=>{attempts++;throw Error(code);}};
+ await expect(f.records().pull()).rejects.toThrow(code);expect(attempts).toBe(1);expect(f.applied).toHaveLength(0);expect(f.state()).toBeUndefined();
+ f.ports.crypto=original;expect(await f.records().pull()).toBe(3);expect(f.state().cursor).toBe('3');
+}});
 const codec=new CloudRecordCodec(c),epoch='epoch-fixture';
 const doc=(id:string):RecordDocument=>({kind:'article',value:{articleId:id,url:'https://private.example/'+id,title:id,updatedAt:1,deleted:false}});
 function env(){
@@ -81,3 +87,47 @@ test('R39 unread EPUB/TXT imported sources are private article records and never
  for(const rssSourceUrl of ['https://watchrss.local/import-content','https://watchrss.local/import-epub/book','https://watchrss.local/import-txt-novel/book']){const f=env(),d={kind:'article',value:{...doc('import').value,rssSourceUrl,independentSaved:true,independentChangedAt:1,isRead:false,readingPositionChangedAt:0}};const old=await f.put(d);f.export([d]);const r=f.records();await r.pull();await r.flush();expect(f.rows.get(old.recordId)!.tombstone).toBe(false);expect(f.posts).toHaveLength(0);}
 });
 test('R44 old chapter retirement requires exact current book/reading ACK and completed package, marker never becomes an entity deletion',async()=>{const vectors=(await import('../fixtures/book-fingerprint.json')).default,v=vectors.cases[0]!,f=env(),book:RecordDocument={kind:'book',value:{bookId:v.bookId,fingerprint:v.fingerprint,title:'Book',chapterCount:2,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:100,sourceDeviceId:'watch'}},reading:RecordDocument={kind:'book-reading',value:{bookId:v.bookId,chapterIndex:1,isRead:true,readingProgress:.5,readingPositionBytes:42,readingPositionContentHash:'p',readingPositionChangedAt:30,sourceDeviceId:'watch'}};const old=await f.put({kind:'article',value:{...doc('legacy-book-chapter').value,url:'https://watchrss.local/import-epub/x/chapter/1',readingPositionChangedAt:30,isRead:true}});f.ports.bookReplacement=async d=>d.kind==='article'?{book,reading}:undefined;f.export([book]);const records=f.records();await records.pull();await records.flush([],[v.bookId]);expect(f.rows.get(old.recordId)?.tombstone).toBe(false);f.export([book,reading]);await records.flush();expect(f.rows.get(old.recordId)?.tombstone).toBe(false);const changed={...reading,value:{...reading.value,readingPositionChangedAt:40}};f.ports.bookReplacement=async()=>({book,reading:changed});await records.flush([],[v.bookId]);expect(f.rows.get(old.recordId)?.tombstone).toBe(false);f.export([book,changed]);await records.flush([],[v.bookId]);expect(f.rows.get(old.recordId)?.tombstone).toBe(true);const decoded=await codec.decode(key,key,'user',f.rows.get(old.recordId)!);expect(decoded.doc.value.bookIndexRetired).toBe(true);expect(decoded.doc.value.deletedAt).toBe(31);f.applied.length=0;await f.records().pull();expect(f.applied.some(d=>d.value.bookIndexRetired)).toBe(false);});
+
+test('applied tombstones retain CAS metadata without retaining ciphertext or decrypting the same revision again',async()=>{
+ const f=env();for(let i=0;i<256;i++)await f.put({kind:'article',value:{articleId:'retired-'+i,url:'https://feed.example/'+i,deleted:true,deletedAt:1}},{tombstone:true});
+ let decrypts=0;const decrypt=f.ports.crypto.decrypt;f.ports.crypto={...f.ports.crypto,decrypt:async(...args)=>{decrypts++;return decrypt(...args);}};
+ await f.records().pull();expect(decrypts).toBe(256);expect(f.applied).toHaveLength(256);expect(Object.keys(f.state().rows)).toHaveLength(0);expect(Object.keys(f.state().records)).toHaveLength(256);expect(f.state().cursor).toBe('256');
+ f.applied.length=0;await f.records().pull();expect(decrypts).toBe(256);expect(f.applied).toHaveLength(0);
+ // A newly issued deletion revision still authenticates and applies once.
+ const changed=await f.put({kind:'article',value:{articleId:'retired-0',url:'https://feed.example/0',deleted:true,deletedAt:2}},{tombstone:true});await f.records().pull();expect(decrypts).toBe(257);expect(f.state().records[changed.recordId].revision).toBe('257');
+});
+test('a suspended key read is control flow, never swallowed as a quarantined bad row',async()=>{
+ const f=env();await f.put(doc('not-poisoned'));let calls=0;f.ports.key=async()=>{if(++calls>1)throw Error('cloud_sync_suspended');return key.slice();};
+ await expect(f.records().pull()).rejects.toThrow('cloud_sync_suspended');expect(f.state()).toBeUndefined();expect(f.applied).toHaveLength(0);
+});
+
+test('large retained replay merges at most fifty at a time and persists completed compaction before suspension',async()=>{
+ const f=env();for(let i=0;i<151;i++)await f.put({kind:'article',value:{articleId:'replay-'+i,url:'https://feed.example/'+i,deleted:true,deletedAt:1}},{tombstone:true,bad:true});
+ await f.records().pull(); // Retain invalid ciphertext rather than losing a quarantined row.
+ const cached=f.state();for(const [id,row]of f.rows){const d={kind:'article',value:{articleId:'replay-'+(Number(row.revision)-1),url:'https://feed.example/'+(Number(row.revision)-1),deleted:true,deletedAt:1}};cached.rows[id].envelope=await codec.encode(key,'user',id,1,d);}
+ f.ports.readState=async()=>JSON.stringify(cached);let checkpoints=0,maxBatch=0,merges=0,suspended=false;
+ f.ports.current=async()=>{if(suspended)throw Error('cloud_sync_suspended');};
+ f.ports.apply=async docs=>{maxBatch=Math.max(maxBatch,docs.length);merges++;if(merges===2)suspended=true;return docs.length;};
+ f.ports.checkpoint=async value=>{checkpoints++;const stored=JSON.parse(value);expect(stored.cursor).toBe('151');expect(Object.keys(stored.rows)).toHaveLength(101);};
+ await expect(f.records().pull()).rejects.toThrow('cloud_sync_suspended');expect(maxBatch).toBe(50);expect(checkpoints).toBe(1);
+});
+
+test('an old-version cache of acknowledged tombstones compacts without any cryptographic or per-entry account IO',async()=>{
+ const f=env();for(let i=0;i<256;i++)await f.put({kind:'article',value:{articleId:'old-cache-'+i,url:'https://feed.example/'+i,deleted:true,deletedAt:1}},{tombstone:true});
+ await f.records().pull();const old=f.state();old.rows=Object.fromEntries(f.rows);f.ports.readState=async()=>JSON.stringify(old);
+ f.ports.crypto={...f.ports.crypto,decrypt:async()=>{throw Error('old acknowledged tombstone must not decrypt');}};
+ let reads=0;f.ports.current=async()=>{reads++;};await f.records().pull();expect(Object.keys(f.state().rows)).toHaveLength(0);expect(Object.keys(f.state().records)).toHaveLength(256);expect(reads).toBeLessThan(30);
+});
+
+test('pull reports actual decrypt attempts and diagnostic failures cannot alter synchronization',async()=>{
+ const f=env(),metrics:any[]=[];await f.put(doc('metric'));f.ports.report=m=>metrics.push(m);await f.records().pull();
+ expect(metrics).toHaveLength(1);expect(metrics[0]).toMatchObject({decryptions:1,retired:0,outcome:'complete'});expect(metrics[0].elapsedMillis).toBeGreaterThanOrEqual(0);
+ expect(Object.keys(metrics[0]).sort()).toEqual(['decryptions','elapsedMillis','outcome','retired']);
+ f.ports.report=()=>{throw Error('diagnostic sink failed');};await expect(f.records().pull()).resolves.toBeGreaterThanOrEqual(0);
+});
+
+test('metrics prove acknowledged tombstones skip decrypt while a new row still authenticates',async()=>{
+ const f=env(),row=await f.put({kind:'article',value:{...doc('retired-metric').value,deleted:true,deletedAt:2}},{tombstone:true});await f.records().pull();const metrics:any[]=[];f.ports.report=m=>metrics.push(m);
+ const cached=f.state()!;cached.rows[row.recordId]=row;f.ports.readState=async()=>JSON.stringify(cached);
+ await f.records().pull();expect(metrics[0]).toMatchObject({decryptions:0,retired:1,outcome:'complete'});
+});

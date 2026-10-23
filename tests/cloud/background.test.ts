@@ -54,6 +54,8 @@ test('release headless handler uses actual SQLite/codec/coordinator: registers a
    case 'crypto.hash':return {digestBase64:Buffer.from(await crypto.sha256(unb64(a.dataBase64)),'hex').toString('base64')};
    case 'crypto.ecdhPublicKey':return {publicKeySpki:'fixture-spki'};
    case 'crypto.hkdfSha256':return {keyBase64:b64(await crypto.hkdf(unb64(a.inputBase64),unb64(a.saltBase64),unb64(a.infoBase64)))};
+   case 'crypto.aesGcmEncrypt':{const sealed=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.dataBase64));return {nonceBase64:b64(sealed.nonce),ciphertextBase64:b64(sealed.ciphertext)};}
+   case 'crypto.aesGcmDecrypt':return {dataBase64:b64(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),unb64(a.ciphertextBase64)))};
    case 'crypto.largeAesGcmEncrypt':{const sealed=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),files.get(a.inputPath)!);return {...await resultFile(sealed.ciphertext),nonceBase64:b64(sealed.nonce)};}
    case 'crypto.largeAesGcmDecrypt':return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));
    case 'sql.query':return sql.query(a.sql).all(...a.params);
@@ -77,6 +79,6 @@ test('release headless handler uses actual SQLite/codec/coordinator: registers a
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
   expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
-  expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.largeAesGcmEncrypt');
+  expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
  }finally{sql.close();}
 });

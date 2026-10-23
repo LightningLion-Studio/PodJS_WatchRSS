@@ -1,3 +1,4 @@
+import {encodeUtf8} from '@podjs/framework/bytes';
 import type {CloudContentState} from './content-lifecycle';
 import {decodeUtf8} from '../core/utf8-decode.ts';
 
@@ -24,19 +25,7 @@ export interface HttpTransport {
 
 /** Small UTF-8 codec for QuickJS builds, which do not provide browser globals. */
 export function utf8Encode(value: string): Uint8Array {
-  const out: number[] = [];
-  for (let i = 0; i < value.length; i += 1) {
-    let cp = value.charCodeAt(i);
-    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < value.length) {
-      const low = value.charCodeAt(i + 1);
-      if (low >= 0xdc00 && low <= 0xdfff) { cp = 0x10000 + ((cp - 0xd800) << 10) + low - 0xdc00; i += 1; }
-    }
-    if (cp < 0x80) out.push(cp);
-    else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 63));
-    else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
-    else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
-  }
-  return new Uint8Array(out);
+  return encodeUtf8(value,'replacement');
 }
 
 export function utf8Decode(bytes: Uint8Array): string {
