@@ -1,6 +1,7 @@
 import type {CloudApprovalState as WatchApprovalState} from '../cloud/approval-controller.ts';
 import {Text, View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
+import {delay,type HostOperation} from '@podjs/framework/services';
 import type {Scroller} from '@pocketjs/framework/kinetics';
 import {createEffect, createMemo, createSignal, onCleanup} from 'solid-js';
 import type {AccountStatusSnapshot} from '../account/status.ts';
@@ -46,11 +47,21 @@ export function CloudSyncScreen(props: {
   if(props.actions)onCleanup(props.actions.subscribe(()=>setActionRevision(value=>value+1)));
   // A destructive pill turns into its confirmation for four seconds after the first tap.
   const [armed,setArmed]=createSignal<string>();
-  let disarm:ReturnType<typeof setTimeout>|undefined;
-  onCleanup(()=>clearTimeout(disarm));
+  let disarm:HostOperation<void>|undefined;
+  const cancelDisarm=()=>{
+    const pending=disarm;disarm=undefined;
+    // The host may already be closing; cleanup must still release this page.
+    try{pending?.cancel();}catch{}
+  };
+  onCleanup(cancelDisarm);
   const arm=(key:string,run:()=>void)=>{
-    if(armed()===key){clearTimeout(disarm);setArmed(undefined);run();return;}
-    clearTimeout(disarm);setArmed(key);disarm=setTimeout(()=>setArmed(undefined),4000);
+    if(armed()===key){cancelDisarm();setArmed(undefined);run();return;}
+    cancelDisarm();setArmed(key);
+    const pending=delay(4000);disarm=pending;
+    const expire=()=>{if(disarm===pending){disarm=undefined;setArmed(undefined);}};
+    // QuickJS has no browser timer globals. Cancellation and host failure both
+    // disarm safely; stale completions cannot affect a newer confirmation.
+    void pending.result.then(expire,expire);
   };
   const act=(work:Promise<unknown>|undefined)=>void work?.then(()=>setRevision(value=>value+1));
   let sequence = 0, disposed = false;
