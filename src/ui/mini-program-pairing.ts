@@ -28,11 +28,12 @@ export interface PairingPorts{
  op<T>(method:string,args:Record<string,unknown>):PairingOperation<T>;
  available():boolean;
  identity():Promise<{deviceId:string;installId:string}>;
- handler(ports:{deviceId:string;installId:string;active:()=>boolean;pairing:{sessionId:string;secret:Uint8Array};confirm:(label:string,sas:string)=>Promise<boolean>}):Promise<PairingHandler>;
+ handler(ports:{deviceId:string;installId:string;active:()=>boolean;checkSession():Promise<void>;pairing:{sessionId:string;secret:Uint8Array};confirm:(label:string,sas:string)=>Promise<boolean>}):Promise<PairingHandler>;
  now():number;
  after(ms:number,fn:()=>void):()=>void;
 }
 export const PAIRING_LIFETIME_MS=300_000,PAIRING_CONFIRM_MS=90_000,PAIRING_FINISH_GRACE_MS=20_000;
+export const PAIRING_REJECT_GRACE_MS=2_000;
 
 export const pairingStartingLabel=(_transport:PairingTransport)=>'正在生成配对码…';
 export const pairingScanHint=(_transport:PairingTransport)=>'打开腕上RSS手机 App 或小程序扫码';
@@ -59,6 +60,7 @@ export class MiniProgramPairing{
  private approval:((value:boolean)=>void)|undefined;private cancelTimers:(()=>void)[]=[];
  private outcome:'pending'|'approved'|'declined'|'timeout'='pending';
  private bound=false;private cloud=false;
+ private handlingConfigure=false;private sessionCheck?:Promise<void>;
  private releaseActivity:(()=>void)|undefined;
  constructor(private readonly ports:PairingPorts,private readonly onState:(state:PairingState)=>void,transport:PairingTransport='internet'){this.transport='internet';}
  current(){return this.state;}
@@ -76,8 +78,15 @@ export class MiniProgramPairing{
  }
  /** The copied account-only button cannot assert SAS agreement. Lead's new SAS UI calls confirmSas. */
  confirm(){return false;}
- confirmSas(matches:boolean){const approve=this.approval;if(!approve||this.state.kind!=='confirm')return false;if(matches)this.emit({kind:'working',step:'saving'});approve(matches);return true;}
- decline(){this.approval?.(false);}
+ confirmSas(matches:boolean){
+  if(this.state.kind!=='confirm')return false;
+  const approve=this.approval;
+  if(!approve){if(!matches&&this.outcome==='approved'){this.outcome='declined';this.stop({kind:'cancelled'});return true;}return false;}
+  // Watch-first agreement keeps the SAS visible until configure actually arrives.
+  if(matches&&this.handlingConfigure)this.emit({kind:'working',step:'saving'});
+  approve(matches);return true;
+ }
+ decline(){this.confirmSas(false);}
  /** Returns true when the page should close (nothing happened yet). */
  cancel():boolean{
   if(this.bound){this.stop({kind:'done',cloudReady:this.cloud});return false;}
@@ -100,7 +109,7 @@ export class MiniProgramPairing{
   this.epoch++;this.secret?.fill(0);this.secret=undefined;
   this.approval?.(false);
   for(const cancel of this.cancelTimers.splice(0))cancel();
-  this.pending?.cancel();this.pending=undefined;
+  this.pending?.cancel();this.pending=undefined;this.sessionCheck=undefined;this.handlingConfigure=false;
   const id=this.sessionId;this.sessionId='';
   if(id)void this.ports.op('provision.close',{sessionId:id}).result.catch(()=>{});
   if(next)this.emit(next);
@@ -120,11 +129,34 @@ export class MiniProgramPairing{
     this.approval=undefined;expire();
     if(this.outcome==='pending')this.outcome=value?'approved':'declined';
     resolve(value);
+    if(!value&&!this.handlingConfigure&&active())this.stop(this.confirmationFailure());
    };
-   const expire=this.ports.after(PAIRING_CONFIRM_MS,()=>{this.outcome='timeout';finish(false);});
+   const expire=this.ports.after(PAIRING_CONFIRM_MS,()=>{if(this.approval===finish){this.outcome='timeout';finish(false);}});
    this.cancelTimers.push(expire);this.approval=finish;
    this.emit({kind:'confirm',account:label,sas,phoneMaskedTrusted:false});
   });
+ }
+ private confirmationFailure():PairingState{return this.outcome==='timeout'?{kind:'failed',title:'等待确认超时',detail:'请重新开始配对',suggestOther:false}:{kind:'cancelled'};}
+ private verifySession(active:()=>boolean):Promise<void>{
+  if(!this.sessionCheck){const check=this.call('provision.check',{},active).then(()=>{});this.sessionCheck=check;void check.finally(()=>{if(this.sessionCheck===check)this.sessionCheck=undefined;}).catch(()=>{});}
+  return this.sessionCheck;
+ }
+ private async checkBeforeSaving(active:()=>boolean){
+  const previous=this.sessionCheck;
+  if(previous)await previous;
+  if(!active())throw Error('cancelled');
+  if(this.sessionCheck===previous)this.sessionCheck=undefined;
+  // A monitor reply may have been sent before the phone declined. Start a new
+  // authenticated check after local agreement rather than reusing that reply.
+  await this.verifySession(active);
+ }
+ /** A held configure must still notice phone-side cancellation while the SAS is visible. */
+ private monitorConfirmation(active:()=>boolean){
+  let stopped=false,cancel=()=>{};
+  const arm=()=>{if(stopped||!active()||this.outcome!=='pending')return;cancel=this.ports.after(1000,()=>{
+   void this.verifySession(active).then(arm,error=>{if(!stopped&&active())this.stop(pairingFailure(error,this.transport,true));});
+  });};
+  const stop=()=>{stopped=true;cancel();};this.cancelTimers.push(stop);arm();return stop;
  }
 
  private async run(epoch:number){
@@ -138,11 +170,14 @@ export class MiniProgramPairing{
    this.sessionId=opened.sessionId;qrShown=true;
    show({kind:'scan',transport,qr:opened.qr,expiresAt:this.ports.now()+PAIRING_LIFETIME_MS});
    const pairing=pairingContext(opened.qr,opened.sessionId,deviceId,installId);this.secret=pairing.secret;
-   const handler=await this.ports.handler({deviceId,installId,active,pairing,confirm:(label,sas)=>this.ask(label,sas,active)});
+   const handler=await this.ports.handler({deviceId,installId,active,checkSession:()=>this.checkBeforeSaving(active),pairing,confirm:(label,sas)=>this.ask(label,sas,active)});
    while(active()){
     const message=await this.call<Record<string,any>>('provision.receive',{},active);
     if(!active())return;
     let result:Record<string,unknown>,stopWith:PairingState|undefined,failed=false;
+    this.handlingConfigure=message.action==='configure';
+    if(this.handlingConfigure&&this.outcome==='approved')show({kind:'working',step:'saving'});
+    const stopChecking=this.handlingConfigure?this.monitorConfirmation(active):()=>{};
     try{
      result=await handler.handle(message);
      if(!active())return;
@@ -152,15 +187,21 @@ export class MiniProgramPairing{
      if(!active())return;
      // WatchSetupHandler reports these two by message; both are worth telling the user plainly.
      const reason=String((error as Error)?.message??'');const conflict=reason.includes('其他账号')||reason.includes('account_switch_rejected');
-     if(message.action==='prepare'&&this.outcome==='timeout')stopWith={kind:'failed',title:'等待确认超时',detail:'请重新开始配对',suggestOther:false};
-     else if(message.action==='prepare'&&this.outcome==='declined')stopWith={kind:'cancelled'};
+     if(this.outcome==='timeout'||this.outcome==='declined')stopWith=this.confirmationFailure();
      else if(conflict)stopWith={kind:'failed',title:'手表已登录其他账号',detail:'请先在手表上退出原账号，再重新配对',suggestOther:false};
      if(message.action==='key'||message.action==='finish')this.cloud=false;
      if(reason.includes('client_upgrade_required')||reason.includes('device_key_conflict'))stopWith=pairingFailure(error,transport,qrShown);
      failed=true;
      result={success:false,message:stopWith?.kind==='cancelled'?'已在手表上取消绑定':conflict?'手表已绑定其他账号，请先在手表退出原账号':'配置未完成，请检查手表账号后重试'};
-    }
-    await this.call('provision.respond',{sequence:message._sequence,result},active);
+    }finally{stopChecking();if(this.epoch===epoch)this.handlingConfigure=false;}
+    // A rejection receipt is best effort; an offline relay must not keep a
+    // declined/expired configure and its credentials alive until QR expiry.
+    const rejectState=stopWith&&(this.bound?{kind:'done',cloudReady:this.cloud} as PairingState:stopWith);
+    const cancelReject=rejectState?this.ports.after(PAIRING_REJECT_GRACE_MS,()=>{if(active())this.stop(rejectState);}):()=>{};
+    this.cancelTimers.push(cancelReject);
+    try{await this.call('provision.respond',{sequence:message._sequence,result},active);}
+    catch(error){if(rejectState&&active()){this.stop(rejectState);return;}throw error;}
+    finally{cancelReject();}
     if(stopWith){this.stop(this.bound?{kind:'done',cloudReady:this.cloud}:stopWith);return;}
     if(failed){show(this.bound?{kind:'done',cloudReady:this.cloud}:{kind:'failed',title:'配对没有完成',detail:'请重新开始配对',suggestOther:false});continue;}
     if(message.action==='finish'){

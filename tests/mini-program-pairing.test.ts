@@ -6,7 +6,7 @@ const qr='wrss-pair:'+Buffer.from(JSON.stringify({sessionId:'s1',deviceId:'d',in
 type Call={method:string;args:Record<string,unknown>;cancelled:boolean};
 function host(options:{permission?:string;startError?:{code:string};existingCloud?:boolean}={}){
  const calls:Call[]=[],inbox:{resolve:(v:any)=>void;reject:(e:any)=>void}[]=[],timers:{ms:number;fn:()=>void;live:boolean}[]=[];
- const states:PairingState[]=[];let confirmLabel='',delivered=false;
+ const states:PairingState[]=[];let confirmLabel='',delivered=false,agreement:Promise<boolean>|undefined;
  const ports:PairingPorts={
   op:<T,>(method:string,args:Record<string,unknown>)=>{
    const call:Call={method,args,cancelled:false};calls.push(call);
@@ -20,8 +20,8 @@ function host(options:{permission?:string;startError?:{code:string};existingClou
   available:()=>true,
   identity:async()=>({deviceId:'d',installId:'i'}),
   handler:async({confirm})=>({handle:async message=>{
-   if(message.action==='prepare'){confirmLabel=message.phoneMasked;if(!await confirm(message.phoneMasked,'12345678'))throw Error('配对未确认');return {success:true};}
-   if(message.action==='configure')return {success:true,bound:true,cloudReady:!!options.existingCloud};
+   if(message.action==='prepare'){confirmLabel=message.phoneMasked;agreement=confirm(message.phoneMasked,'12345678');return {success:true};}
+   if(message.action==='configure'){if(agreement&&!await agreement)throw Error('配对未确认');return {success:true,bound:true,cloudReady:!!options.existingCloud};}
    if(message.action==='key'){delivered=true;return {success:true,cloudReady:true};}
    if(message.action==='finish')return {success:true,cloudReady:delivered||!!options.existingCloud};
    throw Error('x');
@@ -66,7 +66,7 @@ test('internet pairing never asks for nearby permission and reaches cloud-ready 
  await h.deliver({action:'prepare',phoneMasked:'138****0000',_sequence:0});
  expect(last(h)).toEqual({kind:'confirm',account:'138****0000',sas:'12345678',phoneMaskedTrusted:false});
  p.confirmSas(true);await h.settle();
- expect(h.states.some(s=>s.kind==='working'&&s.step==='saving')).toBe(true);
+ expect(last(h).kind).toBe('confirm');
  await h.deliver({action:'configure',_sequence:1});expect(last(h)).toEqual({kind:'working',step:'cloud'});
  await h.deliver({action:'key',_sequence:2});
  expect(h.states.some(s=>s.kind==='done')).toBe(false);
@@ -90,7 +90,7 @@ test('declining on the watch answers the phone, closes the owned session and cha
  const h=host();const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));
  p.start();await h.deliver({action:'prepare',phoneMasked:'138****0000',_sequence:0});
  p.decline();await h.settle();
- expect(h.responses()).toEqual([{success:false,message:'已在手表上取消绑定'}]);
+ expect(h.responses()).toEqual([{success:true}]);
  expect(last(h)).toEqual({kind:'cancelled'});
  expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1'});
 });
@@ -142,7 +142,7 @@ test('finish displays previously persisted authorization even without key delive
 });
 
 test('legacy account-only positive action cannot assert SAS agreement; the dedicated callback is required',async()=>{
- const h=host(),p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.deliver({action:'prepare',phoneMasked:'unverified',_sequence:0});expect(p.confirm()).toBe(false);expect(last(h).kind).toBe('confirm');expect(h.responses()).toHaveLength(0);expect(p.confirmSas(true)).toBe(true);await h.settle();expect(h.responses()).toHaveLength(1);
+ const h=host(),p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.deliver({action:'prepare',phoneMasked:'unverified',_sequence:0});expect(p.confirm()).toBe(false);expect(last(h).kind).toBe('confirm');expect(h.responses()).toHaveLength(1);expect(p.confirmSas(true)).toBe(true);await h.settle();expect(h.responses()).toHaveLength(1);
 });
 test('QR context belongs to the live identity and its secret is cleared when the run ends',async()=>{
  const h=host();let secret:Uint8Array|undefined;const make=h.ports.handler;h.ports.handler=async ports=>{secret=ports.pairing.secret;expect(ports.pairing.sessionId).toBe('s1');return make(ports);};const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.settle();expect(secret?.length).toBe(32);p.dispose();expect(secret?.every(b=>b===0)).toBe(true);

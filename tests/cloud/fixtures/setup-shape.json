@@ -1,6 +1,6 @@
 {
   "provenance": {
-    "contract": "SPEC R6/R7; mini-program watch-setup configure/key receipt checks; native MiniProgramPairingActivity configure/key response fields; SPEC R28 self-registration before bound",
+    "contract": "SPEC R6/R7; mini-program watch-setup configure/key receipt checks; native MiniProgramPairingActivity configure/key response fields; SPEC R28 self-registration before bound; SPEC R43 immediate public prepare including installId",
     "note": "Frozen synthetic protocol transcript. No sibling checkout is loaded. Private key is test-only."
   },
   "now": 1700000000000,
@@ -44,7 +44,8 @@
         "success": true,
         "userId": "6f1c2b0e-3a4d-4c5e-8f90-112233445566",
         "deviceId": "a1b2c3d4-0000-4000-8000-000000000001",
-        "publicKeySpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZYkPyaGPGjY464p83yrG3H2P4lHiSBZKRdxk0RjVK2ZN13xa+W7XqTXuTl/p2pWqgC5OMVUtbj/eDTFtjwMBXg=="
+        "publicKeySpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZYkPyaGPGjY464p83yrG3H2P4lHiSBZKRdxk0RjVK2ZN13xa+W7XqTXuTl/p2pWqgC5OMVUtbj/eDTFtjwMBXg==",
+        "installId": "22222222-2222-4222-8222-222222222222"
       }
     },
     {
