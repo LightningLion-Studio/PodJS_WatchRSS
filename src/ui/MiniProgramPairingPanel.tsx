@@ -49,8 +49,10 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
   return chunkLines(line.text.split('\n'),line.lineHeight,inner()).map(lines=>({height:lines.length*line.lineHeight,render:()=> <Text class="absolute inset-0 text-center" style={{fontSlot:line.slot,lineHeight:line.lineHeight,textColor:color??line.color}}>{lines.join('\n')}</Text>}));
  };
  const gap=(height:number):ScrollEntry=>({height,render:()=>null});
+ // Narrower than the row: these pills often sit low on the face, where the circle is tight.
+ const PILL_WIDTH=140;
  const pill=(label:string,press:()=>void,primary=false):ScrollEntry=>({height:PHONE_PAGE.touchHeight,render:()=>
-  <View class="absolute inset-0 rounded-[24] items-center justify-center" style={{bgColor:primary?PHONE_PAGE.primary:'#2a2a2a'}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
+  <View class="absolute top-[0] rounded-[24] items-center justify-center" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner()),height:PHONE_PAGE.touchHeight,bgColor:primary?PHONE_PAGE.primary:'#2a2a2a'}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
    <Text style={{fontSlot:22,lineHeight:21,textColor:primary?PHONE_PAGE.onPrimary:PHONE_PAGE.foreground}}>{label}</Text>
   </View>});
  const spinner=(label:string):ScrollEntry=>({height:40,render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
