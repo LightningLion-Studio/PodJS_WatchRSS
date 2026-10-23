@@ -80,3 +80,11 @@ test('a phone scan request opens the pairing code on an open connection page; a 
  expect(nodes(manual).some(n=>n.kind==='PairingPanel')).toBe(true);
  bus.setPairingRequestForeground(false);
 });
+
+test('connection page forwards its onPaired home action to the pairing completion onDone callback',()=>{
+ let homes=0;const goHome=()=>{homes++;};
+ const root=createRoot(stop=>{stops.push(stop);return PhoneConnectionScreen({width:233,height:233,active:()=>true,onError:()=>{},onPaired:goHome,ref:()=>{}});});
+ nodes(root).find(n=>String(n.props.accessibilityLabel).startsWith('扫码绑定'))!.props.onPress();
+ const panel=nodes(root).find(n=>n.kind==='PairingPanel')!;
+ expect(panel.props.onDone).toBe(goHome);panel.props.onDone();expect(homes).toBe(1);
+});

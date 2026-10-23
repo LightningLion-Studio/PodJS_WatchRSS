@@ -116,6 +116,6 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  // Short pages sit in the middle of the round face; long ones scroll from the top.
  // Long pages scroll; generous top and bottom spacers keep their first and last rows off the narrow edge.
  const EDGE=40;
- const rows=createMemo(()=>{const list=entries();if(state().kind==='scan')return [...list,gap(EDGE)];const room=props.height-36-list.reduce((sum,row)=>sum+row.height,0);return room>0?[gap(room/2),...list]:[gap(EDGE),...list,gap(EDGE)];});
+ const rows=createMemo(()=>{const list=entries();if(state().kind==='scan')return [...list,gap(EDGE)];const room=props.height-36-list.reduce((sum,row)=>sum+row.height,0);return room>=EDGE*2?[gap(room/2),...list]:[gap(EDGE),...list,gap(EDGE)];});
  return <View class="absolute inset-0 bg-black"><ScrollEntries round={null} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>props.ref({...value,onRootBack:back})} accessibilityLabel="扫码绑定"/></View>;
 }
