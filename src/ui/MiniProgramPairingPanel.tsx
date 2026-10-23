@@ -1,6 +1,6 @@
 import {miniProgramPairingHostPorts} from './mini-program-pairing-host';
 import type {Scroller} from '@pocketjs/framework/kinetics';
-import {createEffect,createMemo,createSignal,onCleanup} from 'solid-js';
+import {createEffect,createMemo,createSignal,onCleanup,untrack} from 'solid-js';
 import {Image,Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {delay} from '@podjs/framework/services';
@@ -30,6 +30,12 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  onCleanup(()=>pairing.dispose());
  createEffect(()=>pairing.setForeground(props.active()));
  pairing.start();
+ let listScroller:Scroller|undefined,lastPhase:PairingState['kind']|undefined;
+ createEffect(()=>{
+  const phase=state().kind;
+  // A short result page must not inherit the scan page's old bottom offset.
+  if(phase!==lastPhase){lastPhase=phase;listScroller?.scrollTo(0,{immediate:true});}
+ });
 
  const [now,setNow]=createSignal(Date.now());
  createEffect(()=>{
@@ -52,6 +58,17 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
   return chunkLines(line.text.split('\n'),line.lineHeight,width).map(lines=>({height:lines.length*line.lineHeight,
    bounds:centredBounds(inner(),Math.min(width,Math.max(...lines.map(item=>measure(item,line.slot)))+4),0,lines.length*line.lineHeight),render:()=> <Text class="absolute top-[0] text-center" style={{insetL:(inner()-width)/2,width,fontSlot:line.slot,lineHeight:line.lineHeight,textColor:color??line.color}}>{lines.join('\n')}</Text>}));
  };
+ const countdown=(expiresAt:number):ScrollEntry=>{
+  const width=Math.min(TEXT_WIDTH,inner()),sample=phonePageText('0:00 后失效，仅限本次使用','small',width,measure);
+  let widest='0',advance=measure(widest,sample.slot);
+  for(const digit of '123456789'){const next=measure(digit,sample.slot);if(next>advance){widest=digit;advance=next;}}
+  const digits=pairingCountdown(expiresAt-untrack(now)).split(':')[0].length;
+  const reserve=phonePageText(`${widest.repeat(digits)}:${widest}${widest} 后失效，仅限本次使用`,'small',width,measure);
+  // Keep row identities and height stable. Only this Text tracks the clock;
+  // rebuilding entries would rasterize/upload the QR texture on every tick.
+  const label=()=>phonePageText(`${pairingCountdown(expiresAt-now())}，仅限本次使用`,'small',width,measure).text;
+  return {height:reserve.height,bounds:centredBounds(inner(),width,0,reserve.height),render:()=> <Text class="absolute top-[0] text-center" style={{insetL:(inner()-width)/2,width,fontSlot:reserve.slot,lineHeight:reserve.lineHeight,textColor:reserve.color}}>{label()}</Text>};
+ };
  const gap=(height:number):ScrollEntry=>({height,render:()=>null});
  // Narrower than the row: these pills often sit low on the face, where the circle is tight.
  const PILL_WIDTH=140;
@@ -64,7 +81,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
   <View class="absolute top-[0] h-[40] items-center justify-center" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner())}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
    <Text style={{fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.secondary}}>{label}</Text>
   </View>});
- const spinner=(label:string):ScrollEntry=>({height:40,bounds:centredBounds(inner(),40,0,40),render:()=> <View class="absolute inset-0 items-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
+ const spinner=(label:string):ScrollEntry=>({height:40,bounds:centredBounds(inner(),40,0,40),render:()=> <View class="absolute inset-0 items-center justify-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
  const mark=(success:boolean):ScrollEntry=>({height:40,bounds:centredBounds(inner(),40,0,40),render:()=>
   <View class="absolute top-[0] w-[40] h-[40] rounded-full items-center justify-center" style={{insetL:(inner()-40)/2,bgColor:success?PHONE_PAGE.primary:'#23272a'}}>
    {success?<Image src="../assets/icons/onboarding-check.svg" style={{width:24,height:24}}/>:<Text style={{fontSlot:23,lineHeight:26,textColor:PHONE_PAGE.foreground}}>!</Text>}
@@ -81,7 +98,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
     </View>},
     {height:(props.height-qrTile())/2,render:()=> <Text class="absolute left-[0] right-[0] top-[8] text-center" style={{fontSlot:0,lineHeight:14,textColor:PHONE_PAGE.secondary}}>下滑查看操作</Text>},
     ...text('用手机扫码绑定','body',PHONE_PAGE.foreground),gap(6),...text(pairingScanHint(current.transport),'body',PHONE_PAGE.secondary),gap(4),
-    ...text(`${pairingCountdown(current.expiresAt-now())}，仅限本次使用`,'small'),gap(12),
+    countdown(current.expiresAt),gap(12),
     pill('取消',cancel),
    ];
    case 'confirm':{
@@ -119,5 +136,5 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  // (sized by its bounds) where the circle is wide enough, including when a long page scrolls.
  const fixedQr=()=>state().kind==='scan';
  const rows=createMemo(()=>fixedQr()?[...entries(),gap(40)]:entries());
- return <View class="absolute inset-0 bg-black"><ScrollEntries {...(fixedQr()?{round:null}:{})} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>props.ref({...value,onRootBack:back})} accessibilityLabel="扫码绑定"/></View>;
+ return <View class="absolute inset-0 bg-black"><ScrollEntries {...(fixedQr()?{round:null}:{})} height={props.height} entries={rows()} padding={18} gap={0} inputActive={props.active} ref={value=>{listScroller=value.scroller;props.ref({...value,onRootBack:back});}} accessibilityLabel="扫码绑定"/></View>;
 }
