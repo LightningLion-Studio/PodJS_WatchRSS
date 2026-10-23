@@ -15,8 +15,9 @@ const text:SyncTextPort={parseUri:async v=>{const u=new URL(v);return {valid:tru
 function database(){const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as any,execute:async(q,p=[])=>{sql.query(q).run(...p as any[]);},transaction:async list=>{sql.transaction(()=>{for(const s of list)sql.query(s.sql).run(...(s.params??[]) as any[]);})();},transactionChanges:async list=>sql.transaction(()=>list.map(s=>{sql.query(s.sql).run(...(s.params??[]) as any[]);return Number((sql.query('SELECT changes() AS n').get() as {n:number}).n);}))()};return {sql,db};}
 const files={storeText:async(_k:string,v:string)=>v,hydrate:async(v:string)=>v};
 function receiver(db:SqlDatabase){const local=new LocalArticleManifestStore(db,codec,text,files,async()=>{});return new SyncArticleReceiver(db,codec,files,async()=>{},()=>999,a=>local.resolveIncomingBody(a));}
-test('ordinary RSS alias receives match 14 actual native Room merges',async()=>{
- const f=database();try{for(const row of fixture.cases){await seedAliasCase(f.db,row);let ok=true,applied:number|undefined;try{applied=await receiver(f.db).receiveWithStats(aliasArticle(row),aliasBody(row),row.input.peer,row.input.authoritative);}catch{ok=false;}if(ok)expect(applied).toBe(row.applied);
+test('ordinary RSS alias receives preserve native Room merges with actual materialization counts',async()=>{
+ const f=database();try{for(const row of fixture.cases){await seedAliasCase(f.db,row);let ok=true,applied:number|undefined;try{applied=await receiver(f.db).receiveWithStats(aliasArticle(row),aliasBody(row),row.input.peer,row.input.authoritative);}catch{ok=false;}// BLE v2 counts a newly materialized article even when saved-state LWW rejects all flags.
+ if(ok)expect(applied).toBe(['both-older','equal-lower-peer','zero-unsave'].includes(row.input.name)?1:row.applied);
  expect({name:row.input.name,ok}).toEqual({name:row.input.name,ok:row.ok});expect(await aliasOutcome(f.db)).toEqual({items:row.items,entries:row.entries,states:row.states});
  }}finally{f.sql.close();}
 });

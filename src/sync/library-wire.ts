@@ -80,8 +80,8 @@ export function buildManifestFrames(payload:JsonObject):JsonObject[]{
 }
 function articleItems(prepared:PreparedArticle,request:RequestedArticleBody):JsonObject[]{
  const payload=bodyForRequest(prepared,request),a=prepared.article;
- const names=['articleId','sourceDeviceId','url','title','siteName','excerpt','imageUrl','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','rssSourceUrl','rssSourceTitle','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','isRead'] as const;
- const meta:JsonObject={};for(const key of names)if(a[key]!==null)meta[key]=key==='readingProgress'?wireProgress(a.readingProgress):a[key];
+ const names=['articleId','legacyArticleIds','sourceDeviceId','url','title','siteName','excerpt','imageUrl','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','rssSourceUrl','rssSourceTitle','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','isRead'] as const;
+ const meta:JsonObject={};for(const key of names)if(a[key]!==null&&a[key]!==undefined)meta[key]=key==='readingProgress'?wireProgress(a.readingProgress):a[key];
  const groups=payload.metadataOnly||!payload.chunks.length?[[]]:payload.chunks.map(c=>[c]);
  return groups.map(chunks=>({...meta,body:{bodyHash:payload.bodyHash,bodyByteCount:payload.bodyByteCount,chunkSize:payload.chunkSize,chunkHashes:[...payload.chunkHashes],metadataOnly:!!payload.metadataOnly,chunks:chunks.map(c=>({index:c.index,hash:c.hash,data:encodeChunkData(c.bytes)}))}}));
 }

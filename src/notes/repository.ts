@@ -1,3 +1,5 @@
+import {onlyChangedSql} from '@podjs/framework/sql-changes';
+import {sha256Hex} from '@podjs/framework/crypto';
 import {memoPlainText,memoTitle} from './text.ts';
 export {memoPlainText,memoTitle} from './text.ts';
 import type { SqlDatabase, SqlParams } from "../core/types.ts";
@@ -30,18 +32,7 @@ const bool = (v: unknown) => Boolean(Number(v));
 function note(row: Record<string,unknown>): MemoNote { return { noteId:String(row.note_id),folderId:row.folder_id == null?null:String(row.folder_id),title:String(row.title),markdown:String(row.markdown),plainText:String(row.plain_text),contentHash:String(row.content_hash),baseContentHash:String(row.base_content_hash),baseMarkdown:String(row.base_markdown),pinned:bool(row.pinned),createdAt:Number(row.created_at),updatedAt:Number(row.updated_at),modifiedBy:String(row.modified_by),deleted:bool(row.deleted),deletedAt:Number(row.deleted_at) }; }
 function folder(row: Record<string,unknown>): MemoFolder { return {folderId:String(row.folder_id),name:String(row.name),sortOrder:Number(row.sort_order),updatedAt:Number(row.updated_at),modifiedBy:String(row.modified_by),deleted:bool(row.deleted),deletedAt:Number(row.deleted_at)}; }
 // Kept local so notes also work in the Android QuickJS host, where Web Crypto is optional.
-function sha256(value: string): string {
-  const bytes=[...utf8Encode(value)], bitLength=bytes.length*8;
-  bytes.push(0x80); while(bytes.length%64!==56) bytes.push(0);
-  const high=Math.floor(bitLength/0x100000000), low=bitLength>>>0;
-  for(let shift=24;shift>=0;shift-=8) bytes.push((high>>>shift)&255);
-  for(let shift=24;shift>=0;shift-=8) bytes.push((low>>>shift)&255);
-  const k=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
-  const h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
-  const rr=(x:number,n:number)=>(x>>>n)|(x<<(32-n));
-  for(let offset=0;offset<bytes.length;offset+=64){const w=new Array<number>(64);for(let i=0;i<16;i++){const p=offset+i*4;w[i]=((bytes[p]<<24)|(bytes[p+1]<<16)|(bytes[p+2]<<8)|bytes[p+3])>>>0;}for(let i=16;i<64;i++){const a=w[i-15],b=w[i-2],s0=rr(a,7)^rr(a,18)^(a>>>3),s1=rr(b,17)^rr(b,19)^(b>>>10);w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;}let[a,b,c,d,e,f,g,z]=h;for(let i=0;i<64;i++){const s1=rr(e,6)^rr(e,11)^rr(e,25),ch=(e&f)^(~e&g),t1=(z+s1+ch+k[i]+w[i])>>>0,s0=rr(a,2)^rr(a,13)^rr(a,22),maj=(a&b)^(a&c)^(b&c),t2=(s0+maj)>>>0;z=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}h[0]=(h[0]+a)>>>0;h[1]=(h[1]+b)>>>0;h[2]=(h[2]+c)>>>0;h[3]=(h[3]+d)>>>0;h[4]=(h[4]+e)>>>0;h[5]=(h[5]+f)>>>0;h[6]=(h[6]+g)>>>0;h[7]=(h[7]+z)>>>0;}
-  return h.map(v=>v.toString(16).padStart(8,"0")).join("");
-}
+const sha256=(value:string)=>sha256Hex(utf8Encode(value));
 
 export class MemoRepository {
   constructor(private readonly db: SqlDatabase, private readonly deviceId: string, private readonly idFactory: () => string = defaultId, private readonly clock: () => number = Date.now) {}
@@ -52,10 +43,20 @@ export class MemoRepository {
   async merge(incoming: readonly MemoNote[]): Promise<number> {
     let applied=0;
     for(const remote of incoming){
-      const row=(await this.db.query("SELECT updated_at,content_hash,base_content_hash FROM memo_notes WHERE note_id=?",[remote.noteId]))[0];
-      if(row&&remote.updatedAt<Number(row.updated_at)&&row.content_hash!==row.base_content_hash)continue;
-      await this.db.execute("INSERT OR REPLACE INTO memo_notes(note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",[remote.noteId,remote.folderId,remote.title,remote.markdown,remote.plainText,remote.contentHash,remote.baseContentHash,remote.baseMarkdown,remote.pinned?1:0,remote.createdAt,remote.updatedAt,remote.modifiedBy,remote.deleted?1:0,remote.deletedAt]);
-      applied++;
+      const row=(await this.db.query("SELECT * FROM memo_notes WHERE note_id=?",[remote.noteId]))[0];
+      if(row){
+        const local=note(row),remoteClock=Math.max(remote.updatedAt,remote.deletedAt),localClock=Math.max(local.updatedAt,local.deletedAt);
+        if(remote.markdown===local.markdown&&remote.contentHash===local.contentHash){
+          // Same-body metadata uses the same total LWW order as the phone.
+          const keys=(n:MemoNote):Array<number|string|boolean>=>[Math.max(n.updatedAt,n.deletedAt),n.modifiedBy,n.deleted,n.title,n.folderId!==null,n.folderId??'',n.pinned,n.createdAt,n.baseContentHash,n.baseMarkdown];
+          const a=keys(remote),b=keys(local);let order=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]){order=a[i]!>b[i]!?1:-1;break;}
+          if(order<=0)continue;
+        }else if(remoteClock<localClock&&(remote.deleted||local.deleted))continue;
+        else if(remote.updatedAt<local.updatedAt&&local.contentHash!==local.baseContentHash)continue;
+      }
+      if(row&&JSON.stringify(note(row))===JSON.stringify(remote))continue;
+      const statement={sql:onlyChangedSql("INSERT INTO memo_notes(note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(note_id) DO UPDATE SET folder_id=excluded.folder_id,title=excluded.title,markdown=excluded.markdown,plain_text=excluded.plain_text,content_hash=excluded.content_hash,base_content_hash=excluded.base_content_hash,base_markdown=excluded.base_markdown,pinned=excluded.pinned,created_at=excluded.created_at,updated_at=excluded.updated_at,modified_by=excluded.modified_by,deleted=excluded.deleted,deleted_at=excluded.deleted_at WHERE (excluded.updated_at>=memo_notes.updated_at OR memo_notes.content_hash=memo_notes.base_content_hash OR (excluded.markdown=memo_notes.markdown AND excluded.content_hash=memo_notes.content_hash AND max(excluded.updated_at,excluded.deleted_at)>=max(memo_notes.updated_at,memo_notes.deleted_at)))"),params:[remote.noteId,remote.folderId,remote.title,remote.markdown,remote.plainText,remote.contentHash,remote.baseContentHash,remote.baseMarkdown,remote.pinned?1:0,remote.createdAt,remote.updatedAt,remote.modifiedBy,remote.deleted?1:0,remote.deletedAt]};
+      if(this.db.transactionChanges){const counts=await this.db.transactionChanges([statement]);applied+=counts[0]!>0?1:0;}else{await this.db.execute(statement.sql,statement.params);applied++;}
     }
     return applied;
   }

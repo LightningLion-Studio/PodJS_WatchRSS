@@ -1,3 +1,4 @@
+import {parseContentState,contentRecovery} from './content-lifecycle';
 import type {WatchCloudRecords} from './records';
 import {canonicalSpki} from './v2';
 import type {WatchCloudClient} from './client';
@@ -9,10 +10,10 @@ import type {WatchCloudLibraryAdapter} from './library';
 import {utf8Encode,type CloudUploadObject,type CloudMemberState,type CloudSnapshotHead} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
-export interface WatchCloudStatus {phase:WatchCloudPhase;message:string;usedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number}
+export interface WatchCloudStatus {phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
 export interface CloudSession {
  userId:string;deviceId:string;displayName:string;
- client:Pick<WatchCloudClient,'setEpoch'|'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
+ client:Pick<WatchCloudClient,'setEpoch'|'setContentGeneration'|'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
  keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'currentKeyVersion'|'acceptBootstrap'|'accountKey'>&Partial<Pick<WatchCloudKeyManager,'prepareLegacyUpgrade'>>;
  codec:WatchCloudCodec;cache:WatchCloudCache;state:WatchCloudStateStore;uploader:{upload(target:CloudUploadObject,bytes:Uint8Array):Promise<void>};
  library:Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
@@ -33,28 +34,31 @@ export interface CloudSyncPorts {
 function headValid(h:CloudSnapshotHead){if(!/^[A-Za-z0-9-]{1,128}$/.test(h.id)||!h.sourceDeviceId||!Number.isSafeInteger(h.deviceSequence)||h.deviceSequence<1||!Number.isSafeInteger(h.keyVersion)||h.keyVersion<1||!Number.isSafeInteger(h.manifestSizeBytes)||h.manifestSizeBytes<51||h.manifestSizeBytes>8*1024*1024||!/^[0-9a-f]{64}$/.test(h.manifestSha256))throw Error('无效云端 head');}
 const sameRecord=(a:Record<string,unknown>,b:Record<string,unknown>)=>Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>a[k]===b[k]);
 export class WatchCloudSyncService {
+ private usageRefresh:(()=>Promise<void>)|undefined;
  private statusEpoch=0;private runEpoch=0;
  private tail:Promise<unknown>=Promise.resolve();private listeners=new Set<()=>void>();
- private value:WatchCloudStatus={phase:'idle',message:'尚未同步',usedBytes:0,quotaBytes:0,lastCompletedAt:0};
+ private value:WatchCloudStatus={phase:'idle',message:'尚未同步',usedBytes:0,reservedBytes:0,quotaBytes:0,lastCompletedAt:0};
  constructor(private ports:CloudSyncPorts,private guard:CloudGuard=cloudDisabled){}
  get status(){return {...this.value};}
  subscribe(fn:()=>void){this.listeners.add(fn);return ()=>{this.listeners.delete(fn);};}
- reset(){this.statusEpoch++;this.value={phase:'idle',message:'尚未同步',usedBytes:0,quotaBytes:0,lastCompletedAt:0};this.emit();}
+ reset(){this.statusEpoch++;this.value={phase:'idle',message:'尚未同步',usedBytes:0,reservedBytes:0,quotaBytes:0,lastCompletedAt:0};this.emit();}
  private emit(){for(const fn of this.listeners)try{fn();}catch{}}
- private set(phase:WatchCloudPhase,message:string,member?:CloudMemberState){if(this.runEpoch!==this.statusEpoch)return;this.value={...this.value,phase,message,...(member?{member,usedBytes:member.usedBytes,quotaBytes:member.quotaBytes}:{}),...(phase==='complete'?{lastCompletedAt:(this.ports.now??Date.now)()}:{} )};this.emit();}
+ private set(phase:WatchCloudPhase,message:string,member?:CloudMemberState){if(this.runEpoch!==this.statusEpoch)return;this.value={...this.value,phase,message,...(member?{member,usedBytes:member.usedBytes,reservedBytes:member.reservedBytes,quotaBytes:member.quotaBytes}:{}),...(phase==='complete'?{lastCompletedAt:(this.ports.now??Date.now)()}:{} )};this.emit();}
  syncNow(manual=false,mode:'all'|'recent128'='recent128'):Promise<boolean>{
-  this.guard.require();const epoch=this.statusEpoch;const run=this.tail.then(()=>this.ports.exclusive(()=>{if(epoch!==this.statusEpoch)return Promise.resolve(false);this.runEpoch=epoch;return this.run(manual,mode);})).catch(error=>{if(epoch!==this.statusEpoch)return false;const reason=String(error);if(reason.includes('cloud_private_body_pending'))this.set('idle','正文仍在同步，请稍后重试');else if(reason.includes('client_upgrade_required'))this.set('error','请升级腕上RSS以继续云同步');else if(reason.includes('library_epoch_mismatch'))this.set('waiting-approval','资料库已重置，请重新批准');else if(reason.includes('rotation_proof_invalid')||reason.includes('device_attestation_invalid'))this.set('waiting-approval','密钥验证失败，请重新批准');else if(reason.includes('device_key_conflict'))this.set('waiting-approval','本机云设备公钥冲突，请重新登记本机');else if(reason.includes('library_owner_mismatch'))this.set('error','本机资料属于其他账号，请先选择清空或合并');else this.set('error','云同步失败，请稍后重试');return false;});this.tail=run;return run;
+  this.guard.require();const epoch=this.statusEpoch;const run=this.tail.then(()=>this.ports.exclusive(()=>{if(epoch!==this.statusEpoch)return Promise.resolve(false);this.runEpoch=epoch;return this.recover(manual,mode);})).catch(error=>{if(epoch!==this.statusEpoch)return false;const reason=String(error);if(reason.includes('cloud_private_body_pending'))this.set('idle','正文仍在同步，请稍后重试');else if(contentRecovery(error)==='upgrade'||reason.includes('client_upgrade_required')||reason.includes('snapshot_content_layout_unsupported')){this.value={...this.value,retryable:false};this.set('error','请升级腕上RSS以继续云同步');}else if(['rebuild','plan'].includes(contentRecovery(error)??'')){this.value={...this.value,retryAtMillis:(this.ports.now??Date.now)()+30000};this.set('idle','云端内容正在重建，已排队重试；本机资料已保留');}else if(reason.includes('library_epoch_mismatch'))this.set('waiting-approval','资料库已重置，请重新批准');else if(reason.includes('rotation_proof_invalid')||reason.includes('device_attestation_invalid'))this.set('waiting-approval','密钥验证失败，请重新批准');else if(reason.includes('device_key_conflict'))this.set('waiting-approval','本机云设备公钥冲突，请重新登记本机');else if(reason.includes('library_owner_mismatch'))this.set('error','本机资料属于其他账号，请先选择清空或合并');else this.set('error','云同步失败，请稍后重试');return false;});this.tail=run;return run;
  }
+ private async refreshUsage(){await this.usageRefresh?.();}
+ private async recover(manual:boolean,mode:'all'|'recent128'){let recovery:string|undefined;for(let attempt=0;attempt<2;attempt++){let refreshed=false;this.usageRefresh=undefined;try{const result=await this.run(manual,mode,attempt>0,recovery==='rebuild');refreshed=true;await this.refreshUsage();return result;}catch(original){let error=original;if(!refreshed)try{await this.refreshUsage();}catch(latest){if(contentRecovery(latest)==='rebuild'||String(latest).includes('library_epoch_mismatch'))error=latest;}const kind=contentRecovery(error);if(attempt||!['rebuild','plan'].includes(kind??''))throw error;recovery=kind;this.set('idle',kind==='rebuild'?'云端内容已清理，正在从本机重建同步':'云端上传计划已失效，正在重新准备');}}return false;}
  private async manifest(s:CloudSession,h:CloudSnapshotHead,bytes:Uint8Array){
   headValid(h);if(bytes.length!==h.manifestSizeBytes||await this.ports.hash(bytes)!==h.manifestSha256)throw Error('云 manifest 哈希或长度不符');
   const key=await s.keys.accountKey(s.userId,h.keyVersion);if(!key)throw Error('缺少账号密钥，请在手机端重新批准');
   try{const m=await s.codec.decryptManifest(key,h.id,bytes);
-   if(h.sourceDeviceId.startsWith('reader-migration-')&&m.objects.some(o=>!o.name.startsWith('reader/')))throw Error('无效阅读器迁移对象');
+   if(h.sourceDeviceId.startsWith('reader-migration-')&&m.objects.some(o=>!o.name.startsWith('reader/')||!!o.privateBook))throw Error('无效阅读器迁移对象');
    if(m.sourceDeviceId!==h.sourceDeviceId||m.deviceSequence!==h.deviceSequence||m.keyVersion!==h.keyVersion||!sameRecord(m.parentHeads,h.parentHeads)||!sameRecord(m.observedHeads,h.observedHeads))throw Error('云 manifest 身份不符');return m;
   }finally{key.fill(0);}
  }
- private async run(manual:boolean,mode:'all'|'recent128'){
-  this.value={...this.value,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined};this.guard.require();const network=await this.ports.network();if(!network.active||!network.validated){this.set('idle','等待网络连接');return false;}
+ private async run(manual:boolean,mode:'all'|'recent128',freshPlan=false,forceContentReset=false){
+  this.value={...this.value,retryAtMillis:undefined,pendingItems:undefined,abandonedItems:undefined,retryable:undefined};this.guard.require();const network=await this.ports.network();if(!network.active||!network.validated){this.set('idle','等待网络连接');return false;}
   // Unknown/cellular/ethernet transports do not silently authorize private bodies.
   const full=manual||(network.wifi&&!network.metered);
   const s=await this.ports.open();if(!s){this.reset();return false;}
@@ -62,7 +66,10 @@ export class WatchCloudSyncService {
   this.set('registering','正在核对云空间');
   let bootstrap=await s.client.bootstrap();await current();
   const changedEpoch=await s.state.acceptEpoch(bootstrap.libraryEpoch);if(changedEpoch){await s.invalidate?.();this.set('waiting-approval','资料库已重置，请重新批准',bootstrap.member);return false;}
-  s.client.setEpoch(bootstrap.libraryEpoch);
+  s.client.setEpoch(bootstrap.libraryEpoch);const content=parseContentState(bootstrap);const previousGeneration=await s.state.contentGeneration();
+  if(forceContentReset||previousGeneration!==undefined&&previousGeneration!==content.contentGeneration||content.contentEmpty){await current();await s.cache.clear(s.userId);await s.state.clearContent();await current();this.set('registering','云端内容已清理，正在从本机重建同步',bootstrap.member);}
+  await s.state.rememberContentGeneration(content.contentGeneration);s.client.setContentGeneration(content.contentGeneration);
+  this.usageRefresh=async()=>{const latest=await s.client.bootstrap();await current();if(latest.libraryEpoch!==bootstrap.libraryEpoch)throw Error('library_epoch_mismatch');if(parseContentState(latest).contentGeneration!==content.contentGeneration)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});this.value={...this.value,member:latest.member,usedBytes:latest.member.usedBytes,reservedBytes:latest.member.reservedBytes,quotaBytes:latest.member.quotaBytes};this.emit();};
   let device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
   if(device?.revokedAt){await s.invalidate?.();this.set('waiting-approval','云设备已撤销，请重新批准',bootstrap.member);return false;}
   const publicKey=await s.keys.publicKeySpki(s.userId,s.deviceId);
@@ -72,7 +79,7 @@ export class WatchCloudSyncService {
   if(upgrade&&!device?.attestation){
    if(device&&canonicalSpki(device.publicKeySpki)!==canonicalSpki(publicKey))throw Error('device_key_conflict');
    await s.client.registerDevice(s.deviceId,s.displayName,publicKey,upgrade.keyVersion,upgrade.attestation);
-   const epoch=bootstrap.libraryEpoch;bootstrap=await s.client.bootstrap();await current();if(bootstrap.libraryEpoch!==epoch){await s.invalidate?.();throw Error('library_epoch_mismatch');}device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
+   const epoch=bootstrap.libraryEpoch,generation=content.contentGeneration;bootstrap=await s.client.bootstrap();await current();if(parseContentState(bootstrap).contentGeneration!==generation)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});if(bootstrap.libraryEpoch!==epoch){await s.invalidate?.();throw Error('library_epoch_mismatch');}device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
   }
   let ready:string;
   try{ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,device?.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);}
@@ -80,7 +87,7 @@ export class WatchCloudSyncService {
   if(ready==='waiting-approval'){this.set('waiting-approval','请在已登录设备上批准此手表',bootstrap.member);return false;}
   await current();const member=bootstrap.member;
   let records:WatchCloudRecords|undefined,recordFailure='';
-  const recordError=(e:unknown)=>{const text=String(e);if(/library_epoch_mismatch|cloud_operation_superseded|账号|client_upgrade_required|device_attestation|commitment|library_owner_mismatch/.test(text))throw e;recordFailure=text.includes('cloud_record_count_limit')?'云记录数量已达上限':text.includes('cloud_quota_exceeded')?'云记录空间不足':text.includes('cloud_records_consent_required')?'请先在手机启用云记录':'云记录待重试';};
+  const recordError=(e:unknown)=>{const text=String(e);if(contentRecovery(e))throw e;if(/library_epoch_mismatch|cloud_operation_superseded|账号|client_upgrade_required|device_attestation|commitment|library_owner_mismatch/.test(text))throw e;recordFailure=text.includes('cloud_record_count_limit')?'云记录数量已达上限':text.includes('cloud_quota_exceeded')?'云记录空间不足':text.includes('cloud_records_consent_required')?'请先在手机启用云记录':'云记录待重试';};
   try{records=await s.records(bootstrap,current);if(await records.pull())this.ports.onChanged?.();}catch(e){recordError(e);}
 
   const heads=await s.client.snapshotHeads();heads.forEach(headValid);
@@ -97,7 +104,7 @@ export class WatchCloudSyncService {
    if(bytes&&(bytes.length!==h.manifestSizeBytes||await this.ports.hash(bytes)!==h.manifestSha256))bytes=undefined;
    bytes??=await s.client.download(remote.manifestUrl,h.manifestSizeBytes,h.manifestSha256);
    const manifest=await this.manifest(s,h,bytes);
-   const selected=manifest.objects.filter(o=>o.name==='rss-state.json'||(full&&(o.name==='library-sync.json'||o.name==='private-library.wrss'||o.name.startsWith('reader/'))));
+   const selected=manifest.objects.filter(o=>o.name==='rss-state.json'||(full&&(o.name==='library-sync.json'||o.name==='private-library.wrss'||o.name.startsWith('reader/')||!!o.privateBook)));
    const descriptors=new Map(remote.chunks.map(c=>[c.sha256,c]));
    const key=await s.keys.accountKey(s.userId,h.keyVersion);if(!key)throw Error('缺少账号密钥');let headPending=0;
    try{const payload=new Map<string,Uint8Array>();for(const object of selected)try{
@@ -120,7 +127,7 @@ export class WatchCloudSyncService {
   // Flush after all public refreshes and merges. Failures stay in the records lane.
   if(records&&!recordFailure)try{try{await records.flush();}catch(e){if(!String(e).includes('cloud_record_conflict'))throw e;await records.pull();await records.flush();}}catch(e){recordError(e);}
   const version=await s.keys.currentKeyVersion(s.userId),payload=await s.library.exportPayloads(full);
-  const contentHash=await this.ports.hash(utf8Encode(`v3:${bootstrap.libraryEpoch}:${version}:${payload.fingerprint}`));
+  const contentHash=await this.ports.hash(utf8Encode(`v3:${bootstrap.libraryEpoch}:${content.contentGeneration}:${version}:${payload.fingerprint}`));
   const fresh=await s.client.snapshotHeads();fresh.forEach(headValid);
   // Do not claim to have observed a head that arrived while we were merging.
   if(fresh.length!==heads.length||fresh.some(h=>!heads.some(old=>old.id===h.id&&old.manifestSha256===h.manifestSha256)))throw Error('云资料已更新，请重试');
@@ -133,16 +140,16 @@ export class WatchCloudSyncService {
   const sameContent=previous?.settings.snapshotContentLayout===3&&previous.settings.libraryEpoch===bootstrap.libraryEpoch&&previous.settings.snapshotContentHashV3===contentHash;
   const now=(this.ports.now??Date.now)();
   const throttled=!manual&&previous&&now-previous.createdAtMillis<10*60*1000;
-  let completedPrivateArticleIds:readonly string[]=full&&sameContent?payload.articleIds??[]:[];
+  let completedPrivateArticleIds:readonly string[]=full&&sameContent?payload.articleIds??[]:[];let completedBookIds:readonly string[]=full&&sameContent&&previous?.settings.privateBodyFingerprintV2===payload.fingerprint&&Array.isArray(previous.settings.privateBodyBookIds)?previous.settings.privateBodyBookIds.filter((id):id is string=>typeof id==='string'&&(payload.bookIds??[]).includes(id)):[];
   if(full&&!recordFailure&&!sameContent&&!throttled&&(payload.objects.length>0||!!own&&!payload.pendingPrivateArticles)){
    const key=await s.keys.accountKey(s.userId,version);if(!key)throw Error('当前账号主密钥不存在');
    let attemptedId:string|undefined;
    try{
     const saved=await s.cache.pending(s.userId);let pending:CloudManifest|undefined;
-    if(saved)try{const m=await s.codec.decryptManifest(key,saved.id,saved.bytes);if(m.sourceDeviceId===s.deviceId&&m.keyVersion===version&&m.settings.libraryEpoch===bootstrap.libraryEpoch&&m.settings.snapshotContentLayout===3)pending=m;}catch{/* Authentication failure never licenses ciphertext reuse. */}
+    if(saved)try{const m=await s.codec.decryptManifest(key,saved.id,saved.bytes);if(m.sourceDeviceId===s.deviceId&&m.keyVersion===version&&m.settings.libraryEpoch===bootstrap.libraryEpoch&&m.settings.snapshotContentLayout===3&&m.settings.contentGeneration===content.contentGeneration)pending=m;}catch{/* Authentication failure never licenses ciphertext reuse. */}
     if(pending)previous=pending;
-    let snapshot=await s.codec.create({accountKey:key,keyVersion:version,sourceDeviceId:s.deviceId,sequence:await s.state.nextSequence(Math.max(bootstrap.devices.find(d=>d.deviceId===s.deviceId)?.lastSequence??0,...fresh.filter(h=>h.sourceDeviceId===s.deviceId).map(h=>h.deviceSequence))),snapshotId:await this.ports.uuid(),createdAtMillis:(this.ports.now??Date.now)(),objects:payload.objects,settings:{snapshotContentLayout:3,libraryEpoch:bootstrap.libraryEpoch,snapshotContentHashV3:contentHash,podjsPrivateBodyFingerprintV3:payload.fingerprint},parentHeads:Object.fromEntries(fresh.map(h=>[h.sourceDeviceId,h.id])),observedHeads:Object.fromEntries(await Promise.all(fresh.map(async h=>[h.sourceDeviceId,Math.min(h.deviceSequence,await s.state.applied(h.sourceDeviceId,full))]))),previous});
-    if(pending&&saved&&JSON.stringify(pending.objects)===JSON.stringify(snapshot.manifest.objects)&&
+    let snapshot=await s.codec.create({accountKey:key,keyVersion:version,sourceDeviceId:s.deviceId,sequence:await s.state.nextSequence(Math.max(bootstrap.devices.find(d=>d.deviceId===s.deviceId)?.lastSequence??0,...fresh.filter(h=>h.sourceDeviceId===s.deviceId).map(h=>h.deviceSequence))),snapshotId:await this.ports.uuid(),createdAtMillis:(this.ports.now??Date.now)(),objects:payload.objects,settings:{contentGeneration:content.contentGeneration,snapshotContentLayout:3,libraryEpoch:bootstrap.libraryEpoch,snapshotContentHashV3:contentHash,podjsPrivateBodyFingerprintV3:payload.fingerprint,privateBodyFingerprintV2:payload.fingerprint,privateBodyBookIds:payload.bookIds??[],privateBodyArticleIds:payload.articleIds??[]},parentHeads:Object.fromEntries(fresh.map(h=>[h.sourceDeviceId,h.id])),observedHeads:Object.fromEntries(await Promise.all(fresh.map(async h=>[h.sourceDeviceId,Math.min(h.deviceSequence,await s.state.applied(h.sourceDeviceId,full))]))),previous});
+    if(!freshPlan&&pending&&saved&&JSON.stringify(pending.objects)===JSON.stringify(snapshot.manifest.objects)&&
       sameRecord(pending.parentHeads,snapshot.manifest.parentHeads)&&sameRecord(pending.observedHeads,snapshot.manifest.observedHeads)&&
       (this.ports.now??Date.now)()-pending.createdAtMillis>=0&&(this.ports.now??Date.now)()-pending.createdAtMillis<23*60*60*1000){
      snapshot={manifest:{...pending,allChunks:pending.objects.flatMap(o=>o.chunks)},encryptedManifest:saved.bytes,newChunks:new Map()};
@@ -156,17 +163,17 @@ export class WatchCloudSyncService {
      await current();if(target.kind==='manifest'?(target.sha256!==manifestHash||target.sizeBytes!==snapshot.encryptedManifest.length):(target.kind!=='chunk'||allowed.get(target.sha256)!==target.sizeBytes))throw Error('无效上传目标');
      const bytes=target.kind==='manifest'?snapshot.encryptedManifest:await s.cache.chunk(s.userId,target.sha256);if(!bytes)throw Error('待上传中继块缺失');await s.uploader.upload(target,bytes);
     }
-    await current();await s.assertUpload?.();await s.client.completeSnapshot(snapshot.manifest.snapshotId,[...allowed.keys()]);completedPrivateArticleIds=payload.articleIds??[];
+    await current();await s.assertUpload?.();await s.client.completeSnapshot(snapshot.manifest.snapshotId,[...allowed.keys()]);completedPrivateArticleIds=payload.articleIds??[];completedBookIds=payload.bookIds??[];
     await current();await s.cache.storeManifest(s.userId,snapshot.manifest.snapshotId,snapshot.encryptedManifest,true);
     await s.cache.clearPending(s.userId,snapshot.manifest.snapshotId);
     await s.state.markApplied(s.deviceId,snapshot.manifest.deviceSequence,false);
     if(full){await s.state.markApplied(s.deviceId,snapshot.manifest.deviceSequence,true);await s.state.markUploaded(contentHash,true);}
    }catch(error){
-    if(attemptedId&&/invalid_snapshot|invalid_device_sequence/.test(error instanceof Error?error.message:''))await s.cache.clearPending(s.userId,attemptedId);
+    if(attemptedId&&!contentRecovery(error)&&/invalid_snapshot|invalid_device_sequence/.test(error instanceof Error?error.message:''))await s.cache.clearPending(s.userId,attemptedId);
     throw error;
    }finally{key.fill(0);}
   }
-  if(records&&!recordFailure&&completedPrivateArticleIds.length)try{await records.flush(completedPrivateArticleIds);}catch(e){recordError(e);}
+  if(records&&!recordFailure&&(completedPrivateArticleIds.length||completedBookIds.length))try{await records.flush(completedPrivateArticleIds,completedBookIds);}catch(e){recordError(e);}
   const deferred=!!(full&&!sameContent&&throttled);
   pendingItems+=payload.pendingPrivateArticles??0;
   this.value={...this.value,pendingItems,abandonedItems,...(deferred?{retryAtMillis:previous!.createdAtMillis+10*60*1000}:{})};

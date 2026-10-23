@@ -12,16 +12,19 @@ const sha256=async(b:Uint8Array)=>new Bun.CryptoHasher('sha256').update(b).diges
 const captured=new Map(fixture.payloads.map(p=>[encodeBodyJson(p.article),new Uint8Array(Buffer.from(p.encodedBase64,'base64'))]));
 const codec:SyncBodyCodec={sha256,encode:async b=>captured.get(encodeBodyJson(b))??gzipSync(encodeBodyJson(b)),decode:async b=>gunzipSync(b).toString('utf8')};
 const text:SyncTextPort={parseUri:async value=>{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};},htmlText:async html=>{const p=fixture.payloads.find(p=>p.article.contentHtml===html);if(!p)throw new Error('Uncaptured HTML input');return p.article.contentText;}};
+// Keep the Android capture intact, but explicitly correct its reproduced
+// save-cancellation-as-delete bug. This is a protocol fix, not a new capture.
+const correctedNative=(rows:typeof fixture.first)=>rows.map(m=>m.articleId==='77e55e3b6e833521d40af49daafbd6f6b9bf053c1a2c390e2066def9e51e7c44'?{...m,deleted:false,deletedAt:0,metadataHash:'9fb1b4250c4d6e5a99e6738ea9508d50b99bfc5f8f4b312aacc52b8b6d9b4b97'}:m);
 async function setup(){const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as any,execute:async(q,p=[])=>{sql.query(q).run(...p as any[]);},transaction:async list=>{sql.transaction(()=>{for(const s of list)sql.query(s.sql).run(...(s.params??[]) as any[]);})();}};const content=new Map<string,string>(),files={storeText:async(k:string,v:string)=>{const m='marker:'+k;content.set(m,v);return m;},hydrate:async(v:string)=>{if(v==='@missing')throw new Error('missing');if(!v.startsWith('marker:'))return v;if(!content.has(v))throw new Error('missing');return content.get(v)!;}};await seedLocalManifestFixture(db,files,text,codec);return {sql,db,files,store:new LocalArticleManifestStore(db,codec,text,files,async()=>{})};}
 test('metadata hash matches Android JSONObject for every native exported article',async()=>{for(const row of fixture.articles)expect(await articleMetadataHash(row.article as ExportedArticle,codec)).toBe(row.metadataHash);});
-test('real SQL library export matches first and repeated native Room manifests',async()=>{const f=await setup();try{const first=await f.store.snapshot();expect(first.map(p=>p.manifest)).toEqual(fixture.first);const second=await f.store.snapshot();expect(second.map(p=>p.manifest)).toEqual(fixture.second);
+test('real SQL library export preserves native manifests except the fixed save-cancellation deletion bug',async()=>{const f=await setup();try{const first=await f.store.snapshot();expect(first.map(p=>p.manifest)).toEqual(correctedNative(fixture.first));const second=await f.store.snapshot();expect(second.map(p=>p.manifest)).toEqual(correctedNative(fixture.second));
  for(const p of second){if(!p.manifest.bodyAvailable){expect(()=>bodyForRequest(p,{articleId:p.article.articleId,bodyHash:'',chunkIndexes:[],metadataOnly:false})).toThrow('unavailable');continue;}const materialized=await f.store.materializeRequested(p);const full=bodyForRequest(materialized,{articleId:p.article.articleId,bodyHash:'stale',chunkIndexes:[999],metadataOnly:true});expect(full.metadataOnly).toBe(false);expect(full.chunks.length).toBe(p.manifest.chunkHashes.length);const meta=bodyForRequest(materialized,{articleId:p.article.articleId,bodyHash:p.manifest.bodyHash,chunkIndexes:[],metadataOnly:true});expect(meta.chunks).toEqual([]);expect(meta.metadataOnly).toBe(true);}
  }finally{f.sql.close();}});
 test('cached body metadata skips compression until requested and invalidates after a body edit',async()=>{const f=await setup();try{
  let encodes=0;const byArticle=new Map<string,number>();const counting={...codec,encode:async(article:ExportedArticle)=>{encodes++;byArticle.set(article.articleId,(byArticle.get(article.articleId)??0)+1);return codec.encode(article);}};
  const store=new LocalArticleManifestStore(f.db,counting,text,f.files,async()=>{});
  const first=await store.snapshot(),initialEncodes=encodes,firstCounts=new Map(byArticle);expect(initialEncodes).toBeGreaterThan(0);
- const second=await store.snapshot();expect(first.map(row=>row.manifest)).toEqual(fixture.first);expect(second.map(row=>row.manifest)).toEqual(fixture.second);
+ const second=await store.snapshot();expect(first.map(row=>row.manifest)).toEqual(correctedNative(fixture.first));expect(second.map(row=>row.manifest)).toEqual(correctedNative(fixture.second));
  const deferred=second.find(row=>row.manifest.bodyAvailable&&row.encodedBody===null);expect(deferred).toBeDefined();
  const deferredId=deferred!.article.articleId;expect(byArticle.get(deferredId)).toBe(firstCounts.get(deferredId));
  const beforeRequest=encodes,materialized=await store.materializeRequested(deferred!);expect(materialized.manifest).toEqual(deferred!.manifest);expect(materialized.encodedBody).not.toBeNull();expect(encodes).toBe(beforeRequest+1);
@@ -87,7 +90,7 @@ test('ordinary unsaved feed rows do not load bodies while preparing the sync man
   let unsavedBodyReads=0,unsavedUriReads=0,metadataFirstPages=0;const migrated:number[]=[];
   const db:SqlDatabase={...f.db,query:async(sql,params)=>{
    if(sql.includes('SELECT content AS value FROM articles WHERE id=?')&&Number(params?.[0])>=1000)unsavedBodyReads++;
-   if(sql.startsWith('SELECT a.id,a.channel_id')&&sql.includes('ORDER BY a.fetched_at')&&params?.at(-1)===0)metadataFirstPages++;
+   if(sql.startsWith('SELECT a.id FROM articles a JOIN channels ch')&&params?.at(-1)===0)metadataFirstPages++;
    return f.db.query(sql,params);
   }};
   const syncText={...text,parseUri:async(value:string)=>{if(value.includes('/unsaved-'))unsavedUriReads++;return text.parseUri(value);}};

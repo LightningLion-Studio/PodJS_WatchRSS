@@ -5,6 +5,7 @@ import {WatchTokenManager} from '../../src/account/token';
 import {revokeAccountCloud,clearAccountCloud} from '../../src/account/cloud-cleanup';
 import type {WatchAccountState} from '../../src/account/types';
 import type {HttpTransport} from '../../src/cloud/types';
+import {contentFixture} from '../cloud/content-fixture';
 const epoch='9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff';
 const account:WatchAccountState={userId:'logout-user',backendBaseUrl:'https://backend.invalid',watchDeviceToken:'expired-bearer',watchRefreshToken:'refresh',tokenExpiresAtMillis:1,refreshTokenExpiresAtMillis:9e15,installId:'i',phoneMasked:'',posthogHost:'',posthogProjectApiKey:'',updatedAtMillis:1,entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},telemetryConfig:{anonymousEnabled:true,diagnosticsEnabled:false,sampleRate:1}};
 const response=(value:unknown,status=200)=>({status,headers:{},body:new TextEncoder().encode(JSON.stringify(value))});
@@ -14,7 +15,7 @@ async function fixture(mode:'ok'|'401'|'503'|'malformed'|'network'|'revoke-fails
  const http:HttpTransport={request:async r=>{
   if(r.url.endsWith('/refresh')){events.push('refresh');expect(JSON.parse(Buffer.from(r.body!).toString())).toEqual({refreshToken:'refresh'});expect(r.headers.authorization).toBeUndefined();if(mode==='network')throw Error('offline');if(mode==='401'||mode==='503')return response({},Number(mode));return response(mode==='malformed'?{}:{watchAccessToken:'fresh-bearer',watchRefreshToken:'rotated-refresh',accessTokenExpiresAt:9e15,refreshTokenExpiresAt:9e15});}
   expect(r.headers.authorization).toBe('Bearer fresh-bearer');
-  if(r.url.endsWith('/bootstrap')){events.push('bootstrap');return response({libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[],member:{},devices:[],keyEnvelopes:[]});}
+  if(r.url.endsWith('/bootstrap')){events.push('bootstrap');return response({...contentFixture,libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[],member:{},devices:[],keyEnvelopes:[]});}
   expect(r.url).toEndWith('/cloud/devices/watch/revoke');events.push('revoke');expect(r.headers['x-watchrss-library-epoch']).toBe(epoch);return response({},mode==='revoke-fails'?503:200);
  }};
  const host=async<T>(method:string,args:any):Promise<T>=>{

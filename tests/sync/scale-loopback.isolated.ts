@@ -64,7 +64,7 @@ async function exchange(serverRepo:SqlLibrarySessionRepository,phone:Awaited<Ret
   const result=await running;expect(result.at(-1)?.libraryApplied).toBe(!options.dropFinalAck);
   if(!options.dropFinalAck)await phone.repo.markSuccess({remoteDeviceId:'watch',localSeqToInclusive:window.toSeqInclusive,remoteSeqToInclusive:Number((response.changeSeqRange as JsonObject).toInclusive),remoteProtocolVersion:14,fullSnapshot:window.fullSnapshot});
   return {interrupted:false,completed,requests,fullBodies,frames,elapsedMs:performance.now()-started,phases,wireBytes:a.bytes()+b.bytes()};
- }finally{await b.conn.close();await a.conn.close();await running.catch(()=>{});}
+ }finally{console.log('T39 exchange progress '+JSON.stringify({options,elapsedMs:performance.now()-started,completed,requests,frames,phases}));await b.conn.close();await a.conn.close();await running.catch(()=>{});}
 }
 // Each exchange uses actual localhost TCP and production framing/coordinator/SQLite repositories.
 const activeSockets=new Set<Socket>();

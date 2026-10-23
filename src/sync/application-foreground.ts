@@ -25,6 +25,7 @@ export type ApplicationSyncEvent = Readonly<
  | {type:'error';message:string}
  | {type:'completed';action:string;success:boolean;message:string;count:number;received:number;applied:number}
 >;
+export const didApplyLibrary=(result:SessionActionResult)=>result.libraryApplied&&(result.request.action==='syncBooks'?Number(result.response.applied)>0:result.request.action==='syncLibrary'&&result.request.phase!=='probe'&&Number((result.response.stats as Record<string,unknown>|undefined)?.applied)>0);
 const OWNER='rfcomm-bootstrap';
 /** Application lifetime binding. UI navigation does not own the native listener. */
 export class ApplicationForegroundSync {
@@ -94,7 +95,7 @@ export class ApplicationForegroundSync {
     acquireMedia:owner=>{if(!this.disposed)void this.enqueue(()=>this.ports.silence.lease(owner,true));},
     releaseMedia:owner=>{void this.enqueue(()=>this.ports.silence.lease(owner,false));},
     onError:error=>{this.status('failed');this.report(error);},
-   },{...options,onActionCompleted:result=>{options.onActionCompleted?.(result);if(result.request.action==='syncLibrary')this.ports.onLibraryChanged?.();this.completed(result);}});
+   },{...options,onActionCompleted:result=>{options.onActionCompleted?.(result);this.completed(result);},onSessionClosed:results=>{options.onSessionClosed?.(results);if(results.some(didApplyLibrary))this.ports.onLibraryChanged?.();}});
    await this.enqueue(()=>this.ports.silence.setEnabled(this.mediaEnabled));if(this.disposed)return;
    this.status('idle');await this.refresh();
   }catch(error){this.status('failed');this.report(error);throw error;}

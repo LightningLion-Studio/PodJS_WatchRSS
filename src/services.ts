@@ -1,3 +1,4 @@
+import {createBookFiles} from './books/files-port';
 import {isLocalOnlyRssSource} from './cloud/rss-identity';
 import {resolvePoolFeed,poolFeedXml} from './cloud/rss-pool';
 import {createCloudTransport} from './cloud/transport';
@@ -14,7 +15,7 @@ import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
 import {ImportedArticleDeletion} from "./core/imported-article-deletion.ts";
 import {ExternalSavedStore} from "./core/external-saved.ts";
 import {DouyinSavedStore} from "./douyin/saved.ts";
-import {readTokenUsageForSync} from './sync/token-usage.ts';
+import {readTokenUsageForSync,readTokenUsagePage} from './sync/token-usage.ts';
 import {builtinForInput,type BuiltinChannel} from './core/builtin-channels.ts';
 import {managedCache} from './cache/host.ts';
 import {readSavedLinks,type SavedLinkType} from './sync/saved-links.ts';
@@ -52,6 +53,7 @@ import { initializeSchema, WatchRssRepository, htmlToText, parseFeed, resolveUrl
 import type { SqlDatabase } from "./core/types.ts";
 import type { AppServices, Article, ArticleQuery, Note, AddChannelPreview } from "./ui/service.ts";
 
+export async function getTokenUsagePageForSync(options:Parameters<typeof readTokenUsagePage>[1]){await init();return readTokenUsagePage(db,options);}
 export async function getTokenUsageForSync(limit:number){await init();return readTokenUsageForSync(db,limit);}
 export async function getSavedLinksForSync(type:SavedLinkType):Promise<string[]> {
   await init();
@@ -60,9 +62,9 @@ export async function getSavedLinksForSync(type:SavedLinkType):Promise<string[]>
 
 export const db: SqlDatabase = {
   query: (sql, params, traceLabel) => sqlite.query(sql, params as (string | number | null)[],traceLabel),
-  execute: async (sql, params, traceLabel) => {await sqlite.execute(sql, params as (string | number | null)[],traceLabel);notifyLibrarySqlCommit([{sql}]);},
-  transaction: async statements => {await sqlite.transaction(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements);},
-  transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);if(changes.some(n=>n>0))notifyLibrarySqlCommit(statements);return changes;},
+  execute: async (sql, params, traceLabel) => {const count=await sqlite.executeChanges(sql, params as (string | number | null)[],traceLabel);notifyLibrarySqlCommit([{sql}],[count]);},
+  transaction: async statements => {const counts=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,counts);},
+  transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,changes);return changes;},
 };
 const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
 const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
@@ -395,6 +397,7 @@ let librarySyncRepository:SqlLibrarySessionRepository|undefined;
 export async function getLibrarySyncRepository():Promise<SqlLibrarySessionRepository>{
  await init();
  return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
+  bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),
   codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},
   files:{storeText:(key,text)=>importedTextWriter.storeText(key,text),hydrate:hydrateStoredContent},
   migrateReading:id=>sqlReadingProgress.migrate(id),migrateReadingMany:ids=>sqlReadingProgress.migrateMany(ids),cleanupRemovedContent,

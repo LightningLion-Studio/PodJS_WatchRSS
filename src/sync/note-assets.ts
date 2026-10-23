@@ -1,8 +1,12 @@
 import type {JsonObject} from './protocol.ts';
 import {wireFields} from './article-batches.ts';
 const CHUNK_BYTES=512*1024;
+export interface NoteAssetInventory {storageKey:string;sha256:string;size:number}
+export function parseNoteAssetInventory(value:unknown):NoteAssetInventory[]{
+ if(!Array.isArray(value))throw Error('Invalid note asset inventory');return value.map(v=>{const r=v as NoteAssetInventory;if(!r||typeof r.storageKey!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(r.storageKey)||typeof r.sha256!=='string'||! /^[a-f0-9]{64}$/.test(r.sha256)||!Number.isSafeInteger(r.size)||r.size<0)throw Error('Invalid note asset inventory row');return {storageKey:r.storageKey,sha256:r.sha256,size:r.size};});
+}
 export interface NoteAssetFiles {
- stat(path:string):Promise<{file:boolean;size:number}>;
+ stat(path:string):Promise<{file:boolean;size:number;modified?:number}>;
  hash(path:string):Promise<{sha256:string;size:number}>;
  remove(path:string):Promise<void>;
  write(path:string,dataBase64:string):Promise<{size:number}>;
@@ -15,6 +19,11 @@ function required(request:JsonObject,key:string):string{if(request[key]===undefi
 export class NoteAssetReceiver {
  private queue:Promise<unknown>=Promise.resolve();
  constructor(private readonly files:NoteAssetFiles){}
+ async inventory(input:unknown):Promise<NoteAssetInventory[]> {
+  const rows=parseNoteAssetInventory(input),verified:NoteAssetInventory[]=[];
+  for(const r of rows){const path='notes/assets/'+r.storageKey;try{const stat=await this.files.stat(path);if(!stat.file||stat.size!==r.size)continue;const hash=await this.files.hash(path);const after=await this.files.stat(path);if(after.file&&after.size===r.size&&(stat.modified===undefined||after.modified===stat.modified)&&hash.size===r.size&&hash.sha256.toLowerCase()===r.sha256)verified.push(r);}catch{/* Missing or concurrently removed files are sent again. */}}
+  return verified;
+ }
  apply(request:JsonObject):Promise<JsonObject>{const job=this.queue.then(()=>this.receive(request));this.queue=job.catch(()=>{});return job;}
  private async receive(request:JsonObject):Promise<JsonObject>{
   if(wireFields.optInt(request,'version')!==1)throw new Error('不支持的备忘录图片同步版本');

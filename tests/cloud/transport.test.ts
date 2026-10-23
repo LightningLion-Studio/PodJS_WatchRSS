@@ -1,3 +1,4 @@
+import {contentFixture} from './content-fixture';
 import {test,expect} from 'bun:test';
 import {createCloudTransport} from '../../src/cloud/transport';
 import {WatchCloudClient} from '../../src/cloud/client';
@@ -20,7 +21,7 @@ test('large PATCH uses bounded chunks/bodyPath, response file validation and cle
 });
 test('401 refreshes once; signed GET has no credentials; recent128/all public inventories remain explicit',async()=>{
  const seen:{url:string;headers:Record<string,string>}[]=[];const refresh:boolean[]=[];let token='old';
- const client=new WatchCloudClient({request:async r=>{seen.push({url:r.url,headers:{...r.headers}});if(r.headers.authorization==='Bearer old')return {status:401,headers:{},body:new Uint8Array()};const json=r.url.endsWith('/resolve')?{source:{id:'feed'}}:r.url.includes('/entries?')?{source:{title:'Feed'},entries:[{id:1,title:'entry'}]}:{member:{}};return {status:200,headers:{},body:utf8Encode(JSON.stringify(json))};}},{baseUrl:'https://backend.invalid',accessToken:'unused',refreshToken:async force=>{refresh.push(force);if(force)token='new';return token;}},crypto,enabled);
+ const client=new WatchCloudClient({request:async r=>{seen.push({url:r.url,headers:{...r.headers}});if(r.headers.authorization==='Bearer old')return {status:401,headers:{},body:new Uint8Array()};const json=r.url.endsWith('/resolve')?{source:{id:'feed'}}:r.url.includes('/entries?')?{source:{title:'Feed'},entries:[{id:1,title:'entry'}]}:{...contentFixture,member:{}};return {status:200,headers:{},body:utf8Encode(JSON.stringify(json))};}},{baseUrl:'https://backend.invalid',accessToken:'unused',refreshToken:async force=>{refresh.push(force);if(force)token='new';return token;}},crypto,enabled);
  await client.bootstrap();expect(refresh).toEqual([false,true]);expect(seen.map(r=>r.headers.authorization)).toEqual(['Bearer old','Bearer new']);
  expect((await client.resolveRssSource('https://feed.invalid/rss','all')).items[0].url).toBe('https://feed.invalid/rss?watchrss_entry=1');await client.resolveRssSource('https://feed.invalid/rss');expect(seen.some(r=>r.url.endsWith('limit=all'))).toBe(true);expect(seen.some(r=>r.url.endsWith('limit=128'))).toBe(true);
 });

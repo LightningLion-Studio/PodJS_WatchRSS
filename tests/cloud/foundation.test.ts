@@ -1,3 +1,4 @@
+import {contentFixture} from './content-fixture';
 import {test,expect} from 'bun:test';
 import {createHash,randomBytes,hkdfSync,createCipheriv,createDecipheriv,generateKeyPairSync,diffieHellman,createPublicKey,type KeyObject} from 'node:crypto';
 import {gzipSync,gunzipSync} from 'node:zlib';

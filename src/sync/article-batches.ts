@@ -1,3 +1,4 @@
+import {parseLegacyArticleIds,assertUniqueArticleAliases} from './article-aliases';
 import {ACTION_SYNC_LIBRARY,PHASE_ARTICLES,decodeChunkData,type JsonObject} from "./protocol.ts";
 import {isWireInteger,wireNumberToken} from "./wire-json.ts";
 import {validateBodyShape,type SyncBodyPayload,type SyncBodyChunk} from "./article-body.ts";
@@ -24,7 +25,7 @@ function strictInteger(parent:JsonObject,key:string,fallback:number,min:number,m
  const v=parent[key];if(!isWireInteger(parent,key)||Number(v)<min||Number(v)>max)throw new Error(`invalid body integer: ${key}`);return Number(v);
 }
 export interface RequestedArticleBody {articleId:string;bodyHash:string;chunkIndexes:readonly number[];metadataOnly:boolean}
-export interface WireIncomingArticle extends IncomingArticle {contentHash:string;independentSaved:boolean;independentChangedAt:number;independentSortOrder:number;deletedAt:number}
+export interface WireIncomingArticle extends IncomingArticle {legacyArticleIds?:readonly string[];contentHash:string;independentSaved:boolean;independentChangedAt:number;independentSortOrder:number;deletedAt:number}
 export interface ReceivedArticle {article:WireIncomingArticle;body:SyncBodyPayload}
 export interface ArticleBatchReceipt {frameCount:number;receivedArticles:number;committedArticles:number;bodyRequests:readonly RequestedArticleBody[]}
 export function validateArticleRequestFrame(frame:JsonObject,index:number,count?:number):number{
@@ -45,6 +46,7 @@ export function parseBodyRequests(frame:JsonObject):RequestedArticleBody[]{
  }return out;
 }
 function merge(first:ReceivedArticle,next:ReceivedArticle):ReceivedArticle{
+ if(JSON.stringify(first.article.legacyArticleIds)!==JSON.stringify(next.article.legacyArticleIds))throw Error('Conflicting article aliases');
  const a=first.body,b=next.body;
  if(a.bodyHash!==b.bodyHash||a.bodyByteCount!==b.bodyByteCount||a.chunkSize!==b.chunkSize||a.metadataOnly!==b.metadataOnly||a.chunkHashes.length!==b.chunkHashes.length||a.chunkHashes.some((h,i)=>h!==b.chunkHashes[i]))throw new Error("conflicting article body metadata");
  const chunks=new Map<number,SyncBodyChunk>();
@@ -62,7 +64,7 @@ export function parseChunkedArticles(frame:JsonObject):ReceivedArticle[]{
   const chunks:SyncBodyChunk[]=[];
   for(const rawChunk of Array.isArray(bodyObject.chunks)?bodyObject.chunks:[]){const c=object(rawChunk);if(!c)continue;const data=string(c.data);if(!trim(data))continue;chunks.push({index:optInt(c,"index"),hash:trim(string(c.hash)),bytes:decodeChunkData(data)});}
   const body:SyncBodyPayload={articleId,bodyHash:trim(string(bodyObject.bodyHash)),bodyByteCount:strictInteger(bodyObject,"bodyByteCount",-1,Number.MIN_SAFE_INTEGER,Number.MAX_SAFE_INTEGER),chunkSize:strictInteger(bodyObject,"chunkSize",-1,-2147483648,2147483647),chunkHashes:(hashes as string[]).map(h=>{const value=trim(h);if(!value)throw new Error("empty body chunk hash");return value;}),chunks,metadataOnly:bool(bodyObject.metadataOnly)};
-  const article:WireIncomingArticle={articleId,url,sourceDeviceId:trim(string(item.sourceDeviceId))?string(item.sourceDeviceId):string(item.deviceId),title:trim(string(item.title))||url,siteName:trim(string(item.siteName)),excerpt:trim(string(item.excerpt)),imageUrl:trim(string(item.imageUrl))||null,
+  const article:WireIncomingArticle={articleId,url,...(item.legacyArticleIds===undefined?{}:{legacyArticleIds:parseLegacyArticleIds(item.legacyArticleIds)}),sourceDeviceId:trim(string(item.sourceDeviceId))?string(item.sourceDeviceId):string(item.deviceId),title:trim(string(item.title))||url,siteName:trim(string(item.siteName)),excerpt:trim(string(item.excerpt)),imageUrl:trim(string(item.imageUrl))||null,
    contentHash:trim(string(item.contentHash)),independentSaved:bool(item.independentSaved,!bool(item.favoriteSaved)&&!bool(item.watchLaterSaved)&&!bool(item.deleted)&&!trim(string(item.rssSourceUrl))),independentChangedAt:optLong(item.independentChangedAt),independentSortOrder:optLong(item.independentSortOrder),deletedAt:optLong(item.deletedAt),
    importedAt:optLong(item.importedAt),updatedAt:optLong(item.updatedAt),rssSourceUrl:trim(string(item.rssSourceUrl))||null,rssSourceTitle:trim(string(item.rssSourceTitle))||null,
    favoriteSaved:bool(item.favoriteSaved),favoriteChangedAt:optLong(item.favoriteChangedAt),favoriteSortOrder:optLong(item.favoriteSortOrder),watchLaterSaved:bool(item.watchLaterSaved),watchLaterChangedAt:optLong(item.watchLaterChangedAt),watchLaterSortOrder:optLong(item.watchLaterSortOrder),
@@ -74,7 +76,7 @@ export function parseChunkedArticles(frame:JsonObject):ReceivedArticle[]{
 export function parseChunkedArticleFrames(frames:readonly JsonObject[]):ReceivedArticle[]{
  const articles=new Map<string,ReceivedArticle>();
  for(const frame of frames)for(const item of parseChunkedArticles(frame)){const old=articles.get(item.article.articleId);articles.set(item.article.articleId,old?merge(old,item):item);}
- return [...articles.values()];
+ const result=[...articles.values()];assertUniqueArticleAliases(result.map(r=>r.article));return result;
 }
 
 /** Article phase only. The selected requests must come from the manifest
@@ -90,6 +92,7 @@ export class ArticleBatchReceiver {
  private done=false;
  private failure:Error|null=null;
  private tail:Promise<unknown>=Promise.resolve();
+ private readonly aliases=new Map<string,string>();
  private readonly selected=new Map<string,RequestedArticleBody>();
  constructor(selected:readonly RequestedArticleBody[],private readonly commit:(article:ReceivedArticle)=>Promise<void>,private readonly options:{ignoreIncoming?:boolean;flushCompleteArticles?:boolean}={}){
   for(const request of selected){if(this.selected.has(request.articleId))throw new Error("duplicate selected article");this.selected.set(request.articleId,{...request,chunkIndexes:[...request.chunkIndexes]});}
@@ -107,6 +110,7 @@ export class ArticleBatchReceiver {
    this.check();if(this.done)throw new Error("article phase already complete");
    const count=validateArticleRequestFrame(frame,this.frameIndex,this.count);this.count=count;
    const entries=parseChunkedArticles(frame),requests=parseBodyRequests(frame),ready:ReceivedArticle[]=[];
+   assertUniqueArticleAliases(entries.map(e=>e.article),this.aliases);
    for(const entry of entries){
     if(!this.options.ignoreIncoming){
      const request=this.selected.get(entry.article.articleId);if(!request||request.bodyHash!==entry.body.bodyHash||request.metadataOnly!==!!entry.body.metadataOnly)throw new Error("unsolicited article body");

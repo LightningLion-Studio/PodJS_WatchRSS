@@ -79,9 +79,12 @@ export async function syncAccount(request: JsonObject, store: Pick<WatchAccountS
   const localDeviceId = await deviceId();
   const state = await parseAccountSyncRequest(request,parseJava);
   const previous=await store.read?.();if(previous&&previous.userId!==state.userId)throw Error('account_switch_rejected: 手表已绑定其他账号，请先退出原账号');
-  await store.save(state);
+  const stable=(v:unknown):unknown=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable((v as Record<string,unknown>)[k])])):v;
+  const content=(value:WatchAccountState)=>JSON.stringify(stable({...value,updatedAtMillis:0}));
+  const changed=!previous||content(previous)!==content(state);
+  if(changed)await store.save(state);
   await telemetry?.recordSyncAccount();
-  onSaved?.();
+  if(changed)onSaved?.();
   return {success:true,version:1,action:'syncAccount',deviceId:localDeviceId,
     boundUserId:state.userId,telemetryBacklog:await telemetry?.backlogCount()??0};
 }

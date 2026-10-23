@@ -1,3 +1,4 @@
+import {matchGzipHash} from '@podjs/framework/crypto';
 import {quoteAndroidJsonString as javaJsonQuote} from '@podjs/framework/json-string';
 /** Port of the validation/reconstruction contract in native ArticleSyncBody. */
 export interface SyncArticleBody {contentHtml:string|null;contentText:string}
@@ -20,7 +21,8 @@ export function validateBodyShape(payload:SyncBodyPayload):void {
 }
 export async function rebuildArticleBody(payload:SyncBodyPayload,local:SyncArticleBody|null,codec:SyncBodyCodec):Promise<SyncArticleBody> {
   validateBodyShape(payload);
-  const localBytes=local?await codec.encode(local):null;
+  let localBytes=local?await codec.encode(local):null;
+  if(localBytes&&localBytes.length===payload.bodyByteCount)localBytes=await matchGzipHash(localBytes,payload.bodyHash,codec.sha256)??localBytes;
   if(local&&localBytes&&localBytes.length===payload.bodyByteCount&&await codec.sha256(localBytes)===payload.bodyHash)return local;
   // Native LibrarySyncPayload rejects conflicting duplicates before rebuildBody.
   const sent=new Map<number,SyncBodyChunk>();
@@ -112,7 +114,7 @@ export async function requireMetadataOnlyBody(payload:SyncBodyPayload,local:Sync
  if(!payload.metadataOnly)throw new Error("同步正文请求不是仅元数据模式");
  if(payload.chunks.length)throw new Error("仅元数据同步包含正文分块");
  if(!available||!stored||!local)throw new Error("仅元数据同步缺少可复用的本地正文");
- const bytes=await codec.encode(local);
+ const encoded=await codec.encode(local),bytes=await matchGzipHash(encoded,payload.bodyHash,codec.sha256)??encoded;
  if(await codec.sha256(bytes)!==payload.bodyHash)throw new Error("同步正文总校验失败");
  if(bytes.length!==payload.bodyByteCount)throw new Error("同步正文长度不匹配");
  const hashes:string[]=[];

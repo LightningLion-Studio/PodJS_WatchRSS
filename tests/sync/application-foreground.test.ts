@@ -29,7 +29,7 @@ test('accepted transfer retains listening through pause and releases screen and 
  const f=fixture();f.repository.resolve(f.repo);await f.runtime.ready;expect(f.resources).toContain('enabled:false');
  f.runtime.setMediaEnabled(true);f.peer();await flush();expect(f.runtime.state).toBe('transferring');expect(f.resources).toContain('screen:rfcomm-bootstrap:true');expect(f.resources).toContain('lease:rfcomm-bootstrap:true');expect(f.resources.indexOf('enabled:true')).toBeLessThan(f.resources.indexOf('lease:rfcomm-bootstrap:true'));
  f.lifecycle('background');f.screen(false);await f.clock.advance(3000);expect(f.sessions[0]!.stops).toBe(0);
- f.sessions[0]!.options.onActionCompleted?.({request:{action:'syncLibrary'},response:{},ack:null,libraryApplied:true});expect(f.changes()).toBe(1);f.sessions[0]!.done.resolve([]);await flush();expect(f.resources.at(-1)).toBe('screen:rfcomm-bootstrap:false');
+ const changed:SessionActionResult={request:{action:'syncLibrary'},response:{stats:{applied:1}},ack:null,libraryApplied:true};f.sessions[0]!.options.onActionCompleted?.(changed);expect(f.changes()).toBe(0);f.sessions[0]!.options.onSessionClosed?.([changed]);expect(f.changes()).toBe(1);f.sessions[0]!.done.resolve([]);await flush();expect(f.resources.at(-1)).toBe('screen:rfcomm-bootstrap:false');
  await f.clock.advance(33000);expect(f.resources).toContain('lease:rfcomm-bootstrap:false');await f.runtime.dispose();expect(f.resources.slice(-3)).toEqual(['screen:rfcomm-bootstrap:false','lease:rfcomm-bootstrap:false','enabled:false']);
 });
 test('stale foreground status cannot reopen a paused application',async()=>{
@@ -53,7 +53,7 @@ test('read-only observers see scalar results and errors without affecting applic
  const result:SessionActionResult={request:{action:'syncLibrary',articles:[{},{}]},response:{success:true,stats:{applied:3}},ack:null,libraryApplied:true};
  f.sessions[0]!.options.onActionCompleted?.(result);
  expect(events.at(-1)).toEqual({type:'completed',action:'syncLibrary',success:true,message:'',count:0,received:2,applied:3});
- expect(Object.isFrozen(events.at(-1))).toBe(true);expect(f.changes()).toBe(1);expect(f.sessions).toHaveLength(1);
+ expect(Object.isFrozen(events.at(-1))).toBe(true);expect(f.changes()).toBe(0);f.sessions[0]!.options.onSessionClosed?.([result]);expect(f.changes()).toBe(1);expect(f.sessions).toHaveLength(1);
  f.sessions[0]!.done.reject(Error('peer gone'));await flush();
  expect(events).toContainEqual({type:'error',message:'peer gone'});expect(f.errors).toHaveLength(1);
  const length=events.length;stop();await f.clock.advance(500);expect(events).toHaveLength(length);
@@ -77,4 +77,15 @@ test('saved native phone setting does not gate Bluetooth initialization or an ac
  await f.runtime.refresh();await f.clock.advance(30000);expect(f.sessions[0].stops).toBe(0);expect(f.runtime.state).toBe('transferring');
  f.lifecycle('background');f.lifecycle('active');await f.runtime.refresh();expect(f.sessions).toHaveLength(1);
  await f.runtime.dispose();
+});
+
+test('BLE v2 only confirmed actual library application notifies; probes and unchanged exchanges stay silent',async()=>{
+ const f=fixture();f.repository.resolve(f.repo);await f.runtime.ready;const completed=f.sessions[0]!.options.onActionCompleted!;
+ for(const value of [
+  {request:{action:'syncLibrary',phase:'probe'},response:{stats:{applied:1}},libraryApplied:true},
+  {request:{action:'syncLibrary',phase:'manifest'},response:{stats:{applied:0}},libraryApplied:true},
+  {request:{action:'syncLibrary',phase:'manifest'},response:{stats:{applied:1}},libraryApplied:false},
+  {request:{action:'syncLlmTokenUsage'},response:{stats:{applied:1}},libraryApplied:false},
+ ])completed({...value,ack:null});expect(f.changes()).toBe(0);
+ const applied:SessionActionResult={request:{action:'syncLibrary',phase:'manifest'},response:{stats:{applied:1}},libraryApplied:true,ack:{success:true,applied:true,phase:'applied',message:''}};completed(applied);expect(f.changes()).toBe(0);f.sessions[0]!.options.onSessionClosed?.([applied]);expect(f.changes()).toBe(1);await f.runtime.dispose();
 });

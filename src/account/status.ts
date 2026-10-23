@@ -4,6 +4,7 @@ import type {WatchCloudPhase} from '../cloud/service.ts';
 export interface AccountCloudStatus {
   message: string;
   usedBytes: number;
+  reservedBytes?: number;
   quotaBytes: number;
   /** Optional so older providers stay valid; the cloud page reads them when present. */
   phase?: WatchCloudPhase;
@@ -20,6 +21,7 @@ function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl
   const own = (cloud.accountId === undefined || cloud.accountId === userId)&&(!cloud.accountScope||cloud.accountScope===JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])) ? cloud : NEUTRAL_CLOUD;
   return {
     message: own.message, usedBytes: own.usedBytes, quotaBytes: own.quotaBytes,
+    ...(own.reservedBytes!==undefined?{reservedBytes:own.reservedBytes}:{}),
     ...(own.phase ? {phase: own.phase} : {}),
     ...(own.lastCompletedAt ? {lastCompletedAt: own.lastCompletedAt} : {}),
   };

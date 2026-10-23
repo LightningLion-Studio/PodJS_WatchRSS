@@ -17,6 +17,12 @@ export class SyncArticleDeletionStore {
   const revision=await libraryRevision(this.db),local=await this.resolveLocal(article);
   if(payload.metadataOnly)await requireMetadataOnlyBody(payload,local?.body??null,!!local?.available,!!local?.hasStoredBody,this.codec);
   else await rebuildArticleBody(payload,local?.available?local.body:null,this.codec);
+  // A delayed delete must not undo a later, durably received keep decision.
+  // Encoding-cache provenance is an accepted sync receipt, not a feed fetch.
+  if(local&&!authoritative){const live=(await this.db.query('SELECT updated_at,source_device_id FROM article_sync_encoding_cache WHERE item_id=?',[local.itemId]))[0];
+   const clock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
+   if(live&&(Number(live.updated_at)>clock||Number(live.updated_at)===clock&&deviceOrder(String(live.source_device_id))>deviceOrder(article.sourceDeviceId||peer)))return 0;
+  }
   const statements:{sql:string;params?:SqlParams}[]=[revisionGuard(revision)],counted:number[]=[];let deletionIndex=-1;
   if(authoritative||article.deletedAt>0){
    const wins=`(?=1 OR NOT EXISTS(SELECT 1 FROM sync_article_deletions WHERE article_id=?) OR ?>COALESCE((SELECT changed_at FROM sync_article_deletions WHERE article_id=?),0) OR (?=COALESCE((SELECT changed_at FROM sync_article_deletions WHERE article_id=?),0) AND ?>COALESCE((SELECT source_order FROM sync_article_deletions WHERE article_id=?),'')))`;

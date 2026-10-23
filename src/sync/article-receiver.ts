@@ -1,8 +1,11 @@
+import {articleState} from './article-provenance';
+import {onlyChangedSql} from '@podjs/framework/sql-changes';
 import {readSyncSqlText} from "./sql-text.ts";
 import type {SqlDatabase,SqlParams} from "../core/types.ts";
 import {isImportedContentUrl} from "../core/imported-content.ts";
 import {javaUtf8Chunks} from "../reader/imported-text-writer.ts";
-import {SyncSavedStateStore,type RemoteSavedState} from "./saved-state.ts";
+import {SyncSavedStateStore,deviceOrder,type RemoteSavedState} from "./saved-state.ts";
+import {libraryRevision,revisionGuard} from './revision';
 import {rebuildArticleBody,requireMetadataOnlyBody,type SyncArticleBody,type SyncBodyPayload,type SyncBodyCodec} from "./article-body.ts";
 
 export interface IncomingArticle {
@@ -31,11 +34,11 @@ export class SyncArticleReceiver {
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec,private readonly files:ArticleReceiveFiles,
   private readonly migrateReading:(id:number)=>Promise<void>,private readonly now=Date.now,private readonly resolveLocal?:LocalBodyResolver){this.saved=new SyncSavedStateStore(db);}
  async receive(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false):Promise<void>{await this.apply(article,payload,remoteDeviceId,authoritative,false);}
- async receiveWithStats(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false,targetItemId?:number):Promise<number>{
+ async receiveWithStats(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false,targetItemId?:number,verifiedTarget=false):Promise<number>{
   if(!this.db.transactionChanges)throw new Error("Counted article receive requires transactionChanges");
-  return this.apply(article,payload,remoteDeviceId,authoritative,true,targetItemId);
+  return this.apply(article,payload,remoteDeviceId,authoritative,true,targetItemId,verifiedTarget);
  }
- private async apply(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative:boolean,counted:boolean,targetItemId?:number):Promise<number>{
+ private async apply(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative:boolean,counted:boolean,targetItemId?:number,verifiedTarget=false):Promise<number>{
   if(article.deleted)throw new Error("Deleted article requires the deletion coordinator");
   if(article.articleId!==payload.articleId)throw new Error("Article/body identity mismatch");
   for(const field of ["importedAt","updatedAt","favoriteChangedAt","favoriteSortOrder","watchLaterChangedAt","watchLaterSortOrder","readingPositionBytes","readingPositionChangedAt"] as const){if(!Number.isSafeInteger(article[field]))throw new Error(`Invalid ${field}`);}
@@ -46,8 +49,8 @@ export class SyncArticleReceiver {
   // A schema migration may have folded the SHA materialization into its RSS
   // row. Reuse only that durable binding in the same source and at the same URL.
   // Only the local cloud coordinator can pass a verified target; transport callers cannot.
-  const target=targetItemId&&(remoteDeviceId==='cloud-records'||remoteDeviceId==='cloud-rss-inventory'||remoteDeviceId.startsWith('cloud-'))?(await this.db.query('SELECT a.id,a.dedup_key,a.guid FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id=? AND c.url=?',[targetItemId,channelUrl]))[0]:undefined;
-  const existing=target??(await this.db.query(`SELECT a.id,a.dedup_key,a.guid FROM articles a JOIN channels ch ON ch.id=a.channel_id
+  const target=targetItemId&&(verifiedTarget||remoteDeviceId==='cloud-records'||remoteDeviceId==='cloud-rss-inventory'||remoteDeviceId.startsWith('cloud-'))?(await this.db.query('SELECT a.* FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id=? AND c.url=?',[targetItemId,channelUrl]))[0]:undefined;
+  const existing=target??(await this.db.query(`SELECT a.* FROM articles a JOIN channels ch ON ch.id=a.channel_id
    WHERE ch.url=? AND (a.dedup_key=? OR ((a.link=? OR (a.link IS NULL AND EXISTS(SELECT 1 FROM sync_article_ids m WHERE m.item_id=a.id AND m.article_id=? AND m.url=?))) AND
     (a.dedup_key LIKE 'guid:%' OR a.dedup_key LIKE 'link:%' OR a.dedup_key LIKE 'title:%') AND
     EXISTS(SELECT 1 FROM sync_article_ids m WHERE m.item_id=a.id AND m.article_id=?)))
@@ -65,14 +68,26 @@ export class SyncArticleReceiver {
   // Publishing content-addressed files cannot damage an old DB reference. A
   // failed transaction may leave an unreferenced file for later GC.
   const cache=new Map<string,string>();
+  if(body===local&&existing&&[chosen,body.contentHtml,body.contentText].some(value=>value!==null&&value.length>50000)){
+   // Reuse committed file references for an identical verified body as well as
+   // avoiding SQLite writes; a full legacy replay must not rewrite its files.
+   const values=[existing.content,await readSyncSqlText(this.db,'SELECT content_html AS value FROM article_sync_content WHERE item_id=?',[existing.id]),await readSyncSqlText(this.db,'SELECT content_text AS value FROM article_sync_content WHERE item_id=?',[existing.id])];
+   for(const raw of values)if(typeof raw==='string'){try{const value=await this.files.hydrate(raw);if(value.length>50000)cache.set(value,raw);}catch{}}
+  }
   const store=async(text:string|null,key:string):Promise<string|null>=>{if(text===null||text.length<=50000)return text;let marker=cache.get(text);if(!marker){marker=await this.files.storeText(key,text);cache.set(text,marker);}return marker;};
   const stored=await store(chosen,`${article.articleId}-content`),html=await store(body.contentHtml,`${article.articleId}-html`),text=(await store(body.contentText,`${article.articleId}-text`))!;
+  if(existing)await this.migrateReading(Number(existing.id));
+  const revision=await libraryRevision(this.db),liveClock=Math.max(article.updatedAt,(article as IncomingArticle&{independentChangedAt?:number}).independentChangedAt??0,article.favoriteChangedAt,article.watchLaterChangedAt);
+  const deleted=(await this.db.query('SELECT changed_at,source_order FROM sync_article_deletions WHERE article_id=?',[article.articleId]))[0];
+  if(!authoritative&&deleted&&(Number(deleted.changed_at)>liveClock||Number(deleted.changed_at)===liveClock&&String(deleted.source_order)>=deviceOrder(article.sourceDeviceId||remoteDeviceId)))return 0;
   const now=this.now(),updated=Math.max(article.updatedAt,article.importedAt),fetched=updated>0?updated:now,progress=Math.fround(Math.max(0,Math.min(1,article.readingProgress)));
   const title=nonblank(article.title)?article.title:article.url,excerpt=nonblank(article.excerpt)?article.excerpt:null;
   const sourceTitle=source?(nonblank(article.rssSourceTitle??"")?article.rssSourceTitle!:nonblank(article.siteName)?article.siteName:source.replace(/^https?:\/\//i,"").split(/[/:?#]/)[0]!):"独立文章";
   const idSql="(SELECT a.id FROM articles a JOIN channels c ON c.id=a.channel_id WHERE c.url=? AND a.dedup_key=?)";
   const idParams=[channelUrl,dedupKey];
-  const statements:Statement[]=[
+  const statements:Statement[]=[revisionGuard(revision),
+   // A confirmed newer keep consumes the old article tombstone atomically.
+   {sql:'DELETE FROM sync_article_deletions WHERE article_id=?',params:[article.articleId]},
    {sql:`UPDATE source_preferences SET use_original_content=1 WHERE channel_id=(SELECT id FROM channels WHERE url=? AND ?=1 AND (title!=? OR description IS NOT ?))`,params:[channelUrl,source?0:1,"独立文章","从手机同步来的独立网页文章"]},
    {sql:`INSERT INTO channels(url,title,description,created_at,sort_order,last_fetched_at) VALUES(?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
     title=CASE WHEN ?=1 THEN excluded.title ELSE channels.title END,description=CASE WHEN ?=1 THEN excluded.description ELSE channels.description END,
@@ -107,7 +122,7 @@ export class SyncArticleReceiver {
    VALUES(${idSql},?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET content_html=excluded.content_html,content_text=excluded.content_text,body_hash=excluded.body_hash,body_bytes=excluded.body_bytes,chunk_size=excluded.chunk_size,chunk_hashes=excluded.chunk_hashes,content_bytes=excluded.content_bytes WHERE ?=1`,params:[...idParams,html,text,payload.bodyHash,payload.bodyByteCount,payload.chunkSize,JSON.stringify(payload.chunkHashes),byteLength(chosen??""),hasBody?1:0]};
   statements.push({sql:`INSERT INTO article_previews(article_id,summary,image_url) VALUES(${idSql},?,?) ON CONFLICT(article_id) DO UPDATE SET summary=excluded.summary,image_url=excluded.image_url`,params:[...idParams,excerpt,article.imageUrl]});
   statements.push({sql:`INSERT INTO article_original_previews(article_id,summary,image_url) VALUES(${idSql},?,?) ON CONFLICT(article_id) DO UPDATE SET summary=excluded.summary,image_url=excluded.image_url`,params:[...idParams,excerpt,article.imageUrl]});
-  if(hasBody){
+  if(hasBody&&body!==local){
    for(const table of ["article_body_chunks","article_original_chunks"])statements.push({sql:`DELETE FROM ${table} WHERE article_id=${idSql}`,params:idParams});
    if(stored!==null){
     statements.push({sql:`INSERT INTO article_original_chunks(article_id,chunk_index,body) VALUES(${idSql},0,?)`,params:[...idParams,stored]});
@@ -115,6 +130,7 @@ export class SyncArticleReceiver {
    }
   }
   statements.push(cacheStatement);
+  if(hasBody)statements.push({sql:`INSERT INTO article_sync_encoding_cache(item_id,body_hash,content_hash,source_device_id,updated_at,imported_at,metadata_state,site_name,rss_source_title) SELECT item_id,body_hash,?,?,?,?,?,?,? FROM article_sync_content WHERE item_id=${idSql} ON CONFLICT(item_id) DO UPDATE SET body_hash=excluded.body_hash,content_hash=excluded.content_hash,source_device_id=excluded.source_device_id,updated_at=excluded.updated_at,imported_at=excluded.imported_at,metadata_state=excluded.metadata_state,site_name=excluded.site_name,rss_source_title=excluded.rss_source_title`,params:[(article as IncomingArticle&{contentHash?:string}).contentHash??payload.bodyHash,article.sourceDeviceId||remoteDeviceId,article.updatedAt,article.importedAt,articleState(article),article.siteName,article.rssSourceTitle,...idParams]});
   // Retain aliases for original RSS rows while promoting the materialized
   // canonical row. Ordinary bindArticle calls still cannot move an identity.
   for(const table of ['sync_article_ids','sync_saved_states'])statements.push({sql:`INSERT INTO sync_article_aliases(item_id,article_id) SELECT item_id,article_id FROM ${table} WHERE article_id=? AND item_id IS NOT NULL ON CONFLICT(item_id) DO UPDATE SET article_id=excluded.article_id`,params:[article.articleId]});
@@ -125,8 +141,8 @@ export class SyncArticleReceiver {
    SELECT m.article_id,s.save_type,s.article_id,m.url,s.saved,s.changed_at,-s.sort_order,i.device_id,i.device_order FROM article_saved_states s JOIN sync_article_ids m ON m.item_id=s.article_id CROSS JOIN sync_local_identity i WHERE m.article_id=? AND i.id=1 ON CONFLICT(article_id,save_type) DO NOTHING`,params:[article.articleId]});
   const countedIndexes:number[]=[];
   for(const type of ["favorite","watchLater"] as const){const state:RemoteSavedState={articleId:article.articleId,url:article.url,type,saved:article[`${type}Saved`],changedAt:article[`${type}ChangedAt`],sortOrder:article[`${type}SortOrder`],sourceDeviceId:cloud?article.sourceDeviceId:remoteDeviceId};const savedStatements=this.saved.remoteStatements(state,{authoritative});if(savedStatements.length)countedIndexes.push(statements.length);statements.push(...savedStatements);}
-  if(existing)await this.migrateReading(Number(existing.id));
-  if(counted){const changes=await this.db.transactionChanges!(statements);if(changes.length!==statements.length)throw new Error("Invalid committed transaction change receipt");return countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);}
-  await this.db.transaction(statements);return 0;
+  const guarded=statements.map(s=>({...s,sql:onlyChangedSql(s.sql)}));
+  if(counted){const changes=await this.db.transactionChanges!(guarded);if(changes.length!==statements.length)throw new Error("Invalid committed transaction change receipt");const saves=countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);return changes[1]!>0||saves||changes.some((n,i)=>n>0&&/^(?:INSERT INTO articles\b|INSERT INTO article_reading_state\b|UPDATE articles\b)/.test(statements[i]!.sql))?Math.max(1,saves):0;}
+  await this.db.transaction(guarded);return 0;
  }
 }

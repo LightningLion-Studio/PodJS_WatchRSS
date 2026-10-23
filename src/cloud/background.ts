@@ -20,5 +20,5 @@ export default defineBackgroundHandler(async context=>{
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard);
  if(!await runtime.accounts.read())return 'success';
- return await runtime.service.syncNow()?'success':'retry';
+ return await runtime.service.syncNow()||runtime.service.status.retryable===false?'success':'retry';
 });

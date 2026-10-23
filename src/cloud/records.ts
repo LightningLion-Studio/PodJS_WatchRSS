@@ -1,9 +1,10 @@
+import {validateBookShape,validateBook,validateBookReading} from '../books/protocol';
 import {isImportedContentUrl} from '../core/imported-content';
 import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {rssSourceKey,tryRssArticleId,isLocalOnlyRssSource} from './rss-identity';
 import type {SnapshotCrypto} from './codec';
 import {utf8Encode,utf8Decode,type CloudTrust} from './types';
-export type RecordKind='article'|'source'|'rss-state';
+export type RecordKind='article'|'source'|'rss-state'|'book'|'book-reading';
 export interface RecordDocument {kind:string;value:Record<string,any>}
 export interface RecordEnvelope {algorithm:'A256GCM';keyVersion:number;nonceBase64:string;ciphertextBase64:string}
 export interface RecordRow {recordId:string;revision:string;envelope:RecordEnvelope;tombstone:boolean}
@@ -16,6 +17,7 @@ export interface RecordPorts {
  readState():Promise<string|undefined>;writeState(value:string):Promise<void>;
  get(after:string):Promise<RecordPage>;push(items:RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>;
  refreshKeys?():Promise<void>;current():Promise<void>;assertUpload():Promise<void>;
+ bookReplacement?(legacy:RecordDocument):Promise<{book:RecordDocument;reading?:RecordDocument}|undefined>;
  apply(documents:RecordDocument[]):Promise<number>;export():Promise<RecordDocument[]>;
 }
 const check=(ok:unknown)=>{if(!ok)throw Error('cloud_record_invalid');};
@@ -25,7 +27,8 @@ const cmp=(a:string,b:string)=>a.length-b.length||(a===b?0:a<b?-1:1);
 export function canonical(value:any):string {if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).filter(k=>value[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value);}
 export function validateRecord(doc:RecordDocument){
  check(doc&&typeof doc.kind==='string'&&!!doc.kind&&doc.value&&typeof doc.value==='object'&&!Array.isArray(doc.value));const v=doc.value;
- if(!['article','source','rss-state'].includes(doc.kind))return;
+ if(doc.kind==='book'){validateBookShape(v);check(Object.keys(v).every(k=>['bookId','fingerprint','title','chapterCount','deletedChapters','deletionClock','deleted','deletedAt','updatedAt','sourceDeviceId','sourceUrl','kind'].includes(k)));return;}if(doc.kind==='book-reading'){validateBookReading(v);check(Object.keys(v).every(k=>['bookId','chapterIndex','isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId','favoriteSaved','favoriteChangedAt','favoriteSortOrder','favoriteSourceDeviceId','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','watchLaterSourceDeviceId'].includes(k)));return;}
+ if(!['article','source','rss-state','book','book-reading'].includes(doc.kind))return;
  check(!['contentText','contentHtml','contentTextGzip','contentHtmlGzip','body','chapters'].some(k=>k in v));
  if(doc.kind==='rss-state'){check(Object.keys(v).every(k=>['sourceId','articleIdHash','sourceDeviceId','isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt'].includes(k)));check(typeof v.sourceId==='string'&&v.sourceId.length>0&&ID.test(v.articleIdHash));}else check(typeof v[doc.kind==='article'?'articleId':'url']==='string'&&!!v[doc.kind==='article'?'articleId':'url'].trim());
  for(const [k,value]of Object.entries(v)){if(/(?:At|Bytes|SortOrder)$/.test(k))check(Number.isSafeInteger(value));if(/(?:At|Bytes)$/.test(k))check(Number(value)>=0);if(['isRead','deleted','favoriteSaved','watchLaterSaved','independentSaved','isPinned'].includes(k))check(typeof value==='boolean');}
@@ -34,18 +37,18 @@ export function validateRecord(doc:RecordDocument){
 const publicArticleIndex=(v:Record<string,any>)=>/^https?:\/\//.test(v.rssSourceUrl??'')&&!isImportedContentUrl(v.rssSourceUrl)&&!isImportedContentUrl(v.url);
 export class CloudRecordCodec {
  constructor(private c:RecordPorts['crypto']){}
- async id(key:Uint8Array,user:string,doc:RecordDocument){validateRecord(doc);const v=doc.value,identity=doc.kind==='rss-state'?v.sourceId+':'+v.articleIdHash:doc.kind==='article'?v.articleId:v.url;const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record-id/v1'));try{return await this.c.hmac(derived,utf8Encode(doc.kind+':'+identity));}finally{derived.fill(0);}}
- async hash(doc:RecordDocument){const value={...doc.value};delete value.sourceDeviceId;if(doc.kind==='source')delete value.createdAt;if('readingProgress'in value)value.readingProgress=Math.floor(value.readingProgress*1e6+.5)/1e6;return this.c.sha256(utf8Encode(canonical({kind:doc.kind,value})));}
+ async id(key:Uint8Array,user:string,doc:RecordDocument){validateRecord(doc);const v=doc.value,identity=doc.kind==='book'?v.bookId:doc.kind==='book-reading'?v.bookId+':'+v.chapterIndex:doc.kind==='rss-state'?v.sourceId+':'+v.articleIdHash:doc.kind==='article'?v.articleId:v.url;const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record-id/v1'));try{return await this.c.hmac(derived,utf8Encode(doc.kind+':'+identity));}finally{derived.fill(0);}}
+ async hash(doc:RecordDocument){if(doc.kind==='book'||doc.kind==='book-reading'){validateRecord(doc);const v={...doc.value};if('readingProgress'in v)v.readingProgress=Math.floor(v.readingProgress*1e6+.5)/1e6;return this.c.sha256(utf8Encode(doc.kind+':'+canonical(v)));}const value={...doc.value};delete value.sourceDeviceId;if(doc.kind==='source')delete value.createdAt;if('readingProgress'in value)value.readingProgress=Math.floor(value.readingProgress*1e6+.5)/1e6;return this.c.sha256(utf8Encode(canonical({kind:doc.kind,value})));}
  async encode(key:Uint8Array,user:string,id:string,version:number,doc:RecordDocument):Promise<RecordEnvelope>{
-  validateRecord(doc);check(ID.test(id)&&Number.isInteger(version)&&version>0);const bytes=utf8Encode(canonical({format:'watchrss-rss-record',version:1,...doc}));check(bytes.length+16<=65536);const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record/v1'));
+  validateRecord(doc);if(doc.kind==='book')await validateBook(doc.value,this.c.sha256);check(ID.test(id)&&Number.isInteger(version)&&version>0);const bytes=utf8Encode(canonical({format:'watchrss-rss-record',version:1,...doc}));check(bytes.length+16<=65536);const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record/v1'));
   try{const out=await this.c.encrypt(derived,utf8Encode(`watchrss-cloud-record-v1:${user}:${id}:${version}`),bytes);return {algorithm:'A256GCM',keyVersion:version,nonceBase64:bytesToBase64(out.nonce),ciphertextBase64:bytesToBase64(out.ciphertext)};}finally{derived.fill(0);bytes.fill(0);}
  }
  async decode(key:Uint8Array,anchor:Uint8Array,user:string,row:RecordRow){
   const e=row.envelope;check(ID.test(row.recordId)&&e?.algorithm==='A256GCM'&&Number.isInteger(e.keyVersion)&&e.keyVersion>0);check(typeof e.ciphertextBase64==='string'&&e.ciphertextBase64.length<=87384&&typeof e.nonceBase64==='string'&&e.nonceBase64.length===16);
   const nonce=base64ToBytes(e.nonceBase64),bytes=base64ToBytes(e.ciphertextBase64);check(nonce.length===12&&bytes.length>=16&&bytes.length<=65536&&bytesToBase64(bytes)===e.ciphertextBase64);
   const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record/v1'));let plain:Uint8Array|undefined;
-  try{plain=await this.c.decrypt(derived,utf8Encode(`watchrss-cloud-record-v1:${user}:${row.recordId}:${e.keyVersion}`),nonce,bytes);const raw=JSON.parse(utf8Decode(plain));check(raw.format==='watchrss-rss-record'&&raw.version===1);const doc:RecordDocument={kind:raw.kind,value:raw.value};validateRecord(doc);let legacy=false;
-   if(['article','source','rss-state'].includes(doc.kind)&&await this.id(anchor,user,doc)!==row.recordId){check(await this.id(key,user,doc)===row.recordId);legacy=true;}return {doc,legacy};
+  try{plain=await this.c.decrypt(derived,utf8Encode(`watchrss-cloud-record-v1:${user}:${row.recordId}:${e.keyVersion}`),nonce,bytes);const raw=JSON.parse(utf8Decode(plain));check(raw.format==='watchrss-rss-record'&&raw.version===1);const doc:RecordDocument={kind:raw.kind,value:raw.value};validateRecord(doc);if(doc.kind==='book')await validateBook(doc.value,this.c.sha256);let legacy=false;
+   if(['article','source','rss-state','book','book-reading'].includes(doc.kind)&&await this.id(anchor,user,doc)!==row.recordId){check(await this.id(key,user,doc)===row.recordId);legacy=true;}return {doc,legacy};
   }catch{throw Error('cloud_record_invalid');}finally{derived.fill(0);plain?.fill(0);}
  }
 }
@@ -65,9 +68,9 @@ export class WatchCloudRecords {
   let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await p.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
   const process=async(rows:RecordRow[])=>{const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={};
    for(const row of rows){await p.current();const old=this.state.records[row.recordId];if(old&&cmp(old.revision,row.revision)>0)continue;let key:Uint8Array|undefined;
-    try{key=await p.key(row.envelope.keyVersion);if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();key=await p.key(row.envelope.keyVersion);}if(!key)throw Error('missing_key_version');const value=await this.codec.decode(key,anchor,p.userId,row);check(!value.doc.value.deleted||row.tombstone);this.decoded.set(row.recordId,{row,...value});const retired=row.tombstone&&!value.doc.value.deleted;
+    try{key=await p.key(row.envelope.keyVersion);if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();key=await p.key(row.envelope.keyVersion);}if(!key)throw Error('missing_key_version');const value=await this.codec.decode(key,anchor,p.userId,row);check(!value.doc.value.deleted||row.tombstone);this.decoded.set(row.recordId,{row,...value});const retired=value.doc.value.bookIndexRetired===true||row.tombstone&&!value.doc.value.deleted;
      const v=value.doc.value,publicIndex=value.doc.kind==='article'&&publicArticleIndex(v);
-     if(!retired&&['article','source','rss-state'].includes(value.doc.kind)&&(!old||old.revision!==row.revision||value.doc.kind!=='article'||publicIndex))docs.push(value.doc);
+     if(!retired&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind)&&(!old||old.revision!==row.revision||value.doc.kind!=='article'||publicIndex))docs.push(value.doc);
      acks[row.recordId]={revision:row.revision,hash:await this.codec.hash(value.doc)};
     }catch(error){if(/library_epoch_mismatch|账号|client_upgrade_required|commitment|device_attestation/.test(String(error)))throw error;/* Retain original ciphertext for replay. A poisoned row cannot disable old validated keys. */}finally{key?.fill(0);}
     this.state.rows[row.recordId]=row;
@@ -86,8 +89,8 @@ export class WatchCloudRecords {
    }throw Error('cloud_record_page_limit');
   }finally{anchor.fill(0);}
  }
- async reapply(){await this.p.current();return this.p.apply([...this.decoded.values()].filter(v=>!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state'].includes(v.doc.kind)).map(v=>v.doc));}
- async flush(completedPrivateArticleIds:readonly string[]=[]){
+ async reapply(){await this.p.current();return this.p.apply([...this.decoded.values()].filter(v=>v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
+ async flush(completedPrivateArticleIds:readonly string[]=[],completedBookIds:readonly string[]=[]){
   const p=this.p;await p.current();await p.assertUpload();const anchor=await p.key(p.anchorVersion),key=await p.key(p.version);if(!anchor||!key){anchor?.fill(0);key?.fill(0);throw Error('missing_key_version');}
   let written=0;const hashById=new Map<string,string>();let batch:RecordWrite[]=[];
   const flush=async()=>{if(!batch.length)return;await p.current();await p.assertUpload();const response=await p.push(batch);await p.current();check(response.formatVersion===1&&response.items?.length===batch.length);const expected=new Map(batch.map(r=>[r.recordId,r])),seen=new Set<string>();
@@ -100,6 +103,8 @@ export class WatchCloudRecords {
    const completed=new Set(completedPrivateArticleIds);
    const interactions=new Map(documents.filter(d=>d.kind==='rss-state').map(d=>[d.value.sourceId+':'+d.value.articleIdHash,d]));
    for(const [id,item]of this.decoded){if(item.row.tombstone)continue;const d=item.doc;
+    const replacement=d.kind==='article'?await p.bookReplacement?.(d):undefined;
+    if(replacement){const current=async(doc:RecordDocument)=>this.state.records[await this.codec.id(anchor,p.userId,doc)]?.hash===await this.codec.hash(doc);if(await current(replacement.book)&&(!replacement.reading||await current(replacement.reading))&&(replacement.book.value.deleted||completedBookIds.includes(replacement.book.value.bookId))){const clock=Math.max(0,...Object.entries(d.value).filter(([k,v])=>k.endsWith('At')&&typeof v==='number').map(([,v])=>Number(v)));check(clock<Number.MAX_SAFE_INTEGER);await add(id,{kind:'article',value:{...d.value,bookIndexRetired:true,deleted:true,deletedAt:clock+1,updatedAt:clock+1}},true);}continue;}
     const isPublic=d.kind==='article'&&publicArticleIndex(d.value);
     if(isPublic&&isLocalOnlyRssSource(d.value.rssSourceUrl))continue;
     const articleId=isPublic?await tryRssArticleId({link:d.value.url,guid:d.value.guid,title:d.value.title,contentHash:d.value.contentHash},p.crypto.sha256):undefined;if(isPublic&&!articleId)continue;

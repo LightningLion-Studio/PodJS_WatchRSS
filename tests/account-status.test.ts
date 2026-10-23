@@ -40,3 +40,4 @@ test('account status only presents real cloud-service data with free quota seman
   ]);
   expect(accountCloudLines({...member, plan: 'free'})).toEqual(accountCloudLines(member));
 });
+test('R45 account status carries ready usage and live reservations separately with account scoping',()=>{const status=accountStatusSnapshot(account,99,{message:'同步完成',usedBytes:17,reservedBytes:23,quotaBytes:100,accountId:account.userId})!;expect(status.cloud?.usedBytes).toBe(17);expect(status.cloud?.reservedBytes).toBe(23);expect(status.cloud!.quotaBytes-status.cloud!.usedBytes-status.cloud!.reservedBytes!).toBe(60);const other=accountStatusSnapshot(account,99,{message:'other',usedBytes:17,reservedBytes:23,quotaBytes:100,accountId:'other-user'})!;expect(other.cloud?.usedBytes).toBe(0);expect(other.cloud?.reservedBytes).toBeUndefined();});

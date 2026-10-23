@@ -23,6 +23,8 @@ const sqlite = {
   async execute(sql: string, params: readonly (string | number | null)[] = []) {
     database.query(sql).run(...paramsOf(params));
   },
+  async executeChanges(sql:string,params:readonly(string|number|null)[]=[]) {return database.transaction(()=>{database.query(sql).run(...paramsOf(params));return Number((database.query('SELECT changes() n').get() as any).n);})();},
+  async transactionChanges(statements:readonly {sql:string;params?:readonly(string|number|null)[]}[]){return database.transaction(()=>statements.map(s=>{database.query(s.sql).run(...paramsOf(s.params));return Number((database.query('SELECT changes() n').get() as any).n);}))();},
   async transaction(statements: readonly { sql: string; params?: readonly (string | number | null)[] }[]) {
     database.transaction(() => {
       for (const statement of statements) database.query(statement.sql).run(...paramsOf(statement.params));

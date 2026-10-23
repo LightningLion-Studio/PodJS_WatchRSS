@@ -55,3 +55,22 @@ export async function readTokenUsageForSync(db:SqlDatabase,limit:number):Promise
  }
  return result;
 }
+
+export interface TokenUsagePage {records:JsonObject[];count:number;usageEpoch:string;nextAfterId:number;hasMore:boolean;reset?:boolean}
+/** Durable generation changes before a deleted tail can reuse an INTEGER PK. */
+export const TOKEN_USAGE_CURSOR_SCHEMA=[
+ `CREATE TABLE IF NOT EXISTS sync_token_usage_epoch(id INTEGER PRIMARY KEY CHECK(id=1),epoch TEXT NOT NULL)`,
+ `CREATE TRIGGER IF NOT EXISTS token_usage_generation_delete AFTER DELETE ON llm_token_usage WHEN OLD.id>COALESCE((SELECT MAX(id) FROM llm_token_usage),0) BEGIN UPDATE sync_token_usage_epoch SET epoch=lower(hex(randomblob(16))) WHERE id=1; END`,
+];
+export async function readTokenUsagePage(db:SqlDatabase,options:{limit:number;afterId:number;usageEpoch?:string}):Promise<TokenUsagePage>{
+ const {limit,afterId,usageEpoch}=options;
+ if(!Number.isSafeInteger(limit)||limit<1||limit>1000||!Number.isSafeInteger(afterId)||afterId<0||usageEpoch!==undefined&&(typeof usageEpoch!=='string'||!usageEpoch))throw Error('Invalid usage cursor');
+ await db.transaction([...TOKEN_USAGE_CURSOR_SCHEMA.map(sql=>({sql})),{sql:'INSERT OR IGNORE INTO sync_token_usage_epoch(id,epoch) VALUES(1,lower(hex(randomblob(16))))'}]);
+ const epoch=String((await db.query('SELECT epoch FROM sync_token_usage_epoch WHERE id=1'))[0]?.epoch??'');if(!epoch)throw Error('Usage epoch unavailable');
+ const reset=usageEpoch!==undefined&&usageEpoch!==epoch||usageEpoch===undefined&&afterId>0,after=reset?0:afterId;
+ const rows=await db.query('SELECT id,provider,model,request_id,usage_json,created_at FROM llm_token_usage WHERE id>? ORDER BY id ASC LIMIT ?',[after,limit+1]);
+ const records=rows.slice(0,limit).map(row=>{let raw:JsonObject={};try{raw=parseWireJson(String(row.usage_json));}catch{}return {id:Number(row.id),provider:String(row.provider),model:String(row.model),requestId:String(row.request_id),createdAt:Number(row.created_at),...tokenUsageWireFields(raw)};});
+ if(records.some(r=>!Number.isSafeInteger(r.id)||r.id<=after||!Number.isSafeInteger(r.createdAt)))throw Error('Invalid usage row identity');
+ const current=String((await db.query('SELECT epoch FROM sync_token_usage_epoch WHERE id=1'))[0]?.epoch??'');if(current!==epoch)throw Error('Usage generation changed during export');
+ return {records,count:records.length,usageEpoch:epoch,nextAfterId:records.at(-1)?.id??after,hasMore:rows.length>limit,...(reset?{reset:true}:{})};
+}

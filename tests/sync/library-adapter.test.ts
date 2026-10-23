@@ -36,7 +36,7 @@ test('reading migration completes before the snapshot revision is captured',asyn
  }finally{f.sql.close();}});
 test('one exchange reuses its unchanged article snapshot and invalidates after a library edit',async()=>{const f=await setup();try{
  let metadataReads=0;const query=f.db.query;
- f.db.query=async(q,p)=>{if(q.startsWith('SELECT a.id,a.channel_id')&&q.includes(' ORDER BY a.fetched_at'))metadataReads++;return query(q,p);};
+ f.db.query=async(q,p)=>{if(q.startsWith('SELECT a.id FROM articles a JOIN channels ch'))metadataReads++;return query(q,p);};
  await f.repo.deviceId();await f.repo.cursor('phone');const initial=metadataReads;expect(initial).toBeGreaterThan(0);
  await f.repo.prepareWindow('phone',0);await f.repo.exportSources();expect(metadataReads).toBe(initial);
  const realNow=Date.now;Date.now=()=>realNow()+6*60*1000;
@@ -51,7 +51,7 @@ test('one exchange reuses its unchanged article snapshot and invalidates after a
 test('empty body request skips scanning and keeps revision-validated metadata for the next sync',async()=>{const f=await setup();try{
  await f.repo.cursor('phone');
  const query=f.db.query;let queries=0,metadataReads=0;
- f.db.query=async(q,p)=>{queries++;if(q.startsWith('SELECT a.id,a.channel_id')&&q.includes(' ORDER BY a.fetched_at'))metadataReads++;return query(q,p);};
+ f.db.query=async(q,p)=>{queries++;if(q.startsWith('SELECT a.id FROM articles a JOIN channels ch'))metadataReads++;return query(q,p);};
  expect(await f.repo.exportRequested([])).toEqual([]);
  expect(queries).toBe(0);
  await f.repo.cursor('phone');

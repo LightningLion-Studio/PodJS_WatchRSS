@@ -86,7 +86,7 @@ test('account reset suppresses a late approval or failure from the previous acco
   f.session.keys.acceptBootstrap=async()=>{entered();return new Promise<'waiting-approval'|'ready'>((resolve,reject)=>{finish=resolve;abort=reject;});};
   const run=f.service.syncNow();await ready;f.service.reset();
   if(fail===true)abort(Error('old account request failed'));else finish(fail==='ready'?'ready':'waiting-approval');
-  await run;expect(f.service.status).toEqual({phase:'idle',message:'尚未同步',usedBytes:0,quotaBytes:0,lastCompletedAt:0});expect(f.calls.some(r=>r.url.endsWith('/heads'))).toBe(false);
+  await run;expect(f.service.status).toEqual({phase:'idle',message:'尚未同步',usedBytes:0,reservedBytes:0,quotaBytes:0,lastCompletedAt:0});expect(f.calls.some(r=>r.url.endsWith('/heads'))).toBe(false);
  }
 });
 

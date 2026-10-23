@@ -79,6 +79,7 @@ export function negotiateLibraryProtocol(remoteVersion: number): NegotiatedProto
 }
 
 export interface ProbeCapabilities {
+ supportsBookSyncV1?:boolean;supportsBookReadingDeltaV1?:boolean;supportsNoteManifestV2?:boolean;supportsNoteAssetInventory?:boolean;supportsRssCanonicalIds?:boolean;supportsFullMetadataOnlyArticles?:boolean;supportsTokenUsageCursor?:boolean;
   supportsManifestBatches?: boolean;
   supportsReaderPresets?: boolean;
   supportsReaderAssets?: boolean;
@@ -91,6 +92,8 @@ export interface ProbeCapabilities {
 export function buildProbeResponse(deviceId: string, capabilities: ProbeCapabilities = {}, watchCapabilities?: JsonObject): JsonObject {
   const payload: JsonObject = {
     success: true, version: PROTOCOL_VERSION, action: ACTION_SYNC_LIBRARY, phase: PHASE_PROBE,
+    ...Object.fromEntries(["supportsBookSyncV1","supportsBookReadingDeltaV1","supportsNoteManifestV2","supportsNoteAssetInventory","supportsRssCanonicalIds","supportsFullMetadataOnlyArticles","supportsTokenUsageCursor"].filter(k=>capabilities[k as keyof ProbeCapabilities]!==undefined).map(k=>[k,capabilities[k as keyof ProbeCapabilities]===true])),
+    ...(capabilities.supportsFullMetadataOnlyArticles?{supportsMetadataOnlyArticles:true}:{}),
     supportsManifestBatches: capabilities.supportsManifestBatches === true,
     supportsReaderPresets: capabilities.supportsReaderPresets === true,
     supportsReaderAssets: capabilities.supportsReaderAssets === true,

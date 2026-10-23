@@ -18,12 +18,13 @@ export class SqlLibrarySequenceStore {
   const row=(await this.db.query('SELECT COALESCE((SELECT MAX(seq) FROM sync_change_log),0) AS local_max,p.last_local_seq_acked,p.last_remote_seq_applied FROM (SELECT 1) LEFT JOIN sync_peer_state p ON p.peer_device_id=?',[this.peer(peer)]))[0]!;
   return {localMaxSeq:exact(Number(row.local_max)),lastLocalSeqAckedByPeer:exact(Number(row.last_local_seq_acked??0)),lastRemoteSeqApplied:exact(Number(row.last_remote_seq_applied??0))};
  }
- async markSuccess(pending:PendingSyncSuccess):Promise<void>{
+ successStatement(pending:PendingSyncSuccess):{sql:string;params:SqlParams}{
   exact(pending.localSeqToInclusive);exact(pending.remoteSeqToInclusive);exact(pending.remoteProtocolVersion);const now=exact(this.now());
-  await this.db.execute(`INSERT INTO sync_peer_state(peer_device_id,last_local_seq_acked,last_remote_seq_applied,last_full_sync_at,last_protocol_version,updated_at) VALUES(?,?,?,?,?,?)
+  return {sql:`INSERT INTO sync_peer_state(peer_device_id,last_local_seq_acked,last_remote_seq_applied,last_full_sync_at,last_protocol_version,updated_at) VALUES(?,?,?,?,?,?)
    ON CONFLICT(peer_device_id) DO UPDATE SET last_local_seq_acked=max(sync_peer_state.last_local_seq_acked,excluded.last_local_seq_acked),last_remote_seq_applied=max(sync_peer_state.last_remote_seq_applied,excluded.last_remote_seq_applied),last_full_sync_at=CASE WHEN ?=1 THEN excluded.last_full_sync_at ELSE sync_peer_state.last_full_sync_at END,last_protocol_version=excluded.last_protocol_version,updated_at=excluded.updated_at`,
-   [this.peer(pending.remoteDeviceId),Math.max(0,pending.localSeqToInclusive),Math.max(0,pending.remoteSeqToInclusive),pending.fullSnapshot?now:0,pending.remoteProtocolVersion,now,pending.fullSnapshot?1:0]);
+   params:[this.peer(pending.remoteDeviceId),Math.max(0,pending.localSeqToInclusive),Math.max(0,pending.remoteSeqToInclusive),pending.fullSnapshot?now:0,pending.remoteProtocolVersion,now,pending.fullSnapshot?1:0]};
  }
+ async markSuccess(pending:PendingSyncSuccess):Promise<void>{const s=this.successStatement(pending);await this.db.execute(s.sql,s.params);}
  async reset():Promise<void>{await this.db.execute('DELETE FROM sync_peer_state');}
  async prepareWindow(peer:string,localDeviceId:string,full:readonly ArticleManifest[],exportSources:(urls?:readonly string[])=>Promise<readonly SyncedSource[]>,peerAppliedLocalSeq?:number,options:{snapshotReconciled?:boolean}={}):Promise<LibraryWindow>{
   const state=(await this.db.query('SELECT * FROM sync_peer_state WHERE peer_device_id=?',[this.peer(peer)]))[0],now=exact(this.now());

@@ -9,7 +9,7 @@ const changed=(alias:string)=>`${alias}.affected=1`;
 /** Version-2 migration. Every temporary copy and the final user_version write
  * execute in the caller's single SQLite transaction. A failure therefore
  * restores both data and version, and retrying is safe. */
-export function dedupKeyMigration(now:number):SchemaStatement[]{
+export function dedupKeyMigration(now:number,onlyProvenDuplicates=false):SchemaStatement[]{
  const guid=trim('a.guid'),link=trim('a.link');
  return [
   {sql:`DROP TABLE IF EXISTS temp._wrss_dedup_plan`},
@@ -21,11 +21,11 @@ export function dedupKeyMigration(now:number):SchemaStatement[]{
   {sql:`CREATE TEMP TABLE _wrss_dedup_plan(item_id INTEGER PRIMARY KEY,channel_id INTEGER NOT NULL,old_key TEXT NOT NULL,target_key TEXT NOT NULL,survivor_id INTEGER NOT NULL,affected INTEGER NOT NULL DEFAULT 0)`},
   {sql:`INSERT INTO _wrss_dedup_plan(item_id,channel_id,old_key,target_key,survivor_id)
    SELECT a.id,a.channel_id,a.dedup_key,
-    CASE WHEN ${HASH('a.dedup_key')} AND ${guid}=a.dedup_key THEN a.dedup_key
+    ${onlyProvenDuplicates?'a.dedup_key':`CASE WHEN ${HASH('a.dedup_key')} AND ${guid}=a.dedup_key THEN a.dedup_key
      WHEN ${guid}<>'' THEN 'guid:'||${guid}
      WHEN a.dedup_key LIKE 'link:%' THEN a.dedup_key
      WHEN ${link}<>'' THEN 'link:'||${link}
-     ELSE 'title:'||a.title END,a.id
+     ELSE 'title:'||a.title END`},a.id
    FROM articles a JOIN channels c ON c.id=a.channel_id
    WHERE (lower(${trim('c.url')}) LIKE 'http://%' OR lower(${trim('c.url')}) LIKE 'https://%')
     AND lower(${trim('c.url')}) NOT LIKE 'https://watchrss.local/import-content%'
@@ -39,7 +39,10 @@ export function dedupKeyMigration(now:number):SchemaStatement[]{
      AND (p2.target_key LIKE 'guid:%' OR p2.target_key LIKE 'link:%' OR p2.target_key LIKE 'title:%')
      AND ${trim('a2.link')}<>'' AND ${trim('a2.link')}=${trim('a1.link')}
     ORDER BY CASE WHEN p2.old_key=p2.target_key THEN 0 ELSE 1 END,p2.item_id LIMIT 1)
-   WHERE ${HASH('old_key')} AND EXISTS(SELECT 1 FROM _wrss_dedup_plan p2
+   WHERE ${HASH('old_key')}
+    AND EXISTS(SELECT 1 FROM articles legacy JOIN sync_article_ids binding ON binding.item_id=legacy.id AND binding.article_id=_wrss_dedup_plan.old_key WHERE legacy.id=_wrss_dedup_plan.item_id AND (${trim('legacy.guid')}='' OR ${trim('legacy.guid')}=_wrss_dedup_plan.old_key))
+    AND NOT EXISTS(SELECT 1 FROM cloud_rss_article_ids canonical WHERE canonical.item_id=_wrss_dedup_plan.item_id)
+    AND (SELECT COUNT(DISTINCT p3.target_key) FROM _wrss_dedup_plan p3 JOIN articles a3 ON a3.id=p3.item_id JOIN articles base ON base.id=_wrss_dedup_plan.item_id WHERE p3.channel_id=_wrss_dedup_plan.channel_id AND p3.item_id<>_wrss_dedup_plan.item_id AND (p3.target_key LIKE 'guid:%' OR p3.target_key LIKE 'link:%' OR p3.target_key LIKE 'title:%') AND ${trim('a3.link')}<>'' AND ${trim('a3.link')}=${trim('base.link')})=1 AND EXISTS(SELECT 1 FROM _wrss_dedup_plan p2
     JOIN articles a2 ON a2.id=p2.item_id JOIN articles a1 ON a1.id=_wrss_dedup_plan.item_id
     WHERE p2.channel_id=_wrss_dedup_plan.channel_id AND p2.item_id<>_wrss_dedup_plan.item_id
      AND (p2.target_key LIKE 'guid:%' OR p2.target_key LIKE 'link:%' OR p2.target_key LIKE 'title:%')

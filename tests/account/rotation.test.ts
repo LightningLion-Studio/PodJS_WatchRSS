@@ -5,6 +5,7 @@ import {withAccountLease} from '../../src/account/lease';
 import {WatchCloudClient} from '../../src/cloud/client';
 import type {WatchAccountState,SecureStorage} from '../../src/account/types';
 import {utf8Encode,type HttpTransport} from '../../src/cloud/types';
+import {contentFixture} from '../cloud/content-fixture';
 const state:WatchAccountState={userId:'u',phoneMasked:'',installId:'i',watchDeviceToken:'old',tokenExpiresAtMillis:1,watchRefreshToken:'refresh',refreshTokenExpiresAtMillis:9e15,backendBaseUrl:'https://backend.invalid',posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'member',active:true,expiresAtMillis:0,features:[]},telemetryConfig:{anonymousEnabled:true,diagnosticsEnabled:false,sampleRate:1},updatedAtMillis:1};
 const deferred=<T=void>()=>{let resolve!:(value:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return{promise,resolve};};
 const response=(value:unknown,status=200)=>({status,headers:{},body:utf8Encode(JSON.stringify(value))});
@@ -44,7 +45,7 @@ test('confirmed refresh 401 expires locally once under the lease and never invok
 test('delayed 401 for an older access token reuses a concurrently rotated pair instead of rotating it again',async()=>{
  const f=fixture();await f.store.save({...state,tokenExpiresAtMillis:9e15});const requestEntered=deferred(),denied=deferred();let rotations=0;const auth:string[]=[];
  const tokens=new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{request:async()=>{rotations++;return response(rotated);}}});
- const client=new WatchCloudClient({request:async r=>{auth.push(r.headers.authorization);if(auth.length===1){requestEntered.resolve();await denied.promise;return response({},401);}return response({member:{}});}},{baseUrl:state.backendBaseUrl,accessToken:'unused',refreshToken:(force,rejected)=>tokens.freshAccessToken(force,rejected)},{sha256:async()=>''},{require(){}});
+ const client=new WatchCloudClient({request:async r=>{auth.push(r.headers.authorization);if(auth.length===1){requestEntered.resolve();await denied.promise;return response({},401);}return response({...contentFixture,member:{}});}},{baseUrl:state.backendBaseUrl,accessToken:'unused',refreshToken:(force,rejected)=>tokens.freshAccessToken(force,rejected)},{sha256:async()=>''},{require(){}});
  const task=client.bootstrap();await requestEntered.promise;await new WatchTokenManager(f.store,{backendBaseUrl:state.backendBaseUrl,transport:{request:async()=>{rotations++;return response(rotated);}}}).freshAccount(true);denied.resolve();await task;
  expect(auth).toEqual(['Bearer old','Bearer new']);expect(rotations).toBe(1);expect((await f.store.read())?.watchRefreshToken).toBe('next');expect(f.revokes).toBe(0);
 });

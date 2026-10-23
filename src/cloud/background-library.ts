@@ -1,3 +1,4 @@
+import {createBookFiles} from '../books/files-port';
 import {bytesToBase64} from '@podjs/framework/bytes';
 import type {SqlDatabase} from '../core/types';
 import {initializeSchema} from '../core/schema';
@@ -29,7 +30,7 @@ export async function createBackgroundLibrary(host:CloudHostRequest,readKv:(key:
   try{await append(input.path,encode(html),0);const result=await host<{path:string}>('file.htmlText',{path:input.path,maxOutputBytes:32*1024*1024});output=result.path;const bytes=await ports.files.read(output);if(!bytes)throw Error('HTML 转码失败');return utf8Decode(bytes);}
   finally{await host('file.delete',{path:input.path}).catch(()=>{});if(output)await host('file.delete',{path:output}).catch(()=>{});}
  }};
- return new SqlLibrarySessionRepository(db,{codec,text,uri:{parseUri:text.parseUri,parseAndroid:value=>host('uri.parse',{value,syntax:'android'})},files:{hydrate,storeText:(key,value)=>writer.storeText(key,value)},migrateReading:id=>reading.migrate(id),migrateReadingMany:ids=>reading.migrateMany(ids),cleanupRemovedContent:async({itemIds})=>{
+ return new SqlLibrarySessionRepository(db,{bookFiles:createBookFiles(host),codec,text,uri:{parseUri:text.parseUri,parseAndroid:value=>host('uri.parse',{value,syntax:'android'})},files:{hydrate,storeText:(key,value)=>writer.storeText(key,value)},migrateReading:id=>reading.migrate(id),migrateReadingMany:ids=>reading.migrateMany(ids),cleanupRemovedContent:async({itemIds})=>{
   for(const id of itemIds){const directory=`offline/rss/${id}`;const listing=await host<{entries:{file:boolean;path:string}[]}>('file.list',{path:directory}).catch(()=>undefined);for(const e of listing?.entries??[])if(e.file&&e.path.startsWith(directory+'/')&&!e.path.slice(directory.length+1).includes('/'))await host('file.delete',{path:e.path});}
  }});
 }
