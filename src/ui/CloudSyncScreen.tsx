@@ -15,7 +15,7 @@ const TONE: Record<CloudSyncTone, string> = {
   ok: PHONE_PAGE.primary, busy: PHONE_PAGE.primary, attention: '#ffc266', error: '#ff7777', muted: PHONE_PAGE.secondary,
 };
 /** Narrower than the row so the pill's ends stay inside the circle wherever it lands on first show. */
-const ACTION_WIDTH = 168, FACTS_WIDTH = 150;
+const ACTION_WIDTH = 168, FACTS_WIDTH = 150, DETAIL_WIDTH = 176;
 
 /** 我的 → 云同步 (native CloudSyncActivity). Opening only reads status; a sync starts on tap alone. */
 export function CloudSyncScreen(props: {
@@ -132,7 +132,8 @@ export function CloudSyncScreen(props: {
   const entries = createMemo<ScrollEntry[]>(() => {
     const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态。',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : cloudSyncView(status(), available(), pending());
     const rows: ScrollEntry[] = [
-      {height: 26, render: () => <Text class="absolute inset-0 text-center" style={{fontSlot: 23, lineHeight: 26, textColor: PHONE_PAGE.foreground}}>云同步</Text>},
+      // Narrow bounds let the round layout start the page higher instead of pushing a full-width row down.
+      {height: 26, bounds: centredBounds(inner(), Math.min(inner(), measure('云同步', 23) + 8), 0, 26), render: () => <Text class="absolute inset-0 text-center" style={{fontSlot: 23, lineHeight: 26, textColor: PHONE_PAGE.foreground}}>云同步</Text>},
       gap(10),
     ];
     const headline = Math.min(inner(), 16 + measure(view.title, 22));
@@ -141,7 +142,7 @@ export function CloudSyncScreen(props: {
         <View class="absolute left-[0] top-[6.5] w-[8] h-[8] rounded-full" style={{bgColor: TONE[view.tone]}}/>
         <Text class="absolute left-[16] top-[0]" style={{fontSlot: 22, lineHeight: 21, textColor: PHONE_PAGE.foreground}}>{view.title}</Text>
       </View>});
-    if (view.detail) rows.push(gap(4), centred(view.detail, 1, 17, PHONE_PAGE.secondary));
+    if (view.detail) rows.push(gap(4), centred(view.detail, 1, 17, PHONE_PAGE.secondary, Math.min(inner(), DETAIL_WIDTH)));
     const button = ['requesting','pending','code','committing'].includes(approval().phase)?undefined:view.button;
     if (button) {
       const width = Math.min(ACTION_WIDTH, inner());
