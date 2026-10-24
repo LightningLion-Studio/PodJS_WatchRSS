@@ -16,18 +16,19 @@ const sessionState=(sessionId:string,prewarming=false):VideoSessionState=>({ok:t
 const bounds={x:0,y:0,width:240,height:240};
 
 function fakePort(decoderLimit=2){
-  const calls:{method:string;sessionId?:string;progress?:number}[]=[];
+  const calls:{method:string;sessionId?:string;progress?:number;loop?:boolean}[]=[];
   let transitionGate:Promise<void>|undefined;
   return {
     calls,
     async capabilities(){return {capability:"media.video.sessions",maxSessions:2,decoderLimit,decoderInUse:0,targetBufferBytesPerSession:6291456,targetBufferBytesTotal:6291456*decoderLimit,prewarmTimeoutMs:2500,prewarmMode:"hidden_first_frame",surfacePromotion:decoderLimit>=2,verticalTransition:decoderLimit>=2,surfaceComposition:"android_texture_view",backgroundPlayback:false};},
     gateTransition(gate:Promise<void>){transitionGate=gate;},
-    prepare(options:any){calls.push({method:options.prewarm?"prewarm":"prepare",sessionId:options.sessionId});return {cancel(){calls.push({method:"cancel",sessionId:options.sessionId});},result:Promise.resolve(sessionState(options.sessionId,options.prewarm))};},
+    prepare(options:any){calls.push({method:options.prewarm?"prewarm":"prepare",sessionId:options.sessionId,loop:options.loop});return {cancel(){calls.push({method:"cancel",sessionId:options.sessionId});},result:Promise.resolve(sessionState(options.sessionId,options.prewarm))};},
     async play(id:string){calls.push({method:"play",sessionId:id});return sessionState(id);},
     async pause(id:string){calls.push({method:"pause",sessionId:id});return sessionState(id);},
     async seek(id:string){return sessionState(id);},async stop(id:string){return sessionState(id);},
     async release(id:string){calls.push({method:"release",sessionId:id});return {sessionId:id,released:true};},
     async setBounds(id:string){return sessionState(id);},async state(id:string){return sessionState(id);},
+    async setLoop(id:string,loop:boolean){calls.push({method:"setLoop",sessionId:id,loop});return {...sessionState(id),loop};},
     async setTransform(id:string){return sessionState(id);},async setVolume(id:string){return sessionState(id);},
     async promote(id:string){calls.push({method:"promote",sessionId:id});return {...sessionState(id),state:"playing"};},
     async transition(options:any){calls.push({method:"transition",sessionId:options.toSessionId,progress:options.progress});if(transitionGate){const gate=transitionGate;transitionGate=undefined;await gate;}return {fromSessionId:options.fromSessionId,toSessionId:options.toSessionId,progress:options.progress,direction:options.direction,fromOffsetYPx:0,toOffsetYPx:0,composited:true as const};},
@@ -100,3 +101,34 @@ test('session diagnostics follow real slot roles, host states, promotion and own
  await pool.promote('up',bounds);const promoted=await pool.diagnostics();expect(promoted?.slots[0]?.sessionId).toBe(initial?.slots[1]?.sessionId);expect(promoted?.slots[0]?.awemeId).toBe('102');expect(promoted?.slots[1]?.bound).toBe(false);
  let finish!:(value:any)=>void;port.capabilities=()=>new Promise(r=>finish=r);const stale=pool.diagnostics();await pool.releaseAll();finish({});expect(await stale).toBeUndefined();expect(port.calls.filter(c=>c.method==='play')).toEqual([]);
 });
+
+ test("loop mode is applied to active, prewarmed and promoted slots without preparing them again",async()=>{
+  const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+  await pool.prepare(source("1"),{bounds,loop:false}).result;
+  await pool.prewarm(source("2"),{bounds,loop:true});
+  expect(port.calls.filter(c=>c.method==="prewarm")[0]?.loop).toBe(false);
+  const prepares=port.calls.filter(c=>c.method==="prepare"||c.method==="prewarm").length;
+  await pool.setLoop(true);expect(port.calls.slice(-2).map(c=>c.loop)).toEqual([true,true]);
+  await pool.promote("up",bounds);await pool.setLoop(false);
+  expect(port.calls.at(-1)).toMatchObject({method:"setLoop",loop:false});
+  await pool.prewarm(source("3"),{bounds,loop:true});expect(port.calls.filter(c=>c.method==="prewarm").at(-1)?.loop).toBe(false);
+  expect(port.calls.filter(c=>c.method==="prepare"||c.method==="prewarm")).toHaveLength(prepares+1);
+ });
+ test("a mode change while prewarm is pending is applied before it can be promoted",async()=>{
+  const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
+  await pool.prepare(source("1"),{bounds,loop:false}).result;
+  let finish!:(value:VideoSessionState)=>void;let id="";
+  port.prepare=(options:any)=>{id=options.sessionId;return {cancel(){},result:new Promise(r=>finish=r)};};
+  const pending=pool.prewarm(source("2"),{bounds,loop:false});await pool.setLoop(true);
+  finish(sessionState(id,true));await pending;
+  expect(port.calls.at(-1)).toMatchObject({method:"setLoop",sessionId:id,loop:true});expect(pool.hasStandby("2")).toBe(true);
+ });
+
+ test("a loop toggle during standby setLoop acknowledgment cannot publish a slot with stale repeat mode",async()=>{
+  const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);await pool.prepare(source("1"),{bounds,loop:false}).result;
+  let finish!:()=>void;const nativeSetLoop=port.setLoop;let deferred=true;
+  port.setLoop=async(id,loop)=>{const value=await nativeSetLoop(id,loop);if(deferred&&id.endsWith("b")){deferred=false;await new Promise<void>(r=>finish=r);}return value;};
+  const pending=pool.prewarm(source("2"),{bounds,loop:false});for(let i=0;i<5;i++)await Promise.resolve();
+  await pool.setLoop(true);finish();await pending;
+  expect(port.calls.at(-1)).toMatchObject({method:"setLoop",loop:true});expect(pool.hasStandby("2")).toBe(true);
+ });

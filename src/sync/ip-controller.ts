@@ -14,7 +14,13 @@ export interface IpSyncControllerPorts extends IpConnectionPorts {
  onRoute?(route:OpenIpRoute|null):void;
  onError?(error:unknown):void;
  mediaLease?(active:boolean):Promise<unknown>;
+ canOffer?(descriptor:IpDescriptor):Promise<boolean>;
  now?():number;
+}
+export function canOfferIpRoutes(descriptor:IpDescriptor,network:{localWifi?:boolean;active:boolean;bluetooth:boolean}):boolean {
+ // Old hosts cannot distinguish a non-default local Wi-Fi from no Wi-Fi.
+ if(network.localWifi===undefined)return true;
+ return descriptor.endpoints.some(e=>e.transportKind==='wifiLan'||e.transportKind==='phoneHotspot'?network.localWifi:e.transportKind==='bluetoothBridge'?network.active&&network.bluetooth:network.active);
 }
 export function ipFailureStage(error:unknown):string {
  const message=error instanceof Error?error.message:String(error);
@@ -41,7 +47,7 @@ export class IpSyncController {
  private scheduleStop(ms:number){this.stopTimer?.cancel();const timer=this.ports.delay(ms);this.stopTimer=timer;void timer.result.then(()=>{if(this.stopTimer!==timer)return;this.stopTimer=undefined;if(!this.active&&!this.transferring)this.stopRoute();},()=>{});}
  async offer(raw:JsonObject):Promise<boolean>{
   if(this.disposed)return false;let descriptor:IpDescriptor;try{descriptor=parseIpDescriptor(raw);}catch{return false;}
-  if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return false;this.descriptor=descriptor;this.descriptorSource='bootstrap';this.recoveryAttempts=0;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
+  if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return false;if(this.ports.canOffer&&!await this.ports.canOffer(descriptor)){if(!this.disposed){this.descriptor=descriptor;this.descriptorSource='bootstrap';}appLogger.i('WatchRSS_IpSync','IP bootstrap deferred: no compatible local route');return false;}if(this.disposed)return false;this.descriptor=descriptor;this.descriptorSource='bootstrap';this.recoveryAttempts=0;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
  }
  refresh(bootstrap=false,recovery=false){if(!recovery)this.recoveryAttempts=0;if(this.disposed||(!this.active&&!bootstrap))return;if(this.transferring){appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
  private async select(bootstrap=false){

@@ -6,6 +6,7 @@ import {Text,View} from "@pocketjs/framework/components";
 import {ScrollEntries,type ScrollEntry} from "./ScrollEntries.tsx";
 import type {Scroller} from "@pocketjs/framework/kinetics";
 import type {AddChannelPreview,Channel} from "./service.ts";
+import {rssAcquisitionState,subscribeRssAcquisition,type RssAcquisitionState} from "../rss/acquisition.ts";
 
 const SAFE=18,GAP=8;
 type Inline=(value:string,bounds:{x:number;y:number;width:number;height:number},onChange:(value:string)=>void,onSubmit:()=>void,options?:{hint?:string;fontSizeSp?:number;inputType?:"text"|"uri"})=>Promise<{close():Promise<void>}>;
@@ -16,6 +17,12 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
   const [loading,setLoading]=createSignal(false),[submitting,setSubmitting]=createSignal(false),[error,setError]=restoredSignal('retained','add-error',props.initialError??'',stringState);
   const [restorePreview,setRestorePreview]=restoredSignal('retained','add-preview',false,booleanState);
   const [editing,setEditing]=createSignal(false);
+  const [acquisition,setAcquisition]=createSignal<RssAcquisitionState|undefined>(rssAcquisitionState());
+  onCleanup(subscribeRssAcquisition(setAcquisition));
+  // Only a local add needs a word: the pool path is the default and says nothing new.
+  const localNote=()=>{const value=acquisition();if(value?.purpose!=="add"||value.mode!=="local")return "";
+    const why=value.reason==="expired"?"登录已失效":value.reason==="unbound"?"未绑定账号":"";
+    return why?`${why}，仅存手表本机\n绑定后自动并入公共池`:"本地专用源，仅存手表本机";};
   let editingPadding=SAFE;
   const verticalPadding=()=>editing()?editingPadding:step()==="preview"?26:step()==="existing"?52:!url().length&&!error()?40:error()?16:SAFE;
   const rowGap=()=>step()==="input"?GAP:4;
@@ -82,6 +89,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
         <Text class="absolute top-[56] text-xs leading-[17] text-center text-[#b6b6b6]" style={{insetL:-2,insetR:-2,height:36}}>支持 RSS/Atom/RDF，添加后会自动拉{"\n"}取最新内容。</Text>
       </View>},
       ...(loading()?[{height:28,render:()=> <Text class="absolute inset-0 text-[13px] text-center text-[#b6b6b6]">解析中...</Text>}]:[]),
+      ...(loading()&&localNote()?[{height:34,render:()=> <Text class="absolute inset-0 text-xs leading-[17] text-center text-[#b6b6b6]">{localNote()}</Text>}]:[]),
       ...(error()?[{height:14,render:()=> <Text class="absolute inset-0 text-xs text-center text-[#e54d4d]">{error()}</Text>}]:[]),
       ...(error()&&error()!=="请输入 RSS 地址"&&error()!=="URL 不合法"?[retryActions(),{height:0,render:()=> <View/>}]:[]),
       ...(url().length>0?[submitAction()]:[]),
@@ -94,6 +102,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
     if(item?.kind==="ready")return [heading("添加 RSS"),
       {height:24,render:()=> <View class="absolute inset-0 items-center justify-center"><Text accessibilityRole="header" class="text-lg leading-[23] text-center text-[#f5f5f5]">{item.title}</Text></View>},
       {height:18,render:()=> <Text class="absolute inset-0 text-xs leading-[17] text-center text-[#b6b6b6]">{item.description||"暂无简介"}</Text>},
+      ...(localNote()?[{height:localNote().includes("\n")?34:17,render:()=> <Text class="absolute inset-0 text-xs leading-[17] text-center text-[#ff6026]">{localNote()}</Text>}]:[]),
       ...(error()?[{height:18,render:()=> <Text class="absolute inset-0 text-xs text-center text-[#e54d4d]">{error()}</Text>}]:[]),
       {height:2,render:()=> <View/>},button(submitting()?"添加中":"确认添加",()=>void confirm(),submitting()),{height:0,render:()=> <View/>},button("修改地址",backToInput)];
     return [heading("添加 RSS")];

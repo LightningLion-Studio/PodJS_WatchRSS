@@ -1,4 +1,4 @@
-import {parseHtmlFragment,normalizeHtmlWhitespace,type HtmlElement} from '@podjs/framework/html';
+import {parseHtmlFragment,normalizeHtmlWhitespace,unwrapEscapedHtml,textWorkChunks,type HtmlElement} from '@podjs/framework/html';
 import { resolveUrl } from "../core/parser.ts";
 import { decodeHtml } from "../core/html.ts";
 export type ContentStyle = "body" | "title" | "subtitle" | "quote" | "code" | "link";
@@ -48,13 +48,13 @@ function dimension(node:Element,name:string):number|undefined {const attr=node.a
 function compact(blocks:ContentBlock[]):ContentBlock[]{
   const result:ContentBlock[]=[];
   for(const block of blocks){if(block.type!=="text"){result.push(block);continue;}
-    for(let start=0;start<block.text.length;){let end=Math.min(start+2000,block.text.length);if(end<block.text.length&&/[\uD800-\uDBFF]/.test(block.text[end-1]))end--;const value=block.text.slice(start,end).trim();start=end;if(!value)continue;
-      const last=result.at(-1);if(last?.type==="text"&&last.style===block.style&&last.text.length+value.length+1<=4000)last.text+="\n"+value;else result.push({...block,text:value});
+    for(const chunk of textWorkChunks(block.text)) {const value=chunk.trim();if(!value)continue;
+      const last=result.at(-1);if(last?.type==="text"&&last.style===block.style&&last.text.length+value.length+1<=1024)last.text+="\n"+value;else result.push({...block,text:value});
     }
   }return result;
 }
 /** Mirrors RssContentParser's block selection and grouping; URLs remain source values. */
-export function parseContent(raw:string):ContentBlock[]{return parseContentTree(raw,detection.test(raw.slice(0,4096))?parseHtmlFragment(raw):null);}
+export function parseContent(raw:string):ContentBlock[]{raw=unwrapEscapedHtml(raw);return parseContentTree(raw,detection.test(raw.slice(0,4096))?parseHtmlFragment(raw):null);}
 function parseContentTree(raw:string,tree:Element|null):ContentBlock[]{
   if(!raw.trim())return [];
   if(!detection.test(raw.slice(0,4096)))return compact(raw.split(/\r\n?|\n/).filter(s=>s.trim()).map(text=>({type:"text",text:text.trim(),style:"body"})));
@@ -123,6 +123,27 @@ async function nativeFragment(raw:string,signal?:AbortSignal):Promise<Element|nu
 /** Production body callbacks leave the SQL completion turn during native scan. */
 export async function parseContentAsync(raw:string,signal?:AbortSignal):Promise<ContentBlock[]>{
  if(signal?.aborted)throw Error('HTML parse cancelled');
+ raw=unwrapEscapedHtml(raw);
+ if(!detection.test(raw.slice(0,4096)))return parsePlainContentAsync(raw,signal);
  return parseContentTree(raw,detection.test(raw.slice(0,4096))?await nativeFragment(raw,signal):null);
 }
 export async function extractReadableHtmlAsync(raw:string,baseUrl:string,signal?:AbortSignal):Promise<string|null>{return readableTree(raw,baseUrl,await nativeFragment(raw,signal));}
+
+/** A newline-free multi-megabyte fallback must not monopolize a service turn.
+ * The framework bounds each work unit; only the visible row window is mounted. */
+async function parsePlainContentAsync(raw:string,signal?:AbortSignal):Promise<ContentBlock[]> {
+ const {prepareTextLayout,yieldWorkTurn}=await import("@podjs/framework/text-layout");
+ const blocks:ContentBlock[]=[];
+ function* steps():Generator<void,ContentBlock[]> {
+  for(const chunk of textWorkChunks(raw)) {
+   for(const line of chunk.split(/\r\n?|\n/)){const value=line.trim();if(!value)continue;
+    const last=blocks.at(-1);if(last?.type==='text'&&last.text.length+value.length+1<=1024)last.text+='\n'+value;else blocks.push({type:'text',text:value,style:'body'});
+   }yield;
+  }return blocks;
+ }
+ let result:ContentBlock[]|undefined,key=0;
+ const task=prepareTextLayout(steps(),{key:()=>key++,entry:()=>undefined,publish:snapshot=>result=snapshot.layout},{yieldTurn:yieldWorkTurn});
+ const cancel=()=>task.cancel();signal?.addEventListener('abort',cancel,{once:true});
+ try{await task.done;if(signal?.aborted)throw Error('HTML parse cancelled');return result??[];}
+ finally{signal?.removeEventListener('abort',cancel);}
+}

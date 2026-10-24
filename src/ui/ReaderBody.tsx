@@ -1,3 +1,6 @@
+import {AutoScrollAwakeLease} from "../reader/keep-awake.ts";
+import {displayPower} from "@podjs/framework/services";
+import {lifecycle} from "@podjs/framework/watch";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {prepareTextLayout} from "@podjs/framework/text";
 import {createWindowValue} from "@podjs/framework/windowed-list";
@@ -57,7 +60,7 @@ function ReaderBodyImpl(props:{
   header?:ScrollEntry[]; footer?:ScrollEntry[];
   articleId:string; top?:number; text:string; blocks:ContentBlock[]; baseUrl?:string; width:number; height:number; lineHeight:number;
   offlineMedia?:Record<string,string>;
-  fontSize:number; onMedia:(block:Exclude<ContentBlock,{type:"text"}>)=>void; active:boolean; autoStart:boolean; speed:number;
+  fontSize:number; onMedia:(block:Exclude<ContentBlock,{type:"text"}>)=>void; active:boolean; autoStart:boolean; keepAwake?:boolean; speed:number;
   onControls:(handle:ReaderBodyHandle)=>void; onError:(message:string)=>void;
   onSpeechControls?:(anchor?:SpeechAnchor)=>void;
   ref:(handle:ReaderBodyHandle)=>void;
@@ -158,7 +161,10 @@ function ReaderBodyImpl(props:{
   const [lastManualScroll,setLastManualScroll]=createSignal(-Infinity);
   let followingSpeech=false;
   const manualScroll=()=>{followingSpeech=false;setLastManualScroll(Date.now());handle.pause();};
-  let disposed=false,foreground=true,lastFrame=0,lastSave=0,lastOffset=-1;
+  let disposed=false,foreground=lifecycle()==="active",lastFrame=0,lastSave=0,lastOffset=-1;
+  const awake=new AutoScrollAwakeLease((owner,active)=>hasCapability("display.power")?displayPower.keepAwake(owner,active):Promise.resolve(),()=>appLogger.w("ReaderAutoScroll","Display lease update failed"));
+  const syncAwake=()=>awake.update({enabled:props.keepAwake===true,scrolling:playing()&&restored(),active:props.active,foreground});
+  createEffect(()=>{void syncAwake();});
   let tapTimer:(()=>void)|undefined,feedbackTimer:(()=>void)|undefined;
   const schedule=(milliseconds:number,callback:()=>void)=>{const timer=delay(Math.max(1,milliseconds));void timer.result.then(callback,()=>{});return ()=>timer.cancel();};
   const currentProgress=()=>{
@@ -286,9 +292,10 @@ function ReaderBodyImpl(props:{
   const removeLifecycle=__onHostEvent(event=>{
     if(event.t!=="lifecycle")return;
     foreground=event.state==="active";lastFrame=0;controller.setBackground(!foreground||!props.active);
+    void syncAwake();
     if(!foreground)void save();
   });
-  onCleanup(()=>{void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  onCleanup(()=>{void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
   function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createWindowValue(raw);return row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,raw(),positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>;}};}

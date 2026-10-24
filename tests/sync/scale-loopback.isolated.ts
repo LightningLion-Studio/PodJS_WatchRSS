@@ -62,7 +62,7 @@ async function exchange(serverRepo:SqlLibrarySessionRepository,phone:Awaited<Ret
   }
   receiver.finish();if(!options.dropFinalAck)await b.conn.writeFrame({action:'ack',phase:'applied',success:true,applied:true});else await b.conn.close();
   const result=await running;expect(result.at(-1)?.libraryApplied).toBe(!options.dropFinalAck);
-  if(!options.dropFinalAck)await phone.repo.markSuccess({remoteDeviceId:'watch',localSeqToInclusive:window.toSeqInclusive,remoteSeqToInclusive:Number((response.changeSeqRange as JsonObject).toInclusive),remoteProtocolVersion:14,fullSnapshot:window.fullSnapshot});
+  if(!options.dropFinalAck)await phone.repo.markSuccess({remoteDeviceId:'watch',projectionGeneration:window.projectionGeneration,localSeqToInclusive:window.toSeqInclusive,remoteSeqToInclusive:Number((response.changeSeqRange as JsonObject).toInclusive),remoteProtocolVersion:14,fullSnapshot:window.fullSnapshot});
   return {interrupted:false,completed,requests,fullBodies,frames,elapsedMs:performance.now()-started,phases,wireBytes:a.bytes()+b.bytes()};
  }finally{console.log('T39 exchange progress '+JSON.stringify({options,elapsedMs:performance.now()-started,completed,requests,frames,phases}));await b.conn.close();await a.conn.close();await running.catch(()=>{});}
 }

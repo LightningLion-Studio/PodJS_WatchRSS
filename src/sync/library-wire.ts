@@ -24,7 +24,8 @@ export function parseSources(frame:JsonObject):SyncedSource[]{
 /** Exact byte count for javaJsonQuote, including slash escapes and Java's
  * ASCII '?' replacement for unmatched UTF-16 surrogates. Response bodies are
  * mostly Base64; avoid constructing a second 40-MB JSON string just to size it. */
-function quotedBytes(value:string):number {return androidJsonQuotedByteLength(value);}
+const quotedSizeCache=new Map<string,number>();
+function quotedBytes(value:string):number {if(value.length>128)return androidJsonQuotedByteLength(value);const old=quotedSizeCache.get(value);if(old!==undefined)return old;const size=androidJsonQuotedByteLength(value);if(quotedSizeCache.size>=128)quotedSizeCache.delete(quotedSizeCache.keys().next().value!);quotedSizeCache.set(value,size);return size;}
 /** Android JSONObject representation for native size estimates. Undefined
  * object fields are omitted; null remains a literal JSON null. */
 function jsonBytes(value:unknown):number {
@@ -49,11 +50,23 @@ export function wireProgress(value:number):number {
 }
 const envelope=(phase:string,deviceId:string,now:()=>number):JsonObject=>({success:true,version:PROTOCOL_VERSION,action:ACTION_SYNC_LIBRARY,phase,deviceId,sentAt:now()});
 export function buildCursorResponse(deviceId:string,cursor:SyncCursor,now=Date.now):JsonObject {return {...envelope('cursor',deviceId,now),supportsManifestBatches:true,syncCursor:{...cursor},supportsAuthoritativeLibraryReplace:true};}
-export function buildManifestResponse(deviceId:string,articles:readonly ArticleManifest[],bodyRequests:readonly RequestedArticleBody[],sources:readonly SyncedSource[],sourcesApplied:number,range:ChangeSequence,now=Date.now):JsonObject {
+export function buildManifestResponse(deviceId:string,articles:readonly ArticleManifest[],bodyRequests:readonly RequestedArticleBody[],sources:readonly SyncedSource[],sourcesApplied:number,range:ChangeSequence,now=Date.now,compact=false):JsonObject {
  return {...envelope('manifest',deviceId,now),supportsArticleBatches:true,supportsManifestBatches:true,supportsChunkedBodies:true,supportsChangeSequences:true,supportsMetadataOnlyArticles:true,supportsReceivedAck:true,supportsTransferByteProgress:true,
-  articleManifest:articles.map(a=>({...a,readingProgress:wireProgress(a.readingProgress),chunkHashes:[...a.chunkHashes]})),bodyRequests:bodyRequests.map(r=>({...r,chunkIndexes:[...r.chunkIndexes]})),rssSources:sources.map(sourceJson),
+  articleManifest:articles.map(a=>manifestEntry(a,compact)),bodyRequests:bodyRequests.map(r=>({...r,chunkIndexes:[...r.chunkIndexes]})),rssSources:sources.map(sourceJson),
   fullSnapshot:range.fullSnapshot,fallbackReason:range.fallbackReason,changeSeqRange:{fromExclusive:range.fromSeqExclusive,toInclusive:range.toSeqInclusive},
   stats:{sourcesSent:sources.length,sourcesApplied,bodyRequests:bodyRequests.length,metadataOnlyRequests:bodyRequests.filter(r=>r.metadataOnly).length,bodyRequestChunks:bodyRequests.reduce((n,r)=>n+r.chunkIndexes.length,0)}};
+}
+/** Only parser-defined defaults may be absent. Explicit unread/deletion clocks
+ * and every nondefault value remain present, including each independent clock. */
+export function manifestEntry(a:ArticleManifest,compact=false):JsonObject {
+ const entry:JsonObject={...a,readingProgress:wireProgress(a.readingProgress),chunkHashes:[...a.chunkHashes]};
+ if(compact){
+  for(const key of ['independentChangedAt','favoriteChangedAt','watchLaterChangedAt','deletedAt','readingProgress','readingPositionBytes','readingPositionChangedAt'] as const)if(entry[key]===0)delete entry[key];
+  if(a.deleted===(a.deletedAt>0))delete entry.deleted;
+  if(a.bodyAvailable===true)delete entry.bodyAvailable;if(a.bodySyncMode==='full')delete entry.bodySyncMode;
+  if(a.readingPositionContentHash==='')delete entry.readingPositionContentHash;if(a.isRead===false)delete entry.isRead;
+ }
+ return entry;
 }
 function sourceJson(s:SyncedSource):JsonObject {return Object.fromEntries(Object.entries(s).filter(([,v])=>v!==null));}
 const manifestFields=['articleManifest','bodyRequests','rssSources'] as const;

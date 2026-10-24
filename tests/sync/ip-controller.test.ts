@@ -124,3 +124,14 @@ test('changing saved phone setting during descriptor authentication does not rej
  const offering=controller.offer({...f.descriptor});settings.update({phoneConnectionEnabled:false});pending.resolve(f.descriptor.hmac);
  expect(await offering).toBe(true);await flush();expect(f.opens).toHaveLength(1);expect(settings.load().phoneConnectionEnabled).toBe(false);await controller.dispose();
 });
+
+test('R47 refuses an impossible LAN upgrade instead of making the phone wait for it',async()=>{
+ const {canOfferIpRoutes}=await import('../../src/sync/ip-controller');const f=ipFixture();await f.sign();let checked=0;
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,canOffer:async descriptor=>{checked++;return canOfferIpRoutes(descriptor,{active:true,bluetooth:true,localWifi:false});}});
+ expect(await controller.offer({...f.descriptor,hmac:'invalid'})).toBe(false);expect(checked).toBe(0);
+ expect(await controller.offer({...f.descriptor})).toBe(false);await flush();expect(f.opens).toEqual([]);expect(checked).toBe(1);
+ expect(canOfferIpRoutes(f.descriptor,{active:true,bluetooth:true,localWifi:true})).toBe(true);
+ expect(canOfferIpRoutes(f.descriptor,{active:true,bluetooth:true})).toBe(true);
+ expect(canOfferIpRoutes({...f.descriptor,endpoints:[{...f.descriptor.endpoints[0]!,transportKind:'bluetoothBridge'}]},{active:true,bluetooth:true,localWifi:false})).toBe(true);
+ await controller.dispose();
+});

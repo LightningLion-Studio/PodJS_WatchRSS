@@ -52,6 +52,7 @@ export class ReaderPresetStore {
   private save(state: ReaderPresetState): ReaderPresetState {
     if (!validSelection(state.selection) || !validSchedule(state.schedule)) throw new Error("阅读器预设设置无效");
     this.storage.set(READER_PRESETS_KEY, state);
+    notifyReaderPresetsChanged();
     return state;
   }
   ensureSeeded(legacyDark: boolean, legacyFontSizeSp: number, now = Date.now()): ReaderPresetState {

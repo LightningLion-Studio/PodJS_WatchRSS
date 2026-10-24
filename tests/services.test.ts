@@ -1,9 +1,11 @@
+import {RssLocalAccess} from '../src/rss/acquisition';
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
 const database = new Database(":memory:");
 const speechCalls:unknown[]=[];
 let feedBytes = new Uint8Array();
+let poolUnavailable=false;
 const feedRequests:string[]=[];const poolRequests:string[]=[];
 const feedResponses=new Map<string,Promise<Uint8Array>[]>();
 let feedCancels=0;
@@ -41,7 +43,7 @@ function mockFeedDownload(url:string,path:string) {
 
 // This suite tests local service/SQL behavior; the public-pool protocol has an
 // independent real-client fixture. Keep its deferred feed/cancellation boundary.
-mock.module('../src/cloud/rss-pool',()=>({resolvePoolFeed:async(_accounts:unknown,_transport:unknown,url:string,_version:string,job?:{cancelled:boolean;cancel?:()=>void})=>{poolRequests.push(url);const path='feeds/pool-fixture-'+feedRequests.length,request=mockFeedDownload(url,path);if(job)job.cancel=()=>request.cancel();await request.result;return {fixtureXml:new TextDecoder().decode(downloaded.get(path))};},poolFeedXml:(value:{fixtureXml:string})=>value.fixtureXml}));
+mock.module('../src/cloud/rss-pool',()=>({resolvePoolFeed:async(_accounts:unknown,_transport:unknown,url:string,_version:string,job?:{cancelled:boolean;cancel?:()=>void})=>{poolRequests.push(url);if(poolUnavailable)throw new RssLocalAccess('unbound');const path='feeds/pool-fixture-'+feedRequests.length,request=mockFeedDownload(url,path);if(job)job.cancel=()=>request.cancel();await request.result;return {fixtureXml:new TextDecoder().decode(downloaded.get(path))};},poolFeedXml:(value:{fixtureXml:string})=>value.fixtureXml}));
 const realWatch=await import('@podjs/framework/watch');
 mock.module('@podjs/framework/watch',()=>({...realWatch,kv:{get:(key:string)=>localKv.get(key),set:(key:string,value:unknown)=>{localKv.set(key,value);},delete:(key:string)=>localKv.delete(key),keys:()=>[...localKv.keys()],batch:(action:()=>unknown)=>action()}}));
 const frameworkServices = await import("@podjs/framework/services");
@@ -670,4 +672,25 @@ test('R36 local-only direct add, preview and refresh use the existing local feed
   const start=poolRequests.length,preview=await services.services.previewChannel!(url);expect(preview.kind).toBe('ready');if(preview.kind!=='ready')throw Error('missing preview');
   const channel=await services.services.confirmAddChannel!(preview.token);try{await services.services.refresh(channel.id);expect(poolRequests.length).toBe(start);expect(feedRequests.filter(v=>v===url).length).toBeGreaterThanOrEqual(2);}finally{await services.services.deleteChannel(channel.id);}
  }}finally{feedBytes=original;}
+});
+
+test('production service add/refresh falls back only on unavailable login and durably marks the local subscription',async()=>{
+ const original=feedBytes;feedBytes=new TextEncoder().encode(feed(1));poolUnavailable=true;let channel:{id:string}|undefined;
+ try{
+  const preview=await services.services.previewChannel!('https://local-fallback.example/rss');expect(preview.kind).toBe('ready');if(preview.kind!=='ready')throw Error('preview unavailable');
+  channel=await services.services.confirmAddChannel!(preview.token);await services.services.refresh(channel.id);
+  expect(database.query('SELECT url FROM rss_local_sources WHERE url=?').get('https://local-fallback.example/rss')).not.toBeNull();
+  const {rssAcquisitionState}=await import('../src/rss/acquisition');expect(rssAcquisitionState()).toMatchObject({mode:'local',purpose:'refresh',reason:'unbound',phase:'ready'});
+ }finally{poolUnavailable=false;feedBytes=original;if(channel)await services.services.deleteChannel(channel.id);}
+});
+test('production offline queue starts from an unopened favorite, uses owned host paths and cleans when the last save is removed',async()=>{
+ const before=feedBytes;let channel:{id:string}|undefined;
+ try{
+  feedBytes=new TextEncoder().encode(feed(1));channel=await services.services.addChannel('https://offline-default.example/rss');const article=(await database.query('SELECT id FROM articles WHERE channel_id=? LIMIT 1').get(Number(channel.id))) as {id:number};
+  database.query('UPDATE articles SET content=?,image_url=? WHERE id=?').run('<img src="https://offline-default.example/a.png">','https://offline-default.example/a.png',article.id);
+  feedBytes=Uint8Array.from([137,80,78,71,13,10,26,10]);await services.services.setSaveState!(String(article.id),'favorite',true);
+  for(let i=0;i<100&&await services.getOfflineMediaStatus(String(article.id));i++)await Bun.sleep(1);
+  const row=database.query('SELECT relative_path FROM offline_media WHERE item_id=?').get(article.id) as {relative_path:string};expect(row.relative_path).toStartWith(`offline/rss/${article.id}/`);expect(downloaded.get(row.relative_path)?.[0]).toBe(137);
+  await services.services.setSaveState!(String(article.id),'favorite',false);for(let i=0;i<100&&await services.getOfflineMediaStatus(String(article.id));i++)await Bun.sleep(1);expect(downloaded.has(row.relative_path)).toBe(false);
+ }finally{feedBytes=before;if(channel)await services.services.deleteChannel(channel.id);}
 });

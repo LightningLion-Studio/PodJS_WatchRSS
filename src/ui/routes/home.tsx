@@ -1,7 +1,7 @@
 import { Show } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
-import { manualCloudSync, applicationCloudApproval, applicationCloudActions } from "../../cloud/application.ts";
+import { manualCloudSync, applicationCloudApproval, applicationCloudActions, applicationCloudHandoff } from "../../cloud/application.ts";
 import { cloudRemediationActions } from "../cloud-sync-view.ts";
 import { clearLocalPrivateLibrary } from "../../services.ts";
 import { readCloudAccountStatus } from "../../cloud/status.ts";
@@ -149,6 +149,7 @@ export function HomeRoutes(props: HomeRoutesProps) {
           available={() => readCloudAccountStatus() !== undefined}
           sync={manualCloud}
           approval={applicationCloudApproval}
+          handoff={applicationCloudHandoff}
           actions={cloudActions}
           clearLocal={clearLocalPrivateLibrary}
           onPhone={() => void props.go("phone-connection")}

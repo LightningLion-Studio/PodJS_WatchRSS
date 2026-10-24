@@ -119,6 +119,7 @@ def stage(native_path: Path, target_path: Path, files_tar: Path, output: Path, r
         dest = sqlite3.connect(partial)
         try:
             dest.execute("PRAGMA foreign_keys=ON")
+            has_offline_policy = scalar(dest, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='offline_media_policy'") > 0
             if scalar(dest, "PRAGMA quick_check") != "ok":
                 raise ValueError("PodJS baseline failed quick_check")
             dest.execute("""CREATE TABLE IF NOT EXISTS offline_media (
@@ -135,6 +136,8 @@ def stage(native_path: Path, target_path: Path, files_tar: Path, output: Path, r
             if scalar(dest, "SELECT COUNT(*) FROM sync_local_identity") != 1:
                 raise ValueError("PodJS baseline must have one local identity")
             dest.execute("BEGIN IMMEDIATE")
+            if has_offline_policy:
+                dest.execute("UPDATE offline_media_policy SET suppress_download=1 WHERE id=1")
             dest.execute("UPDATE sync_local_identity SET device_id=?,device_order=? WHERE id=1",
                          (identity, device_order(identity)))
             channels = native.execute("SELECT * FROM rss_channels").fetchall()
@@ -307,6 +310,8 @@ def stage(native_path: Path, target_path: Path, files_tar: Path, output: Path, r
             for table, count in expected.items():
                 if scalar(dest, f'SELECT COUNT(*) FROM "{table}"') != count:
                     raise ValueError(f"Staged count differs for {table}")
+            if has_offline_policy:
+                dest.execute("UPDATE offline_media_policy SET suppress_download=0 WHERE id=1")
             dest.commit()
             if scalar(dest, "PRAGMA quick_check") != "ok":
                 raise ValueError("Staged database failed quick_check")

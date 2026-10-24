@@ -34,7 +34,7 @@ test('full manifests do not reintroduce an older alternate URL ID deletion after
  await f.db.execute('UPDATE sync_article_deletions SET changed_at=500');expect((await f.repo.prepareWindow('phone',0)).fullArticleManifest.find(r=>r.articleId===legacy)?.deleted).toBe(true);
  }finally{f.sql.close();}});
 test('an unverified feed timestamp never suppresses an old-ID deletion',async()=>{const f=await fixture();try{
- const a=article({updatedAt:400,independentChangedAt:400}),legacy=sha('old id');await f.repo.receiveArticle(await f.packet(a),'phone',false);await f.db.execute('DELETE FROM article_sync_encoding_cache');await f.db.execute('INSERT INTO sync_article_deletions VALUES(?,?,?,?,?)',[legacy,a.url,200,'phone',deviceOrder('phone')]);expect((await f.repo.prepareWindow('phone',0)).fullArticleManifest.find(r=>r.articleId===legacy)?.deleted).toBe(true);
+ const a=article({updatedAt:400,independentChangedAt:400}),legacy=sha('old id');await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(1,'watchrss://phone-imports','feed-only',1)");await f.db.execute("INSERT INTO articles(channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,'unverified','feed body',?,?,400)",[a.url,a.articleId]);await f.db.execute('INSERT INTO sync_article_deletions VALUES(?,?,?,?,?)',[legacy,a.url,200,'phone',deviceOrder('phone')]);expect((await f.repo.prepareWindow('phone',0)).fullArticleManifest.find(r=>r.articleId===legacy)?.deleted).toBe(true);
  }finally{f.sql.close();}});
 test('same-URL RSS rows with distinct canonical pool identities keep the deletion visible',async()=>{const f=await fixture();try{
  const a=article({rssSourceUrl:'https://one.example/rss',updatedAt:400,independentChangedAt:400}),b=article({articleId:sha('second-row'),rssSourceUrl:'https://two.example/rss',updatedAt:400,independentChangedAt:400});await f.repo.receiveArticle(await f.packet(a),'phone',false);await f.repo.receiveArticle(await f.packet(b),'phone',false);
@@ -45,3 +45,24 @@ test('a unique authoritative RSS pool identity supersedes its older normalized-U
  const url='https://www.example.com/private',canonical=sha(url),legacy=sha('https://example.com/private'),a=article({articleId:canonical,url,rssSourceUrl:'https://feed.test/rss',independentSaved:false,independentChangedAt:0,favoriteSaved:false,favoriteChangedAt:400,updatedAt:400});f.repo.configurePeer('phone',{supportsRssCanonicalIds:true});await f.repo.receiveArticle(await f.packet(a),'phone',false);const item=(await f.db.query('SELECT id FROM articles'))[0]!.id;await f.db.execute('INSERT OR REPLACE INTO cloud_rss_article_ids VALUES(?,?)',[item,canonical]);await f.db.execute('INSERT INTO sync_article_deletions VALUES(?,?,?,?,?)',[legacy,url,200,'phone',deviceOrder('phone')]);
  for(let i=0;i<3;i++){const {SqlLibrarySessionRepository}=await import('../../src/sync/library-repository'),repo=new SqlLibrarySessionRepository(f.db,f.ports);repo.configurePeer('phone',{supportsRssCanonicalIds:true});const full=(await repo.prepareWindow('phone',0)).fullArticleManifest;expect(full.some(r=>r.articleId===legacy)).toBe(false);expect(full.find(r=>r.articleId===canonical)?.deleted).toBe(false);}
  }finally{f.sql.close();}});
+
+test('R47.1 projection rebuild retains prior keep receipts and does not revive alternate-ID tombstones',async()=>{
+ const {DOMAIN_ENCODERS}=await import('../../src/sync/domain-definitions'),{SqlLibrarySessionRepository}=await import('../../src/sync/library-repository');
+ const encoder=DOMAIN_ENCODERS.library,f=await fixture();try{
+  const url='https://www.example.com/private',canonical=sha(url),legacy=sha('https://example.com/private');
+  const a=article({articleId:canonical,url,rssSourceUrl:'https://feed.test/rss',independentSaved:false,independentChangedAt:0,favoriteSaved:false,favoriteChangedAt:400,updatedAt:400});
+  f.repo.configurePeer('phone',{supportsRssCanonicalIds:true});await f.repo.receiveArticle(await f.packet(a),'phone',false);
+  const item=(await f.db.query('SELECT id FROM articles'))[0]!.id;
+  await f.db.execute('INSERT OR REPLACE INTO cloud_rss_article_ids VALUES(?,?)',[item,canonical]);
+  await f.db.execute('INSERT INTO sync_article_deletions VALUES(?,?,?,?,?)',[legacy,url,200,'phone',deviceOrder('phone')]);
+  const business=()=>f.db.query('SELECT * FROM sync_article_deletions');const before=await business();
+  for(const upgrade of [false,true,false]){
+   if(upgrade)DOMAIN_ENCODERS.library++;
+   const r=new SqlLibrarySessionRepository(f.db,f.ports);r.configurePeer('phone',{supportsRssCanonicalIds:true});
+   const w=await r.prepareWindow('phone',0);
+   expect(w.fullArticleManifest.some(m=>m.articleId===legacy)).toBe(false);
+   const kept=w.fullArticleManifest.find(m=>m.articleId===canonical)!;expect(kept.deleted).toBe(false);expect(kept.deletedAt).toBe(0);expect(kept.updatedAt).toBe(400);
+   expect(await business()).toEqual(before);
+  }
+ }finally{DOMAIN_ENCODERS.library=encoder;f.sql.close();}
+});

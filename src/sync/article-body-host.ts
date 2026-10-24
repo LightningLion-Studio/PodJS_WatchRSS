@@ -1,6 +1,7 @@
+import {yieldWorkTurn} from '@podjs/framework/text-layout';
 import {decodeSyncUtf8} from './protocol.ts';
 import {encodeUtf8Async,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
-import {fileChunks,uri,hostOperation,bytesToBase64,base64ToBytes} from "@podjs/framework/services";
+import {fileChunks,uri,sqlite,hostOperation,bytesToBase64,base64ToBytes} from "@podjs/framework/services";
 import {encodeBodyJson,MAX_BODY_JSON_BYTES,type SyncBodyCodec} from "./article-body.ts";
 
 async function temporary(chunks:Iterable<Uint8Array>):Promise<string>{
@@ -59,6 +60,7 @@ export const hostArticleBodyCodec:SyncBodyCodec={
 
 /** Generic host services retain Android URI and Jsoup text semantics. */
 export const hostSyncText={
+ yieldTurn:()=>yieldWorkTurn().result,
  parseUri:uri.parse,
  async htmlText(html:string):Promise<string>{
   const input=await temporary([await encodeUtf8Async(html,'question')]);let output:string|undefined,reader:string|undefined;
@@ -70,3 +72,13 @@ export const hostSyncText={
   }finally{if(reader)await fileChunks.closeText(reader);if(output)await fileChunks.remove(output);await fileChunks.remove(input);}
  },
 };
+
+/** Business SELECT only; generic host export handles strings and bounded files. */
+export async function reencodeStoredArticleBodies(ids:readonly number[]){
+ if(!ids.length)return [];if(ids.length>32||ids.some(id=>!Number.isSafeInteger(id)||id<=0))throw Error('invalid_cached_body_batch');
+ const reference={filePrefix:'watchrss-watch-content:',directory:'article_content',filePattern:'(?:v2-[0-9a-f]{64}-[0-9a-f]{64}|[A-Za-z0-9._-]{1,96})\\.txt'};
+ try{
+  const rows=await sqlite.gzipJson({sql:`SELECT c.item_id AS body_key,c.content_html,c.content_text,c.body_hash AS expected_hash FROM article_sync_content c JOIN article_sync_encoding_cache e ON e.item_id=c.item_id AND e.body_hash=c.body_hash WHERE c.item_id IN (${ids.map(()=>'?').join(',')}) ORDER BY c.item_id`,params:ids,keyColumn:'body_key',expectedHashColumn:'expected_hash',fields:[{name:'contentHtml',column:'content_html',omitNull:true,...reference},{name:'contentText',column:'content_text',...reference}],maxRows:32,maxInputBytes:1024*1024,chunkSize:128*1024});
+  return rows.filter(r=>!r.oversized).map(r=>({itemId:Number(r.key),bodyHash:r.sha256,bodyByteCount:r.size,chunkSize:r.chunkSize,chunkHashes:r.chunkHashes}));
+ }catch(error){if(/unknown (?:sql )?method|unsupported/i.test(String(error)))return [];throw error;}
+}

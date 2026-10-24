@@ -120,18 +120,24 @@ test('production list keeps the visible item when earlier row heights change aft
 // prepare/effect path and Activity Context stay real.
 const transforms:any[]=[],volumes:number[]=[];
 let internet='wifi';
-const videoState=()=>({state:'playing',positionMs:0,durationMs:100000,width:466,height:466,volume:.8});
-mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:466,logicalWidth:233,logicalHeight:233,shape:'round',density:2,safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
+let playerLifecycle='active';const playerLifecycleListeners=new Set<(state:string)=>void>();
+let nativeVideoSample:Record<string,unknown>={};
+const videoState=()=>({state:'playing',positionMs:0,durationMs:100000,width:466,height:466,volume:.8,...nativeVideoSample});
+const frameCaptures:any[]=[];
+const loopCalls:boolean[]=[],prepareLoops:boolean[]=[],loopKv=new Map<string,unknown>();
+const videoTimers=new Set<{milliseconds:number;fire:()=>void}>();
+const fireVideoPoll=()=>{for(const timer of [...videoTimers])if(timer.milliseconds===400){videoTimers.delete(timer);timer.fire();}};
+mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:466,logicalWidth:233,logicalHeight:233,shape:'round',density:2,safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,lifecycle:()=>playerLifecycle,onLifecycleChange:(fn:(state:string)=>void)=>{playerLifecycleListeners.add(fn);return ()=>playerLifecycleListeners.delete(fn);},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:(key:string)=>loopKv.get(key),set(key:string,value:unknown){loopKv.set(key,value);},delete(key:string){loopKv.delete(key);}}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string)=>t.length*6})}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:element('RemoteImage')}));
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(listener:any)=>{listener(internet);return ()=>{};}}));
 mock.module('../src/logs/app-logger.ts',()=>({createLogConsole:()=>({warn(){},error(){}}),appLogger:{d(){},i(){},w(){},e(){}}}));
 let inlineCalls=0;
 mock.module('@podjs/framework/services',()=>({textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
- captureBackdrop:async()=>{},prepare:()=>({result:Promise.resolve(videoState()),cancel(){}}),
+ captureFrame:async(options:any)=>{frameCaptures.push(options);return {available:true,kind:"actual_frame",path:"video-frames/test.jpg"};},captureBackdrop:async()=>{},prepare:(options:any)=>{prepareLoops.push(options.loop);return {result:Promise.resolve(videoState()),cancel(){}};},setLoop:async(loop:boolean)=>{loopCalls.push(loop);return videoState();},
  play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
  setBounds:async()=>{},setTransform:async(value:any)=>{transforms.push(value);},setVolume:async(value:number)=>{volumes.push(value);return {...videoState(),volume:value};},
-},videoSessions:{},hostOperation:()=>{throw Error('unexpected native operation');},delay:()=>({result:new Promise<void>(()=>{}),cancel(){}})}));
+},videoSessions:{},hostOperation:()=>{throw Error('unexpected native operation');},delay:(milliseconds:number)=>{let fire!:()=>void;const result=new Promise<void>(r=>fire=r),timer={milliseconds,fire};videoTimers.add(timer);return {result,cancel(){videoTimers.delete(timer);}};}}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 
@@ -151,6 +157,53 @@ test('production immersive player keeps restored mode through prepare and next s
  const bili:ActivityRoute={page:'video',videoTarget:{kind:'bili',aid:1,cid:2},memory:{id:'r999',saved:{'player-scale':'expanded','player-controls':false,'player-start-limit-consumed':true},retained:{}}};
  const b=mount(bili,()=>createComponent(VideoPlayerScreen,{source:{title:'Bili',url:'fixture',platform:'bili',startVolumeLimit:10},width:233,height:233,active:true,offset:0,round:true}));
  await turn();expect(transforms.at(-1).scaleMode).toBe('standard');expect(volumes).toEqual([.1]);expect(nodes(b.root).filter(n=>n.kind==='Image').length).toBeGreaterThan(0);b.dispose();
+});
+
+
+test('production player exposes persistent loop controls, changes the running host and checkpoints repeats once',async()=>{
+ loopKv.clear();loopCalls.length=0;prepareLoops.length=0;nativeVideoSample={};internet='wifi';
+ let handle:any;const checkpoints:string[]=[],progress:number[]=[];
+ const f=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source:{title:'Bili',url:'bili-loop',platform:'bili'},width:233,height:233,active:true,offset:0,round:true,ref:v=>handle=v,onCheckpoint:kind=>checkpoints.push(kind),onProgress:position=>progress.push(position)}));
+ await turn();expect(handle.loopMode()).toBe('off');expect(handle.availableLoopModes()).toEqual(['off','single']);
+ handle.cycleLoopMode();await turn();expect(handle.loopMode()).toBe('single');expect(loopCalls.at(-1)).toBe(true);expect(prepareLoops).toEqual([false]);
+ nativeVideoSample={completedLoops:3,positionMs:25};fireVideoPoll();await turn();
+ nativeVideoSample={completedLoops:4,positionMs:10};fireVideoPoll();await turn();
+ expect(checkpoints.filter(c=>c==='ready')).toHaveLength(1);expect(checkpoints.filter(c=>c==='ended')).toHaveLength(1);expect(progress).toEqual([0]);
+ f.dispose();nativeVideoSample={};
+ const b=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source:{title:'Bili',url:'bili-again',platform:'bili'},width:233,height:233,active:true,offset:0,round:true,ref:v=>handle=v}));
+ await turn();expect(handle.loopMode()).toBe('single');expect(prepareLoops.at(-1)).toBe(true);handle.cycleLoopMode();await turn();expect(loopCalls.at(-1)).toBe(false);b.dispose();loopKv.clear();
+});
+
+test('production auto-next reuses adjacent preview and next action, then stops at the tail',async()=>{
+ loopKv.clear();loopKv.set('watchrss.douyin.loop-mode','next');nativeVideoSample={};internet='wifi';
+ const [source,setSource]=createSignal({title:'A',awemeId:'auto-a',url:'auto-a',platform:'douyin' as const,immersive:true});
+ let nextCalls=0,previewCalls=0;const ready:string[]=[];
+ const f=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{get source(){return source();},width:233,height:233,active:true,offset:0,round:true,
+  onPrepareAdjacent:async()=>{previewCalls++;return source().awemeId==='auto-a'?{key:'auto-b',source:{...source(),awemeId:'auto-b',url:'auto-b'}}:undefined;},
+  onNext:async()=>{nextCalls++;nativeVideoSample={};setSource({...source(),awemeId:'auto-b',url:'auto-b'});},onCheckpoint:kind=>{if(kind==='ready')ready.push(source().awemeId);}}));
+ await turn();nativeVideoSample={state:'ended',positionMs:100000};fireVideoPoll();await turn();await turn();
+ expect(nextCalls).toBe(1);expect(source().awemeId).toBe('auto-b');expect(ready).toEqual(['auto-a','auto-b']);
+ nativeVideoSample={state:'ended',positionMs:100000};fireVideoPoll();await turn();fireVideoPoll();await turn();
+ expect(nextCalls).toBe(1);expect(previewCalls).toBe(2);f.dispose();nativeVideoSample={};loopKv.clear();
+});
+
+
+test('production mode change and background invalidate auto-next while adjacent resolution is pending',async()=>{
+ for(const cause of ['mode','background','inactive','dispose']){
+  loopKv.clear();loopKv.set('watchrss.douyin.loop-mode','next');nativeVideoSample={};internet='wifi';playerLifecycle='active';
+  let finish!:(value:any)=>void,handle:any,nextCalls=0;
+  const [active,setActive]=createSignal(true);
+  const source={title:'A',awemeId:'late-a',url:'late-a',platform:'douyin' as const,immersive:true};
+  const f=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source,width:233,height:233,get active(){return active();},offset:0,round:true,ref:v=>handle=v,
+   onPrepareAdjacent:()=>new Promise(r=>finish=r),onNext:async()=>{nextCalls++;}}));
+  await turn();nativeVideoSample={state:'ended',positionMs:100000};fireVideoPoll();await turn();expect(finish).toBeDefined();
+  if(cause==='mode')handle.cycleLoopMode();
+  else if(cause==='background'){playerLifecycle='background';for(const fn of playerLifecycleListeners)fn('background');}
+  else if(cause==='inactive')setActive(false);
+  else f.dispose();
+  finish({key:'late-b',source:{...source,awemeId:'late-b',url:'late-b'}});await turn();expect(nextCalls).toBe(0);
+  f.dispose();playerLifecycle='active';nativeVideoSample={};loopKv.clear();
+ }
 });
 
 
@@ -243,4 +296,15 @@ test('configuration recovery of a newly created note keeps its original close de
  mount(entry,()=>createComponent(NoteDetailScreen,{width:233,height:233,noteId:'note-fixture',active:true,repository:{get:async()=>current,save:async(input:any)=>({...current,title:input.title,markdown:input.markdown})} as never,input:async()=>new Promise<string|null>(r=>finish=r),inputRecovery:{pending:async requested=>requested===key,dismiss:async()=>{}},onBack:()=>closed++,onError:()=>{}}));
  await turn();await turn();finish('confirmed');await turn();expect(closed).toBe(1);
  const process=recreate(original,true);expect(routeMemory(process).retained['note-create-mode']).toBeUndefined();expect(process.noteId).toBe('note-fixture');
+});
+
+test('player captures an actual rendered Douyin frame with entry source and native generation on exit',async()=>{
+ nativeVideoSample={hasRenderedFirstFrame:true,sourceGeneration:17};frameCaptures.length=0;internet='wifi';const [active,setActive]=createSignal(true);
+ const source={title:'a',platform:'douyin' as const,awemeId:'frame-a',url:'podjs-media-cache://play/bound.mp4',headers:{Cookie:'fixture'},immersive:true};
+ const f=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source,width:233,height:233,get active(){return active();},offset:0,round:true}));await turn();setActive(false);await turn();
+ expect(frameCaptures.at(-1)).toEqual({key:'douyin:frame-a',source:{url:source.url,videoUrl:undefined,audioUrl:undefined,headers:{Cookie:'fixture'}},sourceGeneration:17});f.dispose();nativeVideoSample={};
+});
+test('a restored actual-frame placeholder never prepares an unvalidated saved video URL',async()=>{
+ const before=prepareLoops.length;let handle:any,retries=0;const source={title:'a',platform:'douyin' as const,awemeId:'a',url:'https://expired.invalid/video',previewOnly:true,immersive:true,previewFrame:{entryId:'a',frame:{available:true as const,kind:'actual_frame' as const,path:'video-frames/fixture.jpg',width:10,height:10,positionMs:0,capturedAt:1,capturedGeneration:3}}};
+ const f=mount({page:'video'},()=>createComponent(VideoPlayerScreen,{source,width:233,height:233,active:true,offset:0,round:true,ref:value=>handle=value,onRetry:()=>{retries++;}}));await turn();expect(prepareLoops.length).toBe(before);expect(handle.previewKind()).toBe('actual_frame');f.dispose();expect(retries).toBe(0);
 });

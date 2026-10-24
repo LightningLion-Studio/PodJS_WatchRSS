@@ -62,6 +62,7 @@ export interface DouyinSettingsBindings {
 }
 export interface DouyinScreenProps {
   preset?: ReaderPreset;
+  readerKeepAwake?:boolean;
   active?:boolean;
   onShare?:ShareHandler;
   onDone?: (kind: DouyinActionDone) => void;
@@ -307,7 +308,7 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
     {value => {
       const blocks = () => douyinDetailBlocks(value());
       const title = () => { const first = blocks()[0]; return first?.type === "text" ? first.text : "抖音视频"; };
-      return <MediaReaderDetail width={props.width} height={props.height} preset={preset()} active={props.active !== false}
+      return <MediaReaderDetail width={props.width} height={props.height} preset={preset()} active={props.active !== false} keepAwake={props.readerKeepAwake}
         articleId={`douyin:${props.awemeId}`} title={title()} blocks={blocks().slice(1)} message={error() || notice()}
         favorite={favorite} onPlay={() => void play()} onFavorite={() => void toggleFavorite()} onShare={share}
         onError={setError} ref={handle => props.ref?.({ scroller: handle.scroller })} />;

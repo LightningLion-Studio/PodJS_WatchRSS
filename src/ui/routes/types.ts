@@ -92,6 +92,8 @@ export type RouteEntry = {
   disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
   player?: {
+    invalidatePrefetch?: (id:string)=>void;
+    previewKind?: ()=>"actual_frame"|"cover"|undefined;
     onCrown: (delta: number) => boolean;
     canSwipeBack?: () => boolean;
   };

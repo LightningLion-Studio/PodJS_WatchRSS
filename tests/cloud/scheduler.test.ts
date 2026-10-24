@@ -36,3 +36,24 @@ test('an unbound/empty sync result does not create a retry timer or a background
  s.foreground(true);await settle();for(let i=0;i<100;i++)await settle();expect(runs).toBe(1);expect(timers).toBe(0);
  s.foreground(false);for(let i=0;i<100;i++)s.trigger();await settle();expect(runs).toBe(1);expect(timers).toBe(0);s.dispose();
 });
+
+test('R47 local transfer hold defers changes until close and does not invent a no-change cloud run',async()=>{
+ let count=0,now=0;const timers:{fn:()=>void;cancelled:boolean}[]=[];const s=new WatchCloudScheduler({now:()=>now,sync:async()=>{count++;return true;},delay:(_,fn)=>{const t={fn,cancelled:false};timers.push(t);return()=>{t.cancelled=true;};},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ s.foreground(true);await settle();expect(count).toBe(1);s.hold(true);s.hold(false);await settle();expect(count).toBe(1);expect(timers).toHaveLength(0);
+ s.hold(true);s.trigger();s.trigger();now=CLOUD_INTERVAL;expect(count).toBe(1);s.hold(false);await settle();expect(count).toBe(2);s.dispose();
+});
+test('R47 cloud hold fences active work and retains an explicit queued full manual request',async()=>{
+ const {CloudForegroundExecution}=await import('../../src/cloud/execution');const {LocalTransferActivity}=await import('../../src/sync/local-transfer');const activity=new LocalTransferActivity(),execution=new CloudForegroundExecution(true);let finish!:(b:boolean)=>void;const modes:string[]=[];
+ const s=new WatchCloudScheduler({now:()=>0,sync:async(_,mode)=>{modes.push(mode!);return new Promise<boolean>(r=>{finish=r;});},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ const off=activity.subscribe(active=>{execution.foreground(!active);s.hold(active);});s.foreground(true);const old=execution.begin();const release=activity.acquire(),nested=activity.acquire();expect(()=>old()).toThrow('cloud_sync_suspended');finish(false);await settle();expect(await s.manual('all')).toBe(false);expect(await s.manual('recent128')).toBe(false);release();release();expect(activity.active).toBe(true);expect(modes).toEqual(['recent128']);nested();await settle();expect(modes).toEqual(['recent128','all']);expect(()=>old()).toThrow();expect(()=>execution.begin()).not.toThrow();finish(true);await settle();s.dispose();off();
+});
+
+test('R47 suspending an already-running manual all run resumes its original scope',async()=>{
+ const calls:[boolean,string|undefined][]=[],finishes:((v:boolean)=>void)[]=[];const s=new WatchCloudScheduler({now:()=>0,sync:(manual,mode)=>{calls.push([manual,mode]);return new Promise<boolean>(r=>finishes.push(r));},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ s.foreground(true);finishes[0]!(true);await settle();const full=s.manual('all');await settle();s.hold(true);finishes[1]!(false);await full;await settle();expect(calls).toEqual([[false,'recent128'],[true,'all']]);s.hold(false);await settle();expect(calls.at(-1)).toEqual([true,'all']);finishes[2]!(true);await settle();s.dispose();
+});
+
+test('R47 an in-flight cloud run that completes successfully during a no-change local transfer needs no replay',async()=>{
+ let count=0,finish!:(v:boolean)=>void;const s=new WatchCloudScheduler({now:()=>0,sync:async()=>{count++;return new Promise<boolean>(r=>{finish=r;});},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ s.foreground(true);s.hold(true);finish(true);await settle();s.hold(false);await settle();expect(count).toBe(1);s.dispose();
+});

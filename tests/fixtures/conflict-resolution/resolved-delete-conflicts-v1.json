@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "Sanitized aliases/clocks from the five observed repeat conflicts. Canonical live cancellation is not article deletion. Accepted keep must survive cache eviction, full resync, restart and projection upgrade.",
+  "cases": [
+    {
+      "name": "resolved-1",
+      "url": "https://www.example.invalid/previously-resolved/1",
+      "feed": "https://feeds.example.invalid/rss",
+      "canonicalId": "bae8f38881833aff41f2f21663aea439c264e3c5240ea9aaf0eb0eec666613eb",
+      "legacyId": "7e07b36ae92f829d1a485204c7eea3997e50ad73bce3ee674c10e826a1a596cc",
+      "deletedAt": 1788102905067,
+      "keptAt": 1792756780416,
+      "expectedDeleted": false,
+      "phoneSource": "phone",
+      "legacySource": "watch"
+    },
+    {
+      "name": "resolved-2",
+      "url": "https://www.example.invalid/previously-resolved/2",
+      "feed": "https://feeds.example.invalid/rss",
+      "canonicalId": "3cbc602ed2940663e2d8a83f33e87097aaab17d851d3e866006d5ce2e56cccc1",
+      "legacyId": "60974f24f70ae5a5782d2dfbf506e277ae030678d5857635193b9f341ef609cb",
+      "deletedAt": 1788102905071,
+      "keptAt": 1792794644551,
+      "expectedDeleted": false,
+      "phoneSource": "phone",
+      "legacySource": "watch"
+    },
+    {
+      "name": "resolved-3",
+      "url": "https://www.example.invalid/previously-resolved/3",
+      "feed": "https://feeds.example.invalid/rss",
+      "canonicalId": "4ce33ec97e86f80a6a260621f03cbd8d62f426547fd501b8dc0866b2e287f6b8",
+      "legacyId": "ec80737babcd48c917daf8e9912876a1efb2a05767189d03a905a1c7aa03cfb5",
+      "deletedAt": 1788102905069,
+      "keptAt": 1792756780418,
+      "expectedDeleted": false,
+      "phoneSource": "phone",
+      "legacySource": "watch"
+    },
+    {
+      "name": "resolved-4",
+      "url": "https://www.example.invalid/previously-resolved/4",
+      "feed": "https://feeds.example.invalid/rss",
+      "canonicalId": "fe0cec1beb50cde72bbcf2b6be6b1a69c0f2a0154c337e0c44f67da489c8f79b",
+      "legacyId": "d580923d0e7738a71486830fbb0f1136d1ac9855e982df99cbba635d5d07680d",
+      "deletedAt": 1788102905068,
+      "keptAt": 1792756780422,
+      "expectedDeleted": false,
+      "phoneSource": "phone",
+      "legacySource": "watch"
+    },
+    {
+      "name": "resolved-5",
+      "url": "https://www.example.invalid/previously-resolved/5",
+      "feed": "https://feeds.example.invalid/rss",
+      "canonicalId": "47ad74300255d2bb3a9f1e6c7229a68314a1e79232422c5a5aae5c625d9dffc8",
+      "legacyId": "7e313612effb8027f9f2c169acf251dd5cef71300843102a23432d476777aa50",
+      "deletedAt": 1788102905070,
+      "keptAt": 1792756780423,
+      "expectedDeleted": false,
+      "phoneSource": "phone",
+      "legacySource": "watch"
+    }
+  ]
+}

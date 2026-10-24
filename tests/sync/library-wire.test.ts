@@ -19,3 +19,10 @@ test('JSON frame size keeps Java UTF-8 replacement and escape behavior without a
  const serialize=(value:unknown):string=>value===null?'null':typeof value==='string'?javaJsonQuote(value):typeof value==='number'?Object.is(value,-0)?'-0':String(value):typeof value==='boolean'?String(value):Array.isArray(value)?'['+value.map(serialize).join(',')+']':'{'+Object.entries(value as Record<string,unknown>).filter(([,v])=>v!==undefined).map(([k,v])=>javaJsonQuote(k)+':'+serialize(v)).join(',')+'}';
  expect(nativeJsonSize(nested)).toBe([...javaUtf8Chunks(serialize(nested))].reduce((n,c)=>n+c.length,0));
 });
+
+test('R47 compact manifests preserve parser defaults, explicit unread and keep/deletion clocks',async()=>{
+ const {fixture}=await import('../helpers/local-manifest-fixture');const {manifestEntry}=await import('../../src/sync/library-wire');const {parseArticleManifest}=await import('../../src/sync/manifest');
+ const cases=[...fixture.first,...fixture.second,{...fixture.first[0],deleted:false,deletedAt:4321,readingProgress:0,readingPositionChangedAt:1234,isRead:false,favoriteChangedAt:333,watchLaterChangedAt:444,independentChangedAt:555}];
+ for(const m of cases){const verbose=manifestEntry(m),compact=manifestEntry(m,true);expect(parseArticleManifest({articleManifest:[compact]})).toEqual(parseArticleManifest({articleManifest:[verbose]}));expect(nativeJsonSize(compact)).toBeLessThan(nativeJsonSize(verbose));}
+ const explicit=manifestEntry(cases.at(-1)!,true);expect(explicit.deleted).toBe(false);expect(explicit.deletedAt).toBe(4321);expect(explicit.readingPositionChangedAt).toBe(1234);expect(explicit.favoriteChangedAt).toBe(333);expect(explicit.watchLaterChangedAt).toBe(444);expect(explicit.independentChangedAt).toBe(555);
+});

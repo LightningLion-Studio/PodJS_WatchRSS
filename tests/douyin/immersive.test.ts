@@ -100,3 +100,13 @@ test("clearing an exhausted playback window does not delete history",async()=>{
   const f=fixture(),client=f.make();await client.fetchFeedPage();await client.recordHistory(item("1"));await client.saveRecentWindow([item("1")],"1",null,false);await client.clearPlaybackWindow();
   expect((await client.restoreFeed()).items).toEqual([]);expect(await client.isLoggedIn()).toBe(true);expect(await client.listHistory()).toHaveLength(1);
 });
+
+test('forced 403 source refresh does not reuse old pending resolution or let its late response replace the fresh URL',async()=>{
+ const store=new Store();store.values.set('douyin.cookie','sessionid=fixture');const pending:((value:any)=>void)[]=[];
+ const client=new DouyinClient({secureStorage:store,signer:{sign:()=>''},transport:{request:()=>new Promise(resolve=>pending.push(resolve))}});
+ const old=client.resolvePlayback('same');for(let i=0;i<30;i++)await Promise.resolve();expect(pending).toHaveLength(1);
+ const fresh=client.resolvePlayback('same',{forceRefresh:true});for(let i=0;i<30;i++)await Promise.resolve();expect(pending).toHaveLength(2);
+ const response=(url:string)=>({status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_detail:{...wire('same'),video:{play_addr:{url_list:[url]}}}}))});
+ pending[1]!(response('https://video/fresh'));expect(await fresh).toMatchObject({ok:true,data:{playUrl:'https://video/fresh'}});
+ pending[0]!(response('https://video/obsolete'));expect(await old).toMatchObject({ok:false,code:'CANCELLED'});expect(await client.resolvePlayback('same')).toMatchObject({ok:true,data:{playUrl:'https://video/fresh'}});
+});

@@ -145,13 +145,13 @@ test('a saved entry can still resolve its body from an unsaved source row outsid
   await f.db.execute('INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(?,?,?,?,?,?,?)',
    [2001,1,'Source body','actual body',url,id,1999]);
   await f.db.execute("INSERT INTO article_saved_states(article_id,save_type,saved,changed_at,sort_order) VALUES(2000,'favorite',1,2000,0)");
-  let fallbackReads=0;const db:SqlDatabase={...f.db,query:async(sql,params)=>{
-   if(sql.includes('WHERE ch.url=? AND a.dedup_key=?'))fallbackReads++;
+  let fallbackReads=0,indexReads=0;const db:SqlDatabase={...f.db,query:async(sql,params)=>{
+   if(sql.includes('WHERE ch.url=? AND a.dedup_key=?'))fallbackReads++;if(sql.includes('SELECT a.id,a.dedup_key,ch.url'))indexReads++;
    return f.db.query(sql,params);
   }};
   const result=await new LocalArticleManifestStore(db,codec,text,f.files,async()=>{}).snapshot();
   expect(result.find(row=>row.article.articleId===id)?.article.contentText).toBe('actual body');
-  expect(fallbackReads).toBeGreaterThan(0);
+  expect(fallbackReads).toBe(0);expect(indexReads).toBe(1);
  }finally{f.sql.close();}
 });
 test('outgoing requests deduplicate and order chunks while stale hashes request the whole body',async()=>{

@@ -13,7 +13,7 @@ import { readerChrome } from "../reader/chrome.ts";
  * preset background, 18+4dp top, reader TITLE, caller-supplied blocks (author SUBTITLE, BODY text,
  * a playable video card...), then 15dp and the reader's 32dp 收藏 / 分享 circles (12dp apart). */
 export function MediaReaderDetail(props: {
-  width: number; height: number; preset: ReaderPreset; active: boolean;
+  width: number; height: number; preset: ReaderPreset; active: boolean; keepAwake?:boolean;
   articleId: string; title: string; blocks: ContentBlock[]; message?: string;
   favorite: Accessor<boolean>; onPlay: () => void; onFavorite: () => void; onShare: () => void;
   onError: (message: string) => void; ref?: (handle: ReaderBodyHandle) => void;
@@ -38,6 +38,6 @@ export function MediaReaderDetail(props: {
   const text = () => [props.title, ...props.blocks.flatMap(block => block.type === "text" ? [block.text] : [])].join("\n");
   return <ReaderBody top={0} preset={props.preset} header={header()} footer={footer()} articleId={props.articleId} text={text()} blocks={blocks()}
     width={props.width} height={props.height} fontSize={props.preset.body.fontSizeSp} lineHeight={props.preset.body.fontSizeSp * props.preset.body.lineHeightEm}
-    onMedia={() => props.onPlay()} active={props.active} autoStart={false} speed={1}
+    onMedia={() => props.onPlay()} active={props.active} keepAwake={props.keepAwake} autoStart={false} speed={1}
     onControls={() => {}} onError={props.onError} ref={handle => props.ref?.(handle)} />;
 }

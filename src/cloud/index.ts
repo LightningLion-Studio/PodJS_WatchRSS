@@ -7,3 +7,5 @@ export * from "./codec";
 export * from "./keys";
 export * from "./cache";
 export * from "./state";
+
+export {cloudFormatCapabilities,cloudCompatibility,featurePolicy} from './compatibility';

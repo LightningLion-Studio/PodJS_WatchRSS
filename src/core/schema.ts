@@ -1,16 +1,21 @@
+import {ArticleKeepStore,ARTICLE_KEEP_SCHEMA} from '../sync/article-keep';
+import {LOCAL_RSS_SCHEMA} from '../rss/acquisition';
+import {OFFLINE_QUEUE_SCHEMA} from '../reader/offline-queue-schema';
 import {BOOK_SCHEMA} from '../books/schema';
 import {BOOK_READING_SCHEMA} from '../books/reading-schema';
 import {TOKEN_USAGE_CURSOR_SCHEMA} from '../sync/token-usage';
 import {BUILTIN_CHANNELS} from './builtin-channels.ts';
 import {dedupKeyMigration,type SchemaStatement} from './dedup-migration.ts';
 
-const revisionColumns:Record<string,string[]>={"articles":["id","channel_id","title","description","content","link","guid","pub_date","image_url","audio_url","video_url","is_read","is_saved","reading_progress","dedup_key","fetched_at"],"channels":["id","url","title","description","image_url","last_fetched_at","created_at","sort_order","is_pinned"],"article_body_chunks":["article_id","chunk_index","body"],"article_original_chunks":["article_id","chunk_index","body"],"article_previews":["article_id","summary","image_url"],"article_original_previews":["article_id","summary","image_url"],"article_original_meta":["article_id","source_url","fetched_at"],"article_saved_states":["article_id","save_type","saved","changed_at","sort_order"],"article_saved_entry_times":["article_id","save_type","created_at"],"sync_saved_states":["article_id","save_type","item_id","url","saved","changed_at","sort_order","source_device_id","source_order"],"sync_article_ids":["article_id","item_id","url"],"sync_article_aliases":["item_id","article_id"],"sync_local_identity":["id","device_id","device_order"],"local_article_deletions":["id","channel_url","article_url","dedup_key","was_favorite","was_watch_later","changed_at"],"sync_source_states":["url","source_device_id","title","description","site_url","image_url","created_at","updated_at","sort_order","is_pinned","deleted","deleted_at"],"sync_article_deletions":["article_id","url","changed_at","source_device_id","source_order"],"article_reading_state":["article_id","progress","changed_at","position_bytes","position_hash","state_json"]};
+const revisionColumns:Record<string,string[]>={"sync_article_keeps":["article_id","url","changed_at","source_device_id","source_order","item_id"],"sync_article_keep_aliases":["alias_id","canonical_id","url"],"articles":["id","channel_id","title","description","content","link","guid","pub_date","image_url","audio_url","video_url","is_read","is_saved","reading_progress","dedup_key","fetched_at"],"channels":["id","url","title","description","image_url","last_fetched_at","created_at","sort_order","is_pinned"],"article_body_chunks":["article_id","chunk_index","body"],"article_original_chunks":["article_id","chunk_index","body"],"article_previews":["article_id","summary","image_url"],"article_original_previews":["article_id","summary","image_url"],"article_original_meta":["article_id","source_url","fetched_at"],"article_saved_states":["article_id","save_type","saved","changed_at","sort_order"],"article_saved_entry_times":["article_id","save_type","created_at"],"sync_saved_states":["article_id","save_type","item_id","url","saved","changed_at","sort_order","source_device_id","source_order"],"sync_article_ids":["article_id","item_id","url"],"sync_article_aliases":["item_id","article_id"],"sync_local_identity":["id","device_id","device_order"],"local_article_deletions":["id","channel_url","article_url","dedup_key","was_favorite","was_watch_later","changed_at"],"sync_source_states":["url","source_device_id","title","description","site_url","image_url","created_at","updated_at","sort_order","is_pinned","deleted","deleted_at"],"sync_article_deletions":["article_id","url","changed_at","source_device_id","source_order"],"article_reading_state":["article_id","progress","changed_at","position_bytes","position_hash","state_json"]};
 const changed=(table:string)=>revisionColumns[table]!.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(" OR ");
 
 export const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`,
   `CREATE TABLE IF NOT EXISTS sync_library_revision (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)`,
   `INSERT OR IGNORE INTO sync_library_revision(id,revision) VALUES(1,0)`,
+  ...ARTICLE_KEEP_SCHEMA,
   `CREATE TABLE IF NOT EXISTS sync_article_deletions (article_id TEXT PRIMARY KEY,url TEXT NOT NULL,changed_at INTEGER NOT NULL,source_device_id TEXT NOT NULL,source_order TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS sync_snapshot_fingerprints (kind TEXT NOT NULL,entity_id TEXT NOT NULL,signature TEXT NOT NULL,PRIMARY KEY(kind,entity_id))`,
   `CREATE TABLE IF NOT EXISTS sync_source_states (url TEXT PRIMARY KEY,source_device_id TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,site_url TEXT,image_url TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,sort_order INTEGER NOT NULL,is_pinned INTEGER NOT NULL,deleted INTEGER NOT NULL,deleted_at INTEGER NOT NULL)`,
@@ -57,9 +62,11 @@ export const SCHEMA = [
   `INSERT OR IGNORE INTO article_saved_states(article_id,save_type,saved,changed_at,sort_order) SELECT id,'favorite',1,fetched_at,-fetched_at FROM articles WHERE is_saved=1`,
   `INSERT OR IGNORE INTO sync_article_aliases(item_id,article_id) SELECT item_id,article_id FROM sync_article_ids WHERE item_id IS NOT NULL`,
   `INSERT OR IGNORE INTO article_saved_entry_times(article_id,save_type,created_at) SELECT article_id,save_type,changed_at FROM article_saved_states WHERE saved=1`,
-  ...['articles','channels','article_body_chunks','article_original_chunks','article_previews','article_original_previews','article_original_meta','article_saved_states','article_saved_entry_times','sync_saved_states','sync_article_ids','sync_article_aliases','sync_local_identity','local_article_deletions','sync_source_states','sync_article_deletions','article_reading_state'].flatMap(table=>['INSERT','UPDATE','DELETE'].map(operation=>
+  ...['sync_article_keeps','sync_article_keep_aliases','articles','channels','article_body_chunks','article_original_chunks','article_previews','article_original_previews','article_original_meta','article_saved_states','article_saved_entry_times','sync_saved_states','sync_article_ids','sync_article_aliases','sync_local_identity','local_article_deletions','sync_source_states','sync_article_deletions','article_reading_state'].flatMap(table=>['INSERT','UPDATE','DELETE'].map(operation=>
     `CREATE TRIGGER IF NOT EXISTS sync_revision_${table}_${operation.toLowerCase()} AFTER ${operation} ON ${table} ${operation==='UPDATE'?`WHEN ${changed(table)}`:''} BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END`)),
   ...BOOK_SCHEMA,
+  LOCAL_RSS_SCHEMA,
+  ...OFFLINE_QUEUE_SCHEMA,
 ];
 // Per-item chunk revisions make warm sync caches safe when chunk text changes
 // without touching the article row (including equal-length replacements).
@@ -82,7 +89,7 @@ const bleV2Schema=[
  ...SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER IF NOT EXISTS article_sync_hash_')&&sql.includes(' AFTER UPDATE ')),
  ...syncChunkRevisions.filter(sql=>sql.startsWith('CREATE TRIGGER IF NOT EXISTS sync_body_revision_')&&sql.includes(' AFTER UPDATE ')),
 ];
-export const SCHEMA_VERSION=6;
+export const SCHEMA_VERSION=8;
 
 function pragmaVersion(row:Record<string,unknown>|undefined):number{
   const value=row?.user_version??(row?Object.values(row)[0]:undefined),version=Number(value);
@@ -113,6 +120,9 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
     // message bounded as later migrations grow, retaining atomic version steps.
     await db.transaction(statements);statements.length=0;
   }
+  // Older BLE migrations install revision triggers from the current column map.
+  // Create the new business tables before those triggers reference them.
+  if(current<8)statements.push(...ARTICLE_KEEP_SCHEMA.map(sql=>({sql})));
   if(current<2){
     statements.push(...dedupKeyMigration(now));
     statements.push({sql:`PRAGMA user_version=${SCHEMA_VERSION}`});
@@ -133,5 +143,10 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
     if(current>=5)statements.push(...BOOK_READING_SCHEMA.map(sql=>({sql})));
     statements.push({sql:'PRAGMA user_version=6'});
   }
+  if(current<7){
+    statements.push({sql:LOCAL_RSS_SCHEMA},{sql:`CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)`},...OFFLINE_QUEUE_SCHEMA.map(sql=>({sql})),{sql:'PRAGMA user_version=7'});
+  }
+  if(current<8){statements.push(...SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep')).map(sql=>({sql})),{sql:'PRAGMA user_version=8'});}
   await db.transaction(statements);
+  await new ArticleKeepStore(db).initialize();
 }

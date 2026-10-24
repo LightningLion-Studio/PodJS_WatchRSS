@@ -98,7 +98,11 @@ export class SyncSavedStateStore {
       params: [state.articleId,state.type,state.url,state.saved?1:0,state.changedAt,options.tombstone?0:state.sortOrder,state.sourceDeviceId,deviceOrder(state.sourceDeviceId),...(options.tombstone ? [] : [state.articleId]),options.authoritative?1:0] }];
     // Tombstones for missing articles have no saved-entry side effects in the
     // native repository. Keep that distinct from normal state application.
-    if (!options.tombstone) statements.push(...this.projection(state.articleId,state.type,true));
+    if (!options.tombstone) {
+      if(options.authoritative)statements.push({sql:'UPDATE offline_media_policy SET suppress_download=1 WHERE id=1',params:[]});
+      statements.push(...this.projection(state.articleId,state.type,true));
+      if(options.authoritative)statements.push({sql:'UPDATE offline_media_policy SET suppress_download=0 WHERE id=1',params:[]});
+    }
     return statements;
   }
 

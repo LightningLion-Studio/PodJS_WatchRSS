@@ -68,3 +68,12 @@ test('migrated original-mode hint attempts retain native twelve-hour throttle',a
  expect(store.record(39,now)).toBe(true);expect(store.record(39,now+1)).toBe(false);expect(store.record(39,now+12*60*60*1000+1)).toBe(false);
  expect(store.record(-1,now)).toBe(false);
 });
+
+ test("auto-scroll keep-awake defaults off, preserves old preferences and persists an explicit setter",()=>{
+  const {readerKeepAwake,...old}={...DEFAULT_SETTINGS,fontSizeSp:22,readerAutoStart:true};let stored:unknown=old;
+  const storage={get:<T>()=>stored as T,set:(_key:string,value:unknown)=>{stored=value;}};
+  const store=new SettingsStore(storage);expect(store.load()).toMatchObject({readerKeepAwake:false,fontSizeSp:22,readerAutoStart:true});
+  store.update({readerKeepAwake:true});expect(new SettingsStore(storage).load().readerKeepAwake).toBe(true);
+  store.update({readerKeepAwake:false});expect(store.load().readerKeepAwake).toBe(false);
+  expect(()=>store.update({readerKeepAwake:"true" as any})).toThrow();
+ });

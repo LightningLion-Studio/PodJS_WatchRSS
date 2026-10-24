@@ -84,6 +84,7 @@
     "data.files.chunks",
     "system.browser",
     "system.browser.inApp",
+    "system.browser.inApp.theme",
     "data.secure",
     "media.video",
     "media.tts",

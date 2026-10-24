@@ -46,3 +46,15 @@ test('manifest batches preserve arrays and reject changed peer identity',()=>{
  const frames=buildManifestFrames(payload);expect(frames.length).toBeGreaterThan(2);const combined=combineManifestFrames(frames);expect(combined.articleManifest).toEqual(payload.articleManifest);expect(combined.rssSources).toEqual(payload.rssSources);expect(combined.bodyRequests).toEqual(payload.bodyRequests);
  frames[1]={...frames[1],deviceId:'changed'};expect(()=>combineManifestFrames(frames)).toThrow('identity/order');
 });
+
+test('R47 local transfer owns cloud priority only after first request and releases after close notification',async()=>{
+ for(const fail of [false,true]){let acquired=0,released=0,closed=false,notified=false,index=0;const frames=[{action:'unknown'}, {action:'ack',success:true,applied:true}];const session=new LibrarySyncSession({readFrame:async()=>{expect(acquired).toBe(index?1:0);if(fail)throw Error('socket closed');return frames[index++]!;},writeFrame:async()=>{},close:async()=>{closed=true;}},{deviceId:async()=>'watch'} as LibrarySessionRepository,{acquireSession:()=>{acquired++;return()=>{expect(closed).toBe(true);expect(notified).toBe(true);released++;};},onSessionClosed:()=>{notified=true;}});if(fail)await expect(session.run()).rejects.toThrow('socket closed');else await session.run();expect(acquired).toBe(fail?0:1);expect(released).toBe(acquired);}
+});
+
+for(const fast of [false,true])test('persistent cursor defers projection only for both explicit R47.1 peers: '+fast,async()=>{
+ const row=fixture.cases[0]!,parts=sessionFixtureParts(row),first=row.inbound[0] as JsonObject;let old=0,cheap=0,prepared=0,merged=false,index=0,marked=0;
+ const incoming:JsonObject[]=[{version:14,action:'syncLibrary',phase:'cursor',deviceId:first.deviceId,supportsDomainFastPathV2:fast,requestPersistentSession:true,supportsPersistentSession:true},...row.inbound as JsonObject[],{version:14,action:'syncSession',phase:'complete'},{action:'ack',phase:'applied',success:true,applied:true}];
+ const repo:LibrarySessionRepository={deviceId:async()=>row.deviceId,cursor:async()=>{old++;return row.beforeCursor;},exchangeCursor:async()=>{cheap++;return row.beforeCursor;},mergeSources:async()=>{merged=true;return 0;},prepareWindow:async()=>{expect(merged).toBe(true);prepared++;return parts.window;},exportSources:async()=>parts.window.rssSources,receiveArticle:async()=>0,exportRequested:async r=>parts.articles.filter(a=>r.some(q=>q.articleId===a.article.articleId)),finalizeSnapshot:async()=>{},resetPeerState:async()=>{},markSuccess:async()=>{marked++;}};
+ const sent:JsonObject[]=[];await new LibrarySyncSession({readFrame:async()=>{const frame=incoming[index++];if(!frame)throw Error('EOF');return frame;},writeFrame:async f=>{sent.push(f);},close:async()=>{}},repo,{capabilities:{supportsDomainFastPathV2:true}}).run();
+ expect(old).toBe(fast?0:1);expect(cheap).toBe(fast?1:0);expect(prepared).toBe(1);expect(marked).toBe(1);expect(sent.some(f=>f.phase==='cursor')).toBe(true);
+});

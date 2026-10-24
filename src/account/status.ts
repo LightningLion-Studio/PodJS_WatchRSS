@@ -2,6 +2,7 @@ import type {WatchAccountState} from './types.ts';
 import type {WatchCloudPhase} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
+  formatCompatibility?:import('../cloud/compatibility').CloudCompatibilityStatus;
   message: string;
   usedBytes: number;
   reservedBytes?: number;
@@ -20,6 +21,7 @@ const NEUTRAL_CLOUD: AccountCloudStatus = {message: '尚未同步', usedBytes: 0
 function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl:string): AccountCloudStatus {
   const own = (cloud.accountId === undefined || cloud.accountId === userId)&&(!cloud.accountScope||cloud.accountScope===JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])) ? cloud : NEUTRAL_CLOUD;
   return {
+    ...(own.formatCompatibility?{formatCompatibility:{...own.formatCompatibility}}:{}),
     message: own.message, usedBytes: own.usedBytes, quotaBytes: own.quotaBytes,
     ...(own.reservedBytes!==undefined?{reservedBytes:own.reservedBytes}:{}),
     ...(own.phase ? {phase: own.phase} : {}),

@@ -11,11 +11,19 @@ export interface ExportedArticle extends WireIncomingArticle,SyncArticleBody {
 }
 export const BODY_CHUNK_SIZE=128*1024;
 const integerFields=["importedAt","updatedAt","independentChangedAt","independentSortOrder","favoriteChangedAt","favoriteSortOrder","watchLaterChangedAt","watchLaterSortOrder","deletedAt"] as const;
+const metadataKeys=["articleId", "sourceDeviceId", "url", "title", "siteName", "excerpt", "imageUrl", "importedAt", "updatedAt", "independentSaved", "independentChangedAt", "independentSortOrder", "rssSourceUrl", "rssSourceTitle", "favoriteSaved", "favoriteChangedAt", "favoriteSortOrder", "watchLaterSaved", "watchLaterChangedAt", "watchLaterSortOrder", "deleted", "deletedAt"] as const;
+const metadataPrefixes=metadataKeys.map(key=>javaJsonQuote(key)+':');
+const metadataQuotes=new Map<string,string>();
+function metadataQuote(value:string){
+ if(value.length>512)return javaJsonQuote(value);const old=metadataQuotes.get(value);if(old!==undefined)return old;
+ const quoted=javaJsonQuote(value);if(metadataQuotes.size>=128)metadataQuotes.delete(metadataQuotes.keys().next().value!);metadataQuotes.set(value,quoted);return quoted;
+}
 /** JSONObject insertion order, omitted Java null fields, slash escaping and UTF-8 replacement are significant. */
 export function metadataJson(article:ExportedArticle):string {
  for(const key of integerFields)if(!Number.isSafeInteger(article[key]))throw new Error(`Invalid article metadata ${key}`);
- const fields:Record<string,string|number|boolean|null>={bodyEncodingVersion:3,articleId:article.articleId,sourceDeviceId:article.sourceDeviceId,url:article.url,title:article.title,siteName:article.siteName,excerpt:article.excerpt,imageUrl:article.imageUrl,importedAt:article.importedAt,updatedAt:article.updatedAt,independentSaved:article.independentSaved,independentChangedAt:article.independentChangedAt,independentSortOrder:article.independentSortOrder,rssSourceUrl:article.rssSourceUrl,rssSourceTitle:article.rssSourceTitle,favoriteSaved:article.favoriteSaved,favoriteChangedAt:article.favoriteChangedAt,favoriteSortOrder:article.favoriteSortOrder,watchLaterSaved:article.watchLaterSaved,watchLaterChangedAt:article.watchLaterChangedAt,watchLaterSortOrder:article.watchLaterSortOrder,deleted:article.deleted,deletedAt:article.deletedAt};
- return '{'+Object.entries(fields).filter(([,v])=>v!==null).map(([k,v])=>javaJsonQuote(k)+':'+(typeof v==='string'?javaJsonQuote(v):String(v))).join(',')+'}';
+ const fields=['"bodyEncodingVersion":3'];
+ for(let i=0;i<metadataKeys.length;i++){const value=article[metadataKeys[i]!];if(value!==null)fields.push(metadataPrefixes[i]!+(typeof value==='string'?metadataQuote(value):String(value)));}
+ return '{'+fields.join(',')+'}';
 }
 export async function hashJavaText(value:string,codec:Pick<SyncBodyCodec,"sha256">):Promise<string>{
  return codec.sha256(await encodeUtf8Async(value,'question'));

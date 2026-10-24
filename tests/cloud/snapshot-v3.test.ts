@@ -30,7 +30,7 @@ test('S7/S8: 500 public entries stay local; one read writes exactly one state an
   const readClock=doc.doc.value.readingPositionChangedAt;await new WatchRssRepository(f.local.db,async()=>'').setRead(1,false);expect(await f.service.syncNow()).toBe(true);const unread=posts(f).at(-1),decoded=await codec.decode(key,key,'user',{...unread,revision:'3'});expect(decoded.doc.value.isRead).toBe(false);expect(decoded.doc.value.readingPositionChangedAt).toBeGreaterThan(readClock);expect(f.reservations.size).toBe(0);
   const fresh=await integration();try{fresh.seedRecords(f.recordRows);expect(await fresh.service.syncNow(true)).toBe(true);expect(await fresh.local.db.query('SELECT COUNT(*) n FROM articles')).toEqual([{n:500}]);const applied=(await fresh.local.db.query("SELECT a.is_read,r.changed_at,r.progress FROM articles a JOIN article_reading_state r ON r.article_id=a.id WHERE a.link='https://example.com/0'"))[0];expect(applied).toMatchObject({is_read:0,changed_at:decoded.doc.value.readingPositionChangedAt,progress:.25});expect(fresh.reservations.size).toBe(0);}finally{fresh.local.sql.close();}
  }finally{f.local.sql.close();}
-});
+},30000); // 500 entries across SQLite subprocess fixtures; behavior assertions remain unchanged.
 test('S7: one new private body is incremental; metadata does not change archive; cache loss reuses authenticated head; empty device restores records + WRSS',async()=>{
  const f=await integration();let restored:Awaited<ReturnType<typeof integration>>|undefined;
  try{

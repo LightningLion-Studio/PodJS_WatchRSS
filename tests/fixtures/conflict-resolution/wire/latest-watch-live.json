@@ -1,0 +1,52 @@
+{
+  "phase": "articles",
+  "batchIndex": 0,
+  "totalArticles": 1,
+  "batchWireBytes": 3371,
+  "batchTotalWireBytes": 3371,
+  "action": "syncLibrary",
+  "sentAt": 1792820621308,
+  "bodyRequests": [],
+  "version": 14,
+  "deviceId": "test-phone",
+  "articles": [{
+    "independentSortOrder": 0,
+    "isRead": false,
+    "siteName": "fixture",
+    "readingProgress": 0,
+    "readingPositionChangedAt": 0,
+    "favoriteChangedAt": 9000000000101,
+    "readingPositionContentHash": "",
+    "title": "latest-watch-live",
+    "favoriteSaved": true,
+    "body": {
+      "chunkSize": 131072,
+      "bodyHash": "46ac277747da0d6845387b5a9520db0ddc81f5dde7518f268a06a16778122471",
+      "chunks": [{
+        "data": "H4sIAAAAAAAA/6tWSs7PK0nNKwlJrShRslJKy6woKS1KVUjKT6lUqgUAYCu4ox4AAAA=",
+        "index": 0,
+        "hash": "46ac277747da0d6845387b5a9520db0ddc81f5dde7518f268a06a16778122471"
+      }],
+      "metadataOnly": false,
+      "bodyByteCount": 50,
+      "chunkHashes": ["46ac277747da0d6845387b5a9520db0ddc81f5dde7518f268a06a16778122471"]
+    },
+    "readingPositionBytes": 0,
+    "independentSaved": false,
+    "watchLaterSortOrder": 0,
+    "watchLaterChangedAt": 9000000000101,
+    "sourceDeviceId": "test-phone",
+    "updatedAt": 9000000000101,
+    "importedAt": 1,
+    "articleId": "2ef626345529b915bf07fab9f71716dd81263a72db04536d1f5dc22e8f5df85f",
+    "watchLaterSaved": false,
+    "independentChangedAt": 9000000000101,
+    "url": "https://example.invalid/latest-watch-live",
+    "contentHash": "ca260f20e9412d1ac5e1e30014e8592c75e07ad93446586497e04863084b52a3",
+    "deletedAt": 0,
+    "deleted": false,
+    "excerpt": "",
+    "favoriteSortOrder": 9000000000101
+  }],
+  "batchCount": 1
+}

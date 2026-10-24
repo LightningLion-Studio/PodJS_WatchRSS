@@ -46,6 +46,7 @@ async function transcode(input:Uint8Array,method:string,maximum:number){
  });
 }
 const crypto:SnapshotCrypto={
+ yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),
  random:async size=>bytes((await operation<{bytesBase64:string}>('crypto.random',{bytes:size})).bytesBase64),
  sha256:async input=>input.length>32768?withInput(input,async path=>(await fileChunks.hash(path)).sha256):Array.from(bytes((await operation<{digestBase64:string}>('crypto.hash',{dataBase64:b64(input)})).digestBase64),b=>b.toString(16).padStart(2,'0')).join(''),
  hkdf:async(key,salt,info)=>bytes((await operation<{keyBase64:string}>('crypto.hkdfSha256',{inputBase64:b64(key),saltBase64:b64(salt),infoBase64:b64(info)})).keyBase64),

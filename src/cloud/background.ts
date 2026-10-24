@@ -1,3 +1,5 @@
+import {MANUAL_INTENT_KEY,readManualIntent} from './manual-handoff';
+import {cloudAccountIdentity} from './identity';
 import {defineBackgroundHandler} from '@podjs/framework/background-handler';
 import {CloudGate} from './gate';
 import {OnboardingStore,ONBOARDING_KEY} from '../onboarding/store';
@@ -19,6 +21,13 @@ export default defineBackgroundHandler(async context=>{
  const host:CloudHostRequest=(method,args)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return raw(method,args);};
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard);
- if(!await runtime.accounts.read())return 'success';
- return await runtime.service.syncNow()||runtime.service.status.retryable===false?'success':'retry';
+ const account=await runtime.accounts.read();if(!account)return 'success';
+ const payload=context.payload as {manual?:boolean;token?:string}|null;
+ let intent:ReturnType<typeof readManualIntent>;
+ if(payload?.manual){const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});intent=readManualIntent(stored.value);
+  if(!intent||intent.token!==payload.token||intent.scope!==cloudAccountIdentity(account))return 'success';
+ }
+ const success=await runtime.service.syncNow(!!intent,intent?.mode);
+ if(success&&intent){const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});if(readManualIntent(stored.value)?.token===intent.token)await host('secure.delete',{key:MANUAL_INTENT_KEY});}
+ return success||runtime.service.status.retryable===false?'success':'retry';
 });

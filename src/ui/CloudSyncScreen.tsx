@@ -27,6 +27,7 @@ export function CloudSyncScreen(props: {
   available: () => boolean;
   sync: {readonly pending: boolean; start(): Promise<void>};
   approval?: import('./cloud-sync-view').CloudApprovalControl;
+  handoff?: {readonly state: {phase: import('./cloud-sync-view').CloudHandoffPhase}; subscribe(fn: () => void): () => void};
   /** Logout, owner choice and re-registration; every destructive action is armed by a first tap. */
   actions?: CloudRemediationControl;
   clearLocal?: () => Promise<void>;
@@ -35,6 +36,8 @@ export function CloudSyncScreen(props: {
   ref: (value: {scroller: Scroller}) => void;
 }) {
   const [status, setStatus] = createSignal<AccountStatusSnapshot | null>();
+  const [handoff, setHandoff] = createSignal(props.handoff?.state.phase ?? 'idle');
+  if (props.handoff) onCleanup(props.handoff.subscribe(() => setHandoff(props.handoff!.state.phase)));
   const [available, setAvailable] = createSignal(props.available());
   const [pending, setPending] = createSignal(props.sync.pending);
   const [revision, setRevision] = createSignal(0);
@@ -90,7 +93,7 @@ export function CloudSyncScreen(props: {
   const press = (action: CloudSyncAction) => {
     if (!props.active()) return;
     if (action === 'reload' && loadFailed()) { setLoadFailed(false); setRevision(value=>value+1); return; }
-    const current = cloudSyncView(status(), available(), pending()).button;
+    const current = cloudSyncView(status(), available(), pending(), Date.now(), handoff()).button;
     if (!current?.enabled || current.action!==action) return;
     if (action === 'approval') requestApproval();
     else if (action === 'phone') props.onPhone();
@@ -130,7 +133,7 @@ export function CloudSyncScreen(props: {
   };
 
   const entries = createMemo<ScrollEntry[]>(() => {
-    const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态。',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : cloudSyncView(status(), available(), pending());
+    const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态。',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : cloudSyncView(status(), available(), pending(), Date.now(), handoff());
     const rows: ScrollEntry[] = [
       // Narrow bounds let the round layout start the page higher instead of pushing a full-width row down.
       {height: 26, bounds: centredBounds(inner(), Math.min(inner(), measure('云同步', 23) + 8), 0, 26), render: () => <Text class="absolute inset-0 text-center" style={{fontSlot: 23, lineHeight: 26, textColor: PHONE_PAGE.foreground}}>云同步</Text>},

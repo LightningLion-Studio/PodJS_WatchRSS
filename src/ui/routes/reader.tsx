@@ -150,6 +150,7 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
             lineHeight={props.lineHeight()}
             active={props.active() && props.motion.phase === "idle"}
             autoStart={props.settings().readerAutoStart}
+            keepAwake={props.settings().readerKeepAwake}
             speed={props.settings().readerScrollSpeed}
             favorite={
               (props.article()?.id === rss().id ? props.article() : rss())

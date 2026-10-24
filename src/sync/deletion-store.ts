@@ -1,3 +1,4 @@
+import {ArticleKeepStore} from './article-keep';
 import type {SqlDatabase,SqlParams} from '../core/types.ts';
 import {SyncSavedStateStore,deviceOrder} from './saved-state.ts';
 import {rebuildArticleBody,requireMetadataOnlyBody,type SyncBodyCodec,type SyncBodyPayload} from './article-body.ts';
@@ -14,9 +15,12 @@ export class SyncArticleDeletionStore {
   if(!article.deleted||article.articleId!==payload.articleId)throw new Error('Invalid deletion identity');
   if(!Number.isSafeInteger(article.deletedAt))throw new Error('Invalid deletion clock');
   if(!(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1')).length)throw new Error('Initialize sync identity first');
-  const revision=await libraryRevision(this.db),local=await this.resolveLocal(article);
+  const keep=await new ArticleKeepStore(this.db).lookup(article.articleId,article.url);
+  const revision=await libraryRevision(this.db),local=await this.resolveLocal(article,keep?.item_id==null?undefined:Number(keep.item_id));
   if(payload.metadataOnly)await requireMetadataOnlyBody(payload,local?.body??null,!!local?.available,!!local?.hasStoredBody,this.codec);
   else await rebuildArticleBody(payload,local?.available?local.body:null,this.codec);
+  const incomingClock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
+  if(!authoritative&&keep&&(Number(keep.changed_at)>incomingClock||Number(keep.changed_at)===incomingClock&&String(keep.source_order)>deviceOrder(article.sourceDeviceId||peer)))return 0;
   // A delayed delete must not undo a later, durably received keep decision.
   // Encoding-cache provenance is an accepted sync receipt, not a feed fetch.
   if(local&&!authoritative){const live=(await this.db.query('SELECT updated_at,source_device_id FROM article_sync_encoding_cache WHERE item_id=?',[local.itemId]))[0];

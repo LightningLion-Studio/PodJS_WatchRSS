@@ -2,12 +2,13 @@ import { WatchAccountStore } from './store';
 import type { WatchAccountState, AccountClientOptions } from './types';
 import { utf8Encode, utf8Decode } from '../cloud/types';
 
+export class WatchLoginExpiredError extends Error { constructor(){super('登录已过期，请用手机重新同步账号');} }
 class WatchTokenRefreshError extends Error {
   constructor(readonly status:number){super(`手表令牌刷新失败：HTTP ${status}`);}
 }
 /** Stateless refresh also used under the logout lock: never saves a session or recursively clears it. */
 export async function refreshWatchAccount(state:WatchAccountState,options:AccountClientOptions,now:()=>number=Date.now):Promise<WatchAccountState>{
-  if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=now()))throw Error('登录已过期，请用手机重新同步账号');
+  if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=now()))throw new WatchLoginExpiredError();
   const r=await options.transport.request({method:'POST',url:options.backendBaseUrl.replace(/\/$/,'')+'/functions/v1/account/watch-token/refresh',headers:{accept:'application/json','content-type':'application/json; charset=utf-8',...(options.appVersion?{'X-WatchRSS-App-Version':options.appVersion}:{})},body:utf8Encode(JSON.stringify({refreshToken:state.watchRefreshToken}))});
   if(r.status<200||r.status>=300)throw new WatchTokenRefreshError(r.status);
   const j=JSON.parse(utf8Decode(r.body));
@@ -22,7 +23,7 @@ export class WatchTokenManager {
     const state=await this.store.read();if(!state)throw Error('手表尚未绑定腕上RSS账号');
     if(rejectedAccessToken&&rejectedAccessToken!==state.watchDeviceToken)forceRefresh=false;
     if(!forceRefresh&&state.tokenExpiresAtMillis>this.now()+60000)return state;
-    if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=this.now()))throw Error('登录已过期，请用手机重新同步账号');
+    if(!state.watchRefreshToken||(state.refreshTokenExpiresAtMillis>0&&state.refreshTokenExpiresAtMillis<=this.now()))throw new WatchLoginExpiredError();
     return this.refresh(state);
   }
   async logout():Promise<void>{await this.store.clear();}

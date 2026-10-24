@@ -6,3 +6,6 @@ export function readCloudAccountStatus(){return provider?.();}
 export function subscribeCloudAccountStatus(observer:()=>void){observers.add(observer);return ()=>{observers.delete(observer);};}
 export function notifyCloudAccountStatus(){for(const fn of observers)try{fn();}catch{}}
 export function connectCloudAccountStatus(read:()=>AccountCloudStatus|undefined){provider=read;notifyCloudAccountStatus();return ()=>{if(provider===read)provider=undefined;notifyCloudAccountStatus();};}
+
+/** Read-only UI hook; no host IO, authorizations or feature-gate mutation. */
+export function readCloudFormatCompatibility(){const status=provider?.();return status?.formatCompatibility?{...status.formatCompatibility}:undefined;}

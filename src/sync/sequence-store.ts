@@ -26,6 +26,10 @@ export class SqlLibrarySequenceStore {
  }
  async markSuccess(pending:PendingSyncSuccess):Promise<void>{const s=this.successStatement(pending);await this.db.execute(s.sql,s.params);}
  async reset():Promise<void>{await this.db.execute('DELETE FROM sync_peer_state');}
+ async fastPathRequiresFull(peer:string):Promise<boolean>{
+  const s=(await this.db.query('SELECT * FROM sync_peer_state WHERE peer_device_id=?',[this.peer(peer)]))[0],now=exact(this.now()),last=Number(s?.last_full_sync_at??0);
+  return !s||Number(s.last_protocol_version)<13||last<=0||last>now||now-last>=WEEK;
+ }
  async prepareWindow(peer:string,localDeviceId:string,full:readonly ArticleManifest[],exportSources:(urls?:readonly string[])=>Promise<readonly SyncedSource[]>,peerAppliedLocalSeq?:number,options:{snapshotReconciled?:boolean}={}):Promise<LibraryWindow>{
   const state=(await this.db.query('SELECT * FROM sync_peer_state WHERE peer_device_id=?',[this.peer(peer)]))[0],now=exact(this.now());
   // The production repository has already reconciled exact signatures under
@@ -36,7 +40,7 @@ export class SqlLibrarySequenceStore {
   for(let i=0;i<repair.length;i+=512)await this.db.transaction(repair.slice(i,i+512));
   }
   const max=(await this.cursor(peer)).localMaxSeq,cached=Number(state?.last_local_seq_acked??0),acked=peerAppliedLocalSeq===undefined?cached:Math.max(0,exact(peerAppliedLocalSeq));
-  const reason=!state?'newPeer':Number(state.last_protocol_version)<13?'peerProtocol':peerAppliedLocalSeq!==undefined&&acked<cached?'peerCursorBehind':peerAppliedLocalSeq!==undefined&&acked>max?'peerCursorAhead':Number(state.last_full_sync_at)<=0?'noFullSnapshot':now-Number(state.last_full_sync_at)>=WEEK?'periodicFull':'';
+  const reason=!state?'newPeer':Number(state.last_protocol_version)<13?'peerProtocol':peerAppliedLocalSeq!==undefined&&acked<cached?'peerCursorBehind':peerAppliedLocalSeq!==undefined&&acked>max?'peerCursorAhead':Number(state.last_full_sync_at)<=0?'noFullSnapshot':(Number(state.last_full_sync_at)>now||now-Number(state.last_full_sync_at)>=WEEK)?'periodicFull':'';
   if(reason)return {articleManifest:full,fullArticleManifest:full,rssSources:await exportSources(),fullSnapshot:true,fromSeqExclusive:0,toSeqInclusive:max,peerAckedSeq:acked,fallbackReason:reason};
   const articles=new Set<string>(),sources:string[]=[];
   // Page in stable first-change order; cap by the captured maximum so later

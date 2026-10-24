@@ -5,6 +5,8 @@ import {
   hostOperation,
   type HostOperation,
   type VideoBounds,
+  type VideoFrameCapture,
+  type VideoFrame,
   type VideoPrepare,
   type VideoSessionCapabilities,
   type VideoSessionState,
@@ -58,6 +60,7 @@ export function douyinPagerSettleProgress(from:number,to:0|1,elapsedMs:number):n
 }
 
 interface SessionPort {
+  captureFrame?(sessionId:string,options:VideoFrameCapture):Promise<VideoFrame>;
   capabilities(profile?:VideoDecoderProfile):Promise<VideoSessionCapabilities>;
   prepare(options:Parameters<typeof videoSessions.prepare>[0]):HostOperation<VideoSessionState>;
   play(sessionId:string):Promise<VideoSessionState>;
@@ -69,6 +72,7 @@ interface SessionPort {
   state(sessionId:string):Promise<VideoSessionState>;
   setTransform(sessionId:string,transform:{rotationDeg?:number;scaleMode?:"standard"|"expanded"|"shrunk";panX?:number;panY?:number}):Promise<VideoSessionState>;
   setVolume(sessionId:string,volume:number):Promise<VideoSessionState>;
+  setLoop(sessionId:string,loop:boolean):Promise<VideoSessionState>;
   promote(sessionId:string,options:{replaceSessionId?:string;bounds?:VideoBounds;autoplay?:boolean}):Promise<VideoSessionState>;
   transition(options:{fromSessionId:string;toSessionId:string;progress:number;direction:DouyinPagerDirection;bounds?:VideoBounds}):Promise<VideoSessionTransitionState>;
 }
@@ -80,14 +84,15 @@ const defaultSessionPort:SessionPort={
 
 let nextPoolId=1;
 const state=(value:VideoSessionState):VideoState=>({
-  ok:value.ok,state:value.state,positionMs:value.positionMs,durationMs:value.durationMs,
+  ok:value.ok,state:value.state,positionMs:value.positionMs,durationMs:value.durationMs,completedLoops:value.completedLoops,loop:value.loop,
   width:value.width,height:value.height,volume:value.volume,volumeMax:15,
-  errorCode:value.errorCode,hasRenderedFirstFrame:value.hasRenderedFirstFrame,
+  sourceGeneration:value.sourceGeneration,errorCode:value.errorCode,hasRenderedFirstFrame:value.hasRenderedFirstFrame,
 });
 
 /** Two fixed host slots. Promotion swaps their roles, then the retired slot is
  * reused for the next forward prewarm, matching the native two-player plan. */
 export class DouyinVideoSessionPool {
+  private loop=false;
   private activeId:string;
   private standbyId:string;
   private activeKey:string|undefined;
@@ -124,13 +129,14 @@ export class DouyinVideoSessionPool {
 
   prepare(source:DouyinPreparedSource,options:VideoPrepare):HostOperation<VideoState>{
     const own=++this.generation;
+    this.loop=options.loop===true;
     this.activeKey=source.key;this.standby=undefined;this.standbyReady=false;
     this.standbyPrepare?.cancel();this.standbyPrepare=undefined;
     void this.port.release(this.standbyId).catch(()=>{});
     const operation=this.port.prepare({...options,sessionId:this.activeId,prewarm:false,autoplay:false});
     return {cancel:()=>operation.cancel(),result:operation.result.then(value=>{
       if(own!==this.generation)throw new Error("stale video session preparation");
-      return state(value);
+      return this.syncLoop(this.activeId).then(state);
     })};
   }
 
@@ -143,15 +149,24 @@ export class DouyinVideoSessionPool {
     // The host silences every prewarm internally while retaining this audible
     // volume for promotion. Passing muted=true would make the promoted slot
     // remain silent.
-    const operation=this.port.prepare({...options,sessionId:this.standbyId,prewarm:true,autoplay:false,muted:false});
+    const operation=this.port.prepare({...options,loop:this.loop,sessionId:this.standbyId,prewarm:true,autoplay:false,muted:false});
     this.standbyPrepare=operation;
     try{
       const value=await operation.result;
       if(own!==this.generation||this.standby?.key!==source.key)throw new Error("stale video session prewarm");
-      this.standbyReady=value.hasRenderedFirstFrame;return state(value);
+      while(true){
+        const loop=this.loop;
+        await this.port.setLoop(this.standbyId,loop);
+        if(own!==this.generation||this.standby?.key!==source.key)throw new Error("stale video session prewarm");
+        // Check and publish readiness in the same turn: a toggle between a
+        // nested async helper's return and this continuation must not be lost.
+        if(loop===this.loop){this.standbyReady=value.hasRenderedFirstFrame;return state(value);}
+      }
     }finally{if(this.standbyPrepare===operation)this.standbyPrepare=undefined;}
   }
 
+  captureFrame(options:VideoFrameCapture){if(!this.port.captureFrame)return Promise.reject(Error('frame_capture_unavailable'));return this.port.captureFrame(this.activeId,options);}
+  invalidateStandby(key:string){if(this.standby?.key!==key)return;this.generation++;this.standbyPrepare?.cancel();this.standbyPrepare=undefined;this.standby=undefined;this.standbyReady=false;void this.port.release(this.standbyId).catch(()=>{});}
   hasStandby(key?:string):boolean{return this.standbyReady&&!!key&&this.standby?.key===key;}
   standbySource():DouyinPreparedSource|undefined{return this.standbyReady?this.standby:undefined;}
 
@@ -176,6 +191,15 @@ export class DouyinVideoSessionPool {
     appLogger.d("DouyinImmersive",`promote slot=${this.activeId.endsWith("a")?"Primary":"Secondary"} awemeId=${logPlatformId(target.source.awemeId)}`);
     this.activeKey=target.key;this.standby=undefined;this.standbyReady=false;this.generation++;
     return {source:target,state:state(promoted)};
+  }
+
+  private async syncLoop(id:string):Promise<VideoSessionState>{
+    while(true){const loop=this.loop,value=await this.port.setLoop(id,loop);if(loop===this.loop)return value;}
+  }
+
+  async setLoop(loop:boolean):Promise<void>{
+    this.loop=loop;
+    await Promise.all([...(this.activeKey?[this.syncLoop(this.activeId)]:[]),...(this.standbyReady?[this.syncLoop(this.standbyId)]:[])]);
   }
 
   play():Promise<VideoState>{return this.port.play(this.activeId).then(state);}

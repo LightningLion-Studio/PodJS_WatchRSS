@@ -87,3 +87,12 @@ test('local remediation callbacks require confirmation, coalesce busy actions an
  const actions=cloudRemediationActions({logout:async()=>{calls++;await new Promise<void>(r=>{release=r;});},resolveOwner:async(_choice,_confirmed,clearLocal)=>{calls++;await clearLocal?.();},reregister:async()=>{calls++;throw Error('secret endpoint detail');}});actions.subscribe(()=>phases.push(actions.busy));
  expect(await actions.resolveOwner('merge',false)).toBe(false);expect(await actions.reregister(false)).toBe(false);expect(calls).toBe(0);const exiting=actions.logout();expect(actions.busy).toBe(true);expect(await actions.logout()).toBe(false);release();expect(await exiting).toBe(true);expect(phases).toEqual([true,false]);expect(await actions.reregister(true)).toBe(false);expect(actions.message).not.toContain('secret');
 });
+
+test('a backgrounded manual sync reads as handed off or held, never as finished', () => {
+  const status = accountStatusSnapshot(account, 500, cloud({}));
+  const queued = cloudSyncView(status, true, false, 500, 'queued');
+  expect([queued.title, queued.tone, queued.button?.enabled]).toEqual(['后台同步中', 'busy', true]);
+  const held = cloudSyncView(status, true, false, 500, 'held');
+  expect([held.title, held.button?.enabled]).toEqual(['等待手机同步结束', false]);
+  expect(cloudSyncView(status, true, false, 500, 'foreground').title).toBe(cloudSyncView(status, true, false, 500).title);
+});

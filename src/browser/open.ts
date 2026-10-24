@@ -1,4 +1,6 @@
-import { browser, type BrowserOpenOptions } from '@podjs/framework/services';
+import {followBrowserTheme} from './theme-follow';
+import {ReaderPresetStore,activeReaderPreset,onReaderPresetsChanged} from '../reader/preset-store';
+import { browser, delay, type BrowserOpenOptions } from '@podjs/framework/services';
 import { hasCapability } from '@podjs/framework/watch';
 import { readerChrome } from '../reader/chrome.ts';
 import type { ReaderPreset } from '../reader/preset.ts';
@@ -7,6 +9,18 @@ export type BrowserOrigin = 'article' | 'bili' | 'douyin' | 'rss' | 'information
 export interface BrowserPort {
   hasCapability(name: string): boolean;
   open(url: string, options?: BrowserOpenOptions): { result: Promise<void> };
+}
+let stopThemeFollow: (()=>void)|undefined;
+export function followCurrentReaderTheme():void {
+  stopThemeFollow?.();
+  if(!hasCapability('system.browser.inApp.theme'))return;
+  const presets=new ReaderPresetStore();
+  stopThemeFollow=followBrowserTheme({
+    read:()=>readerBrowserOptions(activeReaderPreset(presets.load())).theme!,
+    update:theme=>browser.updateTheme(theme).result,
+    subscribe:onReaderPresetsChanged,
+    schedule:listener=>{const timer=delay(60000-Date.now()%60000);let cancelled=false;void timer.result.then(()=>{if(!cancelled)listener();}).catch(()=>{});return()=>{cancelled=true;timer.cancel();};},
+  });
 }
 const host: BrowserPort = { hasCapability, open: (url, options) => browser.open(url, options) };
 
@@ -34,6 +48,7 @@ export async function openBrowserUrl(url: string, origin: BrowserOrigin, preset?
     if (!url.trim()) return; // WebViewActivity.open ignores blank URLs.
     if (!preset) throw new Error('In-app browser requires the current reader preset');
     await port.open(url, readerBrowserOptions(preset,port.hasCapability('system.browser.inApp.state'))).result;
+    if(port===host)followCurrentReaderTheme();
   } else {
     await port.open(url).result;
   }

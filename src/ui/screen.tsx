@@ -1646,6 +1646,7 @@ export default function WatchRSS(props: {
               openExport={openHttpExport}
             />
             <MediaRoutes
+              readerKeepAwake={()=>settings().readerKeepAwake}
               createBatteryTelemetry={createVideoBatteryTelemetry}
               preset={readerPreset}
               entry={entry}

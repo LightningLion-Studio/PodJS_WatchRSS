@@ -1,3 +1,11 @@
+import {followCurrentReaderTheme} from './browser/open';
+import {acquireRssFeed,type RssFetchPurpose,type RssAcquisitionMode} from './rss/acquisition';
+import {OfflineMediaQueue} from './reader/offline-queue';
+import {yieldWorkTurn} from "@podjs/framework/text-layout";
+import {repairEncodedRssBodies} from "./core/encoded-body-repair";
+import {SqlDomainVectorStore} from './sync/domain-fast-path';
+import {createDomainExternalState} from './sync/domain-external-state';
+import {hashJavaText} from './sync/article-export';
 import {createBookFiles} from './books/files-port';
 import {isLocalOnlyRssSource} from './cloud/rss-identity';
 import {resolvePoolFeed,poolFeedXml} from './cloud/rss-pool';
@@ -8,7 +16,7 @@ import {requestFeedText} from "./rss/site-challenge.ts";
 import { feedRequest } from "./core/feed-request";
 import {decodeUtf8Async} from "@podjs/framework/bytes";
 import {traceServiceWork} from "@podjs/framework/service-trace";
-import {notifyLibrarySqlCommit} from './core/library-mutations';
+import {subscribeLibraryMutations,notifyLibrarySqlCommit} from './core/library-mutations';
 import {startupMark,startupStep} from "./core/startup-trace.ts";
 import {appLogger} from './logs/app-logger.ts';
 import {migrateDouyinOriginalMode} from "./douyin/original-mode.ts";
@@ -24,7 +32,7 @@ import {importedTextWriter} from "./reader/imported-text-storage.ts";
 import {SqlSourceSyncStore} from "./sync/source-store.ts";
 import {SqlLocalRssActions} from "./sync/local-rss-actions.ts";
 import {ensureSyncDevice,prepareLocalSaveAlias} from "./sync/local-identity.ts";
-import {hostArticleBodyCodec,hostSyncText} from "./sync/article-body-host.ts";
+import {hostArticleBodyCodec,hostSyncText,reencodeStoredArticleBodies} from "./sync/article-body-host.ts";
 import {SqlReadingProgressStore} from "./reader/sql-progress.ts";
 import {ReadingProgressStore} from "./reader/progress.ts";
 import {hasCapability} from "@podjs/framework/watch";
@@ -36,7 +44,7 @@ import {createSummarySession,summaryAccountStore} from "./llm/runtime.ts";
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from './cloud/status';
 import {accountStatusSnapshot} from "./account/status.ts";
 import { buildArticleBlocksAsync } from "./reader/media.ts";
-import {readOfflineMedia,retryOfflineMedia as retryStoredOfflineMedia} from "./reader/offline-media.ts";
+import {readOfflineMedia} from "./reader/offline-media.ts";
 import { isDeletableLocalContentChannel, isImportedContentUrl } from "./core/imported-content.ts";
 import { OriginalContentCache, type OriginalDownload } from "./reader/original-cache.ts";
 import { parseContent, contentText } from "./reader/content.ts";
@@ -93,6 +101,10 @@ function init(): Promise<void> { return ready ??= (async()=>{
   await startupStep('init.douyinMode',()=>migrateDouyinOriginalMode(db,kv));
   await startupStep('init.douyinSaved',()=>douyinSavedStore.migrate());
   startupMark('services.ready');
+  startOfflineMediaQueue();
+  startLocalRssPromotion();
+  followCurrentReaderTheme();
+  if(!kv.get('watchrss.rss-html-envelope-repair.v1'))void yieldWorkTurn().result.then(()=>repairEncodedRssBodies(db)).then(()=>kv.set('watchrss.rss-html-envelope-repair.v1',true)).catch(()=>appLogger.w('RssBodyRepair','Deferred repair failed; will retry'));
 })().catch(error => { ready = undefined; throw error; }); }
 async function insertBuiltin(builtin:BuiltinChannel,now=Date.now()):Promise<import('./ui/service.ts').Channel>{
   const existing=(await db.query("SELECT id,url,title,description FROM channels WHERE url=?",[builtin.url]))[0];
@@ -106,19 +118,20 @@ async function insertBuiltin(builtin:BuiltinChannel,now=Date.now()):Promise<impo
 }
 let downloadSequence = 0;
 let addPreviewSequence=0;
-const pendingAddPreviews=new Map<string,{url:string;xml:string|null;builtin:BuiltinChannel|undefined}>();
-async function fetchFeedText(url: string, job?:OriginalDownload): Promise<string> {
-  const parsed=await uri.parse(url,'android');
-  if(!builtinForInput(url,parsed.host)&&/^https?:\/\//i.test(url)&&!isImportedContentUrl(url)&&!isLocalOnlyRssSource(url)){
-    const pool=await resolvePoolFeed(summaryAccountStore,createCloudTransport(<T>(method:string,args:Record<string,unknown>)=>{const task=hostOperation<T>(method,args);if(method==='http.download'&&job){job.cancel=()=>task.cancel();if(job.cancelled)task.cancel();}return task.result;},{require(){}}),url,watchAppVersion,job);
-    if(job?.cancelled)throw Error('刷新已取消');return poolFeedXml(pool);
-  }
-  const request=requestFeedText(url,(cookie,userAgent)=>{
-    const download:OriginalDownload={cancelled:false};
-    return {result:downloadFeedText(url,download,cookie,userAgent),cancel(){download.cancelled=true;download.cancel?.();}};
-  });
-  if(job){job.cancel=()=>request.cancel();if(job.cancelled)request.cancel();}
-  return request.result;
+const pendingAddPreviews=new Map<string,{url:string;xml:string|null;builtin:BuiltinChannel|undefined;mode?:RssAcquisitionMode}>();
+async function fetchFeed(url:string,job?:OriginalDownload,purpose:RssFetchPurpose='refresh'){
+ const parsed=await uri.parse(url,'android');
+ const eligible=!builtinForInput(url,parsed.host)&&/^https?:\/\//i.test(url)&&!isImportedContentUrl(url)&&!isLocalOnlyRssSource(url);
+ return acquireRssFeed(url,purpose,eligible,{
+  cancelled:()=>job?.cancelled??false,
+  pool:async()=>poolFeedXml(await resolvePoolFeed(summaryAccountStore,createCloudTransport(<T>(method:string,args:Record<string,unknown>)=>{const task=hostOperation<T>(method,args);if(method==='http.download'&&job){job.cancel=()=>task.cancel();if(job.cancelled)task.cancel();}return task.result;},{require(){}}),url,watchAppVersion,job)),
+  direct:async()=>{const request=requestFeedText(url,(cookie,userAgent)=>{const download:OriginalDownload={cancelled:false};return {result:downloadFeedText(url,download,cookie,userAgent),cancel(){download.cancelled=true;download.cancel?.();}};});if(job){job.cancel=()=>request.cancel();if(job.cancelled)request.cancel();}return request.result;},
+ });
+}
+async function fetchFeedText(url:string,job?:OriginalDownload){return (await fetchFeed(url,job)).xml;}
+async function recordRssOrigin(url:string,mode:RssAcquisitionMode){
+ if(isImportedContentUrl(url)||isLocalOnlyRssSource(url)||!/^https?:\/\//i.test(url))return;
+ if(mode==='local'&&await summaryAccountStore.read())void yieldWorkTurn().result.then(()=>promoteLocalRssSources()).catch(()=>{});
 }
 async function downloadFeedText(url: string, job:OriginalDownload, cookie:string, userAgent?:string): Promise<string> {
   appLogger.d('Network','RSS fetch');
@@ -174,7 +187,7 @@ export const services: AppServices = {
   async readAccountStatus(){return accountStatusSnapshot(await summaryAccountStore.read(),Date.now(),readCloudAccountStatus());},
   subscribeAccountStatus(listener){const account=summaryAccountStore.subscribe(listener),cloud=subscribeCloudAccountStatus(listener);return ()=>{account();cloud();};},
   readingProgress: sqlReadingProgress,
-  async retryOfflineMedia(id){await init();return retryStoredOfflineMedia(db,{stat:path=>fileChunks.stat(path),download:async(url,path,maxBytes)=>{await http.download(url,path,maxBytes).result;},remove:path=>fileChunks.remove(path)},Number(id));},
+  async retryOfflineMedia(id){await init();return offlineMediaQueue.retry(Number(id));},
   loadImportedTextChunk(handle,index) {return importedTextStore.chunk(handle,index);},
   async getSpeechSource(article,anchor) { await init();return importedSpeechSource(db,importedTextStore,article,anchor); },
   async readSummaryUsage(){await init();return readUsage(db);},
@@ -269,7 +282,7 @@ export const services: AppServices = {
       article.searchSnippet=searchSnippet(term,description,content,value(row,'summary_match')||value(row,'summary'));
       return article;});
   },
-  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=await buildArticleBlocksAsync(article.rawContent!,article); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
+  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); await repairEncodedRssBodies(db,{id:Number(id)}); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=await buildArticleBlocksAsync(article.rawContent!,article); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
   getOriginalArticle(id) { return originalArticle(id); },
   async addChannel(url) {
     await init();
@@ -280,10 +293,11 @@ export const services: AppServices = {
     if(builtin)return insertBuiltin(builtin);
     const existing=(await db.query('SELECT id,url,title,description FROM channels WHERE url=?',[input]))[0];
     if(existing)return {id:String(existing.id),url:String(existing.url),title:String(existing.title),description:existing.description==null?null:String(existing.description)};
-    const xml=await fetchFeedText(input);
+    const feed=await fetchFeed(input,undefined,'add'),xml=feed.xml;
     const parsed=parseFeed(xml,Date.now(),input);
     const channel=await repo.addChannel(input,parsed.title);
-    const result=await repo.refreshChannel(channel.id,xml);
+    const result=await repo.refreshChannel(channel.id,xml,undefined,feed.mode==='pool');
+    await recordRssOrigin(input,feed.mode);
 
     return {id:String(channel.id),title:result.channel.title,url:channel.url,description:result.channel.description};
   },
@@ -296,11 +310,12 @@ export const services: AppServices = {
     const target=builtin?.url??input;
     const existing=(await db.query('SELECT id,url,title,description FROM channels WHERE url=?',[target]))[0];
     if(existing)return {kind:'existing',channel:{id:String(existing.id),url:String(existing.url),title:String(existing.title),description:existing.description==null?null:String(existing.description)}};
-    const xml=builtin?null:await fetchFeedText(input);
+    const feed=builtin?null:await fetchFeed(input,undefined,'add');
+    const xml=feed?.xml??null;
     const parsed=xml?parseFeed(xml,Date.now(),input):null;
     const token=`add-${++addPreviewSequence}`;
     if(pendingAddPreviews.size>=3)pendingAddPreviews.delete(pendingAddPreviews.keys().next().value!);
-    pendingAddPreviews.set(token,{url:target,xml,builtin});
+    pendingAddPreviews.set(token,{url:target,xml,builtin,mode:feed?.mode});
     return {kind:'ready',token,url:target,title:builtin?.title??parsed!.title,description:builtin?.description??parsed!.description};
   },
   async confirmAddChannel(token) {
@@ -311,7 +326,8 @@ export const services: AppServices = {
     if(existing){pendingAddPreviews.delete(token);return {id:String(existing.id),url:String(existing.url),title:String(existing.title),description:existing.description==null?null:String(existing.description)};}
     if(preview.builtin){const channel=await insertBuiltin(preview.builtin);pendingAddPreviews.delete(token);return channel;}
     const channel=await repo.addChannel(preview.url);
-    const result=await repo.refreshChannel(channel.id,preview.xml!);
+    const result=await repo.refreshChannel(channel.id,preview.xml!,undefined,preview.mode==='pool');
+    await recordRssOrigin(preview.url,preview.mode??'local');
 
     pendingAddPreviews.delete(token);
     return {id:String(channel.id),url:channel.url,title:result.channel.title,description:result.channel.description};
@@ -358,10 +374,10 @@ function refreshChannel(id:string,replace=false):Promise<void> {
     await init();
     const row=(await db.query("SELECT url FROM channels WHERE id=?",[Number(id)]))[0];if(!row)throw new Error("频道不存在");
     const url=String(row.url);if(isImportedContentUrl(url)||!/^https?:\/\//i.test(url))return;
-    const xml=await fetchFeedText(url,job);if(job.cancelled)return;
+    const feed=await fetchFeed(url,job),xml=feed.xml;if(job.cancelled)return;
     const current=(await db.query("SELECT url FROM channels WHERE id=?",[Number(id)]))[0];
     if(job.cancelled||String(current?.url??"")!==url)return;
-    await repo.refreshChannel(Number(id),xml,()=>job.cancelled,true);if(!job.cancelled)emitChannel({id,kind:"refresh"});
+    await repo.refreshChannel(Number(id),xml,()=>job.cancelled,feed.mode==='pool');await recordRssOrigin(url,feed.mode);if(!job.cancelled)emitChannel({id,kind:"refresh"});
   })().catch(error=>{if(!job.cancelled)throw error;}).finally(()=>{if(refreshJobs.get(id)===job)refreshJobs.delete(id);});
   return job.promise;
 }
@@ -398,11 +414,16 @@ export async function getLibrarySyncRepository():Promise<SqlLibrarySessionReposi
  await init();
  return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
   bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),
-  codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},
+  reencodeStoredBodies:reencodeStoredArticleBodies,codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},
   files:{storeText:(key,text)=>importedTextWriter.storeText(key,text),hydrate:hydrateStoredContent},
   migrateReading:id=>sqlReadingProgress.migrate(id),migrateReadingMany:ids=>sqlReadingProgress.migrateMany(ids),cleanupRemovedContent,
  });
 }
+let domainVectorStore:Promise<SqlDomainVectorStore>|undefined;
+export function getDomainVectorStore():Promise<SqlDomainVectorStore>{return domainVectorStore??=(async()=>{
+ await init();await memoRepository.initialize();await (await getLibrarySyncRepository()).prepareFastProjection();
+ return new SqlDomainVectorStore(db,hostArticleBodyCodec,createDomainExternalState({account:()=>summaryAccountStore.read(),kvFingerprint:key=>kv.fingerprint(key),list:path=>fileChunks.list(path),stat:path=>fileChunks.stat(path),hash:value=>hashJavaText(value,hostArticleBodyCodec)}),{canSkipLibrary:async peer=>(await getLibrarySyncRepository()).canSkipLibrary(peer)});
+})().catch(error=>{domainVectorStore=undefined;throw error;});}
 async function cleanupRemovedContent(content:RemovedLibraryContent):Promise<void>{
  const refreshing:Promise<void>[]=[];
  for(const channel of content.channels){
@@ -466,3 +487,29 @@ export function clearLocalPrivateLibrary():Promise<void>{
  void work.finally(()=>{if(privateLibraryClear===work)privateLibraryClear=undefined;}).catch(()=>{});
  return work;
 }
+
+const offlineMediaQueue=new OfflineMediaQueue(db,{
+ body:async id=>{const chunks=await db.query('SELECT body FROM article_original_chunks WHERE article_id=? ORDER BY chunk_index',[id]);return chunks.length?hydrateStoredContent(chunks.map(r=>String(r.body)).join('')):repo.getArticleBody(id);},stat:path=>fileChunks.stat(path),
+ download:(url,path,maxBytes)=>http.download(url,path,maxBytes),remove:path=>fileChunks.remove(path),
+ clearItem:async id=>{const root=`offline/rss/${id}`;for(const entry of (await fileChunks.list(root)).entries){const name=entry.path.slice(root.length+1);if(!entry.path.startsWith(root+'/')||!name||name.includes('/')||name.includes('\\')||entry.directory)throw Error('offline_media_invalid_path');await fileChunks.remove(entry.path);}},
+ schedule:(ms,run)=>{const timer=delay(ms);let cancelled=false;void timer.result.then(()=>{if(!cancelled)run();}).catch(()=>{});return()=>{cancelled=true;timer.cancel();};},
+});
+let offlineMediaStarted=false;
+function startOfflineMediaQueue(){if(offlineMediaStarted)return;offlineMediaStarted=true;subscribeLibraryMutations(()=>{void offlineMediaQueue.wake().catch(()=>{});});void yieldWorkTurn().result.then(()=>offlineMediaQueue.wake()).catch(()=>{});}
+
+let localRssPromotionStarted=false,promotingLocalRss:Promise<void>|undefined;
+/** Durable local marker is removed only after a successful public-pool merge. */
+export async function promoteLocalRssSources():Promise<void>{
+ await init();
+ return promotingLocalRss??= (async()=>{
+  if(!await summaryAccountStore.read())return;
+  for(const row of await db.query('SELECT c.id,c.url FROM channels c JOIN rss_local_sources l ON l.url=c.url ORDER BY c.id')){
+   if(!await summaryAccountStore.read())return;
+   try{await refreshChannel(String(row.id));}catch{appLogger.w('RssPool','Local source promotion deferred');}
+  }
+ })().finally(()=>{promotingLocalRss=undefined;});
+}
+function startLocalRssPromotion(){if(localRssPromotionStarted)return;localRssPromotionStarted=true;summaryAccountStore.subscribe(()=>{void promoteLocalRssSources().catch(()=>{});});void yieldWorkTurn().result.then(()=>promoteLocalRssSources()).catch(()=>{});}
+
+/** Queue status includes extraction failures before media rows could be produced. */
+export async function getOfflineMediaStatus(id:string){await init();return offlineMediaQueue.status(Number(id));}

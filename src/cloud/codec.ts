@@ -1,7 +1,12 @@
+import {mergeCloudArchive,retireCloudArchive} from './archive-compat';
+import {rawJsonUnknownBytes,parseRawJsonAsync,type RawJsonNode} from '@podjs/framework/json-raw';
+import {readWrss} from './wrss';
+import {bindCloudRaw,cloudRaw,cloudCompatibility,requireCloudWritable,parseRawJson,rawJsonValue,rawJsonProperty,rawJsonText,patchCloudObject,patchRawJsonObject,schemaFields,chunkFields,objectFields,manifestFields,settingFields,recordFields,type CloudFeatures} from './compatibility';
 import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {utf8Encode,utf8Decode,type EncryptedCloudSnapshot} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 export interface SnapshotCrypto {
+ yieldTurn?():Promise<void>;
  random(size:number):Promise<Uint8Array>;
  sha256(bytes:Uint8Array):Promise<string>;
  hkdf(key:Uint8Array,salt:Uint8Array,info:Uint8Array):Promise<Uint8Array>;
@@ -11,10 +16,10 @@ export interface SnapshotCrypto {
  gunzip(bytes:Uint8Array,maxBytes:number):Promise<Uint8Array>;
 }
 export interface CloudChunk {plaintextSha256:string;ciphertextSha256:string;plaintextBytes:number;ciphertextBytes:number;saltBase64:string;nonceBase64:string;}
-export interface CloudObject {privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;encoding:'gzip-chunks-v1'|'gzip'|'identity';originalBytes:number;encodedBytes:number;chunks:CloudChunk[];readerKeyEnvelope?:{version:number;saltBase64:string;nonceBase64:string;ciphertextBase64:string;scope?:string};}
-export interface CloudManifest {format:'watchrss-cloud-snapshot';schemaVersion:2;snapshotId:string;sourceDeviceId:string;deviceSequence:number;keyVersion:number;createdAtMillis:number;parentHeads:Record<string,string>;observedHeads:Record<string,number>;objects:CloudObject[];settings:Record<string,unknown>;credentialEnvelopes:Record<string,never>;}
+export interface CloudObject {features?:CloudFeatures;entryRef?:{object:string;entryPath:string;encoding:'identity'};objectKeyEnvelope?:{version:1;scope:string;saltBase64:string;nonceBase64:string;ciphertextBase64:string};privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;encoding:'gzip-chunks-v1'|'gzip'|'identity';originalBytes:number;encodedBytes:number;chunks:CloudChunk[];readerKeyEnvelope?:{version:number;saltBase64:string;nonceBase64:string;ciphertextBase64:string;scope?:string};}
+export interface CloudManifest {features?:CloudFeatures;format:'watchrss-cloud-snapshot';schemaVersion:2;snapshotId:string;sourceDeviceId:string;deviceSequence:number;keyVersion:number;createdAtMillis:number;parentHeads:Record<string,string>;observedHeads:Record<string,number>;objects:CloudObject[];settings:Record<string,unknown>;credentialEnvelopes:Record<string,never>;}
 export interface LogicalObject {privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;bytes:Uint8Array;compress?:boolean;}
-export interface SnapshotInput {accountKey:Uint8Array;keyVersion:number;sourceDeviceId:string;sequence:number;objects:LogicalObject[];parentHeads:Record<string,string>;observedHeads:Record<string,number>;snapshotId:string;createdAtMillis:number;previous?:CloudManifest;carried?:CloudObject[];settings?:Record<string,unknown>;}
+export interface SnapshotInput {removedObjectNames?:readonly string[];readPreviousChunk?:(hash:string)=>Promise<Uint8Array>;removedPrivateArticleIds?:readonly string[];accountKey:Uint8Array;keyVersion:number;sourceDeviceId:string;sequence:number;objects:LogicalObject[];parentHeads:Record<string,string>;observedHeads:Record<string,number>;snapshotId:string;createdAtMillis:number;previous?:CloudManifest;carried?:CloudObject[];settings?:Record<string,unknown>;}
 export const CLOUD_CHUNK_BYTES=4*1024*1024;
 const MAX_OBJECT_BYTES=256*1024*1024;
 const hashPattern=/^[0-9a-f]{64}$/;
@@ -33,12 +38,32 @@ export function validateManifest(m:CloudManifest):void {
  check(size(m.deviceSequence,Number.MAX_SAFE_INTEGER)&&m.deviceSequence>0&&size(m.keyVersion,Number.MAX_SAFE_INTEGER)&&m.keyVersion>0&&size(m.createdAtMillis,Number.MAX_SAFE_INTEGER));
  check(m.parentHeads&&typeof m.parentHeads==='object'&&!Array.isArray(m.parentHeads)&&Object.values(m.parentHeads).every(v=>typeof v==='string'));
  check(m.observedHeads&&typeof m.observedHeads==='object'&&!Array.isArray(m.observedHeads)&&Object.values(m.observedHeads).every(v=>size(v,Number.MAX_SAFE_INTEGER)));
+ if(cloudCompatibility(m).opaque)return;
  check(Array.isArray(m.objects)&&m.objects.length<=1024&&new Set(m.objects.map(o=>o.name)).size===m.objects.length);
  for(const o of m.objects){
+  check(o&&typeof o.name==='string'&&o.name.length>0);if(cloudCompatibility(o).opaque)continue;
+  check(!(o.readerKeyEnvelope&&o.objectKeyEnvelope));
+  if(o.objectKeyEnvelope){const e=o.objectKeyEnvelope;check(o.features?.incompat?.includes('r48.object-key.v1')&&e.version===1&&/^migration:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(e.scope));for(const [v,n]of [[e.saltBase64,16],[e.nonceBase64,12],[e.ciphertextBase64,48]] as const){const b=base64ToBytes(v);check(b.length===n&&bytesToBase64(b)===v);}}
+  if(o.entryRef){const r=o.entryRef;check(o.features?.incompat?.includes('r48.entry-ref.v1')&&!o.chunks&&!o.readerKeyEnvelope&&!o.objectKeyEnvelope&&r.encoding==='identity'&&typeof r.object==='string'&&typeof r.entryPath==='string'&&!!r.entryPath&&!r.entryPath.startsWith('/')&&!r.entryPath.includes('\\')&&!r.entryPath.includes('\0')&&r.entryPath.split('/').every(p=>p&&p!=='.'&&p!=='..'));const target=m.objects.find(x=>x.name===r.object);check(target&&target!==o&&!target.entryRef&&Array.isArray(target.chunks)&&target.chunks.length>0&&size(o.originalBytes));continue;}
   check(typeof o.name==='string'&&o.name.length>0&&['gzip-chunks-v1','gzip','identity'].includes(o.encoding)&&size(o.originalBytes)&&size(o.encodedBytes)&&Array.isArray(o.chunks)&&o.chunks.length>0&&o.chunks.length<=1024);
   for(const c of o.chunks){check(hashPattern.test(c.plaintextSha256)&&hashPattern.test(c.ciphertextSha256)&&size(c.plaintextBytes,8*1024*1024)&&size(c.ciphertextBytes,8*1024*1024)&&c.ciphertextBytes===c.plaintextBytes+51&&typeof c.saltBase64==='string'&&typeof c.nonceBase64==='string');check(base64ToBytes(c.saltBase64).length===16&&base64ToBytes(c.nonceBase64).length===12);}
   check(o.chunks.reduce((n,c)=>n+c.plaintextBytes,0)===o.encodedBytes);
  }
+}
+function parseManifestText(text:string,node:RawJsonNode=parseRawJson(text,{maxBytes:8*1024*1024})):CloudManifest {const manifest=rawJsonValue<CloudManifest>(node);bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576);if(cloudCompatibility(manifest).opaque){validateManifest(manifest);return manifest;}check(Array.isArray(manifest.objects)&&manifest.objects.length<=1024);let unknown=0;const objectNodes=rawJsonProperty(node,'objects')?.items??[];for(let i=0;i<(manifest.objects??[]).length;i++){const o=manifest.objects[i],n=objectNodes[i];check(o&&n);const chunkNodes=rawJsonProperty(n,'chunks')?.items??[];let nested=0;for(let j=0;j<(o.chunks??[]).length;j++){const c=o.chunks[j],cn=chunkNodes[j];check(c&&cn);bindCloudRaw(c,cn,schemaFields(chunkFields),4096);nested+=rawJsonUnknownBytes(cn,schemaFields(chunkFields));}for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']],['readerKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['objectKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['entryRef',['object','entryPath','encoding']]] as [string,readonly string[]][]){const child=rawJsonProperty(n,field);if(child)nested+=rawJsonUnknownBytes(child,schemaFields(keys));}bindCloudRaw(o,n,schemaFields(objectFields),4096,['r48.entry-ref.v1','r48.object-key.v1'],nested);unknown+=rawJsonUnknownBytes(n,schemaFields(objectFields))+nested;}bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576,[],unknown);validateManifest(manifest);return manifest;}
+function serializeDescriptor(o:CloudObject,basis?:CloudObject):string {
+ const raw=basis&&cloudRaw(basis);if(o===basis&&raw)return rawJsonText(raw);
+ const overrides:Record<string,string|undefined>={};
+ if(o.entryRef)overrides.chunks=undefined;else overrides.chunks='['+(o.chunks??[]).map(c=>patchCloudObject(c as unknown as Record<string,any>,chunkFields,basis?.chunks?.find(old=>old.ciphertextSha256===c.ciphertextSha256))).join(',')+']';
+ for(const field of ['readerKeyEnvelope','objectKeyEnvelope','entryRef'] as const)if(!o[field])overrides[field]=undefined;
+ for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']]] as const){const child=raw&&rawJsonProperty(raw,field),v=o[field];if(child&&v){const edits=Object.fromEntries(keys.map(k=>[k,Object.prototype.hasOwnProperty.call(v,k)?JSON.stringify(v[k]):undefined]));overrides[field]=patchRawJsonObject(child,edits);}else if(!v)overrides[field]=undefined;}
+ if(basis?.features&&!o.features)overrides.features=JSON.stringify({...basis.features,incompat:basis.features.incompat.filter(x=>x!=='r48.object-key.v1'&&x!=='r48.entry-ref.v1')});
+ return patchCloudObject(o as unknown as Record<string,any>,objectFields,basis,overrides);
+}
+function serializeManifest(m:CloudManifest,basis?:CloudManifest):string {
+ const overrides:Record<string,string>={objects:'['+m.objects.map(o=>serializeDescriptor(o,basis?.objects.find(old=>old.name===o.name))).join(',')+']'};
+ const settings=basis&&cloudRaw(basis)&&rawJsonProperty(cloudRaw(basis)!,'settings');if(settings)overrides.settings=patchRawJsonObject(settings,Object.fromEntries(Object.entries(m.settings).map(([k,v])=>[k,JSON.stringify(v)])));
+ return patchCloudObject(m as unknown as Record<string,any>,manifestFields,basis,overrides);
 }
 /** Writes WRSSCM3, reads WRSSCM2/3; WRSSCC2 format; keys and gzip are supplied by the host. */
 export class WatchCloudCodec {
@@ -57,12 +82,17 @@ export class WatchCloudCodec {
  }
  async create(input:SnapshotInput):Promise<EncryptedCloudSnapshot & {manifest:CloudManifest & {allChunks:CloudChunk[]};newChunks:Map<string,Uint8Array>}>{
   this.guard.require();check(input.accountKey.length===32&&input.sequence>0&&input.keyVersion>0);
-  const carried=input.carried??[];
+  if(input.previous)requireCloudWritable(input.previous);
+  const requested=new Set(input.objects.map(o=>o.name)),explicit=input.carried??[];const retained=(input.previous?.keyVersion===input.keyVersion?input.previous.objects:[]).filter(o=>!requested.has(o.name)&&!explicit.some(c=>c.name===o.name)&&!['rss-state.json','library-sync.json'].includes(o.name)&&!input.removedObjectNames?.includes(o.name));
+  const logicalObjects=[...input.objects];const oldArchive=retained.find(o=>o.name==='private-library.wrss');if(oldArchive&&input.readPreviousChunk&&input.removedPrivateArticleIds?.length){requireCloudWritable(oldArchive);const bytes=(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk,[oldArchive])).get(oldArchive.name)!;const remaining=await retireCloudArchive(bytes,input.removedPrivateArticleIds,(b,max)=>this.crypto.gunzip(b,max));retained.splice(retained.indexOf(oldArchive),1);if(remaining)logicalObjects.push({name:oldArchive.name,bytes:remaining,compress:false});}
+  for(const o of explicit)if(o.entryRef||o.objectKeyEnvelope)check(input.previous?.objects.includes(o),'cloud_format_write_disabled');
+  const carried=[...explicit,...retained];
+  for(const o of input.previous?.objects??[])if(cloudCompatibility(o).readOnly&&(requested.has(o.name)||!carried.some(c=>c.name===o.name)))throw Error('cloud_format_read_only');
   check(!carried.length||input.previous?.keyVersion===input.keyVersion,'轮换密钥后不能沿用旧数据块');
   check(new Set([...input.objects,...carried].map(o=>o.name)).size===input.objects.length+carried.length);
-  const reusable=new Map(input.previous?.keyVersion===input.keyVersion?input.previous.objects.filter(o=>!o.readerKeyEnvelope).flatMap(o=>o.chunks).map(c=>[c.plaintextSha256,c]):[]);
-  const newChunks=new Map<string,Uint8Array>();const canonical=(c:CloudChunk)=>({...c,saltBase64:bytesToBase64(base64ToBytes(c.saltBase64)),nonceBase64:bytesToBase64(base64ToBytes(c.nonceBase64))});const objects:CloudObject[]=carried.map(o=>({...o,chunks:o.chunks.map(canonical)}));
-  for(const logical of input.objects){
+  const reusable=new Map(input.previous?.keyVersion===input.keyVersion?input.previous.objects.filter(o=>!o.readerKeyEnvelope&&!o.objectKeyEnvelope&&!o.entryRef&&!cloudCompatibility(o).opaque).flatMap(o=>o.chunks??[]).map(c=>[c.plaintextSha256,c]):[]);
+  const newChunks=new Map<string,Uint8Array>();const canonical=(c:CloudChunk)=>({...c,saltBase64:bytesToBase64(base64ToBytes(c.saltBase64)),nonceBase64:bytesToBase64(base64ToBytes(c.nonceBase64))});const objects:CloudObject[]=[...carried];
+  for(const original of logicalObjects){let logical=original;const old=input.previous?.objects.find(o=>o.name===logical.name);if(old&&input.previous?.keyVersion===input.keyVersion&&old.contentSha256&&old.originalBytes===logical.bytes.length&&old.contentSha256===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}if(input.objects.includes(original)&&old&&input.previous?.keyVersion===input.keyVersion&&logical.name==='private-library.wrss'&&input.readPreviousChunk){const previous=(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk,[old])).get(old.name)!;if(previous.length===logical.bytes.length&&previous.every((b,i)=>b===logical.bytes[i])){objects.push(old);continue;}const merged=await mergeCloudArchive(previous,logical.bytes,(b,max)=>this.crypto.gunzip(b,max),input.removedPrivateArticleIds);if(merged.unchanged){objects.push(old);continue;}logical={...logical,bytes:merged.bytes};}
    check(logical.bytes.length<=MAX_OBJECT_BYTES);const chunks:CloudChunk[]=[];let encodedBytes=0;
    for(const slice of contentChunks(logical.bytes)){
     const plain=logical.compress===false?slice:await this.crypto.gzip(slice);
@@ -73,21 +103,20 @@ export class WatchCloudCodec {
    }
    objects.push({...logical.privateBook?{privateBook:logical.privateBook}:{},...logical.privateArticle?{privateArticle:logical.privateArticle}:{},...logical.contentSha256?{contentSha256:logical.contentSha256}:{},name:logical.name,encoding:logical.compress===false?'identity':'gzip-chunks-v1',originalBytes:logical.bytes.length,encodedBytes,chunks});
   }
-  const manifest:CloudManifest={format:'watchrss-cloud-snapshot',schemaVersion:2,snapshotId:input.snapshotId,sourceDeviceId:input.sourceDeviceId,deviceSequence:input.sequence,keyVersion:input.keyVersion,createdAtMillis:input.createdAtMillis,parentHeads:{...input.parentHeads},observedHeads:{...input.observedHeads},objects,settings:input.settings??{},credentialEnvelopes:{}};
-  validateManifest(manifest);const {blob}=await this.seal(input.accountKey,utf8Encode(JSON.stringify(manifest)),'manifest',`watchrss-cloud-manifest-v2:${manifest.snapshotId}`,manifest.snapshotId);
-  return {manifest:{...manifest,allChunks:objects.flatMap(o=>o.chunks)},encryptedManifest:blob,newChunks};
+  const constructed:CloudManifest={...(input.previous?.features?{features:input.previous.features}:{}),format:'watchrss-cloud-snapshot',schemaVersion:2,snapshotId:input.snapshotId,sourceDeviceId:input.sourceDeviceId,deviceSequence:input.sequence,keyVersion:input.keyVersion,createdAtMillis:input.createdAtMillis,parentHeads:{...input.parentHeads},observedHeads:{...input.observedHeads},objects,settings:input.settings??{},credentialEnvelopes:{}};
+  const text=serializeManifest(constructed,input.previous),manifest=parseManifestText(text);const {blob}=await this.seal(input.accountKey,utf8Encode(text),'manifest',`watchrss-cloud-manifest-v2:${manifest.snapshotId}`,manifest.snapshotId);
+  return {manifest:Object.assign(manifest,{allChunks:manifest.objects.flatMap(o=>o.chunks??[])}),encryptedManifest:blob,newChunks};
  }
  async decryptManifest(key:Uint8Array,id:string,encrypted:Uint8Array):Promise<CloudManifest>{
-  this.guard.require();const manifest=JSON.parse(utf8Decode(await this.open(key,encrypted,'manifest',`watchrss-cloud-manifest-v2:${id}`,id))) as CloudManifest;
-  validateManifest(manifest);check(manifest.snapshotId===id);return manifest;
+  this.guard.require();const plain=await this.open(key,encrypted,'manifest',`watchrss-cloud-manifest-v2:${id}`,id);try{const text=utf8Decode(plain),round=utf8Encode(text);check(round.length===plain.length&&round.every((b,i)=>b===plain[i]));const manifest=parseManifestText(text,await parseRawJsonAsync(text,{maxBytes:8*1024*1024,yield:this.crypto.yieldTurn}));check(manifest.snapshotId===id);return manifest;}catch(error){if(error instanceof Error&&error.message==='raw_json_depth')throw Error('cloud_format_depth');throw error;}finally{plain.fill(0);}
  }
- async restore(key:Uint8Array,manifest:CloudManifest,read:(hash:string)=>Promise<Uint8Array>):Promise<Map<string,Uint8Array>>{
-  this.guard.require();validateManifest(manifest);const result=new Map<string,Uint8Array>();
-  for(const o of manifest.objects){const parts:Uint8Array[]=[];let total=0;let root=key;
-   const envelope=o.readerKeyEnvelope;if(envelope){check(envelope.version===1);const derived=await this.crypto.hkdf(key,base64ToBytes(envelope.saltBase64),utf8Encode('watchrss/cloud/reader-key/v1'));try{root=await this.crypto.decrypt(derived,utf8Encode(`watchrss-reader-key-v1:${envelope.scope||o.name}`),base64ToBytes(envelope.nonceBase64),base64ToBytes(envelope.ciphertextBase64));check(root.length===32);}finally{derived.fill(0);}}
+ async restore(key:Uint8Array,manifest:CloudManifest,read:(hash:string)=>Promise<Uint8Array>,selected:readonly CloudObject[]=manifest.objects):Promise<Map<string,Uint8Array>>{
+  this.guard.require();validateManifest(manifest);if(cloudCompatibility(manifest).opaque)throw Error('cloud_format_opaque');const result=new Map<string,Uint8Array>();
+  for(const o of selected){if(cloudCompatibility(o).opaque)throw Error('cloud_format_opaque');if(o.entryRef){const target=manifest.objects.find(x=>x.name===o.entryRef!.object);check(target&&!target.entryRef);const bytes=(await this.restore(key,manifest,read,[target])).get(target.name);check(bytes);const zip=await readWrss(bytes,(b,max)=>this.crypto.gunzip(b,max));const body=zip.get(o.entryRef.entryPath);check(body&&body.length===o.originalBytes,'cloud_entry_ref_missing');result.set(o.name,body);continue;}const parts:Uint8Array[]=[];let total=0;let root=key;
+   const envelope=o.objectKeyEnvelope??o.readerKeyEnvelope;if(envelope){check(envelope.version===1);const derived=await this.crypto.hkdf(key,base64ToBytes(envelope.saltBase64),utf8Encode(o.objectKeyEnvelope?'watchrss/cloud/object-key/v1':'watchrss/cloud/reader-key/v1'));try{root=await this.crypto.decrypt(derived,utf8Encode(`${o.objectKeyEnvelope?'watchrss-object-key-v1':'watchrss-reader-key-v1'}:${envelope.scope||o.name}`),base64ToBytes(envelope.nonceBase64),base64ToBytes(envelope.ciphertextBase64));check(root.length===32);}finally{derived.fill(0);}}
    try{
    for(const c of o.chunks){const blob=await read(c.ciphertextSha256);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);check(bytesToBase64(blob.slice(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.slice(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));const plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);const part=o.encoding==='gzip-chunks-v1'?await this.crypto.gunzip(plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total)):plain;total+=part.length;check(total<=(o.encoding==='gzip'?o.encodedBytes:o.originalBytes));parts.push(part);}
-   const bytes=o.encoding==='gzip'?await this.crypto.gunzip(join(parts),o.originalBytes):join(parts);check(bytes.length===o.originalBytes);result.set(o.name,bytes);
+   const bytes=o.encoding==='gzip'?await this.crypto.gunzip(join(parts),o.originalBytes):join(parts);check(bytes.length===o.originalBytes);if(o.contentSha256)check(await this.crypto.sha256(bytes)===o.contentSha256);result.set(o.name,bytes);
    }finally{if(root!==key)root.fill(0);}
   }return result;
  }

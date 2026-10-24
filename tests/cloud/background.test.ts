@@ -1,3 +1,5 @@
+import {MANUAL_INTENT_KEY} from '../../src/cloud/manual-handoff';
+import {cloudAccountIdentity} from '../../src/cloud/identity';
 import {contentFixture} from './content-fixture';
 import {createHmac} from 'node:crypto';
 import {commit,attest} from '../../src/cloud/v2';
@@ -19,9 +21,11 @@ test('release and debug workers require explicit persisted consent, then skip un
   expect(await handler(context)).toBe('success');expect(calls).toEqual(consent?['app.buildInfo','consent','secure.get']:['app.buildInfo','consent']);
  }
 });
-test('release headless handler uses actual SQLite/codec/coordinator: registers and uploads with durable state, no UI or real HTTP',async()=>{
+test('automatic and manual headless handlers use actual SQLite/codec/coordinator with durable progress and no UI or real HTTP',async()=>{
+ for(const manual of [false,true]){
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
+ if(manual)secure.set(MANUAL_INTENT_KEY,JSON.stringify({version:1,token:'manual_fixture',scope:cloudAccountIdentity(account),mode:'all',createdAt:1}));
  const epoch='9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff',v2={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
  secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode(JSON.stringify(['https://backend.invalid','user'])))+'.'+epoch+'.1',b64(key));
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
@@ -75,10 +79,23 @@ test('release headless handler uses actual SQLite/codec/coordinator: registers a
   }
  };
  try{
-  await initializeSchema({query:async q=>sql.query(q).all() as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
+  await initializeSchema({query:async (q,p=[])=>sql.query(q).all(...p) as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
-  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
+  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:manual?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
   expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
+ expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);
  }finally{sql.close();}
+ }
+});
+
+test('manual headless grant is bound to durable token and backend/account scope before any library, writer or network work',async()=>{
+ const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true}};
+ for(const mismatch of ['token','scope']){const methods:string[]=[];const intent={version:1,token:'opaque_1',scope:mismatch==='scope'?'other':cloudAccountIdentity(account),mode:'all',createdAt:1};
+ const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:{manual:true,token:mismatch==='token'?'stale':'opaque_1'},isCancelled:()=>false,request:async(method,args:any)=>{
+  if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
+  methods.push(args.method);if(args.method==='app.buildInfo')return {debugBuild:false};
+  if(args.method==='secure.get')return {exists:true,value:JSON.stringify(args.args.key===MANUAL_INTENT_KEY?intent:account)};throw Error('unauthorized side effect: '+args.method);
+ }});expect(result).toBe('success');expect(methods).toEqual(['app.buildInfo','secure.get','secure.get']);
+ }
 });

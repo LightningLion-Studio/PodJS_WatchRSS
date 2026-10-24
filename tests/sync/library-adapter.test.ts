@@ -28,9 +28,9 @@ test('reading migration completes before the snapshot revision is captured',asyn
  });
  const window=await repo.prepareWindow('phone',0);
  expect(window.fullArticleManifest).toHaveLength(1);
- // The imported row is encoded once for selection and once for body-source
- // validation. A stale outer revision would repeat both encodes.
- expect(encodes).toBe(2);
+ // The same resolved source is validated by the snapshot revision, without
+ // encoding it twice. A stale outer revision would repeat the work.
+ expect(encodes).toBe(1);
  expect(migrations).toBe(1);
  expect(await f.db.query('SELECT progress FROM article_reading_state')).toEqual([{progress:.4}]);
  }finally{f.sql.close();}});
@@ -58,21 +58,21 @@ test('empty body request skips scanning and keeps revision-validated metadata fo
  expect(metadataReads).toBe(0);
  await f.db.execute("UPDATE articles SET content='changed body' WHERE id=1");await f.repo.cursor('phone');expect(metadataReads).toBeGreaterThan(0);
  }finally{f.sql.close();}});
-test('adapter sends same-clock reading and source edits after the previous ACK',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess(ack(w.toSeqInclusive));expect((await f.repo.prepareWindow('phone',w.toSeqInclusive)).articleManifest).toEqual([]);
+test('adapter sends same-clock reading and source edits after the previous ACK',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess({...ack(w.toSeqInclusive),projectionGeneration:w.projectionGeneration});expect((await f.repo.prepareWindow('phone',w.toSeqInclusive)).articleManifest).toEqual([]);
  await f.db.execute('UPDATE articles SET reading_progress=?,is_read=1 WHERE id=1',[Math.fround(.75)]);await f.db.execute("INSERT INTO channels(url,title,created_at,sort_order) VALUES('https://feed.example/rss','Feed',20,-20)");const delta=await f.repo.prepareWindow('phone',w.toSeqInclusive);expect(delta.fullSnapshot).toBe(false);expect(delta.articleManifest).toHaveLength(1);expect(delta.articleManifest[0]).toMatchObject({articleId:f.id,readingProgress:.75,isRead:true,updatedAt:100});expect(delta.rssSources.map(s=>s.url)).toEqual(['https://feed.example/rss']);expect(delta.toSeqInclusive).toBeGreaterThan(w.toSeqInclusive);
- await f.repo.markSuccess(ack(delta.toSeqInclusive));expect((await f.repo.prepareWindow('phone',delta.toSeqInclusive)).articleManifest).toEqual([]);
+ await f.repo.markSuccess({...ack(delta.toSeqInclusive),projectionGeneration:delta.projectionGeneration});expect((await f.repo.prepareWindow('phone',delta.toSeqInclusive)).articleManifest).toEqual([]);
  }finally{f.sql.close();}});
-test('a write between snapshot logging and MAX sequence capture is included before advertising the boundary',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess(ack(w.toSeqInclusive));const query=f.db.query;let injected=false;f.db.query=async(q,p)=>{if(!injected&&q.startsWith('SELECT COALESCE((SELECT MAX(seq)')){injected=true;await f.db.execute("UPDATE articles SET title='Concurrent' WHERE id=1");}return query(q,p);};const delta=await f.repo.prepareWindow('phone',w.toSeqInclusive);expect(injected).toBe(true);expect(delta.articleManifest).toHaveLength(1);const exported=await f.repo.exportRequested([{articleId:f.id,bodyHash:'',chunkIndexes:[],metadataOnly:false}]);expect(exported[0]!.article.title).toBe('Concurrent');await f.repo.markSuccess(ack(delta.toSeqInclusive));expect((await f.repo.prepareWindow('phone',delta.toSeqInclusive)).articleManifest).toEqual([]);
+test('a write between snapshot logging and MAX sequence capture is included before advertising the boundary',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess({...ack(w.toSeqInclusive),projectionGeneration:w.projectionGeneration});const query=f.db.query;let injected=false;f.db.query=async(q,p)=>{if(!injected&&q.startsWith('SELECT COALESCE((SELECT MAX(seq)')){injected=true;await f.db.execute("UPDATE articles SET title='Concurrent' WHERE id=1");}return query(q,p);};const delta=await f.repo.prepareWindow('phone',w.toSeqInclusive);expect(injected).toBe(true);expect(delta.articleManifest).toHaveLength(1);const exported=await f.repo.exportRequested([{articleId:f.id,bodyHash:'',chunkIndexes:[],metadataOnly:false}]);expect(exported[0]!.article.title).toBe('Concurrent');await f.repo.markSuccess({...ack(delta.toSeqInclusive),projectionGeneration:delta.projectionGeneration});expect((await f.repo.prepareWindow('phone',delta.toSeqInclusive)).articleManifest).toEqual([]);
  }finally{f.sql.close();}});
-test('a post-window edit remains eligible after ACK and never changes the captured manifest',async()=>{const f=await setup();try{const w=await stableWindow(f);const old=JSON.stringify(w.articleManifest);await f.db.execute('UPDATE articles SET reading_progress=.5 WHERE id=1');await f.repo.markSuccess(ack(w.toSeqInclusive));expect(JSON.stringify(w.articleManifest)).toBe(old);const next=await f.repo.prepareWindow('phone',w.toSeqInclusive);expect(next.articleManifest[0]!.readingProgress).toBe(.5);expect(next.toSeqInclusive).toBeGreaterThan(w.toSeqInclusive);
+test('a post-window edit remains eligible after ACK and never changes the captured manifest',async()=>{const f=await setup();try{const w=await stableWindow(f);const old=JSON.stringify(w.articleManifest);await f.db.execute('UPDATE articles SET reading_progress=.5 WHERE id=1');await f.repo.markSuccess({...ack(w.toSeqInclusive),projectionGeneration:w.projectionGeneration});expect(JSON.stringify(w.articleManifest)).toBe(old);const next=await f.repo.prepareWindow('phone',w.toSeqInclusive);expect(next.articleManifest[0]!.readingProgress).toBe(.5);expect(next.toSeqInclusive).toBeGreaterThan(w.toSeqInclusive);
  }finally{f.sql.close();}});
-test('authoritative replacement retains dedup identities, removes omitted channels, prunes state and resets cursors',async()=>{const f=await setup();try{await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(2,'https://other.example/rss','Other',1)");await f.db.execute("INSERT INTO articles(id,channel_id,title,link,dedup_key,fetched_at) VALUES(2,1,'Duplicate','https://example.com/item','rss-guid',1),(3,2,'Omitted source','https://example.com/other','other-id',1)");await f.db.execute("INSERT INTO sync_article_deletions VALUES('obsolete','https://example.com/dead',100,'local','local')");const w=await stableWindow(f);await f.repo.markSuccess(ack(w.toSeqInclusive));await f.repo.finalizeSnapshot([f.id,'other-id'],['watchrss://phone-imports']);expect(await f.db.query('SELECT id FROM articles')).toEqual([{id:1}]);expect(await f.db.query('SELECT id FROM channels')).toEqual([{id:1}]);expect(await f.db.query('SELECT * FROM sync_article_deletions')).toEqual([]);for(const t of ['sync_change_log','sync_peer_state','sync_snapshot_fingerprints','sync_snapshot_retained'])expect(await f.db.query('SELECT * FROM '+t)).toEqual([]);expect(f.cleaned).toEqual([{itemIds:[2,3],channels:[{id:2,url:'https://other.example/rss'}]}]);
+test('authoritative replacement retains dedup identities, removes omitted channels, prunes state and resets cursors',async()=>{const f=await setup();try{await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(2,'https://other.example/rss','Other',1)");await f.db.execute("INSERT INTO articles(id,channel_id,title,link,dedup_key,fetched_at) VALUES(2,1,'Duplicate','https://example.com/item','rss-guid',1),(3,2,'Omitted source','https://example.com/other','other-id',1)");await f.db.execute("INSERT INTO sync_article_deletions VALUES('obsolete','https://example.com/dead',100,'local','local')");const w=await stableWindow(f);await f.repo.markSuccess({...ack(w.toSeqInclusive),projectionGeneration:w.projectionGeneration});await f.repo.finalizeSnapshot([f.id,'other-id'],['watchrss://phone-imports']);expect(await f.db.query('SELECT id FROM articles')).toEqual([{id:1}]);expect(await f.db.query('SELECT id FROM channels')).toEqual([{id:1}]);expect(await f.db.query('SELECT * FROM sync_article_deletions')).toEqual([]);for(const t of ['sync_change_log','sync_peer_state','sync_snapshot_fingerprints','sync_snapshot_retained'])expect(await f.db.query('SELECT * FROM '+t)).toEqual([]);expect(f.cleaned).toEqual([{itemIds:[2,3],channels:[{id:2,url:'https://other.example/rss'}]}]);
  }finally{f.sql.close();}});
-test('failed replacement rolls back rows, cursors and fingerprints and performs no media cleanup',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess(ack(w.toSeqInclusive));const before=await f.db.query('SELECT * FROM sync_peer_state');await f.db.execute("CREATE TRIGGER fail_replace BEFORE DELETE ON articles BEGIN SELECT RAISE(ABORT,'disk full'); END");await expect(f.repo.finalizeSnapshot([],[])).rejects.toThrow('disk full');expect(await f.db.query('SELECT id FROM articles')).toEqual([{id:1}]);expect(await f.db.query('SELECT * FROM sync_peer_state')).toEqual(before);expect((await f.db.query('SELECT * FROM sync_snapshot_fingerprints')).length).toBeGreaterThan(0);expect(await f.db.query('SELECT * FROM sync_snapshot_retained')).toEqual([]);expect(f.cleaned).toEqual([]);
+test('failed replacement rolls back rows, cursors and fingerprints and performs no media cleanup',async()=>{const f=await setup();try{const w=await stableWindow(f);await f.repo.markSuccess({...ack(w.toSeqInclusive),projectionGeneration:w.projectionGeneration});const before=await f.db.query('SELECT * FROM sync_peer_state');await f.db.execute("CREATE TRIGGER fail_replace BEFORE DELETE ON articles BEGIN SELECT RAISE(ABORT,'disk full'); END");await expect(f.repo.finalizeSnapshot([],[])).rejects.toThrow('disk full');expect(await f.db.query('SELECT id FROM articles')).toEqual([{id:1}]);expect(await f.db.query('SELECT * FROM sync_peer_state')).toEqual(before);expect((await f.db.query('SELECT * FROM sync_snapshot_fingerprints')).length).toBeGreaterThan(0);expect(await f.db.query('SELECT * FROM sync_snapshot_retained')).toEqual([]);expect(f.cleaned).toEqual([]);
  }finally{f.sql.close();}});
 test('phone clearLibrary clears the RSS library and cursors while preserving the watch identity and standalone notes',async()=>{
  const f=await setup();try{
-  const w=await stableWindow(f);await f.repo.markSuccess(ack(w.toSeqInclusive));
+  const w=await stableWindow(f);await f.repo.markSuccess({...ack(w.toSeqInclusive),projectionGeneration:w.projectionGeneration});
   await f.db.execute("INSERT INTO article_saved_states(article_id,save_type,saved,changed_at) VALUES(1,'favorite',1,100)");
   await f.db.execute("INSERT INTO notes(article_id,body,created_at,updated_at) VALUES(1,'attached',100,100)");
   await f.db.execute("INSERT INTO local_article_deletions(channel_url,article_url,dedup_key,was_favorite,was_watch_later,changed_at) VALUES('watchrss://phone-imports','https://example.com/old','old',0,0,100)");
@@ -139,7 +139,7 @@ test('warm imported library rebuilds only the edited row and invalidates equal-l
   let encodes=0;const repo=new SqlLibrarySessionRepository(f.db,{...f.ports,codec:{...codec,encode:async a=>{encodes++;return codec.encode(a);}}});
   await repo.cursor('phone');encodes=0;await repo.cursor('phone');expect(encodes).toBe(0);
   await f.db.execute("UPDATE articles SET title='one edit',fetched_at=fetched_at+1 WHERE id=2");
-  await repo.cursor('phone');expect(encodes).toBe(1);
+  await repo.cursor('phone');expect(encodes).toBe(1); // only the edited local chapter is rebuilt
   encodes=0;const before=await repo.prepareWindow('phone',0);
   await f.db.execute("UPDATE article_original_chunks SET body='original B' WHERE article_id=3");
   const after=await repo.prepareWindow('phone',0);expect(encodes).toBe(1);
@@ -153,10 +153,83 @@ test('warm windows reuse reconciled signatures without a full-library timestamp 
   let repairs=0;const db={...f.db,transaction:async (statements:Parameters<SqlDatabase['transaction']>[0])=>{repairs+=statements.filter(s=>s.sql.includes("'repairState'")).length;return f.db.transaction(statements);}};
   const repo=new SqlLibrarySessionRepository(db,f.ports);
   const first=await repo.prepareWindow('phone',0);expect(first.toSeqInclusive).toBeGreaterThan(0);
-  await repo.markSuccess(ack(first.toSeqInclusive));
+  await repo.markSuccess({...ack(first.toSeqInclusive),projectionGeneration:first.projectionGeneration});
   const unchanged=await repo.prepareWindow('phone',first.toSeqInclusive);expect(unchanged.articleManifest).toHaveLength(0);
   await db.execute("UPDATE articles SET title='same clock changed' WHERE id=1");
   const edited=await repo.prepareWindow('phone',first.toSeqInclusive);expect(edited.articleManifest).toHaveLength(1);expect(edited.toSeqInclusive).toBeGreaterThan(first.toSeqInclusive);
   expect(repairs).toBe(0);
  }finally{f.sql.close();}
 });
+
+test('R47 saved-item cancellation reuses received text instead of re-extracting the RSS HTML',async()=>{
+ const f=await setup();try{
+  const {prepareArticle,bodyForRequest}=await import('../../src/sync/article-export');
+  const url='https://example.com/received',id=await stableArticleId(url,text.parseUri,codec);
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(2,'https://feed.example/rss','RSS',1,1)");
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(2,2,'Feed original','stale RSS excerpt',?,'guid:original',100)",[url]);
+  await f.db.execute("INSERT INTO article_original_chunks(article_id,chunk_index,body) VALUES(2,0,'stale separately fetched original')");
+  await f.db.execute('INSERT INTO sync_article_ids(article_id,item_id,url) VALUES(?,?,?)',[id,2,url]);
+  const p=await prepareArticle({...(await f.repo.exportRequested([{articleId:f.id,bodyHash:'',chunkIndexes:[],metadataOnly:false}]))[0]!.article,articleId:id,url,title:'Received',rssSourceUrl:'https://feed.example/rss',rssSourceTitle:'RSS',independentSaved:false,independentChangedAt:0,contentHash:'phone-semantic-hash',contentHtml:'<p>exact phone original</p>',contentText:'exact phone original',favoriteSaved:true,favoriteChangedAt:200,updatedAt:200,sourceDeviceId:'phone'},codec);
+  await f.repo.receiveArticle({article:p.article,body:bodyForRequest(p,{articleId:id,bodyHash:'',chunkIndexes:[],metadataOnly:false})},'phone',false);
+  const cancel={...p.article,favoriteSaved:false,favoriteChangedAt:300,updatedAt:300};
+  const body=bodyForRequest(p,{articleId:id,bodyHash:p.manifest.bodyHash,chunkIndexes:[],metadataOnly:true});
+  await expect(f.repo.receiveArticle({article:cancel,body},'phone',false)).resolves.toBeGreaterThan(0);
+  expect((await f.db.query("SELECT saved FROM sync_saved_states WHERE article_id=? AND save_type='favorite'",[id]))[0]!.saved).toBe(0);
+  expect((await f.db.query('SELECT body FROM article_original_chunks WHERE article_id=2'))[0]!.body).toBe('<p>exact phone original</p>');
+ }finally{f.sql.close();}
+});
+
+test('R47 persistent projection survives a new repository and rebuilds only dirty URLs',async()=>{
+ const f=await setup();try{
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(2,'https://watchrss.local/import-content/txt/fixture','Imported',1,1)");
+  for(let i=2;i<=302;i++)await f.db.execute('INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(?,2,?,?,?,?,?)',[i,'chapter '+i,'body '+i,'https://example.com/chapter/'+i,'chapter:'+i,100+i]);
+  const traces:Record<string,string|number>[]=[],first=new SqlLibrarySessionRepository(f.db,{...f.ports,diagnostic:r=>traces.push(r)});
+  first.configurePeer('phone',{supportsRssCanonicalIds:true});await first.prepareWindow('phone',0);const baseline=await first.prepareWindow('phone',0);
+  let encoded=0,wideRows=0,hashed=0;const query=f.db.query;
+  f.db.query=async(q,p)=>{const r=await query(q,p);if(q.startsWith('SELECT a.id FROM articles a JOIN channels ch'))wideRows+=r.length;return r;};
+  const fresh=()=>{const r=new SqlLibrarySessionRepository(f.db,{...f.ports,diagnostic:r=>traces.push(r),codec:{...codec,encode:async b=>{encoded++;return codec.encode(b);},sha256:async b=>{hashed++;return codec.sha256(b);}}});r.configurePeer('phone',{supportsRssCanonicalIds:true});return r;};
+  const restarted=fresh();await restarted.cursor('phone');expect(wideRows).toBe(0);expect(encoded).toBe(0);expect(hashed).toBeLessThan(24);const afterDefinitionCheck=hashed;await restarted.cursor('phone');expect(hashed).toBe(afterDefinitionCheck);
+  await f.db.execute("UPDATE articles SET title='one edited chapter',is_read=1 WHERE id=101");
+  const changed=await restarted.prepareWindow('phone',0);expect(wideRows).toBe(1);expect(encoded).toBe(0);expect(changed.fullArticleManifest).toHaveLength(baseline.fullArticleManifest.length);
+  expect(traces.some(r=>r.stage==='repository.projection'&&r.cached===1&&r.dirtyUrls===1)).toBe(true);
+  const live=await restarted.exportRequested([{articleId:(await stableArticleId('https://example.com/chapter/101',text.parseUri,codec)),bodyHash:'',chunkIndexes:[],metadataOnly:false}],'phone');expect(live[0]!.article.title).toBe('one edited chapter');
+  await f.db.execute('DELETE FROM sync_projection_header');const full=await fresh().prepareWindow('phone',0);
+  const sorted=(rows:typeof full.fullArticleManifest)=>[...rows].sort((a,b)=>a.articleId.localeCompare(b.articleId));expect(sorted(changed.fullArticleManifest)).toEqual(sorted(full.fullArticleManifest));
+ }finally{f.sql.close();}
+});
+
+test('R47 dirty-URL cache preserves distinct canonical RSS GUIDs sharing one URL',async()=>{const f=await setup();try{
+ await f.db.execute("INSERT INTO channels(id,url,title,created_at) VALUES(2,'https://feed.example/rss','RSS',1)");
+ for(const [id,guid]of [[2,'guid:a'],[3,'guid:b']] as const){await f.db.execute('INSERT INTO articles(id,channel_id,title,content,link,guid,dedup_key,fetched_at) VALUES(?,2,?,?,?,?,?,100)',[id,'row'+id,'body'+id,'https://same.example/url',guid,guid]);await f.db.execute("INSERT INTO article_saved_states(article_id,save_type,saved,changed_at) VALUES(?,'favorite',1,100)",[id]);}
+ const fresh=()=>{const repo=new SqlLibrarySessionRepository(f.db,f.ports);repo.configurePeer('phone',{supportsRssCanonicalIds:true});return repo;};
+ const r=fresh();await r.prepareWindow('phone',0);await r.prepareWindow('phone',0);await f.db.execute("UPDATE articles SET title='changed',is_read=1 WHERE id=2");const partial=await r.prepareWindow('phone',0);
+ expect(partial.fullArticleManifest.filter(m=>m.bodySyncMode==='saved')).toHaveLength(2);
+ await f.db.execute('DELETE FROM sync_projection_header');const full=await fresh().prepareWindow('phone',0);expect([...partial.fullArticleManifest].sort((a,b)=>a.articleId.localeCompare(b.articleId))).toEqual([...full.fullArticleManifest].sort((a,b)=>a.articleId.localeCompare(b.articleId)));
+ }finally{f.sql.close();}});
+test('R47 unobserved revision changes and missing journal entries force a safe full projection',async()=>{const f=await setup();try{
+ f.repo.configurePeer('phone',{supportsRssCanonicalIds:true});await stableWindow(f);await f.db.execute('UPDATE sync_library_revision SET revision=revision+1 WHERE id=1');const traces:Record<string,string|number>[]=[],repo=new SqlLibrarySessionRepository(f.db,{...f.ports,diagnostic:r=>traces.push(r)});repo.configurePeer('phone',{supportsRssCanonicalIds:true});await repo.cursor('phone');expect(traces.some(r=>r.stage==='repository.projection'&&r.cached===0)).toBe(true);
+ await f.db.execute("UPDATE articles SET title='new' WHERE id=1");await f.db.execute('DELETE FROM sync_projection_events');traces.length=0;const last=new SqlLibrarySessionRepository(f.db,{...f.ports,diagnostic:r=>traces.push(r)});last.configurePeer('phone',{supportsRssCanonicalIds:true});await last.cursor('phone');expect(traces.some(r=>r.stage==='repository.projection'&&r.cached===0)).toBe(true);
+ }finally{f.sql.close();}});
+test('R47 malformed cached rows are rebuilt and failed publication leaves the old generation valid',async()=>{const f=await setup();try{
+ f.repo.configurePeer('phone',{supportsRssCanonicalIds:true});const fresh=()=>{const r=new SqlLibrarySessionRepository(f.db,f.ports);r.configurePeer('phone',{supportsRssCanonicalIds:true});return r;};await stableWindow(f);await f.db.execute("UPDATE sync_projection_rows SET json='{broken' WHERE scope=':canonical'");const rebuilt=fresh();expect((await rebuilt.prepareWindow('phone',0)).fullArticleManifest).toHaveLength(1);
+ const old=await f.db.query("SELECT generation FROM sync_projection_header WHERE scope=':canonical'");await f.db.execute("UPDATE articles SET title='changed' WHERE id=1");await f.db.execute("CREATE TRIGGER fail_projection_publish BEFORE INSERT ON sync_projection_header BEGIN SELECT RAISE(ABORT,'cache disk full'); END");await expect(fresh().cursor('phone')).rejects.toThrow('cache disk full');expect(await f.db.query("SELECT generation FROM sync_projection_header WHERE scope=':canonical'")).toEqual(old);
+ await f.db.execute('DROP TRIGGER fail_projection_publish');const next=await fresh().prepareWindow('phone',0);expect(next.fullArticleManifest).toHaveLength(1);expect((await f.db.query('SELECT title FROM articles WHERE id=1'))[0]!.title).toBe('changed');
+ }finally{f.sql.close();}});
+
+test('R47 restarted projection retains source-less unsave and deletion records with exact synthetic bodies',async()=>{const f=await setup();try{
+ const url='https://example.com/no-longer-saved',id=await stableArticleId(url,text.parseUri,codec);
+ await f.db.execute("INSERT INTO sync_saved_states VALUES(?,'favorite',NULL,?,0,200,0,'local','local')",[id,url]);await f.db.execute("INSERT INTO sync_article_deletions VALUES('gone','https://example.com/deleted',300,'local','local')");
+ const fresh=()=>{const r=new SqlLibrarySessionRepository(f.db,f.ports);r.configurePeer('phone',{supportsRssCanonicalIds:true});return r;};const first=fresh();await first.prepareWindow('phone',0);const initial=await first.prepareWindow('phone',0),restarted=fresh(),warm=await restarted.prepareWindow('phone',0);expect(warm.fullArticleManifest).toEqual(initial.fullArticleManifest);
+ const item=warm.fullArticleManifest.find(m=>m.articleId===id)!;expect(item.bodyAvailable).toBe(true);const body=await restarted.exportRequested([{articleId:id,bodyHash:'',metadataOnly:false,chunkIndexes:[]}],'phone');expect(body).toHaveLength(1);expect(await codec.sha256(body[0]!.encodedBody!)).toBe(item.bodyHash);expect(body[0]!.article.favoriteSaved).toBe(false);expect(body[0]!.article.contentText).toBe('');
+ }finally{f.sql.close();}});
+
+test('R47 derived-only writes arriving after cached planning are not consumed as an older window',async()=>{const f=await setup();const {LibraryProjectionCache}=await import('../../src/sync/projection-cache');const original=LibraryProjectionCache.prototype.plan;try{
+ const fresh=()=>{const r=new SqlLibrarySessionRepository(f.db,f.ports);r.configurePeer('phone',{supportsRssCanonicalIds:true});return r;};const r=fresh();await r.prepareWindow('phone',0);await r.prepareWindow('phone',0);let plans=0;
+ LibraryProjectionCache.prototype.plan=async function(...args){const p=await original.apply(this,args);plans++;if(plans===1){await f.db.execute("INSERT INTO sync_projection_events(kind,new_url) VALUES('cacheUrl','https://example.com/item')");}return p;};
+ await fresh().cursor('phone');expect(plans).toBeGreaterThanOrEqual(2);expect((await f.db.query("SELECT seq FROM sync_projection_header WHERE scope=':canonical'"))[0]!.seq).toBe((await f.db.query("SELECT seq FROM sqlite_sequence WHERE name='sync_projection_events'"))[0]!.seq);
+ }finally{LibraryProjectionCache.prototype.plan=original;f.sql.close();}});
+test('R47 small cache publications never copy unchanged rows and other hot repositories see the new revision',async()=>{const f=await setup();try{
+ const fresh=()=>{const r=new SqlLibrarySessionRepository(f.db,f.ports);r.configurePeer('phone',{supportsRssCanonicalIds:true});return r;};const a=fresh(),b=fresh();await a.prepareWindow('phone',0);await a.prepareWindow('phone',0);await b.prepareWindow('phone',0);const generation=(await f.db.query("SELECT generation FROM sync_projection_header WHERE scope=':canonical'"))[0]!.generation;
+ let copies=0,inserted=0;const tx=f.db.transaction;f.db.transaction=async ss=>{copies+=ss.filter(s=>s.sql.startsWith('INSERT INTO sync_projection_rows')&&s.sql.includes(' SELECT ')).length;inserted+=ss.filter(s=>s.sql.startsWith('INSERT INTO sync_projection_rows')&&s.sql.includes(' VALUES')).length;return tx(ss);};
+ await f.db.execute("UPDATE articles SET title='updated once' WHERE id=1");const first=await a.prepareWindow('phone',0);expect(copies).toBe(0);expect(inserted).toBe(1);expect((await f.db.query("SELECT generation FROM sync_projection_header WHERE scope=':canonical'"))[0]!.generation).toBe(generation);const second=await b.prepareWindow('phone',0);expect(second.fullArticleManifest).toEqual(first.fullArticleManifest);
+ }finally{f.sql.close();}});

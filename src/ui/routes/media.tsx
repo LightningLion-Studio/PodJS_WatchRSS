@@ -28,6 +28,7 @@ import type { DouyinPreparedSource } from "../douyin/video-sessions.ts";
 interface MediaRoutesProps {
   createBatteryTelemetry?:()=>import("@podjs/framework/telemetry").ActiveBatterySession;
   preset: () => ReaderPreset;
+  readerKeepAwake?:()=>boolean;
   entry: RouteEntry;
   page: () => Page;
   active: () => boolean;
@@ -143,6 +144,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       <Show when={props.page() === "douyin"}>
         <DouyinScreen
           preset={props.preset()}
+          readerKeepAwake={props.readerKeepAwake?.()}
           active={props.active() && !blocked("douyin")}
           onShare={props.share}
           width={props.width}
