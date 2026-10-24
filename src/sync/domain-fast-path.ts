@@ -11,6 +11,19 @@ let windowSerial=0;
 export class SqlDomainVectorStore implements DomainVectorProvider {
  private definitions:SqlDomainDefinitions;
  constructor(private readonly db:SqlDatabase,private readonly codec:Pick<SyncBodyCodec,'sha256'>,private readonly external:()=>Promise<DomainExternalState>,private readonly options:{now?:()=>number;canSkipLibrary?:(peer:string)=>Promise<boolean>;encoders?:Record<SyncDomain,number>}={}){this.definitions=new SqlDomainDefinitions(db,codec,options.encoders??DOMAIN_ENCODERS);}
+ /** A grant delivery receipt is the current complete account-domain root.
+  * It does not publish, replace or authorize a frozen session proof. */
+ async accountStateRoot(account:{scope:string;root:string}):Promise<string>{
+  if(!/^[0-9a-f]{64}$/.test(account.scope)||!/^[0-9a-f]{64}$/.test(account.root))throw Error('invalid_account_domain_state');
+  const def=(await this.definitions.ensure()).account,row=(await this.db.query("SELECT revision FROM sync_fast_versions WHERE domain='account'"))[0];
+  if(!row)throw Error('missing_account_domain_revision');
+  const base=await this.versionRoot('account',def,account.scope,Number(row.revision));
+  return hashJavaText(JSON.stringify(['watchrss.ble.domain-composite.v2',base,account.root]),this.codec);
+ }
+ private async versionRoot(domain:SyncDomain,def:import('./domain-definitions').DomainDefinition,scope:string,revision:number){
+  const epoch=(await hashJavaText('watchrss.ble.domain-owner.v2\n'+def.epoch+'\n'+scope,this.codec)).slice(0,32);
+  return hashJavaText(projectionVersionRootText(domain,def,epoch,revision),this.codec);
+ }
  async open(peer:string,profile:string){
   if(!peer||peer.length>512||profile!==DOMAIN_FAST_PATH_PROFILE)throw Error('invalid_domain_profile');
   // One file inventory per connection/window. Subsequent calls only revalidate
@@ -27,7 +40,7 @@ export class SqlDomainVectorStore implements DomainVectorProvider {
    for(const row of rows){const d=String(row.domain) as SyncDomain;if(!SYNC_DOMAINS.includes(d)||frozenEpochs[d]!==epochs[d])continue;
     const def=defs[d],revision=Number(row.revision);
     let root=Number(row.cached_revision)===revision&&/^[0-9a-f]{64}$/.test(String(row.root))?String(row.root):undefined;
-    if(!root){const epoch=(await hashJavaText('watchrss.ble.domain-owner.v2\n'+def.epoch+'\n'+scope,this.codec)).slice(0,32);root=await hashJavaText(projectionVersionRootText(d,def,epoch,revision),this.codec);await this.db.execute('INSERT OR REPLACE INTO sync_fast_roots(scope,domain,revision,root) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain=? AND generation=?)',[scope+':'+def.generation,d,revision,root,d,def.generation]);}
+    if(!root){root=await this.versionRoot(d,def,scope,revision);await this.db.execute('INSERT OR REPLACE INTO sync_fast_roots(scope,domain,revision,root) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain=? AND generation=?)',[scope+':'+def.generation,d,revision,root,d,def.generation]);}
     if(d==='library'){
      const gap=(await this.db.query('SELECT (SELECT revision FROM sync_library_revision WHERE id=1)-(SELECT real_events FROM sync_projection_totals WHERE id=1) gap'))[0]?.gap;
      if(gap===undefined)continue;const key=JSON.stringify(['watchrss.ble.library-witness.v2',root,Number(gap)]);root=composites.get(key)??await hashJavaText(key,this.codec);composites.set(key,root);

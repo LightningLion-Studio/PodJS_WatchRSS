@@ -39,12 +39,12 @@ export class SqlSourceSyncStore {
     const channel=this.onChannelRemoved?(await this.db.query('SELECT id,url FROM channels WHERE url=?',[url]))[0]:undefined;
     const itemIds=channel?(await querySyncPages(this.db,'SELECT id FROM articles WHERE channel_id=? ORDER BY id',[channel.id])).map(row=>n(row.id)):[];
     const counts=await this.db.transactionChanges([...(revision===undefined?[]:[revisionGuard(revision)]),{sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,source.sortOrder,source.isPinned?1:0,1,deletedAt]},{sql:'DELETE FROM channels WHERE url=?',params:[url]}]);
-    if(channel)await this.onChannelRemoved!({channel:{id:n(channel.id),url:s(channel.url)},itemIds});if(counts.some(n=>n>0))applied++;continue;
+    if(channel)await this.onChannelRemoved!({channel:{id:n(channel.id),url:s(channel.url)},itemIds});if(counts.slice(revision===undefined?0:1).some(n=>n>0))applied++;continue;
    }
    const old=(await this.db.query('SELECT * FROM sync_source_states WHERE url=?',[url]))[0];
    if(!authoritative&&!old){const local=(await this.db.query('SELECT created_at,sort_order FROM channels WHERE url=?',[url]))[0],incoming=source.updatedAt||source.sortOrder||source.createdAt;if(local&&incoming<Math.max(Number(local.created_at),-Number(local.sort_order)))continue;}
    const clock=source.updatedAt||source.sortOrder||source.createdAt;if(!authoritative&&old&&(clock<Number(old.updated_at)||clock===Number(old.updated_at)&&deviceOrder(source.sourceDeviceId||remoteDeviceId)<deviceOrder(String(old.source_device_id))))continue;
-   const updated=source.updatedAt>0?source.updatedAt:source.sortOrder>0?source.sortOrder:source.createdAt,now=this.now(),order=source.sortOrder>0?source.sortOrder:updated>0?updated:now;
+   const updated=source.updatedAt>0?source.updatedAt:source.sortOrder>0?source.sortOrder:source.createdAt,now=this.now(),order=source.sortOrder!==0?source.sortOrder:updated>0?updated:now;
    const statements:{sql:string;params:SqlParams}[]=[{sql:`INSERT INTO channels(url,title,description,image_url,created_at,sort_order,is_pinned) VALUES(?,?,?,?,?,?,?)
     ON CONFLICT(url) DO UPDATE SET title=excluded.title,description=excluded.description,image_url=excluded.image_url,sort_order=excluded.sort_order,is_pinned=excluded.is_pinned
     WHERE ?=1 OR ?>COALESCE((SELECT updated_at FROM sync_source_states WHERE url=channels.url),max(-channels.sort_order,channels.created_at)) OR (?=COALESCE((SELECT updated_at FROM sync_source_states WHERE url=channels.url),max(-channels.sort_order,channels.created_at)) AND ?>?)`,params:[url,title,nativeTrim(source.description)?source.description:source.siteUrl,source.imageUrl,source.createdAt>0?source.createdAt:now,-order,source.isPinned?1:0,authoritative?1:0,updated,updated,deviceOrder(source.sourceDeviceId||remoteDeviceId),deviceOrder(localDeviceId)]},

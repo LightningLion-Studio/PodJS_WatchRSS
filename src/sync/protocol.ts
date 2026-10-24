@@ -1,7 +1,7 @@
 import {createFrameFacade} from '@podjs/framework/frame-stream';
 import {encodeUtf8,encodeBase64,decodeBase64} from '@podjs/framework/bytes';
 import {encodeUtf8Async,decodeUtf8Async,type CodecWorkOptions} from '@podjs/framework/bytes';
-import {parseWireJson} from "./wire-json.ts";
+import {parseWireJson,parseWireJsonAsync} from "./wire-json.ts";
 /** Pure TypeScript representation of the Android BluetoothSyncProtocol and the
  * wire-level parts of LibrarySyncPayload. It deliberately does not open a
  * Bluetooth socket or implement a sync manager. */
@@ -57,7 +57,7 @@ const frames=createFrameFacade<JsonObject,CodecWorkOptions>({
  encodeBody:payload=>utf8Encode(JSON.stringify(payload)),
  decodeBody:bytes=>parseWireJson(decodeSyncUtf8(bytes)),
  encodeBodyAsync:(payload,options)=>encodeUtf8Async(JSON.stringify(payload),'strict',options),
- decodeBodyAsync:async(bytes,options)=>parseWireJson(await decodeUtf8Async(bytes,options)),
+ decodeBodyAsync:async(bytes,options)=>{const text=await decodeUtf8Async(bytes,options);return text.length<16384?parseWireJson(text):parseWireJsonAsync(text,options);},
  errors:{length:length=>new RangeError(`sync frame length out of range: ${length}`),
   prefix:()=>new Error('truncated sync frame prefix'),size:()=>new Error('truncated or trailing sync frame bytes'),
   failed:()=>new Error('sync stream already failed'),truncated:()=>new Error('truncated sync stream')},

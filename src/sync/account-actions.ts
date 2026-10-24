@@ -75,7 +75,7 @@ export async function parseAccountSyncRequest(request: JsonObject, parseJava?:Ac
 
 /** A successful response means the secure-store write has completed. */
 export async function syncAccount(request: JsonObject, store: Pick<WatchAccountStore,'save'>&Partial<Pick<WatchAccountStore,'read'>>,
-  deviceId: () => Promise<string>, parseJava?:AccountUriParse, onSaved?: () => void, telemetry?:AccountSyncTelemetry): Promise<JsonObject> {
+  deviceId: () => Promise<string>, parseJava?:AccountUriParse, onSaved?: () => void, telemetry?:AccountSyncTelemetry, readStateRoot?:()=>Promise<string>): Promise<JsonObject> {
   const localDeviceId = await deviceId();
   const state = await parseAccountSyncRequest(request,parseJava);
   const previous=await store.read?.();if(previous&&previous.userId!==state.userId)throw Error('account_switch_rejected: 手表已绑定其他账号，请先退出原账号');
@@ -85,6 +85,10 @@ export async function syncAccount(request: JsonObject, store: Pick<WatchAccountS
   if(changed)await store.save(state);
   await telemetry?.recordSyncAccount();
   if(changed)onSaved?.();
-  return {success:true,version:1,action:'syncAccount',deviceId:localDeviceId,
+  // Optional receipt is read from committed secure storage, never the frozen proof.
+  // A missing/unavailable receipt retains the conservative legacy phone path.
+  let accountStateRoot:string|undefined;
+  try{const root=await readStateRoot?.();if(root&&/^[0-9a-f]{64}$/.test(root))accountStateRoot=root;}catch{}
+  return {success:true,version:1,action:'syncAccount',deviceId:localDeviceId,...(accountStateRoot?{accountStateRoot}:{}),
     boundUserId:state.userId,telemetryBacklog:await telemetry?.backlogCount()??0};
 }

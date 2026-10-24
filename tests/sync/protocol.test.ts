@@ -1,3 +1,4 @@
+import {decodeFrameAsync} from '../../src/sync/protocol';
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { ACTION_SYNC_LIBRARY, FrameDecoder, MAX_FRAME_BYTES, PROTOCOL_VERSION, buildProbeResponse, decodeChunkData, decodeFrame, encodeChunkData, encodeFrame, mergeVerifiedChunks, negotiateLibraryProtocol, validateLibraryPayload, type Sha256 } from "../../src/sync/protocol";
@@ -49,4 +50,11 @@ test("chunk encoding and SHA-256 verification match Android byte semantics", asy
 test("rejects a malformed or old library payload", () => {
   expect(() => validateLibraryPayload({ action: ACTION_SYNC_LIBRARY, version: 12, phase: "probe" })).toThrow();
   expect(() => validateLibraryPayload({ action: "other", version: 14, phase: "probe" })).toThrow();
+});
+
+test('large async wire decoding preserves native integer lexemes and cancellation between manifest rows',async()=>{
+ const {wireNumberToken}=await import('../../src/sync/wire-json');
+ const rows=Array.from({length:2135},(_,i)=>`{"id":${i},"bytes":1.0,"clock":1000000000000}`),json='{"rows":['+rows.join(',')+']}',bytes=new TextEncoder().encode(json),frame=new Uint8Array(bytes.length+4);new DataView(frame.buffer).setInt32(0,bytes.length);frame.set(bytes,4);let turns=0;
+ const out=await decodeFrameAsync(frame,{yield:async()=>{turns++;}});expect(out.rows).toHaveLength(2135);expect(wireNumberToken((out.rows as object[])[2134]!,'bytes')).toBe('1.0');expect(turns).toBeGreaterThan(20);
+ let cancelled=false;await expect(decodeFrameAsync(frame,{cancelled:()=>cancelled,yield:async()=>{cancelled=true;}})).rejects.toThrow('cancelled');
 });

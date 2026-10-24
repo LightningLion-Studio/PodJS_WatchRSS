@@ -2,12 +2,14 @@ import {directoryWitness,directoryWitnessWindow,type DirectoryWitnessEntry,type 
 import type {WatchAccountState} from '../account/types';
 import type {DomainExternalState} from './domain-fast-path';
 import {READER_PRESETS_KEY} from '../reader/preset-store';
+/** The post-persistence grant receipt and the domain summary share one root definition. */
+export async function readAccountDomainState(account:WatchAccountState|null,hash:(text:string)=>Promise<string>,now=Date.now()){
+ const scope=await hash(JSON.stringify(['watchrss.ble.owner.v1',account?.backendBaseUrl.replace(/\/+$/,'')??'',account?.userId??'']));
+ const root=await hash(JSON.stringify([account,!!account&&(!account.tokenExpiresAtMillis||now>=account.tokenExpiresAtMillis-60000),!!account&&(!account.refreshTokenExpiresAtMillis||now>=account.refreshTokenExpiresAtMillis)]));
+ return {scope,root};
+}
 export function createDomainExternalState(ports:{account():Promise<WatchAccountState|null>;kvFingerprint(key:string):string|undefined;list(path:string):Promise<{entries:DirectoryWitnessEntry[]}>;stat?(path:string):Promise<WitnessStat>;hash(text:string):Promise<string>;now?:()=>number}):()=>Promise<DomainExternalState>{
- const accountState=async()=>{
-  const account=await ports.account(),scope=await ports.hash(JSON.stringify(['watchrss.ble.owner.v1',account?.backendBaseUrl.replace(/\/+$/,'')??'',account?.userId??''])),now=(ports.now??Date.now)();
-  const root=await ports.hash(JSON.stringify([account,!!account&&(!account.tokenExpiresAtMillis||now>=account.tokenExpiresAtMillis-60000),!!account&&(!account.refreshTokenExpiresAtMillis||now>=account.refreshTokenExpiresAtMillis)]));
-  return {scope,root};
- };
+ const accountState=async()=>readAccountDomainState(await ports.account(),ports.hash,(ports.now??Date.now)());
  return async()=>{
   const account=await accountState(),paths=[['books'],['notes/assets'],['reader_assets/fonts','reader_assets/backgrounds','reader_assets/variants']] as const;
   const results=await Promise.allSettled(paths.map(paths=>ports.stat?directoryWitnessWindow(paths,ports.list,ports.stat,ports.hash):directoryWitness(paths,ports.list,ports.hash)));
