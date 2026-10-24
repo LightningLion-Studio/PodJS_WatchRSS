@@ -63,21 +63,25 @@ export class IpSyncController {
   }
   const descriptor=this.descriptor;if(!descriptor||!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return;
   const previous=this.route,minimum=previous?.descriptorEpoch===descriptor.epoch?previous.endpoint.priority:-1;
-  let endpoints=descriptor.endpoints;
-  if(this.ports.discover){
-   const discovery=this.ports.discover(descriptor.port);this.discovery=discovery;
-   try{
-    const additional=await discovery.result;
-    // Keep the signed descriptor untouched; HELLO_ACK authenticates every route.
-    if(additional.length)appLogger.i('WatchRSS_IpSync',`IP candidates discovered source=mdns count=${additional.length}`);
-    const addresses=new Set(endpoints.map(e=>e.address));endpoints=[...endpoints];
-    for(const endpoint of additional)if(!addresses.has(endpoint.address)){addresses.add(endpoint.address);endpoints.push(endpoint);}
-   }catch(error){if(!this.disposed&&generation===this.routeGeneration&&this.descriptor===descriptor)this.error(error);}
-   finally{if(this.discovery===discovery)this.discovery=undefined;}
-  }
-  if(this.disposed||generation!==this.routeGeneration||this.descriptor!==descriptor||this.transferring||!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now()))return;
-  const candidates=endpoints.filter(e=>e.family==='ipv4'&&e.priority>minimum&&(this.cooldown.get(e.endpointId)??0)<=this.now()).sort((a,b)=>b.priority-a.priority).slice(0,3);
+  // Discovery is speculative: signed bootstrap addresses can be connected while
+  // mDNS is scanning. A healthy signed route must not wait for the scan window.
+  const discovery=this.ports.discover?.(descriptor.port);this.discovery=discovery;
+  const discovered=discovery?.result.then(endpoints=>({endpoints}),error=>({error}));
+  const attempted=new Set<string>();let attempts=0;
+  try{for(let wave=0;wave<2;wave++){
+   let endpoints=descriptor.endpoints;
+   if(wave===1){
+    if(!discovered||attempts>=3)break;
+    const result=await discovered;
+    if('error' in result){if(!this.disposed&&generation===this.routeGeneration&&this.descriptor===descriptor)this.error(result.error);break;}
+    endpoints=result.endpoints;
+    if(endpoints.length)appLogger.i('WatchRSS_IpSync',`IP candidates discovered source=mdns count=${endpoints.length}`);
+   }
+   if(this.disposed||generation!==this.routeGeneration||this.descriptor!==descriptor||this.transferring||!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now()))return;
+   const candidates=endpoints.filter(e=>e.family==='ipv4'&&e.priority>minimum&&!attempted.has(e.address)&&(this.cooldown.get(e.endpointId)??0)<=this.now()).sort((a,b)=>b.priority-a.priority);
   for(const endpoint of candidates){
+   if(attempts>=3)break;if(attempted.has(endpoint.address))continue;
+   attempted.add(endpoint.address);attempts++;
    if(this.disposed||generation!==this.routeGeneration||this.transferring||this.descriptor!==descriptor)return;
    const probe=new IpConnectionProbe(this.ports);this.probe=probe;let selected:OpenIpRoute;
    try{selected=await probe.connect(descriptor,endpoint,await this.ports.repository.deviceId(),previous?.ack.sessionId??null,this.lastAckSeq);}
@@ -87,6 +91,7 @@ export class IpSyncController {
    appLogger.i("WatchRSS_IpSync",`IP route ready reason=${bootstrap?"rfcomm_bootstrap":"refresh"} route=${logIpRoute(selected.endpoint.transportKind)} source=${selected.endpoint.endpointId.startsWith('mdns-')?'mdns':this.descriptorSource} endpoint=<redacted> resume=${previous!=null}`);this.route=selected;if(previous)await previous.connection.close();this.routeChanged(selected);if(!this.active)this.scheduleStop(2500);
    const job=this.serve(selected);this.serving=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.serving===job)this.serving=undefined;});return;
   }
+  }}finally{if(this.discovery===discovery)this.discovery=undefined;discovery?.cancel();}
   if(!this.route&&this.recoveryAttempts>0)this.recover();
  }
  private recover(){

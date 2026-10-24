@@ -1,6 +1,7 @@
 import {test,expect} from 'bun:test';
 import {SettingsStore} from '../../src/settings/store.ts';
 import {ipFixture,flush,deferred} from '../helpers/ip-fixture.ts';
+import type {IpEndpoint} from '../../src/sync/ip-protocol.ts';
 import {IpSyncController} from '../../src/sync/ip-controller.ts';
 import {FrameDecoder} from '../../src/sync/protocol.ts';
 import {LibrarySyncSession,type TransferByteProgress,type LibrarySessionRepository} from '../../src/sync/session.ts';
@@ -35,30 +36,30 @@ test('a newer bootstrap descriptor cancels an in-flight probe and selects the ne
 test('background stop cancels the entire candidate search rather than starting the next address',async()=>{
  const f=ipFixture();f.descriptor.endpoints[0]!.transportKind='unknownLocal';f.descriptor.endpoints.push({...f.descriptor.endpoints[0]!,endpointId:'second',address:'10.0.0.2'});await f.sign();const pending=deferred<{id:string}>();f.ports.sockets.connect=url=>{f.opens.push(url);return {result:pending.result,cancel:()=>pending.reject(new Error('stopped'))};};const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});await controller.offer({...f.descriptor});await flush();controller.setActive(false);await f.clock.advance(2500);expect(f.opens).toHaveLength(1);await controller.dispose();
 });
-test('mDNS expands routes after signature validation without changing the signed descriptor',async()=>{
- const f=ipFixture();f.descriptor.endpoints[0]!.priority=50;await f.sign();let scans=0;
+test('mDNS expands failed signed routes after signature validation without changing the signed descriptor',async()=>{
+ const f=ipFixture();f.descriptor.endpoints[0]!.priority=50;await f.sign();let scans=0;const connect=f.ports.sockets.connect;f.ports.sockets.connect=(url,options)=>url.includes('10.0.0.1:')?(f.opens.push(url),{result:Promise.reject(new Error('unreachable')),cancel(){}}):connect(url,options);
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:port=>{scans++;expect(port).toBe(8888);return {result:Promise.resolve([{endpointId:'mdns-10.0.0.2',address:'10.0.0.2',family:'ipv4',transportKind:'wifiLan',priority:300}]),cancel:()=>{}};}});
  expect(await controller.offer({...f.descriptor,hmac:'invalid'})).toBe(false);expect(scans).toBe(0);
- await controller.offer({...f.descriptor});await flush();expect(f.opens).toEqual(['ws://10.0.0.2:8888/sync']);expect(f.descriptor.endpoints).toHaveLength(1);await controller.dispose();
+ await controller.offer({...f.descriptor});await flush();expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync','ws://10.0.0.2:8888/sync']);expect(f.descriptor.endpoints).toHaveLength(1);await controller.dispose();
 });
 test('disposal cancels pending discovery and cannot start a route',async()=>{
- const f=ipFixture();await f.sign();const pending=deferred<[]>();let cancelled=false;
+ const f=ipFixture();await f.sign();f.ports.sockets.connect=url=>{f.opens.push(url);return {result:Promise.reject(new Error('unreachable')),cancel(){}};};const pending=deferred<[]>();let cancelled=false;
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:()=>({result:pending.result,cancel:()=>{cancelled=true;pending.reject(new Error('cancelled'));}})});
- await controller.offer({...f.descriptor});await flush();await controller.dispose();expect(cancelled).toBe(true);expect(f.opens).toHaveLength(0);
+ await controller.offer({...f.descriptor});await flush();await controller.dispose();expect(cancelled).toBe(true);expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync']);
 });
 test('failed discovery retains signed bootstrap routes',async()=>{
  const f=ipFixture();await f.sign();const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:()=>({result:Promise.reject(new Error('unavailable')),cancel:()=>{}})});
  await controller.offer({...f.descriptor});await flush();expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync']);await controller.dispose();
 });
 test('descriptor expiry during discovery prevents probing',async()=>{
- const f=ipFixture();f.descriptor.expiresAt=100;await f.sign();const pending=deferred<[]>();
+ const f=ipFixture();f.descriptor.expiresAt=100;await f.sign();f.ports.sockets.connect=url=>{f.opens.push(url);return {result:Promise.reject(new Error('unreachable')),cancel(){}};};const pending=deferred<IpEndpoint[]>();
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:()=>({result:pending.result,cancel:()=>pending.reject(new Error('cancelled'))})});
- await controller.offer({...f.descriptor});await flush();await f.clock.advance(101);pending.resolve([]);await flush();expect(f.opens).toHaveLength(0);await controller.dispose();
+ await controller.offer({...f.descriptor});await flush();await f.clock.advance(101);pending.resolve([{endpointId:'mdns',address:'10.0.0.2',family:'ipv4',transportKind:'wifiLan',priority:300}]);await flush();expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync']);await controller.dispose();
 });
 test('a discovered endpoint cannot bypass server authentication',async()=>{
  const f=ipFixture();await f.sign();f.ack.serverDeviceId='impostor';f.ack.hmac='forged';const errors:unknown[]=[];
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,onError:error=>errors.push(error),discover:()=>({result:Promise.resolve([{endpointId:'mdns',address:'10.0.0.2',family:'ipv4',transportKind:'wifiLan',priority:400}]),cancel:()=>{}})});
- await controller.offer({...f.descriptor});await flush();expect(f.opens[0]).toBe('ws://10.0.0.2:8888/sync');expect(f.closed).toContain('stream-1');expect(errors.some(error=>String(error).includes('认证失败'))).toBe(true);expect(f.writes).toHaveLength(0);await controller.dispose();
+ await controller.offer({...f.descriptor});await flush();expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync','ws://10.0.0.2:8888/sync']);expect(f.closed).toEqual(['stream-1','stream-1']);expect(errors.some(error=>String(error).includes('认证失败'))).toBe(true);expect(f.writes).toHaveLength(0);await controller.dispose();
 });
 test('foreground acquisition authenticates a BLE descriptor before selecting a route',async()=>{
  for(const valid of [false,true]){const f=ipFixture();await f.sign();let acquisitions=0;const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,acquireDescriptor:()=>{acquisitions++;return {result:Promise.resolve({...f.descriptor,...(!valid?{hmac:'forged'}:{})}),cancel:()=>{}};}});controller.setActive(true);await flush();expect(acquisitions).toBe(1);expect(f.opens).toHaveLength(valid?1:0);await controller.dispose();}
@@ -134,4 +135,20 @@ test('R47 refuses an impossible LAN upgrade instead of making the phone wait for
  expect(canOfferIpRoutes(f.descriptor,{active:true,bluetooth:true})).toBe(true);
  expect(canOfferIpRoutes({...f.descriptor,endpoints:[{...f.descriptor.endpoints[0]!,transportKind:'bluetoothBridge'}]},{active:true,bluetooth:true,localWifi:false})).toBe(true);
  await controller.dispose();
+});
+
+
+test('a healthy signed route does not wait for the 1500ms mDNS window and cancels it',async()=>{
+ const f=ipFixture();await f.sign();const pending=deferred<[]>();let cancelled=false,scans=0;
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:()=>{scans++;return {result:pending.result,cancel(){cancelled=true;pending.reject(new Error('discovery cancelled'));}};}});
+ await controller.offer({...f.descriptor});await flush();
+ expect(scans).toBe(1);expect(f.clock.now).toBe(0);expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync']);expect(cancelled).toBe(true);expect(f.closed).toHaveLength(0);
+ await controller.dispose();expect(f.closed).toContain('stream-1');
+});
+
+test('signed and discovered waves share a three-attempt budget and never repeat an address',async()=>{
+ const f=ipFixture();await f.sign();f.ports.sockets.connect=url=>{f.opens.push(url);return {result:Promise.reject(new Error('unreachable')),cancel(){}};};
+ const extra=[['duplicate','10.0.0.1',500],['second','10.0.0.2',400],['second-alias','10.0.0.2',350],['third','10.0.0.3',300],['fourth','10.0.0.4',200]].map(([endpointId,address,priority])=>({endpointId:String(endpointId),address:String(address),priority:Number(priority),family:'ipv4' as const,transportKind:'wifiLan' as const}));
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:()=>({result:Promise.resolve(extra),cancel(){}})});
+ await controller.offer({...f.descriptor});await flush();expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync','ws://10.0.0.2:8888/sync','ws://10.0.0.3:8888/sync']);await controller.dispose();
 });
