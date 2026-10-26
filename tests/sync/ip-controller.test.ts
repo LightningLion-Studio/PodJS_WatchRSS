@@ -12,7 +12,7 @@ test('IP owner keeps a nonpersistent transport between actions, then honors pers
  expect(await controller.offer({...f.descriptor,hmac:'wrong'})).toBe(false);expect(f.opens).toHaveLength(0);
  expect(await controller.offer({...f.descriptor})).toBe(true);await flush();expect(routes).toHaveLength(1);
  const decoder=new FrameDecoder();f.feed({action:'syncLibrary',phase:'probe',version:14});f.feed({action:'ack',success:true,applied:true});await flush();expect(f.writes.flatMap(b=>decoder.push(b))).toHaveLength(1);expect(f.closed).toHaveLength(0);expect(media).toEqual([true]);
- f.feed({action:'syncLibrary',phase:'probe',version:14,requestPersistentSession:true,supportsPersistentSession:true});f.feed({action:'ack',success:true,applied:true});f.feed({action:'syncSession',phase:'complete'});f.feed({action:'ack',success:true,applied:true});await flush();const allFrames=new FrameDecoder();expect(f.writes.flatMap(b=>allFrames.push(b))).toHaveLength(3);expect(progress.filter(p=>p.direction==='write').reduce((n,p)=>n+p.bytes,0)).toBe(f.writes.reduce((n,b)=>n+b.length,0));expect(progress.some(p=>p.direction==='read'&&p.bytes===4)).toBe(true);expect(f.closed).toContain('stream-1');expect(routes.at(-1)).toBeNull();expect(errors).toHaveLength(0);await controller.dispose();expect(media).toEqual([true,false]);
+ f.feed({action:'syncLibrary',phase:'probe',version:14,requestPersistentSession:true,supportsPersistentSession:true});f.feed({action:'ack',success:true,applied:true});f.feed({action:'syncSession',phase:'complete'});f.feed({action:'ack',success:true,applied:true});await flush();await flush();const allFrames=new FrameDecoder();expect(f.writes.flatMap(b=>allFrames.push(b))).toHaveLength(3);expect(progress.filter(p=>p.direction==='write').reduce((n,p)=>n+p.bytes,0)).toBe(f.writes.reduce((n,b)=>n+b.length,0));expect(progress.some(p=>p.direction==='read'&&p.bytes===4)).toBe(true);expect(f.closed).toContain('stream-1');expect(routes.at(-1)).toBeNull();expect(errors).toHaveLength(0);await controller.dispose();expect(media).toEqual([true,false]);
 });
 test('active IP transfer survives backgrounding and releases transport after the post-transfer grace',async()=>{
  const f=ipFixture();await f.sign();const handled=deferred<Record<string,unknown>>(),controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now},{handleAction:()=>handled.result});
@@ -151,4 +151,34 @@ test('signed and discovered waves share a three-attempt budget and never repeat 
  const extra=[['duplicate','10.0.0.1',500],['second','10.0.0.2',400],['second-alias','10.0.0.2',350],['third','10.0.0.3',300],['fourth','10.0.0.4',200]].map(([endpointId,address,priority])=>({endpointId:String(endpointId),address:String(address),priority:Number(priority),family:'ipv4' as const,transportKind:'wifiLan' as const}));
  const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now,discover:()=>({result:Promise.resolve(extra),cancel(){}})});
  await controller.offer({...f.descriptor});await flush();expect(f.opens).toEqual(['ws://10.0.0.1:8888/sync','ws://10.0.0.2:8888/sync','ws://10.0.0.3:8888/sync']);await controller.dispose();
+});
+
+test('IP partial frame with no new bytes closes and settles even when the native pending read never wakes',async()=>{
+ const f=ipFixture();await f.sign();let reads=0;const pending=deferred<{eof:boolean;dataBase64:string}>();
+ f.ports.streams.read=()=>({result:++reads===1?Promise.resolve({eof:false,dataBase64:Buffer.from([0,0,0,10]).toString('base64')}):pending.result,cancel(){}});
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});await controller.offer({...f.descriptor});await flush();
+ await f.clock.advance(19999);expect(f.closed).toHaveLength(0);await f.clock.advance(1);expect(f.closed).toContain('stream-1');await controller.dispose();
+});
+test('fresh authenticated bootstrap replaces only a stalled receive, never a healthy active transaction',async()=>{
+ for(const stale of [false,true]){const f=ipFixture();await f.sign();let opens=0;const connect=f.ports.sockets.connect,next=deferred<{id:string}>();
+ f.ports.sockets.connect=(url,options)=>++opens===1?connect(url,options):{result:next.result,cancel:()=>next.reject(Error('cancelled'))};
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});await controller.offer({...f.descriptor});await flush();
+ f.feed({action:'syncLibrary',phase:'probe',version:14,requestPersistentSession:true,supportsPersistentSession:true});f.feed({action:'ack',success:true,applied:true});await flush();
+ await f.clock.advance(stale?20000:1000);await controller.offer({...f.descriptor});await flush();
+ expect(opens).toBe(stale?2:1);expect(f.closed.includes('stream-1')).toBe(stale);
+ if(!stale){f.feed({action:'syncSession',phase:'complete'});f.feed({action:'ack',success:true,applied:true});await flush();await flush();expect(opens).toBe(2);}
+ await controller.dispose();}
+});
+
+test('a bootstrap queued during a long nonpersistent handler dials immediately after its applied ACK',async()=>{
+ const f=ipFixture();await f.sign();const handled=deferred<Record<string,unknown>>(),next=deferred<{id:string}>();let opens=0;const connect=f.ports.sockets.connect;
+ f.ports.sockets.connect=(url,options)=>++opens===1?connect(url,options):{result:next.result,cancel:()=>next.reject(Error('cancelled'))};
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now},{handleAction:()=>handled.result});
+ await controller.offer({...f.descriptor});await flush();f.feed({action:'syncNotes'});await flush();await f.clock.advance(25000);await controller.offer({...f.descriptor});await flush();expect(opens).toBe(1);expect(f.closed).toHaveLength(0);
+ handled.resolve({success:true});f.feed({action:'ack',success:true,applied:true});await flush();await flush();expect(opens).toBe(2);expect(f.closed).toContain('stream-1');await controller.dispose();
+});
+
+test('explicit disposal settles an unwakeable native read immediately, without waiting for the idle budget',async()=>{
+ const f=ipFixture();await f.sign();const pending=deferred<{eof:boolean;dataBase64:string}>();f.ports.streams.read=()=>({result:pending.result,cancel(){}});
+ const controller=new IpSyncController({...f.ports,repository:repository(),now:()=>f.clock.now});await controller.offer({...f.descriptor});await flush();await controller.dispose();expect(f.clock.now).toBe(0);expect(f.closed).toContain('stream-1');
 });

@@ -233,3 +233,12 @@ test('R47 small cache publications never copy unchanged rows and other hot repos
  let copies=0,inserted=0;const tx=f.db.transaction;f.db.transaction=async ss=>{copies+=ss.filter(s=>s.sql.startsWith('INSERT INTO sync_projection_rows')&&s.sql.includes(' SELECT ')).length;inserted+=ss.filter(s=>s.sql.startsWith('INSERT INTO sync_projection_rows')&&s.sql.includes(' VALUES')).length;return tx(ss);};
  await f.db.execute("UPDATE articles SET title='updated once' WHERE id=1");const first=await a.prepareWindow('phone',0);expect(copies).toBe(0);expect(inserted).toBe(1);expect((await f.db.query("SELECT generation FROM sync_projection_header WHERE scope=':canonical'"))[0]!.generation).toBe(generation);const second=await b.prepareWindow('phone',0);expect(second.fullArticleManifest).toEqual(first.fullArticleManifest);
  }finally{f.sql.close();}});
+
+test('incremental fingerprint reconciliation reads only changed IDs and retains unrelated scopes and deletions',async()=>{const f=await setup();try{
+ const w=await stableWindow(f),template=w.fullArticleManifest[0]!,articles=Array.from({length:1200},(_,i)=>({...template,articleId:'scoped-'+i})),rev=await libraryRevision(f.db);
+ await reconcileSnapshotLog(f.db,codec,rev,'local',articles,[],1000,':one');await reconcileSnapshotLog(f.db,codec,rev,'local',articles,[],1000,':other');
+ const query=f.db.query.bind(f.db);let rowsRead=0;f.db.query=async(q,p,l)=>{const rows=await query(q,p,l);if(q.includes('FROM sync_snapshot_fingerprints'))rowsRead+=rows.length;return rows;};
+ await reconcileSnapshotLog(f.db,codec,rev,'local',articles.filter(a=>a.articleId!=='scoped-10'),[],1000,':one',new Set(['scoped-10','scoped-20']));
+ expect(rowsRead).toBe(2);expect(await query("SELECT entity_id FROM sync_snapshot_fingerprints WHERE kind='article:one' AND entity_id='scoped-10'")).toEqual([]);
+ expect((await query("SELECT COUNT(*) n FROM sync_snapshot_fingerprints WHERE kind='article:one'"))[0]!.n).toBe(1199);expect((await query("SELECT COUNT(*) n FROM sync_snapshot_fingerprints WHERE kind='article:other'"))[0]!.n).toBe(1200);
+ }finally{f.sql.close();}});

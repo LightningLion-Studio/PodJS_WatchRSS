@@ -1,4 +1,5 @@
 import {querySyncPages} from './sql-pages';
+import {querySqlTableInfo} from '@podjs/framework/sql';
 import type {ProjectionVersion,ProjectionVersions} from '@podjs/framework/acked-state-vector';
 import type {SqlDatabase,SqlParams} from '../core/types';
 import {hashJavaText} from './article-export';
@@ -43,9 +44,9 @@ export class SqlDomainDefinitions {
    const current=await this.db.query('SELECT * FROM sync_fast_definitions');
    if(current.length===SYNC_DOMAINS.length&&current.every(r=>{const v=this.values[String(r.domain) as SyncDomain];return v&&v.definition===r.definition&&v.epoch===r.epoch&&v.generation===r.generation&&v.encoder===this.encoders[String(r.domain) as SyncDomain]&&v.encoder===Number(r.encoder)&&v.schema===Number(r.schema_version);})){for(const r of current)this.values[String(r.domain) as SyncDomain]!.seeded=!!Number(r.seeded);return;}
   }
-  const tables=await querySyncPages(this.db,"SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name",[],20),tableMap=new Map(tables.map(r=>[String(r.name),r]));
-  const columns=new Map<string,Record<string,unknown>[]>();for(const t of new Set(Object.values(dependencies).flat()))if(tableMap.has(t))columns.set(t,await this.db.query('PRAGMA table_info('+quote(t)+')'));
-  const triggers=await querySyncPages(this.db,"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name",[],20),actual=new Map(triggers.map(t=>[String(t.name),String(t.sql)]));
+  const tables=await querySyncPages(this.db,"SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name",[],100),tableMap=new Map(tables.map(r=>[String(r.name),r]));
+  const columns=await querySqlTableInfo(this.db,[...new Set(Object.values(dependencies).flat())].filter(t=>tableMap.has(t)));
+  const triggers=await querySyncPages(this.db,"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name",[],100),actual=new Map(triggers.map(t=>[String(t.name),String(t.sql)]));
   const desired=new Map<SyncDomain,Map<string,string>>(SYNC_DOMAINS.map(d=>[d,new Map()]));
   // Rebuild existing revision UPDATE triggers against today's complete columns.
   // Projection-cache then observes added fields rather than freezing old lists.

@@ -66,3 +66,23 @@ test('R47.1 projection rebuild retains prior keep receipts and does not revive a
   }
  }finally{DOMAIN_ENCODERS.library=encoder;f.sql.close();}
 });
+
+test('one-URL snapshot reads only its keep proofs while preserving alias suppression and other receipts',async()=>{
+ const f=await fixture();try{
+  const kept=article({updatedAt:400,independentChangedAt:400}),legacy=sha('old alias');
+  await f.repo.receiveArticle(await f.packet(kept),'phone',false);
+  await f.db.execute('INSERT INTO sync_article_deletions VALUES(?,?,?,?,?)',[legacy,kept.url,200,'phone',deviceOrder('phone')]);
+  for(let i=0;i<420;i++)await f.db.transaction([
+   {sql:'INSERT INTO sync_article_keeps VALUES(?,?,400,?,?,NULL)',params:['unrelated-'+i,'https://unrelated.test/'+i,'phone',deviceOrder('phone')]},
+   {sql:'INSERT INTO sync_article_keep_aliases VALUES(?,?,?)',params:['unrelated-'+i,'unrelated-'+i,'https://unrelated.test/'+i]},
+  ]);
+  const {LocalArticleManifestStore}=await import('../../src/sync/local-manifest');
+  const store=new LocalArticleManifestStore(f.db,f.ports.codec,f.ports.text,f.ports.files,f.ports.migrateReading);
+  const full=await store.snapshot(true,true),query=f.db.query.bind(f.db);let proofRows=0;
+  f.db.query=async(q,p)=>{const rows=await query(q,p);if(q.includes('SELECT a.alias_id AS article_id,k.url,k.changed_at'))proofRows+=rows.length;return rows;};
+  const partial=await store.snapshot(true,true,false,undefined,[kept.url]);
+  expect(partial.map(p=>p.manifest)).toEqual(full.filter(p=>p.article.url===kept.url).map(p=>p.manifest));
+  expect(partial.some(p=>p.manifest.articleId===legacy)).toBe(false);expect(proofRows).toBeLessThan(10);
+  expect((await query("SELECT COUNT(*) n FROM sync_article_keeps WHERE article_id LIKE 'unrelated-%'"))[0]!.n).toBe(420);
+ }finally{f.sql.close();}
+});

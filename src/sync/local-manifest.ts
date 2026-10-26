@@ -79,6 +79,8 @@ export class LocalArticleManifestStore {
  private rowSelect(){return this.encodingGeneration?ROW_SELECT.replace(' FROM articles a JOIN channels ch',', (SELECT generation FROM sync_fast_encoded_cache g WHERE g.item_id=a.id AND g.body_hash=c.body_hash) AS body_generation FROM articles a JOIN channels ch'):ROW_SELECT;}
  private bodySourceIds=new Map<string,number>();
  private reusableBodies=new Map<number,PreparedArticle>();
+ private completeReusable:((p:PreparedArticle)=>Promise<PreparedArticle>)|undefined;
+ private async reusableMetadata(id:number){const p=this.reusableBodies.get(id);if(!p)return;const full=await this.completeReusable?.(p)??p;this.reusableBodies.set(id,full);return full;}
  private reencodedBodies=new Map<number,ReencodedBody>();
  private cacheRows=true;
  private rowCache=new Map<string,{stamp:string;prepared:PreparedArticle;bytes:number}>();
@@ -222,7 +224,7 @@ export class LocalArticleManifestStore {
   // alias as deleted makes the phone ask for the same decision on a full sync.
   // Only a verified receive receipt and a unique URL identity establish this
   // supersession; feed fetch clocks and ambiguous same-URL RSS items cannot.
-  const durableKeeps=new Map((await querySyncPages(this.db,'SELECT a.alias_id AS article_id,k.url,k.changed_at FROM sync_article_keeps k JOIN sync_article_keep_aliases a ON a.canonical_id=k.article_id AND a.url=k.url WHERE 1=(SELECT count(*) FROM sync_article_keep_aliases b WHERE b.alias_id=a.alias_id AND b.url=a.url) ORDER BY a.alias_id')).map(r=>[str(r.article_id)+'\0'+str(r.url),num(r.changed_at)]));
+  const durableKeeps=new Map((await querySyncPages(this.db,'SELECT a.alias_id AS article_id,k.url,k.changed_at FROM sync_article_keeps k JOIN sync_article_keep_aliases a ON a.canonical_id=k.article_id AND a.url=k.url WHERE 1=(SELECT count(*) FROM sync_article_keep_aliases b WHERE b.alias_id=a.alias_id AND b.url=a.url)'+(urls?' AND a.url IN ('+marks+')':'')+' ORDER BY a.alias_id',urls??[])).map(r=>[str(r.article_id)+'\0'+str(r.url),num(r.changed_at)]));
   const receipts=new Map<string,{ids:Set<string>;clock:number;pooled:boolean}>();
   for(const row of rows){const url=str(row.link),id=ids.get(num(row.id));if(!url||!id)continue;
    const receipt=receipts.get(url)??{ids:new Set<string>(),clock:0,pooled:false};receipt.ids.add(id);receipt.pooled||=publicByItem.get(num(row.id))?.canonicalBinding===true;
@@ -337,7 +339,7 @@ export class LocalArticleManifestStore {
   return out;
   }finally{this.cacheRows=previousCacheRows;this.reencodedBodies.clear();this.db=originalDb;this.codec=originalCodec;this.text=originalText;}
  }
- restoreReusableBodies(rows:readonly {prepared:PreparedArticle;sourceItem:number}[]){this.reusableBodies=new Map(rows.filter(r=>r.sourceItem>0&&r.prepared.manifest.bodyAvailable).map(r=>[r.sourceItem,r.prepared]));}
+ restoreReusableBodies(rows:readonly {prepared:PreparedArticle;sourceItem:number}[],complete?:((p:PreparedArticle)=>Promise<PreparedArticle>)){this.completeReusable=complete;this.reusableBodies=new Map(rows.filter(r=>r.sourceItem>0&&r.prepared.manifest.bodyAvailable).map(r=>[r.sourceItem,r.prepared]));}
  private reusableBody(row:Row):CachedBodyManifest|null{const p=this.reusableBodies.get(num(row.id));return p?{bodyHash:p.manifest.bodyHash,bodyByteCount:p.manifest.bodyByteCount,chunkSize:p.manifest.chunkSize,chunkHashes:[...p.manifest.chunkHashes]}:null;}
  projectionBindings(){return new Map(this.bodySourceIds);}
  restoreProjectionBindings(bindings:ReadonlyMap<string,number>){this.bodySourceIds=new Map([...bindings].filter(([,id])=>id>0));}
@@ -456,7 +458,7 @@ export class LocalArticleManifestStore {
   // Row fields cover metadata/inline text, and chunk_revision covers external
   // chunk mutations. Reuse body work across a one-article edit or source merge.
   if(!this.cacheRows)return this.buildRow(r,id,device,saved,bodySource,clocks);
-  const reusable=this.reusableBodies.get(num(bodySource.id)),metadata=this.reusableBodies.get(num(r.id));
+  const reusable=await this.reusableMetadata(num(bodySource.id)),metadata=await this.reusableMetadata(num(r.id));
   const {cache_html:_html,cache_text:_text,...metadataRow}=r,{cache_html:_sourceHtml,cache_text:_sourceText,...sourceMetadata}=bodySource;
   const key=id+'\0'+str(r.id),stamp=await hashJavaText(JSON.stringify([metadataRow,id,device,saved,bodySource===r?null:sourceMetadata,clocks,reusable?[reusable.manifest.bodyHash,reusable.manifest.bodyByteCount,reusable.manifest.chunkHashes]:null,metadata?.article.contentHash??null]),this.codec);
   const previous=this.rowCache.get(key);if(previous?.stamp===stamp)return previous.prepared;
@@ -470,7 +472,7 @@ export class LocalArticleManifestStore {
   return prepared;
  }
  private async buildRow(r:Row,id:string,device:string,saved?:{savedAt:number;favorite:boolean;later:boolean;favoriteChanged:number;favoriteOrder:number;laterChanged:number;laterOrder:number},bodySource:Row=r,clocks?:{favorite?:State;later?:State}):Promise<PreparedArticle>{
-  const persisted=this.reusableBodies.get(num(r.id)),cached=(blank(str(r.cached_body_hash))?null:this.cachedBody(bodySource))??this.reusableBody(bodySource);
+  const persisted=await this.reusableMetadata(num(r.id)),cached=(blank(str(r.cached_body_hash))?null:this.cachedBody(bodySource))??this.reusableBody(bodySource);
   if(cached){if(r.summary==null)r.description=num(r.description_inline)===1?nullable(r.description):persisted?persisted.article.excerpt:await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);}
   const {available,contentHtml,contentText}=cached?{available:true,contentHtml:null,contentText:''}:await this.bodyForReencode(bodySource);
   if(!cached&&r.summary==null)r.description=num(r.description_inline)===1?nullable(r.description):await readSyncSqlText(this.db,'SELECT description AS value FROM articles WHERE id=?',[r.id]);

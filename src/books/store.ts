@@ -12,7 +12,7 @@ import {isBookUrl,bookPackageLines,validateBookPackage,parseBookHeader,parseBook
 import type {BookFiles,BookFileInfo} from './files';
 type Row=Record<string,unknown>;type Statement={sql:string;params?:SqlParams};
 const str=(v:unknown)=>String(v??''),num=(v:unknown)=>Number(v??0);
-export interface BookStorePorts {sha256:BookHash;files:BookFiles;text:ArticleReceiveFiles;stableId(url:string):Promise<string>;deviceId():Promise<string>;now?:()=>number;warn?(code:string):void}
+export interface BookStorePorts {sha256:BookHash;files:BookFiles;text:ArticleReceiveFiles;stableId(url:string):Promise<string>;deviceId():Promise<string>;now?:()=>number;warn?(code:string):void;profile?(stage:string,ms:number):void}
 export interface BookMapping {bookId:string;chapterIndex:number;articleId:string;itemId:number|null;url:string}
 /** Caller serializes this store with the library lane. Original package files
  * and chapter mappings survive deletion; only small state rows change. */
@@ -49,7 +49,8 @@ export class SqlBookStore {
  async capture(){const groups=new Map<string,Row[]>();for(const r of await this.rows('SELECT * FROM sync_book_events ORDER BY book_id,chapter_index')){const list=groups.get(str(r.book_id))??[];list.push(r);groups.set(str(r.book_id),list);}for(const [id,events]of groups)await this.guarded(async revision=>{const row=await this.record(id);if(!row)return;const old=this.state(row),whole=events.some(e=>num(e.chapter_index)===0),next={...old,deleted:old.deleted||whole,deletedChapters:[...new Set([...old.deletedChapters,...events.map(e=>num(e.chapter_index)).filter(n=>n>0)])].sort((a,b)=>a-b),deletionClock:events.reduce((at,e)=>Math.max(at,num(e.changed_at)),old.deletionClock),deletedAt:whole?events.reduce((at,e)=>Math.max(at,num(e.changed_at)),old.deletedAt):old.deletedAt};const consume=events.map(e=>({sql:'DELETE FROM sync_book_events WHERE book_id=? AND chapter_index=? AND changed_at<=?',params:[id,e.chapter_index,e.changed_at]}));for(let at=0;at<consume.length;at+=900)await this.db.transaction([...(at===0?[revisionGuard(revision),this.statement(next)]:[]),...consume.slice(at,at+900)]);await this.applyDeletions(next);});await this.captureDisplay();}
  /** Freeze only an original continuous directory with proven body availability.
   * A matching peer state supplies a missing-tail check during legacy migration. */
- async registerLocal(expected:readonly BookState[]=[],check?:()=>void){check?.();await this.capture();check?.();
+ async registerLocal(expected:readonly BookState[]=[],check?:()=>void){const at=Date.now();try{return await this.registerLocalImpl(expected,check);}finally{this.ports.profile?.("books.register",Date.now()-at);}}
+ private async registerLocalImpl(expected:readonly BookState[],check?:()=>void){check?.();await this.capture();check?.();
   const key=canonical(expected.map(b=>[b.bookId,b.sourceUrl??'',b.chapterCount]).sort((a,b)=>String(a[0])<String(b[0])?-1:1)),revision=await libraryRevision(this.db),cached=(await this.db.query('SELECT revision FROM sync_book_registration_cache WHERE cache_key=?',[key]))[0];
   if(cached&&num(cached.revision)===revision){await this.captureReading();return;}
   let cacheable=true;const rows=await this.rows(`SELECT a.id,a.title,a.link,a.dedup_key,a.fetched_at,a.content IS NOT NULL AS has_content,ch.url AS channel_url,ch.title AS channel_title,
@@ -72,7 +73,8 @@ export class SqlBookStore {
   check?.();await this.captureReading();check?.();
   if(cacheable&&await libraryRevision(this.db)===revision)await this.db.execute('INSERT INTO sync_book_registration_cache SELECT ?,? WHERE (SELECT revision FROM sync_library_revision WHERE id=1)=? ON CONFLICT(cache_key) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision',[key,revision,revision]);
  }
- async captureReading(){
+ async captureReading(){const at=Date.now();try{return await this.captureReadingImpl();}finally{this.ports.profile?.("books.captureReading",Date.now()-at);}}
+ private async captureReadingImpl(){
   if((await this.db.query('SELECT 1 FROM sync_book_events LIMIT 1')).length)await this.capture();
   for(;;){if(!(await this.db.query('SELECT 1 FROM sync_book_reading_dirty LIMIT 1')).length)return;
    await this.guarded(async revision=>{

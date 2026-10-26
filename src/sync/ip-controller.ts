@@ -1,3 +1,4 @@
+import {ProgressDeadline} from '@podjs/framework/frame-stream';
 import {SyncEventLog} from '../logs/sync-events.ts';
 import {logIpRoute} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
@@ -33,6 +34,7 @@ export class IpSyncController {
  private acquisition:HostOperation<JsonObject|null>|undefined;
  private descriptor:IpDescriptor|undefined;private route:OpenIpRoute|undefined;private probe:IpConnectionProbe|undefined;
  private refreshJob:Promise<void>|undefined;private refreshQueued=false;private queuedBootstrap=false;private routeGeneration=0;private serving:Promise<void>|undefined;private session:LibrarySyncSession|undefined;
+ private cancelRead:(()=>void)|undefined;private waitingRoute:OpenIpRoute|undefined;private lastIoAt=0;private bootstrapPending=false;
  private active=true;private disposed=false;private transferring=false;private lastAckSeq=0;private cooldown=new Map<string,number>();
  private recoveryAttempts=0;private descriptorSource='bootstrap';
  private recoveryTimer:ForegroundTimer|undefined;
@@ -49,7 +51,9 @@ export class IpSyncController {
   if(this.disposed)return false;let descriptor:IpDescriptor;try{descriptor=parseIpDescriptor(raw);}catch{return false;}
   if(!await verifyIpDescriptor(descriptor,this.ports.crypto,this.now())||this.disposed)return false;if(this.ports.canOffer&&!await this.ports.canOffer(descriptor)){if(!this.disposed){this.descriptor=descriptor;this.descriptorSource='bootstrap';}appLogger.i('WatchRSS_IpSync','IP bootstrap deferred: no compatible local route');return false;}if(this.disposed)return false;this.descriptor=descriptor;this.descriptorSource='bootstrap';this.recoveryAttempts=0;appLogger.i('WatchRSS_IpSync',`IP endpoint accepted from RFCOMM bootstrap endpoints=${descriptor.endpoints.length}`);this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.refresh(true);return true;
  }
- refresh(bootstrap=false,recovery=false){if(!recovery)this.recoveryAttempts=0;if(this.disposed||(!this.active&&!bootstrap))return;if(this.transferring){appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
+ refresh(bootstrap=false,recovery=false){if(!recovery)this.recoveryAttempts=0;if(this.disposed||(!this.active&&!bootstrap))return;if(this.transferring){
+  if(bootstrap){this.bootstrapPending=true;if(this.route&&this.waitingRoute===this.route&&this.now()-this.lastIoAt>=20000){appLogger.w('WatchRSS_IpSync','IP stale receive released for authenticated bootstrap');this.stopRoute();this.bootstrapPending=false;this.refresh(true);return;}}
+  appLogger.i("WatchRSS_IpSync",`IP route refresh deferred during active sync reason=${bootstrap?"rfcomm_bootstrap":"refresh"}`);return;}if(this.refreshJob){if(bootstrap){this.refreshQueued=true;this.queuedBootstrap=true;}return;}const job=this.select(bootstrap);this.refreshJob=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.refreshJob!==job)return;this.refreshJob=undefined;if(this.refreshQueued){const queued=this.queuedBootstrap;this.refreshQueued=false;this.queuedBootstrap=false;this.refresh(queued);}});}
  private async select(bootstrap=false){
   const generation=this.routeGeneration;
   if(!bootstrap&&this.ports.acquireDescriptor){
@@ -88,7 +92,7 @@ export class IpSyncController {
    catch(error){if(this.disposed||generation!==this.routeGeneration||this.descriptor!==descriptor)return;this.cooldown.set(endpoint.endpointId,this.now()+10000);appLogger.w("WatchRSS_IpSync",`IP candidate failed kind=${logIpRoute(endpoint.transportKind)} stage=${ipFailureStage(error)} endpoint=<redacted>`);this.error(error);continue;}
    finally{if(this.probe===probe)this.probe=undefined;}
    if(this.disposed||generation!==this.routeGeneration||this.transferring||this.descriptor!==descriptor||(previous&&previous.endpoint.priority>selected.endpoint.priority)){if(this.transferring)appLogger.i("WatchRSS_IpSync","IP route switch deferred after probe because sync started");await selected.connection.close();return;}
-   appLogger.i("WatchRSS_IpSync",`IP route ready reason=${bootstrap?"rfcomm_bootstrap":"refresh"} route=${logIpRoute(selected.endpoint.transportKind)} source=${selected.endpoint.endpointId.startsWith('mdns-')?'mdns':this.descriptorSource} endpoint=<redacted> resume=${previous!=null}`);this.route=selected;if(previous)await previous.connection.close();this.routeChanged(selected);if(!this.active)this.scheduleStop(2500);
+   appLogger.i("WatchRSS_IpSync",`IP route ready reason=${bootstrap?"rfcomm_bootstrap":"refresh"} route=${logIpRoute(selected.endpoint.transportKind)} source=${selected.endpoint.endpointId.startsWith('mdns-')?'mdns':this.descriptorSource} endpoint=<redacted> resume=${previous!=null}`);this.route=selected;this.lastIoAt=this.now();if(previous)await previous.connection.close();this.routeChanged(selected);if(!this.active)this.scheduleStop(2500);
    const job=this.serve(selected);this.serving=job;void job.catch(e=>this.error(e)).finally(()=>{if(this.serving===job)this.serving=undefined;});return;
   }
   }}finally{if(this.discovery===discovery)this.discovery=undefined;discovery?.cancel();}
@@ -107,15 +111,22 @@ export class IpSyncController {
   try{while(!this.disposed&&this.route===route){
    // Each nonpersistent action completes a session but retains this WebSocket.
    // This owner always closes the underlying transport on cancellation/failure.
-   const connection={setFrameTiming:route.connection.setFrameTiming.bind(route.connection),setTransferProgress:route.connection.setTransferProgress.bind(route.connection),readFrame:async(timeout:number)=>{const frame=await route.connection.readFrame(timeout);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;},writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
+   let readDeadline:ProgressDeadline|undefined;
+   route.connection.setReadBytesComplete(()=>{readDeadline?.stop();if(this.waitingRoute===route)this.waitingRoute=undefined;});
+   const connection={setFrameTiming:route.connection.setFrameTiming.bind(route.connection),setTransferProgress:(listener:Parameters<typeof route.connection.setTransferProgress>[0])=>route.connection.setTransferProgress(progress=>{if(this.route===route&&progress.bytes>0){this.lastIoAt=this.now();if(progress.direction==='read'){readDeadline?.progress(progress.bytes);if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}}}listener?.(progress);}),readFrame:async(timeout:number)=>{
+    const deadline=new ProgressDeadline(ms=>this.ports.delay(ms),Math.min(timeout,90000),20000,this.now,()=>{appLogger.w('WatchRSS_IpSync','IP receive idle deadline; closing route');void route.connection.close().catch(()=>{});});readDeadline=deadline;this.waitingRoute=route;const cancelRead=()=>deadline.cancel();this.cancelRead=cancelRead;
+    try{const frame=await deadline.run(()=>route.connection.readFrame(timeout));if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;}
+    finally{if(this.cancelRead===cancelRead)this.cancelRead=undefined;if(readDeadline===deadline)readDeadline=undefined;if(this.waitingRoute===route)this.waitingRoute=undefined;}
+   },writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
    const session=new LibrarySyncSession(connection,this.ports.repository,{...this.options,actionSession,diagnosticLog,initialRequestTimeoutMs:600000,responseAckTimeoutMs:600000});this.session=session;
    const results=await session.run();if(this.session===session)this.session=undefined;this.transferring=false;this.releaseLater();if(!this.active)this.scheduleStop(30000);this.lastAckSeq++;this.recoveryAttempts=0;
    if(results.some(r=>r.response.fatalSession===true))throw new Error('IP library exchange failed');
+   if(this.bootstrapPending){completed=true;break;}
    if(results.at(-1)?.request.action==='syncSession'){appLogger.i("WatchRSS_IpSync","IP sync session closed phase=<redacted>");completed=true;break;}
    this.refresh();
   }}catch(error){if(this.route===route&&!this.disposed){diagnosticLog.event("server.ip.failed",{message:"<redacted>"},"E");appLogger.w("WatchRSS_IpSync","IP 同步数据通道失败");this.error(error);}}
-  finally{try{await route.connection.close();}finally{if(this.route===route){this.route=undefined;this.session=undefined;this.transferring=false;this.routeChanged(null);this.releaseLater();if(!completed)this.recover();}}}
+  finally{try{await route.connection.close();}finally{if(this.route===route){this.route=undefined;this.session=undefined;this.transferring=false;this.routeChanged(null);this.releaseLater();if(this.bootstrapPending&&!this.disposed){this.bootstrapPending=false;this.refresh(true);}else if(!completed)this.recover();}}}
  }
- private stopRoute(){this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.routeGeneration++;this.refreshQueued=false;this.queuedBootstrap=false;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.session?.cancel();const route=this.route;this.route=undefined;this.transferring=false;if(route){void route.connection.close().catch(e=>this.error(e));this.routeChanged(null);}this.releaseLater();}
+ private stopRoute(){this.cancelRead?.();this.cancelRead=undefined;this.recoveryTimer?.cancel();this.recoveryTimer=undefined;this.routeGeneration++;this.refreshQueued=false;this.queuedBootstrap=false;this.acquisition?.cancel();this.discovery?.cancel();this.probe?.cancel();this.session?.cancel();const route=this.route;this.route=undefined;this.transferring=false;this.waitingRoute=undefined;this.bootstrapPending=false;if(route){void route.connection.close().catch(e=>this.error(e));this.routeChanged(null);}this.releaseLater();}
  async dispose(){if(this.disposed){await this.refreshJob;await this.serving;await this.resources;return;}this.disposed=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.stopRoute();this.media(false);await this.refreshJob?.catch(()=>{});await this.serving?.catch(()=>{});await this.resources;}
 }

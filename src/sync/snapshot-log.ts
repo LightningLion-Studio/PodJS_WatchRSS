@@ -13,7 +13,11 @@ export async function reconcileSnapshotLog(db:SqlDatabase,codec:SyncBodyCodec,re
  for(const a of articles){if(changedArticleIds&&!changedArticleIds.has(a.articleId))continue;const key='article'+scope+'\0'+a.articleId;if(keys.has(key))continue;keys.add(key);records.push({kind:'article',id:a.articleId,signature:await hashJavaText(JSON.stringify(a),codec),changed:Math.max(a.updatedAt,a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt,a.deletedAt,a.readingPositionChangedAt),origin:a.sourceDeviceId||device});}
  for(const s of sources){const key='rssSource'+scope+'\0'+s.url;if(keys.has(key))continue;keys.add(key);records.push({kind:'rssSource',id:s.url,signature:await hashJavaText(JSON.stringify(s),codec),changed:Math.max(s.createdAt,s.updatedAt,s.deletedAt,s.sortOrder),origin:s.sourceDeviceId||device});}
  const stored=new Map<string,string>();
- for(const row of await querySyncPages(db,'SELECT kind,entity_id,signature FROM sync_snapshot_fingerprints ORDER BY kind,entity_id')){if(['article'+scope,'rssSource'+scope].includes(String(row.kind))&&(!changedArticleIds||String(row.kind)!=='article'+scope||changedArticleIds.has(String(row.entity_id))))stored.set(String(row.kind)+'\0'+String(row.entity_id),String(row.signature));}
+ const remember=(rows:Record<string,unknown>[])=>{for(const row of rows)stored.set(String(row.kind)+'\0'+String(row.entity_id),String(row.signature));};
+ if(changedArticleIds){
+  remember(await querySyncPages(db,'SELECT kind,entity_id,signature FROM sync_snapshot_fingerprints WHERE kind=? ORDER BY kind,entity_id',['rssSource'+scope]));
+  const ids=[...changedArticleIds];for(let at=0;at<ids.length;at+=500){const page=ids.slice(at,at+500);remember(await querySyncPages(db,'SELECT kind,entity_id,signature FROM sync_snapshot_fingerprints WHERE kind=? AND entity_id IN ('+page.map(()=>'?').join(',')+') ORDER BY kind,entity_id',['article'+scope,...page]));}
+ }else remember(await querySyncPages(db,'SELECT kind,entity_id,signature FROM sync_snapshot_fingerprints WHERE kind IN (?,?) ORDER BY kind,entity_id',['article'+scope,'rssSource'+scope]));
  let statements:{sql:string;params?:SqlParams}[]=[revisionGuard(revision)];
  const flush=async()=>{await db.transaction(statements);statements=[revisionGuard(revision)];};
  for(const r of records){if(!Number.isSafeInteger(r.changed)||!Number.isSafeInteger(now))throw new Error('Invalid snapshot clock');

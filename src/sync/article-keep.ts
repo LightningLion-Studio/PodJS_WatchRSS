@@ -7,6 +7,7 @@ export const ARTICLE_KEEP_SCHEMA=[
  `CREATE INDEX IF NOT EXISTS sync_article_keeps_url ON sync_article_keeps(url)`,
  `CREATE TABLE IF NOT EXISTS sync_article_keep_aliases(alias_id TEXT NOT NULL,canonical_id TEXT NOT NULL REFERENCES sync_article_keeps(article_id) ON DELETE CASCADE,url TEXT NOT NULL,PRIMARY KEY(alias_id,canonical_id))`,
  `CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_url ON sync_article_keep_aliases(url)`,
+ `CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_identity ON sync_article_keep_aliases(alias_id,url)`,
  `CREATE TABLE IF NOT EXISTS sync_article_keep_migration(id INTEGER PRIMARY KEY CHECK(id=1))`,
 ];
 /** Accepted live state is business evidence. It must outlive body-cache eviction,

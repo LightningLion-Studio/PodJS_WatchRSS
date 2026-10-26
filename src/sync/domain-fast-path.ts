@@ -10,7 +10,7 @@ export interface DomainVectorProvider {open(peer:string,profile:string):Promise<
 let windowSerial=0;
 export class SqlDomainVectorStore implements DomainVectorProvider {
  private definitions:SqlDomainDefinitions;
- constructor(private readonly db:SqlDatabase,private readonly codec:Pick<SyncBodyCodec,'sha256'>,private readonly external:()=>Promise<DomainExternalState>,private readonly options:{now?:()=>number;canSkipLibrary?:(peer:string)=>Promise<boolean>;encoders?:Record<SyncDomain,number>}={}){this.definitions=new SqlDomainDefinitions(db,codec,options.encoders??DOMAIN_ENCODERS);}
+ constructor(private readonly db:SqlDatabase,private readonly codec:Pick<SyncBodyCodec,'sha256'>,private readonly external:()=>Promise<DomainExternalState>,private readonly options:{now?:()=>number;canSkipLibrary?:(peer:string)=>Promise<boolean>;encoders?:Record<SyncDomain,number>;definitions?:SqlDomainDefinitions}={}){this.definitions=options.definitions??new SqlDomainDefinitions(db,codec,options.encoders??DOMAIN_ENCODERS);}
  /** A grant delivery receipt is the current complete account-domain root.
   * It does not publish, replace or authorize a frozen session proof. */
  async accountStateRoot(account:{scope:string;root:string}):Promise<string>{

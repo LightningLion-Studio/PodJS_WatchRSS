@@ -422,7 +422,7 @@ export async function getLibrarySyncRepository():Promise<SqlLibrarySessionReposi
 let domainVectorStore:Promise<SqlDomainVectorStore>|undefined;
 export function getDomainVectorStore():Promise<SqlDomainVectorStore>{return domainVectorStore??=(async()=>{
  await init();await memoRepository.initialize();await (await getLibrarySyncRepository()).prepareFastProjection();
- return new SqlDomainVectorStore(db,hostArticleBodyCodec,createDomainExternalState({account:()=>summaryAccountStore.read(),kvFingerprint:key=>kv.fingerprint(key),list:path=>fileChunks.list(path),stat:path=>fileChunks.stat(path),hash:value=>hashJavaText(value,hostArticleBodyCodec)}),{canSkipLibrary:async peer=>(await getLibrarySyncRepository()).canSkipLibrary(peer)});
+ return new SqlDomainVectorStore(db,hostArticleBodyCodec,createDomainExternalState({account:()=>summaryAccountStore.read(),kvFingerprint:key=>kv.fingerprint(key),list:path=>fileChunks.list(path),stat:path=>fileChunks.stat(path),hash:value=>hashJavaText(value,hostArticleBodyCodec)}),{definitions:(await getLibrarySyncRepository()).domainDefinitions(),canSkipLibrary:async peer=>(await getLibrarySyncRepository()).canSkipLibrary(peer)});
 })().catch(error=>{domainVectorStore=undefined;throw error;});}
 async function cleanupRemovedContent(content:RemovedLibraryContent):Promise<void>{
  const refreshing:Promise<void>[]=[];

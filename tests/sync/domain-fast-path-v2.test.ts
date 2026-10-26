@@ -127,3 +127,73 @@ test('R47.1 import witness uses URL indexes instead of scanning every chapter on
  const book=await f.db.query('EXPLAIN QUERY PLAN SELECT 1 FROM sync_book_aliases WHERE url IN (?,?) OR channel_url IN (?,?)',['old','new','old','new']);
  expect(book.map(r=>String(r.detail)).join(' ')).toContain('sync_fast_import_channel_url');
  }finally{f.sql.close();}});
+
+test('cold projection paging streams stable index order and preserves existing domain proofs',async()=>{
+ const f=await fixture();try{
+  const definitions=new SqlDomainDefinitions(f.db,{sha256:hash});await definitions.ensure();await new LibraryProjectionCache(f.db).initialize();const before=await definitions.ensure();
+  // Reproduce the previous installation without an ORDER BY index, then reopen.
+  await f.db.execute('DROP INDEX sync_projection_order');
+  await f.db.execute("INSERT INTO sync_projection_header VALUES('paging','g',0,0)");
+  await f.db.transaction(Array.from({length:120},(_,i)=>({sql:"INSERT INTO sync_projection_rows VALUES('paging','g',?,?,?,?,?)",params:[String(119-i),'u'+i,i%7,i,'x'.repeat(2200)]})));
+  const query="SELECT json,source_item FROM sync_projection_rows WHERE scope=? AND generation=? ORDER BY position,article_id LIMIT ? OFFSET ?",params=['paging','g',50,50];
+  const expected=await f.db.query(query,params);
+  expect(JSON.stringify(await f.db.query('EXPLAIN QUERY PLAN '+query,params))).toContain('TEMP B-TREE');
+  await new LibraryProjectionCache(f.db).initialize();
+  expect(JSON.stringify(await f.db.query('EXPLAIN QUERY PLAN '+query,params))).not.toContain('TEMP B-TREE');
+  expect(await f.db.query(query,params)).toEqual(expected);
+  const after=await definitions.ensure();expect(after.library.generation).toBe(before.library.generation);
+ }finally{f.sql.close();}
+});
+
+test('cold light index avoids full metadata transfer; requested bodies hydrate byte-identical metadata and clocks',async()=>{
+ const f=await libraryFixture();try{
+  const requests=f.window.fullArticleManifest.map(m=>({articleId:m.articleId,bodyHash:'',chunkIndexes:[],metadataOnly:false}));
+  const before=await f.repo.exportRequested(requests,'phone'),query=f.db.query.bind(f.db);let lightRows=0,fullRows=0,metadataQueries=0;
+  f.db.query=async(q,p,l)=>{const rows=await query(q,p,l);if(q.includes('l.json AS light_json'))for(const r of rows){if(r.light_json!=null)lightRows++;if(r.full_json!=null)fullRows++;}if(q.startsWith('SELECT article_id,json,source_item'))metadataQueries++;return rows;};
+  const cold=f.create(),window=await cold.prepareWindow('phone',f.window.toSeqInclusive);
+  expect(window.fullArticleManifest).toEqual(f.window.fullArticleManifest);expect(lightRows).toBe(2);expect(fullRows).toBe(0);
+  const after=await cold.exportRequested(requests,'phone');expect(after.map(p=>p.article)).toEqual(before.map(p=>p.article));expect(after.map(p=>p.manifest)).toEqual(before.map(p=>p.manifest));expect(after.map(p=>[...p.encodedBody!])).toEqual(before.map(p=>[...p.encodedBody!]));expect(metadataQueries).toBe(1);
+  const bytes=(await query('SELECT (SELECT SUM(length(json)) FROM sync_projection_rows) AS full_bytes,(SELECT SUM(length(json)) FROM sync_projection_light) AS light_bytes'))[0]!;expect(Number(bytes.light_bytes)).toBeLessThan(Number(bytes.full_bytes)*.55);
+ }finally{f.sql.close();}
+});
+test('old caches backfill light metadata without source/clock changes; corrupt light rows use the original cache',async()=>{
+ const f=await libraryFixture();try{
+  const source=await f.db.query('SELECT * FROM articles ORDER BY id'),revision=await f.db.query('SELECT * FROM sync_library_revision');await f.db.execute('DELETE FROM sync_projection_light');
+  expect((await f.create().prepareWindow('phone',f.window.toSeqInclusive)).fullArticleManifest).toEqual(f.window.fullArticleManifest);
+  expect((await f.db.query('SELECT COUNT(*) n FROM sync_projection_light'))[0]!.n).toBe(2);expect(await f.db.query('SELECT * FROM articles ORDER BY id')).toEqual(source);expect(await f.db.query('SELECT * FROM sync_library_revision')).toEqual(revision);
+  await f.db.execute("UPDATE sync_projection_light SET json='bad' WHERE article_id=?",[f.window.fullArticleManifest[0]!.articleId]);
+  expect((await f.create().prepareWindow('phone',f.window.toSeqInclusive)).fullArticleManifest).toEqual(f.window.fullArticleManifest);
+  await f.db.execute("UPDATE sync_projection_rows SET json='bad' WHERE article_id=?",[f.window.fullArticleManifest[0]!.articleId]);
+  expect((await f.db.query('SELECT COUNT(*) n FROM sync_projection_light'))[0]!.n).toBe(1);
+  expect((await f.create().prepareWindow('phone',f.window.toSeqInclusive)).fullArticleManifest).toEqual(f.window.fullArticleManifest);
+ }finally{f.sql.close();}
+});
+
+test('cold light metadata is completed before a cached-body metadata or reading edit is rebuilt',async()=>{
+ const f=await libraryFixture();try{
+  const cold=f.create();await cold.prepareWindow('phone',f.window.toSeqInclusive);
+  await f.db.execute("UPDATE articles SET title='Renamed',fetched_at=200 WHERE id=1");
+  await f.db.execute("INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash,state_json) VALUES(1,0.5,300,4,'body-position',NULL)");
+  const next=await cold.prepareWindow('phone',f.window.toSeqInclusive),old=f.window.fullArticleManifest.find(m=>m.articleId===next.articleManifest[0]?.articleId);
+  const request=next.fullArticleManifest.find(m=>m.readingPositionChangedAt===300)!;expect(request).toBeDefined();expect(request.bodyHash).toBe(old?.bodyHash??f.window.fullArticleManifest.find(m=>m.articleId===request.articleId)!.bodyHash);
+  const body=(await cold.exportRequested([{articleId:request.articleId,bodyHash:'',chunkIndexes:[],metadataOnly:false}],'phone'))[0]!;
+  expect(body.article.title).toBe('Renamed');expect(body.article.readingPositionChangedAt).toBe(300);expect(body.article.readingProgress).toBe(.5);expect(body.article.siteName).toBeDefined();expect(body.article.contentText).toBe('body one');
+ }finally{f.sql.close();}
+});
+
+
+test('cold projection uses the cooperative host scheduler; cancellation cannot publish a partial plan',async()=>{
+ const f=await libraryFixture();try{
+  const {prepareArticle}=await import('../../src/sync/article-export');
+  const base=(await f.repo.exportRequested([{articleId:f.window.fullArticleManifest[0]!.articleId,bodyHash:'',chunkIndexes:[],metadataOnly:false}],'phone'))[0]!;
+  const prepared=[];for(let i=0;i<65;i++)prepared.push(await prepareArticle({...base.article,articleId:await hash(new TextEncoder().encode('yield-'+i))},f.codec,true));
+  let turns=0;const cache=new LibraryProjectionCache(f.db,async()=>{turns++;});
+  const revision=Number((await f.db.query('SELECT revision FROM sync_library_revision'))[0]!.revision);
+  await cache.publish('yield-test',revision,prepared,new Map(prepared.map(p=>[p.article.articleId,1])));
+  const cold=new LibraryProjectionCache(f.db,async()=>{turns++;});
+  const plan=await cold.plan('yield-test',revision,false);expect(turns).toBe(2);expect(plan?.rows.map(r=>r.prepared.manifest)).toEqual(prepared.map(p=>p.manifest));
+  const before=await f.db.query('SELECT * FROM sync_projection_header ORDER BY scope');
+  const cancelled=new LibraryProjectionCache(f.db,async()=>{throw Error('cancelled');});expect(await cancelled.plan('yield-test',revision,false)).toBeUndefined();
+  expect(await f.db.query('SELECT * FROM sync_projection_header ORDER BY scope')).toEqual(before);
+ }finally{f.sql.close();}
+});
