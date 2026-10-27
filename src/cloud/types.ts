@@ -47,6 +47,10 @@ export interface CloudClientOptions {
   onUnauthorized?: ()=>Promise<void>;
   onEpochMismatch?: ()=>Promise<void>;
   refreshToken?: (force:boolean,rejectedAccessToken?:string)=>Promise<string>;
+  /** Release opt-in, independent of the account-scoped server kill switch. */
+  r48WriteV1?:boolean;
+  formatDiagnostic?:(value:string)=>void;
+  now?:()=>number;
 }
 
 export interface CloudMemberState { plan: string; active: boolean; writable: boolean; readable: boolean; quotaBytes: number; usedBytes: number; reservedBytes: number; retentionDays: number | null; readOnlyAt: string | null; deleteAfter: string | null; }
@@ -60,6 +64,6 @@ export interface CloudSnapshotHead { contentLayout?:3|null;totalSizeBytes?:numbe
 export interface CloudUploadObject {transport?:string;uploadUrl?:string;uploadMethod?:string;reservationId?:string; kind: string; sha256: string; sizeBytes: number; objectPath: string; signedUrl: string; token: string; tusEndpoint: string; bucketName: string; }
 export interface CloudSnapshotReservation { snapshotId: string; reservedBytes: number; missingObjects: CloudUploadObject[]; }
 export interface CloudChunkDescriptor { ciphertextSha256: string; ciphertextBytes: number; }
-export interface EncryptedCloudSnapshot { manifest: { snapshotId: string; sourceDeviceId: string; deviceSequence: number; keyVersion: number; parentHeads: Record<string, string>; observedHeads: Record<string, number>; allChunks: CloudChunkDescriptor[] }; encryptedManifest: Uint8Array; }
+export interface EncryptedCloudSnapshot { manifest: { features?:import('./compatibility').CloudFeatures;objects?:import('./codec').CloudObject[]; snapshotId: string; sourceDeviceId: string; deviceSequence: number; keyVersion: number; parentHeads: Record<string, string>; observedHeads: Record<string, number>; allChunks: CloudChunkDescriptor[] }; encryptedManifest: Uint8Array; }
 export interface RssInventoryItem { dedupKey?:string; identityLink?:string|null; audioUrl?:string|null;videoUrl?:string|null;publishedAt?:string|null; url: string; title: string; excerpt: string; contentHtml: string | null; contentText: string; imageUrl: string | null; guid: string; contentHash: string | null; }
 export interface RssInventory { sourceId?:string; url: string; title: string; description: string; siteUrl: string | null; imageUrl: string | null; items: RssInventoryItem[]; }

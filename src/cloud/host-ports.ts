@@ -76,7 +76,7 @@ function foundation(userId:string,deviceId:string,http:HttpTransport,options:Clo
  const invalidate=async()=>{await keys.clear(userId);await state.clear();await cache.clear(userId);};
  const client=new WatchCloudClient(http,{...options,onEpochMismatch:invalidate},crypto,guard);
  return {
-  crypto,v2Crypto,files,store,invalidate,codec:new WatchCloudCodec(crypto,guard),
+  crypto,v2Crypto,files,store,invalidate,codec:new WatchCloudCodec(crypto,guard,{writeV1:()=>client.r48WriteEnabled}),
   keys,cache,state,
   client,
   uploader:{upload:(target:CloudUploadObject,bytes:Uint8Array)=>client.uploadObject(target,bytes)},

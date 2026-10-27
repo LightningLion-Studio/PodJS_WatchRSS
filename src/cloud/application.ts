@@ -1,3 +1,4 @@
+import {appLogger} from '../logs/app-logger';
 import {CloudVisibility} from './visibility';
 import {CloudManualHandoff} from './manual-handoff';
 import {localTransferActivity} from '../sync/local-transfer';
@@ -32,7 +33,7 @@ function start(){
   if(!await initializeCloudHost()||disposed)return;
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
   const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
-  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,notifyLibraryChanged,execution);approvals=runtime.approvals;foreground();cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
+  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,notifyLibraryChanged,execution,{recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value)});approvals=runtime.approvals;foreground();cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   scheduler=new WatchCloudScheduler({sync:async(manual,mode)=>{const complete=manual?handoff?.captureCompletion():undefined;const result=await runtime!.service.syncNow(manual,mode);await complete?.(result);if(runtime!.service.status.retryable===false)await scheduler?.setUpgradeRequired(true);else if(result)await scheduler?.setUpgradeRequired(false);const retry=runtime!.service.status.retryAtMillis;if(retry)scheduler?.deferUntil(retry);return result;},now:Date.now,delay:(ms,fn)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return()=>timer.cancel();},scheduleWorker:()=>host<void>('cloud.schedule',{}),cancelWorker:()=>host<void>('cloud.cancel',{})},guard);
   handoff=new CloudManualHandoff(host,async()=>{const account=await summaryAccountStore.read();return account?cloudAccountIdentity(account):undefined;},mode=>scheduler!.manual(mode));
   cleanups.push(handoff.subscribe(()=>{for(const fn of handoffListeners)try{fn();}catch{}}));

@@ -1,3 +1,5 @@
+import {memoizeSmallDigest} from '../core/digest-cache';
+import {PRIVATE_OVERLAY_NAME,PrivateOverlayReadSet,decodePrivateOverlay} from './private-overlay';
 import type {CloudBookSnapshot,CloudBookPort} from '../books/cloud-port';
 import type {BookState,BookReading} from '../books/protocol';
 import {validateBook,validateBookReading} from '../books/protocol';
@@ -22,11 +24,13 @@ export interface CloudLibraryRepository extends Partial<CloudBookPort> {
   * applied cursor or ACK may be advanced until this entire operation succeeds. */
  mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void):Promise<number>;
 }
-export interface CloudLibraryCrypto {gzip(bytes:Uint8Array):Promise<Uint8Array>;gunzip(bytes:Uint8Array,max:number):Promise<Uint8Array>;sha256(bytes:Uint8Array):Promise<string>;stableId(url:string):Promise<string>}
+export interface CloudLibraryCrypto {yieldTurn?():Promise<void>;gzip(bytes:Uint8Array):Promise<Uint8Array>;gunzip(bytes:Uint8Array,max:number):Promise<Uint8Array>;sha256(bytes:Uint8Array):Promise<string>;stableId(url:string):Promise<string>}
 export const privateCloudBody=(a:Pick<ExportedArticle,'url'|'rssSourceUrl'>)=>isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim();
 const stateJson=(a:ExportedArticle)=>{const {contentHtml,contentText,cloudRssArticleId,cloudLegacyArticleIds,bodySourceDeviceId,...state}=a;return state;};
 export class WatchCloudLibraryAdapter {
- constructor(private repository:CloudLibraryRepository,private deviceId:string,private crypto:CloudLibraryCrypto,private guard:CloudGuard=cloudDisabled){}
+ private overlay:PrivateOverlayReadSet;
+ constructor(private repository:CloudLibraryRepository,private deviceId:string,private crypto:CloudLibraryCrypto,private guard:CloudGuard=cloudDisabled){this.crypto={...crypto,sha256:memoizeSmallDigest(bytes=>crypto.sha256(bytes),{beforeUse:()=>this.guard.require()})};this.overlay=new PrivateOverlayReadSet(this.crypto);}
+ async observePrivateOverlay(payload:Map<string,Uint8Array>,remote:string,descriptors:readonly CloudObject[],trustedApplied=false){this.guard.require();return this.overlay.observe(payload,remote,descriptors,trustedApplied);}
  async publicSources(){this.guard.require();return (await this.repository.cloudSnapshot(false)).sources.filter(s=>!s.deleted&&!isImportedContentUrl(s.url)&&/^https?:\/\//i.test(s.url)&&!isLocalOnlyRssSource(s.url));}
  private async articleIdentity(a:ExportedArticle){return a.cloudRssArticleId??tryRssArticleId({link:a.url,title:a.title,contentHash:a.contentHash},this.crypto.sha256);}
  private sourceIds=new Map<string,string>();
@@ -35,6 +39,21 @@ export class WatchCloudLibraryAdapter {
  private bookStates=new Map<string,BookState>();
  private bookReading=new Map<string,BookReading>();
  private cacheBooks(snapshot:CloudBookSnapshot|undefined){this.bookExport=snapshot;this.bookMappings.clear();this.bookStates.clear();this.bookReading.clear();if(!snapshot)return;for(const m of snapshot.mappings)for(const key of ['id:'+m.articleId,'url:'+m.url]){const rows=this.bookMappings.get(key)??[];rows.push(m);this.bookMappings.set(key,rows);}for(const b of snapshot.books)this.bookStates.set(b.bookId,b);for(const r of snapshot.reading)this.bookReading.set(r.bookId+':'+r.chapterIndex,r);}
+ // Exact public identity inputs only. This cache contains no reading/save
+ // values, pool-source bindings, account keys, receipts or persistent state.
+ private readingIdentityCache=new Map<string,{canonical:string;hash:string;aliases:string[];bytes:number}>();
+ private readingIdentityBytes=0;
+ private async readingIdentity(a:ExportedArticle){
+  this.guard.require();const key=JSON.stringify([a.cloudRssArticleId??null,a.articleId,a.url,a.rssSourceUrl,a.title,a.contentHash]);
+  const old=this.readingIdentityCache.get(key);if(old){this.readingIdentityCache.delete(key);this.readingIdentityCache.set(key,old);return old;}
+  const articleId=await this.articleIdentity(a);if(!articleId)return;
+  const hash=await this.crypto.sha256(utf8Encode(articleId)),sourceId=await rssSourceKey(a.rssSourceUrl!,this.crypto.sha256),aliases:string[]=[];
+  let web=false;try{canonicalRssUrl(a.url,false);web=true;}catch{}
+  if(web)for(const id of [await rssArticleId(a.url,this.crypto.sha256),await legacyWebArticleId(a.url,this.crypto.sha256)]){const alias=await this.crypto.sha256(utf8Encode(id));if(alias!==hash)aliases.push(sourceId+':'+alias);}
+  const canonical=sourceId+':'+hash,bytes=256+2*(key.length+canonical.length+hash.length+aliases.join('').length),value={canonical,hash,aliases,bytes};this.guard.require();
+  if(key.length<=4096&&bytes<=8*1024*1024){while(this.readingIdentityCache.size&&(this.readingIdentityCache.size>=8192||this.readingIdentityBytes+bytes>8*1024*1024)){const first=this.readingIdentityCache.keys().next().value!;this.readingIdentityBytes-=this.readingIdentityCache.get(first)!.bytes;this.readingIdentityCache.delete(first);}this.readingIdentityCache.set(key,value);this.readingIdentityBytes+=bytes;}
+  return value;
+ }
  private pendingReading=new Map<string,RecordDocument>();
  private readingAliases=new Map<string,string>();
  private retainedSources=new Map<string,Record<string,any>>();
@@ -66,6 +85,10 @@ export class WatchCloudLibraryAdapter {
   this.guard.require();let changed=0;const articles:ExportedArticle[]=[],sources:SyncedSource[]=[];
   for(const doc of documents.filter(d=>d.kind==='source')){const v=doc.value;if(v.sourceId)this.sourceIds.set(v.url,v.sourceId);}
   const books=documents.filter(d=>d.kind==='book').map(d=>d.value as BookState),reading=documents.filter(d=>d.kind==='book-reading').map(d=>d.value as BookReading);if(books.length||reading.length){if(!this.repository.mergeCloudBooks)throw Error('book_storage_unavailable');changed+=await this.repository.mergeCloudBooks(books,reading);}
+  // Imported books cannot materialize public RSS articles. Replaying a book-only
+  // page must not rescan/hash the public library for previously queued RSS state.
+  // Source/article pages and inventory/body restores still apply that state.
+  if(documents.length&&documents.every(d=>d.kind==='book'||d.kind==='book-reading'))return changed;
   for(const doc of documents){const v=doc.value;if(v.bookIndexRetired===true)continue;
    if(doc.kind==='source'){this.retainedSources.set(v.url,v);if(v.sourceId)this.sourceIds.set(v.url,v.sourceId);sources.push(...parseSources({rssSources:[v]}));}
    else if(doc.kind==='rss-state'){const id=v.sourceId+':'+v.articleIdHash,old=this.pendingReading.get(id);this.pendingReading.set(id,old?{kind:doc.kind,value:mergeReadingValue(old.value,v)}:doc);}
@@ -83,33 +106,34 @@ export class WatchCloudLibraryAdapter {
   const candidates=this.repository.cloudReadingCandidates?await this.repository.cloudReadingCandidates():(await this.repository.cloudSnapshot(false)).stateArticles,articles:ExportedArticle[]=[];
   for(const a of candidates){
    if(!a.rssSourceUrl||isImportedContentUrl(a.rssSourceUrl)||isLocalOnlyRssSource(a.rssSourceUrl))continue;
-   const articleId=await this.articleIdentity(a);if(!articleId)continue;
-   const hash=await this.crypto.sha256(utf8Encode(articleId)),sourceId=await rssSourceKey(a.rssSourceUrl,this.crypto.sha256),aliases:string[]=[];
-   // Only web URLs had a legacy URL projection. Opaque links must never all
-   // alias the backend's empty-input hash and inherit another entry's state.
-   let web=false;try{canonicalRssUrl(a.url,false);web=true;}catch{}
-   if(web)for(const id of [await rssArticleId(a.url,this.crypto.sha256),await legacyWebArticleId(a.url,this.crypto.sha256)]){
-    const alias=await this.crypto.sha256(utf8Encode(id));if(alias!==hash){aliases.push(sourceId+':'+alias);this.readingAliases.set(sourceId+':'+alias,sourceId+':'+hash);}
-   }
+   const identity=await this.readingIdentity(a);if(!identity)continue;
+   for(const alias of identity.aliases)this.readingAliases.set(alias,identity.canonical);
    let merged:Record<string,any>|undefined;
-   for(const key of [sourceId+':'+hash,this.sourceIds.get(a.rssSourceUrl)+':'+hash,...aliases]){const remote=this.pendingReading.get(key);if(remote)merged=merged?mergeReadingValue(merged,remote.value):remote.value;}
-   if(merged)articles.push({...a,...mergeReadingValue(a,merged),articleId:a.articleId,contentHtml:null,contentText:''});
+   // Pool IDs can change independently of an immutable article identity.
+   for(const key of [identity.canonical,this.sourceIds.get(a.rssSourceUrl)+':'+identity.hash,...identity.aliases]){const remote=this.pendingReading.get(key);if(remote)merged=merged?mergeReadingValue(merged,remote.value):remote.value;}
+   if(merged){const next=mergeReadingValue(a,merged);
+    // Retain pending records/aliases for future inventory materialization, but
+    // do not replay every already-applied reading/save clock through the body
+    // receiver again for each incoming record page.
+    if(['isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder'].some(k=>(a as unknown as Record<string,unknown>)[k]!==next[k]))articles.push({...a,...next,articleId:a.articleId,contentHtml:null,contentText:''});
+   }
   }
   return articles.length?this.repository.mergeCloud([],articles,'cloud-records'):0;
  }
- async exportPayloads(full:boolean):Promise<{objects:LogicalObject[];fingerprint:string;articleIds?:string[];bookIds?:string[];removedArticleIds?:string[];removedObjectNames?:string[];pendingPrivateArticles?:number}>{
+ async exportPayloads(full:boolean):Promise<{objects:LogicalObject[];fingerprint:string;articleIds?:string[];bookIds?:string[];removedArticleIds?:string[];removedArticleUrls?:string[];removedObjectNames?:string[];pendingPrivateArticles?:number}>{
   this.guard.require();if(!full)return {objects:[],fingerprint:''};const s=await this.repository.cloudSnapshot(true);const pending=new Set(s.pendingPrivateArticleIds??(s.pendingPrivateBodies?s.articles.filter(a=>!a.contentText.trim()&&!a.contentHtml?.trim()).map(a=>a.articleId):[]));
-  const rows=s.articles.filter(a=>!pending.has(a.articleId)&&!a.deleted&&(privateCloudBody(a)||a.favoriteSaved||a.watchLaterSaved)).sort((a,b)=>a.articleId<b.articleId?-1:a.articleId>b.articleId?1:0);
+  const retired=new Set(s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId));for(const id of retired)pending.delete(id);
+  const rows=s.articles.filter(a=>!retired.has(a.articleId)&&!pending.has(a.articleId)&&!a.deleted&&(privateCloudBody(a)||a.favoriteSaved||a.watchLaterSaved)).sort((a,b)=>a.articleId<b.articleId?-1:a.articleId>b.articleId?1:0);
   const entries=new Map<string,Uint8Array>(),metadata:Record<string,any>[]=[],fingerprints:any[]=[];
   for(const a of rows){const stem='bodies/'+await this.crypto.sha256(utf8Encode(a.articleId)),text=utf8Encode(a.contentText),html=a.contentHtml===null?undefined:utf8Encode(a.contentHtml);entries.set(stem+'.txt',text);if(html)entries.set(stem+'.html',html);
    const m:Record<string,any>={...stateJson(a),sourceDeviceId:a.bodySourceDeviceId??a.sourceDeviceId,updatedAt:a.importedAt,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false,contentTextEntry:stem+'.txt',contentHtmlEntry:html?stem+'.html':null};metadata.push(m);
    // Reading/reordering clocks are records state, not a reason to republish bodies.
-   fingerprints.push([a.articleId,a.url,a.title,a.siteName,a.excerpt,a.imageUrl,a.rssSourceUrl,a.rssSourceTitle,a.contentHash,a.importedAt,a.independentSaved,a.favoriteSaved,a.watchLaterSaved,await this.crypto.sha256(text),html?await this.crypto.sha256(html):null]);
+   fingerprints.push([a.articleId,a.url,a.title,a.siteName,a.excerpt,a.imageUrl,a.rssSourceUrl,a.rssSourceTitle,a.contentHash,a.importedAt,await this.crypto.sha256(text),html?await this.crypto.sha256(html):null]);
   }
   const archive=new Map<string,Uint8Array>();archive.set('manifest.json',utf8Encode(canonical({format:'watchrss-library-backup',version:3,cloudContentOnly:true,exportedAt:Math.max(1,...metadata.map(a=>a.importedAt)),sourceCount:0,articleCount:rows.length,savedItemCount:0,readerPresetCount:0,readerFontCount:0,readerBackgroundCount:0,appMetaCount:0})));for(const name of ['sources.json','saved_items.json','app_meta.json'])archive.set(name,utf8Encode('[]'));archive.set('articles.json',utf8Encode(canonical(metadata)));for(const e of entries)archive.set(...e);
   const objects:LogicalObject[]=rows.length?[{name:'private-library.wrss',bytes:writeWrss(archive),compress:false}]:[],bookIds:string[]=[],removedObjectNames:string[]=[];let missingBooks=0;
   for(const book of (await this.repository.cloudBooks?.())?.books??[]){if(book.deleted){removedObjectNames.push('books/'+book.bookId+'.jsonl');continue;}fingerprints.push(['book',book.bookId,book.fingerprint]);let bytes:Uint8Array|undefined;try{bytes=await this.repository.cloudBookBody?.(book.bookId);}catch{missingBooks++;continue;}if(!bytes){missingBooks++;continue;}const header=parseBookHeader(utf8Decode(bytes.subarray(0,bytes.indexOf(10))));const privateBook={bookId:book.bookId,fingerprint:book.fingerprint,title:header.title,chapterCount:header.chapterCount,sourceUrl:header.sourceUrl,kind:header.kind,packagePath:'books/'+book.bookId+'.jsonl'};objects.push({name:privateBook.packagePath,bytes,privateBook,contentSha256:await this.crypto.sha256(bytes)});bookIds.push(book.bookId);}
-  return {objects,removedObjectNames,removedArticleIds:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId),fingerprint:await this.crypto.sha256(utf8Encode(canonical(fingerprints))),articleIds:[...new Set(rows.flatMap(a=>[a.articleId,...(a.cloudLegacyArticleIds??[])]))],bookIds,pendingPrivateArticles:pending.size+missingBooks};
+  return {objects,removedObjectNames,removedArticleUrls:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.url),removedArticleIds:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId),fingerprint:await this.crypto.sha256(utf8Encode(canonical(fingerprints))),articleIds:[...new Set(rows.flatMap(a=>[a.articleId,...(a.cloudLegacyArticleIds??[])]))],bookIds,pendingPrivateArticles:pending.size+missingBooks};
  }
  private async decode(bytes:Uint8Array,state:boolean):Promise<{sources:SyncedSource[];articles:ExportedArticle[]}>{
   const root=JSON.parse(utf8Decode(bytes));
@@ -139,10 +163,13 @@ export class WatchCloudLibraryAdapter {
   for(const [name,state]of [['library-sync.json',false],['rss-state.json',true]] as const){const bytes=payload.get(name);if(bytes){const value=await this.decode(bytes,state);value.articles=value.articles.map(a=>{const known=currentArticles.get(a.articleId);return known&&known.contentHash!==a.contentHash?{...a,contentHash:known.contentHash,contentHtml:null,contentText:''}:a;});decoded.push(value);}}
   const metadata=(raw:any)=>{if(!raw||typeof raw.articleId!=='string'||!raw.articleId.trim()||typeof raw.url!=='string'||!raw.url.trim()||typeof raw.title!=='string'||!raw.title.trim()||typeof raw.contentHash!=='string'||!raw.contentHash.trim())throw Error('cloud_private_metadata_missing');const a=parseChunkedArticles({articles:[{...Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null)),body:{}}]})[0]?.article;if(!a)throw Error('cloud_private_metadata_missing');return a;};
   const keepReading=(a:ReturnType<typeof metadata>)=>{const base=currentArticles.get(a.articleId);return base&&!base.deleted?{...a,...mergeReadingValue(a,base)} as typeof a:a;};
-  const archive=payload.get('private-library.wrss');if(archive){let zip:Map<string,Uint8Array>|undefined,rows:any[]=[];
+  const overlayBytes=payload.get(PRIVATE_OVERLAY_NAME);if(overlayBytes)pending+=(await this.observePrivateOverlay(payload,remote,descriptors)).pending;
+  const overlays=overlayBytes?(await decodePrivateOverlay(overlayBytes,this.crypto.sha256)).entries:[];
+  const archiveNames=['private-library.wrss',...overlays.filter(e=>e.kind==='article'&&e.object).map(e=>e.object!)];
+  for(const archiveName of archiveNames){const archive=payload.get(archiveName);if(archive){let zip:Map<string,Uint8Array>|undefined,rows:any[]=[];
    try{zip=await readWrss(archive,(b,max)=>this.crypto.gunzip(b,max));const manifest=JSON.parse(utf8Decode(zip.get('manifest.json')??new Uint8Array()));if(manifest.format!=='watchrss-library-backup'||![1,2,3].includes(manifest.version))throw Error('cloud_archive_invalid');rows=JSON.parse(utf8Decode(zip.get('articles.json')??new Uint8Array()));if(!Array.isArray(rows)||rows.length>100000)throw Error('cloud_archive_invalid');}catch(error){if(error instanceof SyntaxError||String(error).includes('cloud_archive_invalid'))lost();else retry();zip=undefined;}
-   if(zip?.has('books.json')){try{const directory=JSON.parse(utf8Decode(zip.get('books.json')!));if(!Array.isArray(directory)||directory.length>100000)throw Error('invalid books directory');for(const descriptor of directory)bookBodies.push({descriptor,bytes:zip.get(descriptor.packagePath)});}catch{lost();}}
-   const articles:ExportedArticle[]=[];if(zip)for(const raw of rows){if(raw?.deleted)continue;let a:ReturnType<typeof metadata>;
+   if(archiveName==='private-library.wrss'&&zip?.has('books.json')){try{const directory=JSON.parse(utf8Decode(zip.get('books.json')!));if(!Array.isArray(directory)||directory.length>100000)throw Error('invalid books directory');for(const descriptor of directory)bookBodies.push({descriptor,bytes:zip.get(descriptor.packagePath)});}catch{lost();}}
+   const articles:ExportedArticle[]=[];if(zip)for(const raw of rows){if(raw?.deleted||!this.overlay.allow('article',raw?.articleId,remote,archiveName==='private-library.wrss'?undefined:archiveName))continue;let a:ReturnType<typeof metadata>;
     try{const base=currentArticles.get(raw?.articleId);a=metadata(raw?.url?raw:base&&base.contentHash===raw?.contentHash&&!base.deleted?base:raw);}catch{lost();continue;}
     const stem='bodies/'+await this.crypto.sha256(utf8Encode(a.articleId));
     if(raw.contentTextEntry!==stem+'.txt'||raw.contentHtmlEntry!=null&&raw.contentHtmlEntry!==stem+'.html'){lost();continue;}
@@ -150,18 +177,18 @@ export class WatchCloudLibraryAdapter {
     // A successfully authenticated immutable ZIP cannot grow missing entries.
     if(!text||raw.contentHtmlEntry&&!html){lost();continue;}articles.push({...keepReading(a),contentText:utf8Decode(text),contentHtml:html?utf8Decode(html):null});
    }decoded.push({sources:[],articles});
-  }
+  }}
   const readers:ExportedArticle[]=[],seen=new Set<string>();
   for(const object of descriptors.filter(o=>o.name.startsWith('reader/'))){seen.add(object.name);let raw=object.privateArticle;
    if(!raw)for(const a of currentArticles.values())if(!a.deleted&&object.name===`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`){raw={...a};break;}
    let a:ReturnType<typeof metadata>;try{a=metadata(raw);}catch{lost();continue;}
    const name=`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`;
-   if(name!==object.name){lost();continue;}const body=payload.get(name);if(!body){retry();continue;}
+   if(name!==object.name){lost();continue;}if(!this.overlay.allow('article',a.articleId,remote))continue;const body=payload.get(name);if(!body){retry();continue;}
    if(object.contentSha256&&await this.crypto.sha256(body)!==object.contentSha256){lost();continue;}
    readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});
   }
-  for(const [name,body]of payload)if(name.startsWith('reader/')&&!seen.has(name)){let matched=false;for(const a of currentArticles.values())if(!a.deleted&&name===`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`){readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});matched=true;break;}if(!matched)lost();}
-  for(const {descriptor:d,bytes} of bookBodies){if(!d||!/^([a-f0-9]{64})$/.test(d.bookId)||d.packagePath!=='books/'+d.bookId+'.jsonl'||!Number.isSafeInteger(d.chapterCount)||d.chapterCount<1){lost();continue;}if(!bytes){retry();continue;}if(!this.repository.receiveCloudBook){retry();continue;}try{const header=parseBookHeader(utf8Decode(bytes.subarray(0,bytes.indexOf(10))));if(header.chapterCount!==d.chapterCount)throw Error('book_count_mismatch');await validateBook({bookId:d.bookId,fingerprint:d.fingerprint,title:d.title,chapterCount:d.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:0,sourceDeviceId:remote,sourceUrl:d.sourceUrl,kind:d.kind},this.crypto.sha256);bookChanged+=await this.repository.receiveCloudBook(d.bookId,bytes);}catch(error){if(/book_sync_invalid|fingerprint|identity|directory|count_mismatch|invalid_book|JSON|SyntaxError/.test(String(error)))lost();else retry();}}
+  for(const [name,body]of payload)if(name.startsWith('reader/')&&!seen.has(name)){let matched=false;for(const a of currentArticles.values())if(!a.deleted&&this.overlay.allow('article',a.articleId,remote)&&name===`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`){readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});matched=true;break;}if(!matched)lost();}
+  for(const {descriptor:d,bytes} of bookBodies){if(d?.bookId&&!this.overlay.allow('book',d.bookId,remote,overlays.some(e=>e.kind==='book'&&e.id===d.bookId)?d.packagePath:undefined))continue;if(!d||!/^([a-f0-9]{64})$/.test(d.bookId)||d.packagePath!=='books/'+d.bookId+'.jsonl'||!Number.isSafeInteger(d.chapterCount)||d.chapterCount<1){lost();continue;}if(!bytes){retry();continue;}if(!this.repository.receiveCloudBook){retry();continue;}try{const header=parseBookHeader(utf8Decode(bytes.subarray(0,bytes.indexOf(10))));if(header.chapterCount!==d.chapterCount)throw Error('book_count_mismatch');await validateBook({bookId:d.bookId,fingerprint:d.fingerprint,title:d.title,chapterCount:d.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:0,sourceDeviceId:remote,sourceUrl:d.sourceUrl,kind:d.kind},this.crypto.sha256);bookChanged+=await this.repository.receiveCloudBook(d.bookId,bytes);}catch(error){if(/book_sync_invalid|fingerprint|identity|directory|count_mismatch|invalid_book|JSON|SyntaxError/.test(String(error)))lost();else retry();}}
   if(readers.length)decoded.push({sources:[],articles:readers});let changed=bookChanged;for(const value of decoded)changed+=await this.repository.mergeCloud(value.sources,value.articles,remote);changed+=await this.applyReadingStates();return {changed,pending,abandoned,warnings};
  }
  async mergeInventory(inventory:RssInventory){

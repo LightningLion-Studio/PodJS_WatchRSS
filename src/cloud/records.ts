@@ -13,6 +13,7 @@ export interface RecordRow {recordId:string;revision:string;envelope:RecordEnvel
 export interface RecordPage extends CloudTrust {formatVersion:0|1;items:RecordRow[];cursor:string;headRevision:string;hasMore:boolean}
 export interface RecordWrite {recordId:string;expectedRevision:string;envelope:RecordEnvelope;tombstone:boolean}
 export interface RecordPullMetrics {decryptions:number;retired:number;elapsedMillis:number;outcome:'complete'|'paused'|'failed'}
+export interface RecordReplayProgress {event:'records-replay';stage:'decoding'|'merging'|'applied';batchRows:number;documents:number;keyMillis:number;decodeMillis:number;hashMillis:number;applyMillis:number;elapsedMillis:number}
 export interface RecordPorts {
  userId:string;epoch:string;anchorVersion:number;version:number;
  key(version:number):Promise<Uint8Array|undefined>;
@@ -23,6 +24,7 @@ export interface RecordPorts {
  checkpoint?(value:string):Promise<void>;
  /** Numeric work counters only; never include record IDs, keys or plaintext. */
  report?(metrics:RecordPullMetrics):void;
+ progress?(metrics:RecordReplayProgress):void;
  get(after:string):Promise<RecordPage>;push(items:RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>;
  refreshKeys?():Promise<void>;current():Promise<void>;assertUpload():Promise<void>;
  bookReplacement?(legacy:RecordDocument):Promise<{book:RecordDocument;reading?:RecordDocument}|undefined>;
@@ -83,7 +85,7 @@ export class WatchCloudRecords {
    if(s.epoch===p.epoch)this.state=s;
   }catch{/* Cache loss requires cursor zero, never a library reset. */}
   let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await p.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
-  const process=async(rows:RecordRow[])=>{await p.current();const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={},retiredIds=new Set<string>();
+  const process=async(rows:RecordRow[])=>{await p.current();const started=Date.now(),times={keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:0};const timed=async<T>(name:keyof typeof times,run:()=>Promise<T>)=>{const at=Date.now();try{return await run();}finally{times[name]+=Math.max(0,Date.now()-at);}};const progress=(stage:RecordReplayProgress['stage'],documents:number)=>{try{p.progress?.({event:'records-replay',stage,batchRows:rows.length,documents,...times,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};progress('decoding',0);const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={},retiredIds=new Set<string>();
    for(const row of rows){const old=this.state.records[row.recordId];if(old&&cmp(old.revision,row.revision)>0)continue;
     // This exact tombstone revision was authenticated and acknowledged earlier.
     // Compact old-version caches too: they retained every retired ciphertext.
@@ -91,15 +93,15 @@ export class WatchCloudRecords {
     // ciphertext (no acknowledgement) must still authenticate below.
     if(row.tombstone&&old?.revision===row.revision&&!this.state.protectedRows?.[row.recordId]){delete this.state.rows[row.recordId];this.decoded.delete(row.recordId);this.retired++;continue;}
     await p.current();let key:Uint8Array|undefined;
-    try{key=await p.key(row.envelope.keyVersion);if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();key=await p.key(row.envelope.keyVersion);}if(!key)throw Error('missing_key_version');const value=await this.codec.decode(key,anchor,p.userId,row);check(cloudCompatibility(value.doc).opaque||!value.doc.value.deleted||row.tombstone);this.decoded.set(row.recordId,{row,...value});delete this.state.quarantinedRows?.[row.recordId];if(cloudCompatibility(value.doc).readOnly)(this.state.protectedRows??={})[row.recordId]=true;else delete this.state.protectedRows?.[row.recordId];if(cloudCompatibility(value.doc).opaque){acks[row.recordId]={revision:row.revision,hash:await this.codec.hash(value.doc)};this.state.rows[row.recordId]=row;continue;}const retired=value.doc.value.bookIndexRetired===true||row.tombstone&&!value.doc.value.deleted;
+    try{key=await timed('keyMillis',()=>p.key(row.envelope.keyVersion));if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();key=await timed('keyMillis',()=>p.key(row.envelope.keyVersion));}if(!key)throw Error('missing_key_version');const value=await timed('decodeMillis',()=>this.codec.decode(key!,anchor,p.userId,row));check(cloudCompatibility(value.doc).opaque||!value.doc.value.deleted||row.tombstone);this.decoded.set(row.recordId,{row,...value});delete this.state.quarantinedRows?.[row.recordId];if(cloudCompatibility(value.doc).readOnly)(this.state.protectedRows??={})[row.recordId]=true;else delete this.state.protectedRows?.[row.recordId];if(cloudCompatibility(value.doc).opaque){acks[row.recordId]={revision:row.revision,hash:await timed('hashMillis',()=>this.codec.hash(value.doc))};this.state.rows[row.recordId]=row;continue;}const retired=value.doc.value.bookIndexRetired===true||row.tombstone&&!value.doc.value.deleted;
      const v=value.doc.value,publicIndex=value.doc.kind==='article'&&publicArticleIndex(v);
      if(!retired&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind)&&(!old||old.revision!==row.revision||value.doc.kind!=='article'||publicIndex))docs.push(value.doc);
-     acks[row.recordId]={revision:row.revision,hash:await this.codec.hash(value.doc)};
+     acks[row.recordId]={revision:row.revision,hash:await timed('hashMillis',()=>this.codec.hash(value.doc))};
      if(row.tombstone&&!cloudCompatibility(value.doc).readOnly&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind))retiredIds.add(row.recordId);
     }catch(error){if(String(error).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE)||/cloud_sync_suspended|cloud_operation_superseded|library_epoch_mismatch|账号|client_upgrade_required|commitment|device_attestation/.test(String(error)))throw error;this.decoded.delete(row.recordId);if(String(error).includes('cloud_record_format_depth'))(this.state.quarantinedRows??={})[row.recordId]=true;/* Retain original ciphertext for replay. A poisoned row cannot disable old validated keys. */}finally{key?.fill(0);}
     this.state.rows[row.recordId]=row;
    }
-   if(docs.length)changed+=await p.apply(docs);await p.current();Object.assign(this.state.records,acks);
+   progress('merging',docs.length);if(docs.length)changed+=await timed('applyMillis',()=>p.apply(docs));await p.current();Object.assign(this.state.records,acks);progress('applied',docs.length);
    // Authenticated tombstones have been applied. Keep CAS revisions/hashes, but
    // do not decrypt and reapply thousands of retired RSS indexes on every run.
    for(const id of retiredIds){delete this.state.rows[id];this.decoded.delete(id);}
@@ -120,7 +122,11 @@ export class WatchCloudRecords {
   }catch(error){if(String(error).includes('cloud_sync_suspended')&&p.checkpoint)await p.checkpoint(JSON.stringify(this.state));throw error;}finally{anchor.fill(0);}
  }
  async reapply(){await this.p.current();return this.p.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
- async flush(completedPrivateArticleIds:readonly string[]=[],completedBookIds:readonly string[]=[]){
+ flush(completedPrivateArticleIds:readonly string[]=[],completedBookIds:readonly string[]=[]){return this.flushRecords(completedPrivateArticleIds,completedBookIds,false);}
+ /** Public RSS interactions commit independently of slow private body restore.
+  * This lane never publishes private metadata or retires any legacy record. */
+ flushInteractions(){return this.flushRecords([],[],true);}
+ private async flushRecords(completedPrivateArticleIds:readonly string[],completedBookIds:readonly string[],interactionsOnly:boolean){
   const p=this.p;await p.current();await p.assertUpload();const anchor=await p.key(p.anchorVersion),key=await p.key(p.version);if(!anchor||!key){anchor?.fill(0);key?.fill(0);throw Error('missing_key_version');}
   let written=0;const hashById=new Map<string,string>();let batch:RecordWrite[]=[];
   const flush=async()=>{if(!batch.length)return;await p.current();await p.assertUpload();const response=await p.push(batch);await p.current();check(response.formatVersion===1&&response.items?.length===batch.length);const expected=new Map(batch.map(r=>[r.recordId,r])),seen=new Set<string>();
@@ -128,7 +134,8 @@ export class WatchCloudRecords {
   const add=async(id:string,doc:RecordDocument,tombstone=!!doc.value.deleted,original?:RecordRow)=>{const hash=await this.codec.hash(doc),old=this.state.records[id],basis=this.decoded.get(id)?.doc;if(old?.hash===hash&&!original){delete this.state.pendingEdits?.[id];return;}if((basis&&cloudCompatibility(basis).readOnly)||(!basis&&this.state.rows[id])){(this.state.pendingEdits??={})[id]=true;return;}const envelope=original?.envelope??await this.codec.encode(key,p.userId,id,p.version,doc,basis??doc);delete this.state.pendingEdits?.[id];const item={recordId:id,expectedRevision:original?.revision??old?.revision??'0',envelope,tombstone};
    if(batch.length&&(batch.length>=50||utf8Encode(JSON.stringify({formatVersion:1,items:[...batch,item]})).length>1048576))await flush();hashById.set(id,hash);batch.push(item);};
   try{
-   const documents=await p.export();for(const deleting of [true,false]){for(const doc of documents)if(!!doc.value.deleted===deleting)await add(await this.codec.id(anchor,p.userId,doc),doc);await flush();}
+   const documents=(await p.export()).filter(doc=>!interactionsOnly||doc.kind==='rss-state');for(const deleting of [true,false]){for(const doc of documents)if(!!doc.value.deleted===deleting)await add(await this.codec.id(anchor,p.userId,doc),doc);await flush();}
+   if(interactionsOnly){await this.save();return written;}
    // R3/S8: obsolete public indexes become entity tombstones only AFTER new states commit.
    const completed=new Set(completedPrivateArticleIds);
    const interactions=new Map(documents.filter(d=>d.kind==='rss-state').map(d=>[d.value.sourceId+':'+d.value.articleIdHash,d]));

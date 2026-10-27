@@ -131,3 +131,25 @@ test('metrics prove acknowledged tombstones skip decrypt while a new row still a
  const cached=f.state()!;cached.rows[row.recordId]=row;f.ports.readState=async()=>JSON.stringify(cached);
  await f.records().pull();expect(metrics[0]).toMatchObject({decryptions:0,retired:1,outcome:'complete'});
 });
+
+test('interaction-only publication commits RSS state without publishing private metadata or retiring indexes',async()=>{
+ const f=env(),url='https://feed.example/rss',sourceId=await rssSourceKey(url,crypto.sha256),link='https://private.example/early';
+ const old=await f.put({kind:'article',value:{...doc('early').value,url:link,rssSourceUrl:url,isRead:true,readingPositionChangedAt:8}});
+ const state={kind:'rss-state',value:{sourceId,articleIdHash:await crypto.sha256(utf8Encode(await rssArticleId(link,crypto.sha256))),isRead:true,readingPositionChangedAt:9,readingProgress:.5}};
+ f.export([doc('private-body-metadata'),state]);const r=f.records();await r.pull();expect(await r.flushInteractions()).toBe(1);
+ expect(f.posts).toHaveLength(1);expect((await codec.decode(key,key,'user',{...f.posts[0],revision:'2'})).doc.kind).toBe('rss-state');expect(f.rows.get(old.recordId)!.tombstone).toBe(false);
+ expect(await r.flushInteractions()).toBe(0);expect(f.posts).toHaveLength(1);
+ await r.flush();expect(f.rows.get(old.recordId)!.tombstone).toBe(true);expect(f.posts.some(p=>p.recordId!==old.recordId&&p.recordId!==f.posts[0].recordId)).toBe(true);
+});
+test('failed early RSS publication remains retryable and account fencing still blocks it',async()=>{
+ const f=env();f.export([{kind:'rss-state',value:{sourceId:'s',articleIdHash:'a'.repeat(64),isRead:true,readingPositionChangedAt:2}}]);const r=f.records();await r.pull();f.failPush('cloud_write_failed');
+ await expect(r.flushInteractions()).rejects.toThrow('cloud_write_failed');expect(Object.keys(f.state().records)).toHaveLength(0);
+ f.failPush('');expect(await r.flushInteractions()).toBe(1);expect(f.posts).toHaveLength(1);f.invalidate();await expect(r.flushInteractions()).rejects.toThrow('账号已变更');expect(f.posts).toHaveLength(1);
+});
+
+test('record replay timings are numeric and diagnostic sink failure cannot affect durable ACK',async()=>{
+ const f=env();await f.put(doc('never-log-private-id'));const progress:any[]=[];f.ports.progress=metrics=>{progress.push(metrics);if(metrics.stage==='applied')throw Error('diagnostic unavailable');};expect(await f.records().pull()).toBe(1);expect(f.state().cursor).toBe('1');expect(progress.map(v=>v.stage)).toEqual(['decoding','merging','applied']);expect(JSON.stringify(progress)).not.toContain('private-id');expect(progress.every(v=>Object.entries(v).every(([k,value])=>['event','stage'].includes(k)||typeof value==='number'&&value>=0))).toBe(true);
+});
+test('failed record apply emits no applied timing and never records an ACK',async()=>{
+ const f=env();await f.put(doc('failed'));const stages:string[]=[];f.ports.progress=value=>stages.push(value.stage);f.failApply(true);await expect(f.records().pull()).rejects.toThrow('db failure');expect(stages).toEqual(['decoding','merging']);expect(f.state()).toBeUndefined();
+});

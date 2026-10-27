@@ -19,6 +19,6 @@ export async function dbFixture(){const sql=new Database(':memory:');sql.exec('P
  const exec=(s:{sql:string;params?:readonly unknown[]})=>{sql.query(s.sql).run(...(s.params??[]) as any[]);if(fail&&s.sql.includes('INSERT INTO article_reading_state'))throw Error('disk fault');};
  const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as any,execute:async(q,p=[])=>{exec({sql:q,params:p});},transaction:async ss=>{sql.transaction(()=>ss.forEach(exec))();},transactionChanges:async ss=>sql.transaction(()=>ss.map(s=>{exec(s);return (sql.query('SELECT changes() AS n').get() as any).n;}))()};
  await initializeSchema(db,{seedBuiltinChannels:false});await new SyncSavedStateStore(db).initializeDevice('watch');
- const repo=new SqlLibrarySessionRepository(db,{codec,text:{parseUri,htmlText:async s=>s.replace(/<[^>]*>/g,'')},uri:{parseUri,parseAndroid:parseUri},files:{storeText:async(_,v)=>v,hydrate:async v=>v},migrateReading:async()=>{},cleanupRemovedContent:async()=>{},now:()=>100});
- const adapter=new WatchCloudLibraryAdapter(repo,'watch',cloudCrypto,enabled);return {db,sql,repo,adapter,fail:()=>{fail=true;}};
+ const ports:ConstructorParameters<typeof SqlLibrarySessionRepository>[1]={codec,text:{parseUri,htmlText:async s=>s.replace(/<[^>]*>/g,'')},uri:{parseUri,parseAndroid:parseUri},files:{storeText:async(_,v)=>v,hydrate:async v=>v},migrateReading:async()=>{},cleanupRemovedContent:async()=>{},now:()=>100};const repo=new SqlLibrarySessionRepository(db,ports);
+ const adapter=new WatchCloudLibraryAdapter(repo,'watch',cloudCrypto,enabled);return {db,sql,repo,adapter,ports,fail:()=>{fail=true;}};
 }

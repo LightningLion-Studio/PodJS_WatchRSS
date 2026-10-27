@@ -1,3 +1,4 @@
+import {PRIVATE_OVERLAY_FEATURE,PRIVATE_OVERLAY_NAME,planPrivateOverlay} from './private-overlay';
 import {mergeCloudArchive,retireCloudArchive} from './archive-compat';
 import {rawJsonUnknownBytes,parseRawJsonAsync,type RawJsonNode} from '@podjs/framework/json-raw';
 import {readWrss} from './wrss';
@@ -19,7 +20,9 @@ export interface CloudChunk {plaintextSha256:string;ciphertextSha256:string;plai
 export interface CloudObject {features?:CloudFeatures;entryRef?:{object:string;entryPath:string;encoding:'identity'};objectKeyEnvelope?:{version:1;scope:string;saltBase64:string;nonceBase64:string;ciphertextBase64:string};privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;encoding:'gzip-chunks-v1'|'gzip'|'identity';originalBytes:number;encodedBytes:number;chunks:CloudChunk[];readerKeyEnvelope?:{version:number;saltBase64:string;nonceBase64:string;ciphertextBase64:string;scope?:string};}
 export interface CloudManifest {features?:CloudFeatures;format:'watchrss-cloud-snapshot';schemaVersion:2;snapshotId:string;sourceDeviceId:string;deviceSequence:number;keyVersion:number;createdAtMillis:number;parentHeads:Record<string,string>;observedHeads:Record<string,number>;objects:CloudObject[];settings:Record<string,unknown>;credentialEnvelopes:Record<string,never>;}
 export interface LogicalObject {privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;bytes:Uint8Array;compress?:boolean;}
-export interface SnapshotInput {removedObjectNames?:readonly string[];readPreviousChunk?:(hash:string)=>Promise<Uint8Array>;removedPrivateArticleIds?:readonly string[];accountKey:Uint8Array;keyVersion:number;sourceDeviceId:string;sequence:number;objects:LogicalObject[];parentHeads:Record<string,string>;observedHeads:Record<string,number>;snapshotId:string;createdAtMillis:number;previous?:CloudManifest;carried?:CloudObject[];settings?:Record<string,unknown>;}
+const authenticatedRoots=new WeakMap<CloudManifest,string>();
+export interface SnapshotInput {reuseManifests?:readonly CloudManifest[];removedPrivateArticleUrls?:readonly string[];features?:CloudFeatures;removedObjectNames?:readonly string[];readPreviousChunk?:(hash:string)=>Promise<Uint8Array>;removedPrivateArticleIds?:readonly string[];accountKey:Uint8Array;keyVersion:number;sourceDeviceId:string;sequence:number;objects:LogicalObject[];parentHeads:Record<string,string>;observedHeads:Record<string,number>;snapshotId:string;createdAtMillis:number;previous?:CloudManifest;carried?:CloudObject[];settings?:Record<string,unknown>;}
+export interface CloudCodecWriteGates {writeV1():boolean;migrationV1?():boolean}
 export const CLOUD_CHUNK_BYTES=4*1024*1024;
 const MAX_OBJECT_BYTES=256*1024*1024;
 const hashPattern=/^[0-9a-f]{64}$/;
@@ -40,6 +43,7 @@ export function validateManifest(m:CloudManifest):void {
  check(m.observedHeads&&typeof m.observedHeads==='object'&&!Array.isArray(m.observedHeads)&&Object.values(m.observedHeads).every(v=>size(v,Number.MAX_SAFE_INTEGER)));
  if(cloudCompatibility(m).opaque)return;
  check(Array.isArray(m.objects)&&m.objects.length<=1024&&new Set(m.objects.map(o=>o.name)).size===m.objects.length);
+ check(m.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE)===true?m.objects.some(o=>o.name===PRIVATE_OVERLAY_NAME&&!o.entryRef):!m.objects.some(o=>o.name===PRIVATE_OVERLAY_NAME||o.name.startsWith('private/articles/')),'cloud_format_overlay_invalid');
  for(const o of m.objects){
   check(o&&typeof o.name==='string'&&o.name.length>0);if(cloudCompatibility(o).opaque)continue;
   check(!(o.readerKeyEnvelope&&o.objectKeyEnvelope));
@@ -50,7 +54,7 @@ export function validateManifest(m:CloudManifest):void {
   check(o.chunks.reduce((n,c)=>n+c.plaintextBytes,0)===o.encodedBytes);
  }
 }
-function parseManifestText(text:string,node:RawJsonNode=parseRawJson(text,{maxBytes:8*1024*1024})):CloudManifest {const manifest=rawJsonValue<CloudManifest>(node);bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576);if(cloudCompatibility(manifest).opaque){validateManifest(manifest);return manifest;}check(Array.isArray(manifest.objects)&&manifest.objects.length<=1024);let unknown=0;const objectNodes=rawJsonProperty(node,'objects')?.items??[];for(let i=0;i<(manifest.objects??[]).length;i++){const o=manifest.objects[i],n=objectNodes[i];check(o&&n);const chunkNodes=rawJsonProperty(n,'chunks')?.items??[];let nested=0;for(let j=0;j<(o.chunks??[]).length;j++){const c=o.chunks[j],cn=chunkNodes[j];check(c&&cn);bindCloudRaw(c,cn,schemaFields(chunkFields),4096);nested+=rawJsonUnknownBytes(cn,schemaFields(chunkFields));}for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']],['readerKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['objectKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['entryRef',['object','entryPath','encoding']]] as [string,readonly string[]][]){const child=rawJsonProperty(n,field);if(child)nested+=rawJsonUnknownBytes(child,schemaFields(keys));}bindCloudRaw(o,n,schemaFields(objectFields),4096,['r48.entry-ref.v1','r48.object-key.v1'],nested);unknown+=rawJsonUnknownBytes(n,schemaFields(objectFields))+nested;}bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576,[],unknown);validateManifest(manifest);return manifest;}
+function parseManifestText(text:string,node:RawJsonNode=parseRawJson(text,{maxBytes:8*1024*1024})):CloudManifest {const manifest=rawJsonValue<CloudManifest>(node);bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576,[PRIVATE_OVERLAY_FEATURE]);if(cloudCompatibility(manifest).opaque){validateManifest(manifest);return manifest;}check(Array.isArray(manifest.objects)&&manifest.objects.length<=1024);let unknown=0;const objectNodes=rawJsonProperty(node,'objects')?.items??[];for(let i=0;i<(manifest.objects??[]).length;i++){const o=manifest.objects[i],n=objectNodes[i];check(o&&n);const chunkNodes=rawJsonProperty(n,'chunks')?.items??[];let nested=0;for(let j=0;j<(o.chunks??[]).length;j++){const c=o.chunks[j],cn=chunkNodes[j];check(c&&cn);bindCloudRaw(c,cn,schemaFields(chunkFields),4096);nested+=rawJsonUnknownBytes(cn,schemaFields(chunkFields));}for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']],['readerKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['objectKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['entryRef',['object','entryPath','encoding']]] as [string,readonly string[]][]){const child=rawJsonProperty(n,field);if(child)nested+=rawJsonUnknownBytes(child,schemaFields(keys));}bindCloudRaw(o,n,schemaFields(objectFields),4096,['r48.entry-ref.v1','r48.object-key.v1'],nested);unknown+=rawJsonUnknownBytes(n,schemaFields(objectFields))+nested;}bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576,[PRIVATE_OVERLAY_FEATURE],unknown);validateManifest(manifest);return manifest;}
 function serializeDescriptor(o:CloudObject,basis?:CloudObject):string {
  const raw=basis&&cloudRaw(basis);if(o===basis&&raw)return rawJsonText(raw);
  const overrides:Record<string,string|undefined>={};
@@ -67,7 +71,18 @@ function serializeManifest(m:CloudManifest,basis?:CloudManifest):string {
 }
 /** Writes WRSSCM3, reads WRSSCM2/3; WRSSCC2 format; keys and gzip are supplied by the host. */
 export class WatchCloudCodec {
- constructor(private crypto:SnapshotCrypto,private guard:CloudGuard=cloudDisabled){}
+ constructor(private crypto:SnapshotCrypto,private guard:CloudGuard=cloudDisabled,private writeGates?:CloudCodecWriteGates){}
+ private requireWriteV1(){this.guard.require();check(this.writeGates?.writeV1()===true,'cloud_format_write_disabled');}
+ /** This creates only the wrapping envelope. Output chunks remain encrypted
+  * under the per-plan read-only root; ordinary edits always use accountKey. */
+ async wrapObjectKey(accountKey:Uint8Array,outputRoot:Uint8Array,planId:string):Promise<NonNullable<CloudObject['objectKeyEnvelope']>>{
+  this.requireWriteV1();check(this.writeGates?.migrationV1?.()===true,'cloud_format_migration_disabled');
+  check(accountKey.length===32&&outputRoot.length===32&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(planId));
+  const scope='migration:'+planId,salt=await this.crypto.random(16);check(salt.length===16);
+  const key=await this.crypto.hkdf(accountKey,salt,utf8Encode('watchrss/cloud/object-key/v1'));
+  try{const sealed=await this.crypto.encrypt(key,utf8Encode('watchrss-object-key-v1:'+scope),outputRoot);check(sealed.nonce.length===12&&sealed.ciphertext.length===48);this.requireWriteV1();check(this.writeGates?.migrationV1?.()===true,'cloud_format_migration_disabled');return {version:1,scope,saltBase64:bytesToBase64(salt),nonceBase64:bytesToBase64(sealed.nonce),ciphertextBase64:bytesToBase64(sealed.ciphertext)};}
+  finally{key.fill(0);}
+ }
  private async seal(key:Uint8Array,plain:Uint8Array,kind:'chunk'|'manifest',aad:string,snapshotId?:string){
   const salt=await this.crypto.random(16);check(salt.length===16);
   const derived=await this.crypto.hkdf(key,salt,utf8Encode(kind==='manifest'?`watchrss/cloud/manifest/v2/${snapshotId}`:'watchrss/cloud/chunk/v1'));
@@ -83,16 +98,24 @@ export class WatchCloudCodec {
  async create(input:SnapshotInput):Promise<EncryptedCloudSnapshot & {manifest:CloudManifest & {allChunks:CloudChunk[]};newChunks:Map<string,Uint8Array>}>{
   this.guard.require();check(input.accountKey.length===32&&input.sequence>0&&input.keyVersion>0);
   if(input.previous)requireCloudWritable(input.previous);
+  const rootIdentity=await this.crypto.sha256(input.accountKey);if(input.previous?.keyVersion===input.keyVersion)check(authenticatedRoots.get(input.previous)===rootIdentity,'cloud_format_reuse_scope');
+  if(input.previous?.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE)||input.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE))this.requireWriteV1();
+  const overlayWrite=this.writeGates?.writeV1()===true;
+  if(overlayWrite&&input.previous?.objects.some(o=>o.name==='private-library.wrss'||o.name===PRIVATE_OVERLAY_NAME)&&(input.objects.some(o=>o.name==='private-library.wrss')||input.removedPrivateArticleIds?.length||input.removedObjectNames?.length))check(input.readPreviousChunk,'cloud_format_previous_missing');
+  if(overlayWrite&&input.previous&&input.readPreviousChunk)input=await planPrivateOverlay(input,this.crypto,async object=>(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk!,[object])).get(object.name)!);
+  if(input.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE))this.requireWriteV1();
   const requested=new Set(input.objects.map(o=>o.name)),explicit=input.carried??[];const retained=(input.previous?.keyVersion===input.keyVersion?input.previous.objects:[]).filter(o=>!requested.has(o.name)&&!explicit.some(c=>c.name===o.name)&&!['rss-state.json','library-sync.json'].includes(o.name)&&!input.removedObjectNames?.includes(o.name));
   const logicalObjects=[...input.objects];const oldArchive=retained.find(o=>o.name==='private-library.wrss');if(oldArchive&&input.readPreviousChunk&&input.removedPrivateArticleIds?.length){requireCloudWritable(oldArchive);const bytes=(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk,[oldArchive])).get(oldArchive.name)!;const remaining=await retireCloudArchive(bytes,input.removedPrivateArticleIds,(b,max)=>this.crypto.gunzip(b,max));retained.splice(retained.indexOf(oldArchive),1);if(remaining)logicalObjects.push({name:oldArchive.name,bytes:remaining,compress:false});}
-  for(const o of explicit)if(o.entryRef||o.objectKeyEnvelope)check(input.previous?.objects.includes(o),'cloud_format_write_disabled');
+  for(const o of explicit)if((o.entryRef||o.objectKeyEnvelope)&&!input.previous?.objects.includes(o)){this.requireWriteV1();if(o.objectKeyEnvelope)check(this.writeGates?.migrationV1?.()===true,'cloud_format_migration_disabled');}
   const carried=[...explicit,...retained];
   for(const o of input.previous?.objects??[])if(cloudCompatibility(o).readOnly&&(requested.has(o.name)||!carried.some(c=>c.name===o.name)))throw Error('cloud_format_read_only');
   check(!carried.length||input.previous?.keyVersion===input.keyVersion,'轮换密钥后不能沿用旧数据块');
   check(new Set([...input.objects,...carried].map(o=>o.name)).size===input.objects.length+carried.length);
+  for(const m of input.reuseManifests??[])check(authenticatedRoots.get(m)===rootIdentity&&m.keyVersion===input.keyVersion,'cloud_format_reuse_scope');
   const reusable=new Map(input.previous?.keyVersion===input.keyVersion?input.previous.objects.filter(o=>!o.readerKeyEnvelope&&!o.objectKeyEnvelope&&!o.entryRef&&!cloudCompatibility(o).opaque).flatMap(o=>o.chunks??[]).map(c=>[c.plaintextSha256,c]):[]);
+  for(const m of input.reuseManifests??[])if(!cloudCompatibility(m).readOnly)for(const o of m.objects)if(!o.readerKeyEnvelope&&!o.objectKeyEnvelope&&!o.entryRef&&!cloudCompatibility(o).readOnly)for(const c of o.chunks??[])if(!reusable.has(c.plaintextSha256))reusable.set(c.plaintextSha256,c);
   const newChunks=new Map<string,Uint8Array>();const canonical=(c:CloudChunk)=>({...c,saltBase64:bytesToBase64(base64ToBytes(c.saltBase64)),nonceBase64:bytesToBase64(base64ToBytes(c.nonceBase64))});const objects:CloudObject[]=[...carried];
-  for(const original of logicalObjects){let logical=original;const old=input.previous?.objects.find(o=>o.name===logical.name);if(old&&input.previous?.keyVersion===input.keyVersion&&old.contentSha256&&old.originalBytes===logical.bytes.length&&old.contentSha256===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}if(input.objects.includes(original)&&old&&input.previous?.keyVersion===input.keyVersion&&logical.name==='private-library.wrss'&&input.readPreviousChunk){const previous=(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk,[old])).get(old.name)!;if(previous.length===logical.bytes.length&&previous.every((b,i)=>b===logical.bytes[i])){objects.push(old);continue;}const merged=await mergeCloudArchive(previous,logical.bytes,(b,max)=>this.crypto.gunzip(b,max),input.removedPrivateArticleIds);if(merged.unchanged){objects.push(old);continue;}logical={...logical,bytes:merged.bytes};}
+  for(const original of logicalObjects){let logical=original;const old=input.previous?.objects.find(o=>o.name===logical.name);if(old&&(old.objectKeyEnvelope||old.readerKeyEnvelope)&&input.previous?.keyVersion===input.keyVersion&&input.readPreviousChunk&&this.writeGates?.writeV1()===true){const bytes=(await this.restore(input.accountKey,input.previous,input.readPreviousChunk,[old])).get(old.name)!;if(bytes.length===logical.bytes.length&&await this.crypto.sha256(bytes)===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}}if(old&&input.previous?.keyVersion===input.keyVersion&&old.contentSha256&&old.originalBytes===logical.bytes.length&&old.contentSha256===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}if(input.objects.includes(original)&&old&&input.previous?.keyVersion===input.keyVersion&&logical.name==='private-library.wrss'&&input.readPreviousChunk){const previous=(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk,[old])).get(old.name)!;if(previous.length===logical.bytes.length&&previous.every((b,i)=>b===logical.bytes[i])){objects.push(old);continue;}const merged=await mergeCloudArchive(previous,logical.bytes,(b,max)=>this.crypto.gunzip(b,max),input.removedPrivateArticleIds);if(merged.unchanged){objects.push(old);continue;}logical={...logical,bytes:merged.bytes};}
    check(logical.bytes.length<=MAX_OBJECT_BYTES);const chunks:CloudChunk[]=[];let encodedBytes=0;
    for(const slice of contentChunks(logical.bytes)){
     const plain=logical.compress===false?slice:await this.crypto.gzip(slice);
@@ -103,12 +126,23 @@ export class WatchCloudCodec {
    }
    objects.push({...logical.privateBook?{privateBook:logical.privateBook}:{},...logical.privateArticle?{privateArticle:logical.privateArticle}:{},...logical.contentSha256?{contentSha256:logical.contentSha256}:{},name:logical.name,encoding:logical.compress===false?'identity':'gzip-chunks-v1',originalBytes:logical.bytes.length,encodedBytes,chunks});
   }
-  const constructed:CloudManifest={...(input.previous?.features?{features:input.previous.features}:{}),format:'watchrss-cloud-snapshot',schemaVersion:2,snapshotId:input.snapshotId,sourceDeviceId:input.sourceDeviceId,deviceSequence:input.sequence,keyVersion:input.keyVersion,createdAtMillis:input.createdAtMillis,parentHeads:{...input.parentHeads},observedHeads:{...input.observedHeads},objects,settings:input.settings??{},credentialEnvelopes:{}};
-  const text=serializeManifest(constructed,input.previous),manifest=parseManifestText(text);const {blob}=await this.seal(input.accountKey,utf8Encode(text),'manifest',`watchrss-cloud-manifest-v2:${manifest.snapshotId}`,manifest.snapshotId);
+  const constructed:CloudManifest={...((input.features??input.previous?.features)?{features:input.features??input.previous?.features}:{}),format:'watchrss-cloud-snapshot',schemaVersion:2,snapshotId:input.snapshotId,sourceDeviceId:input.sourceDeviceId,deviceSequence:input.sequence,keyVersion:input.keyVersion,createdAtMillis:input.createdAtMillis,parentHeads:{...input.parentHeads},observedHeads:{...input.observedHeads},objects,settings:input.settings??{},credentialEnvelopes:{}};
+  const text=serializeManifest(constructed,input.previous),manifest=parseManifestText(text);
+  // Never publish an unverified archive reference. A name/path assertion alone
+  // cannot prove that the immutable target contains the requested bytes.
+  for(const o of explicit)if(o.entryRef&&!input.previous?.objects.includes(o)){
+   check(input.readPreviousChunk,'cloud_entry_ref_unverified');
+   const body=(await this.restore(input.accountKey,manifest,input.readPreviousChunk,[manifest.objects.find(x=>x.name===o.name)!])).get(o.name)!;
+   if(o.contentSha256)check(await this.crypto.sha256(body)===o.contentSha256,'cloud_entry_ref_hash');
+   this.requireWriteV1();
+  }
+  const {blob}=await this.seal(input.accountKey,utf8Encode(text),'manifest',`watchrss-cloud-manifest-v2:${manifest.snapshotId}`,manifest.snapshotId);
+  if(manifest.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE)||explicit.some(o=>(o.entryRef||o.objectKeyEnvelope)&&!input.previous?.objects.includes(o)))this.requireWriteV1();
+  authenticatedRoots.set(manifest,rootIdentity);
   return {manifest:Object.assign(manifest,{allChunks:manifest.objects.flatMap(o=>o.chunks??[])}),encryptedManifest:blob,newChunks};
  }
  async decryptManifest(key:Uint8Array,id:string,encrypted:Uint8Array):Promise<CloudManifest>{
-  this.guard.require();const plain=await this.open(key,encrypted,'manifest',`watchrss-cloud-manifest-v2:${id}`,id);try{const text=utf8Decode(plain),round=utf8Encode(text);check(round.length===plain.length&&round.every((b,i)=>b===plain[i]));const manifest=parseManifestText(text,await parseRawJsonAsync(text,{maxBytes:8*1024*1024,yield:this.crypto.yieldTurn}));check(manifest.snapshotId===id);return manifest;}catch(error){if(error instanceof Error&&error.message==='raw_json_depth')throw Error('cloud_format_depth');throw error;}finally{plain.fill(0);}
+  this.guard.require();const plain=await this.open(key,encrypted,'manifest',`watchrss-cloud-manifest-v2:${id}`,id);try{const text=utf8Decode(plain),round=utf8Encode(text);check(round.length===plain.length&&round.every((b,i)=>b===plain[i]));const manifest=parseManifestText(text,await parseRawJsonAsync(text,{maxBytes:8*1024*1024,yield:this.crypto.yieldTurn}));check(manifest.snapshotId===id);authenticatedRoots.set(manifest,await this.crypto.sha256(key));return manifest;}catch(error){if(error instanceof Error&&error.message==='raw_json_depth')throw Error('cloud_format_depth');throw error;}finally{plain.fill(0);}
  }
  async restore(key:Uint8Array,manifest:CloudManifest,read:(hash:string)=>Promise<Uint8Array>,selected:readonly CloudObject[]=manifest.objects):Promise<Map<string,Uint8Array>>{
   this.guard.require();validateManifest(manifest);if(cloudCompatibility(manifest).opaque)throw Error('cloud_format_opaque');const result=new Map<string,Uint8Array>();

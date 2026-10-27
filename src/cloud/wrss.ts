@@ -16,13 +16,13 @@ export function writeWrss(entries:Map<string,Uint8Array>):Uint8Array {
  const cd=concat(directory),end=new Uint8Array(22),v=new DataView(end.buffer);v.setUint32(0,0x06054b50,true);v.setUint16(8,entries.size,true);v.setUint16(10,entries.size,true);v.setUint32(12,cd.length,true);v.setUint32(16,offset,true);check(offset+cd.length+22<=MAX);return concat([...files,cd,end]);
 }
 /** Authenticated ZIP only; strict bounds/CRC, no path extraction or filesystem names. */
-export async function readWrss(bytes:Uint8Array,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>){
+export async function readWrss(bytes:Uint8Array,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>,options:{yield?:()=>Promise<void>}={}){
  check(bytes.length>=22&&bytes.length<=MAX);const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let end=bytes.length-22;
  for(;end>=Math.max(0,bytes.length-65557);end--)if(view.getUint32(end,true)===0x06054b50&&end+22+view.getUint16(end+20,true)===bytes.length)break;
  check(end>=0&&end>=bytes.length-65557);check(view.getUint16(end+4,true)===0&&view.getUint16(end+6,true)===0);
  const count=view.getUint16(end+10,true),size=view.getUint32(end+12,true),start=view.getUint32(end+16,true);check(view.getUint16(end+8,true)===count&&start+size===end);
  const entries=new Map<string,Uint8Array>();let at=start,total=0;
- for(let i=0;i<count;i++){
+ for(let i=0;i<count;i++){if(i>0&&i%16===0)await options.yield?.();
   check(at+46<=end&&view.getUint32(at,true)===0x02014b50);
   const flags=view.getUint16(at+8,true),method=view.getUint16(at+10,true),crc=view.getUint32(at+16,true),packed=view.getUint32(at+20,true),length=view.getUint32(at+24,true),n=view.getUint16(at+28,true),extra=view.getUint16(at+30,true),comment=view.getUint16(at+32,true),local=view.getUint32(at+42,true);
   check(!(flags&1)&&[0,8].includes(method)&&at+46+n+extra+comment<=end&&local+30<=start);
