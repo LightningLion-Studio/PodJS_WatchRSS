@@ -19,6 +19,15 @@ const text:SyncTextPort={parseUri:async value=>{const u=new URL(value);return {v
 for(const row of fixture.sources)test('source BLE v2 clock/provenance with native normalization: '+row.input.name,async()=>{
  const f=database();try{await initializeSchema(f.db);if(row.input.existing){await f.db.execute("INSERT INTO channels(id,url,title,description,image_url,last_fetched_at,created_at,sort_order) VALUES(1,'https://feed.example/rss','Old Feed','Old description','old-image',100,10,-40)");await f.db.execute('INSERT INTO source_preferences(channel_id,use_original_content) VALUES(1,1)');await f.db.execute('INSERT INTO source_media_preferences(channel_id,continue_in_background) VALUES(1,1)');}
  const store=new SqlSourceSyncStore(f.db,{parseAndroid:async v=>{expect(v).toBe(row.normalizedUrl);return row.androidUri;},parseUri:async v=>{if(v.startsWith('https://HTTPS://'))return {valid:true,scheme:'https',host:'HTTPS',rawPath:'//'+v.slice(14),rawQuery:null};if(v.includes('例子.测试'))return {valid:true,scheme:'http',host:null,rawPath:'/rss',rawQuery:null};return text.parseUri(v);}},()=>row.now);
+ // Historical native fixture unconditionally accepted an older delete. The
+ // corrected production rule must protect a newer pre-sync local channel.
+ if(row.input.name==='older-delete'){
+  expect(await store.merge([row.input.source],row.input.peer,'local',row.input.authoritative)).toBe(0);
+  expect(await f.db.query('SELECT title,created_at,sort_order FROM channels')).toEqual([{title:'Old Feed',created_at:10,sort_order:-40}]);
+  expect(await f.db.query('SELECT * FROM sync_source_states')).toEqual([]);
+  expect((await store.export('local'))[0]).toMatchObject({deleted:false,updatedAt:40,sourceDeviceId:'local',title:'Old Feed'});
+  return;
+ }
  expect(normalizeSourceUrl(row.input.source.url)).toBe(row.normalizedUrl);const clockFixed=['older-source','equal-peer-loses'].includes(row.input.name);const expectedApplied=clockFixed?1:row.applied;expect(await store.merge([row.input.source],row.input.peer,'local',row.input.authoritative)).toBe(expectedApplied);
  const channels=(await f.db.query('SELECT c.*,p.use_original_content,b.continue_in_background FROM channels c LEFT JOIN source_preferences p ON p.channel_id=c.id LEFT JOIN source_media_preferences b ON b.channel_id=c.id ORDER BY c.id')).map(r=>({id:Number(r.id),url:r.url,title:r.title,description:r.description??null,imageUrl:r.image_url??null,lastFetchedAt:r.last_fetched_at??null,createdAt:Number(r.created_at),sortOrder:-Number(r.sort_order),isPinned:!!Number(r.is_pinned),original:!!Number(r.use_original_content),background:!!Number(r.continue_in_background)}));// Explicit v2 differences: polling lastFetchedAt no longer wins a source edit;
  // accepted original provenance/business clock/siteUrl survive export.
