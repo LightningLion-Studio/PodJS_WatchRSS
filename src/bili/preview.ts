@@ -29,7 +29,7 @@ interface Download { status: number; headers: Record<string, string>; size: numb
 export interface PreviewPorts {
   store: { get(key: string): unknown; set(key: string, value: unknown): void; delete(key: string): void };
   digest(value: string): Promise<string>;
-  resolve(target: DetailTarget & { cid: number; qn: number; preferMp4: true }): Promise<BiliPlayUrl>;
+  resolve(target: DetailTarget & { cid: number; qn: number; preferMp4: true; forceWeb?:boolean }): Promise<BiliPlayUrl>;
   headers(): Promise<Record<string, string>>;
   download(url: string, path: string, headers: Record<string, string>, maxBytes: number): { result: Promise<Download>; cancel(): void };
   stat(path: string): Promise<{ file: boolean; size: number }>;
@@ -44,6 +44,7 @@ export interface PreviewPorts {
   now?(): number;
 }
 type Job = {
+  forceWeb?:boolean;
   key: string; target: DetailTarget; cancelled: boolean; pins: Set<string>;
   current?: { cancel(): void }; result: Promise<string>; resolve(path: string): void; reject(error: unknown): void;
 };
@@ -167,7 +168,7 @@ export class BiliPreviewCache {
     const path = `${ROOT}/${key}.mp4`, part = path + '.part', chunk = path + '.chunk';
     job.pins = new Set([path, part, chunk]);
     const found = await this.lookup(job.target); this.check(job); if (found) return found.path;
-    const play = await this.ports.resolve({ ...job.target, cid: job.target.cid!, qn: PREVIEW_QUALITY, preferMp4: true }); this.check(job);
+    const play = await this.ports.resolve({ ...job.target, cid: job.target.cid!, qn: PREVIEW_QUALITY, preferMp4: true,...(job.forceWeb?{forceWeb:true}:{}) }); this.check(job);
     const durl = play.durl[0], size = previewBytes(durl?.size, durl?.length);
     if (size > this.cache.limitBytes) throw Error('preview_exceeds_cache_limit');
     const url = durl.url?.trim(); if (!url || !/^https?:\/\//i.test(url)) throw Error('missing_preview_mp4');
@@ -193,13 +194,17 @@ export class BiliPreviewCache {
         const request = this.ports.download(url, chunk, { ...headers, 'Accept-Encoding': 'identity', Range: `bytes=${start}-${end}`,
           ...(record.etag ? { 'If-Range': record.etag } : {}) }, end - start + 1);
         job.current = request;
-        const response = await request.result; job.current = undefined; this.check(job);
+        let response:Download;
+        try{response=await request.result;}
+        catch(error){if(play.apiSource==='watch')job.forceWeb=true;throw error;}
+        job.current = undefined; this.check(job);
         const responseHeaders = Object.fromEntries(Object.entries(response.headers).map(([key, value]) => [key.toLowerCase(), value]));
         const etag = responseHeaders.etag;
         const validRange = response.status === 206 && responseHeaders['content-range'] === `bytes ${start}-${end}/${durl.size}`;
         const wholeFile = start === 0 && size === durl.size && response.status === 200;
         if ((!validRange && !wholeFile) || response.size !== end - start + 1 ||
           (record.etag && etag !== record.etag)) {
+          if(play.apiSource==='watch')job.forceWeb=true;
           await this.ports.remove(part); this.records = this.records.filter(row => row.key !== job.key); this.save();
           throw Error('invalid_preview_range');
         }

@@ -65,14 +65,16 @@ export class VideoPlaybackTrace {
   readonly session = ++sequence;
   private firstFrame = false;
   private lastSample = -Infinity;
+  private apiRoute=0;
+  setBiliRoute(route:'watch'|'web'|undefined){this.apiRoute=route==='watch'?1:route==='web'?2:0;}
   constructor(private platform:'bili'|'douyin'|'rss', private started = Date.now()) {}
   event(stage:'api'|'candidate'|'prepare'|'first_frame'|'sample'|'exit', values:Record<string,unknown> = {}) {
     if(stage==='prepare')this.firstFrame=false;
-    if (!videoOptEnabled('metrics')) return;
+    if (!videoOptEnabled('metrics') && !(this.platform==='bili'&&['api','candidate','first_frame'].includes(stage))) return;
     const allowed = ['apiMs','candidate','width','height','bitrate','sourceGeneration','bytesLoaded','firstByteMs','firstFrameMs','rebufferCount','rebufferMs','droppedFrames','throughputBps','cacheHit'];
     const safe:Record<string,number> = {};
     for (const key of allowed) if (typeof values[key] === 'number' && Number.isFinite(values[key])) safe[key] = Math.max(0, Math.floor(values[key] as number));
-    appLogger.i('VideoOpt', JSON.stringify({session:this.session,platform:this.platform,stage,elapsedMs:Math.max(0,Date.now()-this.started),...safe}));
+    appLogger.i('VideoOpt', JSON.stringify({session:this.session,platform:this.platform,stage,apiRoute:this.apiRoute,elapsedMs:Math.max(0,Date.now()-this.started),...safe}));
   }
   sample(state:{hasRenderedFirstFrame?:boolean;sourceGeneration?:number;width?:number;height?:number;metrics?:Record<string,number|undefined>}, presented = true) {
     const metrics = state.metrics ?? {};

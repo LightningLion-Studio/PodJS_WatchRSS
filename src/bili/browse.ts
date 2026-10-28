@@ -67,6 +67,7 @@ export class BiliFeedBrowser {
   state: BrowseState<BiliItem> = { items: [], loading: false, canLoadMore: true };
   private generation = 0;
   private disposed = false;
+  private watchCursor?:string;
   constructor(private client: Pick<BiliClient, 'feed'>, private store: BrowseStore, private changed: (state: BrowseState<BiliItem>) => void = () => {}) {}
   private publish(update: Partial<BrowseState<BiliItem>>) { this.state = { ...this.state, ...update }; this.changed(this.state); }
   dispose() { this.disposed = true; this.generation++; }
@@ -80,10 +81,11 @@ export class BiliFeedBrowser {
     try {
       const page = await this.client.feed();
       if (this.disposed || generation !== this.generation) return;
+      this.watchCursor=page.source==='watch'?page.nextPage:undefined;
       const fresh = appendUnique([], page.items, videoKey);
       const items = fresh.length ? appendUnique(prefix, fresh, videoKey) : cached.length ? cached : current;
       if (fresh.length) this.store.set(FEED_CACHE, fresh.slice(0, 50));
-      this.publish({ items, loading: false, canLoadMore: items.length > 0 });
+      this.publish({ items, loading: false, canLoadMore: page.source==='watch'?!!this.watchCursor:items.length > 0 });
     } catch (error) { if (!this.disposed && generation === this.generation) this.publish({ loading: false, error, items: cached.length ? cached : current }); }
   };
   loadMore = async () => {
@@ -91,10 +93,11 @@ export class BiliFeedBrowser {
     const generation = ++this.generation;
     this.publish({ loading: true, error: undefined });
     try {
-      const page = await this.client.feed();
+      const page = await this.client.feed(this.watchCursor?{page_next:this.watchCursor}:{});
       if (this.disposed || generation !== this.generation) return;
+      this.watchCursor=page.source==='watch'?page.nextPage:undefined;
       const items = appendUnique(this.state.items, page.items, videoKey);
-      this.publish({ items, loading: false, canLoadMore: items.length > this.state.items.length });
+      this.publish({ items, loading: false, canLoadMore: page.source==='watch'?!!this.watchCursor&&items.length>this.state.items.length:items.length > this.state.items.length });
     } catch (error) { if (!this.disposed && generation === this.generation) this.publish({ loading: false, error }); }
   };
 }

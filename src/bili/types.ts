@@ -1,4 +1,4 @@
-export interface BiliHttpRequest { method: "GET" | "POST"; url: string; headers: Record<string, string>; body?: Uint8Array }
+export interface BiliHttpRequest { method: "GET" | "POST"; url: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?:number; acceptHttpErrors?:boolean }
 export interface BiliHttpResponse { status: number; headers: Record<string, string | string[]>; body: Uint8Array }
 export interface BiliTransport { request(request: BiliHttpRequest): Promise<BiliHttpResponse> }
 export interface BiliSecureStore { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void>; delete(key: string): Promise<void> }
@@ -17,12 +17,12 @@ export interface BiliItem { aid?: number; bvid?: string; cid?: number; title?: s
 export interface BiliPage { cid?: number; page?: number; part?: string; duration?: number }
 export interface BiliInteraction { like?: boolean; coin?: boolean; favorite?: boolean }
 export interface BiliVideoDetail { item: BiliItem; desc?: string; pages: BiliPage[]; interaction?: BiliInteraction }
-export interface BiliFeedPage { items: BiliItem[]; source: "web" }
+export interface BiliFeedPage { items: BiliItem[]; source: "web"|"watch"; nextPage?:string }
 export interface BiliTrendingWord { keyword: string; showName?: string; icon?: string; position?: number }
 export type BiliSearchResult = { kind: "video"; aid?: number; bvid?: string; title?: string; author?: string; mid?: number; pic?: string; description?: string; duration?: string; play?: number; danmaku?: number; pubdate?: number; tag?: string } | { kind: "user"; mid?: number; name?: string; sign?: string; picture?: string; fans?: number; videos?: number } | { kind: "media"; mediaId?: number; seasonId?: number; title?: string; cover?: string; areas?: string; styles?: string; description?: string; pubtime?: number; score?: number };
 export interface BiliSearchPage { numResults?: number; numPages?: number; page?: number; pageSize?: number; results: BiliSearchResult[] }
 export interface BiliDashStream { id?: number; baseUrl?: string; backupUrl: string[]; bandwidth?: number; codecId?: number; width?: number; height?: number; frameRate?: string }
-export interface BiliPlayUrl { quality?: number; format?: string; timeLength?: number; acceptQuality: number[]; acceptDescription: string[]; dash?: { video: BiliDashStream[]; audio: BiliDashStream[] }; durl: { order?: number; length?: number; size?: number; url?: string; backupUrl: string[] }[] }
+export interface BiliPlayUrl { apiSource?:"watch"|"web"; quality?: number; format?: string; timeLength?: number; acceptQuality: number[]; acceptDescription: string[]; dash?: { video: BiliDashStream[]; audio: BiliDashStream[] }; durl: { order?: number; length?: number; size?: number; url?: string; backupUrl: string[] }[] }
 export interface BiliFavoriteFolder { id?: number; fid?: number; mid?: number; title?: string; mediaCount?: number; attr?: number; favState?: number }
 export interface BiliFavoritePage { mediaId?: number; title?: string; hasMore: boolean; medias: Array<BiliItem & { favTime?: number }> }
 export interface BiliCommentContent {

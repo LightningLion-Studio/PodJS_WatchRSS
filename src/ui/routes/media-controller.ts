@@ -191,10 +191,10 @@ export function createMediaRouteController(
       };
       const trace=new VideoPlaybackTrace('bili'),apiStarted=Date.now();
       const {remote: source,source: initialSource} = await resolveBiliPlaybackWithPreview(
-        () => route.source ? Promise.resolve(route.source) : biliClient.resolvePlayback({aid: Number(route.aid) || undefined,bvid: route.bvid,cid: Number(route.cid),preferMp4: true}),
+        () => route.source&&(route.source.apiSource!=='watch'||biliClient.watchApiEnabled()) ? Promise.resolve(route.source) : biliClient.resolvePlayback({aid: Number(route.aid) || undefined,bvid: route.bvid,cid: Number(route.cid),preferMp4: true}),
         localPreview,route.title ?? "哔哩哔哩",headers,
       );
-      trace.event('api',{apiMs:Date.now()-apiStarted,cacheHit:route.source?1:0});trace.event('candidate',{candidate:0});registerVideoResolution(initialSource.url??initialSource.videoUrl??'',trace);
+      trace.setBiliRoute(source.apiSource);trace.event('api',{apiMs:Date.now()-apiStarted,cacheHit:route.source?1:0});trace.event('candidate',{candidate:0});registerVideoResolution(initialSource.url??initialSource.videoUrl??'',trace);
       const checkpoint = createBiliPlaybackCheckpoint({
         storage: {
           get: async (key) => kv.get<string>(key),
@@ -216,12 +216,13 @@ export function createMediaRouteController(
       if (dependencies.current() !== origin) return;
       const resolveRetry = createBiliPlaybackRetry(
         source,
-        () =>
+        retry =>
           biliClient.resolvePlayback({
             aid: Number(route.aid) || undefined,
             bvid: route.bvid,
             cid: Number(route.cid),
             preferMp4: true,
+            forceWeb:retry?.forceWeb,
           }),
         route.title ?? "哔哩哔哩",
         headers,
@@ -234,6 +235,7 @@ export function createMediaRouteController(
         if (entry.retryPlayback !== retryPlayback) return;
         const next = await resolveRetry(options);
         if (dependencies.current() !== entry) return;
+        if(source.apiSource==='watch')trace.setBiliRoute(next.url?.startsWith('managed-cache/bili-preview/')?undefined:'web');
         trace.event('candidate');registerVideoResolution(next.url??next.videoUrl??'',trace);
         const previous = dependencies.playingSource() ?? entry.playback!;
         const updated = {

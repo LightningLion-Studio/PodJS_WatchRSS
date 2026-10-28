@@ -99,6 +99,14 @@ test('Range fixture rejects unrelated and missing-Range requests without opening
   } finally { await f.cleanup(); }
 });
 
+test('watch preview direct failure uses Web on the bounded next attempt',async()=>{
+ const f=fixture();const resolve=f.ports.resolve,download=f.ports.download;const forced:Array<boolean|undefined>=[];let calls=0;
+ f.ports.resolve=async input=>{forced.push(input.forceWeb);return {...await resolve(input),apiSource:input.forceWeb?'web':'watch'};};
+ f.ports.download=(...args)=>++calls===1?{result:Promise.reject(Error('fixture_direct_failure')),cancel(){}}:download(...args);
+ try{const path=await f.cache.enqueue(target).result;expect(path).toContain('.mp4');expect(forced).toEqual([undefined,true]);expect(calls).toBe(3);}
+ finally{await f.cleanup();}
+});
+
 test('native qn32 estimate is a 30-minute prefix, uses exact arithmetic, rejects absent/invalid metadata', () => {
   expect(previewBytes(300, PREVIEW_MS * 2)).toBe(150);
   expect(previewBytes(1, PREVIEW_MS * 2)).toBe(1);

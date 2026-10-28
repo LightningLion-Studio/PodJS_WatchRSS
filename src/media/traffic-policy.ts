@@ -1,6 +1,7 @@
 /** Only existing list endpoints; paths and credentials never leave this function. */
 export function videoResponseBudget(url:string, enabled:boolean):number {
   const path=/^https?:\/\/[^/]+([^?#]*)/.exec(url)?.[1];
+  if(path==='/x/watch/feed'||path==='/x/watch/player/playurl')return 2*1024*1024;
   return enabled && ['/x/web-interface/history/cursor','/x/web-interface/wbi/index/top/feed/rcmd','/aweme/v2/web/module/feed/'].includes(path??'') ? 2*1024*1024 : 8*1024*1024;
 }
 export function boundedVideoPageSize(value:number|undefined,enabled:boolean,fallback=20):number {

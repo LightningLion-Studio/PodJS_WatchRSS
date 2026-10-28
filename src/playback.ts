@@ -24,24 +24,30 @@ export function biliPlaybackSource(source:BiliPlayUrl,title:string,headers:Recor
 }
 export interface BiliPlaybackRetryOptions { manual?: boolean; error?:unknown }
 /** Automatic recovery is bounded; an explicit retry starts a fresh attempt, including unchanged URLs. */
-export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:()=>Promise<BiliPlayUrl>, title:string, headers:Record<string,string>, local?:()=>Promise<PlaybackSource|undefined>, initialSource?:PlaybackSource, policy:{enabled?:boolean;networkEpoch?:()=>number;now?:()=>number}={}) {
+export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:(options?:{forceWeb?:boolean})=>Promise<BiliPlayUrl>, title:string, headers:Record<string,string>, local?:()=>Promise<PlaybackSource|undefined>, initialSource?:PlaybackSource, policy:{enabled?:boolean;networkEpoch?:()=>number;now?:()=>number}={}) {
  const now=policy.now??Date.now,budget=new PlaybackRecoveryBudget(now);let epoch=policy.networkEpoch?.();
  const fresh=(source:BiliPlayUrl)=>biliPlaybackCandidates(source,title,headers).filter(candidate=>!policy.enabled||mediaSourceExpiry([candidate.url??candidate.videoUrl??'',candidate.audioUrl??''],now())>now()).slice(0,16);
  let candidates=fresh(initial), current=initialSource??candidates.shift(), refreshed=false, localConsumed=false;
+ let watchFallbackAttempted=false;
  const failed=new Set<string>();
  const key=(source:PlaybackSource)=>JSON.stringify([source.url,source.videoUrl,source.audioUrl]);
  let pending:Promise<PlaybackSource>|undefined;
  const choose=async({manual=false,error}:BiliPlaybackRetryOptions):Promise<PlaybackSource>=>{
   let resolutionError:unknown;
+  const switchToWeb=initial.apiSource==='watch'&&!watchFallbackAttempted;
   if(policy.enabled){
-   if(['restricted','decode'].includes(playbackFailure(error)))throw new Error('playback_recovery_not_retryable');
+   if(!switchToWeb&&['restricted','decode'].includes(playbackFailure(error)))throw new Error('playback_recovery_not_retryable');
    if(manual)budget.reset();
    budget.claim();
    if(epoch!==policy.networkEpoch?.()){epoch=policy.networkEpoch?.();candidates=[];}
    if(playbackFailure(error)==='expired')candidates=[];
   }
-  const resolveFresh=async()=>{const network=policy.networkEpoch?.();const value=await (policy.enabled?budget.run(resolve,services.delay):resolve());if(policy.enabled&&network!==policy.networkEpoch?.())throw new Error('playback_network_changed');return value;};
-  if(manual){
+  const resolveFresh=async()=>{const network=policy.networkEpoch?.();const run=()=>resolve(watchFallbackAttempted?{forceWeb:true}:undefined);const value=await (policy.enabled?budget.run(run,services.delay):run());if(policy.enabled&&network!==policy.networkEpoch?.())throw new Error('playback_network_changed');return value;};
+  if(switchToWeb){
+   watchFallbackAttempted=true;refreshed=true;candidates=[];
+   if(current)failed.add(key(current));
+   try{candidates=fresh(await resolveFresh());}catch(error){resolutionError=error;}
+  }else if(manual){
    const known=current?[current,...candidates]:candidates;
    failed.clear();localConsumed=false;refreshed=true;
    // Refresh first, but a transient resolver failure must not prevent retrying
