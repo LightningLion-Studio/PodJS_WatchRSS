@@ -3,7 +3,7 @@ import { createRoot, createSignal } from 'solid-js';
 import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
-let client:DouyinClient;
+let client:DouyinClient;let optRecovery=false;
 let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
@@ -12,13 +12,14 @@ mock.module('../src/media-services.ts',()=>({douyinPreload:{sourceFor:()=>canoni
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
-mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},lifecycle:()=> 'active'}));
-mock.module('@podjs/framework/services',()=>({video:{captureBackdrop:async()=>{},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{}}));
+mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
+mock.module('@podjs/framework/services',()=>({video:{captureBackdrop:async()=>{},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
-function fixture(){
+function fixture(opt=false){
+ optRecovery=opt;
  canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
@@ -161,4 +162,20 @@ test('READY persists the actual registered source so a later exact-binding frame
  const f=fixture(),a=item('a');f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
  canonicalSource={...a,playUrl:'https://refreshed/source'};const entry=f.stack().at(-1)!;f.controller.douyinReady(entry);paintRelease({committed:true});for(let i=0;i<100;i++)await Promise.resolve();await entry.queue!.persist();
  expect((await client.restorePlaybackQueue()).items[0]?.playUrl).toBe('https://refreshed/source');
+});
+
+
+test('VIDEO-OPT production controller switches same-track CDN before refresh and keeps position',async()=>{
+ const f=fixture(true),a={...item('a'),variants:[{playUrl:'https://video/a',playUrls:['https://video/a','https://video/backup'],codec:'h264' as const,bitrate:100,width:640,height:360}]};
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let refreshes=0;client.resolvePlayback=async()=>{refreshes++;return {ok:false,code:'REQUEST_FAILED',message:'offline'};};
+ await f.controller.recoverDouyinVideo(entry,false,12345,{code:'cdn_error'});
+ expect(f.source()).toMatchObject({url:'https://video/backup',resumePositionMs:12345});expect(refreshes).toBe(0);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(f.error()).toBe('');
+});
+
+test('VIDEO-OPT rejects late same-item resolution after queue generation changes',async()=>{
+ const f=fixture(true),a=item('a');f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let finish!:(v:any)=>void;client.resolvePlayback=()=>new Promise(r=>finish=r);
+ const before=f.source(),pending=f.controller.recoverDouyinVideo(entry,false,7000);entry.queue!.restoreSelection('a');finish({ok:true,data:{...a,playUrl:'https://video/fresh'}});await pending;
+ expect(f.source()).toBe(before);expect(entry.queue!.snapshot().item?.playUrl).toBe(a.playUrl);
 });

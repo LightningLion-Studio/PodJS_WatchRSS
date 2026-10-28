@@ -1,11 +1,14 @@
+import {DouyinPlaybackRecovery} from '../../douyin/playback-recovery.ts';
+import {videoOptEnabled,invalidateVideoNetwork,videoNetworkEpoch,VideoPlaybackTrace,registerVideoResolution} from '../../media/video-opt.ts';
 import {afterPaint} from '@podjs/framework/render';
 import {appLogger} from '../../logs/app-logger.ts';
 import {applyPreferredDouyinPlayback} from '../../douyin/playback-selector.ts';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import {lifecycle} from '@podjs/framework/watch';
 import {douyinDebug} from '../../debug/douyin-host.ts';
-import { createSignal, type Accessor, type Setter } from "solid-js";
+import { onCleanup, createSignal, type Accessor, type Setter } from "solid-js";
 import { kv } from "@podjs/framework/watch";
+import * as hostServices from "@podjs/framework/services";
 import { video } from "@podjs/framework/services";
 import { createBiliPlaybackCheckpoint } from "../../bili/playback.ts";
 import { originalContentEnabled } from "../../bili/browse.ts";
@@ -57,6 +60,8 @@ export function createMediaRouteController(
   const [douyinBackground, setDouyinBackground] = createSignal(
     kv.get<boolean>("watchrss.douyin.background-playback") ?? false,
   );
+
+  if(videoOptEnabled('recovery')||videoOptEnabled('adaptive'))onCleanup(hostServices.onNetworkChange(invalidateVideoNetwork));
 
   const playbackPreferences = () => ({
     digitalCrownVolume: dependencies.settings().mediaVolumeControl,
@@ -119,12 +124,13 @@ export function createMediaRouteController(
       const douyin =
         douyinVideoTarget(article.link) ?? douyinVideoTarget(rawUrl);
       let url = resolved;
+      let douyinItem:import("../../douyin/types.ts").DouyinItem|undefined;
       let headers: Record<string, string> | undefined;
       if (douyin) {
         headers = await douyinClient.buildPlaybackHeaders();
         if (douyin.awemeId) {
           const result = await douyinClient.resolvePlayback(douyin.awemeId);
-          if (result.ok) url = result.data.playUrl;
+          if (result.ok) {url = result.data.playUrl;douyinItem=result.data;}
           else if (douyinVideoTarget(resolved)) {
             throw new Error(result.message);
           }
@@ -144,7 +150,7 @@ export function createMediaRouteController(
         {
           memory,videoTarget:{kind:'rss',articleId:article.id,url:rawUrl},
           rssDouyinRecovery: douyin?.awemeId
-            ? new DouyinRssRecovery(douyinClient, douyin.awemeId)
+            ? new DouyinRssRecovery(douyinClient, douyin.awemeId,douyinItem)
             : undefined,
         },
       );
@@ -183,10 +189,12 @@ export function createMediaRouteController(
         const cached = await biliPreviewCache.lookup({aid: Number(route.aid) || undefined,bvid: route.bvid,cid: Number(route.cid)});
         return cached ? {url: cached.path,type: 'video/mp4',headers: {},title: route.title ?? "哔哩哔哩"} : undefined;
       };
+      const trace=new VideoPlaybackTrace('bili'),apiStarted=Date.now();
       const {remote: source,source: initialSource} = await resolveBiliPlaybackWithPreview(
         () => route.source ? Promise.resolve(route.source) : biliClient.resolvePlayback({aid: Number(route.aid) || undefined,bvid: route.bvid,cid: Number(route.cid),preferMp4: true}),
         localPreview,route.title ?? "哔哩哔哩",headers,
       );
+      trace.event('api',{apiMs:Date.now()-apiStarted,cacheHit:route.source?1:0});trace.event('candidate',{candidate:0});registerVideoResolution(initialSource.url??initialSource.videoUrl??'',trace);
       const checkpoint = createBiliPlaybackCheckpoint({
         storage: {
           get: async (key) => kv.get<string>(key),
@@ -219,12 +227,14 @@ export function createMediaRouteController(
         headers,
         localPreview,
         initialSource,
+        {enabled:videoOptEnabled('recovery'),networkEpoch:videoNetworkEpoch},
       );
       const retryPlayback = async (positionMs: number, options?: import("../../playback.ts").BiliPlaybackRetryOptions) => {
         const entry = dependencies.current();
         if (entry.retryPlayback !== retryPlayback) return;
         const next = await resolveRetry(options);
         if (dependencies.current() !== entry) return;
+        trace.event('candidate');registerVideoResolution(next.url??next.videoUrl??'',trace);
         const previous = dependencies.playingSource() ?? entry.playback!;
         const updated = {
           ...previous,
@@ -491,7 +501,7 @@ export function createMediaRouteController(
     }
   };
 
-  const recoverDouyinVideo = async (entry: RouteEntry, manual = false) => {
+  const recoverDouyinVideo = async (entry: RouteEntry, manual = false, positionMs = 0, error?:unknown) => {
     if (
       !entry.queue ||
       dependencies.current() !== entry ||
@@ -503,6 +513,23 @@ export function createMediaRouteController(
     try {
       const id = entry.queue.snapshot().item?.awemeId;
       if (!id) return;
+      if (videoOptEnabled('recovery')) {
+        const selected=entry.queue.snapshot().item!;
+        if(entry.douyinRecovery?.id!==id)entry.douyinRecovery={id,policy:new DouyinPlaybackRecovery(selected,async()=>{
+          const result=await douyinClient.resolvePlayback(id,{forceRefresh:true});
+          if(!result.ok)throw {code:result.code};
+          return result.data;
+        })};
+        if(entry.playback?.url?.startsWith('podjs-media-cache:')||entry.playback?.url?.startsWith('managed-cache/'))await douyinPreload.invalidate(id);
+        const queueGeneration=entry.queue.diagnostics().generation;
+        const current=()=>dependencies.current()===entry&&entry.queue?.snapshot().item?.awemeId===id&&entry.queue.diagnostics().generation===queueGeneration;
+        const source=await entry.douyinRecovery.policy.recover({...entry.playback!,resumePositionMs:positionMs},current,manual,error);
+        if(!source||!current())return;
+        entry.queue.updateCurrentUrl(source.url!);await entry.queue.persist();
+        if(!current())return;
+        entry.playback=source;dependencies.setPlayingSource(source);dependencies.setError('');
+        dependencies.onActivityStateChange?.();return;
+      }
       if (entry.playback?.url?.startsWith('managed-cache/douyin-preload/')) {
         await douyinPreload.invalidate(id);
         const remote=await douyinClient.resolvePlayback(id,{forceRefresh:true});
@@ -648,13 +675,13 @@ export function createMediaRouteController(
     }
   };
 
-  const recoverRssDouyinVideo = async (entry: RouteEntry, manual = false) => {
+  const recoverRssDouyinVideo = async (entry: RouteEntry, manual = false,positionMs?:number,error?:unknown) => {
     if (!entry.rssDouyinRecovery || !entry.playback) return;
     try {
       const source = await entry.rssDouyinRecovery.recover(
-        entry.playback,
+        {...entry.playback,resumePositionMs:positionMs??entry.playback.resumePositionMs},
         () => dependencies.current() === entry,
-        manual,
+        manual,error,
       );
       if (source) {
         dependencies.onRssSourcePublished?.();

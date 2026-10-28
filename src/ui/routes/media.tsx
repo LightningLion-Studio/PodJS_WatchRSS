@@ -61,8 +61,8 @@ interface MediaRoutesProps {
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
-  recoverDouyinVideo: (entry: RouteEntry, manual?: boolean) => Promise<void>;
-  recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean) => Promise<void>;
+  recoverDouyinVideo: (entry: RouteEntry, manual?: boolean, positionMs?:number, error?:unknown) => Promise<void>;
+  recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean,positionMs?:number,error?:unknown) => Promise<void>;
   douyinReady: (entry: RouteEntry) => void;
   douyinActions: (entry: RouteEntry) => void;
   changeDouyinVideo: (
@@ -210,20 +210,20 @@ export function MediaRoutes(props: MediaRoutesProps) {
           }}
           onPlaybackFailure={
             props.entry.queue
-              ? () => void props.recoverDouyinVideo(props.entry)
+              ? (position,error) => void props.recoverDouyinVideo(props.entry,false,position,error)
               : props.entry.rssDouyinRecovery
-                ? () => void props.recoverRssDouyinVideo(props.entry)
+                ? (position,error) => void props.recoverRssDouyinVideo(props.entry,false,position,error)
                 : props.entry.playback?.platform === "bili" && props.entry.retryPlayback
-                  ? position => void props.entry.retryPlayback!(position).catch(error => props.setError(String(error)))
+                  ? (position,error) => void props.entry.retryPlayback!(position,{error}).catch(error => props.setError(String(error)))
                   : undefined
           }
           onRetry={
             props.entry.retryPlayback
               ? position => props.entry.retryPlayback!(position, {manual:true})
               : props.entry.queue
-                ? () => props.recoverDouyinVideo(props.entry, true)
+                ? position => props.recoverDouyinVideo(props.entry, true,position)
                 : props.entry.rssDouyinRecovery
-                  ? () => props.recoverRssDouyinVideo(props.entry, true)
+                  ? position => props.recoverRssDouyinVideo(props.entry, true,position)
                   : undefined
           }
           onActions={

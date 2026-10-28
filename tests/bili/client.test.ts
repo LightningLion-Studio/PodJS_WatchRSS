@@ -37,3 +37,11 @@ describe("bilibili shared client",()=>{
  ]);const client=createBiliClient({transport,secureStore:store,now:()=>2000,rsaOaepSha256:{async encrypt(key,input){pem=key;cryptoInput=new TextDecoder().decode(input);return new Uint8Array([0,10,255])}}});expect(await client.refreshCookies()).toEqual({refreshed:true,checked:true,forced:false,confirmed:true});expect(cryptoInput).toBe("refresh_1234");expect(pem).toContain("BEGIN PUBLIC KEY");expect(transport.requests[1].url).toEndWith("/correspond/1/000aff");expect(new TextDecoder().decode(transport.requests[2].body)).toContain("refresh_token=old-refresh");expect(new TextDecoder().decode(transport.requests[3].body)).toContain("csrf=new-csrf");const restored=createBiliClient({transport:new Queue([]),secureStore:store});expect(await restored.getLoginState()).toEqual({status:"authenticated",userId:"42"});expect((await restored.getSession())?.refreshToken).toBe("new-refresh");expect((await restored.getSession())?.cookies.SESSDATA).toBe("new-session")});
  test("cookie refresh check persists timestamp and skips crypto when current",async()=>{const store=new Store();store.value=JSON.stringify({cookies:{bili_jct:"csrf",SESSDATA:"session"},refreshToken:"refresh",updatedAt:1});const transport=new Queue([response({refresh:false,timestamp:4321})]);const client=createBiliClient({transport,secureStore:store,now:()=>5000});expect(await client.refreshCookies()).toEqual({refreshed:false,checked:true,forced:false});expect((await client.getSession())?.cookieRefreshCheckedAt).toBe(4321);expect(transport.requests).toHaveLength(1)});
 });
+
+
+test('HEVC-only WBI DASH keeps the existing MP4 legacy fallback instead of enabling HEVC',async()=>{
+ const store=new Store();store.values.set('watchrss.bili.session.v1.wbi',JSON.stringify({imgKey:'7cd084941338484aae1ad9425b84077c',subKey:'4932caff0ff746eab6f01bf08b70ac45'}));
+ const transport=new Queue([response({dash:{video:[{base_url:'https://fixture/hevc',codecid:12}],audio:[]}}),response({durl:[{url:'https://fixture/avc.mp4'}]})]);
+ const result=await createBiliClient({transport,secureStore:store}).resolvePlayback({cid:8,bvid:'BVsafe',preferMp4:true});
+ expect(result.durl[0]?.url).toBe('https://fixture/avc.mp4');expect(transport.requests).toHaveLength(2);
+});

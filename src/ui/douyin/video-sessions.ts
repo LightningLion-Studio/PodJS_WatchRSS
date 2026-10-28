@@ -27,7 +27,7 @@ export interface DouyinPreparedSource { key:string; source:PlaybackSource }
 type VideoDecoderProfile={videoMime?:string;videoWidth?:number;videoHeight?:number};
 
 export function douyinDecoderProfile(item:DouyinItem,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight">{
-  const variant=item.variants.find(candidate=>candidate.playUrl===url);
+  const variant=item.variants.find(candidate=>candidate.playUrl===url||candidate.playUrls?.includes(url));
   if(!variant)return {};
   return {
     ...(variant.codec==="h264"?{videoMime:"video/avc"}:variant.codec==="h265"?{videoMime:"video/hevc"}:{}),
@@ -84,7 +84,7 @@ const defaultSessionPort:SessionPort={
 
 let nextPoolId=1;
 const state=(value:VideoSessionState):VideoState=>({
-  ok:value.ok,state:value.state,positionMs:value.positionMs,durationMs:value.durationMs,completedLoops:value.completedLoops,loop:value.loop,
+  presented:value.presented,metrics:value.metrics,ok:value.ok,state:value.state,positionMs:value.positionMs,durationMs:value.durationMs,completedLoops:value.completedLoops,loop:value.loop,
   width:value.width,height:value.height,volume:value.volume,volumeMax:15,
   sourceGeneration:value.sourceGeneration,errorCode:value.errorCode,hasRenderedFirstFrame:value.hasRenderedFirstFrame,
 });

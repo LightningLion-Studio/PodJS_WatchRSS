@@ -1,3 +1,4 @@
+import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
 import {video} from '@podjs/framework/services';
 import {DouyinPrefetchResults,type PrefetchFailure} from './prefetch-results.ts';
@@ -37,14 +38,15 @@ export function createHostDouyinPreload(client:DouyinClient) {
  const stats=async()=>{const s=await mediaPrefixCache.stats().result;appLogger.i('DouyinProxy',`cache files=${s.files} bytes=${s.bytes} downloadedBytes=${s.downloadedBytes} cacheReadBytes=${s.cacheReadBytes} networkReadBytes=${s.networkReadBytes} maxBytes=${s.maxBytes}`);return s;};
  const allowed=async()=>douyinPreloadAllowed(await discovery.networkSnapshot(),bluetoothOwners.has(owner));
  const register=async(item:DouyinItem,headers:Record<string,string>)=>{
-  const selected=applyPreferredDouyinPlayback(item);if(!selected.playUrl)return undefined;
-  return remember((await mediaPrefixCache.register(selected.awemeId,selected.playUrl,headers).result).uri,selected);
+  const selected=preserveSelectedDouyinItem(item);if(!selected.playUrl)return undefined;
+  const uri=(await mediaPrefixCache.register(selected.awemeId,selected.playUrl,headers).result).uri;
+  registerVideoResolution(uri,takeVideoResolution(selected.playUrl,'douyin'));return remember(uri,selected);
  };
  const run=async(own:number)=>{
   if(!plan)return;const enabled=await allowed();if(own!==generation)return;lastAllowed=enabled;
   if(!enabled){await mediaPrefixCache.window([]).result;return;}
   await cleanupOldFiles();if(own!==generation||!plan)return;
-  results.begin();const targets=douyinProxyWindow(plan.items,plan.anchor,plan.mode),mode=plan.mode;
+  results.begin();const targets=douyinProxyWindow(plan.items,plan.anchor,plan.mode).slice(0,videoOptEnabled('traffic')?2:undefined),mode=plan.mode;
   const headers=await client.buildPlaybackHeaders();if(own!==generation)return;
   // Foreground resolution stays independent: one rejected neighbour cannot block its prepare.
   const prepared:{uri:string;prefetchBytes:number;captureBytes:number;itemToken:string;generation:number}[]=[];
@@ -53,7 +55,7 @@ export function createHostDouyinPreload(client:DouyinClient) {
    if(own!==generation)return;const result=await client.resolvePlayback(item.awemeId);if(own!==generation)return;
    if(!result.ok){appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
    const uri=await register(result.data,headers);if(own!==generation)return;if(!uri)continue;
-   if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=selectPreferredDouyinVariant(result.data.variants??[])?.bitrate??0;
+   if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;
    const itemToken=`p${++token}`;results.bind({id:item.awemeId,itemToken,generation:own,uri,url:result.data.playUrl});
    prepared.push({uri,itemToken,generation:own,prefetchBytes:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs)});
    if(own!==generation)return;
@@ -90,7 +92,7 @@ export function createHostDouyinPreload(client:DouyinClient) {
  return {
   // A proxy is not a complete local file; queue resolution must continue enforcing URL TTL.
   capabilities:()=>({coverCache:true,actualFrame:true,prefixBytes:true,completeVideo:false}),
-  async restoreFrame(item:DouyinItem,headers:Record<string,string>){return video.restoreFrame(`douyin:${item.awemeId}`,{url:applyPreferredDouyinPlayback(item).playUrl,headers});},
+  async restoreFrame(item:DouyinItem,headers:Record<string,string>){return video.restoreFrame(`douyin:${item.awemeId}`,{url:preserveSelectedDouyinItem(item).playUrl,headers});},
   failures:()=>results.snapshot(),
   sourceFor:(uri:string)=>sources.get(uri),
   lookup:async(_id:string):Promise<string|undefined>=>undefined,

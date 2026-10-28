@@ -34,10 +34,10 @@ const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
-function mount(status:InternetStatus,url='https://video/current',immersive=false,platform:'douyin'|'bili'='douyin'){
+function mount(status:InternetStatus,url='https://video/current',immersive=false,platform:'douyin'|'bili'='douyin',recoveryDeadlineMs?:number){
  initial=status;prepares=[];plays=0;retries=0;failures=0;ticks=[];current=state('idle');
  const activeEvents:Array<{source:string|undefined;active:boolean}>=[];
- const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform,url,title:'current',immersive},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retries++;},onPlaybackFailure:()=>{failures++;},onPlaybackActiveChanged:(source,active)=>activeEvents.push({source,active})});});
+ const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform,url,title:'current',immersive,recoveryDeadlineMs},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retries++;},onPlaybackFailure:()=>{failures++;},onPlaybackActiveChanged:(source,active)=>activeEvents.push({source,active})});});
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 test('D2 initial network gate clears on WiFi without fetching or replacing queue',async()=>{
@@ -154,13 +154,14 @@ test('ready without a decoded frame keeps the cover until the subsequent state p
 
 // Run the real component with the production capability advertised but the
 // watch's one-decoder response, rather than bypassing the session probe.
-function mountRetained(platform:'douyin'|'bili'|'rss'='douyin',backgroundPlayback=false){
+function mountRetained(platform:'douyin'|'bili'|'rss'='douyin',backgroundPlayback=false,recoveryDeadlineMs?:number){
+ const source={platform,immersive:platform==='douyin',url:'https://video/retained',title:'retained',backgroundPlayback,recoveryDeadlineMs};
  initial='available';prepares=[];plays=0;legacyStops=0;sessionReleases=0;gestures.length=0;
  let setActive!:(active:boolean)=>void,dispose!:()=>void;
  const root=createRoot(stop=>{dispose=stop;stops.push(stop);const [active,set]=createSignal(true);setActive=set;
-  return VideoPlayerScreen({source:{platform,immersive:platform==='douyin',url:'https://video/retained',title:'retained',backgroundPlayback},width:233,height:233,get active(){return active();},offset:0,round:true});
+  return VideoPlayerScreen({source,width:233,height:233,get active(){return active();},offset:0,round:true});
  });
- return {setActive,dispose,root};
+ return {setActive,dispose,root,source};
 }
 test('one-decoder fallback stops the legacy player when its screen is disposed',async()=>{
  sessionsCapable=true;const f=mountRetained();await flush();expect(plays).toBe(1);
@@ -225,4 +226,20 @@ test('real session playback releases sessions without stopping the shared legacy
 test('returning to the retained Douyin page prepares again at the observed position',async()=>{
  const f=mountRetained();await flush();f.setActive(false);await flush();f.setActive(true);await flush();
  expect(prepares).toHaveLength(2);expect(prepares[1].resumePositionMs).toBe(321);expect(plays).toBe(2);
+});
+
+
+test('recovery deadline stops hanging prepare and late READY cannot restart it',async()=>{
+ let finish!:(v:any)=>void;heldPrepare=new Promise(r=>finish=r);const before=legacyStops;mount('available','https://video/current',false,'bili',Date.now()+1000);await flush();
+ const timers=[...ticks];for(const tick of timers)tick();await flush();expect(legacyStops).toBeGreaterThan(before);expect(plays).toBe(0);
+ finish(state('ready'));await flush();expect(plays).toBe(0);
+});
+test('rendered first frame disarms recovery deadline without stopping successful playback',async()=>{
+ mount('available','https://video/current',false,'bili',Date.now()+1000);await flush();const before=legacyStops;for(const tick of [...ticks])tick();await flush();expect(legacyStops).toBe(before);expect(plays).toBe(1);
+});
+
+
+test('successful recovery is not expired again when returning to its retained screen',async()=>{
+ const f=mountRetained('douyin',false,Date.now()+1000);await flush();f.setActive(false);await flush();const before=legacyStops;
+ f.source.recoveryDeadlineMs=Date.now()-1000;f.setActive(true);await flush();for(const tick of [...ticks])tick();await flush();expect(legacyStops).toBe(before);expect(plays).toBe(2);
 });

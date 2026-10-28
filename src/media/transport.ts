@@ -3,6 +3,8 @@ import {appLogger} from '../logs/app-logger.ts';
 import {mediaRequestFailure} from '../douyin/errors.ts';
 import type {HttpRequest,HttpResponse,HttpTransport} from '../cloud/types.ts';
 import type {DownloadResult} from '@podjs/framework/services';
+import {videoOptEnabled} from './video-opt.ts';
+import {videoResponseBudget} from './traffic-policy.ts';
 
 export interface MediaTransportPorts {
   download(args:Record<string,unknown>):Promise<DownloadResult>;
@@ -19,7 +21,7 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
     appLogger.d('Network',`${request.method} media request`);
     const path=`media-json/request-${Date.now()}-${++sequence}.json`;
     return withOwnedPrivateFile(path,path=>ports.remove(path),async path=>{
-      const response=await ports.download({url:request.url,path,method:request.method,bodyBase64:request.body?ports.base64(request.body):undefined,headers:request.headers,maxBytes:8*1024*1024,
+      const response=await ports.download({url:request.url,path,method:request.method,bodyBase64:request.body?ports.base64(request.body):undefined,headers:request.headers,maxBytes:videoResponseBudget(request.url,videoOptEnabled('traffic')),
         timeoutMs:request.timeoutMs??30000,...(request.readTimeoutMs===undefined?{}:{readTimeoutMs:request.readTimeoutMs}),...(request.acceptHttpErrors===undefined?{}:{acceptHttpErrors:request.acceptHttpErrors})});
       const bytes=await readDownloadedBytes(path,response.size,(path,offset)=>ports.read(path,offset),()=>Error('服务器响应下载不完整'));
       appLogger.i('Network',`media response status=${response.status} bytes=${response.size}`);
