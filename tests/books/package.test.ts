@@ -1,5 +1,6 @@
 import {test,expect} from 'bun:test';
 import v from '../fixtures/book-fingerprint.json';
+import cliSingle from '../fixtures/cli-single-txt-book.json';
 import {bookPackageLines,splitBookLines,validateBookPackage} from '../../src/books/package';
 const sha=async(b:Uint8Array)=>new Bun.CryptoHasher('sha256').update(b).digest('hex');
 const vector=v.cases[0]!;const header={format:'watchrss-book' as const,version:1 as const,title:'filename excluded',chapterCount:2,sourceUrl:'https://watchrss.local/import-epub/test',kind:'epub' as const};
@@ -10,3 +11,11 @@ test('JSONL streaming across tiny chunks matches shared fingerprint including CR
 test('partial, extra/reordered chapters, nonbook URLs, wrong fingerprint and non-LF framing never validate',async()=>{const text=await collect();for(const corrupt of [text.slice(0,-1),text.split('\n').slice(0,2).join('\n')+'\n',text+text.split('\n')[1]+'\n',text.replace('"chapterIndex":1','"chapterIndex":3'),text.replaceAll('https://watchrss.local','https://public.example'),text.replace('"contentText":"甲','"contentText":"改'),'\ufeff'+text])await expect(validateBookPackage(splitBookLines(chunks(corrupt)),sha,vector)).rejects.toThrow();});
 
 test('HTML-only package changes keep the immutable content identity',async()=>{const text=(await collect()).replace('甲','changed HTML');expect((await validateBookPackage(splitBookLines(chunks(text)),sha,vector)).bookId).toBe(vector.bookId);});
+
+test('CLI single TXT package accepts its existing local URI hint with the producer fingerprint unchanged',async()=>{
+ const parsed=await validateBookPackage(splitBookLines(chunks(cliSingle.packageUtf8)),sha,cliSingle);
+ expect(parsed.bookId).toBe(cliSingle.bookId);expect(parsed.header.sourceUrl).toBe(cliSingle.sourceUrl);
+ for(const bad of ['https://public.example/file','javascript:alert(1)',cliSingle.sourceUrl+'?x=1',cliSingle.sourceUrl+'#part',cliSingle.sourceUrl+'/../x','watchrss://import/online-v1/not-a-hash']){
+  await expect(validateBookPackage(splitBookLines(chunks(cliSingle.packageUtf8.replaceAll(cliSingle.sourceUrl,bad))),sha,cliSingle)).rejects.toThrow();
+ }
+});

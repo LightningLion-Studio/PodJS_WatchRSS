@@ -59,6 +59,19 @@ test('library-owner upload guard prevents export/reservation even after download
  const f=await fixture();f.session.assertUpload=async()=>{throw Error('library_owner_mismatch');};expect(await f.service.syncNow()).toBe(false);expect(f.reservations.size).toBe(0);
 });
 
+test('owner choice appears before rebuilding or fetching the previous account public RSS inventory',async()=>{
+ const f=await fixture();await f.phone();let projections=0,inventories=0;
+ f.session.assertUpload=async()=>{throw Error('library_owner_mismatch');};
+ f.session.library.publicSources=async()=>{projections++;return [{url:'https://old-owner.invalid/rss',sourceDeviceId:'old',title:'Old fixture',description:'',siteUrl:null,imageUrl:null,createdAt:1,updatedAt:1,sortOrder:1,isPinned:false,deleted:false,deletedAt:0}];};
+ f.session.client.resolveRssSource=async()=>{inventories++;throw Error('old owner RSS request must not run');};
+ expect(await f.service.syncNow()).toBe(false);
+ expect(f.service.status.message).toBe('本机资料属于其他账号，请先选择清空或合并');
+ expect(projections).toBe(0);expect(inventories).toBe(0);expect(f.reservations.size).toBe(0);
+ // Existing read-only recovery is retained; ownership still gates the expensive
+ // local-source projection and all uploads until the user makes a choice.
+ expect(f.merged.length).toBeGreaterThan(0);
+});
+
 test('426 upgrade is actionable and preserves the no-content-I/O boundary',async()=>{
  const f=await fixture();f.session.client.bootstrap=async()=>{throw Error('client_upgrade_required');};expect(await f.service.syncNow()).toBe(false);expect(f.service.status.message).toContain('请升级');expect(f.calls).toHaveLength(0);
 });

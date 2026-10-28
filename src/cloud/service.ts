@@ -153,6 +153,10 @@ export class WatchCloudSyncService {
    if(full&&!headPending){await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,true);await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);await s.client.acknowledge(h.id,s.deviceId);}
    else if(!headPending&&selected.some(o=>o.name==='rss-state.json'))await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);
   }
+  // A different library owner needs an explicit choice before rebuilding the
+  // previous account's public-source projection or issuing its RSS requests.
+  // Keep read-only cloud recovery above and recheck again before every upload.
+  await current();await s.assertUpload?.();
   let inventoryFailures=0;
   {this.set('downloading','正在更新公共 RSS 库',member);for(const source of await s.library.publicSources()){
    await current();try{const inventory=await s.client.resolveRssSource(source.url,mode);await current();changed=(await s.library.mergeInventory({...inventory,url:source.url})>0)||changed;}catch{inventoryFailures++;}

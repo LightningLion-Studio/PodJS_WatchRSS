@@ -1,7 +1,10 @@
 import {canonical} from '../cloud/records';
+import {isCliSingleTextUrl} from '../core/imported-content';
 import {chapterHash,bookFingerprint,bookId,normalizeBookText,BOOK_MAX_CHAPTERS,type BookChapter,type BookHash} from './protocol';
 export interface BookPackageHeader {format:'watchrss-book';version:1;title:string;chapterCount:number;sourceUrl:string;kind:'txt'|'epub'}
-export const isBookUrl=(url:string)=>/^https:\/\/watchrss\.local\/(?:import-txt-novel(?:\/|$)|import-epub(?:\/|$)|import-content\/txt\/)/i.test(url);
+// CLI single-file imports already publish this local URI in their immutable
+// R44 package. It is a display hint; retain the original bytes and fingerprint.
+export const isBookUrl=(url:string)=>/^https:\/\/watchrss\.local\/(?:import-txt-novel(?:\/|$)|import-epub(?:\/|$)|import-content\/txt\/)/i.test(url)||isCliSingleTextUrl(url);
 const invalid=()=>{throw Error('book_package_invalid');};
 export function parseBookHeader(line:string):BookPackageHeader {let h:BookPackageHeader;try{h=JSON.parse(line);}catch{return invalid();}if(!h||h.format!=='watchrss-book'||h.version!==1||typeof h.title!=='string'||!Number.isInteger(h.chapterCount)||h.chapterCount<1||h.chapterCount>BOOK_MAX_CHAPTERS||typeof h.sourceUrl!=='string'||!isBookUrl(h.sourceUrl)||!['txt','epub'].includes(h.kind))invalid();return h;}
 export function parseBookChapter(line:string,index:number):BookChapter {let c:BookChapter;try{c=JSON.parse(line);}catch{return invalid();}if(!c||c.chapterIndex!==index||typeof c.title!=='string'||typeof c.contentText!=='string'||c.contentHtml!==null&&typeof c.contentHtml!=='string'||typeof c.url!=='string'||!isBookUrl(c.url))invalid();return c;}

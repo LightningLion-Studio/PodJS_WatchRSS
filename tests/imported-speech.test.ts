@@ -43,6 +43,11 @@ test("repository resolves local TXT only, preferring the original marker with bo
   const first=await importedSpeechSource(db,store,article,{importedChunkIndex:0});expect((await first?.peek())?.text).toBe("导入正文");expect(files).toEqual(["article_content/body.txt"]);
   raw.run("INSERT INTO article_original_chunks(article_id,chunk_index,body) VALUES(1,0,'watchrss-watch-content:original.txt')");
   const original=await importedSpeechSource(db,store,article);expect(original?.segmentCount).toBe(0);expect(files.at(-1)).toBe("article_content/original.txt");expect((await original?.peek())?.text).toBe("标题。");
+  // A large CLI book chapter has the same managed marker and must use bounded
+  // chunk reads rather than displaying the marker or loading the entire body.
+  raw.run("UPDATE articles SET link=?",['watchrss://import/online-v1/'+'a'.repeat(64)]);
+  const cli=await importedSpeechSource(db,store,article,{importedChunkIndex:0});
+  expect((await cli?.peek())?.text).toBe("导入正文");expect(files.at(-1)).toBe("article_content/original.txt");
   for(const link of ['https://remote.test/article','https://watchrss.local/import-content/pdf/1']){raw.run("UPDATE articles SET link=?",[link]);const before=files.length;expect(await importedSpeechSource(db,store,article)).toBeNull();expect(files.length).toBe(before);}
   expect(queries.filter(q=>q.includes('FROM articles a WHERE')).every(q=>q.includes('substr(content,1,512)'))).toBe(true);
  }finally{raw.close();}

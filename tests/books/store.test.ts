@@ -1,5 +1,6 @@
 import {test,expect} from 'bun:test';
 import vectors from '../fixtures/book-fingerprint.json';
+import cliSingle from '../fixtures/cli-single-txt-book.json';
 import {bookFixture,seedChapters} from './fixture';
 import {bookPackageLines} from '../../src/books/package';
 import {SqlBookStore} from '../../src/books/store';
@@ -7,6 +8,20 @@ import type {BookState,BookReading} from '../../src/books/protocol';
 const vector=vectors.cases[0]!,source='https://watchrss.local/import-epub/test';
 async function packageFor(f:Awaited<ReturnType<typeof bookFixture>>){return f.files.write(bookPackageLines({format:'watchrss-book',version:1,title:'Book',chapterCount:2,sourceUrl:source,kind:'epub'},vector.chapters.map((c,i)=>({...c,chapterIndex:i+1,url:source+'/chapter/'+(i+1)}))),512*1024*1024);}
 const state:BookState={bookId:vector.bookId,fingerprint:vector.fingerprint,title:'Book',chapterCount:2,deletedChapters:[],deleted:false,deletionClock:0,deletedAt:0,updatedAt:100,sourceDeviceId:'phone',sourceUrl:source,kind:'epub'};
+test('CLI single TXT metadata completes from the authenticated original package and repeated cloud replay writes nothing',async()=>{
+ const f=await bookFixture();try{
+  const peer:BookState={...state,bookId:cliSingle.bookId,fingerprint:cliSingle.fingerprint,chapterCount:1,sourceUrl:cliSingle.sourceUrl,kind:'txt'};
+  await f.store.merge(peer);
+  await f.store.mergeReading({bookId:peer.bookId,chapterIndex:1,isRead:false,readingProgress:.25,readingPositionBytes:12,readingPositionContentHash:'position',readingPositionChangedAt:200,sourceDeviceId:'cli',favoriteSaved:true,favoriteChangedAt:300,favoriteSortOrder:1});
+  const original=()=>f.files.writeBytes(new TextEncoder().encode(cliSingle.packageUtf8));
+  expect(await f.store.installPackage(await original(),peer.bookId)).toBeGreaterThan(0);
+  expect(await f.db.query('SELECT content,is_saved,is_read FROM articles')).toEqual([{content:cliSingle.chapter.contentText,is_saved:1,is_read:0}]);
+  expect((await f.store.manifests())[0]?.contentAvailable).toBe(true);
+  const before=f.changes();expect(await f.store.installPackage(await original(),peer.bookId)).toBe(0);expect(f.changes()).toBe(before);
+  await f.store.merge({...peer,deletedChapters:[1],deletionClock:400});
+  await f.store.installPackage(await original(),peer.bookId);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:0}]);
+ }finally{f.sql.close();}
+});
 test('legacy registration freezes original fingerprint once; chapter/whole deletions survive restart and old body replay',async()=>{const f=await bookFixture();try{await seedChapters(f,source,vector.chapters);await f.store.registerLocal([state]);const manifests=await f.store.manifests();expect(manifests).toHaveLength(1);expect(manifests[0]?.bookId).toBe(vector.bookId);expect(manifests[0]?.contentAvailable).toBe(true);const bytes=f.writes();await f.db.execute('DELETE FROM articles WHERE link=?',[source+'/chapter/1']);const cold=new SqlBookStore(f.db,f.bookPorts);expect((await cold.manifests())[0]?.deletedChapters).toEqual([1]);expect(f.writes()).toBe(bytes);await cold.merge(state);await cold.installPackage(await packageFor(f),state.bookId);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:1}]);await f.db.execute('DELETE FROM channels WHERE url=?',[source]);expect((await cold.manifests())[0]?.deleted).toBe(true);await cold.installPackage(await packageFor(f),state.bookId);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:0}]);}finally{f.sql.close();}});
 test('incomplete legacy directory keeps its chapter records and never publishes a partial book',async()=>{const f=await bookFixture();try{await seedChapters(f,source,vector.chapters);await f.db.execute('UPDATE articles SET link=? WHERE link=?',[source+'/chapter/3',source+'/chapter/2']);await f.store.registerLocal([state]);expect(await f.store.manifests()).toEqual([]);expect(await f.store.chapterIds()).toEqual(new Set());expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:2}]);}finally{f.sql.close();}});
 test('deletion and independent reading/save clocks may arrive before the original book; repeated body is zero-write',async()=>{const f=await bookFixture();try{await f.store.merge({...state,deletedChapters:[2],deletionClock:150});const r:BookReading={bookId:state.bookId,chapterIndex:1,isRead:false,readingProgress:.25,readingPositionChangedAt:200,readingPositionBytes:42,readingPositionContentHash:'position',sourceDeviceId:'phone',favoriteSaved:true,favoriteChangedAt:300,favoriteSortOrder:7};await f.store.mergeReading(r);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:0}]);expect(await f.store.installPackage(await packageFor(f),state.bookId)).toBeGreaterThan(0);expect(await f.db.query('SELECT title,is_read,is_saved FROM articles')).toEqual([{title:vector.chapters[0]!.title,is_read:0,is_saved:1}]);expect(await f.db.query('SELECT progress,changed_at,position_bytes FROM article_reading_state')).toEqual([{progress:.25,changed_at:200,position_bytes:42}]);const before=f.changes();expect(await f.store.installPackage(await packageFor(f),state.bookId)).toBe(0);expect(f.changes()).toBe(before);expect(await f.store.mergeReading({...r,isRead:true,readingPositionChangedAt:100,favoriteSaved:false,favoriteChangedAt:250})).toBe(0);expect((await f.store.readingStates())[0]?.favoriteSaved).toBe(true);}finally{f.sql.close();}});

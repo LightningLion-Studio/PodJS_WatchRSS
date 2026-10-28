@@ -1,9 +1,10 @@
 import {utf8Encode,utf8Decode} from './types';
+import {crc32,crc32Async,type CodecWorkOptions} from '@podjs/framework/bytes';
+export {crc32};
 
 const MAX=256*1024*1024, ENTRY=32*1024*1024;
 const entryLimit=(name:string)=>/^books\/[a-f0-9]{64}\.jsonl$/.test(name)?MAX:ENTRY;
 const check=(v:unknown)=>{if(!v)throw Error('cloud_archive_invalid');};
-export function crc32(bytes:Uint8Array){let crc=0xffffffff;for(const b of bytes){crc^=b;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return (crc^0xffffffff)>>>0;}
 const concat=(parts:Uint8Array[])=>{const out=new Uint8Array(parts.reduce((n,b)=>n+b.length,0));let at=0;for(const p of parts){out.set(p,at);at+=p.length;}return out;};
 /** Deterministic ZIP STORE: fixed DOS date, UTF-8 names, no platform extras. */
 export function writeWrss(entries:Map<string,Uint8Array>):Uint8Array {
@@ -16,7 +17,7 @@ export function writeWrss(entries:Map<string,Uint8Array>):Uint8Array {
  const cd=concat(directory),end=new Uint8Array(22),v=new DataView(end.buffer);v.setUint32(0,0x06054b50,true);v.setUint16(8,entries.size,true);v.setUint16(10,entries.size,true);v.setUint32(12,cd.length,true);v.setUint32(16,offset,true);check(offset+cd.length+22<=MAX);return concat([...files,cd,end]);
 }
 /** Authenticated ZIP only; strict bounds/CRC, no path extraction or filesystem names. */
-export async function readWrss(bytes:Uint8Array,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>,options:{yield?:()=>Promise<void>}={}){
+export async function readWrss(bytes:Uint8Array,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>,options:CodecWorkOptions={}){
  check(bytes.length>=22&&bytes.length<=MAX);const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let end=bytes.length-22;
  for(;end>=Math.max(0,bytes.length-65557);end--)if(view.getUint32(end,true)===0x06054b50&&end+22+view.getUint16(end+20,true)===bytes.length)break;
  check(end>=0&&end>=bytes.length-65557);check(view.getUint16(end+4,true)===0&&view.getUint16(end+6,true)===0);
@@ -30,7 +31,7 @@ export async function readWrss(bytes:Uint8Array,gunzip:(b:Uint8Array,max:number)
   check(view.getUint32(local,true)===0x04034b50&&view.getUint16(local+8,true)===method);const ln=view.getUint16(local+26,true),le=view.getUint16(local+28,true),body=local+30+ln+le;check(body+packed<=start&&utf8Decode(bytes.subarray(local+30,local+30+ln))===name);
   let raw:Uint8Array=bytes.slice(body,body+packed);
   if(method===8){const trailer=new Uint8Array(8),t=new DataView(trailer.buffer);t.setUint32(0,crc,true);t.setUint32(4,length,true);raw=await gunzip(concat([new Uint8Array([31,139,8,0,0,0,0,0,0,3]),raw,trailer]),length);}
-  check(raw.length===length&&crc32(raw)===crc);total+=raw.length;check(total<=MAX);entries.set(name,raw);at+=46+n+extra+comment;
+  check(raw.length===length&&await crc32Async(raw,options)===crc);total+=raw.length;check(total<=MAX);entries.set(name,raw);at+=46+n+extra+comment;
  }
  check(at===end);return entries;
 }

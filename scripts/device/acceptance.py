@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import sqlite3
@@ -51,7 +52,16 @@ def table_digest(path):
         return tables
 
 
-def stream_digest(stream, temp):
+def database_member(marker):
+    if marker == 'legacy\n':
+        return 'databases/podjs.sqlite'
+    generations = re.findall(r'^generation=(g-[A-Za-z0-9-]+)$', marker, re.M)
+    if len(generations) != 1:
+        raise ValueError('Invalid active generation; snapshot refused')
+    return 'files/package-takeover/generations/' + generations[0] + '/podjs.sqlite'
+
+
+def stream_digest(stream, temp, database='databases/podjs.sqlite'):
     # Same row serialization as verification/library-data-digest.py. No tar on disk;
     # retain only SQLite + sidecars temporarily for transaction-consistent row hashes.
     files = {}
@@ -62,7 +72,7 @@ def stream_digest(stream, temp):
             name = member.name.removeprefix('./')
             h = hashlib.sha256()
             target = None
-            if name in {'databases/podjs.sqlite' + suffix for suffix in ('', '-wal', '-shm', '-journal')}:
+            if name in {database + suffix for suffix in ('', '-wal', '-shm', '-journal')}:
                 target = (Path(temp) / Path(name).name).open('wb')
             try:
                 with archive.extractfile(member) as source:
@@ -76,9 +86,9 @@ def stream_digest(stream, temp):
             files[name] = h.hexdigest()
     db = Path(temp) / 'podjs.sqlite'
     if not db.exists():
-        raise ValueError('No databases/podjs.sqlite: receipt refused (run-as/package/data unavailable)')
+        raise ValueError('Selected SQLite database missing: receipt refused')
     return {'files': files, 'tables': table_digest(db), 'integrity': 'ok',
-            'format': 'stream-digest-v1', 'archiveStored': False}
+            'format': 'stream-digest-v1', 'archiveStored': False, 'databaseMember': database}
 
 
 def snapshot(a, label):
@@ -86,6 +96,9 @@ def snapshot(a, label):
     if output.exists():
         raise ValueError('Refusing to overwrite receipt: ' + str(output))
     run(a.adb + ['shell', 'am', 'force-stop', a.package], a.dry_run)
+    marker = run(a.adb + ['shell', 'run-as', a.package, 'sh', '-c',
+        "'if [ -f files/package-takeover/active ]; then cat files/package-takeover/active; else printf \"legacy\\n\"; fi'"], a.dry_run)
+    database = database_member(marker) if not a.dry_run else 'databases/podjs.sqlite'
     cmd = a.adb + ['exec-out', 'run-as', a.package, 'tar', '-cf', '-', 'databases', 'files', 'shared_prefs']
     print(shlex.join(cmd) + ' | streaming SHA256/SQLite digest -> ' + str(output), flush=True)
     if a.dry_run:
@@ -93,7 +106,7 @@ def snapshot(a, label):
     with tempfile.TemporaryDirectory(prefix='wrss-digest-') as temp, tempfile.TemporaryFile() as errors:
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errors) as proc:
             try:
-                receipt = stream_digest(proc.stdout, temp)
+                receipt = stream_digest(proc.stdout, temp, database)
             except BaseException:
                 proc.kill()
                 raise

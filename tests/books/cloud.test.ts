@@ -1,6 +1,7 @@
 import {test,expect} from 'bun:test';
 import {createHmac} from 'node:crypto';
 import vectors from '../fixtures/book-fingerprint.json';
+import cliSingle from '../fixtures/cli-single-txt-book.json';
 import {bookFixture,seedChapters} from './fixture';
 import {SqlLibrarySessionRepository} from '../../src/sync/library-repository';
 import {WatchCloudLibraryAdapter} from '../../src/cloud/library';
@@ -14,6 +15,20 @@ const c={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k)
 const state={bookId:v.bookId,fingerprint:v.fingerprint,title:'Book',chapterCount:2,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:100,sourceDeviceId:'phone',sourceUrl:source,kind:'epub'};
 function repo(f:Awaited<ReturnType<typeof bookFixture>>){return new SqlLibrarySessionRepository(f.db,{...f.ports,bookFiles:f.files});}
 function adapter(r:ReturnType<typeof repo>){return new WatchCloudLibraryAdapter(r,'watch',{...crypto,stableId:async url=>crypto.sha256(utf8Encode(url))},guard);}
+test('CLI single-file cloud book record and direct object complete the real SQL reader without duplicate chapters',async()=>{
+ const f=await bookFixture();try{
+  const a=adapter(repo(f)),book={...state,bookId:cliSingle.bookId,fingerprint:cliSingle.fingerprint,chapterCount:1,sourceUrl:cliSingle.sourceUrl,kind:'txt'};
+  await a.applyRecords([{kind:'book',value:book}]);
+  const name='books/'+book.bookId+'.jsonl',bytes=utf8Encode(cliSingle.packageUtf8);
+  const descriptor={name,encoding:'identity' as const,originalBytes:bytes.length,encodedBytes:bytes.length,chunks:[],privateBook:{bookId:book.bookId,fingerprint:book.fingerprint,title:book.title,chapterCount:1,sourceUrl:book.sourceUrl,kind:book.kind,packagePath:name}};
+  const payload=new Map([[name,bytes]]),first=await a.restorePayloads(payload,'cli',[descriptor]);
+  expect(first.pending).toBe(0);expect(first.abandoned).toBe(0);expect(first.changed).toBeGreaterThan(0);
+  expect(await f.db.query('SELECT content FROM articles')).toEqual([{content:cliSingle.chapter.contentText}]);
+  expect(await f.db.query('SELECT registration_complete FROM sync_books')).toEqual([{registration_complete:1}]);
+  expect((await a.restorePayloads(payload,'cli',[descriptor])).changed).toBe(0);
+  expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:1}]);
+ }finally{f.sql.close();}
+});
 test('R44 cloud book HMAC/hash retain provenance, validate identity and never accept retired indexes as user deletions',async()=>{
  const codec=new CloudRecordCodec(c),doc={kind:'book',value:state};const derived=await c.hkdf(key,utf8Encode('u'),utf8Encode('watchrss/cloud/record-id/v1'));
  expect(await codec.id(key,'u',doc)).toBe(await c.hmac(derived,utf8Encode('book:'+state.bookId)));expect(await codec.hash(doc)).toBe(await c.sha256(utf8Encode('book:'+canonical(state))));expect(await codec.hash({...doc,value:{...state,sourceDeviceId:'other'}})).not.toBe(await codec.hash(doc));
