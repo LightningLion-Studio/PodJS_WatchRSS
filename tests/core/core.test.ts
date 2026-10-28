@@ -89,7 +89,7 @@ test('new libraries seed native builtin rows atomically, while an existing delet
     expect(raw.query("SELECT url FROM channels").all()).toEqual([{url:'builtin:bili'}]);
   }finally{raw.close();}
 });
-test('schema version upgrades in order, skips matching versions, and retries an interrupted migration atomically',async()=>{
+test('schema upgrades in order, repairs matching-version helpers without data migrations, and retries atomically',async()=>{
   const raw=new Database(':memory:'),db=new BunDb(raw);
   try{
     for(const sql of SCHEMA)raw.run(sql);raw.run('PRAGMA user_version=1');
@@ -102,8 +102,14 @@ test('schema version upgrades in order, skips matching versions, and retries an 
     await initializeSchema(db,{now:()=>99});
     expect(raw.query('PRAGMA user_version').get()).toEqual({user_version:SCHEMA_VERSION});
     expect(raw.query('SELECT dedup_key FROM articles').get()).toEqual({dedup_key:'guid:raw-guid'});
-    const queries:string[]=[];let transactions=0;const matching={query:async(sql:string)=>{queries.push(sql);return db.query(sql);},transaction:async()=>{transactions++;throw Error('must skip');}};
-    await initializeSchema(matching,{seedBuiltinChannels:true,now:()=>{throw Error('must not prepare migrations');}});expect(transactions).toBe(0);expect(queries).toEqual(['PRAGMA user_version']);
+    const queries:string[]=[];let transactions=0;const before=raw.query('SELECT total_changes() AS n').get();
+    const matching={query:async(sql:string)=>{queries.push(sql);return db.query(sql);},transaction:async(statements:{sql:string;params?:readonly unknown[]}[])=>{
+      transactions++;expect(statements.length).toBeGreaterThan(0);
+      for(const statement of statements){expect(statement.sql).toMatch(/^CREATE (TABLE|INDEX) IF NOT EXISTS /);expect(statement.params).toBeUndefined();}
+      await db.transaction(statements);
+    }};
+    await initializeSchema(matching,{seedBuiltinChannels:true,now:()=>{throw Error('must not prepare migrations');}});
+    expect(transactions).toBe(1);expect(queries).toEqual(['PRAGMA user_version']);expect(raw.query('SELECT total_changes() AS n').get()).toEqual(before);
   }finally{raw.close();}
 });
 test('dedup upgrade merges native-prefix and sync-hash rows without losing user or sync state',async()=>{

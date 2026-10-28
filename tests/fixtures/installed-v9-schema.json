@@ -1,0 +1,1146 @@
+{
+  "sourceCommit": "2ce5698fa49a00493b4e4d9e4ee2cc0c23997749",
+  "sourcePath": "src/core/schema.ts",
+  "generatedBy": "historical initializeSchema, seedBuiltinChannels=false, now=12345, bun:sqlite",
+  "version": 9,
+  "statements": [
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_register_state(article_id TEXT PRIMARY KEY,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL,state_json TEXT NOT NULL,legacy_json TEXT,materialized_json TEXT,pending_json TEXT,raw_json TEXT NOT NULL,raw_conflict INTEGER NOT NULL DEFAULT 0,body_pending INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS article_register_state_item ON article_register_state(item_id)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_register_conflicts(article_id TEXT NOT NULL REFERENCES article_register_state(article_id) ON DELETE CASCADE,version_hash TEXT NOT NULL,raw_json TEXT NOT NULL,PRIMARY KEY(article_id,version_hash))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_library_revision (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_library_revision(id,revision) VALUES(1,0)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keeps(article_id TEXT PRIMARY KEY,url TEXT NOT NULL,changed_at INTEGER NOT NULL,source_device_id TEXT NOT NULL,source_order TEXT NOT NULL,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keeps_url ON sync_article_keeps(url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keep_aliases(alias_id TEXT NOT NULL,canonical_id TEXT NOT NULL REFERENCES sync_article_keeps(article_id) ON DELETE CASCADE,url TEXT NOT NULL,PRIMARY KEY(alias_id,canonical_id))"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_url ON sync_article_keep_aliases(url)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_identity ON sync_article_keep_aliases(alias_id,url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keep_migration(id INTEGER PRIMARY KEY CHECK(id=1))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_deletions (article_id TEXT PRIMARY KEY,url TEXT NOT NULL,changed_at INTEGER NOT NULL,source_device_id TEXT NOT NULL,source_order TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_snapshot_fingerprints (kind TEXT NOT NULL,entity_id TEXT NOT NULL,signature TEXT NOT NULL,PRIMARY KEY(kind,entity_id))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_source_states (url TEXT PRIMARY KEY,source_device_id TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,site_url TEXT,image_url TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,sort_order INTEGER NOT NULL,is_pinned INTEGER NOT NULL,deleted INTEGER NOT NULL,deleted_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_peer_state (peer_device_id TEXT PRIMARY KEY,last_local_seq_acked INTEGER NOT NULL DEFAULT 0,last_remote_seq_applied INTEGER NOT NULL DEFAULT 0,last_full_sync_at INTEGER NOT NULL DEFAULT 0,last_protocol_version INTEGER NOT NULL DEFAULT 0,updated_at INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_change_log (seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,entity_id TEXT NOT NULL,changed_at INTEGER NOT NULL,origin_device_id TEXT NOT NULL,reason TEXT NOT NULL,created_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_change_log_entity ON sync_change_log(kind,entity_id)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_reading_state (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, progress REAL NOT NULL, changed_at INTEGER NOT NULL, position_bytes INTEGER NOT NULL, position_hash TEXT NOT NULL, state_json TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_sync_content (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, content_html TEXT, content_text TEXT NOT NULL, body_hash TEXT NOT NULL, body_bytes INTEGER NOT NULL, chunk_size INTEGER NOT NULL, chunk_hashes TEXT NOT NULL, content_bytes INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_sync_encoding_cache (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, body_hash TEXT NOT NULL,content_hash TEXT,source_device_id TEXT,updated_at INTEGER,imported_at INTEGER,metadata_state TEXT,site_name TEXT,rss_source_title TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_native_sync_hash (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,body_hash TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS offline_media (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, media_type TEXT NOT NULL CHECK(media_type IN ('IMAGE','VIDEO')), origin_url TEXT NOT NULL, relative_path TEXT, created_at INTEGER NOT NULL, UNIQUE(item_id,origin_url))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_local_identity (id INTEGER PRIMARY KEY CHECK(id=1), device_id TEXT NOT NULL, device_order TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS cloud_rss_article_ids (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_ids (article_id TEXT PRIMARY KEY, item_id INTEGER UNIQUE CHECK(item_id>0) REFERENCES articles(id) ON DELETE SET NULL, url TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_aliases (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_article_alias_immutable BEFORE UPDATE OF article_id ON sync_article_aliases WHEN OLD.article_id!=NEW.article_id BEGIN SELECT RAISE(ABORT,'Article alias already bound to another identity'); END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_article_binding_immutable"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_article_binding_immutable BEFORE UPDATE OF item_id ON sync_article_ids WHEN OLD.item_id IS NOT NULL AND NEW.item_id IS NOT NULL AND OLD.item_id!=NEW.item_id AND NOT (\n    EXISTS(SELECT 1 FROM sync_article_aliases WHERE item_id=OLD.item_id AND article_id=OLD.article_id) AND\n    EXISTS(SELECT 1 FROM sync_article_aliases al JOIN articles a ON a.id=al.item_id WHERE al.item_id=NEW.item_id AND al.article_id=NEW.article_id AND a.dedup_key=NEW.article_id AND a.link IS NEW.url)\n   ) BEGIN SELECT RAISE(ABORT,'Article id already bound to another item'); END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_article_insert_binding_immutable BEFORE INSERT ON sync_article_ids WHEN NEW.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_article_ids WHERE article_id=NEW.article_id AND item_id IS NOT NULL AND item_id!=NEW.item_id) BEGIN SELECT RAISE(ABORT,'Article id already bound to another item'); END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_saved_entry_times (article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,save_type TEXT NOT NULL CHECK(save_type IN ('favorite','watchLater')),created_at INTEGER NOT NULL,PRIMARY KEY(article_id,save_type))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_saved_states (article_id TEXT NOT NULL, save_type TEXT NOT NULL CHECK(save_type IN ('favorite','watchLater')), item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL, url TEXT NOT NULL, saved INTEGER NOT NULL CHECK(saved IN (0,1)), changed_at INTEGER NOT NULL, sort_order INTEGER NOT NULL, source_device_id TEXT NOT NULL, source_order TEXT NOT NULL, PRIMARY KEY(article_id,save_type))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS llm_token_usage (id INTEGER PRIMARY KEY, provider TEXT NOT NULL, model TEXT NOT NULL, request_id TEXT NOT NULL, usage_json TEXT, created_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS local_article_deletions (id INTEGER PRIMARY KEY, channel_url TEXT NOT NULL, article_url TEXT NOT NULL, dedup_key TEXT NOT NULL, was_favorite INTEGER NOT NULL, was_watch_later INTEGER NOT NULL, changed_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS source_media_preferences (channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE, continue_in_background INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_original_previews (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, summary TEXT, image_url TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_original_meta (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_url TEXT NOT NULL, fetched_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_original_chunks (article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, chunk_index INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(article_id,chunk_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_token_usage_epoch(id INTEGER PRIMARY KEY CHECK(id=1),epoch TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS token_usage_generation_delete AFTER DELETE ON llm_token_usage WHEN OLD.id>COALESCE((SELECT MAX(id) FROM llm_token_usage),0) BEGIN UPDATE sync_token_usage_epoch SET epoch=lower(hex(randomblob(16))) WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS channels (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, title TEXT NOT NULL, description TEXT, image_url TEXT, last_fetched_at INTEGER, created_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, content TEXT, link TEXT, guid TEXT, pub_date TEXT, image_url TEXT, audio_url TEXT, video_url TEXT, is_read INTEGER NOT NULL DEFAULT 0, is_saved INTEGER NOT NULL DEFAULT 0, reading_progress REAL NOT NULL DEFAULT 0, dedup_key TEXT NOT NULL, fetched_at INTEGER NOT NULL, UNIQUE(channel_id, dedup_key))"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS articles_channel_date ON articles(channel_id, fetched_at DESC)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS articles_sync_order ON articles(fetched_at DESC,id DESC)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS source_preferences (channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE, use_original_content INTEGER NOT NULL DEFAULT 0, read_preset TEXT NOT NULL DEFAULT 'default')"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_body_chunks (article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, chunk_index INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(article_id, chunk_index))"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_content_update AFTER UPDATE OF content,description,link ON articles WHEN OLD.content IS NOT NEW.content OR OLD.description IS NOT NEW.description OR OLD.link IS NOT NEW.link BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.id;DELETE FROM article_sync_content WHERE item_id=NEW.id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_body_chunks_insert AFTER INSERT ON article_body_chunks  BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.article_id;DELETE FROM article_sync_content WHERE item_id=NEW.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_body_chunks_update AFTER UPDATE ON article_body_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.article_id;DELETE FROM article_sync_content WHERE item_id=NEW.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_body_chunks_delete AFTER DELETE ON article_body_chunks  BEGIN DELETE FROM article_native_sync_hash WHERE item_id=OLD.article_id;DELETE FROM article_sync_content WHERE item_id=OLD.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_original_chunks_insert AFTER INSERT ON article_original_chunks  BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.article_id;DELETE FROM article_sync_content WHERE item_id=NEW.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_original_chunks_update AFTER UPDATE ON article_original_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.article_id;DELETE FROM article_sync_content WHERE item_id=NEW.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_original_chunks_delete AFTER DELETE ON article_original_chunks  BEGIN DELETE FROM article_native_sync_hash WHERE item_id=OLD.article_id;DELETE FROM article_sync_content WHERE item_id=OLD.article_id; END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_previews (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, summary TEXT, image_url TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_saved_states (article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, save_type TEXT NOT NULL CHECK(save_type IN ('favorite','watchLater')), saved INTEGER NOT NULL, changed_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(article_id,save_type))"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO article_saved_states(article_id,save_type,saved,changed_at,sort_order) SELECT id,'favorite',1,fetched_at,-fetched_at FROM articles WHERE is_saved=1"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_article_aliases(item_id,article_id) SELECT item_id,article_id FROM sync_article_ids WHERE item_id IS NOT NULL"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO article_saved_entry_times(article_id,save_type,created_at) SELECT article_id,save_type,changed_at FROM article_saved_states WHERE saved=1"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keeps_insert AFTER INSERT ON sync_article_keeps  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keeps_update AFTER UPDATE ON sync_article_keeps WHEN OLD.article_id IS NOT NEW.article_id OR OLD.url IS NOT NEW.url OR OLD.changed_at IS NOT NEW.changed_at OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order OR OLD.item_id IS NOT NEW.item_id BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keeps_delete AFTER DELETE ON sync_article_keeps  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep_aliases_insert AFTER INSERT ON sync_article_keep_aliases  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep_aliases_update AFTER UPDATE ON sync_article_keep_aliases WHEN OLD.alias_id IS NOT NEW.alias_id OR OLD.canonical_id IS NOT NEW.canonical_id OR OLD.url IS NOT NEW.url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep_aliases_delete AFTER DELETE ON sync_article_keep_aliases  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_articles_insert AFTER INSERT ON articles  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_articles_update AFTER UPDATE ON articles WHEN OLD.id IS NOT NEW.id OR OLD.channel_id IS NOT NEW.channel_id OR OLD.title IS NOT NEW.title OR OLD.description IS NOT NEW.description OR OLD.content IS NOT NEW.content OR OLD.link IS NOT NEW.link OR OLD.guid IS NOT NEW.guid OR OLD.pub_date IS NOT NEW.pub_date OR OLD.image_url IS NOT NEW.image_url OR OLD.audio_url IS NOT NEW.audio_url OR OLD.video_url IS NOT NEW.video_url OR OLD.is_read IS NOT NEW.is_read OR OLD.is_saved IS NOT NEW.is_saved OR OLD.reading_progress IS NOT NEW.reading_progress OR OLD.dedup_key IS NOT NEW.dedup_key OR OLD.fetched_at IS NOT NEW.fetched_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_articles_delete AFTER DELETE ON articles  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_channels_insert AFTER INSERT ON channels  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_channels_update AFTER UPDATE ON channels WHEN OLD.id IS NOT NEW.id OR OLD.url IS NOT NEW.url OR OLD.title IS NOT NEW.title OR OLD.description IS NOT NEW.description OR OLD.image_url IS NOT NEW.image_url OR OLD.last_fetched_at IS NOT NEW.last_fetched_at OR OLD.created_at IS NOT NEW.created_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.is_pinned IS NOT NEW.is_pinned BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_channels_delete AFTER DELETE ON channels  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_body_chunks_insert AFTER INSERT ON article_body_chunks  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_body_chunks_update AFTER UPDATE ON article_body_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_body_chunks_delete AFTER DELETE ON article_body_chunks  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_chunks_insert AFTER INSERT ON article_original_chunks  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_chunks_update AFTER UPDATE ON article_original_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_chunks_delete AFTER DELETE ON article_original_chunks  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_previews_insert AFTER INSERT ON article_previews  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_previews_update AFTER UPDATE ON article_previews WHEN OLD.article_id IS NOT NEW.article_id OR OLD.summary IS NOT NEW.summary OR OLD.image_url IS NOT NEW.image_url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_previews_delete AFTER DELETE ON article_previews  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_previews_insert AFTER INSERT ON article_original_previews  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_previews_update AFTER UPDATE ON article_original_previews WHEN OLD.article_id IS NOT NEW.article_id OR OLD.summary IS NOT NEW.summary OR OLD.image_url IS NOT NEW.image_url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_previews_delete AFTER DELETE ON article_original_previews  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_meta_insert AFTER INSERT ON article_original_meta  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_meta_update AFTER UPDATE ON article_original_meta WHEN OLD.article_id IS NOT NEW.article_id OR OLD.source_url IS NOT NEW.source_url OR OLD.fetched_at IS NOT NEW.fetched_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_original_meta_delete AFTER DELETE ON article_original_meta  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_saved_states_insert AFTER INSERT ON article_saved_states  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_saved_states_update AFTER UPDATE ON article_saved_states WHEN OLD.article_id IS NOT NEW.article_id OR OLD.save_type IS NOT NEW.save_type OR OLD.saved IS NOT NEW.saved OR OLD.changed_at IS NOT NEW.changed_at OR OLD.sort_order IS NOT NEW.sort_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_saved_states_delete AFTER DELETE ON article_saved_states  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_saved_entry_times_insert AFTER INSERT ON article_saved_entry_times  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_saved_entry_times_update AFTER UPDATE ON article_saved_entry_times WHEN OLD.article_id IS NOT NEW.article_id OR OLD.save_type IS NOT NEW.save_type OR OLD.created_at IS NOT NEW.created_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_saved_entry_times_delete AFTER DELETE ON article_saved_entry_times  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_saved_states_insert AFTER INSERT ON sync_saved_states  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_saved_states_update AFTER UPDATE ON sync_saved_states WHEN OLD.article_id IS NOT NEW.article_id OR OLD.save_type IS NOT NEW.save_type OR OLD.item_id IS NOT NEW.item_id OR OLD.url IS NOT NEW.url OR OLD.saved IS NOT NEW.saved OR OLD.changed_at IS NOT NEW.changed_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_saved_states_delete AFTER DELETE ON sync_saved_states  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_ids_insert AFTER INSERT ON sync_article_ids  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_ids_update AFTER UPDATE ON sync_article_ids WHEN OLD.article_id IS NOT NEW.article_id OR OLD.item_id IS NOT NEW.item_id OR OLD.url IS NOT NEW.url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_ids_delete AFTER DELETE ON sync_article_ids  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_aliases_insert AFTER INSERT ON sync_article_aliases  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_aliases_update AFTER UPDATE ON sync_article_aliases WHEN OLD.item_id IS NOT NEW.item_id OR OLD.article_id IS NOT NEW.article_id BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_aliases_delete AFTER DELETE ON sync_article_aliases  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_local_identity_insert AFTER INSERT ON sync_local_identity  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_local_identity_update AFTER UPDATE ON sync_local_identity WHEN OLD.id IS NOT NEW.id OR OLD.device_id IS NOT NEW.device_id OR OLD.device_order IS NOT NEW.device_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_local_identity_delete AFTER DELETE ON sync_local_identity  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_local_article_deletions_insert AFTER INSERT ON local_article_deletions  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_local_article_deletions_update AFTER UPDATE ON local_article_deletions WHEN OLD.id IS NOT NEW.id OR OLD.channel_url IS NOT NEW.channel_url OR OLD.article_url IS NOT NEW.article_url OR OLD.dedup_key IS NOT NEW.dedup_key OR OLD.was_favorite IS NOT NEW.was_favorite OR OLD.was_watch_later IS NOT NEW.was_watch_later OR OLD.changed_at IS NOT NEW.changed_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_local_article_deletions_delete AFTER DELETE ON local_article_deletions  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_source_states_insert AFTER INSERT ON sync_source_states  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_source_states_update AFTER UPDATE ON sync_source_states WHEN OLD.url IS NOT NEW.url OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.title IS NOT NEW.title OR OLD.description IS NOT NEW.description OR OLD.site_url IS NOT NEW.site_url OR OLD.image_url IS NOT NEW.image_url OR OLD.created_at IS NOT NEW.created_at OR OLD.updated_at IS NOT NEW.updated_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.is_pinned IS NOT NEW.is_pinned OR OLD.deleted IS NOT NEW.deleted OR OLD.deleted_at IS NOT NEW.deleted_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_source_states_delete AFTER DELETE ON sync_source_states  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_deletions_insert AFTER INSERT ON sync_article_deletions  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_deletions_update AFTER UPDATE ON sync_article_deletions WHEN OLD.article_id IS NOT NEW.article_id OR OLD.url IS NOT NEW.url OR OLD.changed_at IS NOT NEW.changed_at OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_deletions_delete AFTER DELETE ON sync_article_deletions  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_reading_state_insert AFTER INSERT ON article_reading_state  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_reading_state_update AFTER UPDATE ON article_reading_state WHEN OLD.article_id IS NOT NEW.article_id OR OLD.progress IS NOT NEW.progress OR OLD.changed_at IS NOT NEW.changed_at OR OLD.position_bytes IS NOT NEW.position_bytes OR OLD.position_hash IS NOT NEW.position_hash OR OLD.state_json IS NOT NEW.state_json BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_article_reading_state_delete AFTER DELETE ON article_reading_state  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_display(book_id TEXT PRIMARY KEY,projection TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_books(book_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,chapter_count INTEGER NOT NULL,state_json TEXT NOT NULL,package_path TEXT,package_sha256 TEXT,package_bytes INTEGER,registration_complete INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_identity_immutable BEFORE UPDATE OF fingerprint,chapter_count ON sync_books WHEN OLD.fingerprint!=NEW.fingerprint OR OLD.chapter_count!=NEW.chapter_count BEGIN SELECT RAISE(ABORT,'Book identity is immutable');END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_chapters(book_id TEXT NOT NULL REFERENCES sync_books(book_id),chapter_index INTEGER NOT NULL,article_id TEXT NOT NULL,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL,url TEXT NOT NULL,chapter_hash TEXT NOT NULL,PRIMARY KEY(book_id,chapter_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_aliases(book_id TEXT NOT NULL REFERENCES sync_books(book_id),chapter_index INTEGER NOT NULL,article_id TEXT NOT NULL,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL,url TEXT NOT NULL,channel_url TEXT NOT NULL,wire_identity INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(book_id,chapter_index,article_id))"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_book_alias_item ON sync_book_aliases(item_id)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_book_alias_article ON sync_book_aliases(article_id)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_book_alias_url ON sync_book_aliases(url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading(book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,state_json TEXT NOT NULL,is_read INTEGER NOT NULL,progress REAL NOT NULL,clock INTEGER NOT NULL,position INTEGER NOT NULL,hash TEXT NOT NULL,source TEXT NOT NULL,favorite_saved INTEGER,favorite_clock INTEGER,favorite_order INTEGER,favorite_source TEXT,favorite_source_order TEXT,watchLater_saved INTEGER,watchLater_clock INTEGER,watchLater_order INTEGER,watchLater_source TEXT,watchLater_source_order TEXT,PRIMARY KEY(book_id,chapter_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_events(book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,changed_at INTEGER NOT NULL,PRIMARY KEY(book_id,chapter_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_delete_members(book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,PRIMARY KEY(book_id,chapter_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_context(id INTEGER PRIMARY KEY CHECK(id=1),remote INTEGER NOT NULL)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_book_context VALUES(1,0)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_local_chapter_delete BEFORE DELETE ON articles WHEN (SELECT remote FROM sync_book_context WHERE id=1)=0 BEGIN\n INSERT INTO sync_book_events(book_id,chapter_index,changed_at) SELECT book_id,chapter_index,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER) FROM sync_book_aliases WHERE item_id=OLD.id\n ON CONFLICT(book_id,chapter_index) DO UPDATE SET changed_at=max(changed_at,excluded.changed_at);END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_local_whole_delete BEFORE DELETE ON channels WHEN (SELECT remote FROM sync_book_context WHERE id=1)=0 BEGIN\n INSERT INTO sync_book_events(book_id,chapter_index,changed_at) SELECT DISTINCT m.book_id,0,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER) FROM sync_book_aliases m JOIN articles a ON a.id=m.item_id WHERE a.channel_id=OLD.id\n ON CONFLICT(book_id,chapter_index) DO UPDATE SET changed_at=max(changed_at,excluded.changed_at);END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_stage(book_id TEXT NOT NULL,package_sha256 TEXT NOT NULL,chapter_index INTEGER NOT NULL,book_article_id TEXT NOT NULL,wire_id TEXT NOT NULL,url TEXT NOT NULL,channel_url TEXT NOT NULL,channel_title TEXT NOT NULL,title TEXT NOT NULL,content TEXT,html TEXT,text TEXT NOT NULL,deleted INTEGER NOT NULL,existing_item INTEGER,chapter_hash TEXT NOT NULL,PRIMARY KEY(book_id,package_sha256,chapter_index))"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_books_insert AFTER INSERT ON sync_books  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_books_update AFTER UPDATE ON sync_books WHEN OLD.state_json IS NOT NEW.state_json BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_books_delete AFTER DELETE ON sync_books  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_book_reading_insert AFTER INSERT ON sync_book_reading  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_book_reading_update AFTER UPDATE ON sync_book_reading WHEN OLD.state_json IS NOT NEW.state_json BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_book_reading_delete AFTER DELETE ON sync_book_reading  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_book_events_insert AFTER INSERT ON sync_book_events  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_book_events_update AFTER UPDATE ON sync_book_events  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_revision_sync_book_events_delete AFTER DELETE ON sync_book_events  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_parts(book_id TEXT NOT NULL,package_sha256 TEXT NOT NULL,fingerprint TEXT NOT NULL,byte_count INTEGER NOT NULL,chunk_count INTEGER NOT NULL,chunk_index INTEGER NOT NULL,path TEXT NOT NULL,PRIMARY KEY(book_id,package_sha256,chunk_index))"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_saved_states_item ON sync_saved_states(item_id)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS articles_sync_order ON articles(fetched_at DESC,id DESC)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_registration_cache(cache_key TEXT PRIMARY KEY,revision INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_display_dirty(book_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 1)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_display_article_dirty AFTER UPDATE OF title ON articles WHEN OLD.title IS NOT NEW.title BEGIN\n INSERT INTO sync_book_display_dirty(book_id) SELECT DISTINCT book_id FROM sync_book_aliases WHERE item_id=NEW.id ON CONFLICT(book_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_display_channel_dirty AFTER UPDATE OF title ON channels WHEN OLD.title IS NOT NEW.title BEGIN\n INSERT INTO sync_book_display_dirty(book_id) SELECT DISTINCT book_id FROM sync_book_aliases WHERE channel_url=NEW.url ON CONFLICT(book_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_book_display_dirty(book_id) SELECT b.book_id FROM sync_books b LEFT JOIN sync_book_display d ON d.book_id=b.book_id WHERE b.registration_complete=1 AND d.book_id IS NULL"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch TEXT NOT NULL,root TEXT,count INTEGER NOT NULL DEFAULT 0,capture_seeded INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_book_reading_meta(id,epoch) VALUES(1,lower(hex(randomblob(16))))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_versions(book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(book_id,chapter_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_journal(seq INTEGER PRIMARY KEY AUTOINCREMENT,book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_history(seq INTEGER PRIMARY KEY,book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,state_json TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_book_reading_history_key ON sync_book_reading_history(book_id,chapter_index,seq)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_journal_history AFTER INSERT ON sync_book_reading_journal BEGIN\n INSERT INTO sync_book_reading_history SELECT NEW.seq,NEW.book_id,NEW.chapter_index,r.state_json FROM sync_book_reading r WHERE r.book_id=NEW.book_id AND r.chapter_index=NEW.chapter_index;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_journal_version AFTER INSERT ON sync_book_reading_journal BEGIN\n SELECT CASE WHEN NEW.seq>9007199254740991 THEN RAISE(ABORT,'reading sequence exhausted') END;\n INSERT INTO sync_book_reading_versions VALUES(NEW.book_id,NEW.chapter_index,NEW.seq) ON CONFLICT(book_id,chapter_index) DO UPDATE SET seq=excluded.seq;END"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_book_reading_version_seq ON sync_book_reading_versions(seq)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_hashes(book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(book_id,chapter_index))"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_book_hashes(book_id TEXT PRIMARY KEY,root TEXT NOT NULL,count INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_hash_dirty(book_id TEXT PRIMARY KEY)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_dirty(item_id INTEGER PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 1)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_projection(id INTEGER PRIMARY KEY CHECK(id=1),active INTEGER NOT NULL)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_book_reading_projection VALUES(1,0)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_book_reading_peers(peer TEXT PRIMARY KEY,local_epoch TEXT NOT NULL,local_seq INTEGER NOT NULL,remote_epoch TEXT NOT NULL,remote_seq INTEGER NOT NULL,root TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_delta_insert AFTER INSERT ON sync_book_reading  BEGIN\n INSERT INTO sync_book_reading_journal(book_id,chapter_index) VALUES(NEW.book_id,NEW.chapter_index);\n DELETE FROM sync_book_reading_hashes WHERE book_id=NEW.book_id AND chapter_index=NEW.chapter_index;\n INSERT INTO sync_book_reading_hash_dirty VALUES(NEW.book_id) ON CONFLICT(book_id) DO NOTHING;\n UPDATE sync_book_reading_meta SET root=NULL WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_delta_update AFTER UPDATE ON sync_book_reading WHEN OLD.state_json IS NOT NEW.state_json BEGIN\n INSERT INTO sync_book_reading_journal(book_id,chapter_index) VALUES(NEW.book_id,NEW.chapter_index);\n DELETE FROM sync_book_reading_hashes WHERE book_id=NEW.book_id AND chapter_index=NEW.chapter_index;\n INSERT INTO sync_book_reading_hash_dirty VALUES(NEW.book_id) ON CONFLICT(book_id) DO NOTHING;\n UPDATE sync_book_reading_meta SET root=NULL WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_delta_delete AFTER DELETE ON sync_book_reading  BEGIN\n DELETE FROM sync_book_reading_versions WHERE book_id=OLD.book_id AND chapter_index=OLD.chapter_index;\n DELETE FROM sync_book_reading_hashes WHERE book_id=OLD.book_id AND chapter_index=OLD.chapter_index;\n INSERT INTO sync_book_reading_hash_dirty VALUES(OLD.book_id) ON CONFLICT(book_id) DO NOTHING;\n UPDATE sync_book_reading_meta SET root=NULL WHERE id=1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_articles_update AFTER UPDATE OF is_read,reading_progress ON articles\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0 AND (OLD.is_read IS NOT NEW.is_read OR OLD.reading_progress IS NOT NEW.reading_progress) BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.id WHERE OLD.id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\nINSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.id WHERE NEW.id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_article_reading_state_insert AFTER INSERT  ON article_reading_state\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.article_id WHERE NEW.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_article_reading_state_update AFTER UPDATE OF progress,changed_at,position_bytes,position_hash ON article_reading_state\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0 AND (OLD.progress IS NOT NEW.progress OR OLD.changed_at IS NOT NEW.changed_at OR OLD.position_bytes IS NOT NEW.position_bytes OR OLD.position_hash IS NOT NEW.position_hash) BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.article_id WHERE OLD.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\nINSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.article_id WHERE NEW.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_article_reading_state_delete AFTER DELETE  ON article_reading_state\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.article_id WHERE OLD.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_article_saved_states_insert AFTER INSERT  ON article_saved_states\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.article_id WHERE NEW.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_article_saved_states_update AFTER UPDATE OF saved,changed_at,sort_order ON article_saved_states\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0 AND (OLD.saved IS NOT NEW.saved OR OLD.changed_at IS NOT NEW.changed_at OR OLD.sort_order IS NOT NEW.sort_order) BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.article_id WHERE OLD.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\nINSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.article_id WHERE NEW.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_article_saved_states_delete AFTER DELETE  ON article_saved_states\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.article_id WHERE OLD.article_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.article_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_sync_saved_states_insert AFTER INSERT  ON sync_saved_states\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.item_id WHERE NEW.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.item_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_sync_saved_states_update AFTER UPDATE OF item_id,saved,changed_at,sort_order,source_device_id ON sync_saved_states\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0 AND (OLD.item_id IS NOT NEW.item_id OR OLD.saved IS NOT NEW.saved OR OLD.changed_at IS NOT NEW.changed_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.source_device_id IS NOT NEW.source_device_id) BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.item_id WHERE OLD.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.item_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\nINSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.item_id WHERE NEW.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=NEW.item_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_dirty_sync_saved_states_delete AFTER DELETE  ON sync_saved_states\n WHEN (SELECT active FROM sync_book_reading_projection WHERE id=1)=0  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT OLD.item_id WHERE OLD.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=OLD.item_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_alias_dirty_insert AFTER INSERT  ON sync_book_aliases  BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.item_id WHERE NEW.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_books b WHERE b.book_id=NEW.book_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_alias_dirty_update AFTER UPDATE OF item_id ON sync_book_aliases WHEN OLD.item_id IS NOT NEW.item_id BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT NEW.item_id WHERE NEW.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_books b WHERE b.book_id=NEW.book_id AND b.registration_complete=1) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_book_reading_registration_dirty AFTER UPDATE OF registration_complete ON sync_books WHEN OLD.registration_complete=0 AND NEW.registration_complete=1 BEGIN\n INSERT INTO sync_book_reading_dirty(item_id) SELECT DISTINCT item_id FROM sync_book_aliases WHERE book_id=NEW.book_id AND item_id IS NOT NULL ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;END"
+    },
+    {
+      "sql": "INSERT INTO sync_book_reading_journal(book_id,chapter_index) SELECT r.book_id,r.chapter_index FROM sync_book_reading r WHERE (SELECT capture_seeded FROM sync_book_reading_meta WHERE id=1)=0 AND NOT EXISTS(SELECT 1 FROM sync_book_reading_versions v WHERE v.book_id=r.book_id AND v.chapter_index=r.chapter_index)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_book_reading_hash_dirty SELECT DISTINCT book_id FROM sync_book_reading WHERE (SELECT capture_seeded FROM sync_book_reading_meta WHERE id=1)=0"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_book_reading_dirty(item_id) SELECT DISTINCT m.item_id FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE b.registration_complete=1 AND m.item_id IS NOT NULL AND (SELECT capture_seeded FROM sync_book_reading_meta WHERE id=1)=0"
+    },
+    {
+      "sql": "UPDATE sync_book_reading_meta SET capture_seeded=1 WHERE id=1 AND capture_seeded=0"
+    },
+    {
+      "sql": "INSERT INTO sync_book_reading_history SELECT v.seq,v.book_id,v.chapter_index,r.state_json FROM sync_book_reading_versions v JOIN sync_book_reading r ON r.book_id=v.book_id AND r.chapter_index=v.chapter_index WHERE NOT EXISTS(SELECT 1 FROM sync_book_reading_history h WHERE h.seq=v.seq)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS rss_local_sources(url TEXT PRIMARY KEY REFERENCES channels(url) ON DELETE CASCADE)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS offline_media_jobs(item_id INTEGER PRIMARY KEY,generation INTEGER NOT NULL,desired TEXT NOT NULL CHECK(desired IN ('download','cleanup')),attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,last_error TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS offline_media_policy(id INTEGER PRIMARY KEY CHECK(id=1),suppress_download INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO offline_media_policy(id,suppress_download) VALUES(1,0)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_saved_insert AFTER INSERT ON article_saved_states WHEN NEW.saved=1 BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error)\n SELECT NEW.article_id,1,CASE WHEN EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) THEN 'download' ELSE 'cleanup' END,0,0,NULL\n WHERE NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) OR (SELECT suppress_download FROM offline_media_policy WHERE id=1)=0\n ON CONFLICT(item_id) DO UPDATE SET generation=CASE WHEN offline_media_jobs.desired=excluded.desired THEN generation ELSE generation+1 END,desired=excluded.desired,attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_saved_update AFTER UPDATE OF saved ON article_saved_states WHEN OLD.saved IS NOT NEW.saved AND (NEW.saved=1 OR NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1)) BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error)\n SELECT NEW.article_id,1,CASE WHEN EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) THEN 'download' ELSE 'cleanup' END,0,0,NULL\n WHERE NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) OR (SELECT suppress_download FROM offline_media_policy WHERE id=1)=0\n ON CONFLICT(item_id) DO UPDATE SET generation=CASE WHEN offline_media_jobs.desired=excluded.desired THEN generation ELSE generation+1 END,desired=excluded.desired,attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_saved_delete AFTER DELETE ON article_saved_states WHEN OLD.saved=1 AND NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=OLD.article_id AND saved=1) BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error)\n SELECT OLD.article_id,1,CASE WHEN EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=OLD.article_id AND saved=1) THEN 'download' ELSE 'cleanup' END,0,0,NULL\n WHERE NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=OLD.article_id AND saved=1) OR (SELECT suppress_download FROM offline_media_policy WHERE id=1)=0\n ON CONFLICT(item_id) DO UPDATE SET generation=CASE WHEN offline_media_jobs.desired=excluded.desired THEN generation ELSE generation+1 END,desired=excluded.desired,attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_article_delete BEFORE DELETE ON articles WHEN EXISTS(SELECT 1 FROM offline_media WHERE item_id=OLD.id) OR EXISTS(SELECT 1 FROM offline_media_jobs WHERE item_id=OLD.id) BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error) VALUES(OLD.id,1,'cleanup',0,0,NULL) ON CONFLICT(item_id) DO UPDATE SET generation=generation+1,desired='cleanup',attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "PRAGMA user_version=1"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keeps(article_id TEXT PRIMARY KEY,url TEXT NOT NULL,changed_at INTEGER NOT NULL,source_device_id TEXT NOT NULL,source_order TEXT NOT NULL,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keeps_url ON sync_article_keeps(url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keep_aliases(alias_id TEXT NOT NULL,canonical_id TEXT NOT NULL REFERENCES sync_article_keeps(article_id) ON DELETE CASCADE,url TEXT NOT NULL,PRIMARY KEY(alias_id,canonical_id))"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_url ON sync_article_keep_aliases(url)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_identity ON sync_article_keep_aliases(alias_id,url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keep_migration(id INTEGER PRIMARY KEY CHECK(id=1))"
+    },
+    {
+      "sql": "DROP TABLE IF EXISTS temp._wrss_dedup_plan"
+    },
+    {
+      "sql": "DROP TABLE IF EXISTS temp._wrss_identity_candidates"
+    },
+    {
+      "sql": "DROP TABLE IF EXISTS temp._wrss_identity_choice"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_article_binding_immutable"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_article_insert_binding_immutable"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_article_alias_immutable"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_dedup_plan(item_id INTEGER PRIMARY KEY,channel_id INTEGER NOT NULL,old_key TEXT NOT NULL,target_key TEXT NOT NULL,survivor_id INTEGER NOT NULL,affected INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "INSERT INTO _wrss_dedup_plan(item_id,channel_id,old_key,target_key,survivor_id)\n   SELECT a.id,a.channel_id,a.dedup_key,\n    CASE WHEN length(a.dedup_key)=64 AND lower(a.dedup_key)=a.dedup_key AND a.dedup_key NOT GLOB '*[^0-9a-f]*' AND trim(COALESCE(a.guid,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))=a.dedup_key THEN a.dedup_key\n     WHEN trim(COALESCE(a.guid,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' THEN 'guid:'||trim(COALESCE(a.guid,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))\n     WHEN a.dedup_key LIKE 'link:%' THEN a.dedup_key\n     WHEN trim(COALESCE(a.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' THEN 'link:'||trim(COALESCE(a.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))\n     ELSE 'title:'||a.title END,a.id\n   FROM articles a JOIN channels c ON c.id=a.channel_id\n   WHERE (lower(trim(COALESCE(c.url,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))) LIKE 'http://%' OR lower(trim(COALESCE(c.url,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))) LIKE 'https://%')\n    AND lower(trim(COALESCE(c.url,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))) NOT LIKE 'https://watchrss.local/import-content%'\n    AND lower(trim(COALESCE(c.url,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))) NOT LIKE 'https://watchrss.local/import-epub%'\n    AND lower(trim(COALESCE(c.url,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))) NOT LIKE 'https://watchrss.local/import-txt-novel%'"
+    },
+    {
+      "sql": "UPDATE _wrss_dedup_plan SET target_key=(SELECT p2.target_key FROM _wrss_dedup_plan p2\n    JOIN articles a2 ON a2.id=p2.item_id JOIN articles a1 ON a1.id=_wrss_dedup_plan.item_id\n    WHERE p2.channel_id=_wrss_dedup_plan.channel_id AND p2.item_id<>_wrss_dedup_plan.item_id\n     AND (p2.target_key LIKE 'guid:%' OR p2.target_key LIKE 'link:%' OR p2.target_key LIKE 'title:%')\n     AND trim(COALESCE(a2.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' AND trim(COALESCE(a2.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))=trim(COALESCE(a1.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))\n    ORDER BY CASE WHEN p2.old_key=p2.target_key THEN 0 ELSE 1 END,p2.item_id LIMIT 1)\n   WHERE length(old_key)=64 AND lower(old_key)=old_key AND old_key NOT GLOB '*[^0-9a-f]*'\n    AND EXISTS(SELECT 1 FROM articles legacy JOIN sync_article_ids binding ON binding.item_id=legacy.id AND binding.article_id=_wrss_dedup_plan.old_key WHERE legacy.id=_wrss_dedup_plan.item_id AND (trim(COALESCE(legacy.guid,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))='' OR trim(COALESCE(legacy.guid,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))=_wrss_dedup_plan.old_key))\n    AND NOT EXISTS(SELECT 1 FROM cloud_rss_article_ids canonical WHERE canonical.item_id=_wrss_dedup_plan.item_id)\n    AND (SELECT COUNT(DISTINCT p3.target_key) FROM _wrss_dedup_plan p3 JOIN articles a3 ON a3.id=p3.item_id JOIN articles base ON base.id=_wrss_dedup_plan.item_id WHERE p3.channel_id=_wrss_dedup_plan.channel_id AND p3.item_id<>_wrss_dedup_plan.item_id AND (p3.target_key LIKE 'guid:%' OR p3.target_key LIKE 'link:%' OR p3.target_key LIKE 'title:%') AND trim(COALESCE(a3.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' AND trim(COALESCE(a3.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))=trim(COALESCE(base.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288)))=1 AND EXISTS(SELECT 1 FROM _wrss_dedup_plan p2\n    JOIN articles a2 ON a2.id=p2.item_id JOIN articles a1 ON a1.id=_wrss_dedup_plan.item_id\n    WHERE p2.channel_id=_wrss_dedup_plan.channel_id AND p2.item_id<>_wrss_dedup_plan.item_id\n     AND (p2.target_key LIKE 'guid:%' OR p2.target_key LIKE 'link:%' OR p2.target_key LIKE 'title:%')\n     AND trim(COALESCE(a2.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' AND trim(COALESCE(a2.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))=trim(COALESCE(a1.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288)))"
+    },
+    {
+      "sql": "CREATE INDEX temp._wrss_dedup_target ON _wrss_dedup_plan(channel_id,target_key)"
+    },
+    {
+      "sql": "UPDATE _wrss_dedup_plan SET survivor_id=(SELECT p2.item_id FROM _wrss_dedup_plan p2\n    WHERE p2.channel_id=_wrss_dedup_plan.channel_id AND p2.target_key=_wrss_dedup_plan.target_key\n    ORDER BY CASE WHEN p2.old_key=p2.target_key THEN 0 ELSE 1 END,p2.item_id LIMIT 1)"
+    },
+    {
+      "sql": "UPDATE _wrss_dedup_plan SET affected=1 WHERE survivor_id IN\n    (SELECT survivor_id FROM _wrss_dedup_plan WHERE old_key<>target_key OR item_id<>survivor_id)"
+    },
+    {
+      "sql": "CREATE INDEX temp._wrss_dedup_survivor ON _wrss_dedup_plan(survivor_id)"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_identity_candidates(survivor_id INTEGER NOT NULL,article_id TEXT NOT NULL,priority INTEGER NOT NULL,PRIMARY KEY(survivor_id,article_id))"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO _wrss_identity_candidates SELECT p.survivor_id,x.article_id,\n    CASE WHEN x.item_id=p.survivor_id THEN 0 ELSE 2 END FROM _wrss_dedup_plan p JOIN sync_article_aliases x ON x.item_id=p.item_id WHERE p.affected=1"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO _wrss_identity_candidates SELECT p.survivor_id,x.article_id,\n    CASE WHEN x.item_id=p.survivor_id THEN 1 ELSE 3 END FROM _wrss_dedup_plan p JOIN sync_article_ids x ON x.item_id=p.item_id WHERE p.affected=1"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO _wrss_identity_candidates SELECT p.survivor_id,x.article_id,3 FROM _wrss_dedup_plan p JOIN sync_saved_states x ON x.item_id=p.item_id WHERE p.affected=1"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO _wrss_identity_candidates SELECT survivor_id,old_key,4 FROM _wrss_dedup_plan WHERE affected=1 AND length(old_key)=64 AND lower(old_key)=old_key AND old_key NOT GLOB '*[^0-9a-f]*'"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_identity_choice AS SELECT DISTINCT c.survivor_id,\n    (SELECT c2.article_id FROM _wrss_identity_candidates c2 WHERE c2.survivor_id=c.survivor_id ORDER BY c2.priority,c2.article_id LIMIT 1) article_id\n    FROM _wrss_identity_candidates c"
+    },
+    {
+      "sql": "UPDATE articles SET\n    title=COALESCE((SELECT NULLIF(s.title,'') FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id ORDER BY s.fetched_at DESC,s.id DESC LIMIT 1),title),\n    description=COALESCE((SELECT s.description FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND trim(COALESCE(s.description,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' ORDER BY length(s.description) DESC,s.fetched_at DESC LIMIT 1),description),\n    content=COALESCE((SELECT s.content FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND trim(COALESCE(s.content,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' ORDER BY length(s.content) DESC,s.fetched_at DESC LIMIT 1),content),\n    link=COALESCE(NULLIF(link,''),(SELECT NULLIF(s.link,'') FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND trim(COALESCE(s.link,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' ORDER BY s.fetched_at DESC LIMIT 1)),\n    guid=COALESCE(NULLIF(guid,''),(SELECT NULLIF(s.guid,'') FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND trim(COALESCE(s.guid,''),char(9)||char(10)||char(11)||char(12)||char(13)||char(28)||char(29)||char(30)||char(31)||char(32)||char(160)||char(5760)||char(8192)||char(8193)||char(8194)||char(8195)||char(8196)||char(8197)||char(8198)||char(8199)||char(8200)||char(8201)||char(8202)||char(8232)||char(8233)||char(8239)||char(8287)||char(12288))<>'' ORDER BY s.fetched_at DESC LIMIT 1)),\n    pub_date=COALESCE(pub_date,(SELECT s.pub_date FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND s.pub_date IS NOT NULL ORDER BY s.fetched_at DESC LIMIT 1)),\n    image_url=COALESCE(image_url,(SELECT s.image_url FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND s.image_url IS NOT NULL ORDER BY s.fetched_at DESC LIMIT 1)),\n    audio_url=COALESCE(audio_url,(SELECT s.audio_url FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND s.audio_url IS NOT NULL ORDER BY s.fetched_at DESC LIMIT 1)),\n    video_url=COALESCE(video_url,(SELECT s.video_url FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id AND s.video_url IS NOT NULL ORDER BY s.fetched_at DESC LIMIT 1)),\n    is_read=(SELECT max(s.is_read) FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id),\n    is_saved=(SELECT max(s.is_saved) FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id),\n    reading_progress=(SELECT max(s.reading_progress) FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id),\n    fetched_at=(SELECT max(s.fetched_at) FROM _wrss_dedup_plan p JOIN articles s ON s.id=p.item_id WHERE p.survivor_id=articles.id)\n   WHERE id IN(SELECT survivor_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_reading_copy AS SELECT p.survivor_id,r.progress,r.changed_at,r.position_bytes,r.position_hash,r.state_json\n   FROM _wrss_dedup_plan p JOIN article_reading_state r ON r.article_id=p.item_id\n   WHERE p.item_id=(SELECT p2.item_id FROM _wrss_dedup_plan p2 JOIN article_reading_state r2 ON r2.article_id=p2.item_id\n    WHERE p2.survivor_id=p.survivor_id ORDER BY r2.changed_at DESC,CASE WHEN r2.changed_at=0 THEN r2.progress ELSE 0 END DESC,CASE WHEN p2.item_id=p2.survivor_id THEN 0 ELSE 1 END,p2.item_id LIMIT 1)\n    AND p.affected=1"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_saved_winners AS SELECT DISTINCT p.survivor_id,s.save_type,\n    (SELECT s2.article_id FROM _wrss_dedup_plan p2 JOIN article_saved_states s2 ON s2.article_id=p2.item_id\n     WHERE p2.survivor_id=p.survivor_id AND s2.save_type=s.save_type ORDER BY s2.changed_at DESC,s2.saved DESC,s2.article_id DESC LIMIT 1) source_id\n   FROM _wrss_dedup_plan p JOIN article_saved_states s ON s.article_id=p.item_id WHERE p.affected=1"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_saved_copy AS SELECT w.survivor_id,s.save_type,s.saved,s.changed_at,s.sort_order\n   FROM _wrss_saved_winners w JOIN article_saved_states s ON s.article_id=w.source_id AND s.save_type=w.save_type"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_saved_time_copy AS SELECT p.survivor_id,t.save_type,min(t.created_at) created_at\n   FROM _wrss_dedup_plan p JOIN article_saved_entry_times t ON t.article_id=p.item_id WHERE p.affected=1 GROUP BY p.survivor_id,t.save_type"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_body_copy AS SELECT g.survivor_id,b.chunk_index,b.body FROM\n    (SELECT DISTINCT p.survivor_id,(SELECT p2.item_id FROM _wrss_dedup_plan p2 JOIN\n      (SELECT article_id,sum(length(body)) size FROM article_body_chunks GROUP BY article_id) z ON z.article_id=p2.item_id\n      WHERE p2.survivor_id=p.survivor_id ORDER BY z.size DESC,p2.item_id DESC LIMIT 1) source_id\n     FROM _wrss_dedup_plan p WHERE p.affected=1) g JOIN article_body_chunks b ON b.article_id=g.source_id"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_original_body_copy AS SELECT g.survivor_id,b.chunk_index,b.body FROM\n    (SELECT DISTINCT p.survivor_id,(SELECT p2.item_id FROM _wrss_dedup_plan p2 JOIN\n      (SELECT article_id,sum(length(body)) size FROM article_original_chunks GROUP BY article_id) z ON z.article_id=p2.item_id\n      WHERE p2.survivor_id=p.survivor_id ORDER BY z.size DESC,p2.item_id DESC LIMIT 1) source_id\n     FROM _wrss_dedup_plan p WHERE p.affected=1) g JOIN article_original_chunks b ON b.article_id=g.source_id"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_preview_copy AS SELECT g.survivor_id,p.summary,p.image_url FROM\n    (SELECT DISTINCT x.survivor_id,(SELECT x2.item_id FROM _wrss_dedup_plan x2 JOIN article_previews p2 ON p2.article_id=x2.item_id\n      WHERE x2.survivor_id=x.survivor_id ORDER BY (p2.summary IS NOT NULL)+(p2.image_url IS NOT NULL) DESC,length(COALESCE(p2.summary,'')) DESC,x2.item_id DESC LIMIT 1) source_id\n     FROM _wrss_dedup_plan x WHERE x.affected=1) g JOIN article_previews p ON p.article_id=g.source_id"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_original_preview_copy AS SELECT g.survivor_id,p.summary,p.image_url FROM\n    (SELECT DISTINCT x.survivor_id,(SELECT x2.item_id FROM _wrss_dedup_plan x2 JOIN article_original_previews p2 ON p2.article_id=x2.item_id\n      WHERE x2.survivor_id=x.survivor_id ORDER BY (p2.summary IS NOT NULL)+(p2.image_url IS NOT NULL) DESC,length(COALESCE(p2.summary,'')) DESC,x2.item_id DESC LIMIT 1) source_id\n     FROM _wrss_dedup_plan x WHERE x.affected=1) g JOIN article_original_previews p ON p.article_id=g.source_id"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_original_meta_copy AS SELECT g.survivor_id,m.source_url,m.fetched_at FROM\n    (SELECT DISTINCT x.survivor_id,(SELECT x2.item_id FROM _wrss_dedup_plan x2 JOIN article_original_meta m2 ON m2.article_id=x2.item_id\n      WHERE x2.survivor_id=x.survivor_id ORDER BY m2.fetched_at DESC,x2.item_id DESC LIMIT 1) source_id\n     FROM _wrss_dedup_plan x WHERE x.affected=1) g JOIN article_original_meta m ON m.article_id=g.source_id"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_offline_copy AS SELECT p.survivor_id,max(o.media_type) media_type,o.origin_url,max(o.relative_path) relative_path,min(o.created_at) created_at\n   FROM _wrss_dedup_plan p JOIN offline_media o ON o.item_id=p.item_id WHERE p.affected=1 GROUP BY p.survivor_id,o.origin_url"
+    },
+    {
+      "sql": "CREATE TEMP TABLE _wrss_cleanup_copy AS SELECT p.survivor_id,max(d.content_marker) content_marker FROM _wrss_dedup_plan p\n   JOIN article_deletion_cleanup d ON d.item_id=p.item_id WHERE p.affected=1 GROUP BY p.survivor_id"
+    },
+    {
+      "sql": "UPDATE notes SET article_id=(SELECT survivor_id FROM _wrss_dedup_plan WHERE item_id=notes.article_id) WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "UPDATE sync_saved_states SET item_id=(SELECT survivor_id FROM _wrss_dedup_plan WHERE item_id=sync_saved_states.item_id) WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "UPDATE sync_article_ids SET item_id=NULL WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM sync_article_aliases WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_reading_state WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_saved_states WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_saved_entry_times WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_body_chunks WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_original_chunks WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_previews WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_original_previews WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_original_meta WHERE article_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_sync_content WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_sync_encoding_cache WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_native_sync_hash WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM offline_media WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "DELETE FROM article_deletion_cleanup WHERE item_id IN(SELECT item_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "INSERT INTO article_reading_state SELECT * FROM _wrss_reading_copy"
+    },
+    {
+      "sql": "INSERT INTO article_saved_states SELECT * FROM _wrss_saved_copy"
+    },
+    {
+      "sql": "INSERT INTO article_saved_entry_times SELECT * FROM _wrss_saved_time_copy"
+    },
+    {
+      "sql": "INSERT INTO article_body_chunks SELECT * FROM _wrss_body_copy"
+    },
+    {
+      "sql": "INSERT INTO article_original_chunks SELECT * FROM _wrss_original_body_copy"
+    },
+    {
+      "sql": "INSERT INTO article_previews SELECT * FROM _wrss_preview_copy"
+    },
+    {
+      "sql": "INSERT INTO article_original_previews SELECT * FROM _wrss_original_preview_copy"
+    },
+    {
+      "sql": "INSERT INTO article_original_meta SELECT * FROM _wrss_original_meta_copy"
+    },
+    {
+      "sql": "INSERT INTO offline_media(item_id,media_type,origin_url,relative_path,created_at) SELECT * FROM _wrss_offline_copy"
+    },
+    {
+      "sql": "INSERT INTO article_deletion_cleanup SELECT * FROM _wrss_cleanup_copy"
+    },
+    {
+      "sql": "UPDATE articles SET reading_progress=COALESCE((SELECT progress FROM article_reading_state WHERE article_id=articles.id),reading_progress),\n    is_saved=COALESCE((SELECT saved FROM article_saved_states WHERE article_id=articles.id AND save_type='favorite'),is_saved)\n   WHERE id IN(SELECT survivor_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "INSERT INTO sync_article_ids(article_id,item_id,url) SELECT i.article_id,i.survivor_id,COALESCE(a.link,p.target_key)\n   FROM _wrss_identity_choice i JOIN articles a ON a.id=i.survivor_id JOIN _wrss_dedup_plan p ON p.item_id=i.survivor_id\n   WHERE 1 ON CONFLICT(article_id) DO UPDATE SET item_id=excluded.item_id,url=CASE WHEN (SELECT link FROM articles WHERE id=excluded.item_id) IS NULL THEN sync_article_ids.url ELSE excluded.url END"
+    },
+    {
+      "sql": "INSERT INTO sync_article_aliases(item_id,article_id) SELECT survivor_id,article_id FROM _wrss_identity_choice"
+    },
+    {
+      "sql": "DELETE FROM articles WHERE id IN(SELECT item_id FROM _wrss_dedup_plan WHERE item_id<>survivor_id)"
+    },
+    {
+      "sql": "UPDATE articles SET dedup_key=char(0)||'wrss-dedup:'||id WHERE id IN(SELECT survivor_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "UPDATE articles SET dedup_key=(SELECT target_key FROM _wrss_dedup_plan WHERE survivor_id=articles.id ORDER BY CASE WHEN old_key=target_key THEN 0 ELSE 1 END,item_id LIMIT 1)\n   WHERE id IN(SELECT survivor_id FROM _wrss_dedup_plan WHERE affected=1)"
+    },
+    {
+      "sql": "INSERT INTO sync_change_log(kind,entity_id,changed_at,origin_device_id,reason,created_at)\n   SELECT 'article',i.article_id,?,COALESCE((SELECT device_id FROM sync_local_identity WHERE id=1),(SELECT source_device_id FROM sync_saved_states WHERE article_id=i.article_id ORDER BY changed_at DESC LIMIT 1),'dedup-migration'),'dedupMigration',?\n   FROM _wrss_identity_choice i",
+      "params": [
+        12345,
+        12345
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER sync_article_alias_immutable BEFORE UPDATE OF article_id ON sync_article_aliases WHEN OLD.article_id!=NEW.article_id BEGIN SELECT RAISE(ABORT,'Article alias already bound to another identity'); END"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_article_binding_immutable BEFORE UPDATE OF item_id ON sync_article_ids WHEN OLD.item_id IS NOT NULL AND NEW.item_id IS NOT NULL AND OLD.item_id!=NEW.item_id AND NOT (\n    EXISTS(SELECT 1 FROM sync_article_aliases WHERE item_id=OLD.item_id AND article_id=OLD.article_id) AND\n    EXISTS(SELECT 1 FROM sync_article_aliases al JOIN articles a ON a.id=al.item_id WHERE al.item_id=NEW.item_id AND al.article_id=NEW.article_id AND a.dedup_key=NEW.article_id AND a.link IS NEW.url)\n   ) BEGIN SELECT RAISE(ABORT,'Article id already bound to another item'); END"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_article_insert_binding_immutable BEFORE INSERT ON sync_article_ids WHEN NEW.item_id IS NOT NULL AND EXISTS(SELECT 1 FROM sync_article_ids WHERE article_id=NEW.article_id AND item_id IS NOT NULL AND item_id!=NEW.item_id) BEGIN SELECT RAISE(ABORT,'Article id already bound to another item'); END"
+    },
+    {
+      "sql": "DROP TABLE _wrss_cleanup_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_offline_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_original_meta_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_original_preview_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_preview_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_original_body_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_body_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_saved_time_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_saved_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_saved_winners"
+    },
+    {
+      "sql": "DROP TABLE _wrss_reading_copy"
+    },
+    {
+      "sql": "DROP TABLE _wrss_identity_choice"
+    },
+    {
+      "sql": "DROP TABLE _wrss_identity_candidates"
+    },
+    {
+      "sql": "DROP TABLE _wrss_dedup_plan"
+    },
+    {
+      "sql": "PRAGMA user_version=9"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_body_revision (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,revision INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_body_chunks_insert AFTER INSERT ON article_body_chunks  BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT NEW.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=NEW.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      \n    END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_body_chunks_update AFTER UPDATE ON article_body_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT NEW.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=NEW.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE OLD.article_id!=NEW.article_id AND EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n    END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_body_chunks_delete AFTER DELETE ON article_body_chunks  BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      \n    END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_original_chunks_insert AFTER INSERT ON article_original_chunks  BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT NEW.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=NEW.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      \n    END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_original_chunks_update AFTER UPDATE ON article_original_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT NEW.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=NEW.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE OLD.article_id!=NEW.article_id AND EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n    END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_original_chunks_delete AFTER DELETE ON article_original_chunks  BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      \n    END"
+    },
+    {
+      "sql": "PRAGMA user_version=9"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_token_usage_epoch(id INTEGER PRIMARY KEY CHECK(id=1),epoch TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS token_usage_generation_delete AFTER DELETE ON llm_token_usage WHEN OLD.id>COALESCE((SELECT MAX(id) FROM llm_token_usage),0) BEGIN UPDATE sync_token_usage_epoch SET epoch=lower(hex(randomblob(16))) WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_peer_features(peer_device_id TEXT PRIMARY KEY,rss_canonical INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_peer_echo_generation(peer_device_id TEXT PRIMARY KEY,generation TEXT NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_peer_echo(peer_device_id TEXT NOT NULL,generation TEXT NOT NULL,kind TEXT NOT NULL,entity_id TEXT NOT NULL,incoming_signature TEXT NOT NULL,local_signature TEXT NOT NULL,PRIMARY KEY(peer_device_id,generation,kind,entity_id))"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_article_keeps_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_article_keeps_update AFTER UPDATE ON sync_article_keeps WHEN OLD.article_id IS NOT NEW.article_id OR OLD.url IS NOT NEW.url OR OLD.changed_at IS NOT NEW.changed_at OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order OR OLD.item_id IS NOT NEW.item_id BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_article_keep_aliases_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_article_keep_aliases_update AFTER UPDATE ON sync_article_keep_aliases WHEN OLD.alias_id IS NOT NEW.alias_id OR OLD.canonical_id IS NOT NEW.canonical_id OR OLD.url IS NOT NEW.url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_articles_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_articles_update AFTER UPDATE ON articles WHEN OLD.id IS NOT NEW.id OR OLD.channel_id IS NOT NEW.channel_id OR OLD.title IS NOT NEW.title OR OLD.description IS NOT NEW.description OR OLD.content IS NOT NEW.content OR OLD.link IS NOT NEW.link OR OLD.guid IS NOT NEW.guid OR OLD.pub_date IS NOT NEW.pub_date OR OLD.image_url IS NOT NEW.image_url OR OLD.audio_url IS NOT NEW.audio_url OR OLD.video_url IS NOT NEW.video_url OR OLD.is_read IS NOT NEW.is_read OR OLD.is_saved IS NOT NEW.is_saved OR OLD.reading_progress IS NOT NEW.reading_progress OR OLD.dedup_key IS NOT NEW.dedup_key OR OLD.fetched_at IS NOT NEW.fetched_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_channels_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_channels_update AFTER UPDATE ON channels WHEN OLD.id IS NOT NEW.id OR OLD.url IS NOT NEW.url OR OLD.title IS NOT NEW.title OR OLD.description IS NOT NEW.description OR OLD.image_url IS NOT NEW.image_url OR OLD.last_fetched_at IS NOT NEW.last_fetched_at OR OLD.created_at IS NOT NEW.created_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.is_pinned IS NOT NEW.is_pinned BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_body_chunks_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_body_chunks_update AFTER UPDATE ON article_body_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_original_chunks_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_original_chunks_update AFTER UPDATE ON article_original_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_previews_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_previews_update AFTER UPDATE ON article_previews WHEN OLD.article_id IS NOT NEW.article_id OR OLD.summary IS NOT NEW.summary OR OLD.image_url IS NOT NEW.image_url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_original_previews_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_original_previews_update AFTER UPDATE ON article_original_previews WHEN OLD.article_id IS NOT NEW.article_id OR OLD.summary IS NOT NEW.summary OR OLD.image_url IS NOT NEW.image_url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_original_meta_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_original_meta_update AFTER UPDATE ON article_original_meta WHEN OLD.article_id IS NOT NEW.article_id OR OLD.source_url IS NOT NEW.source_url OR OLD.fetched_at IS NOT NEW.fetched_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_saved_states_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_saved_states_update AFTER UPDATE ON article_saved_states WHEN OLD.article_id IS NOT NEW.article_id OR OLD.save_type IS NOT NEW.save_type OR OLD.saved IS NOT NEW.saved OR OLD.changed_at IS NOT NEW.changed_at OR OLD.sort_order IS NOT NEW.sort_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_saved_entry_times_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_saved_entry_times_update AFTER UPDATE ON article_saved_entry_times WHEN OLD.article_id IS NOT NEW.article_id OR OLD.save_type IS NOT NEW.save_type OR OLD.created_at IS NOT NEW.created_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_saved_states_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_saved_states_update AFTER UPDATE ON sync_saved_states WHEN OLD.article_id IS NOT NEW.article_id OR OLD.save_type IS NOT NEW.save_type OR OLD.item_id IS NOT NEW.item_id OR OLD.url IS NOT NEW.url OR OLD.saved IS NOT NEW.saved OR OLD.changed_at IS NOT NEW.changed_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_article_ids_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_article_ids_update AFTER UPDATE ON sync_article_ids WHEN OLD.article_id IS NOT NEW.article_id OR OLD.item_id IS NOT NEW.item_id OR OLD.url IS NOT NEW.url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_article_aliases_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_article_aliases_update AFTER UPDATE ON sync_article_aliases WHEN OLD.item_id IS NOT NEW.item_id OR OLD.article_id IS NOT NEW.article_id BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_local_identity_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_local_identity_update AFTER UPDATE ON sync_local_identity WHEN OLD.id IS NOT NEW.id OR OLD.device_id IS NOT NEW.device_id OR OLD.device_order IS NOT NEW.device_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_local_article_deletions_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_local_article_deletions_update AFTER UPDATE ON local_article_deletions WHEN OLD.id IS NOT NEW.id OR OLD.channel_url IS NOT NEW.channel_url OR OLD.article_url IS NOT NEW.article_url OR OLD.dedup_key IS NOT NEW.dedup_key OR OLD.was_favorite IS NOT NEW.was_favorite OR OLD.was_watch_later IS NOT NEW.was_watch_later OR OLD.changed_at IS NOT NEW.changed_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_source_states_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_source_states_update AFTER UPDATE ON sync_source_states WHEN OLD.url IS NOT NEW.url OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.title IS NOT NEW.title OR OLD.description IS NOT NEW.description OR OLD.site_url IS NOT NEW.site_url OR OLD.image_url IS NOT NEW.image_url OR OLD.created_at IS NOT NEW.created_at OR OLD.updated_at IS NOT NEW.updated_at OR OLD.sort_order IS NOT NEW.sort_order OR OLD.is_pinned IS NOT NEW.is_pinned OR OLD.deleted IS NOT NEW.deleted OR OLD.deleted_at IS NOT NEW.deleted_at BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_sync_article_deletions_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_sync_article_deletions_update AFTER UPDATE ON sync_article_deletions WHEN OLD.article_id IS NOT NEW.article_id OR OLD.url IS NOT NEW.url OR OLD.changed_at IS NOT NEW.changed_at OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_revision_article_reading_state_update"
+    },
+    {
+      "sql": "CREATE TRIGGER sync_revision_article_reading_state_update AFTER UPDATE ON article_reading_state WHEN OLD.article_id IS NOT NEW.article_id OR OLD.progress IS NOT NEW.progress OR OLD.changed_at IS NOT NEW.changed_at OR OLD.position_bytes IS NOT NEW.position_bytes OR OLD.position_hash IS NOT NEW.position_hash OR OLD.state_json IS NOT NEW.state_json BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS article_sync_hash_article_body_chunks_update"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_body_revision_article_body_chunks_update"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS article_sync_hash_article_original_chunks_update"
+    },
+    {
+      "sql": "DROP TRIGGER IF EXISTS sync_body_revision_article_original_chunks_update"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_content_update AFTER UPDATE OF content,description,link ON articles WHEN OLD.content IS NOT NEW.content OR OLD.description IS NOT NEW.description OR OLD.link IS NOT NEW.link BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.id;DELETE FROM article_sync_content WHERE item_id=NEW.id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_body_chunks_update AFTER UPDATE ON article_body_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.article_id;DELETE FROM article_sync_content WHERE item_id=NEW.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS article_sync_hash_article_original_chunks_update AFTER UPDATE ON article_original_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN DELETE FROM article_native_sync_hash WHERE item_id=NEW.article_id;DELETE FROM article_sync_content WHERE item_id=NEW.article_id; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_body_chunks_update AFTER UPDATE ON article_body_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT NEW.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=NEW.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE OLD.article_id!=NEW.article_id AND EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n    END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_body_revision_article_original_chunks_update AFTER UPDATE ON article_original_chunks WHEN OLD.article_id IS NOT NEW.article_id OR OLD.chunk_index IS NOT NEW.chunk_index OR OLD.body IS NOT NEW.body BEGIN\n      INSERT INTO sync_body_revision(item_id,revision) SELECT NEW.article_id,1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=NEW.article_id)\n      ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n      INSERT INTO sync_body_revision(item_id,revision) SELECT OLD.article_id,1 WHERE OLD.article_id!=NEW.article_id AND EXISTS(SELECT 1 FROM articles WHERE id=OLD.article_id) ON CONFLICT(item_id) DO UPDATE SET revision=revision+1;\n    END"
+    },
+    {
+      "sql": "PRAGMA user_version=9"
+    },
+    {
+      "sql": "ALTER TABLE sync_peer_features ADD COLUMN book_sync INTEGER NOT NULL DEFAULT 0"
+    },
+    {
+      "sql": "PRAGMA user_version=5"
+    },
+    {
+      "sql": "PRAGMA user_version=6"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS rss_local_sources(url TEXT PRIMARY KEY REFERENCES channels(url) ON DELETE CASCADE)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS offline_media_jobs(item_id INTEGER PRIMARY KEY,generation INTEGER NOT NULL,desired TEXT NOT NULL CHECK(desired IN ('download','cleanup')),attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,last_error TEXT)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS offline_media_policy(id INTEGER PRIMARY KEY CHECK(id=1),suppress_download INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO offline_media_policy(id,suppress_download) VALUES(1,0)"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_saved_insert AFTER INSERT ON article_saved_states WHEN NEW.saved=1 BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error)\n SELECT NEW.article_id,1,CASE WHEN EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) THEN 'download' ELSE 'cleanup' END,0,0,NULL\n WHERE NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) OR (SELECT suppress_download FROM offline_media_policy WHERE id=1)=0\n ON CONFLICT(item_id) DO UPDATE SET generation=CASE WHEN offline_media_jobs.desired=excluded.desired THEN generation ELSE generation+1 END,desired=excluded.desired,attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_saved_update AFTER UPDATE OF saved ON article_saved_states WHEN OLD.saved IS NOT NEW.saved AND (NEW.saved=1 OR NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1)) BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error)\n SELECT NEW.article_id,1,CASE WHEN EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) THEN 'download' ELSE 'cleanup' END,0,0,NULL\n WHERE NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=NEW.article_id AND saved=1) OR (SELECT suppress_download FROM offline_media_policy WHERE id=1)=0\n ON CONFLICT(item_id) DO UPDATE SET generation=CASE WHEN offline_media_jobs.desired=excluded.desired THEN generation ELSE generation+1 END,desired=excluded.desired,attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_saved_delete AFTER DELETE ON article_saved_states WHEN OLD.saved=1 AND NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=OLD.article_id AND saved=1) BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error)\n SELECT OLD.article_id,1,CASE WHEN EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=OLD.article_id AND saved=1) THEN 'download' ELSE 'cleanup' END,0,0,NULL\n WHERE NOT EXISTS(SELECT 1 FROM article_saved_states WHERE article_id=OLD.article_id AND saved=1) OR (SELECT suppress_download FROM offline_media_policy WHERE id=1)=0\n ON CONFLICT(item_id) DO UPDATE SET generation=CASE WHEN offline_media_jobs.desired=excluded.desired THEN generation ELSE generation+1 END,desired=excluded.desired,attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS offline_article_delete BEFORE DELETE ON articles WHEN EXISTS(SELECT 1 FROM offline_media WHERE item_id=OLD.id) OR EXISTS(SELECT 1 FROM offline_media_jobs WHERE item_id=OLD.id) BEGIN INSERT INTO offline_media_jobs(item_id,generation,desired,attempts,next_at,last_error) VALUES(OLD.id,1,'cleanup',0,0,NULL) ON CONFLICT(item_id) DO UPDATE SET generation=generation+1,desired='cleanup',attempts=0,next_at=0,last_error=NULL; END"
+    },
+    {
+      "sql": "PRAGMA user_version=7"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keeps_insert AFTER INSERT ON sync_article_keeps  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keeps_update AFTER UPDATE ON sync_article_keeps WHEN OLD.article_id IS NOT NEW.article_id OR OLD.url IS NOT NEW.url OR OLD.changed_at IS NOT NEW.changed_at OR OLD.source_device_id IS NOT NEW.source_device_id OR OLD.source_order IS NOT NEW.source_order OR OLD.item_id IS NOT NEW.item_id BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keeps_delete AFTER DELETE ON sync_article_keeps  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep_aliases_insert AFTER INSERT ON sync_article_keep_aliases  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep_aliases_update AFTER UPDATE ON sync_article_keep_aliases WHEN OLD.alias_id IS NOT NEW.alias_id OR OLD.canonical_id IS NOT NEW.canonical_id OR OLD.url IS NOT NEW.url BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep_aliases_delete AFTER DELETE ON sync_article_keep_aliases  BEGIN UPDATE sync_library_revision SET revision=revision+1 WHERE id=1; END"
+    },
+    {
+      "sql": "PRAGMA user_version=8"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_register_state(article_id TEXT PRIMARY KEY,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL,state_json TEXT NOT NULL,legacy_json TEXT,materialized_json TEXT,pending_json TEXT,raw_json TEXT NOT NULL,raw_conflict INTEGER NOT NULL DEFAULT 0,body_pending INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS article_register_state_item ON article_register_state(item_id)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS article_register_conflicts(article_id TEXT NOT NULL REFERENCES article_register_state(article_id) ON DELETE CASCADE,version_hash TEXT NOT NULL,raw_json TEXT NOT NULL,PRIMARY KEY(article_id,version_hash))"
+    },
+    {
+      "sql": "PRAGMA user_version=9"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keeps(article_id TEXT PRIMARY KEY,url TEXT NOT NULL,changed_at INTEGER NOT NULL,source_device_id TEXT NOT NULL,source_order TEXT NOT NULL,item_id INTEGER REFERENCES articles(id) ON DELETE SET NULL)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keeps_url ON sync_article_keeps(url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keep_aliases(alias_id TEXT NOT NULL,canonical_id TEXT NOT NULL REFERENCES sync_article_keeps(article_id) ON DELETE CASCADE,url TEXT NOT NULL,PRIMARY KEY(alias_id,canonical_id))"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_url ON sync_article_keep_aliases(url)"
+    },
+    {
+      "sql": "CREATE INDEX IF NOT EXISTS sync_article_keep_aliases_identity ON sync_article_keep_aliases(alias_id,url)"
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS sync_article_keep_migration(id INTEGER PRIMARY KEY CHECK(id=1))"
+    },
+    {
+      "sql": "INSERT OR IGNORE INTO sync_article_keep_migration VALUES(1)"
+    }
+  ]
+}

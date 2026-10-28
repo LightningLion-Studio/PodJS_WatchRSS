@@ -11,11 +11,20 @@ import {dedupKeyMigration,type SchemaStatement} from './dedup-migration.ts';
 const revisionColumns:Record<string,string[]>={"sync_article_keeps":["article_id","url","changed_at","source_device_id","source_order","item_id"],"sync_article_keep_aliases":["alias_id","canonical_id","url"],"articles":["id","channel_id","title","description","content","link","guid","pub_date","image_url","audio_url","video_url","is_read","is_saved","reading_progress","dedup_key","fetched_at"],"channels":["id","url","title","description","image_url","last_fetched_at","created_at","sort_order","is_pinned"],"article_body_chunks":["article_id","chunk_index","body"],"article_original_chunks":["article_id","chunk_index","body"],"article_previews":["article_id","summary","image_url"],"article_original_previews":["article_id","summary","image_url"],"article_original_meta":["article_id","source_url","fetched_at"],"article_saved_states":["article_id","save_type","saved","changed_at","sort_order"],"article_saved_entry_times":["article_id","save_type","created_at"],"sync_saved_states":["article_id","save_type","item_id","url","saved","changed_at","sort_order","source_device_id","source_order"],"sync_article_ids":["article_id","item_id","url"],"sync_article_aliases":["item_id","article_id"],"sync_local_identity":["id","device_id","device_order"],"local_article_deletions":["id","channel_url","article_url","dedup_key","was_favorite","was_watch_later","changed_at"],"sync_source_states":["url","source_device_id","title","description","site_url","image_url","created_at","updated_at","sort_order","is_pinned","deleted","deleted_at"],"sync_article_deletions":["article_id","url","changed_at","source_device_id","source_order"],"article_reading_state":["article_id","progress","changed_at","position_bytes","position_hash","state_json"]};
 const changed=(table:string)=>revisionColumns[table]!.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(" OR ");
 
+// Additive helpers have no user_version bump. Both fresh installs and every
+// supported installed database must receive these declarations. Keep data
+// backfills and trigger replacements out of this list: reopening v9 must not
+// resurrect saves, regenerate epochs, or repeat business migrations.
+const libraryClearSchema = `CREATE TABLE IF NOT EXISTS library_clear_journal (id INTEGER PRIMARY KEY CHECK(id=1),private_data INTEGER NOT NULL CHECK(private_data IN (0,1)),content_json TEXT NOT NULL)`;
+const deletionCleanupSchema = `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`;
+const rssArticleIdsSchema = `CREATE TABLE IF NOT EXISTS cloud_rss_article_ids (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)`;
+const AUXILIARY_SCHEMA = [libraryClearSchema, ...ARTICLE_REGISTER_SCHEMA, deletionCleanupSchema, rssArticleIdsSchema];
+
 export const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS library_clear_journal (id INTEGER PRIMARY KEY CHECK(id=1),private_data INTEGER NOT NULL CHECK(private_data IN (0,1)),content_json TEXT NOT NULL)`,
+  libraryClearSchema,
   ...ARTICLE_REGISTER_SCHEMA,
   `CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`,
+  deletionCleanupSchema,
   `CREATE TABLE IF NOT EXISTS sync_library_revision (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)`,
   `INSERT OR IGNORE INTO sync_library_revision(id,revision) VALUES(1,0)`,
   ...ARTICLE_KEEP_SCHEMA,
@@ -31,7 +40,7 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS article_native_sync_hash (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,body_hash TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS offline_media (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, media_type TEXT NOT NULL CHECK(media_type IN ('IMAGE','VIDEO')), origin_url TEXT NOT NULL, relative_path TEXT, created_at INTEGER NOT NULL, UNIQUE(item_id,origin_url))`,
   `CREATE TABLE IF NOT EXISTS sync_local_identity (id INTEGER PRIMARY KEY CHECK(id=1), device_id TEXT NOT NULL, device_order TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS cloud_rss_article_ids (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)`,
+  rssArticleIdsSchema,
   `CREATE TABLE IF NOT EXISTS sync_article_ids (article_id TEXT PRIMARY KEY, item_id INTEGER UNIQUE CHECK(item_id>0) REFERENCES articles(id) ON DELETE SET NULL, url TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS sync_article_aliases (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)`,
   `CREATE TRIGGER IF NOT EXISTS sync_article_alias_immutable BEFORE UPDATE OF article_id ON sync_article_aliases WHEN OLD.article_id!=NEW.article_id BEGIN SELECT RAISE(ABORT,'Article alias already bound to another identity'); END`,
@@ -107,8 +116,13 @@ interface SchemaDatabase {
 
 export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinChannels?:boolean;now?:()=>number}={}) {
   const current=pragmaVersion((await db.query('PRAGMA user_version'))[0]);
-  if(current===SCHEMA_VERSION)return;
   if(current>SCHEMA_VERSION)throw new Error(`Database schema ${current} is newer than supported ${SCHEMA_VERSION}`);
+  if(current===SCHEMA_VERSION){
+    // A single transaction also makes interrupted auxiliary installation safe
+    // to retry. Reject future schemas above before any CREATE or version write.
+    await db.transaction(AUXILIARY_SCHEMA.map(sql=>({sql})));
+    return;
+  }
   const existingCacheColumns=current>=1?new Set((await db.query('PRAGMA table_info(article_sync_encoding_cache)')).map(r=>String(r.name))):new Set<string>();
   const now=(options.now??Date.now)(),statements:SchemaStatement[]=[];
   if(current<1){
@@ -123,6 +137,9 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
     // message bounded as later migrations grow, retaining atomic version steps.
     await db.transaction(statements);statements.length=0;
   }
+  // Existing v1..v8 installations also need new helper tables before a data
+  // migration can reference them (notably the RSS mapping in dedup migration).
+  statements.push(...AUXILIARY_SCHEMA.map(sql=>({sql})));
   // Older BLE migrations install revision triggers from the current column map.
   // Create the new business tables before those triggers reference them.
   if(current<8)statements.push(...ARTICLE_KEEP_SCHEMA.map(sql=>({sql})));
