@@ -113,9 +113,16 @@ export class SyncArticleReceiver {
   const clock=article.readingPositionChangedAt||article.updatedAt;
   // Compare against the live SQL clock, not a pre-transaction JS read.
   const localSource=`COALESCE((SELECT reading_source FROM cloud_article_state WHERE article_id=? AND reading_clock=article_reading_state.changed_at),(SELECT device_id FROM sync_local_identity WHERE id=1),'')`;
-  if(cloud)wins=`(excluded.changed_at>article_reading_state.changed_at OR (excluded.changed_at=article_reading_state.changed_at AND (? > ${localSource} OR (? = ${localSource} AND ?=0))))`;
-  const flags=cloud?[article.sourceDeviceId,article.articleId,article.sourceDeviceId,article.articleId,article.isRead?1:0]:[authoritative?1:0,hasBody?1:0,payload.bodyHash];
+  if(cloud)wins=`(excluded.changed_at>article_reading_state.changed_at OR (excluded.changed_at=article_reading_state.changed_at AND (? > ${localSource} OR (? = ${localSource} AND (?=0 OR ?=(SELECT is_read FROM articles WHERE id=article_reading_state.article_id))))))`;
+  const flags=cloud?[article.sourceDeviceId,article.articleId,article.sourceDeviceId,article.articleId,article.isRead?1:0,article.isRead?1:0]:[authoritative?1:0,hasBody?1:0,payload.bodyHash];
   if(cloud)statements.push({sql:`UPDATE articles SET is_read=? WHERE id=${idSql} AND (NOT EXISTS(SELECT 1 FROM article_reading_state WHERE article_id=articles.id) OR EXISTS(SELECT 1 FROM article_reading_state WHERE article_id=articles.id AND (? > changed_at OR (?=changed_at AND (? > ${localSource} OR (?=${localSource} AND ?=0))))))`,params:[article.isRead?1:0,...idParams,clock,clock,article.sourceDeviceId,article.articleId,article.sourceDeviceId,article.articleId,article.isRead?1:0]});
+  if(remoteDeviceId==='cloud-rss-inventory'&&!authoritative){
+   // Feed bodies carry no reading operation. In particular, a different body
+   // must not select the legacy "body changed" rewind below. Preserve an
+   // existing structured row verbatim, or seed only the native legacy ratio.
+   statements.push({sql:`INSERT OR IGNORE INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash,state_json)
+    SELECT id,reading_progress,0,0,'',NULL FROM articles WHERE id=${idSql}`,params:idParams});
+  }else{
   statements.push({sql:`INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash,state_json)
    VALUES(${idSql},?,?,?,?,NULL) ON CONFLICT(article_id) DO UPDATE SET
    progress=CASE WHEN ${wins} THEN excluded.progress ELSE article_reading_state.progress END,
@@ -124,6 +131,7 @@ export class SyncArticleReceiver {
    state_json=CASE WHEN ${wins} THEN NULL ELSE article_reading_state.state_json END,
    changed_at=CASE WHEN ?=1 THEN excluded.changed_at ELSE max(article_reading_state.changed_at,excluded.changed_at) END`,params:[...idParams,progress,cloud?clock:article.readingPositionChangedAt,article.readingPositionBytes,article.readingPositionContentHash,...flags,...flags,...flags,...flags,authoritative?1:0]});
   statements.push({sql:`UPDATE articles SET reading_progress=(SELECT progress FROM article_reading_state WHERE article_id=articles.id) WHERE id=${idSql}`,params:idParams});
+  }
   if(cloud)statements.push({sql:`INSERT INTO cloud_article_state(article_id,content_hash,body_hash,reading_clock,reading_source) SELECT ?,?,'',?,? WHERE EXISTS(SELECT 1 FROM article_reading_state WHERE article_id=${idSql} AND changed_at=?) ON CONFLICT(article_id) DO UPDATE SET reading_clock=excluded.reading_clock,reading_source=excluded.reading_source WHERE excluded.reading_clock>cloud_article_state.reading_clock OR (excluded.reading_clock=cloud_article_state.reading_clock AND excluded.reading_source>=cloud_article_state.reading_source)`,params:[article.articleId,(article as IncomingArticle&{contentHash?:string}).contentHash??'',clock,article.sourceDeviceId,...idParams,clock]});
   const cacheStatement:Statement={sql:`INSERT INTO article_sync_content(item_id,content_html,content_text,body_hash,body_bytes,chunk_size,chunk_hashes,content_bytes)
    VALUES(${idSql},?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET content_html=excluded.content_html,content_text=excluded.content_text,body_hash=excluded.body_hash,body_bytes=excluded.body_bytes,chunk_size=excluded.chunk_size,chunk_hashes=excluded.chunk_hashes,content_bytes=excluded.content_bytes WHERE ?=1`,params:[...idParams,html,text,payload.bodyHash,payload.bodyByteCount,payload.chunkSize,JSON.stringify(payload.chunkHashes),byteLength(chosen??""),hasBody?1:0]};

@@ -111,7 +111,7 @@ export class WatchCloudLibraryAdapter {
    let merged:Record<string,any>|undefined;
    // Pool IDs can change independently of an immutable article identity.
    for(const key of [identity.canonical,this.sourceIds.get(a.rssSourceUrl)+':'+identity.hash,...identity.aliases]){const remote=this.pendingReading.get(key);if(remote)merged=merged?mergeReadingValue(merged,remote.value):remote.value;}
-   if(merged){const next=mergeReadingValue(a,merged);
+   if(merged){const next=mergeReadingValue(a,merged,true);
     // Retain pending records/aliases for future inventory materialization, but
     // do not replay every already-applied reading/save clock through the body
     // receiver again for each incoming record page.
@@ -158,6 +158,26 @@ export class WatchCloudLibraryAdapter {
   this.guard.require();const decoded:{sources:SyncedSource[];articles:ExportedArticle[]}[]=[],warnings:string[]=[];let pending=0,abandoned=0;
   let bookChanged=0;const bookBodies:{descriptor:Record<string,any>;bytes?:Uint8Array}[]=[];for(const o of descriptors)if(o.privateBook)bookBodies.push({descriptor:o.privateBook,bytes:payload.get(o.name)});
   const currentArticles=new Map((await this.repository.cloudSnapshot(false)).stateArticles.map(a=>[a.articleId,a]));
+  // Legacy reader descriptors have no privateArticle metadata. Index names once
+  // per restore, rather than hashing every candidate for every missing object.
+  // Keep collision order: descriptors use the first live candidate; unmatched
+  // payloads use the first candidate allowed by the current overlay.
+  let readerIndex:Map<string,ExportedArticle[]>|undefined,readerTail:IterableIterator<ExportedArticle>|undefined,readerWork=0;
+  const findReader=async(name:string,requireAllowed=false)=>{
+   this.guard.require();
+   readerIndex??=new Map();readerTail??=currentArticles.values();
+   const allowed=(a:ExportedArticle)=>!requireAllowed||this.overlay.allow('article',a.articleId,remote);
+   const cached=readerIndex.get(name)?.find(allowed);if(cached)return cached;
+   // Scan only the unseen suffix, stopping at the same first match as before.
+   // An unrelated later hash failure must not invalidate an earlier match.
+   for(const a of readerTail)if(!a.deleted){
+    const key=`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`,values=readerIndex.get(key)??[];values.push(a);readerIndex.set(key,values);
+    if(++readerWork%32===0)await this.crypto.yieldTurn?.();
+    this.guard.require();
+    if(key===name&&allowed(a))return a;
+   }
+   return undefined;
+  };
   const lost=()=>{abandoned++;warnings.push('已放弃结构不完整、无法恢复的私有条目');};
   const retry=()=>{pending++;warnings.push('私有条目缺少正文，等待重试');};
   for(const [name,state]of [['library-sync.json',false],['rss-state.json',true]] as const){const bytes=payload.get(name);if(bytes){const value=await this.decode(bytes,state);value.articles=value.articles.map(a=>{const known=currentArticles.get(a.articleId);return known&&known.contentHash!==a.contentHash?{...a,contentHash:known.contentHash,contentHtml:null,contentText:''}:a;});decoded.push(value);}}
@@ -180,14 +200,14 @@ export class WatchCloudLibraryAdapter {
   }}
   const readers:ExportedArticle[]=[],seen=new Set<string>();
   for(const object of descriptors.filter(o=>o.name.startsWith('reader/'))){seen.add(object.name);let raw=object.privateArticle;
-   if(!raw)for(const a of currentArticles.values())if(!a.deleted&&object.name===`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`){raw={...a};break;}
+   if(!raw){const candidate=await findReader(object.name);if(candidate)raw={...candidate};}
    let a:ReturnType<typeof metadata>;try{a=metadata(raw);}catch{lost();continue;}
    const name=`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`;
    if(name!==object.name){lost();continue;}if(!this.overlay.allow('article',a.articleId,remote))continue;const body=payload.get(name);if(!body){retry();continue;}
    if(object.contentSha256&&await this.crypto.sha256(body)!==object.contentSha256){lost();continue;}
    readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});
   }
-  for(const [name,body]of payload)if(name.startsWith('reader/')&&!seen.has(name)){let matched=false;for(const a of currentArticles.values())if(!a.deleted&&this.overlay.allow('article',a.articleId,remote)&&name===`reader/${(await this.crypto.sha256(utf8Encode(a.articleId))).slice(0,32)}/${(await this.crypto.sha256(utf8Encode(a.contentHash))).slice(0,32)}.txt`){readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});matched=true;break;}if(!matched)lost();}
+  for(const [name,body]of payload)if(name.startsWith('reader/')&&!seen.has(name)){const a=await findReader(name,true);if(a)readers.push({...keepReading(a),contentHtml:null,contentText:utf8Decode(body)});else lost();}
   for(const {descriptor:d,bytes} of bookBodies){if(d?.bookId&&!this.overlay.allow('book',d.bookId,remote,overlays.some(e=>e.kind==='book'&&e.id===d.bookId)?d.packagePath:undefined))continue;if(!d||!/^([a-f0-9]{64})$/.test(d.bookId)||d.packagePath!=='books/'+d.bookId+'.jsonl'||!Number.isSafeInteger(d.chapterCount)||d.chapterCount<1){lost();continue;}if(!bytes){retry();continue;}if(!this.repository.receiveCloudBook){retry();continue;}try{const header=parseBookHeader(utf8Decode(bytes.subarray(0,bytes.indexOf(10))));if(header.chapterCount!==d.chapterCount)throw Error('book_count_mismatch');await validateBook({bookId:d.bookId,fingerprint:d.fingerprint,title:d.title,chapterCount:d.chapterCount,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:0,sourceDeviceId:remote,sourceUrl:d.sourceUrl,kind:d.kind},this.crypto.sha256);bookChanged+=await this.repository.receiveCloudBook(d.bookId,bytes);}catch(error){if(/book_sync_invalid|fingerprint|identity|directory|count_mismatch|invalid_book|JSON|SyntaxError/.test(String(error)))lost();else retry();}}
   if(readers.length)decoded.push({sources:[],articles:readers});let changed=bookChanged;for(const value of decoded)changed+=await this.repository.mergeCloud(value.sources,value.articles,remote);changed+=await this.applyReadingStates();return {changed,pending,abandoned,warnings};
  }
@@ -207,8 +227,11 @@ export class WatchCloudLibraryAdapter {
 }
 
 /** Reading LWW never uses the public feed refresh clock. Exact ties prefer unread. */
-export function mergeReadingValue(local:Record<string,any>,remote:Record<string,any>){
+export function mergeReadingValue(local:Record<string,any>,remote:Record<string,any>,replaySameOperation=false){
  const out={...local},lc=local.readingPositionChangedAt||0,rc=remote.readingPositionChangedAt||0,ld=local.sourceDeviceId||'',rd=remote.sourceDeviceId||'';
- if(rc>lc||rc===lc&&(rd>ld||rd===ld&&remote.isRead===false)){for(const k of ['isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId'])if(k in remote)out[k]=remote[k];}
+ // Authenticated records replay can repair an older body's accidental local
+ // rewind. Equal writer/clock/read flag identifies the same reading operation;
+ // a newer local operation and an explicit unread tie still take precedence.
+ if(rc>lc||rc===lc&&(rd>ld||rd===ld&&(remote.isRead===false||replaySameOperation&&remote.isRead===local.isRead))){for(const k of ['isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId'])if(k in remote)out[k]=remote[k];}
  for(const type of ['favorite','watchLater']){const k=type+'ChangedAt';if((remote[k]??0)>(local[k]??0)||(remote[k]??0)===(local[k]??0)&&rd>=ld)for(const suffix of ['Saved','ChangedAt','SortOrder'])if(type+suffix in remote)out[type+suffix]=remote[type+suffix];}return out;
 }

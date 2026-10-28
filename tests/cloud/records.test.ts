@@ -24,6 +24,24 @@ function env(){
  const records=()=>new WatchCloudRecords(ports);
  return {ports,rows,applied,posts,records,state:()=>stored?JSON.parse(stored):undefined,export:(docs:RecordDocument[])=>{exported=docs;},failApply:(v:boolean)=>{failApply=v;},failPush:(v:string)=>{failPush=v;},missing:(v:boolean)=>{missing=v;},invalidate:()=>{current=false;},async put(d:RecordDocument,options:{bad?:boolean;tombstone?:boolean;contentKey?:Uint8Array;version?:number;anchor?:Uint8Array}={}){const k=options.contentKey??key,id=await codec.id(options.anchor??k,'user',d),envelope=await codec.encode(k,'user',id,options.version??1,d);if(options.bad)envelope.ciphertextBase64=Buffer.alloc(32).toString('base64');const row={recordId:id,revision:String(++head),envelope,tombstone:options.tombstone??false};rows.set(id,row);return row;}};
 }
+const cachedRss=(n:number):RecordDocument=>({kind:'rss-state',value:{sourceId:'cache-fixture',articleIdHash:n.toString(16).padStart(64,'0'),isRead:false,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:n+1,favoriteSaved:false,favoriteChangedAt:n+2,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:n+3,watchLaterSortOrder:0,deleted:false,deletedAt:0}});
+test('2135 durable public interactions replay in five bounded merges before network or upload',async()=>{
+ const f=env();for(let i=0;i<2134;i++)await f.put(cachedRss(i));await f.put({kind:'article',value:{...doc('cached-public').value,rssSourceUrl:'https://feed.example/rss',isRead:false,readingPositionChangedAt:3,favoriteSaved:false,favoriteChangedAt:4}});
+ await f.records().pull();const sizes:number[]=[],applied:RecordDocument[]=[],get=f.ports.get;let gets=0;
+ f.ports.apply=async docs=>{sizes.push(docs.length);applied.push(...docs);return docs.length;};f.ports.get=async after=>{gets++;expect(applied).toHaveLength(2135);return get(after);};
+ const started=performance.now();expect(await f.records().pull()).toBe(2135);expect(sizes).toEqual([500,500,500,500,135]);expect(gets).toBe(1);expect(applied.filter(d=>d.kind==='rss-state').every(d=>d.value.isRead===false&&d.value.favoriteSaved===false&&d.value.watchLaterSaved===false&&d.value.readingPositionChangedAt>0)).toBe(true);expect(performance.now()-started).toBeLessThan(5000);
+});
+test('cached interaction replay failure or suspension cannot overtake into GET, cursor or upload; retry keeps all values',async()=>{
+ for(const mode of ['failure','suspension']){const f=env();for(let i=0;i<551;i++)await f.put(cachedRss(i));await f.records().pull();const before=f.state();let gets=0,applies=0,checkpoints=0;
+  f.ports.get=async()=>{gets++;throw Error('GET must follow cached replay');};f.ports.apply=async docs=>{if(++applies===2)throw Error(mode==='failure'?'fixture disk failure':'cloud_sync_suspended');return docs.length;};f.ports.checkpoint=async raw=>{checkpoints++;expect(JSON.parse(raw)).toEqual(before);};
+  await expect(f.records().pull()).rejects.toThrow(mode==='failure'?'fixture disk failure':'cloud_sync_suspended');expect(gets).toBe(0);expect(f.state()).toEqual(before);expect(f.posts).toHaveLength(0);expect(checkpoints).toBe(mode==='suspension'?1:0);
+  const recovered:RecordDocument[]=[];f.ports.apply=async docs=>{recovered.push(...docs);return docs.length;};f.ports.get=async()=>({libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[],formatVersion:1,items:[],cursor:'551',headRevision:'551',hasMore:false});await f.records().pull();expect(recovered).toHaveLength(551);expect(recovered.map(d=>d.value)).toEqual(Array.from({length:551},(_,i)=>cachedRss(i).value));
+ }
+});
+test('cached unacknowledged or changed-hash interactions retain the fifty-row durable apply boundary',async()=>{
+ const f=env();for(let i=0;i<111;i++)await f.put(cachedRss(i));await f.records().pull();const state=f.state(),ids=Object.keys(state.records);for(const id of ids.slice(0,60))delete state.records[id];for(const id of ids.slice(60))state.records[id].hash='f'.repeat(64);f.ports.readState=async()=>JSON.stringify(state);
+ const sizes:number[]=[];f.ports.apply=async docs=>{sizes.push(docs.length);return docs.length;};await f.records().pull();expect(sizes).toEqual([50,50,11]);expect(Object.keys(f.state().records)).toHaveLength(111);
+});
 test('R41 uncomputable legacy index identity skips only that retirement while healthy records commit',async()=>{
  const f=env(),bad=await f.put({kind:'article',value:{...doc('bad-identity').value,rssSourceUrl:'https://feed.example/rss',guid:'identity-hash-fault'}}),good=await f.put({kind:'article',value:{...doc('healthy-old-index').value,rssSourceUrl:'https://feed.example/rss'}});
  const sha=f.ports.crypto.sha256;f.ports.crypto={...f.ports.crypto,sha256:async bytes=>{if(new TextDecoder().decode(bytes)==='identity-hash-fault')throw Error('entry hash fault');return sha(bytes);}};

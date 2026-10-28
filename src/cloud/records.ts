@@ -85,7 +85,15 @@ export class WatchCloudRecords {
    if(s.epoch===p.epoch)this.state=s;
   }catch{/* Cache loss requires cursor zero, never a library reset. */}
   let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await p.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
-  const process=async(rows:RecordRow[])=>{await p.current();const started=Date.now(),times={keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:0};const timed=async<T>(name:keyof typeof times,run:()=>Promise<T>)=>{const at=Date.now();try{return await run();}finally{times[name]+=Math.max(0,Date.now()-at);}};const progress=(stage:RecordReplayProgress['stage'],documents:number)=>{try{p.progress?.({event:'records-replay',stage,batchRows:rows.length,documents,...times,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};progress('decoding',0);const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={},retiredIds=new Set<string>();
+  const cachedInteractions:RecordDocument[]=[];
+  const applyCachedInteractions=async(final=false)=>{
+   while(cachedInteractions.length>=500||final&&cachedInteractions.length){
+    await p.current();const docs=cachedInteractions.splice(0,500),started=Date.now();
+    const report=(stage:'merging'|'applied')=>{try{p.progress?.({event:'records-replay',stage,batchRows:docs.length,documents:docs.length,keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:stage==='applied'?Math.max(0,Date.now()-started):0,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};
+    report('merging');changed+=await p.apply(docs);await p.current();report('applied');
+   }
+  };
+  const process=async(rows:RecordRow[],retained=false)=>{await p.current();const started=Date.now(),times={keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:0};const timed=async<T>(name:keyof typeof times,run:()=>Promise<T>)=>{const at=Date.now();try{return await run();}finally{times[name]+=Math.max(0,Date.now()-at);}};const progress=(stage:RecordReplayProgress['stage'],documents:number)=>{try{p.progress?.({event:'records-replay',stage,batchRows:rows.length,documents,...times,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};progress('decoding',0);const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={},retiredIds=new Set<string>();
    for(const row of rows){const old=this.state.records[row.recordId];if(old&&cmp(old.revision,row.revision)>0)continue;
     // This exact tombstone revision was authenticated and acknowledged earlier.
     // Compact old-version caches too: they retained every retired ciphertext.
@@ -95,8 +103,15 @@ export class WatchCloudRecords {
     await p.current();let key:Uint8Array|undefined;
     try{key=await timed('keyMillis',()=>p.key(row.envelope.keyVersion));if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();key=await timed('keyMillis',()=>p.key(row.envelope.keyVersion));}if(!key)throw Error('missing_key_version');const value=await timed('decodeMillis',()=>this.codec.decode(key!,anchor,p.userId,row));check(cloudCompatibility(value.doc).opaque||!value.doc.value.deleted||row.tombstone);this.decoded.set(row.recordId,{row,...value});delete this.state.quarantinedRows?.[row.recordId];if(cloudCompatibility(value.doc).readOnly)(this.state.protectedRows??={})[row.recordId]=true;else delete this.state.protectedRows?.[row.recordId];if(cloudCompatibility(value.doc).opaque){acks[row.recordId]={revision:row.revision,hash:await timed('hashMillis',()=>this.codec.hash(value.doc))};this.state.rows[row.recordId]=row;continue;}const retired=value.doc.value.bookIndexRetired===true||row.tombstone&&!value.doc.value.deleted;
      const v=value.doc.value,publicIndex=value.doc.kind==='article'&&publicArticleIndex(v);
-     if(!retired&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind)&&(!old||old.revision!==row.revision||value.doc.kind!=='article'||publicIndex))docs.push(value.doc);
-     acks[row.recordId]={revision:row.revision,hash:await timed('hashMillis',()=>this.codec.hash(value.doc))};
+     const hash=await timed('hashMillis',()=>this.codec.hash(value.doc));
+     if(!retired&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind)&&(!old||old.revision!==row.revision||value.doc.kind!=='article'||publicIndex)){
+      // Already-durable public interactions still need replay when an inventory
+      // materializes an article. Aggregate only exact authenticated ACK matches:
+      // fresh/changed values, tombstones and unknown formats keep the 50-row path.
+      if(retained&&!row.tombstone&&!cloudCompatibility(value.doc).readOnly&&old?.revision===row.revision&&old.hash===hash&&(value.doc.kind==='rss-state'||publicIndex))cachedInteractions.push(value.doc);
+      else docs.push(value.doc);
+     }
+     acks[row.recordId]={revision:row.revision,hash};
      if(row.tombstone&&!cloudCompatibility(value.doc).readOnly&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind))retiredIds.add(row.recordId);
     }catch(error){if(String(error).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE)||/cloud_sync_suspended|cloud_operation_superseded|library_epoch_mismatch|账号|client_upgrade_required|commitment|device_attestation/.test(String(error)))throw error;this.decoded.delete(row.recordId);if(String(error).includes('cloud_record_format_depth'))(this.state.quarantinedRows??={})[row.recordId]=true;/* Retain original ciphertext for replay. A poisoned row cannot disable old validated keys. */}finally{key?.fill(0);}
     this.state.rows[row.recordId]=row;
@@ -109,9 +124,11 @@ export class WatchCloudRecords {
   try{
    // Replay encrypted retained rows, including states that preceded public entries.
    const retained=Object.values(this.state.rows);
-   // Cached inventories can contain tens of thousands of old indexes. Bound
-   // each library merge and advance the in-memory checkpoint after each batch.
-   for(let at=0;at<retained.length;at+=50)await process(retained.slice(at,at+50));
+   // Decode in bounded pages. Fresh/unacknowledged values still merge at most
+   // fifty at a time; already-durable public interactions aggregate to 500.
+   for(let at=0;at<retained.length;at+=50){await process(retained.slice(at,at+50),true);if(cachedInteractions.length>=500)await applyCachedInteractions();}
+   // No GET/cursor advancement or local upload may overtake this replay.
+   await applyCachedInteractions(true);
    for(let pages=0;pages<2000;pages++){
     let page:RecordPage;try{page=await p.get(cursor);}catch(e){if(!restarted&&String(e).includes('cloud_record_cursor_invalid')){restarted=true;this.state=this.empty();this.decoded.clear();cursor='0';continue;}throw e;}
     await p.current();if(page.libraryEpoch!==p.epoch)throw Error('library_epoch_mismatch');if(page.formatVersion===0)throw Error('cloud_records_consent_required');
