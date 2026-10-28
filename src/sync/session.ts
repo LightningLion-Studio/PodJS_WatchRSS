@@ -9,6 +9,7 @@ import {ArticleBatchReceiver,wireFields,type ReceivedArticle,type RequestedArtic
 import {parseArticleManifest,selectArticleBodyRequests,type ArticleManifest} from './manifest.ts';
 import {buildCursorResponse,buildManifestResponse,buildManifestFrames,buildChunkedResponseFrames,combineManifestFrames,manifestBatchCount,parseCursor,parseChangeSequence,parseResponseAck,parseSources,type SyncCursor,type ChangeSequence,type ResponseAck,type SyncedSource} from './library-wire.ts';
 import type {PreparedArticle} from './article-export.ts';
+import {LibrarySnapshotBusyError} from './manifest-contention';
 const {string,trim,bool,optLong}=wireFields;
 /** Byte deltas, including the four-byte prefix; never article/resource counts. */
 export interface TransferByteProgress {direction:'read'|'write';bytes:number}
@@ -25,12 +26,12 @@ export interface PendingSyncSuccess {remoteDeviceId:string;localSeqToInclusive:n
  * counts are native state-operation counts, not the number of article rows. */
 export interface LibrarySessionRepository {
  deviceId():Promise<string>;
- cursor(peer:string):Promise<SyncCursor>;
+ cursor(peer:string,check?:()=>void):Promise<SyncCursor>;
  /** R47.1 peers always exchange manifest windows; this cursor reads published journal state only. */
  exchangeCursor?(peer:string):Promise<SyncCursor>;
  mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean):Promise<number>;
- prepareWindow(peer:string,peerAppliedLocalSeq:number):Promise<LibraryWindow>;
- exportSources(peer?:string):Promise<readonly SyncedSource[]>;
+ prepareWindow(peer:string,peerAppliedLocalSeq:number,check?:()=>void):Promise<LibraryWindow>;
+ exportSources(peer?:string,check?:()=>void):Promise<readonly SyncedSource[]>;
  receiveArticle(article:ReceivedArticle,remote:string,authoritative:boolean):Promise<number>;
  configurePeer?(peer:string,capabilities:ProbeCapabilities):void;
  exportRequested(requests:readonly RequestedArticleBody[],peer?:string):Promise<readonly PreparedArticle[]>;
@@ -146,7 +147,7 @@ export class LibrarySyncSession {
     }
     const unsupported=()=>string(request.action)===ACTION_SYNC_LIBRARY&&optLong(request.version)<MIN_SUPPORTED_PHONE_PROTOCOL_VERSION;
     if(!rejection&&!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='cursor'){
-     this.capabilities(request);this.checkpointRequested=request[LIBRARY_CHECKPOINT_FEATURE]===true;this.status({phase:'cursor'});const peer=trim(string(request.deviceId))||'phone';const response={...this.extensionCapabilities(),...buildCursorResponse(localId,await this.timed('library.cursor.prepared',()=>persistent&&this.peerCapabilities.supportsDomainFastPathV2===true&&this.extensionCapabilities().supportsDomainFastPathV2===true&&this.repository.exchangeCursor?this.repository.exchangeCursor(peer):this.repository.cursor(peer)),this.now)};
+     this.capabilities(request);this.checkpointRequested=request[LIBRARY_CHECKPOINT_FEATURE]===true;this.status({phase:'cursor'});const peer=trim(string(request.deviceId))||'phone';const response={...this.extensionCapabilities(),...buildCursorResponse(localId,await this.timed('library.cursor.prepared',()=>persistent&&this.peerCapabilities.supportsDomainFastPathV2===true&&this.extensionCapabilities().supportsDomainFastPathV2===true&&this.repository.exchangeCursor?this.repository.exchangeCursor(peer):this.repository.cursor(peer,()=>this.check())),this.now)};
      this.log.event("library.cursor.exchanged",{remoteDeviceId:peer});await this.write({...response,...(this.checkpointRequested?{[LIBRARY_CHECKPOINT_FEATURE]:true}:{}),...(accepted?persistentFields:{})});request=await this.read(timeout);rejection=this.options.filterRequest?.(request);
      if(!rejection&&request.action==='syncBooks'&&(!this.peerCapabilities.supportsBookSyncV1||this.extensionCapabilities().supportsBookSyncV1!==true))rejection={success:false,action:'syncBooks',version:1,errorCode:'book_sync_not_negotiated'};
      if(!rejection&&request.action==='syncBooks'&&['readingSummary','readingDelta','readingCommit'].includes(String(request.phase))&&(!this.peerCapabilities.supportsBookReadingDeltaV1||this.extensionCapabilities().supportsBookReadingDeltaV1!==true))rejection={success:false,action:'syncBooks',version:1,errorCode:'book_reading_delta_not_negotiated'};
@@ -158,7 +159,7 @@ export class LibrarySyncSession {
       this.log.event('library.manifest.handle.start');this.status({phase:'manifest'});const count=manifestBatchCount(request);if(count>512)throw new Error('Manifest batch limit exceeded');const frames=[request];for(let i=1;i<count;i++)frames.push(await this.read(180000));request=combineManifestFrames(frames);
       const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;
      }catch(error){
-      this.check();this.log.event('library.manifest.handle.failed',{message:'<redacted>'},'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:'library_exchange_failed',fatalSession:true};
+      this.check();const busy=error instanceof LibrarySnapshotBusyError;this.log.event('library.manifest.handle.failed',{message:'<redacted>',retryable:busy},busy?'W':'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:busy?'library_busy':'library_exchange_failed',fatalSession:!busy,...(busy?{retryable:true,retryAfterMillis:error.retryAfterMillis}:{})};
       try{await this.write(response);}catch{this.log.event('library.errorResponse.write.failed',{},'W');}this.aborting=true;this.log.event("server.exchange.aborted",{persistentSession:persistent,completedActions:results.length,elapsedMs:this.log.elapsed()});this.status({phase:'error',message:String(response.message)});results.push({request,response,ack:null,libraryApplied:false});return results;
      }
     }else{
@@ -222,9 +223,9 @@ export class LibrarySyncSession {
   this.log.event("library.manifest.parsed",{remoteManifest:remoteManifest.length,incomingSources:sources.length,remoteSeqToInclusive:remoteRange.toSeqInclusive,remoteFullSnapshot:remoteRange.fullSnapshot});
   let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>this.repository.mergeSources(sources,peer,false)):0;this.check();
   if(mode==="merge")this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});
-  const prepared=await this.timed('library.window.prepared',()=>this.repository.prepareWindow(peer,remoteCursor.lastRemoteSeqApplied));this.check();
+  const prepared=await this.timed('library.window.prepared',()=>this.repository.prepareWindow(peer,remoteCursor.lastRemoteSeqApplied,()=>this.check()));this.check();
   const force=bool(request.forceFull),full=force||mode!=='merge'||!bool(request.supportsChangeSequences)||optLong(request.version)<8;
-  const window:LibraryWindow=full?{...prepared,articleManifest:prepared.fullArticleManifest,rssSources:await this.repository.exportSources(peer),fullSnapshot:true,fromSeqExclusive:0,fallbackReason:force?'forcedFull':'peerProtocol'}:prepared;
+  const window:LibraryWindow=full?{...prepared,articleManifest:prepared.fullArticleManifest,rssSources:await this.repository.exportSources(peer,()=>this.check()),fullSnapshot:true,fromSeqExclusive:0,fallbackReason:force?'forcedFull':'peerProtocol'}:prepared;
   this.log.event("library.local.exported",{outgoingArticles:window.articleManifest.length,fullArticles:window.fullArticleManifest.length,outgoingSources:window.rssSources.length,chunked:true,localSeqMax:window.toSeqInclusive,peerAckedSeq:window.peerAckedSeq,fullSnapshot:window.fullSnapshot});
   this.capabilities(request);
   const selected=source?[]:selectArticleBodyRequests(window.fullArticleManifest,remoteManifest,{supportsMetadataOnly:bool(request.supportsMetadataOnlyArticles)&&optLong(request.version)>=8,supportsFullMetadataOnly:this.peerCapabilities.supportsFullMetadataOnlyArticles===true});

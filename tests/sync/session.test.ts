@@ -4,6 +4,7 @@ import {LibrarySyncSession,type LibrarySessionRepository} from '../../src/sync/s
 import {StreamFrameConnection} from '../../src/sync/stream.ts';
 import {encodeFrame,decodeFrame,type JsonObject} from '../../src/sync/protocol.ts';
 import {buildManifestFrames,combineManifestFrames,buildChunkedResponseFrames} from '../../src/sync/library-wire.ts';
+import {LibrarySnapshotBusyError} from '../../src/sync/manifest-contention';
 for(const row of fixture.cases)test('native watch session: '+row.input.name,async()=>{
  const actual=await replaySessionFixture(row);expect(normalizeSessionResponse(actual.outbound)).toEqual(normalizeSessionResponse(row.outbound));expect(actual.peer).toEqual(row.peer);expect(actual.closed).toBe(true);expect(actual.actions.length).toBe(row.completedActions);
  if(row.input.name==='watch-source-nonempty-phone-article'){expect(row.returned).toBe(true);expect(row.itemCount).toBe(0);expect((row.inbound[1] as JsonObject).articles).toHaveLength(1);}
@@ -34,6 +35,14 @@ test('cancel while repository prepare is pending prevents manifest and ACK progr
  const repo:LibrarySessionRepository={deviceId:async()=>row.deviceId,cursor:async()=>row.beforeCursor,mergeSources:async()=>0,prepareWindow:async()=>{prepared();return pending;},exportSources:async()=>[],receiveArticle:async()=>0,exportRequested:async()=>[],finalizeSnapshot:async()=>{},resetPeerState:async()=>{},markSuccess:async()=>{marks++;}};
  const s=new LibrarySyncSession({readFrame:async()=>row.inbound[0]! as JsonObject,writeFrame:async()=>{writes++;},close:async()=>{closed++;}},repo);
  const result=s.run();await started;s.cancel();release(window);await expect(result).rejects.toThrow('cancelled');expect(writes).toBe(0);expect(marks).toBe(0);expect(closed).toBe(1);
+});
+test('manifest contention is retryable, closes the exchange and never consumes an ACK or completes another domain',async()=>{
+ const row=fixture.cases[0]!;let reads=0,closed=0,marked=0;const outgoing:JsonObject[]=[];
+ const repo={deviceId:async()=>row.deviceId,mergeSources:async()=>0,prepareWindow:async()=>{throw new LibrarySnapshotBusyError();},markSuccess:async()=>{marked++;}} as unknown as LibrarySessionRepository;
+ const session=new LibrarySyncSession({readFrame:async()=>{reads++;return {...row.inbound[0] as JsonObject,requestPersistentSession:true,supportsPersistentSession:true};},writeFrame:async f=>{outgoing.push(f);},close:async()=>{closed++;}},repo);
+ const results=await session.run();expect(reads).toBe(1);expect(closed).toBe(1);expect(marked).toBe(0);
+ expect(outgoing).toHaveLength(1);expect(outgoing[0]).toMatchObject({success:false,errorCode:'library_busy',retryable:true,retryAfterMillis:500,fatalSession:false});
+ expect(results).toHaveLength(1);expect(results[0]).toMatchObject({ack:null,libraryApplied:false});
 });
 test('stream connection respects fragmented reads and frame-wide deadline',async()=>{
  const raw=encodeFrame({version:14,action:'syncLibrary',phase:'probe',unicode:'正文 😀'}),writes:Uint8Array[]=[];let offset=0,clock=0,closes=0;

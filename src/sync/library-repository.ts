@@ -2,6 +2,7 @@ import {knownRecordValue} from '../cloud/compatibility';
 import {ArticleRegisterStore} from './article-register-store';
 import type {RecordDocument} from '../cloud/records';
 import {FullSyncPerf} from './full-sync-perf';
+import {ManifestContention,LibrarySnapshotBusyError} from './manifest-contention';
 import {SqlDomainDefinitions,projectionGuard} from './domain-definitions';
 import {LibraryProjectionCache} from './projection-cache';
 import type {AfterReadingAck} from '../books/reading-delta';
@@ -64,6 +65,13 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   this.deletion=new SyncArticleDeletionStore(db,ports.codec,(a,target)=>this.local.resolveIncomingBody(a,target),itemIds=>ports.cleanupRemovedContent({itemIds,channels:[]}));this.sources=new SqlSourceSyncStore(db,ports.uri,this.now,removed=>ports.cleanupRemovedContent({itemIds:removed.itemIds,channels:[removed.channel]}));this.sequence=new SqlLibrarySequenceStore(db,this.now);
  }
  private report(fields:Record<string,string|number>){try{this.ports.diagnostic?.(fields);}catch{/* Diagnostics never change the exchange. */}}
+ private async snapshotRetry(attempt:number,canonical:boolean,revision:number,sequence:number,reason:string){
+  if(!this.ports.diagnostic)return;
+  try{const counts:Record<string,number>={source:0,url:0,bodyUrl:0,full:0,none:0,bookUrl:0,bookBodyUrl:0,bookOnly:0,cacheUrl:0,cacheNone:0,other:0};
+   for(const row of await this.db.query('SELECT kind,COUNT(*) AS n FROM sync_projection_events WHERE seq>? GROUP BY kind',[sequence])){const key=String(row.kind);counts[Object.hasOwn(counts,key)?key:'other']+=Number(row.n);}
+   this.report({stage:'repository.snapshot.retry',attempt,canonical:canonical?1:0,reason,revision,observedRevision:await libraryRevision(this.db),projectionSeq:sequence,observedProjectionSeq:await this.projection.sequence(),events:JSON.stringify(counts)});
+  }catch{/* Diagnostics must not hide storage errors or change retry decisions. */}
+ }
  private run<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(action);this.tail=result.catch(()=>{});return result;}
  private async identity():Promise<string>{const row=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!row||!String(row.device_id).trim())throw new Error('Initialize sync identity first');return String(row.device_id);}
  private async migrate(){const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
@@ -72,8 +80,10 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   this.local.restoreReusableBodies([]);check?.();
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
   const id=await this.migrate();if(bookMode)await this.books?.registerLocal([],check);trace('repository.migrate');
+  const contention=new ManifestContention(this.db,()=>this.ports.text.yieldTurn?.()??this.db.query('SELECT 1'),fields=>this.report(fields));
   for(let attempt=0;attempt<3;attempt++){
-   check?.();let revision=await libraryRevision(this.db);
+   if(attempt)await contention.settle(attempt,check);
+   check?.();let revision=await libraryRevision(this.db);const projectionSeq=await this.projection.sequence();
    try{
     let cached=this.snapshotCache,preparedSources:readonly SyncedSource[]|undefined;
     // A full library exchange can outlast five minutes. The revision guard,
@@ -92,23 +102,26 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
     if(!cached||cached.revision!==revision||cached.canonical!==canonical||cached.bookMode!==bookMode){
      const articles=await this.local.snapshot(true,canonical,bookMode,check);trace('repository.articles');this.report({stage:'manifest.inventory',canonical:canonical?1:0,inventory:JSON.stringify(libraryInventory(articles.map(a=>({...a.article,deleted:a.manifest.deleted}))))});const sourceRows=preparedSources??await this.sources.export(id),bookSources=bookMode?await this.books?.sourceUrls():undefined,sources=bookSources?sourceRows.filter(s=>!bookSources.has(s.url)):sourceRows;trace('repository.sources');
      await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),(canonical?':canonical':'')+(bookMode?':books-v1':''),undefined,await this.needsProjectionSeed());trace('repository.fingerprints');
-     if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;continue;}
+     if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'revision');continue;}
      cached={canonical,bookMode,revision,projectionSeq:0,articles,sources};this.snapshotCache=cached;
     }
     await this.db.transaction([projectionGuard(generation),{sql:"UPDATE sync_fast_definitions SET seeded=1 WHERE domain='library' AND generation=?",params:[generation]}]);
     const {articles,sources}=cached;
     const result=await action(articles,sources,id);if(await libraryRevision(this.db)===revision)return result;
     this.snapshotCache=undefined;
-   }catch(error){if(await this.definitions.libraryGeneration()===generation&&await libraryRevision(this.db)===revision)throw error;this.snapshotCache=undefined;}
+   }catch(error){check?.();if(await this.definitions.libraryGeneration()===generation&&await libraryRevision(this.db)===revision&&await this.projection.sequence()===projectionSeq)throw error;this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'validation');continue;}
+   await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'action');
   }
-  throw new Error('Library changed repeatedly while preparing sync');
+  throw new LibrarySnapshotBusyError();
  }
  private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
   if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
   const id=await this.migrate();trace('repository.migrate');
+  const contention=new ManifestContention(this.db,()=>this.ports.text.yieldTurn?.()??this.db.query('SELECT 1'),fields=>this.report(fields));
   for(let attempt=0;attempt<3;attempt++){
+   if(attempt)await contention.settle(attempt,check);
    check?.();let revision=await libraryRevision(this.db);const projectionSeq=await this.projection.sequence();
    try{
     let cached=this.snapshotCache;
@@ -136,9 +149,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
      trace('repository.articles');
      const bookSources=bookMode?await this.books?.sourceUrls():undefined,sources=bookSources?sourceRows.filter(s=>!bookSources.has(s.url)):sourceRows;trace('repository.sources');
      await reconcileSnapshotLog(this.db,this.ports.codec,revision,id,articles.map(a=>a.manifest),sources,this.now(),scope,changedIds,await this.needsProjectionSeed());trace('repository.fingerprints');
-     if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;continue;}
+     if(await libraryRevision(this.db)!==revision){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'revision');continue;}
      if(!plan||plan.urls!==undefined)await this.projection.publish(scope,revision,articles,this.local.projectionBindings(),plan,plan?.urls,observedSeq,generation);
-     if(await this.projection.sequence()!==observedSeq){this.snapshotCache=undefined;continue;}
+     if(await this.projection.sequence()!==observedSeq){this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,observedSeq,'projection');continue;}
      this.report({stage:'repository.projection',cached:plan?1:0,dirtyUrls:plan?.urls?.length??0,articles:articles.length});
      cached={canonical,bookMode,revision,projectionSeq:observedSeq,articles,sources};this.snapshotCache=cached;
     }
@@ -146,9 +159,10 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
     const {articles,sources}=cached;
     const result=await action(articles,sources,id);if(await libraryRevision(this.db)===revision&&await this.projection.sequence()===cached.projectionSeq)return result;
     this.snapshotCache=undefined;
-   }catch(error){if(await this.definitions.libraryGeneration()===generation&&await libraryRevision(this.db)===revision)throw error;this.snapshotCache=undefined;}
+   }catch(error){check?.();if(await this.definitions.libraryGeneration()===generation&&await libraryRevision(this.db)===revision&&await this.projection.sequence()===projectionSeq)throw error;this.snapshotCache=undefined;await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'validation');continue;}
+   await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'action');
   }
-  throw new Error('Library changed repeatedly while preparing sync');
+  throw new LibrarySnapshotBusyError();
  }
  private async needsProjectionSeed(){return !Number((await this.db.query("SELECT seeded FROM sync_fast_definitions WHERE domain='library'"))[0]?.seeded);}
  async prepareFastProjection(){
@@ -168,19 +182,19 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  /** The manifest window captures its own upper bound after source merge. Never
   * acknowledge or fabricate a sequence to avoid materializing before that merge. */
  exchangeCursor(peer:string){return this.run(async()=>{await this.migrate();await this.prepareFastProjection();const c=await this.sequence.cursor(peer);return await this.changedIdentityMode(peer)?{...c,lastRemoteSeqApplied:0,lastLocalSeqAckedByPeer:0}:c;});}
- cursor(peer:string){return this.run(()=>this.snapshot(async()=>{const c=await this.sequence.cursor(peer);return await this.changedIdentityMode(peer)?{...c,lastRemoteSeqApplied:0,lastLocalSeqAckedByPeer:0}:c;},!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer)));}
+ cursor(peer:string,check?:()=>void){return this.run(()=>this.snapshot(async()=>{const c=await this.sequence.cursor(peer);return await this.changedIdentityMode(peer)?{...c,lastRemoteSeqApplied:0,lastLocalSeqAckedByPeer:0}:c;},!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer),check));}
  mergeSources(sources:readonly SyncedSource[],remote:string,authoritative:boolean){return this.run(async()=>this.sources.merge(sources,remote,await this.migrate(),authoritative));}
- prepareWindow(peer:string,peerAppliedLocalSeq:number):Promise<LibraryWindow>{return this.run(()=>this.perf.time("window.total",()=>this.snapshot(async(articles,sources,id)=>{
+ prepareWindow(peer:string,peerAppliedLocalSeq:number,check?:()=>void):Promise<LibraryWindow>{return this.run(()=>this.perf.time("window.total",()=>this.snapshot(async(articles,sources,id)=>{
    const manifests=await this.wireManifests(articles,peer);const window=await this.sequence.prepareWindow(peer,id,manifests,async urls=>urls?sources.filter(s=>urls.includes(s.url)):sources,peerAppliedLocalSeq,{snapshotReconciled:true});
    window.projectionGeneration=this.projectionGeneration;
    if(await this.changedIdentityMode(peer))return {...window,articleManifest:manifests,rssSources:sources,fullSnapshot:true,fromSeqExclusive:0,fallbackReason:'articleIdentityChanged'};
    if(!(await this.db.query('SELECT peer FROM sync_fast_library_baseline WHERE peer=? AND generation=?',[peer,this.projectionGeneration])).length)return {...window,articleManifest:manifests,rssSources:sources,fullSnapshot:true,fromSeqExclusive:0,fallbackReason:'projectionChanged'};
    return window.fullSnapshot?window:{...window,...await this.echo.filter(peer,window.articleManifest,window.rssSources)};
-  },!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer))).finally(()=>this.perf.flush("window.perf")));}
+  },!!this.peerCanonical.get(peer),!!this.peerBooks.get(peer),check)).finally(()=>this.perf.flush("window.perf")));}
  private async wireManifests(articles:readonly PreparedArticle[],peer:string){return this.perf.time("snapshot.wireManifests",()=>this.wireManifestsImpl(articles,peer));}
  private async wireManifestsImpl(articles:readonly PreparedArticle[],peer:string){if(!this.peerCanonical.get(peer))return articles.map(a=>a.manifest);const identities=await this.local.cloudRssIdentitiesForUrls([...new Set(articles.filter(p=>p.article.rssSourceUrl&&!isImportedContentUrl(p.article.rssSourceUrl)).map(p=>p.article.url))]),counts=new Map<string,number>();for(const r of identities)counts.set(r.nativeArticleId,(counts.get(r.nativeArticleId)??0)+1);const byId=new Map<string,typeof identities>();for(const r of identities){const rows=byId.get(r.articleId)??[];rows.push(r);byId.set(r.articleId,rows);}return articles.map(p=>{const rows=byId.get(p.article.articleId)??[],legacy=[...new Set(rows.flatMap(r=>[r.localArticleId,...(counts.get(r.nativeArticleId)===1?[r.nativeArticleId]:[])]))].filter(id=>id!==p.article.articleId);return legacy.length?{...p.manifest,legacyArticleIds:legacy}:p.manifest;});}
 
- exportSources(peer?:string){return this.run(()=>this.snapshot(async(_a,sources)=>sources,!!this.peerCanonical.get(peer??''),!!this.peerBooks.get(peer??'')));}
+ exportSources(peer?:string,check?:()=>void){return this.run(()=>this.snapshot(async(_a,sources)=>sources,!!this.peerCanonical.get(peer??''),!!this.peerBooks.get(peer??''),check));}
  receiveArticle(entry:ReceivedArticle,remote:string,authoritative:boolean){return this.run(()=>this.perf.time('receive.total',async()=>{await this.perf.time('receive.migrate',()=>this.migrate());if(!this.projectionGeneration)await this.prepareFastProjection();const mapped=await this.perf.time('receive.bookMapping',async()=>this.books?.mapping(entry.article.articleId,entry.article.url));if(mapped){const book=(await this.books!.states()).find(b=>b.bookId===mapped.bookId);if(book&&(book.deleted||book.deletedChapters.includes(mapped.chapterIndex)))return 0;}let target;
    if(entry.article.rssSourceUrl&&!isImportedContentUrl(entry.article.rssSourceUrl)){const candidates=(await this.perf.time('receive.identity',()=>this.local.cloudRssIdentities({sourceUrl:entry.article.rssSourceUrl!,url:entry.article.url,ids:[entry.article.articleId,...entry.article.legacyArticleIds??[]]}))).filter(r=>r.sourceUrl===entry.article.rssSourceUrl);target=this.peerCanonical.get(remote)?candidates.find(r=>r.articleId===entry.article.articleId)??candidates.find(r=>r.legacyMaterialized&&r.url===entry.article.url&&entry.article.legacyArticleIds?.includes(r.localArticleId)):candidates.find(r=>r.canonicalBinding&&r.localArticleId===entry.article.articleId&&r.url===entry.article.url);if(!target&&!this.peerCanonical.get(remote)){const legacy=candidates.filter(r=>r.canonicalBinding&&r.nativeArticleId===entry.article.articleId&&r.url===entry.article.url);if(legacy.length===1)target=legacy[0];}}
    const article=target?{...entry.article,articleId:target.localArticleId,legacyArticleIds:[...new Set([...entry.article.legacyArticleIds??[],entry.article.articleId])].filter(id=>id!==target.localArticleId)}:entry.article,body={...entry.body,articleId:article.articleId};
