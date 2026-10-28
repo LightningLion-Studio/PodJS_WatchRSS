@@ -10,6 +10,7 @@ import type {SqlDatabase} from '../../src/core/types.ts';
 import {SqlLibrarySessionRepository} from '../../src/sync/library-repository.ts';
 import {SyncSavedStateStore} from '../../src/sync/saved-state.ts';
 import {StreamFrameConnection} from '../../src/sync/stream.ts';
+import {FrameLengthError} from '@podjs/framework/frame-stream';
 import {LibrarySyncSession} from '../../src/sync/session.ts';
 import {ArticleBatchReceiver,parseBodyRequests} from '../../src/sync/article-batches.ts';
 import {parseArticleManifest,selectArticleBodyRequests} from '../../src/sync/manifest.ts';
@@ -26,20 +27,21 @@ async function fixture(path:string,id:string){
  const repo=new SqlLibrarySessionRepository(db,{codec,text,uri:{parseUri:text.parseUri,parseAndroid:text.parseUri},files:{storeText:async(_k,v)=>v,hydrate:async v=>v},migrateReading:async()=>{},migrateReadingMany:async()=>{},cleanupRemovedContent:async()=>{}});
  return {sql,db,repo,queries:()=>queries,count:()=>Number((sql.query('SELECT count(*) n FROM articles').get() as any).n)};
 }
-function connection(socket:Socket){
- const chunks:Uint8Array[]=[];let ended=false,notify:(()=>void)|undefined,total=0;
+function connection(socket:Socket){ const endpoints={localPort:socket.localPort,remotePort:socket.remotePort};
+ const chunks:Uint8Array[]=[];let ended=false,notify:(()=>void)|undefined,total=0,readBytes=0,readCalls=0,activeReads=0,maxActiveReads=0;
  socket.on('data',(b:Buffer)=>{chunks.push(new Uint8Array(b));notify?.();});socket.on('end',()=>{ended=true;notify?.();});socket.on('close',()=>{ended=true;notify?.();});socket.on('error',()=>{ended=true;notify?.();});
- const conn=new StreamFrameConnection({read:async(max,timeout)=>{while(!chunks.length&&!ended){await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{notify=undefined;reject(new Error('loopback read timed out'));},timeout);notify=()=>{clearTimeout(timer);notify=undefined;resolve();};});}const b=chunks.shift();if(!b)return null;if(b.length>max)chunks.unshift(b.subarray(max));return b.subarray(0,max);},write:async b=>{total+=b.length;await new Promise<void>((resolve,reject)=>socket.write(b,error=>error?reject(error):resolve()));},close:async()=>{socket.destroy();}});
- return {conn,bytes:()=>total};
+ const conn=new StreamFrameConnection({read:async(max,timeout)=>{readCalls++;activeReads++;maxActiveReads=Math.max(maxActiveReads,activeReads);try{while(!chunks.length&&!ended){await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{notify=undefined;reject(new Error('loopback read timed out'));},timeout);notify=()=>{clearTimeout(timer);notify=undefined;resolve();};});}const b=chunks.shift();if(!b)return null;if(b.length>max)chunks.unshift(b.subarray(max));const bytes=b.subarray(0,max);readBytes+=bytes.length;return bytes;}finally{activeReads--;}},write:async b=>{total+=b.length;await new Promise<void>((resolve,reject)=>socket.write(b,error=>error?reject(error):resolve()));},close:async()=>{socket.destroy();}});
+ return {conn,bytes:()=>total,diagnostics:()=>({...endpoints,readCalls,readBytes,maxActiveReads})};
 }
 async function exchange(serverRepo:SqlLibrarySessionRepository,phone:Awaited<ReturnType<typeof fixture>>,options:{checkpoint:boolean;interruptAt?:number;dropFinalAck?:boolean}){
  
  const accepted:Promise<Socket>=new Promise(resolve=>{server.once('connection',resolve);});
  const socket=connect({host:'127.0.0.1',port:(server.address() as any).port});
  await new Promise<void>(resolve=>socket.once('connect',resolve));const remote=await accepted;
+ const paired=remote.remotePort===socket.localPort&&remote.localPort===socket.remotePort;
  const a=connection(remote),b=connection(socket);let phases:Record<string,number>={},phaseStart=performance.now(),last='request';
  const session=new LibrarySyncSession(a.conn,serverRepo,{responseAckTimeoutMs:10000,onStatus:status=>{const now=performance.now();phases[last]=(phases[last]??0)+now-phaseStart;phaseStart=now;last=status.phase;}});
- const running=session.run();let requests=0,fullBodies=0,completed=0,frames=0;const started=performance.now();
+ const running=session.run();void running.catch(error=>{if(error instanceof FrameLengthError)console.error('T39_FRAME_DIAGNOSTIC '+JSON.stringify({length:error.length,maxFrameBytes:error.maxFrameBytes,paired,server:a.diagnostics(),client:b.diagnostics()}));});let requests=0,fullBodies=0,completed=0,frames=0;const started=performance.now();
  try{
   const localId=await phone.repo.deviceId(),cursor=await phone.repo.cursor('watch');
   await b.conn.writeFrame({version:14,action:'syncLibrary',phase:'cursor',deviceId:localId,syncCursor:cursor,...(options.checkpoint?{[feature]:true}:{})});
