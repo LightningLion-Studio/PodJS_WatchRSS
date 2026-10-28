@@ -5,7 +5,7 @@ import {WATCH_COOLDOWN_MS,type BiliWatchConfig} from './config.ts';
 
 export type WatchFallbackReason='disabled'|'unconfigured'|'logged_in_web'|'cooldown'|'transport'|'http'|'risk'|'api'|'parse'|'empty'|'quality'|'unsupported_params'|'direct_url';
 export class WatchApiError extends Error {
-  constructor(readonly reason:WatchFallbackReason){super('watch_api_'+reason);}
+  constructor(readonly reason:WatchFallbackReason,readonly quality?:number){super('watch_api_'+reason);}
 }
 export interface WatchApiOptions {
   transport:BiliTransport;
@@ -14,7 +14,7 @@ export interface WatchApiOptions {
   parsePlay:(value:Record<string,any>)=>BiliPlayUrl;
   now:()=>number;
   cooldown?:{get():number;set(until:number):unknown};
-  event?:(event:{operation:'feed'|'playurl';route:'watch'|'web';reason?:WatchFallbackReason;elapsedMs?:number})=>void;
+  event?:(event:{operation:'feed'|'playurl';route:'watch'|'web';reason?:WatchFallbackReason;elapsedMs?:number;quality?:number;requestedQn?:number})=>void;
 }
 const number=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)?v:undefined;
 const string=(v:unknown)=>typeof v==='string'?v:undefined;
@@ -60,12 +60,17 @@ export class BiliWatchApi {
     if(!object(j.data))throw new WatchApiError('parse');
     return {data:j.data,loggedIn:!!session?.cookies.SESSDATA};
   }
-  async first<T>(operation:'feed'|'playurl',watch:()=>Promise<T>,web:()=>Promise<T>):Promise<T>{
+  async first<T>(operation:'feed'|'playurl',watch:()=>Promise<T>,web:()=>Promise<T>,playback?:{requestedQn:number}):Promise<T>{
     const started=this.o.now();
-    try{const value=await watch();this.emit({operation,route:'watch',elapsedMs:this.o.now()-started});return value;}
+    try{
+      const value=await watch();
+      const metrics=playback?{requestedQn:playback.requestedQn,quality:object(value)?number(value.quality):undefined}:{};
+      this.emit({operation,route:'watch',elapsedMs:this.o.now()-started,...metrics});return value;
+    }
     catch(error){
       const reason=error instanceof WatchApiError?error.reason:'parse';
-      this.emit({operation,route:'web',reason,elapsedMs:this.o.now()-started});
+      const metrics=playback?{requestedQn:playback.requestedQn,quality:error instanceof WatchApiError?error.quality:undefined}:{};
+      this.emit({operation,route:'web',reason,elapsedMs:this.o.now()-started,...metrics});
       return web();
     }
   }
@@ -88,10 +93,11 @@ export class BiliWatchApi {
   async play(x:{cid:number;aid?:number;bvid?:string;qn?:number;preferMp4?:boolean}):Promise<BiliPlayUrl>{
     if(!Number.isSafeInteger(x.aid)||x.aid!<=0||!Number.isSafeInteger(x.cid)||x.cid<=0)throw new WatchApiError('unsupported_params');
     const qn=x.qn??(x.preferMp4?32:64);
-    const {data,loggedIn}=await this.request('/x/watch/player/playurl',{aid:x.aid,cid:x.cid,qn,fnval:x.preferMp4?1:4048,resume:1});
+    const {data}=await this.request('/x/watch/player/playurl',{aid:x.aid,cid:x.cid,qn,fnval:x.preferMp4?1:4048,resume:1});
     let source:BiliPlayUrl;
     try{source=this.o.parsePlay(data);}catch{throw new WatchApiError('parse');}
-    if(source.durl.length&&data.video_codecid!=null&&data.video_codecid!==7)throw new WatchApiError('empty');
+    const quality=number(source.quality);
+    if(source.durl.length&&data.video_codecid!=null&&data.video_codecid!==7)throw new WatchApiError('empty',quality);
     const now=this.o.now();
     source.durl=source.durl.slice(0,8).map(v=>({...v,url:usableUrl(v.url,now)?v.url:undefined,backupUrl:v.backupUrl.filter(u=>usableUrl(u,now)).slice(0,8)}));
     if(source.dash){
@@ -99,8 +105,9 @@ export class BiliWatchApi {
       source.dash={video:filter(source.dash.video).filter(v=>v.codecId==null||v.codecId===7),audio:filter(source.dash.audio)};
     }
     const usable=source.durl.length?!!(source.durl[0]?.url||source.durl[0]?.backupUrl.length):!!source.dash?.video.some(v=>v.baseUrl||v.backupUrl.length);
-    if(!usable)throw new WatchApiError('empty');
-    if(loggedIn&&(source.quality??0)<qn)throw new WatchApiError('quality');
+    if(!usable)throw new WatchApiError('empty',quality);
+    // The watch accepts 360P even when the server returns less than requested qn.
+    if(quality===undefined||quality<16)throw new WatchApiError('quality',quality);
     return {...source,apiSource:'watch'};
   }
 }

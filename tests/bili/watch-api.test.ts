@@ -53,10 +53,57 @@ test('logged-in account functions stay Web before cookie verification; verified 
  f.setConfig({webCookieVerified:true});expect((await f.client.resolvePlayback({aid:7,cid:8,preferMp4:true,qn:16})).apiSource).toBe('watch');expect(f.requests[1].headers.Cookie).toContain('fixture-session');
  expect([...f.values.keys()]).not.toContain('access_token');
 });
-test('authenticated watch quality downgrade returns original Web result',async()=>{
- const f=setup([ok(play()),ok(play('https://fixture.invalid/web.mp4',80))],{session:true,verified:true});
- const result=await f.client.resolvePlayback({aid:7,cid:8,qn:80,preferMp4:true});expect(result.apiSource).toBe('web');expect(result.quality).toBe(80);expect(f.requests).toHaveLength(2);
+test.each([false,true])('360P and higher stay watch below requested qn; authenticated=%s',async session=>{
+ for(const quality of [16,32,64,80]){
+  const f=setup([ok(play(undefined,quality))],{session,verified:session});
+  const stored=f.values.get('watchrss.bili.session.v1');
+  const result=await f.client.resolvePlayback({aid:7,cid:8,qn:120,preferMp4:true});
+  expect(result.apiSource).toBe('watch');expect(result.quality).toBe(quality);expect(f.requests).toHaveLength(1);
+  expect(new URL(f.requests[0].url).searchParams.get('qn')).toBe('120');
+  expect(f.events).toEqual([{operation:'playurl',route:'watch',elapsedMs:0,quality,requestedQn:120}]);
+  expect(f.values.get('watchrss.bili.session.v1')).toBe(stored);
+  const metrics=JSON.stringify(f.events);for(const secret of ['fixture-client','fixture-session','fixture-csrf','https://'])expect(metrics).not.toContain(secret);
+ }
 });
+test.each([false,true])('below 360P or unknown quality falls back once; authenticated=%s',async session=>{
+ for(const quality of [0,15,undefined,Number.NaN,Number.POSITIVE_INFINITY]){
+  const f=setup([ok({...play(),quality}),ok(play('https://fixture.invalid/web.mp4',80))],{session,verified:session});
+  const result=await f.client.resolvePlayback({aid:7,cid:8,qn:8,preferMp4:true});
+  expect(result.apiSource).toBe('web');expect(result.quality).toBe(80);expect(f.requests).toHaveLength(2);
+  expect(f.requests.map(r=>new URL(r.url).pathname)).toEqual(['/x/watch/player/playurl','/x/player/wbi/playurl']);
+  expect(f.events).toEqual([{operation:'playurl',route:'web',reason:'quality',elapsedMs:0,quality:Number.isFinite(quality)?quality:undefined,requestedQn:8}]);
+ }
+});
+test.each([true,false])('default request qn is recorded separately from actual 360P; preferMp4=%s',async preferMp4=>{
+ const f=setup([ok(play())],{session:true,verified:true});
+ expect((await f.client.resolvePlayback({aid:7,cid:8,preferMp4})).apiSource).toBe('watch');
+ const requestedQn=preferMp4?32:64;
+ expect(new URL(f.requests[0].url).searchParams.get('qn')).toBe(String(requestedQn));
+ expect(f.events).toEqual([{operation:'playurl',route:'watch',elapsedMs:0,quality:16,requestedQn}]);
+});
+test('unverified logged-in playback stays Web and does not invent watch quality',async()=>{
+ const f=setup([ok(play('https://fixture.invalid/web.mp4',80))],{session:true});
+ const stored=f.values.get('watchrss.bili.session.v1');
+ expect((await f.client.resolvePlayback({aid:7,cid:8,qn:80,preferMp4:true})).apiSource).toBe('web');
+ expect(f.requests).toHaveLength(1);expect(new URL(f.requests[0].url).hostname).toBe('api.bilibili.com');
+ expect(f.events).toEqual([{operation:'playurl',route:'web',reason:'logged_in_web',elapsedMs:0,requestedQn:80,quality:undefined}]);
+ expect(f.values.get('watchrss.bili.session.v1')).toBe(stored);
+});
+test.each([false,true])('360P still requires a playable track; authenticated=%s',async session=>{
+ for(const data of [{...play(),durl:[]},{...play(),video_codecid:12},play('file:///private/data'),{quality:16,dash:{video:[{base_url:'https://fixture.invalid/hevc',codecid:12}],audio:[]}}]){
+  const f=setup([ok(data),ok(play('https://fixture.invalid/web.mp4',80))],{session,verified:session});
+  expect((await f.client.resolvePlayback({aid:7,cid:8,qn:80,preferMp4:true})).apiSource).toBe('web');
+  expect(f.requests).toHaveLength(2);
+  expect(f.events).toEqual([{operation:'playurl',route:'web',reason:'empty',elapsedMs:0,quality:16,requestedQn:80}]);
+ }
+});
+test('authenticated H264 DASH at 360P is usable below requested qn',async()=>{
+ const f=setup([ok({quality:16,dash:{video:[{id:16,base_url:'https://fixture.invalid/video',codecid:7}],audio:[{base_url:'https://fixture.invalid/audio'}]}})],{session:true,verified:true});
+ const source=await f.client.resolvePlayback({aid:7,cid:8,qn:80});
+ expect(source.apiSource).toBe('watch');expect(source.dash?.video[0].baseUrl).toBe('https://fixture.invalid/video');expect(f.requests).toHaveLength(1);
+ expect(f.events).toEqual([{operation:'playurl',route:'watch',elapsedMs:0,quality:16,requestedQn:80}]);
+});
+
 test.each(['expired','invalid','hevc','voucher'] as const)('unusable watch source %s falls back once',async kind=>{
  const d=kind==='expired'?play('https://fixture.invalid/a?deadline=1'):kind==='invalid'?play('file:///private/data'):kind==='hevc'?{...play(),video_codecid:12}:{v_voucher:'fixture'};
  const f=setup([ok(d),ok(play('https://fixture.invalid/web.mp4'))]);expect((await f.client.resolvePlayback({aid:7,cid:8,preferMp4:true})).apiSource).toBe('web');expect(f.requests).toHaveLength(2);

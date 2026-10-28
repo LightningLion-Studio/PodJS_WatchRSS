@@ -55,7 +55,7 @@ export class BiliClient {
  async resolvePlayback(x:{cid:number;aid?:number;bvid?:string;qn?:number;preferMp4?:boolean;forceWeb?:boolean}):Promise<BiliPlayUrl>{
   this.id(x);
   if(x.forceWeb){appLogger.i('BiliRoute',JSON.stringify({operation:'playurl',route:'web',reason:'direct_url'}));return {...await this.resolveWebPlayback(x),apiSource:'web'};}
-  return this.watch.first('playurl',()=>this.watch.play(x),async()=>({...await this.resolveWebPlayback(x),apiSource:'web'}));
+  return this.watch.first('playurl',()=>this.watch.play(x),async()=>({...await this.resolveWebPlayback(x),apiSource:'web'}),{requestedQn:x.qn??(x.preferMp4?32:64)});
  }
  private async resolveWebPlayback(x:{cid:number;aid?:number;bvid?:string;qn?:number;preferMp4?:boolean}):Promise<BiliPlayUrl>{
   this.id(x);
