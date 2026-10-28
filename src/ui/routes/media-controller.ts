@@ -243,6 +243,7 @@ export function createMediaRouteController(
           url: undefined,
           videoUrl: undefined,
           audioUrl: undefined,
+          biliApiSource: undefined,
           ...next,
           resumePositionMs: next.url?.startsWith("managed-cache/bili-preview/") ? 0 : positionMs,
         };

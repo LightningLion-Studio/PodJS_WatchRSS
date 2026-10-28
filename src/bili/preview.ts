@@ -30,7 +30,7 @@ export interface PreviewPorts {
   store: { get(key: string): unknown; set(key: string, value: unknown): void; delete(key: string): void };
   digest(value: string): Promise<string>;
   resolve(target: DetailTarget & { cid: number; qn: number; preferMp4: true; forceWeb?:boolean }): Promise<BiliPlayUrl>;
-  headers(): Promise<Record<string, string>>;
+  headers(source:BiliPlayUrl): Promise<Record<string, string>>;
   download(url: string, path: string, headers: Record<string, string>, maxBytes: number): { result: Promise<Download>; cancel(): void };
   stat(path: string): Promise<{ file: boolean; size: number }>;
   write(path: string, dataBase64: string): Promise<unknown>;
@@ -185,7 +185,7 @@ export class BiliPreviewCache {
         this.records = this.records.filter(value => value !== row);
       this.check(job); this.save(record);
     }
-    const headers = await this.ports.headers(); this.check(job);
+    const headers = await this.ports.headers(play); this.check(job);
     try {
       while (record.offset < size) {
         this.check(job);

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BiliPreviewCache, PREVIEW_INDEX, PREVIEW_MS, previewBytes, type PreviewPorts } from '../../src/bili/preview.ts';
 import { ManagedCache } from '../../src/cache/managed.ts';
+import {biliCdnHeaders} from '../../src/bili/cdn.ts';
 import { createBiliPlaybackRetry, resolveBiliPlaybackWithPreview } from '../../src/playback.ts';
 
 const MiB = 1024 * 1024;
@@ -276,4 +277,15 @@ test('server may ignore Range only when the whole small file is the requested pr
 
 test('M3 diagnostics expose real index offsets and workers without source or credential data',async()=>{
  const f=fixture();try{f.block();const request=f.cache.enqueue(target);await f.started.promise;const working=f.cache.diagnostics();expect(working.indexScope).toBe('bili-preview');expect(working.jobs.filter(j=>j.active)).toHaveLength(1);expect(working.records[0]?.offset).toBe(0);expect(working.records[0]?.complete).toBe(false);expect(JSON.stringify(working)).not.toContain('fixture_cookie');expect(JSON.stringify(working)).not.toContain('http://');f.unblock();await request.result;const done=f.cache.diagnostics();expect(done.records[0]?.offset).toBe(f.body.length/2);expect(done.records[0]?.complete).toBe(true);done.records[0]!.offset=0;expect(f.cache.diagnostics().records[0]?.offset).toBe(f.body.length/2);}finally{await f.cleanup();}
+});
+
+
+test('watch preview selects headers from the resolved source and bounds every Range independently',async()=>{
+ const f=fixture();const resolve=f.ports.resolve;const origins:unknown[]=[];
+ f.ports.resolve=async input=>({...await resolve(input),apiSource:'watch'});
+ f.ports.headers=async source=>{origins.push(source.apiSource);return biliCdnHeaders(source,{Cookie:'synthetic',Referer:'https://www.bilibili.com/'});};
+ try{
+  await f.cache.enqueue(target).result;expect(origins).toEqual(['watch']);expect(f.requests).toHaveLength(2);
+  for(const request of f.requests){expect(request.headers.get('referer')).toBeNull();expect(request.headers.get('cookie')).toBeNull();expect(request.headers.get('user-agent')).toBe('Mozilla/5.0');expect(request.range).toMatch(/^bytes=\d+-\d+$/);}
+ }finally{await f.cleanup();}
 });

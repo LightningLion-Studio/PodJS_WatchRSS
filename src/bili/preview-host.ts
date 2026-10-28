@@ -3,6 +3,7 @@ import { kv } from '@podjs/framework/watch';
 import type { BiliClient } from './client.ts';
 import { BiliPreviewCache } from './preview.ts';
 import { managedCache } from '../cache/host.ts';
+import {biliCdnHeaders} from './cdn.ts';
 
 /** The video host resolves this app-root relative path to a checked file URI. */
 export function createHostBiliPreview(client: Pick<BiliClient, 'resolvePlayback' | 'getSession'>) {
@@ -15,7 +16,8 @@ export function createHostBiliPreview(client: Pick<BiliClient, 'resolvePlayback'
       return Array.from(base64ToBytes(result.digestBase64), byte => byte.toString(16).padStart(2, '0')).join('');
     },
     resolve: target => client.resolvePlayback(target),
-    async headers() {
+    async headers(source) {
+      if(source.apiSource==='watch')return biliCdnHeaders(source,{});
       const session = await client.getSession();
       return { Referer: 'https://www.bilibili.com/', 'User-Agent': 'Mozilla/5.0',
         ...(session ? { Cookie: Object.entries(session.cookies).map(([key, value]) => `${key}=${value}`).join('; ') } : {}) };

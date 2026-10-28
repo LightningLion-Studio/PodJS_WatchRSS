@@ -2,10 +2,13 @@ import {playbackFailure} from './media/playback-failure.ts';
 import {PlaybackRecoveryBudget,mediaSourceExpiry} from '@podjs/framework/media-policy';
 import * as services from '@podjs/framework/services';
 import type { BiliPlayUrl } from "./bili/types.ts";
+import {biliCdnHeaders} from './bili/cdn.ts';
 import type { PlaybackSource } from "./ui/VideoPlayerScreen.tsx";
 const urls = (primary: string | undefined, backups: string[]) => [...new Set([primary, ...backups].map(url => url?.trim()).filter((url): url is string => !!url))];
 export function biliPlaybackCandidates(source:BiliPlayUrl,title:string,headers:Record<string,string>):PlaybackSource[] {
- if(source.durl.length) return urls(source.durl[0]?.url, source.durl[0]?.backupUrl ?? []).slice(0,16).map(url => ({url,headers,title}));
+ headers=biliCdnHeaders(source,headers);
+ const origin=source.apiSource?{biliApiSource:source.apiSource}:{};
+ if(source.durl.length) return urls(source.durl[0]?.url, source.durl[0]?.backupUrl ?? []).slice(0,16).map(url => ({url,headers,title,...origin}));
  const dash=source.dash;
  if(!dash?.video.length)return [];
  const supported=dash.video.filter(v=>v.codecId==null||v.codecId===7);
@@ -13,7 +16,7 @@ export function biliPlaybackCandidates(source:BiliPlayUrl,title:string,headers:R
  const audio=[...dash.audio].sort((a,b)=>(a.bandwidth??0)-(b.bandwidth??0)).flatMap(a=>urls(a.baseUrl,a.backupUrl));
  const candidates:PlaybackSource[]=[];
  for(const v of video)for(const videoUrl of urls(v.baseUrl,v.backupUrl))for(const audioUrl of audio.length?audio:[undefined]){
-  candidates.push(audioUrl?{videoUrl,audioUrl,headers,title}:{url:videoUrl,headers,title});
+  candidates.push(audioUrl?{videoUrl,audioUrl,headers,title,...origin}:{url:videoUrl,headers,title,...origin});
   if(candidates.length>=16)return candidates;
  }
  return candidates;
@@ -30,7 +33,7 @@ export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:(options?:{
  let candidates=fresh(initial), current=initialSource??candidates.shift(), refreshed=false, localConsumed=false;
  let watchFallbackAttempted=false;
  const failed=new Set<string>();
- const key=(source:PlaybackSource)=>JSON.stringify([source.url,source.videoUrl,source.audioUrl]);
+ const key=(source:PlaybackSource)=>JSON.stringify([source.url,source.videoUrl,source.audioUrl,source.biliApiSource]);
  let pending:Promise<PlaybackSource>|undefined;
  const choose=async({manual=false,error}:BiliPlaybackRetryOptions):Promise<PlaybackSource>=>{
   let resolutionError:unknown;
