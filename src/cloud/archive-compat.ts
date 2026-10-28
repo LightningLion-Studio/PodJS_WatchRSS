@@ -1,9 +1,10 @@
+import {equalBytesAsync} from '@podjs/framework/bytes';
 import {parseRawJson,rawJsonProperty,rawJsonValue,rawJsonText,patchRawJsonObject} from '@podjs/framework/json-raw';
 import {featurePolicy,recordFields} from './compatibility';
 import {readWrss,writeWrss} from './wrss';
 import {utf8Decode,utf8Encode} from './types';
 const metadataFields=[...recordFields.article,'contentTextEntry','contentHtmlEntry'];
-const equal=(a:Uint8Array|undefined,b:Uint8Array|undefined)=>a===b||!!a&&!!b&&a.length===b.length&&a.every((x,i)=>x===b[i]);
+const equal=async(a:Uint8Array|undefined,b:Uint8Array|undefined)=>a===b||!!a&&!!b&&await equalBytesAsync(a,b);
 /** Legacy ZIP remains one physical object while the new-reference write gate is
  * closed. Preserve unsupported files and raw metadata when that object is edited;
  * identical semantic input carries its original compressed ciphertext instead. */
@@ -22,7 +23,7 @@ export async function mergeCloudArchive(oldBytes:Uint8Array,newBytes:Uint8Array,
   result.push(patchRawJsonObject(basis,edits));
   // State clocks and neutral cloud placeholders do not version immutable bodies.
   for(const k of ['articleId','url','title','rssSourceUrl','contentHash','importedAt','independentSaved','favoriteSaved','watchLaterSaved'])if((before[k]??null)!==(row[k]??null))unchanged=false;
-  for(const k of ['contentTextEntry','contentHtmlEntry'])if((before[k]??null)!==(row[k]??null)||!equal(before[k]?old.get(before[k]):undefined,row[k]?next.get(row[k]):undefined))unchanged=false;
+  for(const k of ['contentTextEntry','contentHtmlEntry'])if((before[k]??null)!==(row[k]??null)||!await equal(before[k]?old.get(before[k]):undefined,row[k]?next.get(row[k]):undefined))unchanged=false;
  }
  const retiring=new Set(removed);for(const node of oldRows.items??[]){const row=rawJsonValue<any>(node);if(!row||typeof row.articleId!=='string'){result.push(rawJsonText(node));unchanged=false;continue;}if(seen.has(row.articleId)||retiring.has(row.articleId))continue;result.push(rawJsonText(node));for(const k of ['contentTextEntry','contentHtmlEntry'])if(typeof row[k]==='string'&&old.has(row[k]))next.set(row[k],old.get(row[k])!);unchanged=false;}
  if(unchanged)return {bytes:oldBytes,unchanged:true};
