@@ -1,4 +1,5 @@
 import {encodeUtf8Async} from '@podjs/framework/bytes';
+import {matchGzipHash} from '@podjs/framework/crypto';
 import {javaJsonQuote,type SyncArticleBody,type SyncBodyCodec,type SyncBodyPayload} from "./article-body.ts";
 import type {WireIncomingArticle,RequestedArticleBody} from "./article-batches.ts";
 import type {ArticleManifest} from "./manifest.ts";
@@ -41,10 +42,13 @@ export async function prepareCachedArticle(article:ExportedArticle,codec:Pick<Sy
  return {article,manifest,encodedBody:null};
 }
 /** Computes hashes from actual hydrated body bytes, never trusts a cached manifest. */
-export async function prepareArticle(article:ExportedArticle,codec:SyncBodyCodec,bodyAvailable=true):Promise<PreparedArticle>{
- const bytes=bodyAvailable?await codec.encode(article):null,chunkHashes:string[]=[];
- if(bytes)for(let index=0;index<Math.max(1,Math.ceil(bytes.length/BODY_CHUNK_SIZE));index++)chunkHashes.push(await codec.sha256(bytes.subarray(index*BODY_CHUNK_SIZE,(index+1)*BODY_CHUNK_SIZE)));
- const bodyHash=bytes?(chunkHashes.length===1?chunkHashes[0]!:await codec.sha256(bytes)):"",metadataHash=bytes?await articleMetadataHash(article,codec):"";
+export async function prepareArticle(article:ExportedArticle,codec:SyncBodyCodec,bodyAvailable=true,expectedBodyHash?:string):Promise<PreparedArticle>{
+ let bytes=bodyAvailable?await codec.encode(article):null;const chunkHashes:string[]=[];let verifiedBodyHash:string|undefined;
+ // A cloud archive contains logical text, not the peer's gzip member. Preserve
+ // its accepted wire encoding only when the entire regenerated digest matches.
+ if(bytes&&expectedBodyHash){const matched=await matchGzipHash(bytes,expectedBodyHash,codec.sha256);if(matched){bytes=matched;verifiedBodyHash=expectedBodyHash;}}
+ if(bytes)for(let index=0;index<Math.max(1,Math.ceil(bytes.length/BODY_CHUNK_SIZE));index++)chunkHashes.push(verifiedBodyHash&&bytes.length<=BODY_CHUNK_SIZE?verifiedBodyHash:await codec.sha256(bytes.subarray(index*BODY_CHUNK_SIZE,(index+1)*BODY_CHUNK_SIZE)));
+ const bodyHash=bytes?(chunkHashes.length===1?chunkHashes[0]!:verifiedBodyHash??await codec.sha256(bytes)):"",metadataHash=bytes?await articleMetadataHash(article,codec):"";
  const manifest:ArticleManifest={articleId:article.articleId,sourceDeviceId:article.sourceDeviceId,contentHash:article.contentHash,updatedAt:article.updatedAt,independentChangedAt:article.independentChangedAt,favoriteChangedAt:article.favoriteChangedAt,watchLaterChangedAt:article.watchLaterChangedAt,deletedAt:article.deletedAt,deleted:article.deleted,bodyHash,bodyByteCount:bytes?.length??0,chunkSize:bytes?BODY_CHUNK_SIZE:0,chunkHashes,metadataHash,bodyAvailable,bodySyncMode:bodySyncMode(article),readingProgress:article.readingProgress,readingPositionBytes:article.readingPositionBytes,readingPositionContentHash:article.readingPositionContentHash,readingPositionChangedAt:article.readingPositionChangedAt,isRead:article.isRead};
  return {article,manifest,encodedBody:bytes};
 }

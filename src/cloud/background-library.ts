@@ -1,5 +1,6 @@
 import {createBookFiles} from '../books/files-port';
 import {bytesToBase64} from '@podjs/framework/bytes';
+import {stableGzipHeader} from '@podjs/framework/crypto';
 import type {SqlDatabase} from '../core/types';
 import {initializeSchema} from '../core/schema';
 import {ensureSyncDevice} from '../sync/local-identity';
@@ -24,7 +25,7 @@ export async function createBackgroundLibrary(host:CloudHostRequest,readKv:(key:
  const writer=new ImportedTextWriter({createTemp:directory=>host('file.createTemp',{directory}),write:(path,bytes)=>host('file.write',{path,dataBase64:bytesToBase64(bytes),atomicReplace:true}),append,hash:path=>host('file.hash',{path}),commit:(path,target,expectedSize,expectedSha256)=>host('file.commit',{path,target,expectedSize,expectedSha256}),remove:async path=>{await host('file.delete',{path});}});
  const hydrate=async(value:string)=>{const name=importedTextFileName(value);if(!name)return value;const bytes=await ports.files.read('article_content/'+name);if(!bytes)throw Error('正文文件缺失');return utf8Decode(bytes);};
  const encode=(value:string)=>{const chunks=[...javaUtf8Chunks(value)],out=new Uint8Array(chunks.reduce((n,b)=>n+b.length,0));let at=0;for(const b of chunks){out.set(b,at);at+=b.length;}return out;};
- const codec:SyncBodyCodec={sha256:ports.crypto.sha256,encode:body=>ports.crypto.gzip(encode(encodeBodyJson(body))),decode:async bytes=>utf8Decode(bytes[0]===31&&bytes[1]===139?await ports.crypto.gunzip(bytes,32*1024*1024):bytes)};
+ const codec:SyncBodyCodec={sha256:ports.crypto.sha256,encode:async body=>stableGzipHeader(await ports.crypto.gzip(encode(encodeBodyJson(body)))),decode:async bytes=>utf8Decode(bytes[0]===31&&bytes[1]===139?await ports.crypto.gunzip(bytes,32*1024*1024):bytes)};
  const text:SyncTextPort={parseUri:value=>host('uri.parse',{value}),htmlText:async html=>{
   const input=await host<{path:string}>('file.createTemp',{directory:'cloud-crypto'});let output:string|undefined;
   try{await append(input.path,encode(html),0);const result=await host<{path:string}>('file.htmlText',{path:input.path,maxOutputBytes:32*1024*1024});output=result.path;const bytes=await ports.files.read(output);if(!bytes)throw Error('HTML 转码失败');return utf8Decode(bytes);}

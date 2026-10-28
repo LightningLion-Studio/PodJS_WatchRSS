@@ -259,7 +259,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   await this.cloudState();const id=await this.migrate();const identities=await this.local.cloudRssIdentities(undefined,check);let changed=remote==='cloud-records'?await this.mergeCloudSources(sources,id):await this.sources.merge(sources,remote,id,false);
   const protectedIds=new Set((await querySyncPages(this.db,'SELECT article_id FROM article_register_state ORDER BY article_id')).map(r=>String(r.article_id)));
   for(const incoming of articles){check?.();
-   if(protectedIds.has(incoming.articleId)){if(!incoming.deleted&&(incoming.contentText.trim()||incoming.contentHtml?.trim()))changed+=await new ArticleRegisterStore(this.db,this.ports.codec.sha256).restoreBody(incoming,await prepareArticle(incoming,this.ports.codec,true),this.ports.files);continue;}
+   if(protectedIds.has(incoming.articleId)){if(!incoming.deleted&&(incoming.contentText.trim()||incoming.contentHtml?.trim()))changed+=await new ArticleRegisterStore(this.db,this.ports.codec.sha256).restoreBody(incoming,await this.prepareCloudArticle(incoming),this.ports.files);continue;}
    const bookMapping=await this.books?.mapping(incoming.articleId,incoming.url);if(bookMapping){const values={bookId:bookMapping.bookId,chapterIndex:bookMapping.chapterIndex,isRead:incoming.isRead,readingProgress:incoming.readingProgress,readingPositionBytes:incoming.readingPositionBytes,readingPositionContentHash:incoming.readingPositionContentHash,readingPositionChangedAt:incoming.readingPositionChangedAt,sourceDeviceId:incoming.sourceDeviceId,favoriteSaved:incoming.favoriteSaved,favoriteChangedAt:incoming.favoriteChangedAt,favoriteSortOrder:incoming.favoriteSortOrder,watchLaterSaved:incoming.watchLaterSaved,watchLaterChangedAt:incoming.watchLaterChangedAt,watchLaterSortOrder:incoming.watchLaterSortOrder};changed+=await this.books!.mergeReading(values);if(incoming.deleted){const state=(await this.books!.states()).find(b=>b.bookId===bookMapping.bookId)!;changed+=await this.books!.merge({...state,deletedChapters:[...new Set([...state.deletedChapters,bookMapping.chapterIndex])].sort((a,b)=>a-b),deletionClock:Math.max(state.deletionClock,incoming.deletedAt,incoming.updatedAt)});}continue;}
    let article=incoming;let targetItemId:number|undefined;let publicId:string|undefined;
    if(incoming.rssSourceUrl&&!isImportedContentUrl(incoming.rssSourceUrl)&&!isImportedContentUrl(incoming.url)&&!isLocalOnlyRssSource(incoming.rssSourceUrl)){
@@ -282,9 +282,15 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
     const existing=(await this.db.query('SELECT a.fetched_at,a.title,a.description,a.image_url,EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=a.id AND s.saved=1) AS retained FROM articles a JOIN channels c ON c.id=a.channel_id WHERE c.url=? AND (a.id=? OR a.dedup_key=?) LIMIT 1',[incoming.rssSourceUrl,targetItemId??0,incoming.articleId]))[0];
     const at=existing?Number(existing.fetched_at):this.now();article={...article,importedAt:at,updatedAt:at,...(Number(existing?.retained)?{title:String(existing.title),excerpt:String(existing.description??''),imageUrl:existing.image_url==null?null:String(existing.image_url),contentHtml:null,contentText:''}:{})};
    }
-   const oldMeta=(await this.db.query('SELECT * FROM cloud_article_state WHERE article_id=?',[article.articleId]))[0];
+   // Fold the accepted wire witness into the existing metadata lookup. All
+   // lookups use primary keys; do not scan RSS IDs once per imported article.
+   const metaRow=(await this.db.query(`SELECT m.*,CASE WHEN e.body_hash=c.body_hash THEN c.body_hash END AS wire_body_hash
+    FROM (SELECT 1) LEFT JOIN cloud_article_state m ON m.article_id=?
+    LEFT JOIN article_sync_content c ON c.item_id=COALESCE(?,(SELECT item_id FROM sync_article_ids WHERE article_id=?))
+    LEFT JOIN article_sync_encoding_cache e ON e.item_id=c.item_id`,[article.articleId,targetItemId??null,article.articleId]))[0];
+   const oldMeta=metaRow?.article_id==null?undefined:metaRow;
    if(remote==='cloud-records'){const existing=(await this.db.query('SELECT a.title,a.description,a.image_url,a.fetched_at FROM sync_article_ids m JOIN articles a ON a.id=m.item_id WHERE m.article_id=?',[article.articleId]))[0];if(existing&&Number(existing.fetched_at)>article.updatedAt)article={...article,title:String(existing.title),excerpt:String(existing.description??''),imageUrl:existing.image_url==null?null:String(existing.image_url),updatedAt:Number(existing.fetched_at),contentHash:oldMeta?String(oldMeta.content_hash):article.contentHash};}
-   const prepared=await prepareArticle(article,this.ports.codec,true);
+   const prepared=await prepareArticle(article,this.ports.codec,true,typeof metaRow?.wire_body_hash==='string'?metaRow.wire_body_hash:undefined);
    const body=bodyForRequest(prepared,{articleId:article.articleId,bodyHash:'',metadataOnly:false,chunkIndexes:[]});
    changed+=article.deleted?await this.deletion.receive(article,body,remote,false):await this.receiver.receiveWithStats(article,body,remote==='cloud-records'||remote==='cloud-rss-inventory'?remote:targetItemId?'cloud-'+remote:remote,false,targetItemId);
    if(publicId&&!article.deleted){await this.db.execute(`INSERT INTO cloud_rss_article_ids(item_id,article_id) SELECT item_id,? FROM sync_article_ids WHERE article_id=? AND item_id IS NOT NULL ON CONFLICT(item_id) DO UPDATE SET article_id=excluded.article_id`,[publicId,article.articleId]);const row=identities.find(r=>r.itemId===targetItemId);if(row){row.articleId=publicId;row.legacyMaterialized=false;}}
@@ -293,6 +299,12 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   }
   if(changed>0)this.snapshotCache=undefined;return changed;
  });}
+
+ private async prepareCloudArticle(article:ExportedArticle,targetItemId?:number){
+  const cached=(await this.db.query(`SELECT c.body_hash FROM article_sync_content c JOIN article_sync_encoding_cache e ON e.item_id=c.item_id AND e.body_hash=c.body_hash
+   WHERE c.item_id=COALESCE(?,(SELECT item_id FROM sync_article_ids WHERE article_id=?),(SELECT item_id FROM article_register_state WHERE article_id=?))`,[targetItemId??null,article.articleId,article.articleId]))[0];
+  return prepareArticle(article,this.ports.codec,true,cached?String(cached.body_hash):undefined);
+ }
 
  resetPeerState(){return this.run(()=>this.sequence.reset());}
  markSuccess(pending:PendingSyncSuccess){return this.run(()=>this.perf.time("markSuccess.total",()=>this.snapshot(async(articles,sources)=>{const peer=pending.remoteDeviceId,manifests=await this.wireManifests(articles,peer),proof=await this.echo.stage(peer,manifests,sources,pending.receivedArticleManifest??[],pending.receivedSources??[]);await this.db.transaction([this.sequence.successStatement(pending),...(pending.fullSnapshot&&pending.projectionGeneration?[{sql:"INSERT INTO sync_fast_library_baseline(peer,generation) SELECT ?,? WHERE EXISTS(SELECT 1 FROM sync_fast_definitions WHERE domain='library' AND generation=?) ON CONFLICT(peer) DO UPDATE SET generation=excluded.generation",params:[peer,pending.projectionGeneration,pending.projectionGeneration]}]:[]),{sql:'INSERT INTO sync_peer_features(peer_device_id,rss_canonical,book_sync) VALUES(?,?,?) ON CONFLICT(peer_device_id) DO UPDATE SET rss_canonical=excluded.rss_canonical,book_sync=excluded.book_sync',params:[peer,this.peerCanonical.get(peer)?1:0,this.peerBooks.get(peer)?1:0]},...proof]);},!!this.peerCanonical.get(pending.remoteDeviceId),!!this.peerBooks.get(pending.remoteDeviceId))).finally(()=>this.perf.flush("markSuccess.perf")));}

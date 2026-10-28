@@ -1,4 +1,5 @@
 import {yieldWorkTurn} from '@podjs/framework/text-layout';
+import {stableGzipHeader} from '@podjs/framework/crypto';
 import {decodeSyncUtf8} from './protocol.ts';
 import {encodeUtf8Async,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
 import {fileChunks,uri,sqlite,hostOperation,bytesToBase64,base64ToBytes} from "@podjs/framework/services";
@@ -39,11 +40,11 @@ export const hostArticleBodyCodec:SyncBodyCodec={
   const encoded=await encodeUtf8Async(encodeBodyJson(body),'question'),chunks=[encoded],size=encoded.length;
   if(size<=64*1024){
    const bytes=encoded;
-   try{return base64ToBytes((await fileChunks.gzipBytes(bytesToBase64(bytes))).dataBase64);}
+   try{return stableGzipHeader(base64ToBytes((await fileChunks.gzipBytes(bytesToBase64(bytes))).dataBase64));}
    catch(error){if(!/unsupported|unknown method/i.test(String(error)))throw error;}
   }
   const input=await temporary(chunks);let output:string|undefined;
-  try{const result=await fileChunks.gzip(input,MAX_BODY_JSON_BYTES);output=result.path;return await readBytes(output,result.size);}
+  try{const result=await fileChunks.gzip(input,MAX_BODY_JSON_BYTES);output=result.path;return stableGzipHeader(await readBytes(output,result.size));}
   finally{if(output)await fileChunks.remove(output);await fileChunks.remove(input);}
  },
  async decode(bytes){
