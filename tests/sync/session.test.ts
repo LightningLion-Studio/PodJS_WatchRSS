@@ -67,3 +67,16 @@ for(const fast of [false,true])test('persistent cursor defers projection only fo
  const sent:JsonObject[]=[];await new LibrarySyncSession({readFrame:async()=>{const frame=incoming[index++];if(!frame)throw Error('EOF');return frame;},writeFrame:async f=>{sent.push(f);},close:async()=>{}},repo,{capabilities:{supportsDomainFastPathV2:true}}).run();
  expect(old).toBe(fast?0:1);expect(cheap).toBe(fast?1:0);expect(prepared).toBe(1);expect(marked).toBe(1);expect(sent.some(f=>f.phase==='cursor')).toBe(true);
 });
+
+test('session cancellation reaches an in-progress destructive action and cannot acknowledge a late clear',async()=>{
+ const {LibraryClearOperation}=await import('../../src/core/library-clear');
+ const {createApplicationActionHandler}=await import('../../src/sync/application-actions');
+ const operation=new LibraryClearOperation(()=>({result:new Promise(()=>{}),cancel(){}}));
+ let started!:()=>void,finish!:()=>void,destructive=0,writes=0;
+ const waiting=new Promise<void>(resolve=>{started=resolve;}),stalled=new Promise<void>(resolve=>{finish=resolve;});
+ const handler=createApplicationActionHandler({notes:{} as never,deviceId:async()=>'watch',notesChanged:()=>{},clearLibrary:context=>operation.run(false,{check:context?.checkCancelled,onCancel:context?.onCancel},async control=>{started();await stalled;control.check();destructive++;})});
+ const session=new LibrarySyncSession({readFrame:async()=>({version:14,action:'clearLibrary'}),writeFrame:async()=>{writes++;},close:async()=>{}},{deviceId:async()=>'watch'} as LibrarySessionRepository,{handleAction:handler});
+ const result=session.run();await waiting;session.cancel();
+ await expect(result).rejects.toThrow('cancelled');expect(writes).toBe(0);
+ finish();for(let n=0;n<10;n++)await Promise.resolve();expect(destructive).toBe(0);
+});

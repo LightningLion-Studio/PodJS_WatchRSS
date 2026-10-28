@@ -94,7 +94,7 @@ test('failed phone clearLibrary rolls back before acknowledging and leaves media
  const f=await setup();try{
   await f.db.execute("CREATE TRIGGER fail_clear BEFORE DELETE ON channels BEGIN SELECT RAISE(ABORT,'disk failure'); END");
   const handle=createApplicationActionHandler({notes:{} as never,deviceId:()=>f.repo.deviceId(),notesChanged:()=>{},clearLibrary:()=>f.repo.clearLibrary()});
-  expect(await handle({version:14,action:'clearLibrary'})).toEqual({success:false,message:'disk failure'});
+  expect(await handle({version:14,action:'clearLibrary'})).toEqual({success:false,action:'clearLibrary',errorCode:'clear_library_database',retryable:true,message:'数据库清理失败，请重试'});
   expect(await f.db.query('SELECT id FROM channels')).toEqual([{id:1}]);
   expect(await f.db.query('SELECT id FROM articles')).toEqual([{id:1}]);
   expect(f.cleaned).toEqual([]);

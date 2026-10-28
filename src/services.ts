@@ -11,7 +11,8 @@ import {isLocalOnlyRssSource} from './cloud/rss-identity';
 import {resolvePoolFeed,poolFeedXml} from './cloud/rss-pool';
 import {createCloudTransport} from './cloud/transport';
 import {watchAppVersion} from './core/app-version';
-import {clearPrivateContentFiles} from './core/clear-private-files';
+import {LibraryClearOperation,LibraryClearError,type LibraryClearOptions} from './core/library-clear';
+import {LIBRARY_CONTENT_ROOTS,clearPrivateContentFiles} from './core/clear-private-files';
 import {requestFeedText} from "./rss/site-challenge.ts";
 import { feedRequest } from "./core/feed-request";
 import {decodeUtf8Async} from "@podjs/framework/bytes";
@@ -68,12 +69,15 @@ export async function getSavedLinksForSync(type:SavedLinkType):Promise<string[]>
   return readSavedLinks(db,type);
 }
 
-export const db: SqlDatabase = {
+let libraryWriteBlocked=false;
+const assertLibraryWritable=()=>{if(libraryWriteBlocked)throw new LibraryClearError('clear_library_busy');};
+const clearDatabase: SqlDatabase = {
   query: (sql, params, traceLabel) => sqlite.query(sql, params as (string | number | null)[],traceLabel),
   execute: async (sql, params, traceLabel) => {const count=await sqlite.executeChanges(sql, params as (string | number | null)[],traceLabel);notifyLibrarySqlCommit([{sql}],[count]);},
   transaction: async statements => {const counts=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,counts);},
   transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,changes);return changes;},
 };
+export const db:SqlDatabase={query:clearDatabase.query,execute:async(...args)=>{assertLibraryWritable();return clearDatabase.execute(...args);},transaction:async statements=>{assertLibraryWritable();return clearDatabase.transaction(statements);},transactionChanges:async statements=>{assertLibraryWritable();return clearDatabase.transactionChanges!(statements);}};
 const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
 const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
 /** Start database setup at JS start, in parallel with the startup gate; later calls share it. */
@@ -84,8 +88,16 @@ export const memoRepository = new MemoRepository(db, "podjs-watch");
 let ready: Promise<void> | undefined;
 function init(): Promise<void> { return ready ??= (async()=>{
   const fresh=await startupStep('init.probe',async()=>!(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")).length);
-  await startupStep('init.schema',()=>initializeSchema(db,{seedBuiltinChannels:fresh}));
-  await startupStep('init.syncDevice',()=>ensureSyncDevice(db,async()=>base64ToBytes((await hostOperation<{bytesBase64:string}>("crypto.random",{bytes:16}).result).bytesBase64)));
+  await startupStep('init.schema',()=>initializeSchema(clearDatabase,{seedBuiltinChannels:fresh}));
+  await startupStep('init.syncDevice',()=>ensureSyncDevice(clearDatabase,async()=>base64ToBytes((await hostOperation<{bytesBase64:string}>("crypto.random",{bytes:16}).result).bytesBase64)));
+  if((await clearDatabase.query('SELECT id FROM library_clear_journal WHERE id=1')).length){
+    libraryWriteBlocked=true;
+    await libraryRecoveryOperation.run(false,{},async control=>{
+      if(!(await hostOperation<{acquired:boolean}>('cloud.acquire',{localTransferOwner:true}).result).acquired)throw new LibraryClearError('clear_library_busy');
+      try{await libraryRepository().resumeLibraryClear(control,clearDatabase);}finally{await hostOperation('cloud.release',{}).result;}
+    });
+    libraryWriteBlocked=false;offlineMediaQueue.resume();
+  }
   // Retry committed deletions after process interruption; keep failed work queued.
   await startupStep('init.deletionCleanup',()=>new ImportedArticleDeletion(db,hostSyncText,hostArticleBodyCodec,fileChunks,itemId=>originalCache.cancelItems([String(itemId)])).cleanupPending().catch(()=>{}));
   // Native seeds only on database creation. Never revive a channel deleted from an existing library.
@@ -365,7 +377,7 @@ function emitChannel(event:ChannelEvent){for(const listener of channelListeners)
 type RefreshJob=OriginalDownload&{promise:Promise<void>};
 const refreshJobs=new Map<string,RefreshJob>();
 function refreshChannel(id:string,replace=false):Promise<void> {
-  if(privateLibraryClear)return Promise.reject(Error("本机资料正在清空"));
+  if(libraryClearOperation.running||libraryWriteBlocked)return Promise.reject(Error("本机资料正在清空"));
   const previous=refreshJobs.get(id);if(previous&&!replace)return previous.promise;
   if(previous){previous.cancelled=true;previous.cancel?.();}
   const job:RefreshJob={cancelled:false,promise:Promise.resolve()};
@@ -395,7 +407,7 @@ const originalCache=new OriginalContentCache(db,async(sourceUrl,job)=>{
 },2,id=>emitChannel({id,kind:"original"}));
 const originalRequests=new Map<string,Promise<Article>>();
 function originalArticle(id:string):Promise<Article>{
-  if(privateLibraryClear)return Promise.reject(Error("本机资料正在清空"));
+  if(libraryClearOperation.running||libraryWriteBlocked)return Promise.reject(Error("本机资料正在清空"));
   const current=originalRequests.get(id);if(current)return current;
   const request=loadOriginalArticle(id).finally(()=>originalRequests.delete(id));originalRequests.set(id,request);return request;
 }
@@ -412,11 +424,15 @@ let librarySyncRepository:SqlLibrarySessionRepository|undefined;
  * schema and durable device identity initialization. */
 export async function getLibrarySyncRepository():Promise<SqlLibrarySessionRepository>{
  await init();
- return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
+ return libraryRepository();
+}
+function libraryRepository(){return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
   bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),
   reencodeStoredBodies:reencodeStoredArticleBodies,codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},
   files:{storeText:(key,text)=>importedTextWriter.storeText(key,text),hydrate:hydrateStoredContent},
   migrateReading:id=>sqlReadingProgress.migrate(id),migrateReadingMany:ids=>sqlReadingProgress.migrateMany(ids),cleanupRemovedContent,
+  clearContentFiles:(privateData,control)=>clearPrivateContentFiles(fileChunks,{roots:privateData?undefined:LIBRARY_CONTENT_ROOTS,check:()=>control?.check(),onDeleted:count=>control?.progress('files',count)}),
+  finishLibraryClear:finishLibraryClear,
  });
 }
 let domainVectorStore:Promise<SqlDomainVectorStore>|undefined;
@@ -453,39 +469,49 @@ export function notifyLibraryChanged(){emitChannel({id:"*",kind:"library"});}
 export function notifyNotesChanged(){emitChannel({id:"*",kind:"notes"});}
 
 
-let privateLibraryClear:Promise<void>|undefined;
-/** Explicit local account-ownership clear; resolves only after all private content is removed.
- * The account store publishes its new owner after this promise, never on partial failure. */
-export function clearLocalPrivateLibrary():Promise<void>{
- if(privateLibraryClear)return privateLibraryClear;
- const work=(async()=>{
-  await init();
-  // Shares the foreground/background cloud writer lease: no cursor/cache writer
-  // may race the local wipe. This is local host IO, never a remote deletion.
-  if(!(await hostOperation<{acquired:boolean}>('cloud.acquire',{}).result).acquired)throw Error('云同步正在运行，请稍后清空');
+const libraryClearOperation=new LibraryClearOperation(delay),libraryRecoveryOperation=new LibraryClearOperation(delay);
+export const localLibraryClearSnapshot=()=>libraryRecoveryOperation.running||libraryWriteBlocked&&!libraryClearOperation.running&&libraryRecoveryOperation.snapshot().phase!=='idle'?libraryRecoveryOperation.snapshot():libraryClearOperation.snapshot();
+export function subscribeLocalLibraryClear(observer:Parameters<LibraryClearOperation['subscribe']>[0]){const publish=()=>observer(localLibraryClearSnapshot()),stop=libraryClearOperation.subscribe(publish),stopRecovery=libraryRecoveryOperation.subscribe(publish);return()=>{stop();stopRecovery();};}
+export const cancelLocalLibraryClear=()=>{libraryClearOperation.cancel();libraryRecoveryOperation.cancel();};
+/** Phone's explicit wipe preserves standalone notes and credentials. No account lookup. */
+export function clearWatchLibrary(options:LibraryClearOptions={}):Promise<void>{return runLibraryClear(false,options);}
+/** Account ownership clear includes notes, private caches and cursors. */
+export function clearLocalPrivateLibrary():Promise<void>{return runLibraryClear(true,{});}
+function runLibraryClear(privateData:boolean,options:LibraryClearOptions):Promise<void>{
+ return libraryClearOperation.run(privateData,options,async control=>{
+  await init();control.check();
+  if(!(await hostOperation<{acquired:boolean}>('cloud.acquire',{localTransferOwner:true}).result).acquired)throw new LibraryClearError('clear_library_busy','云同步正在运行，请稍后清空');
   try{
-  const jobs=[...refreshJobs.values()];
-  for(const job of jobs){job.cancelled=true;job.cancel?.();}
-  pendingAddPreviews.clear();
-  await Promise.allSettled(jobs.map(job=>job.promise));
-  await originalCache.cancelAll();await Promise.allSettled([...originalRequests.values()]);
-  await readerSpeech.stop();
-  await memoRepository.initialize();
-  await (await getLibrarySyncRepository()).clearLibrary({privateData:true});
-  for(const bucket of ['images','bili-preview','douyin-preload'] as const)await managedCache.clearBucket(bucket);
-  await clearPrivateContentFiles(fileChunks);
-  // Applied heads/hashes must be forgotten or a newly chosen library could be
-  // treated as already restored. Preserve cloud keys, epoch, identity and login.
-  await hostOperation('secure.update',{values:{},removePrefixes:['watchrss.cloud.state.']}).result;
-  const prefixes=['watchrss.reader.progress.','douyin.feed.','douyin.recent-window.','douyin.playback-','douyin.history.','douyin.watched.','douyin.saved.','bili.history.'];
-  kv.batch(()=>{for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))kv.delete(key);});
-  for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))throw Error('private_library_kv_remains');
-  notifyLibraryChanged();notifyNotesChanged();
-  }finally{await hostOperation('cloud.release',{}).result;}
- })();
- privateLibraryClear=work;
- void work.finally(()=>{if(privateLibraryClear===work)privateLibraryClear=undefined;}).catch(()=>{});
- return work;
+   control.progress('quiescing');libraryWriteBlocked=true;
+   const jobs=[...refreshJobs.values()];for(const job of jobs){job.cancelled=true;job.cancel?.();}
+   pendingAddPreviews.clear();
+   // Do not delete underneath non-cooperative writers. Caller has a deadline;
+   // barrier and lease stay held until cancellation actually settles.
+   await Promise.all([Promise.allSettled(jobs.map(job=>job.promise)),originalCache.cancelAll(),Promise.allSettled([...originalRequests.values()]),offlineMediaQueue.pause()]);
+   control.check();await readerSpeech.stop();control.check();
+   if(privateData)await new MemoRepository(clearDatabase,"podjs-watch").initialize();control.check();
+   const repository=await getLibrarySyncRepository();
+   control.check();
+   await repository.clearLibrary({privateData,control,database:clearDatabase});
+   control.check();notifyLibraryChanged();if(privateData)notifyNotesChanged();
+  }finally{
+   // A committed intent prevents cache/import writers until successful resume.
+   try{
+    const pending=(await clearDatabase.query('SELECT id FROM library_clear_journal WHERE id=1')).length>0;
+    libraryWriteBlocked=pending;
+    if(!pending)offlineMediaQueue.resume();
+   }finally{await hostOperation('cloud.release',{}).result;}
+  }
+ });
+}
+async function finishLibraryClear(privateData:boolean,check:()=>void){
+ for(const bucket of ['images','bili-preview','douyin-preload'] as const){check();await managedCache.clearBucket(bucket);}
+ check();
+ if(privateData)await hostOperation('secure.update',{values:{},removePrefixes:['watchrss.cloud.state.']}).result;
+ const prefixes=['watchrss.reader.progress.','douyin.feed.','douyin.recent-window.','douyin.playback-','douyin.history.','douyin.watched.',...(privateData?['douyin.saved.','bili.history.']:[])];
+ check();kv.batch(()=>{for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))kv.delete(key);});
+ for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))throw Error('private_library_kv_remains');
+ check();
 }
 
 const offlineMediaQueue=new OfflineMediaQueue(db,{

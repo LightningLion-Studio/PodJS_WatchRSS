@@ -1,3 +1,4 @@
+import {CLOUD_SYNC_SUSPENDED} from './execution';
 import {createBookFiles} from '../books/files-port';
 import {bytesToBase64} from '@podjs/framework/bytes';
 import {stableGzipHeader} from '@podjs/framework/crypto';
@@ -17,7 +18,9 @@ import type {CloudGuard} from './guard';
 export async function createBackgroundLibrary(host:CloudHostRequest,readKv:(key:string)=>Promise<unknown>,guard:CloudGuard){
  guard.require();const ports=createCloudHostPorts(host,guard);
  const db:SqlDatabase={query:(sql,params=[])=>host('sql.query',{sql,params}),execute:async(sql,params=[])=>{await host('sql.execute',{sql,params});},transaction:async statements=>{await host('sql.transaction',{statements});},transactionChanges:statements=>host('sql.transaction',{statements,reportChanges:true})};
- await initializeSchema(db,{seedBuiltinChannels:false});await ensureSyncDevice(db,()=>ports.crypto.random(16));
+ await initializeSchema(db,{seedBuiltinChannels:false});
+ if((await db.query('SELECT id FROM library_clear_journal WHERE id=1')).length)throw Error(CLOUD_SYNC_SUSPENDED);
+ await ensureSyncDevice(db,()=>ports.crypto.random(16));
  const reading=new SqlReadingProgressStore(db,new ReadingProgressStore({get:async key=>{const value=await readKv(key);return typeof value==='string'?value:null;},set:async()=>{throw Error('Background legacy progress is read only');}}));
  const append=async(path:string,bytes:Uint8Array,offset:number)=>{
   for(let at=0;at<bytes.length;at+=32768){const part=bytes.subarray(at,at+32768);const r=await host<{size:number}>('file.write',{path,append:true,expectedOffset:offset,dataBase64:bytesToBase64(part)});offset+=part.length;if(r.size!==offset)throw Error('后台正文写入不完整');}return {size:offset};

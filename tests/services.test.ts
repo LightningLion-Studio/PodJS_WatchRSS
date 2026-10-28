@@ -13,7 +13,7 @@ let originalHtml="",originalDownloads=0;
 const downloaded = new Map<string, Uint8Array>();
 let failedRemoval:string|undefined;
 const localKv=new Map<string,unknown>();
-const cloudOps:string[]=[];let cloudBusy=false;
+const cloudOps:string[]=[];let cloudBusy=false,localTransferHeld=false;
 
 function paramsOf(params: readonly (string | number | null)[] = []): (string | number | null)[] { return [...params]; }
 const sqlite = {
@@ -56,7 +56,7 @@ mock.module("@podjs/framework/services", () => ({
   bytesToBase64:(value:Uint8Array)=>Buffer.from(value).toString("base64"),
   stringToUtf8:(value:string)=>new TextEncoder().encode(value),
   hostOperation: (method:string,args:Record<string,unknown>)=>{
-    if(method==='cloud.acquire'){cloudOps.push(method);return {result:Promise.resolve({acquired:!cloudBusy})};}
+    if(method==='cloud.acquire'){cloudOps.push(method);return {result:Promise.resolve({acquired:!cloudBusy&&(!localTransferHeld||args.localTransferOwner===true)})};}
     if(method==='cloud.release'){cloudOps.push(method);return {result:Promise.resolve()};}
     if(method==='secure.update'){cloudOps.push(method);expect(args).toEqual({values:{},removePrefixes:['watchrss.cloud.state.']});return {result:Promise.resolve()};}
     if(method==='crypto.random')return {result:Promise.resolve({bytesBase64:Buffer.alloc(Number(args.bytes)).toString('base64')})};
@@ -85,7 +85,7 @@ mock.module("@podjs/framework/services", () => ({
   base64ToBytes: (value: string) => new Uint8Array(Buffer.from(value, "base64")),
   utf8ToString: (value: Uint8Array) => new TextDecoder().decode(value),
   textInput: { prompt: () => ({ result: Promise.resolve(null) }) },
-  delay: (ms:number) => {speechCalls.push(["delay",ms]);return {result:Promise.resolve(),cancel:()=>{}};},
+  delay: (ms:number) => {if(ms>=1000)return {result:new Promise<void>(()=>{}),cancel:()=>{}};speechCalls.push(["delay",ms]);return {result:Promise.resolve(),cancel:()=>{}};},
   speech: { onProgress:()=>()=>{}, initializeLocal:async()=>{speechCalls.push(["initializeLocal"]);}, state:async()=>({state:"ready"}), speak: (text:string,language:string,rate:number) => {speechCalls.push(["speak",text,language,rate]);return { result: Promise.resolve(undefined) };}, stop: () => Promise.resolve(undefined) },
   audio: {play:()=>({result:Promise.resolve(undefined)}),setSpeed:async()=>{},state:async()=>({state:'stopped'}),stop:async()=>{}},
 }));
@@ -693,4 +693,45 @@ test('production offline queue starts from an unopened favorite, uses owned host
   const row=database.query('SELECT relative_path FROM offline_media WHERE item_id=?').get(article.id) as {relative_path:string};expect(row.relative_path).toStartWith(`offline/rss/${article.id}/`);expect(downloaded.get(row.relative_path)?.[0]).toBe(137);
   await services.services.setSaveState!(String(article.id),'favorite',false);for(let i=0;i<100&&await services.getOfflineMediaStatus(String(article.id));i++)await Bun.sleep(1);expect(downloaded.has(row.relative_path)).toBe(false);
  }finally{feedBytes=before;if(channel)await services.services.deleteChannel(channel.id);}
+});
+
+test('unbound phone clear is cancellable after commit, blocks writers while pending and retries without changing account or standalone notes',async()=>{
+ const channel=await services.services.addChannel('https://example.test/unbound-clear');
+ await services.memoRepository.initialize();const note=await services.memoRepository.save({markdown:'standalone survives phone clear'});
+ downloaded.set('article_content/phone-clear.txt',new Uint8Array([1,2,3]));
+ cloudOps.length=0;let cancelled=false;
+ await expect(services.clearWatchLibrary({onProgress:p=>{if(p.phase==='files'&&!cancelled){cancelled=true;services.cancelLocalLibraryClear();}}})).rejects.toMatchObject({code:'clear_library_cancelled'});
+ await Bun.sleep(0);
+ expect((await sqlite.query('SELECT * FROM library_clear_journal')).length).toBe(1);
+ expect(await sqlite.query('SELECT id FROM articles')).toEqual([]);
+ await expect(services.db.execute("INSERT INTO channels(url,title,created_at) VALUES('https://blocked.test','blocked',1)")).rejects.toMatchObject({code:'clear_library_busy'});
+ await services.clearWatchLibrary();
+ expect(await sqlite.query('SELECT * FROM library_clear_journal')).toEqual([]);
+ expect(downloaded.has('article_content/phone-clear.txt')).toBe(false);
+ expect(await services.memoRepository.get(note.noteId)).not.toBeNull();
+ expect(cloudOps).toEqual(['cloud.acquire','cloud.release','cloud.acquire','cloud.release']);
+ expect(services.localLibraryClearSnapshot()).toMatchObject({phase:'complete',databaseCommitted:true});
+ await services.db.execute("INSERT INTO channels(url,title,created_at) VALUES('https://unblocked.test','unblocked',1)");
+ await services.clearWatchLibrary();
+});
+
+test('production startup resumes a committed library clear before background queues without any account',async()=>{
+ // A fresh module has no in-memory file plan; only the SQLite journal survives.
+ await services.clearWatchLibrary();
+ downloaded.set('article_content/boot-orphan.txt',new Uint8Array([1]));
+ await sqlite.execute('INSERT INTO library_clear_journal VALUES(1,0,?)',[JSON.stringify({itemIds:[],channels:[],bookPaths:[]})]);
+ const modulePath='../src/services.ts?library-clear-restart=1';
+ const restarted=await import(modulePath) as typeof services;
+ const phases:string[]=[];const stop=restarted.subscribeLocalLibraryClear(p=>{phases.push(p.phase);});
+ try{await restarted.getLibrarySyncRepository();await Bun.sleep(0);}finally{stop();}
+ expect(downloaded.has('article_content/boot-orphan.txt')).toBe(false);
+ expect(await sqlite.query('SELECT * FROM library_clear_journal')).toEqual([]);
+ expect(phases).toContain('files');expect(phases).toContain('complete');
+ expect(await sqlite.query('SELECT * FROM channels')).toEqual([]);
+});
+
+
+test('remote clear acquires writer exclusion inside its own local-transfer pause and still refuses a real cloud writer',async()=>{
+ await services.services.addChannel('https://example.test/local-pause-clear');localTransferHeld=true;
+ try{cloudBusy=true;await expect(services.clearWatchLibrary()).rejects.toMatchObject({code:'clear_library_busy'});expect((await sqlite.query('SELECT * FROM channels')).length).toBeGreaterThan(0);cloudBusy=false;await services.clearWatchLibrary();expect(await sqlite.query('SELECT * FROM channels')).toEqual([]);}finally{cloudBusy=false;localTransferHeld=false;}
 });

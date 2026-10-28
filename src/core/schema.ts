@@ -12,6 +12,7 @@ const revisionColumns:Record<string,string[]>={"sync_article_keeps":["article_id
 const changed=(table:string)=>revisionColumns[table]!.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(" OR ");
 
 export const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS library_clear_journal (id INTEGER PRIMARY KEY CHECK(id=1),private_data INTEGER NOT NULL CHECK(private_data IN (0,1)),content_json TEXT NOT NULL)`,
   ...ARTICLE_REGISTER_SCHEMA,
   `CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`,

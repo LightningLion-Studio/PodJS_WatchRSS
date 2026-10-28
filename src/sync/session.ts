@@ -42,7 +42,7 @@ export interface LibrarySessionRepository {
 export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number;sentArticles?:number;totalArticles?:number}
 export interface SessionActionResult {request:JsonObject;response:JsonObject;ack:ResponseAck|null;libraryApplied:boolean}
 /** Opaque connection identity generated locally; never taken from wire fields. */
-export interface SyncActionContext {readonly session:object; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
+export interface SyncActionContext {readonly session:object; checkCancelled?:()=>void; onCancel?:(cancel:()=>void)=>()=>void; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
 export interface LibrarySessionOptions {
  actionSession?:object;
  acquireSession?:()=>()=>void;
@@ -66,6 +66,7 @@ const persistentFields={supportsPersistentSession:true,persistentSessionAccepted
  * One instance owns and closes one connection. There are no automatic retries. */
 export class LibrarySyncSession {
  private readonly actionContext:SyncActionContext;
+ private readonly cancelObservers=new Set<()=>void>();
  private appliedAckJobs:(()=>Promise<void>)[]=[];
  private readonly log:SyncEventLog;
  private peerCapabilities:ProbeCapabilities={};
@@ -106,8 +107,8 @@ export class LibrarySyncSession {
  private aborting=false;
  private readonly now:()=>number;
  private readonly monotonic:()=>number;
- constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.actionContext={session:options.actionSession??{},afterAppliedAck:commit=>this.appliedAckJobs.push(commit)};this.log=options.diagnosticLog??new SyncEventLog();this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());this.connection.setTransferProgress?.(options.onTransferProgress);this.connection.setFrameTiming?.(sample=>{this.log.event(sample.direction==='read'?'frame.read.complete':'frame.write.complete',{frameBytes:sample.bytes,readMs:sample.readMs,decodeMs:sample.decodeMs,encodeMs:sample.encodeMs,writeMs:sample.writeMs});});}
- cancel():void {this.cancelled??=new Error('Sync session cancelled');void this.close().catch(()=>{});}
+ constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.actionContext={session:options.actionSession??{},checkCancelled:()=>this.check(),onCancel:cancel=>{if(this.cancelled)cancel();else this.cancelObservers.add(cancel);return()=>{this.cancelObservers.delete(cancel);};},afterAppliedAck:commit=>this.appliedAckJobs.push(commit)};this.log=options.diagnosticLog??new SyncEventLog();this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());this.connection.setTransferProgress?.(options.onTransferProgress);this.connection.setFrameTiming?.(sample=>{this.log.event(sample.direction==='read'?'frame.read.complete':'frame.write.complete',{frameBytes:sample.bytes,readMs:sample.readMs,decodeMs:sample.decodeMs,encodeMs:sample.encodeMs,writeMs:sample.writeMs});});}
+ cancel():void {this.cancelled??=new Error('Sync session cancelled');for(const cancel of this.cancelObservers)cancel();this.cancelObservers.clear();void this.close().catch(()=>{});}
  private async timed<T>(event:string,action:()=>Promise<T>):Promise<T>{const start=this.monotonic();try{return await action();}finally{this.log.event(event,{elapsedMs:Math.max(0,Math.round(this.monotonic()-start))});}}
  private check():void {if(this.cancelled)throw this.cancelled;}
  private status(status:SyncSessionStatus):void {this.options.onStatus?.(status);}

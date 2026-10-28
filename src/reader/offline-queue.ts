@@ -15,15 +15,19 @@ type Job={item_id:number;generation:number;desired:string;attempts:number;next_a
 /** Serial, durable, bounded retries. Saved-state SQL and job intent commit together. */
 export class OfflineMediaQueue {
  private running:Promise<void>|undefined;private wakeAgain=false;private active:{job:Job;cancel:()=>void}|undefined;
- private cancelTimer=()=>{};
+ private cancelTimer=()=>{};private paused=false;
+ /** Quiesce before destructive local cleanup. Keep paused until its durable intent completes. */
+ pause():Promise<void>{this.paused=true;this.cancelTimer();this.active?.cancel();return this.running??Promise.resolve();}
+ resume(){this.paused=false;void this.wake().catch(()=>{});}
  private readonly now:()=>number;
  constructor(private readonly db:SqlDatabase,private readonly port:OfflineQueuePort){this.now=port.now??Date.now;}
  wake():Promise<void>{
   this.cancelTimer();
+  if(this.paused)return this.running??Promise.resolve();
   if(this.running){this.wakeAgain=true;void this.cancelStale().catch(()=>{});return this.running;}
   return this.running=this.drain().finally(()=>{this.running=undefined;if(this.wakeAgain){this.wakeAgain=false;void this.wake().catch(()=>{});}});
  }
- private async current(job:Job):Promise<boolean>{const row=(await this.db.query('SELECT generation,desired FROM offline_media_jobs WHERE item_id=?',[job.item_id]))[0];return !!row&&Number(row.generation)===job.generation&&String(row.desired)===job.desired;}
+ private async current(job:Job):Promise<boolean>{if(this.paused)return false;const row=(await this.db.query('SELECT generation,desired FROM offline_media_jobs WHERE item_id=?',[job.item_id]))[0];return !!row&&Number(row.generation)===job.generation&&String(row.desired)===job.desired;}
  private async cancelStale(){const active=this.active;if(active&&!await this.current(active.job))active.cancel();}
  async status(id:number){const row=(await this.db.query('SELECT desired,attempts,next_at,last_error FROM offline_media_jobs WHERE item_id=?',[id]))[0];return row?{desired:String(row.desired),attempts:Number(row.attempts),nextAt:Number(row.next_at),error:row.last_error==null?null:String(row.last_error)}:null;}
  async retry(id:number){
@@ -32,6 +36,7 @@ export class OfflineMediaQueue {
  }
  private async drain(){
   for(;;){
+   if(this.paused)return;
    const row=(await this.db.query('SELECT * FROM offline_media_jobs WHERE next_at<=? AND attempts<6 ORDER BY item_id LIMIT 1',[this.now()]))[0];
    if(!row){const next=(await this.db.query('SELECT min(next_at) AS next FROM offline_media_jobs WHERE attempts<6'))[0]?.next;if(next!=null)this.cancelTimer=this.port.schedule(Math.max(1000,Number(next)-this.now()),()=>{void this.wake().catch(()=>{});});return;}
    const job:Job={item_id:Number(row.item_id),generation:Number(row.generation),desired:String(row.desired),attempts:Number(row.attempts),next_at:Number(row.next_at)};
@@ -42,6 +47,7 @@ export class OfflineMediaQueue {
     }else await this.download(job);
     if(await this.current(job))await this.db.execute('DELETE FROM offline_media_jobs WHERE item_id=? AND generation=?',[job.item_id,job.generation]);
    }catch{
+    if(this.paused)return;
     await this.db.execute(`UPDATE offline_media_jobs SET attempts=attempts+1,next_at=?,last_error='media_unavailable' WHERE item_id=? AND generation=?`,[this.now()+Math.min(3600000,30000*2**job.attempts),job.item_id,job.generation]);
    }finally{this.active=undefined;}
   }

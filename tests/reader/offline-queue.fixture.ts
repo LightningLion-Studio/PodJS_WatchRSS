@@ -66,3 +66,18 @@ test('a terminal cleanup failure is explicitly retryable without recreating a do
   f.port.clearItem=clear;await f.queue.retry(1);expect(f.jobs()).toEqual([]);expect(f.files.size).toBe(0);expect(f.downloads).toHaveLength(2);
  }finally{f.sql.close();}
 });
+
+test('library wipe pauses queue, cancels active IO and awaits non-cooperative completion without resurrection',async()=>{
+ const f=await fixture();try{
+  let started!:()=>void,release!:()=>void,cancels=0,settled=false;
+  const entered=new Promise<void>(resolve=>{started=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+  f.port.download=(_url,path)=>({result:(async()=>{started();await blocked;f.files.add(path);})(),cancel(){cancels++;}});
+  await f.repo.setSaveState(1,'favorite',true);void f.queue.wake();await entered;
+  const idle=f.queue.pause().then(()=>{settled=true;});await Promise.resolve();expect(cancels).toBe(1);expect(settled).toBe(false);
+  void f.queue.wake();release();await idle;
+  expect(f.files.size).toBe(0);expect(f.jobs()[0].attempts).toBe(0);
+  await f.db.transaction([{sql:'DELETE FROM channels'},{sql:'DELETE FROM offline_media_jobs'}]);
+  await f.queue.wake();expect(f.files.size).toBe(0);f.queue.resume();await f.queue.wake();
+  expect(f.jobs()).toEqual([]);expect(f.files.size).toBe(0);
+ }finally{f.sql.close();}
+});
