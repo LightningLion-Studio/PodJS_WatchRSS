@@ -1,3 +1,4 @@
+import {ARTICLE_REGISTER_SCHEMA} from '../sync/article-register-store';
 import {ArticleKeepStore,ARTICLE_KEEP_SCHEMA} from '../sync/article-keep';
 import {LOCAL_RSS_SCHEMA} from '../rss/acquisition';
 import {OFFLINE_QUEUE_SCHEMA} from '../reader/offline-queue-schema';
@@ -11,6 +12,7 @@ const revisionColumns:Record<string,string[]>={"sync_article_keeps":["article_id
 const changed=(table:string)=>revisionColumns[table]!.map(c=>`OLD.${c} IS NOT NEW.${c}`).join(" OR ");
 
 export const SCHEMA = [
+  ...ARTICLE_REGISTER_SCHEMA,
   `CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`,
   `CREATE TABLE IF NOT EXISTS sync_library_revision (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)`,
@@ -89,7 +91,7 @@ const bleV2Schema=[
  ...SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER IF NOT EXISTS article_sync_hash_')&&sql.includes(' AFTER UPDATE ')),
  ...syncChunkRevisions.filter(sql=>sql.startsWith('CREATE TRIGGER IF NOT EXISTS sync_body_revision_')&&sql.includes(' AFTER UPDATE ')),
 ];
-export const SCHEMA_VERSION=8;
+export const SCHEMA_VERSION=9;
 
 function pragmaVersion(row:Record<string,unknown>|undefined):number{
   const value=row?.user_version??(row?Object.values(row)[0]:undefined),version=Number(value);
@@ -147,6 +149,7 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
     statements.push({sql:LOCAL_RSS_SCHEMA},{sql:`CREATE TABLE IF NOT EXISTS native_reading_sources (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, source_device_id TEXT NOT NULL,changed_at INTEGER NOT NULL)`},...OFFLINE_QUEUE_SCHEMA.map(sql=>({sql})),{sql:'PRAGMA user_version=7'});
   }
   if(current<8){statements.push(...SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER IF NOT EXISTS sync_revision_sync_article_keep')).map(sql=>({sql})),{sql:'PRAGMA user_version=8'});}
+  if(current<9)statements.push(...ARTICLE_REGISTER_SCHEMA.map(sql=>({sql})),{sql:'PRAGMA user_version=9'});
   await db.transaction(statements);
   await new ArticleKeepStore(db).initialize();
 }

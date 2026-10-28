@@ -26,6 +26,15 @@ function head(v: any): CloudSnapshotHead { return { ...(v.contentLayout===3||v.c
 
 export class WatchCloudClient {
   private epoch?:string;private generation?:string;
+  private requiredFormatFeatures:string[]=[];private featureScope?:string;
+  get requiredFeatures(){return [...this.requiredFormatFeatures];}
+  private observeRequiredFeatures(raw:any){
+    if(raw.requiredFeatures===undefined)return;
+    const features=raw.requiredFeatures;if(!Array.isArray(features)||features.length>16||features.some(f=>typeof f!=='string'||!/^[a-z0-9][a-z0-9.-]{0,47}$/.test(f))||new Set(features).size!==features.length)throw new CloudRequestError(426,'cloud_format_upgrade_required');
+    const scope=typeof raw.libraryEpoch==='string'&&contentGenerationValid(raw.contentGeneration)?raw.libraryEpoch+':'+raw.contentGeneration.toLowerCase():undefined;
+    if(scope&&this.featureScope&&scope!==this.featureScope)this.requiredFormatFeatures=[];
+    if(scope)this.featureScope=scope;this.requiredFormatFeatures=[...new Set([...this.requiredFormatFeatures,...features])].sort();
+  }
   private r48WriteUntil=0;private r48WriteFrom=0;private r48GateRequest=0;private r48Snapshots=new Set<string>();
   get r48WriteEnabled(){return this.options.r48WriteV1===true&&(this.options.now??Date.now)()>=this.r48WriteFrom&&(this.options.now??Date.now)()<this.r48WriteUntil;}
   /** No persisted authorization. Failure, missing/old response or stale cache
@@ -38,11 +47,14 @@ export class WatchCloudClient {
     return this.r48WriteEnabled;
   }
   setContentGeneration(generation:string){if(!contentGenerationValid(generation))throw new CloudRequestError(426,'client_upgrade_required');this.generation=generation.toLowerCase();}
-  private contentResponse(value:unknown){const state=parseContentState(value);if(this.generation&&state.contentGeneration!==this.generation)throw new CloudRequestError(409,'cloud_content_rebuild_required');return state;}
+  private contentResponse(value:unknown){const state=parseContentState(value);if(this.generation&&state.contentGeneration!==this.generation)throw new CloudRequestError(409,'cloud_content_rebuild_required');this.observeRequiredFeatures(value);return state;}
   setEpoch(epoch:string){this.epoch=epoch;}
   constructor(private readonly http: HttpTransport, private readonly options: CloudClientOptions, private readonly crypto: CloudCrypto, private readonly guard: CloudGuard = cloudDisabled) {}
   private async request(method: string, path: string, body?: unknown,raw?:Uint8Array,r48Write=false): Promise<HttpResponse> {
     this.guard.require();
+    // This build reads provenance but cannot publish it. Consumption ACKs,
+    // GET/bootstrap and cancellation remain available; never invent a header.
+    if(this.requiredFormatFeatures.length&&((method==='POST'&&['/functions/v1/cloud/records','/functions/v1/cloud/snapshots/reserve','/functions/v1/cloud/snapshots/complete'].includes(path))||(method==='PUT'&&path.startsWith('/functions/v1/cloud/uploads/'))))throw new CloudRequestError(426,'cloud_format_upgrade_required');
     const token=this.options.refreshToken?await this.options.refreshToken(false):this.options.accessToken;
     const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${token}` };
     if(method!=='GET'&&path.startsWith('/functions/v1/cloud/')&&!path.endsWith('/bootstrap')){
@@ -69,9 +81,9 @@ export class WatchCloudClient {
     if(response.status===426){let code='client_upgrade_required';try{const value=parse(response).error;if(typeof value==='string'&&/^[a-z][a-z0-9_]{0,79}$/.test(value))code=value;}catch{}throw new CloudRequestError(426,code);}
     return response;
   }
-  async bootstrap(): Promise<CloudBootstrap> { const j = requireOk(await this.request("POST", "/functions/v1/cloud/bootstrap", {})); return { ...parseContentState(j),libraryEpoch:j.libraryEpoch,keyVersionFloor:j.keyVersionFloor,keyCommitments:j.keyCommitments, member: member(j.member), devices: (j.devices || []).map((v: any): RegisteredCloudDevice => ({ deviceId: String(v.deviceId), platform: String(v.platform), displayName: String(v.displayName || ""), publicKeySpki: String(v.publicKeySpki || ""), keyVersion: Number(v.keyVersion || 1), lastSequence: Number(v.lastSequence || 0), attestation:v.attestation,attestationKeyVersion:v.attestationKeyVersion,revokedAt: v.revokedAt == null ? null : String(v.revokedAt) })), keyEnvelopes: (j.keyEnvelopes || []).map((v: any) => ({ id: String(v.id), recipientType: String(v.recipientType), recipientDeviceId: v.recipientDeviceId == null ? null : String(v.recipientDeviceId), envelope: { algorithm: String(v.algorithm), keyVersion: Number(v.keyVersion), wrappedKeyBase64: String(v.wrappedKeyBase64), nonceBase64: String(v.nonceBase64), ephemeralPublicKeySpki: v.ephemeralPublicKeySpki == null ? null : String(v.ephemeralPublicKeySpki) } })) }; }
+  async bootstrap(): Promise<CloudBootstrap> { const j = requireOk(await this.request("POST", "/functions/v1/cloud/bootstrap", {})); this.observeRequiredFeatures(j); return { ...parseContentState(j),libraryEpoch:j.libraryEpoch,keyVersionFloor:j.keyVersionFloor,keyCommitments:j.keyCommitments, member: member(j.member), devices: (j.devices || []).map((v: any): RegisteredCloudDevice => ({ deviceId: String(v.deviceId), platform: String(v.platform), displayName: String(v.displayName || ""), publicKeySpki: String(v.publicKeySpki || ""), keyVersion: Number(v.keyVersion || 1), lastSequence: Number(v.lastSequence || 0), attestation:v.attestation,attestationKeyVersion:v.attestationKeyVersion,revokedAt: v.revokedAt == null ? null : String(v.revokedAt) })), keyEnvelopes: (j.keyEnvelopes || []).map((v: any) => ({ id: String(v.id), recipientType: String(v.recipientType), recipientDeviceId: v.recipientDeviceId == null ? null : String(v.recipientDeviceId), envelope: { algorithm: String(v.algorithm), keyVersion: Number(v.keyVersion), wrappedKeyBase64: String(v.wrappedKeyBase64), nonceBase64: String(v.nonceBase64), ephemeralPublicKeySpki: v.ephemeralPublicKeySpki == null ? null : String(v.ephemeralPublicKeySpki) } })) }; }
   async registerDevice(deviceId: string, displayName: string, publicKeySpki: string, keyVersion: number,attestation?:{keyVersion:number;mac:string}): Promise<void> { requireOk(await this.request("POST", "/functions/v1/cloud/devices/register", { deviceId, platform: "watch", displayName, publicKeySpki, keyVersion,...(attestation?{attestation:attestation.mac,attestationKeyVersion:attestation.keyVersion}:{}), capabilities: { ...cloudFormatCapabilities,cloudFormatR48WriteV1:this.options.r48WriteV1===true,snapshotSchema: 2, cloudRelay: true, rtosProtocolReserved: true } })); }
-  async formatCapabilities(){const value=requireOk(await this.request('GET','/functions/v1/cloud/format-capabilities'));return {...value,local:{...cloudFormatCapabilities,cloudFormatR48WriteV1:this.options.r48WriteV1===true}};}
+  async formatCapabilities(){const value=requireOk(await this.request('GET','/functions/v1/cloud/format-capabilities'));this.observeRequiredFeatures(value);return {...value,local:{...cloudFormatCapabilities,cloudFormatR48WriteV1:this.options.r48WriteV1===true}};}
   async revokeDevice(deviceId:string){requireOk(await this.request('POST',`/functions/v1/cloud/devices/${encodeURIComponent(deviceId)}/revoke`,{}));}
   async approvalCreate(deviceId:string,commitment:string){return requireOk(await this.request('POST','/functions/v1/cloud/approvals/v2',{deviceId,commitment})) as {requestId:string;expiresAt:number};}
   async approvalGet(id:string){return requireOk(await this.request('GET',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}`));}

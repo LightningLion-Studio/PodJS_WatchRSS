@@ -50,7 +50,7 @@ test('v6 upgrade installs durable auxiliary state atomically without changing ex
   await f.repo.setSaveState(1,'favorite',true);await f.repo.setRead(1,true,.25);const reading=await f.db.query('SELECT * FROM article_reading_state');
   for(const name of ['offline_saved_insert','offline_saved_update','offline_saved_delete','offline_article_delete'])await f.db.execute('DROP TRIGGER '+name);
   for(const name of ['offline_media_jobs','offline_media_policy','native_reading_sources','rss_local_sources'])await f.db.execute('DROP TABLE '+name);await f.db.execute('PRAGMA user_version=6');
-  await initializeSchema(f.db,{seedBuiltinChannels:false});expect((await f.db.query('PRAGMA user_version'))[0].user_version).toBe(8);expect(await f.db.query('SELECT * FROM article_reading_state')).toEqual(reading);expect(f.jobs()).toEqual([]);
+  await initializeSchema(f.db,{seedBuiltinChannels:false});expect((await f.db.query('PRAGMA user_version'))[0].user_version).toBe(9);expect(await f.db.query('SELECT * FROM article_reading_state')).toEqual(reading);expect(f.jobs()).toEqual([]);
   await f.repo.setSaveState(1,'watchLater',true);expect(f.jobs()).toHaveLength(1);
  }finally{f.sql.close();}
 });

@@ -15,9 +15,12 @@ import {cloudDisabled,type CloudGuard} from './guard';
 import {writeWrss,readWrss} from './wrss';
 import type {LogicalObject,CloudObject} from './codec';
 import {rssSourceKey,rssArticleId,legacyWebArticleId,tryRssArticleId,isLocalOnlyRssSource,canonicalRssUrl} from './rss-identity';
+import {hasArticleRegisters} from './article-register';
 import {canonical,type RecordDocument} from './records';
 export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sources:readonly SyncedSource[];stateArticles:readonly ExportedArticle[];pendingPrivateBodies?:boolean;pendingPrivateArticleIds?:readonly string[]}
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
+ cloudArticleRegisters?():Promise<RecordDocument[]>;
+ mergeCloudArticleRegisters?(documents:RecordDocument[]):Promise<number>;
  cloudSnapshot(full:boolean,check?:()=>void):Promise<CloudLibrarySnapshot>;
  cloudReadingCandidates?(check?:()=>void):Promise<readonly ExportedArticle[]>;
  /** Each entity commits its source/body/saved/reading state transactionally. No
@@ -58,9 +61,10 @@ export class WatchCloudLibraryAdapter {
  private readingAliases=new Map<string,string>();
  private retainedSources=new Map<string,Record<string,any>>();
  async exportRecords():Promise<RecordDocument[]>{
-  this.guard.require();const s=await this.repository.cloudSnapshot(false),out:RecordDocument[]=[];
+  this.guard.require();const s=await this.repository.cloudSnapshot(false),out:RecordDocument[]=[],protectedArticles=await this.repository.cloudArticleRegisters?.()??[],protectedIds=new Set(protectedArticles.flatMap(d=>[d.value.articleId,...(d.projectionAliases??[])]));
   for(const source of s.sources){const sourceId=this.sourceIds.get(source.url);out.push({kind:'source',value:{url:source.url,sourceDeviceId:source.sourceDeviceId,sourceId:sourceId??'',title:source.title,sortOrder:source.sortOrder,isPinned:source.isPinned,updatedAt:source.updatedAt,deleted:source.deleted,deletedAt:source.deletedAt,...Object.fromEntries(Object.entries(this.retainedSources.get(source.url)??{}).filter(([k])=>['useOriginalContent','continuePlaybackInBackground'].includes(k)))}});}
   for(const a of s.stateArticles){
+   if(protectedIds.has(a.articleId))continue;
    if(privateCloudBody(a)){out.push({kind:'article',value:Object.fromEntries(Object.entries(stateJson(a)).filter(([,v])=>v!==null))});continue;}
    if(isLocalOnlyRssSource(a.rssSourceUrl!))continue;
    if(!(a.isRead||a.readingProgress||a.readingPositionChangedAt||a.favoriteChangedAt||a.watchLaterChangedAt||a.favoriteSaved||a.watchLaterSaved))continue;
@@ -75,14 +79,14 @@ export class WatchCloudLibraryAdapter {
   const blocked=new Set<string>();for(const source of s.sources)if(isLocalOnlyRssSource(source.url)){const poolId=this.sourceIds.get(source.url);if(poolId)blocked.add(poolId);try{blocked.add(await this.crypto.sha256(utf8Encode(canonicalRssUrl(source.url,false))));}catch{/* Credentialed URLs have no public source key. */}}
   const ids=new Set(out.filter(d=>d.kind==='rss-state').map(d=>d.value.sourceId+':'+d.value.articleIdHash));for(const [id,doc]of this.pendingReading)if(!ids.has(id)&&!blocked.has(doc.value.sourceId)){const current=combined.get(this.readingAliases.get(id)??'');out.push(current?{kind:doc.kind,value:mergeReadingValue(doc.value,current.value)}:doc);}
   const books=await this.repository.cloudBooks?.();this.cacheBooks(books);if(books){out.push(...books.books.map(value=>({kind:'book',value})),...books.reading.map(value=>({kind:'book-reading',value})));}
-  return out;
+  return [...out,...protectedArticles];
  }
  async bookReplacement(legacy:RecordDocument){if(legacy.kind!=='article')return;if(!this.bookExport)this.cacheBooks(await this.repository.cloudBooks?.());if(!this.bookExport)return;const exact=this.bookMappings.get('id:'+legacy.value.articleId)??[],candidates=exact.length?exact:this.bookMappings.get('url:'+legacy.value.url)??[];if(new Set(candidates.map(m=>m.bookId+':'+m.chapterIndex)).size!==1)return;const mapping=candidates[0]!;const book=this.bookStates.get(mapping.bookId);if(!book)return;const reading=this.bookReading.get(book.bookId+':'+mapping.chapterIndex);const interacted=legacy.value.isRead||legacy.value.readingProgress||legacy.value.readingPositionChangedAt||legacy.value.favoriteChangedAt||legacy.value.watchLaterChangedAt||legacy.value.favoriteSaved||legacy.value.watchLaterSaved;
   if(interacted&&(!reading||['readingPositionChangedAt','favoriteChangedAt','watchLaterChangedAt'].some(k=>((reading as unknown as Record<string,any>)[k]??0)<(legacy.value[k]??0))))return;
   return {book:{kind:'book',value:book},...(reading?{reading:{kind:'book-reading',value:reading}}:{})};
  }
  async applyRecords(documents:RecordDocument[]){
-  this.guard.require();let changed=0;const articles:ExportedArticle[]=[],sources:SyncedSource[]=[];
+  this.guard.require();let changed=0;const protectedDocs=documents.filter(hasArticleRegisters);if(protectedDocs.length){if(!this.repository.mergeCloudArticleRegisters)throw Error('cloud_format_article_storage_unavailable');changed+=await this.repository.mergeCloudArticleRegisters(protectedDocs);}documents=documents.filter(d=>!hasArticleRegisters(d));const articles:ExportedArticle[]=[],sources:SyncedSource[]=[];
   for(const doc of documents.filter(d=>d.kind==='source')){const v=doc.value;if(v.sourceId)this.sourceIds.set(v.url,v.sourceId);}
   const books=documents.filter(d=>d.kind==='book').map(d=>d.value as BookState),reading=documents.filter(d=>d.kind==='book-reading').map(d=>d.value as BookReading);if(books.length||reading.length){if(!this.repository.mergeCloudBooks)throw Error('book_storage_unavailable');changed+=await this.repository.mergeCloudBooks(books,reading);}
   // Imported books cannot materialize public RSS articles. Replaying a book-only

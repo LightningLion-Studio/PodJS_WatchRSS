@@ -22,7 +22,7 @@ async function sealed(text:string,account=key,magic='WRSSCM3'){const salt=new Ui
 test('R48 shared three-level feature vectors, exact unknown spans and bounded policy',()=>{
  for(const c of extensions.cases){const p=featurePolicy(c.features,c.known);if(c.withinLimits===false)continue;expect(p.opaque).toBe(c.expected.read==='opaque');expect(p.readOnly).toBe(c.expected.write==='blocked'||c.expected.write==='pending-upgrade');}
  for(const v of extensions.invalidFeatures)expect(featurePolicy(v).opaque).toBe(true);
- expect(cloudFormatCapabilities).toEqual({cloudFormatR48ReadV1:true,cloudFormatR48WriteV1:false,cloudFormatMigrationR48V1:false});
+ expect(cloudFormatCapabilities).toEqual({cloudFormatR48ReadV1:true,cloudFormatR48WriteV1:false,cloudFormatMigrationR48V1:false,cloudArticleProvenanceReadV1:true,cloudArticleProvenanceWriteV1:false});
 });
 test('R48 production record AEAD edits known fields and retains every original unknown token',async()=>{
  const row=await record(extensions.implicitCompat.originalUtf8),decoded=await rc.decode(key,key,'user',row);

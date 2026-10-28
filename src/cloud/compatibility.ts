@@ -2,8 +2,8 @@ import {parseRawJson,rawJsonProperty,rawJsonText,rawJsonValue,patchRawJsonObject
 export {parseRawJson,rawJsonProperty,rawJsonText,rawJsonValue,patchRawJsonObject};
 export interface CloudFeatures {incompat:string[];roCompat:string[]}
 export interface CloudCompatibility {opaque:boolean;readOnly:boolean;upgradeRequired:boolean;reason?:string}
-export interface CloudCompatibilityStatus {opaque:number;readOnly:number;editPending:number;upgradeRequired:boolean}
-export const cloudFormatCapabilities=Object.freeze({cloudFormatR48ReadV1:true,cloudFormatR48WriteV1:false,cloudFormatMigrationR48V1:false});
+export interface CloudCompatibilityStatus {requiredFeatures?:string[];opaque:number;readOnly:number;editPending:number;upgradeRequired:boolean}
+export const cloudFormatCapabilities=Object.freeze({cloudFormatR48ReadV1:true,cloudFormatR48WriteV1:false,cloudFormatMigrationR48V1:false,cloudArticleProvenanceReadV1:true,cloudArticleProvenanceWriteV1:false});
 const frames=new WeakMap<object,{node:RawJsonNode;policy:CloudCompatibility;unknownBytes:number}>();
 const NAME=/^[a-z0-9][a-z0-9.-]{0,47}$/;
 export function featurePolicy(value:unknown,known:readonly string[]=[]):CloudCompatibility {
@@ -17,6 +17,7 @@ export function bindCloudRaw<T extends object>(value:T,node:RawJsonNode,schema:R
  if(unknownBytes>limit)policy={opaque:true,readOnly:true,upgradeRequired:true,reason:'unknown_size_limit'};
  frames.set(value,{node,policy,unknownBytes});return value;
 }
+export function markCloudReadOnly(value:object,reason:string){const frame=frames.get(value);if(frame)frame.policy={...frame.policy,readOnly:true,upgradeRequired:true,reason};}
 export function isolateCloudRaw(value:object,reason:string){const frame=frames.get(value);if(frame)frame.policy={opaque:true,readOnly:true,upgradeRequired:true,reason};}
 /** Known-only records need no plaintext/token cache after validation. */
 export function releaseKnownCloudRaw(value:object){const frame=frames.get(value);if(frame&&frame.unknownBytes===0&&!frame.policy.readOnly)frames.delete(value);}
@@ -27,14 +28,14 @@ export function requireCloudWritable(value:object){if(cloudCompatibility(value).
 export const schemaFields=(names:readonly string[]):Record<string,true>=>Object.fromEntries(names.map(k=>[k,true]));
 const reading=['isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt'];
 export const recordFields:Record<string,readonly string[]>=Object.assign(Object.create(null),{
- article:['articleId','url','title','siteName','excerpt','imageUrl','rssSourceUrl','rssSourceTitle','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','guid','bookIndexRetired','rssIndexRetired',...reading],
+ article:['registerSources','articleId','url','title','siteName','excerpt','imageUrl','rssSourceUrl','rssSourceTitle','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','guid','bookIndexRetired','rssIndexRetired',...reading],
  source:['url','sourceId','title','description','siteUrl','imageUrl','createdAt','updatedAt','sourceDeviceId','sortOrder','isPinned','deleted','deletedAt','useOriginalContent','continuePlaybackInBackground'],
  'rss-state':['sourceId','articleIdHash',...reading],
  book:['bookId','fingerprint','title','chapterCount','deletedChapters','deletionClock','deleted','deletedAt','updatedAt','sourceDeviceId','sourceUrl','kind'],
  'book-reading':['bookId','chapterIndex',...reading.filter(k=>!['deleted','deletedAt'].includes(k)),'favoriteSourceDeviceId','watchLaterSourceDeviceId']
 });
 export function knownRecordValue(kind:string,value:Record<string,any>){const fields=recordFields[kind];return fields?Object.fromEntries(Object.entries(value).filter(([k])=>fields.includes(k))):value;}
-export function recordRawSchema(kind:string):RawJsonSchema{return {format:true,version:true,kind:true,features:true,value:recordFields[kind]?schemaFields(recordFields[kind]):true};}
+export function recordRawSchema(kind:string):RawJsonSchema{return {format:true,version:true,kind:true,features:true,value:recordFields[kind]?{...schemaFields(recordFields[kind]),...(kind==='article'?{registerSources:schemaFields(['metadata','reading','independent','favorite','watchLater','deletion'])}:{})}:true};}
 export const chunkFields=['plaintextSha256','ciphertextSha256','plaintextBytes','ciphertextBytes','saltBase64','nonceBase64'];
 export const objectFields=['name','encoding','originalBytes','encodedBytes','chunks','privateArticle','privateBook','contentSha256','readerKeyEnvelope','objectKeyEnvelope','entryRef','features'];
 export const manifestFields=['format','schemaVersion','snapshotId','sourceDeviceId','deviceSequence','keyVersion','createdAtMillis','parentHeads','observedHeads','objects','settings','credentialEnvelopes','features'];
@@ -49,6 +50,6 @@ export function patchCloudObject(value:Record<string,any>,fields:readonly string
 export function rawRecordText(doc:{kind:string;value:Record<string,any>;features?:CloudFeatures},basis=doc):string {
  requireCloudWritable(basis);const raw=cloudRaw(basis),node=raw&&rawJsonProperty(raw,'value'),known=knownRecordValue(doc.kind,doc.value);
  const body=node?patchRawJsonObject(node,Object.fromEntries((recordFields[doc.kind]??Object.keys(known)).map(k=>[k,Object.prototype.hasOwnProperty.call(known,k)?JSON.stringify(known[k]):undefined]))):JSON.stringify(known);
- return raw?patchRawJsonObject(raw,{kind:JSON.stringify(doc.kind),value:body}):JSON.stringify({format:'watchrss-rss-record',version:1,...doc,value:known});
+ return raw?patchRawJsonObject(raw,{kind:JSON.stringify(doc.kind),value:body}):JSON.stringify({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:known});
 }
 export const emptyCompatibilityStatus=():CloudCompatibilityStatus=>({opaque:0,readOnly:0,editPending:0,upgradeRequired:false});
