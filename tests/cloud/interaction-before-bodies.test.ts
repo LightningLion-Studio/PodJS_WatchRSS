@@ -15,5 +15,5 @@ test('record failure diagnostics expose only bounded codes and never raw content
  const {recordFailureDiagnostic}=await import('../../src/cloud/record-diagnostic');
  expect(JSON.parse(recordFailureDiagnostic(Object.assign(Error('book_chapter_out_of_range'),{status:400})))).toEqual({event:'records-failed',code:'book_chapter_out_of_range',name:'Error',status:400});
  const raw=recordFailureDiagnostic(Object.assign(Error('SQLiteException at https://private.invalid/secret?token=hidden recovery words'),{name:'personal-name',code:'token=hidden',status:'401'}));
- expect(JSON.parse(raw)).toEqual({event:'records-failed',code:'unclassified',name:'Error',category:'sqlite'});expect(raw).not.toMatch(/hidden|private.invalid|personal-name|recovery/);
+ expect(JSON.parse(raw)).toEqual({event:'records-failed',code:'host_sqlite_failure',name:'Error',category:'sqlite'});expect(raw).not.toMatch(/hidden|private.invalid|personal-name|recovery/);
 });

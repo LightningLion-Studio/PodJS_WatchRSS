@@ -6,7 +6,7 @@ import {CloudRecordCodec,WatchCloudRecords,revision,validateRecord,type RecordDo
 import {rssSourceKey,rssArticleId} from '../../src/cloud/rss-identity';
 import {utf8Encode} from '../../src/cloud/types';
 const c={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
-test('unavailable or paused host crypto stops at the first record without ACK, and a repaired host can retry',async()=>{for(const code of ['cloud_host_capability_unavailable','cloud_sync_suspended']){
+test('unavailable or paused host crypto stops at the first record without ACK, and a repaired host can retry',async()=>{for(const code of ['cloud_host_capability_unavailable','cloud_sync_suspended','cloud_sync_deadline_exceeded']){
  const f=env();for(let i=0;i<3;i++)await f.put(doc('host-repair-'+i));const original=f.ports.crypto;let attempts=0;
  f.ports.crypto={...original,decrypt:async()=>{attempts++;throw Error(code);}};
  await expect(f.records().pull()).rejects.toThrow(code);expect(attempts).toBe(1);expect(f.applied).toHaveLength(0);expect(f.state()).toBeUndefined();
@@ -32,9 +32,9 @@ test('2135 durable public interactions replay in five bounded merges before netw
  const started=performance.now();expect(await f.records().pull()).toBe(2135);expect(sizes).toEqual([500,500,500,500,135]);expect(gets).toBe(1);expect(applied.filter(d=>d.kind==='rss-state').every(d=>d.value.isRead===false&&d.value.favoriteSaved===false&&d.value.watchLaterSaved===false&&d.value.readingPositionChangedAt>0)).toBe(true);expect(performance.now()-started).toBeLessThan(5000);
 });
 test('cached interaction replay failure or suspension cannot overtake into GET, cursor or upload; retry keeps all values',async()=>{
- for(const mode of ['failure','suspension']){const f=env();for(let i=0;i<551;i++)await f.put(cachedRss(i));await f.records().pull();const before=f.state();let gets=0,applies=0,checkpoints=0;
-  f.ports.get=async()=>{gets++;throw Error('GET must follow cached replay');};f.ports.apply=async docs=>{if(++applies===2)throw Error(mode==='failure'?'fixture disk failure':'cloud_sync_suspended');return docs.length;};f.ports.checkpoint=async raw=>{checkpoints++;expect(JSON.parse(raw)).toEqual(before);};
-  await expect(f.records().pull()).rejects.toThrow(mode==='failure'?'fixture disk failure':'cloud_sync_suspended');expect(gets).toBe(0);expect(f.state()).toEqual(before);expect(f.posts).toHaveLength(0);expect(checkpoints).toBe(mode==='suspension'?1:0);
+ for(const mode of ['failure','suspension','deadline']){const f=env();for(let i=0;i<551;i++)await f.put(cachedRss(i));await f.records().pull();const before=f.state();let gets=0,applies=0,checkpoints=0;
+  f.ports.get=async()=>{gets++;throw Error('GET must follow cached replay');};f.ports.apply=async docs=>{if(++applies===2)throw Error(mode==='failure'?'fixture disk failure':mode==='deadline'?'cloud_sync_deadline_exceeded':'cloud_sync_suspended');return docs.length;};f.ports.checkpoint=async raw=>{checkpoints++;expect(JSON.parse(raw)).toEqual(before);};
+  await expect(f.records().pull()).rejects.toThrow(mode==='failure'?'fixture disk failure':mode==='deadline'?'cloud_sync_deadline_exceeded':'cloud_sync_suspended');expect(gets).toBe(0);expect(f.state()).toEqual(before);expect(f.posts).toHaveLength(0);expect(checkpoints).toBe(mode==='failure'?0:1);
   const recovered:RecordDocument[]=[];f.ports.apply=async docs=>{recovered.push(...docs);return docs.length;};f.ports.get=async()=>({libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[],formatVersion:1,items:[],cursor:'551',headRevision:'551',hasMore:false});await f.records().pull();expect(recovered).toHaveLength(551);expect(recovered.map(d=>d.value)).toEqual(Array.from({length:551},(_,i)=>cachedRss(i).value));
  }
 });

@@ -17,3 +17,16 @@ export class CloudForegroundExecution {
  foreground(active:boolean){if(this.active&&!active)this.generation++;this.active=active;}
  begin(){const generation=this.generation;const current=()=>{if(!this.active||generation!==this.generation)throw Error(CLOUD_SYNC_SUSPENDED);};current();return current;}
 }
+
+/** Cooperative work deadline, checked at IO and commit boundaries. Never race a
+ * write against a timer: the lease remains held until the old task unwinds. */
+export const CLOUD_SYNC_BUDGET_MILLIS=5*60*1000;
+export class CloudSyncDeadlineError extends Error {
+ readonly code='cloud_sync_deadline_exceeded';
+ constructor(){super('cloud_sync_deadline_exceeded');}
+}
+export class CloudSyncBudget {
+ private readonly started:number;private expired=false;
+ constructor(private readonly now=()=>globalThis.performance?.now?.()??Date.now()){this.started=now();}
+ check=()=>{if(this.expired||this.now()-this.started>=CLOUD_SYNC_BUDGET_MILLIS){this.expired=true;throw new CloudSyncDeadlineError();}};
+}

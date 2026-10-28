@@ -18,8 +18,8 @@ import {watchAppVersion} from '../core/app-version';
 export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void,execution?:{begin():()=>void},formats:{writeV1?:boolean;formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
  const ports=createCloudHostPorts(host,guard),transport=createCloudTransport(host,guard);
  const accounts=accountStore??new WatchAccountStore({exclusive:action=>withAccountLease(host,action),revokeCloudScope:state=>revokeAccountCloud(host,state),clearCloudScope:state=>clearAccountCloud(host,state),get:async key=>(await ports.store.get(key))??null,set:ports.store.set,remove:async key=>{await host('secure.delete',{key});}});
- const openSession=async()=>{
-   guard.require();const assertRun=execution?.begin()??(()=>{});const stored=await accounts.read();assertRun();if(!stored)return undefined;
+ const openSession=async(check?:()=>void)=>{
+   guard.require();const foreground=execution?.begin()??(()=>{});const assertRun=()=>{foreground();check?.();};const stored=await accounts.read();assertRun();if(!stored)return undefined;
    const assertAccountCurrent=async()=>{guard.require();const current=await accounts.read();if(!current||current.userId!==stored.userId||current.backendBaseUrl!==stored.backendBaseUrl)throw Error('账号已变更');};
    const assertCurrent=async()=>{assertRun();await assertAccountCurrent();assertRun();};
    const runGuard={require(){guard.require();assertRun();}};

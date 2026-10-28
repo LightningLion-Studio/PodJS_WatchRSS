@@ -10,11 +10,13 @@ interface Witness {revision:number;sequence:number}
 /** Do not repeatedly rebuild a large inventory while a finite import is still
  * writing. Keep the original three attempts and all publication guards; spend
  * at most two additional seconds yielding between them. No database lock is
- * held over JS/codec/file work. A sample cap also bounds broken/frozen clocks. */
+ * held over JS/codec/file work. A sample cap also bounds broken/frozen clocks.
+ * Timerless guests yield through the supplied host port; the elapsed quiet
+ * window still must reach 32ms. Do not import UI services into this shared code. */
 export class ManifestContention {
  private waited=0;private samples=0;
  constructor(private readonly db:SqlDatabase,private readonly yieldTurn:()=>Promise<unknown>,private readonly diagnostic?:(fields:Record<string,string|number>)=>void,
-  private readonly clock=()=>globalThis.performance?.now?.()??Date.now(),private readonly pause:(ms:number)=>Promise<unknown>=ms=>new Promise(resolve=>setTimeout(resolve,ms))){}
+  private readonly clock=()=>globalThis.performance?.now?.()??Date.now(),private readonly pause:(ms:number)=>Promise<unknown>=ms=>typeof globalThis.setTimeout==='function'?new Promise(resolve=>globalThis.setTimeout(resolve,ms)):this.yieldTurn()){}
  private async witness():Promise<Witness>{
   const row=(await this.db.query("SELECT revision,COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_projection_events'),0) AS projection_seq FROM sync_library_revision WHERE id=1"))[0];
   if(!row||!Number.isSafeInteger(Number(row.revision))||!Number.isSafeInteger(Number(row.projection_seq)))throw Error('Missing or invalid library witness');
