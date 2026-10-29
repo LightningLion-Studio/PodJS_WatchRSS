@@ -33,10 +33,10 @@ test('account status only presents real cloud-service data with free quota seman
     message: '同步完成', usedBytes: 3 * 1048576 + 123, quotaBytes: 10 * 1048576,
   })!;
   expect(accountCloudLines(member)).toEqual([
-    '云中继：同步完成', '空间：3 / 10 MiB', '首次使用需在已登录设备上批准这块手表。',
+    '云中继：同步完成', '空间：3 / 10 MiB', '首次使用需在已登录的手机 App 或微信小程序上批准这块手表。',
   ]);
   expect(accountCloudLines({...member, cloud: {...member.cloud!, quotaBytes: 0}})).toEqual([
-    '云中继：同步完成', '首次使用需在已登录设备上批准这块手表。',
+    '云中继：同步完成', '首次使用需在已登录的手机 App 或微信小程序上批准这块手表。',
   ]);
   expect(accountCloudLines({...member, plan: 'free'})).toEqual(accountCloudLines(member));
 });

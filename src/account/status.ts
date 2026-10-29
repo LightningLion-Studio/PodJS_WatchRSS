@@ -60,6 +60,6 @@ export function accountCloudLines(status: AccountStatusSnapshot): string[] {
   if (!status.cloud) return [];
   const lines = [`云中继：${status.cloud.message}`];
   if (status.cloud.quotaBytes > 0) lines.push(`空间：${Math.floor(status.cloud.usedBytes / 1048576)} / ${Math.floor(status.cloud.quotaBytes / 1048576)} MiB`);
-  lines.push('首次使用需在已登录设备上批准这块手表。');
+  lines.push('首次使用需在已登录的手机 App 或微信小程序上批准这块手表。');
   return lines;
 }

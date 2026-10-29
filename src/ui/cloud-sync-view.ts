@@ -42,7 +42,7 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
   if(cloud.message.includes('重新登记本机'))return{...base,title:'需要重新登记本机',detail:'本机设备公钥与云端不一致，请确认后重新登记。',tone:'attention',button:undefined};
   if(cloud.message.includes('属于其他账号'))return{...base,title:'需要选择资料归属',detail:'请选择清空本机资料或明确合并，选择前不会上传。',tone:'attention',button:undefined};
   if(cloud.message.includes('请升级'))return{...base,title:'请升级腕上RSS',detail:'升级后继续云同步，本机资料保持不变。',tone:'attention',button:undefined};
-  if (phase === 'waiting-approval') return {...base, title: '需要云密钥授权', detail: '向已授权的手机或小程序请求批准，并核对两端显示的 8 位授权码。', tone: 'attention', button: {label: '请求设备批准', action: 'approval', enabled: true}};
+  if (phase === 'waiting-approval') return {...base, title: '需要云密钥授权', detail: '打开已登录本账号的手机 App 或微信小程序，稍等会弹出授权提示，核对两端的 8 位授权码。', tone: 'attention', button: {label: '请求设备批准', action: 'approval', enabled: true}};
   if (phase === 'error') return {...base, title: '同步失败', detail: '这次没有同步完成，请稍后重试。', tone: 'error', button: {label: '重试', action: 'sync', enabled: true}};
   // Idle carries the service's own reason when it stopped early (network, read-only space).
   if (cloud.message === '等待网络连接') return {...base, title: '等待网络', detail: '连上网络后再试。', tone: 'attention', button: {label: '重试', action: 'sync', enabled: true}};
