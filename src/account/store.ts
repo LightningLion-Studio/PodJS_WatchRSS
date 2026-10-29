@@ -1,5 +1,9 @@
 import { SecureStorage, WatchAccountState, WatchEntitlementSnapshot, WatchTelemetryConfig } from "./types";
 
+export const LIBRARY_OWNER_MISMATCH='library_owner_mismatch';
+export class LibraryOwnerMismatchError extends Error {readonly code=LIBRARY_OWNER_MISMATCH;constructor(){super(LIBRARY_OWNER_MISMATCH);}}
+export const isLibraryOwnerMismatch=(error:unknown)=>!!error&&typeof error==='object'&&((error as {code?:unknown}).code===LIBRARY_OWNER_MISMATCH||/^library_owner_mismatch(?::|$)/.test(String((error as {message?:unknown}).message??'')));
+const ownerScope=(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>)=>JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]);
 const KEY = "state_json";
 const entitlement = (v: any): WatchEntitlementSnapshot => ({ plan: typeof v?.plan === "string" && v.plan ? v.plan : "free", active: v?.active !== false, expiresAtMillis: Number(v?.expiresAtMillis || 0), features: Array.isArray(v?.features) ? v.features.map(String).map((x: string) => x.trim()).filter(Boolean) : [] });
 const telemetry = (v: any): WatchTelemetryConfig => ({ anonymousEnabled: v?.anonymousEnabled !== false, diagnosticsEnabled: v?.diagnosticsEnabled === true, sampleRate: typeof v?.sampleRate === "number" ? v.sampleRate : 1 });
@@ -14,7 +18,17 @@ export class WatchAccountStore {
   /** The secure store changed outside save/clear; readers are uncached, observers must refresh. */
   invalidate():void { this.changed(); }
   async read(): Promise<WatchAccountState | null> { const raw = await this.storage.get(this.key); if (!raw) return null; try { const j = JSON.parse(raw); const state: WatchAccountState = { userId: String(j.userId || "").trim(), phoneMasked: String(j.phoneMasked || "").trim(), installId: String(j.installId || "").trim(), watchDeviceToken: String(j.watchAccessToken || j.watchDeviceToken || "").trim(), tokenExpiresAtMillis: Number(j.accessTokenExpiresAtMillis || j.tokenExpiresAtMillis || 0), watchRefreshToken: String(j.watchRefreshToken || "").trim(), refreshTokenExpiresAtMillis: Number(j.refreshTokenExpiresAtMillis || 0), backendBaseUrl: String(j.backendBaseUrl || "").trim(), posthogHost: String(j.posthogHost || "").trim(), posthogProjectApiKey: String(j.posthogProjectApiKey || "").trim(), entitlement: entitlement(j.entitlement), telemetryConfig: telemetry(j.telemetryConfig), updatedAtMillis: Number(j.updatedAtMillis || 0) }; return state.userId && state.watchDeviceToken ? state : null; } catch (_) { return null; } }
-  async assertLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>):Promise<void>{const key='watchrss.library.owner',owner=await this.storage.get(key),scope=JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]);if(owner&&owner!==scope)throw Error('library_owner_mismatch: 请清空本机资料或明确确认合并');if(!owner)await this.storage.set(key,scope);}
+  async assertLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>):Promise<void>{const key='watchrss.library.owner',owner=await this.storage.get(key),scope=JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]);if(owner&&owner!==scope)throw new LibraryOwnerMismatchError();if(!owner)await this.storage.set(key,scope);}
+  /** Empty-library adoption is the only automatic ownership transfer. Probe
+   * under the account mutation lease and recheck the account after async SQL. */
+  ensureLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>,hasLocalContent:()=>Promise<boolean>){return this.change(async()=>{
+    const current=await this.read();if(!current||ownerScope(current)!==ownerScope(state))throw Error('account_switch_rejected');
+    const scope=ownerScope(state),owner=await this.storage.get('watchrss.library.owner');if(owner===scope)return;
+    if(owner&&await hasLocalContent())throw new LibraryOwnerMismatchError();
+    const latest=await this.read();if(!latest||ownerScope(latest)!==scope)throw Error('account_switch_rejected');
+    if(await this.storage.get('watchrss.library.owner')!==owner)throw new LibraryOwnerMismatchError();
+    await this.storage.set('watchrss.library.owner',scope);
+  });}
   /** Call only from an explicit local user action; clearing must finish before ownership changes. */
   resolveLibraryOwner(state:Pick<WatchAccountState,'userId'|'backendBaseUrl'>,choice:'clear'|'merge',clearLocal?:()=>Promise<void>){return this.change(async()=>{const current=await this.read();if(current&&(current.userId!==state.userId||current.backendBaseUrl!==state.backendBaseUrl))throw Error('account_switch_rejected');if(choice==='clear'){if(!clearLocal)throw Error('local_clear_required');await clearLocal();}else if(choice!=='merge')throw Error('explicit_owner_choice_required');await this.storage.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]));});}
   save(state: WatchAccountState,expected?:WatchAccountState,check?:()=>void): Promise<void> { return this.change(async()=>{check?.();const previous=await this.read();if(expected&&(!previous||previous.userId!==expected.userId||previous.backendBaseUrl!==expected.backendBaseUrl||previous.watchRefreshToken!==expected.watchRefreshToken))throw Error("账号已变更，请重试");if(previous&&(previous.userId!==state.userId||previous.backendBaseUrl.replace(/\/+$/,'')!==state.backendBaseUrl.replace(/\/+$/,'')))throw Error('account_switch_rejected: 请先退出原账号');if(!await this.storage.get('watchrss.library.owner')){check?.();await this.storage.set('watchrss.library.owner',JSON.stringify([state.backendBaseUrl.replace(/\/+$/,''),state.userId]));}check?.();await this.write(state); });}

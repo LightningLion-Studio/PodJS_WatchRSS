@@ -24,6 +24,7 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
   if (status === undefined) return {title: '正在读取', detail: '', tone: 'muted'};
   if (!available) return {title: '暂未开放', detail: '当前版本还不能使用云同步。本机内容和手机同步照常可用。', tone: 'muted'};
   if (status === null) return {title: '未登录账号', detail: '在手机端登录腕上RSS，再把账号同步到手表。', tone: 'muted', button: phone};
+  if(status.cloud&&(status.cloud.ownerChoiceRequired||status.cloud.errorCode==='library_owner_mismatch'||status.cloud.message.includes('属于其他账号')))return{title:'需要选择资料归属',detail:'本机资料属于其他账号。清空仅删除本机资料；合并会上传本机资料。',tone:'attention'};
   const expired = status.refreshTokenStatus === 'expired' || (status.refreshTokenStatus === 'legacy' && status.accessTokenExpired);
   if (expired) return {title: '登录已过期', detail: '请在手机端重新把账号同步到手表。', tone: 'attention', button: phone};
   if (!status.cloud) return {title: '暂未开放', detail: '当前版本还不能使用云同步。本机内容和手机同步照常可用。', tone: 'muted'};
@@ -84,7 +85,7 @@ export interface CloudApprovalControl {readonly state:import('../cloud/approval-
 /** Display-only flags for the Lead's new controls. No credentials or request nonces. */
 export function cloudRemediationView(status:AccountStatusSnapshot|null|undefined,approval:import('../cloud/approval-controller').CloudApprovalState){
  const message=status?.cloud?.message??'';
- return{canLogout:!!status,needsOwnerChoice:message.includes('属于其他账号'),needsReregistration:message.includes('重新登记本机'),needsUpgrade:message.includes('请升级'),approvalCode:approval.code,approvalExpiresAt:approval.expiresAt,canConfirm:approval.phase==='code'&&!approval.confirmed,canDisagree:approval.phase==='code',canCancel:['requesting','pending','code'].includes(approval.phase),committing:approval.phase==='committing'};
+ return{canLogout:!!status,needsOwnerChoice:!!status?.cloud?.ownerChoiceRequired||status?.cloud?.errorCode==='library_owner_mismatch'||message.includes('属于其他账号'),needsReregistration:message.includes('重新登记本机'),needsUpgrade:message.includes('请升级'),approvalCode:approval.code,approvalExpiresAt:approval.expiresAt,canConfirm:approval.phase==='code'&&!approval.confirmed,canDisagree:approval.phase==='code',canCancel:['requesting','pending','code'].includes(approval.phase),committing:approval.phase==='committing'};
 }
 export type CloudRemediationControl=ReturnType<typeof cloudRemediationActions>;
 /** Busy/error protection for destructive local actions; confirmation is supplied by the UI. */

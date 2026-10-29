@@ -2,6 +2,8 @@ import type {WatchAccountState} from './types.ts';
 import type {WatchCloudPhase} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
+  ownerChoiceRequired?:boolean;
+  errorCode?:'cloud_format_upgrade_required'|'library_owner_mismatch';
   formatCompatibility?:import('../cloud/compatibility').CloudCompatibilityStatus;
   message: string;
   usedBytes: number;
@@ -22,6 +24,8 @@ function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl
   const own = (cloud.accountId === undefined || cloud.accountId === userId)&&(!cloud.accountScope||cloud.accountScope===JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])) ? cloud : NEUTRAL_CLOUD;
   return {
     ...(own.formatCompatibility?{formatCompatibility:{...own.formatCompatibility}}:{}),
+    ...(own.ownerChoiceRequired?{ownerChoiceRequired:true}:{}),
+    ...(own.errorCode?{errorCode:own.errorCode}:{}),
     message: own.message, usedBytes: own.usedBytes, quotaBytes: own.quotaBytes,
     ...(own.reservedBytes!==undefined?{reservedBytes:own.reservedBytes}:{}),
     ...(own.phase ? {phase: own.phase} : {}),

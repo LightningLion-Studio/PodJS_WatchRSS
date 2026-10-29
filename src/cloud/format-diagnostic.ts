@@ -12,7 +12,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  if(/cloud_sync_suspended|cloud_operation_superseded/.test(message))return 'suspended';
  if(code==='r48_write_feature_disabled'||/cloud_format_(?:write|migration)_disabled/.test(message))return 'gate';
  if(n===401||n===403||/device_session_revoked/.test(code))return 'authorization';
- if(n===409)return 'conflict';
+ if(code==='library_owner_mismatch'||/^library_owner_mismatch(?::|$)/.test(message)||n===409)return 'conflict';
  if(n===413||n===429||/cloud_(?:format_capacity|quota_exceeded)/.test(message+' '+code))return 'capacity';
  if(n>=500&&n<=599)return 'server';
  if(/cloud_format_|cloud_entry_ref_/.test(message))return 'format';

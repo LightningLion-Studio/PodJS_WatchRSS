@@ -19,6 +19,8 @@ import {hasArticleRegisters} from './article-register';
 import {canonical,type RecordDocument} from './records';
 export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sources:readonly SyncedSource[];stateArticles:readonly ExportedArticle[];pendingPrivateBodies?:boolean;pendingPrivateArticleIds?:readonly string[]}
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
+ /** Includes pending/tombstone/private note state; never reads article bodies. */
+ hasLocalPrivateContent?():Promise<boolean>;
  cloudArticleRegisters?():Promise<RecordDocument[]>;
  mergeCloudArticleRegisters?(documents:RecordDocument[]):Promise<number>;
  cloudSnapshot(full:boolean,check?:()=>void):Promise<CloudLibrarySnapshot>;

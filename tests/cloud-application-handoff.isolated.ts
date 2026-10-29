@@ -15,6 +15,7 @@ mock.module('../src/core/library-mutations.ts',()=>({subscribeLibraryMutations:(
 mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyLibraryChanged(){},services:{subscribeChannel:()=>()=>{}}}));
 mock.module('../src/cloud/status.ts',()=>({connectCloudAccountStatus:()=>()=>{},notifyCloudAccountStatus(){}}));
 mock.module('../src/cloud/runtime.ts',()=>({createCloudRuntime:(...args:any[])=>({
+ inspectOwner:async()=>true,
  approvals:{active:false,state:{phase:'idle'},subscribe:()=>()=>{},setForeground(){},reset(){}},
  service:{status:{phase:'idle'},reset(){},subscribe:()=>()=>{},syncNow:async(manual:boolean)=>{if(!manual)return false;assertRun=args[5].begin();return new Promise<boolean>(resolve=>finish=resolve);}},
 })}));

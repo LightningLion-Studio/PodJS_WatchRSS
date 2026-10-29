@@ -96,3 +96,10 @@ test('a backgrounded manual sync reads as handed off or held, never as finished'
   expect([held.title, held.button?.enabled]).toEqual(['等待手机同步结束', false]);
   expect(cloudSyncView(status, true, false, 500, 'foreground').title).toBe(cloudSyncView(status, true, false, 500).title);
 });
+
+
+test('typed owner choice outranks pending manual, local hold, background handoff and token expiry',()=>{
+ const status=cloud({phase:'error',message:'fixed-code-only',ownerChoiceRequired:true,errorCode:'library_owner_mismatch'});
+ for(const handoff of ['idle','held','queued','foreground']as const){const snapshot=accountStatusSnapshot(account,2500,status)!;expect(cloudSyncView(snapshot,true,true,2500,handoff)).toMatchObject({title:'需要选择资料归属',tone:'attention'});expect(cloudSyncView(snapshot,true,true,2500,handoff).button).toBeUndefined();}
+ const foreign=accountStatusSnapshot(account,500,{...status,accountId:'different'})!;expect(foreign.cloud?.ownerChoiceRequired).toBeUndefined();expect(foreign.cloud?.errorCode).toBeUndefined();
+});

@@ -1,10 +1,10 @@
-import { Show } from "solid-js";
+import { Show, createSignal, onCleanup } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
 import { manualCloudSync, applicationCloudApproval, applicationCloudActions, applicationCloudHandoff } from "../../cloud/application.ts";
 import { cloudRemediationActions } from "../cloud-sync-view.ts";
 import { clearLocalPrivateLibrary } from "../../services.ts";
-import { readCloudAccountStatus } from "../../cloud/status.ts";
+import { readCloudAccountStatus, subscribeCloudAccountStatus } from "../../cloud/status.ts";
 import { CloudSyncScreen } from "../CloudSyncScreen.tsx";
 import { coalescedRequest } from "../cloud-sync-view.ts";
 import HomeScreen, { type HomeScreenProps } from "../HomeScreen.tsx";
@@ -59,6 +59,10 @@ interface HomeRoutesProps {
 const manualCloud = coalescedRequest(() => manualCloudSync());
 
 export function HomeRoutes(props: HomeRoutesProps) {
+  // A cloud failure must not wait for the user to reopen the cloud page. The
+  // active route alone mounts this existing round-list choice surface.
+  const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
+  onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
   const openChannel = (channel: Channel) => {
     if (channel.url === "builtin:bili") {
       void props.openBili({ name: "entry" });
@@ -169,6 +173,12 @@ export function HomeRoutes(props: HomeRoutesProps) {
             props.entry.internalBack = value.onRootBack;
           }}
         />
+      </Show>
+      <Show when={props.active() && cloudOwnerChoice()}>
+        <CloudSyncScreen width={props.width} height={props.height} active={props.active}
+          load={props.services.readAccountStatus} subscribe={props.services.subscribeAccountStatus}
+          available={()=>true} sync={manualCloud} actions={cloudActions} clearLocal={clearLocalPrivateLibrary}
+          onPhone={()=>void props.go("phone-connection")} onError={props.setError} ref={()=>{}}/>
       </Show>
     </>
   );

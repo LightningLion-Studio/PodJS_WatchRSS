@@ -177,16 +177,16 @@ export function CloudSyncScreen(props: {
     }
     if(actions&&fix.needsReregistration)rows.push(gap(12),pill(armed()==='reregister'?'再按一次确认':'重新登记本机',armed()!=='reregister',()=>arm('reregister',()=>act(actions.reregister(true))),!busy,armed()==='reregister'));
     if(actions?.message)rows.push(gap(8),centred(actions.message,1,17,'#ff7777'));
-    if (view.space || view.lastSynced) rows.push(gap(14));
-    if (view.space) {
+    if (!fix.needsOwnerChoice && (view.space || view.lastSynced)) rows.push(gap(14));
+    if (!fix.needsOwnerChoice && view.space) {
       const fill = Math.max(0, Math.round(FACTS_WIDTH * view.space.fraction));
       rows.push({height: 4, bounds: centredBounds(inner(), FACTS_WIDTH, 0, 4), render: () =>
         <View class="absolute rounded-[2]" style={{insetL: (inner() - FACTS_WIDTH) / 2, insetT: 0, width: FACTS_WIDTH, height: 4, bgColor: '#2a2a2a'}}>
           <View class="absolute left-[0] top-[0] rounded-[2]" style={{width: fill, height: 4, bgColor: PHONE_PAGE.primary}}/>
         </View>}, gap(6), centred(view.space.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
     }
-    if (view.lastSynced) rows.push(gap(6), centred(view.lastSynced, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
-    if(props.actions&&fix.canLogout){
+    if (!fix.needsOwnerChoice && view.lastSynced) rows.push(gap(6), centred(view.lastSynced, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
+    if(props.actions&&fix.canLogout&&!fix.needsOwnerChoice){
       rows.push(gap(20),pill(armed()==='logout'?'再按一次确认退出':'退出账号',false,()=>arm('logout',()=>act(props.actions!.logout())),!busy,armed()==='logout'),
         gap(4),centred('退出后本机文章保留，可登录其他账号。',0,14,PHONE_PAGE.secondary,FACTS_WIDTH));
     }

@@ -36,6 +36,8 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'app.buildInfo':return {debugBuild:false};
    case 'cloud.acquire':expect(leased).toBe(false);leased=true;return {acquired:true};
    case 'cloud.release':leased=false;return {};
+   case 'secure.acquire':expect(a.key).toBe('watchrss.account.session.v1');return {acquired:true};
+   case 'secure.release':expect(a.key).toBe('watchrss.account.session.v1');return {};
    case 'discovery.networkSnapshot':return {active:true,validated:true,wifi:true,metered:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
    case 'secure.set':secure.set(a.key,a.value);return {};
