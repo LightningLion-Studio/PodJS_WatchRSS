@@ -56,7 +56,7 @@ function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;
     press:()=>nodes(root).find(n=>n.kind==='View'&&n.props.accessibilityRole==='button'&&n.props.class?.includes('rounded-full'))!.props.onPress()};
 }
 
-for(const outcome of ['success','timeout','http','empty','expired','parse'] as const)test(`fresh feed ${outcome} leaves 刷新中 and supports the native next action`,async()=>{
+for(const outcome of ['success','timeout','http','empty','expired','status8','parse'] as const)test(`fresh feed ${outcome} leaves 刷新中 and supports the native next action`,async()=>{
   const f=mount();await requestReady(f);
   expect(f.requests).toHaveLength(1);expect(f.text()).toContain('刷新中...');
   const {request,reply}=f.requests[0]!;const url=new URL(request.url);
@@ -64,14 +64,15 @@ for(const outcome of ['success','timeout','http','empty','expired','parse'] as c
   expect(url.pathname).toBe('/aweme/v2/web/module/feed/');expect(url.searchParams.get('count')).toBe('16');expect(url.searchParams.has('aweme_id')).toBe(false);
   if(outcome==='timeout')reply.reject({code:'host_error',message:'java.net.SocketTimeoutException: read timed out'});
   else if(outcome==='expired')reply.resolve({status:200,headers:{},body:utf8Encode('blocked')});
+  else if(outcome==='status8')reply.resolve({status:200,headers:{},body:utf8Encode('{"status_code":8,"status_msg":"synthetic"}')});
   else if(outcome==='parse')reply.resolve({status:200,headers:{},body:utf8Encode('{')});
   else reply.resolve(response(outcome==='empty'?[]:['fresh'],outcome==='http'?503:200));
   await settled(f);expect(f.text()).not.toContain('刷新中...');expect(f.plays).toHaveLength(0);
   if(outcome==='success'){
     expect(f.text()).toContain('下拉刷新，向上进入短视频流');f.swipe(-80);await settle();
     expect(f.plays).toMatchObject([{item:{awemeId:'fresh'},immersive:true}]);expect(f.requests).toHaveLength(1);
-  }else if(outcome==='expired'){
-    expect(f.text()).toContain('需要登录');expect(f.data.has('douyin.cookie')).toBe(false);f.press();await settle();expect(f.routes).toEqual([{name:'login'}]);
+  }else if(outcome==='expired'||outcome==='status8'){
+    expect(f.text()).toContain('需要登录');expect(f.text()).not.toContain('暂无内容');expect(f.data.has('douyin.cookie')).toBe(false);f.press();await settle();expect(f.routes).toEqual([{name:'login'}]);
   }else{
     expect(f.text()).toContain(outcome==='empty'?'暂无内容，下拉刷新或点箭头重试':outcome==='parse'?'解析失败':'网络请求失败');
     f.press();await settle();expect(f.requests).toHaveLength(2);expect(f.text()).toContain('刷新中...');
@@ -142,4 +143,10 @@ test('leaving or disposing an entry cancels its temporary-failure retry timer',a
   retryTimers.length=0;const f=mount({auth403:{sleep:async()=>{}}});await requestReady(f);f.requests[0]!.reply.resolve(response([],403));await requestReady(f,2);f.requests[1]!.reply.resolve(response([],403));await settled(f);
   const timer=retryTimers[0]!;if(leave==='inactive')f.setActive(false);else f.dispose();await settle();expect(timer.cancelled).toBe(true);f.advance(30000);timer.fire();await settle();expect(f.requests).toHaveLength(2);
  }
+});
+
+test('cached anchor status8 replaces cached playback with a login action',async()=>{
+ const f=mount({cacheCount:4});await requestReady(f);f.requests[0]!.reply.resolve({status:200,headers:{},body:utf8Encode('{"status_code":8}')});
+ const end=Date.now()+2000;while(!f.text().includes('需要登录')&&Date.now()<end)await settle();
+ expect(f.text()).toContain('需要登录');expect(f.text()).not.toContain('暂无内容');expect(f.data.has('douyin.cookie')).toBe(false);f.press();await settle();expect(f.plays).toHaveLength(0);expect(f.routes).toEqual([{name:'login'}]);
 });

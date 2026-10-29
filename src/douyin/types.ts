@@ -5,6 +5,9 @@ export interface DouyinHistoryStorage extends DouyinSecureStorage {}
 export interface DouyinSavedStorage extends DouyinSecureStorage {}
 export interface DouyinSigner { sign(params: Readonly<Record<string, string>>): Promise<string> | string; }
 export interface DouyinClientOptions {
+  requestConfig?:import('./request-config.ts').DouyinRequestConfigSource;
+  /** Gated by requestConfig.webPagination. Supply only a verified contract. */
+  webFeedPagination?:(input:{cursor:string|null;count:number;presentedIds:readonly string[]})=>{params:Record<string,string>;nextCursor:(page:DouyinFeedPage)=>string|null};
   auth403?: import('./auth403.ts').Douyin403Options;
   onLogout?:()=>Promise<void>; transport: HttpTransport; secureStorage: DouyinSecureStorage; signer?: DouyinSigner; historyStorage?: import("./state-storage.ts").DouyinStateStorage; savedStorage?: DouyinSavedStorage; savedStore?: Pick<import("./saved.ts").DouyinSavedStore,"list"|"state"|"set"|"toggle">; now?: () => number; }
 export type DouyinCodec = "h264" | "h265" | "unknown";

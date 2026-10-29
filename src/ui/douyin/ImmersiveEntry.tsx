@@ -25,6 +25,12 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     void timer.result.then(()=>{if(retryTimer!==timer)return;retryTimer=undefined;if(current())void load(true);},()=>{});
   };
   const active=()=>!disposed&&(props.active??true);
+  const requireLogin=async(current:()=>boolean)=>{
+    if(!current())return;cancelRetry();setLogged(false);setItems([]);anchor=null;cursor=null;hasMore=false;setError(formatDouyinError('NOT_LOGGED_IN'));
+    // status_code=8 already expires through the client; ordinary blocked/empty
+    // responses retain the existing active-screen cleanup boundary.
+    if(await props.client.isLoggedIn()&&current())await props.client.clearCookie();
+  };
   const load=async(refresh=false)=>{
     if(!active()||busy())return;
     cancelRetry();
@@ -46,10 +52,12 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
             // immediate navigation, but replenish from a fresh feed in the background
             // so the preload window does not retry the same stale identities forever.
             if(isDouyinTemporaryFailure(result.code)){retryTemporary(result,current);return;}
-            if(result.code==='CANCELLED'||result.code==='NOT_LOGGED_IN')return;
+            if(result.code==='NOT_LOGGED_IN'){await requireLogin(current);return;}
+            if(result.code==='CANCELLED')return;
             appLogger.i('DouyinEntry','expired queue anchor failed; refreshing feed');
             const fresh=await props.client.fetchFeedPage({count:16});
-            if(!current()||!fresh.ok)return;
+            if(!current())return;
+            if(!fresh.ok){if(fresh.code==='NOT_LOGGED_IN')await requireLogin(current);else if(isDouyinTemporaryFailure(fresh.code))retryTemporary(fresh,current);return;}
             cursor=fresh.data.nextCursor;hasMore=fresh.data.hasMore;anchor=null;setItems(fresh.data.items);
           }).catch(()=>{});
           return;
@@ -62,8 +70,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         setError(formatDouyinError(result.code));
         retryTemporary(result,current);
         if(result.code==='NOT_LOGGED_IN'){
-          setLogged(false);setItems([]);anchor=null;cursor=null;hasMore=false;
-          await props.client.clearCookie();
+          await requireLogin(current);
         }
       }
     }catch{if(current())setError(formatDouyinError('REQUEST_FAILED'));}
@@ -95,7 +102,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
-  const hint=()=>busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
+  const hint=()=>!logged()?"需要登录，请重新登录":busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
   return <View class="absolute inset-0 bg-black">
    <View class="absolute inset-0">
     <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">

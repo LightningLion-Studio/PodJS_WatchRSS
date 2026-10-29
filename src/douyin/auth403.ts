@@ -69,6 +69,11 @@ export class Douyin403Policy {
     if(!this.decision)this.decision=this.decide(cookie,api).finally(()=>{this.decision=undefined;});
     return this.decision;
   }
+  /** An HTML detail challenge is not evidence of an expired login. */
+  async challenge(api:DouyinApiCategory):Promise<Douyin403Decision>{
+    await this.load();if(!await this.ports.current())return {kind:'cancelled'};
+    return this.activeCooldown(api)??this.enterCooldown(api,false);
+  }
   private async decide(cookie:string,api:DouyinApiCategory):Promise<Douyin403Decision>{
     let result:DouyinLoginProbeResult='unknown',timedOut=false;
     const probe=this.ports.options.probe;
@@ -88,8 +93,11 @@ export class Douyin403Policy {
     if(!await this.ports.current())return {kind:'cancelled'};
     this.ports.metric({stage:'probe',api,count:1,result:timedOut?'timeout':result});
     if(result==='unauthenticated')return {kind:'unauthenticated'};
+    return this.activeCooldown(api)??this.enterCooldown(api,result==='authenticated');
+  }
+  private async enterCooldown(api:DouyinApiCategory,authenticated:boolean):Promise<Douyin403Decision>{
     const strikes=Math.min(6,this.state.strikes+1),delayMs=Math.min(DOUYIN_AUTH403_MAX_COOLDOWN_MS,30_000*2**(strikes-1));
-    this.version++;this.state={until:this.ports.now()+delayMs,strikes,authenticated:result==='authenticated'};
+    this.version++;this.state={until:this.ports.now()+delayMs,strikes,authenticated};
     try{await this.ports.storage.set(DOUYIN_AUTH403_COOLDOWN_KEY,JSON.stringify({version:1,...this.state}));}
     catch{this.ports.metric({stage:'storage',api,count:1,result:'failed'});}
     if(!await this.ports.current())return {kind:'cancelled'};

@@ -14,3 +14,10 @@ test('production defaults persist exactly the unchanged feed snapshot',async()=>
  const client=new DouyinClient({secureStorage:storage,transport:{request:async()=>({status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_list:[row],cursor:'next',has_more:1}))})}});
  const result=await client.fetchFeedPage({count:16});expect(result.ok).toBe(true);const stored=await new DouyinFeedStore(storage).read(FEED_KEY);expect(stored.items).toEqual(parseDouyinFeed(JSON.stringify({aweme_list:[row]})).items);expect(stored).toMatchObject({cursor:'next',hasMore:true,anchorAwemeId:null});
 });
+
+test('web play_addr_265 survives asynchronous projection alongside both legacy keys',async()=>{
+ const video={play_addr_265:{url_list:['https://fixture/web265'],width:360,height:640},play_addr_h265:{url_list:['https://fixture/legacy265']},play_addr_bytevc1:{url_list:['https://fixture/bytevc1']}};
+ const raw=JSON.stringify({aweme_list:[{aweme_id:'265',video}],has_more:0});
+ const sync=parseDouyinFeed(raw),asyncPage=await parseDouyinFeedAsync(raw);expect(asyncPage).toEqual(sync);
+ expect(sync.items[0]!.variants.map(v=>[v.playUrl,v.codec])).toEqual([['https://fixture/web265','h265'],['https://fixture/legacy265','h265'],['https://fixture/bytevc1','h265']]);
+});

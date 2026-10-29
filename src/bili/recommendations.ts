@@ -1,8 +1,9 @@
+import {RECENT_RECOMMENDATION_LIMIT,recentRecommendationIds,rememberRecommendationIds} from '../media/recommendation-history.ts';
 import {md5} from './portable.ts';
 import type {BiliItem,BiliSession} from './types.ts';
 import type {BrowseStore} from './browse.ts';
 
-export const RECOMMENDATION_LIMIT=512;
+export const RECOMMENDATION_LIMIT=RECENT_RECOMMENDATION_LIMIT;
 export const recommendationId=(item:Pick<BiliItem,'aid'|'bvid'>):string|undefined =>
  Number.isSafeInteger(item.aid)&&item.aid!>0?`aid:${item.aid}`:item.bvid?.trim()?`bvid:${item.bvid.trim()}`:undefined;
 /** Account IDs survive Cookie rotation. An incomplete session never shares anonymous history. */
@@ -18,13 +19,9 @@ export class BiliRecommendationHistory {
  constructor(private store:BrowseStore,private scope:string){}
  read():string[] {
   const raw=this.store.get<unknown>(feedSeenKey(this.scope));
-  if(!Array.isArray(raw))return [];
-  const valid=raw.filter((id):id is string=>typeof id==='string'&&id.length<=256&&/^(aid:[1-9]\d*|bvid:\S+)$/.test(id));
-  return [...new Set(valid)].slice(-RECOMMENDATION_LIMIT);
+  return recentRecommendationIds(raw,id=>/^(aid:[1-9]\d*|bvid:\S+)$/.test(id));
  }
  remember(items:readonly BiliItem[]) {
-  const ids=new Set(this.read());
-  for(const item of items){const id=recommendationId(item);if(id){ids.delete(id);ids.add(id);}}
-  this.store.set(feedSeenKey(this.scope),[...ids].slice(-RECOMMENDATION_LIMIT));
+  this.store.set(feedSeenKey(this.scope),rememberRecommendationIds(this.read(),items.map(recommendationId).filter((id):id is string=>!!id)));
  }
 }

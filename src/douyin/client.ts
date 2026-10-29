@@ -1,3 +1,5 @@
+import {douyinRequestProfile,resolveDouyinRequestConfig,DOUYIN_USER_AGENT,DOUYIN_REFERER,type DouyinRequestConfig} from './request-config.ts';
+import {douyinFeedSeenKey,readDouyinSeenIds,filterDouyinRecommendations} from './recommendations.ts';
 import {Douyin403Policy,DOUYIN_AUTH403_COOLDOWN_KEY,type DouyinApiCategory,type Douyin403Decision,type Douyin403Metric} from './auth403.ts';
 import {boundedVideoPageSize} from '../media/traffic-policy.ts';
 import {decodableDouyinItem,videoOptEnabled,VideoPlaybackTrace,registerVideoResolution} from '../media/video-opt.ts';
@@ -9,19 +11,17 @@ import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './errors.ts';
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems } from "./feed-store.ts";
 import {decodeMediaText} from '../media/text.ts';
-import { parseDouyinDetail, parseDouyinFeedAsync } from "./parser.ts";
+import { parseDouyinDetail, parseDouyinFeedAsync, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
 import { DouyinSavedStore } from "./saved.ts";
 import type { DouyinClientOptions, DouyinErrorCode, DouyinContent, DouyinFeedPage, DouyinHistoryEntry, DouyinInteraction, DouyinItem, DouyinResult, DouyinSavedKind, DouyinSigner } from "./types.ts";
 
-export const DOUYIN_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36";
-export const DOUYIN_REFERER="https://www.douyin.com/";
+export {DOUYIN_USER_AGENT,DOUYIN_REFERER};
 export const DOUYIN_PUBLIC_MEDIA_HEADERS:Readonly<Record<string,string>>=Object.freeze({"User-Agent":DOUYIN_USER_AGENT,Referer:DOUYIN_REFERER});
 const COOKIE_KEY="douyin.cookie";
 const PLAY_URL_TTL_MS=5*60*1000;
 // DouyinWebCrawler uses OkHttp defaults: 10s connect/read/write, no call timeout.
 export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
-const baseParams:Record<string,string>={device_platform:"webapp",aid:"6383",channel:"channel_pc_web",pc_client_type:"1",version_code:"290100",version_name:"29.1.0",cookie_enabled:"true",screen_width:"680",screen_height:"907",browser_language:"zh-CN",browser_platform:"Win32",browser_name:"Chrome",browser_version:"130.0.0.0",browser_online:"true",engine_name:"Blink",engine_version:"130.0.0.0",os_name:"Windows",os_version:"10",cpu_core_num:"12",device_memory:"8",platform:"PC",downlink:"10",effective_type:"4g",from_user_page:"1",locate_query:"false",need_time_list:"1",pc_libra_divert:"Windows",publish_video_strategy_type:"2",round_trip_time:"0",show_live_replay_strategy:"1",time_list_query:"0",whale_cut_token:"",update_version_code:"170400",msToken:""};
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
 export class DouyinClient {
@@ -93,12 +93,13 @@ export class DouyinClient {
     await this.enqueueCookie(async()=>{await commitCookie();await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();});
   }
   async logout(){await this.clearCookie();await this.options.onLogout?.();}
-  async buildPlaybackHeaders(){const cookie=await this.readCookie();return {...DOUYIN_PUBLIC_MEDIA_HEADERS,...(cookie?{Cookie:cookie}:{})};}
-  private async get(path:string,params:Record<string,string>,method:'GET'|'POST'):Promise<DouyinResult<string>> {
+  async buildPlaybackHeaders():Promise<Record<string,string>>{const cookie=await this.readCookie(),profile=douyinRequestProfile(await resolveDouyinRequestConfig(this.options.requestConfig));return {...profile.headers,...(cookie?{Cookie:cookie}:{})};}
+  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig):Promise<DouyinResult<string>> {
     await this.cookieWrites.catch(()=>{});
     const generation=this.authGeneration,cookie=await this.readCookie();
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
     if(!cookie)return fail('NOT_LOGGED_IN','未登录');
+    const profile=douyinRequestProfile(config??await resolveDouyinRequestConfig(this.options.requestConfig));params={...profile.params,...params};
     const api:DouyinApiCategory=path==='/aweme/v2/web/module/feed/'?'feed':path==='/aweme/v1/web/aweme/detail/'?'detail':'other';
     const policy=this.recoveryEnabled()?this.recoveryPolicy(cookie,generation):undefined;
     if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited')return this.limited(limited);}
@@ -112,19 +113,32 @@ export class DouyinClient {
       const active=policy?.activeCooldown(api);if(active)return this.limited(active);
       const url=`https://www.douyin.com${path}?${query({...params,a_bogus:signed})}`;
       try{
-        const r=await this.options.transport.request({method,url,headers:{...DOUYIN_PUBLIC_MEDIA_HEADERS,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
+        if(api==='detail')appLogger.i('DouyinDetail',JSON.stringify({event:'request',api:'detail',count:1,mode:'abogus_only'}));
+        const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
           timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
+        const detailBody=api==='detail'?await decodeMediaText(r.body):undefined;
+        if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        if(api==='detail'&&isDouyinHtmlChallenge(detailBody??'')){
+          appLogger.w('DouyinDetail',JSON.stringify({event:'challenge',api:'detail',count:1,mode:'abogus_only'}));
+          const decision=await policy?.challenge(api);
+          if(!await this.currentAuth(cookie,generation)||decision?.kind==='cancelled')return fail('CANCELLED',formatDouyinError('CANCELLED'));
+          return {...fail('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:decision?.kind==='limited'?decision.retryAfterMs:30000};
+        }
         if(r.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
         if(r.status!==200){appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
-        const body=await decodeMediaText(r.body);
+        const body=detailBody??await decodeMediaText(r.body);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         if(!body.trim()||body==='blocked'){
           appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=${body==='blocked'?'blocked':'empty'}`);
           // Keep the existing active-screen expiry boundary for ordinary responses.
           return fail('NOT_LOGGED_IN',body==='blocked'?'Cookie无效：响应体为blocked':'Cookie无效：响应体为空字符串');
         }
+        const statusCode=await readDouyinStatusCode(body);
+        if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        if(statusCode===8){appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=status8`);return this.expireAuthentication(cookie,generation);}
+        if(statusCode!==undefined&&statusCode!==0)return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));
         if(policy)await policy.successful(policyVersion);
         return await this.currentAuth(cookie,generation)?{ok:true,data:body}:fail('CANCELLED',formatDouyinError('CANCELLED'));
       }catch(error){
@@ -152,9 +166,44 @@ export class DouyinClient {
     try{return await pending;}finally{if(this.forbiddenRequests.get(key)===pending)this.forbiddenRequests.delete(key);}
   }
   private freshFeedItem(awemeId:string):DouyinItem|null{const cached=this.feedCache.get(awemeId);if(!cached)return null;if(this.now()-cached.resolvedAtMillis>=PLAY_URL_TTL_MS){this.feedCache.delete(awemeId);return null;}return cached.item.playUrl.trim()?cached.item:null;}
-  async fetchFeedPage(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>>{const authGeneration=this.authGeneration;await this.prepareHistory();const count=Math.max(1,Math.min(20,boundedVideoPageSize(input.count,videoOptEnabled('traffic'),10))),params:Record<string,string>={...baseParams,count:String(count)};const cursor=input.cursor?.trim();if(cursor){params.cursor=cursor;params.max_cursor=cursor;}const r=await this.get("/aweme/v2/web/module/feed/",params,"POST");if(!r.ok)return r;try{const data=await parseDouyinFeedAsync(r.data),resolvedAtMillis=this.now();if(authGeneration!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));for(const item of data.items)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});this.feedCursor=data.nextCursor;this.feedHasMore=data.hasMore;await this.feedStore.save(FEED_KEY,{items:data.items.slice(0,20),cursor:data.nextCursor,hasMore:data.hasMore,anchorAwemeId:null,savedAtMillis:resolvedAtMillis,resolved:Object.fromEntries(data.items.map(item=>[item.awemeId,resolvedAtMillis]))});return {ok:true,data,source:"network"};}catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail("PARSE_FAILED",formatDouyinError("PARSE_FAILED"));}}
+  async fetchFeedPage(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>> {
+    const generation=this.authGeneration;await this.prepareHistory();
+    const cookie=await this.readCookie(),config=await resolveDouyinRequestConfig(this.options.requestConfig);
+    if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
+    const count=Math.max(1,Math.min(20,boundedVideoPageSize(input.count,videoOptEnabled('traffic'),10))),cursor=input.cursor?.trim()||null;
+    const storage=this.options.historyStorage??this.options.secureStorage,key=cookie?douyinFeedSeenKey(cookie):'';
+    let params:Record<string,string>={count:String(count)},web:ReturnType<NonNullable<DouyinClientOptions['webFeedPagination']>>|undefined;
+    if(config.webPagination&&this.options.webFeedPagination){
+      web=this.options.webFeedPagination({cursor,count,presentedIds:await readDouyinSeenIds(storage,key)});params={...web.params,count:String(count)};
+    }else{
+      if(config.webPagination)appLogger.w('DouyinFeed','pagination contract=unconfigured mode=legacy');
+      if(cursor){params.cursor=cursor;params.max_cursor=cursor;}
+    }
+    if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
+    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config);if(!r.ok)return r;
+    try{
+      const parsed=await parseDouyinFeedAsync(r.data),resolvedAtMillis=this.now();
+      if(web)parsed.nextCursor=web.nextCursor(parsed);
+      return await this.enqueueCookie(async():Promise<DouyinResult<DouyinFeedPage>>=>{
+        if(!cookie||!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        const previous=await readDouyinSeenIds(storage,key);
+        if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        const filtered=filterDouyinRecommendations(parsed.items,previous);
+        // A duplicate-only page cannot cause an automatic load-more loop.
+        const data={...parsed,items:filtered.items,hasMore:parsed.hasMore&&filtered.items.length>0};
+        await this.feedStore.save(FEED_KEY,{items:data.items.slice(0,20),cursor:data.nextCursor,hasMore:data.hasMore,anchorAwemeId:null,savedAtMillis:resolvedAtMillis,resolved:Object.fromEntries(data.items.map(item=>[item.awemeId,resolvedAtMillis]))});
+        if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        await storage.set(key,JSON.stringify(filtered.ids));
+        if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        for(const item of data.items)this.feedCache.set(item.awemeId,{item,resolvedAtMillis});
+        this.feedCursor=data.nextCursor;this.feedHasMore=data.hasMore;
+        appLogger.i('DouyinFeed',JSON.stringify({filteredCount:filtered.filteredCount}));
+        return {ok:true,data,source:'network'};
+      });
+    }catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
+  }
   feedSnapshot(){const items:DouyinItem[]=[];for(const id of this.feedCache.keys()){const item=this.freshFeedItem(id);if(item)items.push(item);}return {items:items.slice(-40),cursor:this.feedCursor,hasMore:this.feedHasMore};}
-  async fetchDetail(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinContent>>{const id=awemeId.trim();if(!id)return fail("PARSE_FAILED","缺少 awemeId");const initialCached=this.freshFeedItem(id);if(initialCached&&!options.forceRefresh)return {ok:true,data:{kind:"video",item:initialCached},source:"feed-cache"};const token={};this.detailRequests.set(id,token);const r=await this.get("/aweme/v1/web/aweme/detail/",{...baseParams,aweme_id:id},"GET");if(!r.ok&&r.code==="NOT_LOGGED_IN"){if(this.detailRequests.get(id)===token)this.detailRequests.delete(id);return r;}if(this.detailRequests.get(id)!==token)return fail("CANCELLED",formatDouyinError("CANCELLED"));this.detailRequests.delete(id);if(!r.ok&&isDouyinTemporaryFailure(r.code))return r;if(!r.ok){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:r;}try{const data=traceServiceWork("douyin.detail.parse",()=>parseDouyinDetail(r.data));if(data.kind==="video")this.feedCache.set(id,{item:data.item,resolvedAtMillis:this.now()});return {ok:true,data,source:"network"};}catch(e){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:fail("PARSE_FAILED",String(e));}}
+  async fetchDetail(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinContent>>{const id=awemeId.trim();if(!id)return fail("PARSE_FAILED","缺少 awemeId");const initialCached=this.freshFeedItem(id);if(initialCached&&!options.forceRefresh)return {ok:true,data:{kind:"video",item:initialCached},source:"feed-cache"};const token={};this.detailRequests.set(id,token);const r=await this.get("/aweme/v1/web/aweme/detail/",{aweme_id:id},"GET");if(!r.ok&&r.code==="NOT_LOGGED_IN"){if(this.detailRequests.get(id)===token)this.detailRequests.delete(id);return r;}if(this.detailRequests.get(id)!==token)return fail("CANCELLED",formatDouyinError("CANCELLED"));this.detailRequests.delete(id);if(!r.ok&&isDouyinTemporaryFailure(r.code))return r;if(!r.ok){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:r;}try{const data=traceServiceWork("douyin.detail.parse",()=>parseDouyinDetail(r.data));if(data.kind==="video")this.feedCache.set(id,{item:data.item,resolvedAtMillis:this.now()});return {ok:true,data,source:"network"};}catch(e){const cached=this.freshFeedItem(id);return cached?{ok:true,data:{kind:"video",item:cached},source:"feed-cache"}:fail("PARSE_FAILED",String(e));}}
   private async resolvePlaybackInner(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinItem>>{const id=awemeId.trim();if(options.forceRefresh)this.feedCache.delete(id);const cached=this.freshFeedItem(id);if(cached)return {ok:true,data:cached,source:"feed-cache"};const r=await this.fetchDetail(id);return !r.ok?r:r.data.kind==="video"?{ok:true,data:r.data.item,source:r.source}:fail("UNSUPPORTED","图文内容没有视频播放流");}
   async resolvePlayback(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinItem>>{
     const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true]);let pending=this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}

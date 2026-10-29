@@ -33,9 +33,9 @@ test("legacy 403 switch expires the session and notifies login navigation, inclu
 test("resolvePlayback refreshes when the feed cache is expired",async()=>{let now=0,calls=0;const store=new MemoryStore();await store.set("douyin.cookie","x");const client=new DouyinClient({transport:{async request(){calls++;return {status:200,headers:{},body:utf8Encode(JSON.stringify(calls===1?{aweme_list:[item]}:{aweme_detail:{...item,desc:"fresh"}}))};}},secureStorage:store,signer:{sign:()=>"x"},now:()=>now});await client.fetchFeedPage();now=5*60*1000;const result=await client.resolvePlayback("7");expect(result).toMatchObject({ok:true,source:"network",data:{description:"fresh"}});expect(calls).toBe(2);});
 
 import nativeFeed from '../fixtures/douyin-feed-native.json';
-test('all recommendation parameters match the native 16-item title-page request',async()=>{
+test('recommendation keeps native parameters with the observed web version defaults',async()=>{
   const store=new MemoryStore();await store.set('douyin.cookie','fixture');let signed:Readonly<Record<string,string>>={};const requests:HttpRequest[]=[];
   const client=new DouyinClient({secureStorage:store,signer:{sign:params=>{signed=params;return 'sig';}},transport:{request:async request=>{requests.push(request);return {status:200,headers:{},body:utf8Encode('{"aweme_list":[]}')};}}});
   await client.fetchFeedPage({count:16});
-  expect(signed).toEqual(nativeFeed.params);expect(new URL(requests[0]!.url).pathname).toBe(nativeFeed.path);expect(requests[0]!.method).toBe(nativeFeed.method);
+  expect(signed).toEqual({...nativeFeed.params,version_code:'170400',version_name:'17.4.0',browser_version:'155.0.0.0',engine_version:'155.0.0.0'});expect(new URL(requests[0]!.url).pathname).toBe(nativeFeed.path);expect(requests[0]!.method).toBe(nativeFeed.method);
 });
