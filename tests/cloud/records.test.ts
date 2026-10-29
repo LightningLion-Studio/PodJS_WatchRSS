@@ -5,6 +5,7 @@ import {crypto,key} from './k2-crypto';
 import {CloudRecordCodec,WatchCloudRecords,revision,validateRecord,type RecordDocument,type RecordPorts,type RecordRow} from '../../src/cloud/records';
 import {rssSourceKey,rssArticleId} from '../../src/cloud/rss-identity';
 import {utf8Encode} from '../../src/cloud/types';
+import {cloudRaw} from '../../src/cloud/compatibility';
 const c={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
 test('unavailable or paused host crypto stops at the first record without ACK, and a repaired host can retry',async()=>{for(const code of ['cloud_host_capability_unavailable','cloud_sync_suspended','cloud_sync_deadline_exceeded']){
  const f=env();for(let i=0;i<3;i++)await f.put(doc('host-repair-'+i));const original=f.ports.crypto;let attempts=0;
@@ -79,9 +80,8 @@ test('unknown authenticated kinds survive replay; epoch mismatch, account switch
  for(const mode of ['epoch','pagination','account']){const g=env();await g.put(doc('a'));const get=g.ports.get;g.ports.get=async after=>{const page=await get(after);if(mode==='epoch')page.libraryEpoch='new';if(mode==='pagination')page.hasMore=true;if(mode==='account')g.invalidate();return page;};await expect(g.records().pull()).rejects.toThrow();expect(g.state()).toBeUndefined();}
 });
 test('missing content version refreshes verified bootstrap once then replays; corrupt projection restarts at cursor zero',async()=>{
- const f=env();await f.put(doc('a'));let calls=0,missing=true;f.ports.key=async version=>version===1&&missing&&calls>0?undefined:key.slice();
- // First key request is the anchor, following requests are row content keys.
- const original=f.ports.key;let keys=0;f.ports.key=async v=>++keys===1?key.slice():missing?undefined:original(v);
+ const f=env();await f.put(doc('a'),{version:2,anchor:key});let calls=0,missing=true;f.ports.key=async version=>version===2&&missing?undefined:key.slice();
+ // Content version 2 is distinct from the already verified anchor version 1.
  f.ports.refreshKeys=async()=>{calls++;missing=false;};await f.records().pull();expect(calls).toBe(1);expect(f.applied.map(d=>d.value.articleId)).toEqual(['a']);
  const afters:string[]=[];const get=f.ports.get;f.ports.get=async after=>{afters.push(after);return get(after);};f.ports.readState=async()=>'{"epoch":"epoch-fixture","cursor":"9","records":{"invalid":{}},"rows":{}}';await f.records().pull();expect(afters[0]).toBe('0');
 });
@@ -115,7 +115,7 @@ test('applied tombstones retain CAS metadata without retaining ciphertext or dec
  const changed=await f.put({kind:'article',value:{articleId:'retired-0',url:'https://feed.example/0',deleted:true,deletedAt:2}},{tombstone:true});await f.records().pull();expect(decrypts).toBe(257);expect(f.state().records[changed.recordId].revision).toBe('257');
 });
 test('a suspended key read is control flow, never swallowed as a quarantined bad row',async()=>{
- const f=env();await f.put(doc('not-poisoned'));let calls=0;f.ports.key=async()=>{if(++calls>1)throw Error('cloud_sync_suspended');return key.slice();};
+ const f=env();await f.put(doc('not-poisoned'),{version:2,anchor:key});f.ports.key=async version=>{if(version===2)throw Error('cloud_sync_suspended');return key.slice();};
  await expect(f.records().pull()).rejects.toThrow('cloud_sync_suspended');expect(f.state()).toBeUndefined();expect(f.applied).toHaveLength(0);
 });
 
@@ -170,4 +170,40 @@ test('record replay timings are numeric and diagnostic sink failure cannot affec
 });
 test('failed record apply emits no applied timing and never records an ACK',async()=>{
  const f=env();await f.put(doc('failed'));const stages:string[]=[];f.ports.progress=value=>stages.push(value.stage);f.failApply(true);await expect(f.records().pull()).rejects.toThrow('db failure');expect(stages).toEqual(['decoding','merging']);expect(f.state()).toBeUndefined();
+});
+
+
+test('production hydrate path skips unchanged original ciphertext and SQL while keeping decoded migration basis',async()=>{
+ const f=env();for(let i=0;i<2135;i++)await f.put(cachedRss(i));await f.records().pull();let originals=0,projections=0,keys=0,hkdfs=0;const c=f.ports.crypto,key=f.ports.key;
+ f.ports.crypto={...c,decrypt:async(k,a,n,b)=>{if(new TextDecoder().decode(a).startsWith('watchrss-cloud-record-v1:'))originals++;else projections++;return c.decrypt(k,a,n,b);},hkdf:async(...args)=>{hkdfs++;return c.hkdf(...args);}};
+ f.ports.key=async v=>{keys++;return key(v);};const hydrated:RecordDocument[]=[];f.ports.hydrate=async docs=>{hydrated.push(...docs);};f.ports.apply=async()=>{throw Error('unchanged durable rows must not merge');};
+ const r=f.records();expect(await r.pull()).toBe(0);expect(originals).toBe(0);expect(projections).toBe(43);expect(hydrated).toHaveLength(2135);expect(keys).toBe(1);expect(hkdfs).toBe(1);
+ for(const item of (r as any).decoded.values())expect(cloudRaw(item.doc)).toBeUndefined();
+ // The encrypted disposable cache never stores article IDs or reading payloads as plaintext.
+ expect(JSON.stringify(f.state())).not.toContain('cache-fixture');
+});
+test('projection corruption or a changed row/hash only retries affected originals, and never licenses an unauthenticated value',async()=>{
+ for(const mode of ['ciphertext','ack','row'] as const){const f=env();for(let i=0;i<111;i++)await f.put(cachedRss(i));await f.records().pull();const state=f.state();
+  if(mode==='ciphertext')state.projections[0].ciphertextBase64=Buffer.alloc(48).toString('base64');
+  else if(mode==='ack')state.records[state.projections[0].ids[0]].hash='f'.repeat(64);
+  else state.rows[state.projections[0].ids[0]].envelope.ciphertextBase64=Buffer.alloc(48).toString('base64');
+  const hydrated:RecordDocument[]=[];f.ports.readState=async()=>JSON.stringify(state);f.ports.hydrate=async docs=>{hydrated.push(...docs);};let decrypts=0;const c=f.ports.crypto;
+  f.ports.crypto={...c,decrypt:async(k,a,n,b)=>{if(new TextDecoder().decode(a).startsWith('watchrss-cloud-record-v1:'))decrypts++;return c.decrypt(k,a,n,b);}};
+  f.applied.length=0;await f.records().pull();expect(decrypts).toBe(50);expect(f.applied).toHaveLength(mode==='ack'?1:0);expect(hydrated.length+f.applied.length).toBe(mode==='row'?110:111);expect(f.state().cursor).toBe('111');expect(Object.keys(f.state().rows)).toHaveLength(111);
+ }
+});
+test('a restarted projection stays epoch/account bound and read-only unknown tokens survive exact reserialization',async()=>{
+ const f=env(),future={kind:'future-kind',value:{opaque:'future'}};await f.put(future);await f.records().pull();const before=f.state();expect(before.projections).toHaveLength(1);
+ f.ports.hydrate=async()=>{};const r=f.records();await r.pull();expect(r.compatibility.opaque).toBe(1);expect(f.state().rows).toEqual(before.rows);
+ // A cache copied to another epoch is disposable, never treated as an applied library.
+ f.ports.epoch='other';await expect(f.records().pull()).rejects.toThrow('library_epoch_mismatch');
+});
+
+
+test('failed hash cannot certify a projection using an old ACK; repair must authenticate and apply the row',async()=>{
+ const f=env(),row=await f.put(cachedRss(9));await f.records().pull();const old=f.state();old.projections=[];old.records[row.recordId].hash='f'.repeat(64);let stored=JSON.stringify(old);
+ f.ports.readState=async()=>stored;f.ports.writeState=async text=>{stored=text;};f.ports.hydrate=async()=>{};f.applied.length=0;
+ const original=f.ports.crypto;f.ports.crypto={...original,sha256:async bytes=>{if(new TextDecoder().decode(bytes).startsWith('{"kind":"rss-state"'))throw Error('fixture hash unavailable');return original.sha256(bytes);}};
+ await f.records().pull();expect(JSON.parse(stored).projections).toEqual([]);expect(f.applied).toHaveLength(0);expect(JSON.parse(stored).rows[row.recordId]).toEqual(row);
+ f.ports.crypto=original;await f.records().pull();expect(f.applied).toHaveLength(1);expect(JSON.parse(stored).projections).toHaveLength(1);expect(JSON.parse(stored).records[row.recordId].hash).not.toBe('f'.repeat(64));
 });

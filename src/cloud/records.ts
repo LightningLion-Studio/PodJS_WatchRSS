@@ -13,7 +13,7 @@ export interface RecordEnvelope {algorithm:'A256GCM';keyVersion:number;nonceBase
 export interface RecordRow {recordId:string;revision:string;envelope:RecordEnvelope;tombstone:boolean}
 export interface RecordPage extends CloudTrust {formatVersion:0|1;items:RecordRow[];cursor:string;headRevision:string;hasMore:boolean}
 export interface RecordWrite {recordId:string;expectedRevision:string;envelope:RecordEnvelope;tombstone:boolean}
-export interface RecordPullMetrics {decryptions:number;retired:number;elapsedMillis:number;outcome:'complete'|'paused'|'failed'}
+export interface RecordPullMetrics {projectionDecryptions?:number;decryptions:number;retired:number;elapsedMillis:number;outcome:'complete'|'paused'|'failed'}
 export interface RecordReplayProgress {event:'records-replay';stage:'decoding'|'merging'|'applied';batchRows:number;documents:number;keyMillis:number;decodeMillis:number;hashMillis:number;applyMillis:number;elapsedMillis:number}
 export interface RecordPorts {
  userId:string;epoch:string;anchorVersion:number;version:number;
@@ -31,6 +31,9 @@ export interface RecordPorts {
  get(after:string):Promise<RecordPage>;push(items:RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>;
  refreshKeys?():Promise<void>;current():Promise<void>;assertUpload():Promise<void>;
  bookReplacement?(legacy:RecordDocument):Promise<{book:RecordDocument;reading?:RecordDocument}|undefined>;
+ /** Restore previously committed in-memory RSS/source projections without SQL writes. */
+ hydrate?(documents:RecordDocument[]):Promise<void>;
+ reapply?():Promise<number>;
  apply(documents:RecordDocument[]):Promise<number>;export():Promise<RecordDocument[]>;
 }
 const check=(ok:unknown)=>{if(!ok)throw Error('cloud_record_invalid');};
@@ -68,19 +71,32 @@ export class CloudRecordCodec {
   }catch(error){if(error instanceof Error&&[CLOUD_HOST_CAPABILITY_UNAVAILABLE,CLOUD_SYNC_SUSPENDED,'cloud_sync_deadline_exceeded','cloud_operation_superseded'].includes(error.message))throw error;throw Error(error instanceof Error&&error.message==='raw_json_depth'?'cloud_record_format_depth':'cloud_record_invalid');}finally{derived.fill(0);plain?.fill(0);}
  }
 }
-interface RecordState {protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
+interface RecordProjection {ids:string[];keyVersion:number;binding:string;nonceBase64:string;ciphertextBase64:string}
+interface RecordState {projections?:RecordProjection[];protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
 /** Disposable encrypted projection, account/epoch scoped by the cache; no plaintext library in it. */
 export class WatchCloudRecords {
  private state!:RecordState;private codec:CloudRecordCodec;private decoded=new Map<string,{row:RecordRow;doc:RecordDocument;legacy:boolean}>();
- private decryptions=0;private retired=0;
+ private decryptions=0;private projectionDecryptions=0;private retired=0;
+ private runKeys=new Map<number,Uint8Array|undefined>();
+ private derivedKeys=new Map<string,Uint8Array>();
+ private async key(version:number){let key=this.runKeys.get(version);if(!this.runKeys.has(version)){key=await this.p.key(version);this.runKeys.set(version,key);}return key?.slice();}
+ private async projectionBinding(ids:string[]){return this.p.crypto.sha256(utf8Encode(JSON.stringify(ids.map(id=>[this.state.rows[id],this.state.records[id]]))));}
+ private projectionAad(group:Pick<RecordProjection,'keyVersion'|'binding'>){return utf8Encode(JSON.stringify(['watchrss/local-record-projection/v1',this.p.userId,this.p.epoch,group.keyVersion,group.binding]));}
+ private async projectionKey(key:Uint8Array){return this.derive(key,utf8Encode(this.p.userId),utf8Encode('watchrss/local-record-projection/v1'));}
+ private async derive(key:Uint8Array,salt:Uint8Array,info:Uint8Array){
+  const id=bytesToBase64(key)+':'+bytesToBase64(salt)+':'+bytesToBase64(info);let derived=this.derivedKeys.get(id);
+  if(!derived){derived=await this.p.crypto.hkdf(key,salt,info);this.derivedKeys.set(id,derived);}return derived.slice();
+ }
+ private clearRunKeys(){for(const key of [...this.runKeys.values(),...this.derivedKeys.values()])key?.fill(0);this.runKeys.clear();this.derivedKeys.clear();}
+
  get compatibility(){const out=emptyCompatibilityStatus();for(const item of this.decoded.values()){const p=cloudCompatibility(item.doc);if(p.opaque)out.opaque++;else if(p.readOnly)out.readOnly++;}for(const id of Object.keys(this.state?.protectedRows??{}))if(!this.decoded.has(id))out.readOnly++;out.opaque+=Object.keys(this.state?.quarantinedRows??{}).length;out.editPending=Object.keys(this.state?.pendingEdits??{}).length;out.upgradeRequired=!!(out.opaque||out.readOnly||out.editPending);return out;}
- constructor(private p:RecordPorts){this.codec=new CloudRecordCodec({...p.crypto,decrypt:async(...args)=>{this.decryptions++;return p.crypto.decrypt(...args);}});}
+ constructor(private p:RecordPorts){this.codec=new CloudRecordCodec({...p.crypto,hkdf:(...args)=>this.derive(...args),decrypt:async(...args)=>{this.decryptions++;return p.crypto.decrypt(...args);}});}
  private empty():RecordState{return {epoch:this.p.epoch,cursor:'0',records:{},rows:{}};}
  private async save(){await this.p.current();await this.p.writeState(JSON.stringify(this.state));}
  async pull(){
-  this.decryptions=0;this.retired=0;const began=Date.now();let outcome:RecordPullMetrics['outcome']='complete';
+  this.decryptions=0;this.projectionDecryptions=0;this.retired=0;const began=Date.now();let outcome:RecordPullMetrics['outcome']='complete';
   try{return await this.pullRecords();}catch(error){outcome=String(error).includes('cloud_sync_suspended')?'paused':'failed';throw error;}
-  finally{try{this.p.report?.({decryptions:this.decryptions,retired:this.retired,elapsedMillis:Math.max(0,Date.now()-began),outcome});}catch{/* Diagnostics cannot change sync behavior. */}}
+  finally{this.clearRunKeys();try{this.p.report?.({...(this.projectionDecryptions?{projectionDecryptions:this.projectionDecryptions}:{}),decryptions:this.decryptions,retired:this.retired,elapsedMillis:Math.max(0,Date.now()-began),outcome});}catch{/* Diagnostics cannot change sync behavior. */}}
  }
  private async pullRecords(){
   const p=this.p;await p.current();this.state=this.empty();const raw=await p.readState();if(raw)try{const s=JSON.parse(raw);revision(s.cursor);check(s.records&&s.rows&&typeof s.records==='object'&&typeof s.rows==='object'&&!Array.isArray(s.records)&&!Array.isArray(s.rows)&&Object.keys(s.records).length<=50000&&Object.keys(s.rows).length<=50000);
@@ -88,15 +104,39 @@ export class WatchCloudRecords {
    if(s.protectedVersions!==undefined){check(s.protectedVersions&&typeof s.protectedVersions==='object'&&!Array.isArray(s.protectedVersions));let count=Object.keys(s.rows).length;for(const [id,versions]of Object.entries(s.protectedVersions) as [string,RecordRow[]][]){check(ID.test(id)&&Array.isArray(versions));for(const row of versions){check(row.recordId===id&&row.envelope&&typeof row.tombstone==='boolean');revision(row.revision);}count+=versions.length;}check(count<=50000);}
    for(const [id,v]of Object.entries(s.records) as [string,{revision:string;hash:string}][]){check(ID.test(id)&&v&&ID.test(v.hash));revision(v.revision);}
    for(const [id,v]of Object.entries(s.rows) as [string,RecordRow][]){check(ID.test(id)&&v&&v.recordId===id&&v.envelope&&typeof v.tombstone==='boolean');revision(v.revision);}
+   // Projection corruption is not loss of the underlying encrypted row cache.
+   if(s.projections!==undefined){let count=0;s.projections=Array.isArray(s.projections)?s.projections.filter((g:RecordProjection)=>{const valid=g&&Array.isArray(g.ids)&&g.ids.length>0&&g.ids.length<=50&&g.ids.every(id=>ID.test(id))&&Number.isSafeInteger(g.keyVersion)&&g.keyVersion>0&&ID.test(g.binding)&&typeof g.nonceBase64==='string'&&g.nonceBase64.length===16&&typeof g.ciphertextBase64==='string'&&g.ciphertextBase64.length<=12*1024*1024;count+=valid?g.ids.length:0;return valid&&count<=50000;}):[];}
    if(s.epoch===p.epoch)this.state=s;
   }catch{/* Cache loss requires cursor zero, never a library reset. */}
-  let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await p.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
+  let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await this.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
+  this.decoded.clear();
+  const projectionEntries=new Map<string,{id:string;text:string;legacy:boolean}>();
   const cachedInteractions:RecordDocument[]=[];
+  const storeProjection=async(rows:RecordRow[])=>{
+   const entries=rows.flatMap(row=>{const entry=projectionEntries.get(row.recordId);return entry&&this.state.rows[row.recordId]&&this.state.records[row.recordId]?.revision===row.revision?[entry]:[];});if(!entries.length)return;
+   const ids=entries.map(e=>e.id),version=p.version,key=await this.key(version);if(!key)throw Error('missing_key_version');let derived:Uint8Array|undefined,bytes:Uint8Array|undefined;
+   try{const group={ids,keyVersion:version,binding:await this.projectionBinding(ids)};derived=await this.projectionKey(key);bytes=utf8Encode(JSON.stringify({version:1,entries}));check(bytes.length<=8*1024*1024);const encrypted=await p.crypto.encrypt(derived,this.projectionAad(group),bytes);(this.state.projections??=[]).push({...group,nonceBase64:bytesToBase64(encrypted.nonce),ciphertextBase64:bytesToBase64(encrypted.ciphertext)});}finally{key.fill(0);derived?.fill(0);bytes?.fill(0);}
+  };
+  const hydrateProjections=async()=>{
+   const covered=new Set<string>(),valid:RecordProjection[]=[];
+   for(const group of this.state.projections??[]){await p.current();let key:Uint8Array|undefined,derived:Uint8Array|undefined,bytes:Uint8Array|undefined;
+    try{if(group.ids.some(id=>covered.has(id)||!this.state.rows[id]||this.state.quarantinedRows?.[id])||await this.projectionBinding(group.ids)!==group.binding)continue;
+     key=await this.key(group.keyVersion);if(!key)continue;derived=await this.projectionKey(key);this.projectionDecryptions++;bytes=await p.crypto.decrypt(derived,this.projectionAad(group),base64ToBytes(group.nonceBase64),base64ToBytes(group.ciphertextBase64));check(bytes.length<=8*1024*1024);
+     const data=JSON.parse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
+     const items=data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};});
+     const docs=items.filter((item:any)=>!cloudCompatibility(item.doc).opaque&&item.doc.value.bookIndexRetired!==true&&!(item.row.tombstone&&!item.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(item.doc.kind)).map((item:any)=>item.doc);
+     if(p.hydrate)await p.hydrate(docs);else cachedInteractions.push(...docs);
+     await p.current();for(const item of items){covered.add(item.row.recordId);this.decoded.set(item.row.recordId,item);}valid.push(group);
+    }catch(error){if(/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|library_epoch_mismatch|账号|cloud_host_capability_unavailable/.test(String(error)))throw error;/* Invalid disposable projection falls back to authenticated original rows. */}
+    finally{key?.fill(0);derived?.fill(0);bytes?.fill(0);}
+   }
+   this.state.projections=valid;return covered;
+  };
   const applyCachedInteractions=async(final=false)=>{
    while(cachedInteractions.length>=500||final&&cachedInteractions.length){
     await p.current();const docs=cachedInteractions.splice(0,500),started=Date.now();
     const report=(stage:'merging'|'applied')=>{try{p.progress?.({event:'records-replay',stage,batchRows:docs.length,documents:docs.length,keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:stage==='applied'?Math.max(0,Date.now()-started):0,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};
-    report('merging');changed+=await p.apply(docs);await p.current();report('applied');
+    report('merging');if(p.hydrate)await p.hydrate(docs);else changed+=await p.apply(docs);await p.current();report('applied');
    }
   };
   const process=async(rows:RecordRow[],retained=false)=>{await p.current();const started=Date.now(),times={keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:0};const timed=async<T>(name:keyof typeof times,run:()=>Promise<T>)=>{const at=Date.now();try{return await run();}finally{times[name]+=Math.max(0,Date.now()-at);}};const progress=(stage:RecordReplayProgress['stage'],documents:number)=>{try{p.progress?.({event:'records-replay',stage,batchRows:rows.length,documents,...times,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};progress('decoding',0);const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={},retiredIds=new Set<string>();
@@ -107,19 +147,19 @@ export class WatchCloudRecords {
     // ciphertext (no acknowledgement) must still authenticate below.
     if(row.tombstone&&old?.revision===row.revision&&!this.state.protectedRows?.[row.recordId]){delete this.state.rows[row.recordId];this.decoded.delete(row.recordId);this.retired++;continue;}
     await p.current();let key:Uint8Array|undefined;
-    try{key=await timed('keyMillis',()=>p.key(row.envelope.keyVersion));if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();key=await timed('keyMillis',()=>p.key(row.envelope.keyVersion));}if(!key)throw Error('missing_key_version');const value=await timed('decodeMillis',()=>this.codec.decode(key!,anchor,p.userId,row));check(cloudCompatibility(value.doc).opaque||!value.doc.value.deleted||row.tombstone);const previous=this.decoded.get(row.recordId);if(previous&&previous.row.revision!==row.revision&&(hasArticleRegisters(previous.doc)||hasArticleRegisters(value.doc))){const versions=(this.state.protectedVersions??={})[row.recordId]??=[];const unique=[...versions];for(const original of [previous.row,row])if(!unique.some(r=>r.revision===original.revision&&r.envelope.ciphertextBase64===original.envelope.ciphertextBase64))unique.push(original);if(Object.keys(this.state.rows).length+Object.values(this.state.protectedVersions??{}).reduce((n,v)=>n+v.length,0)+unique.length-versions.length>50000)throw Error('cloud_record_count_limit');this.state.protectedVersions[row.recordId]=unique;}this.decoded.set(row.recordId,{row,...value});delete this.state.quarantinedRows?.[row.recordId];if(cloudCompatibility(value.doc).readOnly)(this.state.protectedRows??={})[row.recordId]=true;else delete this.state.protectedRows?.[row.recordId];if(cloudCompatibility(value.doc).opaque){acks[row.recordId]={revision:row.revision,hash:await timed('hashMillis',()=>this.codec.hash(value.doc))};this.state.rows[row.recordId]=row;continue;}const retired=value.doc.value.bookIndexRetired===true||row.tombstone&&!value.doc.value.deleted;
+    try{key=await timed('keyMillis',()=>this.key(row.envelope.keyVersion));if(!key&&p.refreshKeys&&!refreshed.has(row.envelope.keyVersion)){refreshed.add(row.envelope.keyVersion);await p.refreshKeys();await p.current();this.runKeys.delete(row.envelope.keyVersion);key=await timed('keyMillis',()=>this.key(row.envelope.keyVersion));}if(!key)throw Error('missing_key_version');const value=await timed('decodeMillis',()=>this.codec.decode(key!,anchor,p.userId,row));check(cloudCompatibility(value.doc).opaque||!value.doc.value.deleted||row.tombstone);const previous=this.decoded.get(row.recordId);if(previous&&previous.row.revision!==row.revision&&(hasArticleRegisters(previous.doc)||hasArticleRegisters(value.doc))){const versions=(this.state.protectedVersions??={})[row.recordId]??=[];const unique=[...versions];for(const original of [previous.row,row])if(!unique.some(r=>r.revision===original.revision&&r.envelope.ciphertextBase64===original.envelope.ciphertextBase64))unique.push(original);if(Object.keys(this.state.rows).length+Object.values(this.state.protectedVersions??{}).reduce((n,v)=>n+v.length,0)+unique.length-versions.length>50000)throw Error('cloud_record_count_limit');this.state.protectedVersions[row.recordId]=unique;}this.decoded.set(row.recordId,{row,...value});projectionEntries.set(row.recordId,{id:row.recordId,text:cloudRaw(value.doc)?.source??canonical({format:'watchrss-rss-record',version:1,kind:value.doc.kind,features:value.doc.features,value:value.doc.value}),legacy:value.legacy});delete this.state.quarantinedRows?.[row.recordId];if(cloudCompatibility(value.doc).readOnly)(this.state.protectedRows??={})[row.recordId]=true;else delete this.state.protectedRows?.[row.recordId];if(cloudCompatibility(value.doc).opaque){acks[row.recordId]={revision:row.revision,hash:await timed('hashMillis',()=>this.codec.hash(value.doc))};this.state.rows[row.recordId]=row;continue;}const retired=value.doc.value.bookIndexRetired===true||row.tombstone&&!value.doc.value.deleted;
      const v=value.doc.value,publicIndex=value.doc.kind==='article'&&publicArticleIndex(v);
      const hash=await timed('hashMillis',()=>this.codec.hash(value.doc));
      if(!retired&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind)&&(!old||old.revision!==row.revision||value.doc.kind!=='article'||publicIndex)){
       // Already-durable public interactions still need replay when an inventory
       // materializes an article. Aggregate only exact authenticated ACK matches:
       // fresh/changed values, tombstones and unknown formats keep the 50-row path.
-      if(retained&&!row.tombstone&&!cloudCompatibility(value.doc).readOnly&&old?.revision===row.revision&&old.hash===hash&&(value.doc.kind==='rss-state'||publicIndex))cachedInteractions.push(value.doc);
+      if(retained&&!row.tombstone&&!cloudCompatibility(value.doc).readOnly&&old?.revision===row.revision&&old.hash===hash&&(p.hydrate||value.doc.kind==='rss-state'||publicIndex))cachedInteractions.push(value.doc);
       else docs.push(value.doc);
      }
      acks[row.recordId]={revision:row.revision,hash};
      if(row.tombstone&&!cloudCompatibility(value.doc).readOnly&&['article','source','rss-state','book','book-reading'].includes(value.doc.kind))retiredIds.add(row.recordId);
-    }catch(error){if(String(error).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE)||String(error).includes('cloud_record_count_limit')||/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|library_epoch_mismatch|账号|client_upgrade_required|commitment|device_attestation/.test(String(error)))throw error;this.decoded.delete(row.recordId);if(String(error).includes('cloud_record_format_depth'))(this.state.quarantinedRows??={})[row.recordId]=true;/* Retain original ciphertext for replay. A poisoned row cannot disable old validated keys. */}finally{key?.fill(0);}
+    }catch(error){if(String(error).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE)||String(error).includes('cloud_record_count_limit')||/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|library_epoch_mismatch|账号|client_upgrade_required|commitment|device_attestation/.test(String(error)))throw error;this.decoded.delete(row.recordId);projectionEntries.delete(row.recordId);if(String(error).includes('cloud_record_format_depth'))(this.state.quarantinedRows??={})[row.recordId]=true;/* Retain original ciphertext for replay. A poisoned row cannot disable old validated keys. */}finally{key?.fill(0);}
     this.state.rows[row.recordId]=row;
    }
    progress('merging',docs.length);if(docs.length)changed+=await timed('applyMillis',()=>p.apply(docs));await p.current();Object.assign(this.state.records,acks);progress('applied',docs.length);
@@ -128,11 +168,16 @@ export class WatchCloudRecords {
    for(const id of retiredIds){delete this.state.rows[id];this.decoded.delete(id);}
   };
   try{
-   // Replay encrypted retained rows, including states that preceded public entries.
-   const retained=Object.values(this.state.rows);
+   // Reuse durably applied projections; authenticate only uncovered originals.
+   // Hydrate pending interactions even when their public entries do not exist yet.
+   const covered=await hydrateProjections();const retained=Object.values(this.state.rows).filter(row=>!covered.has(row.recordId));
    // Decode in bounded pages. Fresh/unacknowledged values still merge at most
    // fifty at a time; already-durable public interactions aggregate to 500.
-   for(let at=0;at<retained.length;at+=50){await process(retained.slice(at,at+50),true);if(cachedInteractions.length>=500)await applyCachedInteractions();}
+   for(let at=0;at<retained.length;at+=50){const batch=retained.slice(at,at+50);await process(batch,true);await applyCachedInteractions(true);await storeProjection(batch);projectionEntries.clear();
+    // Amortize full-cache atomic writes; a deadline/suspension checkpoints the
+    // remaining completed 50-row batches below, before releasing the lease.
+    if((at+50)%500===0)await this.save();}
+   projectionEntries.clear();
    // No GET/cursor advancement or local upload may overtake this replay.
    await applyCachedInteractions(true);
    const startCursor=cursor;
@@ -141,13 +186,13 @@ export class WatchCloudRecords {
     await p.current();if(page.libraryEpoch!==p.epoch)throw Error('library_epoch_mismatch');if(page.formatVersion===0)throw Error('cloud_records_consent_required');
     check(page.formatVersion===1&&Array.isArray(page.items)&&page.items.length<=50&&typeof page.hasMore==='boolean');revision(page.cursor);revision(page.headRevision);check(cmp(page.cursor,cursor)>=0&&cmp(page.headRevision,page.cursor)>=0&&(page.hasMore?(cmp(page.cursor,cursor)>0&&cmp(page.headRevision,page.cursor)>0&&page.items.length>0):page.cursor===page.headRevision));
     let last=cursor;for(const row of page.items){revision(row.revision);check(ID.test(row.recordId)&&typeof row.tombstone==='boolean'&&cmp(row.revision,last)>0&&cmp(row.revision,page.cursor)<=0);last=row.revision;}
-    await process(page.items);cursor=page.cursor;this.state.cursor=cursor;await this.save();
+    await process(page.items);await storeProjection(page.items);projectionEntries.clear();cursor=page.cursor;this.state.cursor=cursor;await this.save();
     try{const base=BigInt(startCursor);p.pageProgress?.(Number(BigInt(cursor)-base),Number(BigInt(page.headRevision)-base));}catch{}
     if(!page.hasMore)return changed;
    }throw Error('cloud_record_page_limit');
   }catch(error){if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&p.checkpoint)await p.checkpoint(JSON.stringify(this.state));throw error;}finally{anchor.fill(0);}
  }
- async reapply(){await this.p.current();return this.p.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
+ async reapply(){await this.p.current();if(this.p.reapply)return this.p.reapply();return this.p.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
  flush(completedPrivateArticleIds:readonly string[]=[],completedBookIds:readonly string[]=[]){return this.flushRecords(completedPrivateArticleIds,completedBookIds,false);}
  /** Public RSS interactions commit independently of slow private body restore.
   * This lane never publishes private metadata or retires any legacy record. */
@@ -178,6 +223,6 @@ export class WatchCloudRecords {
      await add(id,{kind:d.kind,value:{articleId:d.value.articleId,url:d.value.url,rssSourceUrl:d.value.rssSourceUrl,sourceDeviceId:d.value.sourceDeviceId??'',deleted:true,deletedAt:Math.max(1,...Object.entries(d.value).filter(([k,v])=>k.endsWith('At')&&typeof v==='number').map(([,v])=>Number(v)))+1}},true);
     }else if(item.legacy){const newId=await this.codec.id(anchor,p.userId,d);if(this.state.records[newId]){await add(id,d,true,item.row);}}
    }await flush();await this.save();return written;
-  }catch(error){if((error as {status?:number})?.status===426||(error as {code?:string})?.code==='cloud_format_upgrade_required'){for(const item of batch)(this.state.pendingEdits??={})[item.recordId]=true;await this.save();}throw error;}finally{anchor.fill(0);key.fill(0);}
+  }catch(error){if((error as {status?:number})?.status===426||(error as {code?:string})?.code==='cloud_format_upgrade_required'){for(const item of batch)(this.state.pendingEdits??={})[item.recordId]=true;await this.save();}throw error;}finally{anchor.fill(0);key.fill(0);this.clearRunKeys();}
  }
 }

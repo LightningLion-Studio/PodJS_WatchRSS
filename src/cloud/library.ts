@@ -85,10 +85,13 @@ export class WatchCloudLibraryAdapter {
   if(interacted&&(!reading||['readingPositionChangedAt','favoriteChangedAt','watchLaterChangedAt'].some(k=>((reading as unknown as Record<string,any>)[k]??0)<(legacy.value[k]??0))))return;
   return {book:{kind:'book',value:book},...(reading?{reading:{kind:'book-reading',value:reading}}:{})};
  }
- async applyRecords(documents:RecordDocument[]){
-  this.guard.require();let changed=0;const protectedDocs=documents.filter(hasArticleRegisters);if(protectedDocs.length){if(!this.repository.mergeCloudArticleRegisters)throw Error('cloud_format_article_storage_unavailable');changed+=await this.repository.mergeCloudArticleRegisters(protectedDocs);}documents=documents.filter(d=>!hasArticleRegisters(d));const articles:ExportedArticle[]=[],sources:SyncedSource[]=[];
+ /** Rebuild the ephemeral lookup tables from an authenticated, durably applied
+  * local projection. Never replay SQL side effects merely to warm a new session. */
+ async hydrateRecords(documents:RecordDocument[]){await this.applyRecords(documents,true);}
+ async applyRecords(documents:RecordDocument[],hydrateOnly=false){
+  this.guard.require();let changed=0;const protectedDocs=documents.filter(hasArticleRegisters);if(protectedDocs.length&&!hydrateOnly){if(!this.repository.mergeCloudArticleRegisters)throw Error('cloud_format_article_storage_unavailable');changed+=await this.repository.mergeCloudArticleRegisters(protectedDocs);}documents=documents.filter(d=>!hasArticleRegisters(d));const articles:ExportedArticle[]=[],sources:SyncedSource[]=[];
   for(const doc of documents.filter(d=>d.kind==='source')){const v=doc.value;if(v.sourceId)this.sourceIds.set(v.url,v.sourceId);}
-  const books=documents.filter(d=>d.kind==='book').map(d=>d.value as BookState),reading=documents.filter(d=>d.kind==='book-reading').map(d=>d.value as BookReading);if(books.length||reading.length){if(!this.repository.mergeCloudBooks)throw Error('book_storage_unavailable');changed+=await this.repository.mergeCloudBooks(books,reading);}
+  const books=documents.filter(d=>d.kind==='book').map(d=>d.value as BookState),reading=documents.filter(d=>d.kind==='book-reading').map(d=>d.value as BookReading);if(!hydrateOnly&&(books.length||reading.length)){if(!this.repository.mergeCloudBooks)throw Error('book_storage_unavailable');changed+=await this.repository.mergeCloudBooks(books,reading);}
   // Imported books cannot materialize public RSS articles. Replaying a book-only
   // page must not rescan/hash the public library for previously queued RSS state.
   // Source/article pages and inventory/body restores still apply that state.
@@ -103,6 +106,7 @@ export class WatchCloudLibraryAdapter {
     const clean=Object.fromEntries(Object.entries(v).filter(([,v])=>v!==null));const a=parseChunkedArticles({articles:[{...clean,body:{}}]})[0]?.article;if(!a)throw Error('cloud_record_invalid');articles.push({...a,contentHtml:null,contentText:''});
    }
   }
+  if(hydrateOnly)return 0;
   if(sources.length||articles.length)changed+=await this.repository.mergeCloud(sources,articles,'cloud-records');return changed+await this.applyReadingStates();
  }
  async applyReadingStates(){
