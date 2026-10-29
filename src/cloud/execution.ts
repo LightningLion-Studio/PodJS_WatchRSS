@@ -28,5 +28,6 @@ export class CloudSyncDeadlineError extends Error {
 export class CloudSyncBudget {
  private readonly started:number;private expired=false;
  constructor(private readonly now=()=>globalThis.performance?.now?.()??Date.now()){this.started=now();}
+ remainingMillis(){return this.expired?0:Math.max(0,CLOUD_SYNC_BUDGET_MILLIS-(this.now()-this.started));}
  check=()=>{if(this.expired||this.now()-this.started>=CLOUD_SYNC_BUDGET_MILLIS){this.expired=true;throw new CloudSyncDeadlineError();}};
 }

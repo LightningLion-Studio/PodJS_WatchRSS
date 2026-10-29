@@ -1,3 +1,4 @@
+import type {RestoreApplyCheckpoint} from './snapshot-checkpoint';
 import {parseRawJson,parseRawJsonAsync,rawJsonValue,rawJsonText,canonicalIntegerJson,rawJsonProperty,patchRawJsonObject,jsonUtf8Bytes} from '@podjs/framework/json-raw';
 import {parseChunkedArticles} from '../sync/article-batches';
 import {validateBookPackage,splitBookLines} from '../books/package';
@@ -121,20 +122,20 @@ export class PrivateOverlayReadSet {
  private winners=new Map<string,{entry:PrivateOverlayEntry;remote:string;binding:string;valid:boolean;conflict:boolean}>();
  private observed=new Set<string>();
  constructor(private crypto:OverlayCrypto){}
- async observe(payload:Map<string,Uint8Array>,remote:string,descriptors:readonly CloudManifest['objects'][number][],trustedApplied=false){
+ async observe(payload:Map<string,Uint8Array>,remote:string,descriptors:readonly CloudManifest['objects'][number][],trustedApplied=false,work?:{checkpoint:RestoreApplyCheckpoint;resolve:(name:string)=>Promise<Uint8Array|undefined>}){
   const bytes=payload.get(PRIVATE_OVERLAY_NAME);if(!bytes)return {pending:0};
-  const stamp=remote+':'+await this.crypto.sha256(bytes);if(this.observed.has(stamp))return {pending:0};this.observed.add(stamp);
+  const stamp=remote+':'+await this.crypto.sha256(bytes);if(this.observed.has(stamp))return {pending:0};
   const index=await decodePrivateOverlay(bytes,this.crypto.sha256);let pending=0;
-  for(const entry of index.entries){let valid=entry.object===null,binding='';
-   if(entry.object){const descriptor=descriptors.find(o=>o.name===entry.object),body=payload.get(entry.object);binding=descriptor?await this.crypto.sha256(utf8Encode(cloudRaw(descriptor)?rawJsonText(cloudRaw(descriptor)!):JSON.stringify(descriptor))):'missing';
-    if(trustedApplied&&descriptor)valid=true;else if(descriptor&&body)try{if(descriptor.contentSha256&&await this.crypto.sha256(body)!==descriptor.contentSha256)fail();if(entry.kind==='article')await validateMicroArchive(body,entry.id,this.crypto);else{const d=descriptor.privateBook;if(!d||d.bookId!==entry.id||d.packagePath!==entry.object)throw Error('cloud_format_overlay_invalid');const chunks=async function*(){yield utf8Decode(body);};await validateBookPackage(splitBookLines(chunks()),this.crypto.sha256,{bookId:entry.id,fingerprint:String(d.fingerprint),chapterCount:Number(d.chapterCount)});}valid=true;}catch{/* Preserve backing and retry; never translate failure into deletion. */}
+  for(const entry of index.entries){await work?.checkpoint.check();let valid=entry.object===null,binding='';const done=work?.checkpoint.has(overlayKey(entry));
+   if(entry.object){const descriptor=descriptors.find(o=>o.name===entry.object),body=done?undefined:(payload.get(entry.object)??await work?.resolve(entry.object));binding=descriptor?await this.crypto.sha256(utf8Encode(cloudRaw(descriptor)?rawJsonText(cloudRaw(descriptor)!):JSON.stringify(descriptor))):'missing';
+    if((trustedApplied||done)&&descriptor)valid=true;else if(descriptor&&body)try{if(descriptor.contentSha256&&await this.crypto.sha256(body)!==descriptor.contentSha256)fail();if(entry.kind==='article')await validateMicroArchive(body,entry.id,this.crypto);else{const d=descriptor.privateBook;if(!d||d.bookId!==entry.id||d.packagePath!==entry.object)throw Error('cloud_format_overlay_invalid');const chunks=async function*(){yield utf8Decode(body);};await validateBookPackage(splitBookLines(chunks()),this.crypto.sha256,{bookId:entry.id,fingerprint:String(d.fingerprint),chapterCount:Number(d.chapterCount)});}valid=true;}catch{await work?.checkpoint.check();/* Preserve backing and retry; never translate failure into deletion. */}
    }
-   if(!valid)pending++;
+   if(valid)await work?.checkpoint.commit(overlayKey(entry));else pending++;
    const key=overlayKey(entry),old=this.winners.get(key),order=old?compareOverlayClock(entry,old.entry):1;
    if(order>0)this.winners.set(key,{entry,remote,binding,valid,conflict:false});
    else if(order===0&&old&&entry.object!==null&&old.entry.object!==null&&(entry.object!==old.entry.object||binding!==old.binding)){old.conflict=true;pending++;}
   }
-  return {pending};
+  this.observed.add(stamp);return {pending};
  }
  allow(kind:'article'|'book',id:string,remote:string,object?:string){
   const winner=this.winners.get(kind+'\0'+id);if(!winner)return !object;

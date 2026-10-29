@@ -3,7 +3,7 @@ import type {WatchCloudPhase} from '../cloud/service.ts';
 
 export interface AccountCloudStatus {
   ownerChoiceRequired?:boolean;
-  errorCode?:'cloud_format_upgrade_required'|'library_owner_mismatch';
+  errorCode?:'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';
   formatCompatibility?:import('../cloud/compatibility').CloudCompatibilityStatus;
   message: string;
   usedBytes: number;

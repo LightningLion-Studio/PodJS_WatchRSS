@@ -27,3 +27,10 @@ test('cloud file chunks use bounded native Base64 and preserve exact publication
  const input=Uint8Array.from({length:65537},(_,i)=>i%251);await ports.files.writeAtomic('cache',input);expect(files.get('cache')).toEqual(Buffer.from(input));expect([...files.keys()]).toEqual(['cache']);expect(encodedSizes.length).toBeGreaterThan(20);
  }finally{global.pod=previous;}
 });
+
+test('cloud hash/gzip use the existing bounded native byte ABI without host file roundtrips and retain the output bound',async()=>{
+ const global=globalThis as any,previous=global.pod;try{
+  const {gunzipSync,gzipSync}=await import('node:zlib');let calls=0;global.pod={sha256Bytes:(b:Uint8Array)=>{expect(b.length).toBeLessThanOrEqual(256*1024);return new Uint8Array(createHash('sha256').update(b).digest());},gunzipBytes:(b:Uint8Array)=>{const out=gunzipSync(b);return out.length<=256*1024?new Uint8Array(out):null;}};
+  const ports=createCloudHostPorts(async()=>{calls++;throw Error('native bytes must not stage files');},{require(){}}),body=new Uint8Array(128*1024).fill(71),zip=new Uint8Array(gzipSync(body));expect(await ports.crypto.sha256(body)).toBe(createHash('sha256').update(body).digest('hex'));expect(await ports.crypto.gunzip(zip,body.length)).toEqual(body);await expect(ports.crypto.gunzip(zip,body.length-1)).rejects.toThrow('cloud_snapshot_inflate_limit');expect(calls).toBe(0);
+ }finally{global.pod=previous;}
+});

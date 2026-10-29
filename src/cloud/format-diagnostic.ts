@@ -6,6 +6,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  const code=typeof value.code==='string'?value.code:'';
  const n=typeof value.status==='number'?value.status:status;
  if(code==='cloud_sync_deadline_exceeded'||/cloud_sync_deadline_exceeded|\b(?:timed? ?out|deadline|SocketTimeoutException)\b/i.test(message))return 'timeout';
+ if(code==='cloud_snapshot_progress_stalled'||message==='cloud_snapshot_progress_stalled')return 'runtime';
  if(code==='library_busy'||/Local library changed/.test(message))return 'concurrent-library-change';
  if(/setTimeout is not defined|Can't find variable: setTimeout/.test(message))return 'runtime';
  if(code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(message))return 'storage';
@@ -13,6 +14,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  if(code==='r48_write_feature_disabled'||/cloud_format_(?:write|migration)_disabled/.test(message))return 'gate';
  if(n===401||n===403||/device_session_revoked/.test(code))return 'authorization';
  if(code==='library_owner_mismatch'||/^library_owner_mismatch(?::|$)/.test(message)||n===409)return 'conflict';
+ if(code==='cloud_snapshot_unit_capacity'||message==='cloud_snapshot_unit_capacity')return 'capacity';
  if(n===413||n===429||/cloud_(?:format_capacity|quota_exceeded)/.test(message+' '+code))return 'capacity';
  if(n>=500&&n<=599)return 'server';
  if(/cloud_format_|cloud_entry_ref_/.test(message))return 'format';
