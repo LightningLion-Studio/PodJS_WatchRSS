@@ -1,3 +1,4 @@
+import {isDouyinTemporaryFailure} from '../../douyin/errors.ts';
 import {DouyinPlaybackRecovery} from '../../douyin/playback-recovery.ts';
 import {videoOptEnabled,invalidateVideoNetwork,videoNetworkEpoch,VideoPlaybackTrace,registerVideoResolution} from '../../media/video-opt.ts';
 import {afterPaint} from '@podjs/framework/render';
@@ -520,7 +521,7 @@ export function createMediaRouteController(
         const selected=entry.queue.snapshot().item!;
         if(entry.douyinRecovery?.id!==id)entry.douyinRecovery={id,policy:new DouyinPlaybackRecovery(selected,async()=>{
           const result=await douyinClient.resolvePlayback(id,{forceRefresh:true});
-          if(!result.ok)throw {code:result.code};
+          if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code,retryAfterMs:result.retryAfterMs});
           return result.data;
         })};
         if(entry.playback?.url?.startsWith('podjs-media-cache:')||entry.playback?.url?.startsWith('managed-cache/'))await douyinPreload.invalidate(id);
@@ -575,6 +576,7 @@ export function createMediaRouteController(
         : entry.queue.recover());
       if (dependencies.current() !== entry) return;
       if (!result.ok) {
+        if(isDouyinTemporaryFailure(result.code))failures.delete(id);
         if (result.code === "CANCELLED") return;
         if (
           !entry.queue.snapshot().playlist.length &&

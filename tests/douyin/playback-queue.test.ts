@@ -20,3 +20,11 @@ test('diagnostic quarantine IDs come from actual failed candidate removals and r
  const queue=new DouyinPlaybackQueue(client,{items:[item('1'),item('2'),item('3')],selectedAwemeId:'1',hasMore:false});
  expect(queue.diagnostics().quarantinedAwemeIds).toEqual([]);await queue.preview('next');const d=queue.diagnostics();expect(d.quarantinedAwemeIds).toEqual(['2']);expect(d.itemCount).toBe(2);d.quarantinedAwemeIds.push('forged');expect(queue.diagnostics().quarantinedAwemeIds).toEqual(['2']);expect(queue.snapshot().item?.awemeId).toBe('1');
 });
+
+
+for(const code of ['RATE_LIMITED','TEMPORARILY_UNAVAILABLE'] as const)test(`${code} retains the selected item and neighbours during recover, next and preview`,async()=>{
+ let calls=0;const client={resolvePlayback:async()=>{calls++;return {ok:false as const,code,message:'temporary',retryAfterMs:30000};}} as unknown as DouyinClient;
+ const queue=new DouyinPlaybackQueue(client,{items:[item('1'),item('2'),item('3')],selectedAwemeId:'1',hasMore:false});
+ expect(await queue.recover()).toMatchObject({code});expect(await queue.next()).toMatchObject({code});expect(await queue.preview('next')).toMatchObject({code});
+ expect(queue.snapshot().item?.awemeId).toBe('1');expect(queue.snapshot().playlist).toHaveLength(3);expect(queue.diagnostics().quarantinedAwemeIds).toEqual([]);expect(calls).toBe(3);
+});

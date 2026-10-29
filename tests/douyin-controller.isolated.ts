@@ -179,3 +179,11 @@ test('VIDEO-OPT rejects late same-item resolution after queue generation changes
  const before=f.source(),pending=f.controller.recoverDouyinVideo(entry,false,7000);entry.queue!.restoreSelection('a');finish({ok:true,data:{...a,playUrl:'https://video/fresh'}});await pending;
  expect(f.source()).toBe(before);expect(entry.queue!.snapshot().item?.playUrl).toBe(a.playUrl);
 });
+
+
+test('temporary API throttling never consumes the controller media-failure quarantine budget',async()=>{
+ const f=fixture(),a=item('a');f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ let calls=0;client.resolvePlayback=async()=>{calls++;return {ok:false,code:'RATE_LIMITED',message:'抖音暂时不可用，稍后自动重试',retryAfterMs:30000};};
+ const entry=f.stack().at(-1)!;await f.controller.recoverDouyinVideo(entry);await f.controller.recoverDouyinVideo(entry,true);
+ expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(entry.queue!.snapshot().playlist).toHaveLength(1);expect(calls).toBe(2);expect(f.error()).toBe('抖音暂时不可用，稍后自动重试');
+});

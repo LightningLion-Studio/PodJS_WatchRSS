@@ -18,10 +18,10 @@ test("cookie import follows Android rule: trimmed non-empty header, no sessionid
 
 test("blocked and malformed responses are typed failures",async()=>{const store=new MemoryStore();await store.set("douyin.cookie","x");const replies=["blocked","{"];const client=new DouyinClient({transport:{async request(){return {status:200,headers:{},body:utf8Encode(replies.shift()!) };}},secureStorage:store,signer:{sign:()=>"x"}});expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:"NOT_LOGGED_IN"});expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:"PARSE_FAILED"});});
 
-test("403 expires the session and notifies login navigation, including thrown HTTP failures",async()=>{
+test("legacy 403 switch expires the session and notifies login navigation, including thrown HTTP failures",async()=>{
  for(const thrown of [false,true]){
   const store=new MemoryStore();await store.set('douyin.cookie','x');let redirects=0;
-  const client=new DouyinClient({secureStorage:store,signer:{sign:()=>"x"},transport:{async request(){if(thrown)throw new Error('http_status:403');return {status:403,headers:{},body:utf8Encode('forbidden')};}}});
+  const client=new DouyinClient({auth403:{enabled:false},secureStorage:store,signer:{sign:()=>"x"},transport:{async request(){if(thrown)throw new Error('http_status:403');return {status:403,headers:{},body:utf8Encode('forbidden')};}}});
   const unsubscribe=client.onAuthExpired(()=>redirects++);
   expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'NOT_LOGGED_IN'});
   expect(await client.isLoggedIn()).toBe(false);expect(redirects).toBe(1);

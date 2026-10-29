@@ -1,3 +1,5 @@
+import * as hostServices from '@podjs/framework/services';
+import {DOUYIN_AUTH403_MAX_COOLDOWN_MS} from '../../douyin/auth403.ts';
 import {debugGate} from '../../debug/host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import { createSignal, createEffect, untrack, onCleanup, Show } from "solid-js";
@@ -5,7 +7,7 @@ import { View, Text, Image } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
 import { createGesture } from "@pocketjs/framework/gesture";
 import type { DouyinScreenProps } from "./index.tsx";
-import { formatDouyinError } from "../../douyin/errors.ts";
+import { isDouyinTemporaryFailure,formatDouyinError } from "../../douyin/errors.ts";
 import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 
@@ -13,9 +15,19 @@ import type { DouyinItem } from "../../douyin/types.ts";
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[logged,setLogged]=createSignal(true);
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
+  let retryTimer:{cancel():void}|undefined;
+  const cancelRetry=()=>{retryTimer?.cancel();retryTimer=undefined;};
+  const retryTemporary=(result:{code:import('../../douyin/types.ts').DouyinErrorCode;retryAfterMs?:number},current:()=>boolean)=>{
+    if(!isDouyinTemporaryFailure(result.code))return;
+    setError(formatDouyinError(result.code));cancelRetry();
+    const wait=Number.isFinite(result.retryAfterMs)?Math.max(1000,Math.min(DOUYIN_AUTH403_MAX_COOLDOWN_MS,result.retryAfterMs!)):30000;
+    const timer=hostServices.delay(wait);retryTimer=timer;
+    void timer.result.then(()=>{if(retryTimer!==timer)return;retryTimer=undefined;if(current())void load(true);},()=>{});
+  };
   const active=()=>!disposed&&(props.active??true);
   const load=async(refresh=false)=>{
     if(!active()||busy())return;
+    cancelRetry();
     const own=++generation,current=()=>active()&&own===generation;
     setBusy(true);setError("");
     try{
@@ -33,6 +45,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
             // Old queues can contain only expired/unresolvable detail URLs. Keep
             // immediate navigation, but replenish from a fresh feed in the background
             // so the preload window does not retry the same stale identities forever.
+            if(isDouyinTemporaryFailure(result.code)){retryTemporary(result,current);return;}
             if(result.code==='CANCELLED'||result.code==='NOT_LOGGED_IN')return;
             appLogger.i('DouyinEntry','expired queue anchor failed; refreshing feed');
             const fresh=await props.client.fetchFeedPage({count:16});
@@ -47,6 +60,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       if(result.ok){traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
       else{
         setError(formatDouyinError(result.code));
+        retryTemporary(result,current);
         if(result.code==='NOT_LOGGED_IN'){
           setLogged(false);setItems([]);anchor=null;cursor=null;hasMore=false;
           await props.client.clearCookie();
@@ -77,7 +91,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     }
   });
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
-  createEffect(()=>{if(props.active??true)void untrack(()=>load());else{generation++;setBusy(false);}});onCleanup(()=>{disposed=true;generation++;gesture.dispose();});
+  createEffect(()=>{if(props.active??true)void untrack(()=>load());else{generation++;cancelRetry();setBusy(false);}});onCleanup(()=>{disposed=true;generation++;cancelRetry();gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;

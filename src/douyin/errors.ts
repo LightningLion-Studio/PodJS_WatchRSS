@@ -3,6 +3,8 @@ import type { DouyinErrorCode } from './types.ts';
 /** Native DouyinRepository.formatDouyinError; never expose transport/signing text. */
 export function formatDouyinError(code: DouyinErrorCode): string {
   switch (code) {
+    case 'RATE_LIMITED':
+    case 'TEMPORARILY_UNAVAILABLE': return '抖音暂时不可用，稍后自动重试';
     case 'NOT_LOGGED_IN': return '需要登录';
     case 'PARSE_FAILED': return '解析失败';
     case 'REQUEST_FAILED': return '网络请求失败';
@@ -21,3 +23,5 @@ export function mediaRequestFailure(error: unknown): { category: 'http' | 'timeo
   if (/cancelled|canceled|abort/i.test(description)) return { category: 'cancelled' };
   return { category: 'network' };
 }
+
+export const isDouyinTemporaryFailure=(code:DouyinErrorCode)=>code==='RATE_LIMITED'||code==='TEMPORARILY_UNAVAILABLE';

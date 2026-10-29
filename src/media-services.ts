@@ -1,3 +1,4 @@
+import {readDouyin403Enabled} from './douyin/auth403.ts';
 import {DouyinSqlStateStorage} from './douyin/state-storage.ts';
 import {createHostDouyinPreload} from './douyin/preload-host.ts';
 import {createHostBiliPreview} from './bili/preview-host.ts';
@@ -27,6 +28,7 @@ export const biliClient=createBiliClient({watchApi:()=>readWatchConfig(kv),watch
  else await biliPreviewCache.remove(item).catch(()=>appLogger.w('BiliPreview','preview removal failed'));},rsaOaepSha256:{encrypt:async(pem,plaintext)=>base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(plaintext)).result).ciphertextBase64)},sleep:ms=>delay(ms).result});
 export const biliPreviewCache=createHostBiliPreview(biliClient);
 export const douyinClient=new DouyinClient({
+ auth403:{enabled:()=>readDouyin403Enabled(kv)},
  onLogout:()=>clearDouyinLogoutData(managedCache, { ...browser, hasCapability }),
  transport:mediaTransport,
  savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},

@@ -1,3 +1,4 @@
+import {isDouyinTemporaryFailure} from './errors.ts';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
 import type { DouyinClient } from "./client.ts";
 import type { DouyinItem, DouyinResult } from "./types.ts";
@@ -74,7 +75,7 @@ export class DouyinPlaybackQueue {
       if(target>=this.items.length){if(this.hasMore)continue;return lastFailure;}
       const result=await this.resolvePreviewAt(target,op);
       if(op!==this.previewGeneration)return cancelled();if(result.ok)return result;
-      if(result.code==="NOT_LOGGED_IN"||result.code==="CANCELLED")return result;
+      if(result.code==="NOT_LOGGED_IN"||result.code==="CANCELLED"||isDouyinTemporaryFailure(result.code))return result;
       lastFailure=result;this.quarantined.add(this.items[target].awemeId);this.items.splice(target,1);
     }
     return lastFailure;
@@ -89,7 +90,7 @@ export class DouyinPlaybackQueue {
   async recover():Promise<DouyinResult<DouyinPlaybackQueueState>>{
     if(this.fixedSources)return this.current();
     this.previewGeneration++;const op=++this.generation;const result=await this.resolveAt(this.index,op,true);
-    if(op!==this.generation)return cancelled();if(result.ok)return result;return this.discard();
+    if(op!==this.generation)return cancelled();if(result.ok||isDouyinTemporaryFailure(result.code))return result;return this.discard();
   }
   async discard():Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const current=this.items[this.index];if(current){this.quarantined.add(current.awemeId);this.items.splice(this.index,1);this.index--;}
@@ -115,7 +116,7 @@ export class DouyinPlaybackQueue {
       if(target>=this.items.length){if(this.hasMore)continue;return lastFailure;}
       const result=await this.resolveAt(target,op);
       if(op!==this.generation)return cancelled();if(result.ok)return result;
-      if(result.code==="NOT_LOGGED_IN")return result;
+      if(result.code==="NOT_LOGGED_IN"||isDouyinTemporaryFailure(result.code))return result;
       lastFailure=result;this.quarantined.add(this.items[target].awemeId);this.items.splice(target,1);
     }
     return lastFailure;

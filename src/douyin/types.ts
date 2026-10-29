@@ -5,6 +5,7 @@ export interface DouyinHistoryStorage extends DouyinSecureStorage {}
 export interface DouyinSavedStorage extends DouyinSecureStorage {}
 export interface DouyinSigner { sign(params: Readonly<Record<string, string>>): Promise<string> | string; }
 export interface DouyinClientOptions {
+  auth403?: import('./auth403.ts').Douyin403Options;
   onLogout?:()=>Promise<void>; transport: HttpTransport; secureStorage: DouyinSecureStorage; signer?: DouyinSigner; historyStorage?: import("./state-storage.ts").DouyinStateStorage; savedStorage?: DouyinSavedStorage; savedStore?: Pick<import("./saved.ts").DouyinSavedStore,"list"|"state"|"set"|"toggle">; now?: () => number; }
 export type DouyinCodec = "h264" | "h265" | "unknown";
 export interface DouyinVideoVariant { playUrl: string; /** Optional for old persisted snapshots. Ordered same-track CDN candidates. */ playUrls?: string[]; codec: DouyinCodec; bitrate: number; width: number; height: number; definition?: string; quality?: string; gearName?: string; }
@@ -16,7 +17,7 @@ export interface DouyinHistoryEntry { item: DouyinItem; watchedAtMillis: number;
 export type DouyinSavedKind = "favorite" | "watchLater";
 export interface DouyinSavedEntry { platform: "douyin"; awemeId: string; item: DouyinItem; kind: DouyinSavedKind; savedAtMillis: number; shareUrl: string; }
 export interface DouyinSavedState { favorite: boolean; watchLater: boolean; }
-export type DouyinErrorCode = "NOT_LOGGED_IN" | "REQUEST_FAILED" | "PARSE_FAILED" | "UNSUPPORTED" | "CANCELLED";
+export type DouyinErrorCode = "NOT_LOGGED_IN" | "REQUEST_FAILED" | "PARSE_FAILED" | "UNSUPPORTED" | "CANCELLED" | "RATE_LIMITED" | "TEMPORARILY_UNAVAILABLE";
 export type DouyinDataSource = "network" | "feed-cache";
-export type DouyinResult<T> = { ok: true; data: T; source?: DouyinDataSource } | { ok: false; code: DouyinErrorCode; message: string };
+export type DouyinResult<T> = { ok: true; data: T; source?: DouyinDataSource } | { ok: false; code: DouyinErrorCode; message: string; retryAfterMs?:number };
 export type DouyinInteraction = "like" | "unlike" | "favorite" | "unfavorite" | "follow" | "unfollow" | "comment";

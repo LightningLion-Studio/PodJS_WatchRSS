@@ -6,6 +6,7 @@ import {DouyinClient,DOUYIN_NETWORK_TIMEOUT_MS} from '../src/douyin/client.ts';
 import {FEED_KEY,QUEUE_KEY} from '../src/douyin/feed-store.ts';
 import {utf8Encode} from '../src/cloud/types.ts';
 import type {HttpRequest,HttpResponse} from '../src/cloud/types.ts';
+import type {Douyin403Options} from '../src/douyin/auth403.ts';
 import type {DouyinScreenProps} from '../src/ui/douyin/index.tsx';
 
 const require=createRequire(import.meta.url),{transformSync}=require('@babel/core');
@@ -19,8 +20,15 @@ let debugAllowed=false;
 mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return debugAllowed;}}}));
 let gesture:any;
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gesture=options;return {dispose(){}};}}));
+const realServices=await import('@podjs/framework/services');
+const retryTimers:Array<{ms:number;cancelled:boolean;fire:()=>void}>=[];
+mock.module('@podjs/framework/services',()=>({...realServices,delay:(ms:number)=>{
+ if(ms<1000)return {result:Promise.resolve(),cancel(){}};
+ let fire!:()=>void;const result=new Promise<void>(r=>fire=r),entry={ms,cancelled:false,fire};retryTimers.push(entry);
+ return {result,cancel(){entry.cancelled=true;}};
+}}));
 const {ImmersiveEntry}=await import('../src/ui/douyin/ImmersiveEntry.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{debugAllowed=false;for(const stop of stops.splice(0))stop();});
+const stops:(()=>void)[]=[];afterEach(()=>{retryTimers.length=0;debugAllowed=false;for(const stop of stops.splice(0))stop();});
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props' in value))return [];return [value,...nodes(value.props.children)];}
 // Event-loop turn only drains component promise chains; no elapsed-time assertions.
 const settle=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
@@ -31,17 +39,18 @@ async function requestReady(f:{requests:unknown[]},count=1){const end=Date.now()
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
-function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string}={}){
+function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options}={}){
+  let now=1_000_000;
   const data=new Map<string,string>();if(options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
   const items=Array.from({length:options.cacheCount??0},(_,i)=>({awemeId:String(i+1),description:'cached',playUrl:`https://old.test/${i+1}`,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}));
   const cached={items,anchorAwemeId:items[0]?.awemeId??null,cursor:options.cursor??null,hasMore:options.hasMore??false,savedAtMillis:1,resolved:{}};
   data.set(FEED_KEY,JSON.stringify(cached));data.set(QUEUE_KEY,JSON.stringify(cached));
   const requests:{request:HttpRequest;reply:ReturnType<typeof deferred<HttpResponse>>}[]=[],plays:any[]=[],routes:any[]=[];
-  const client=new DouyinClient({secureStorage:{get:async k=>data.get(k)??null,set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>1_000_000,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
+  const client=new DouyinClient({auth403:options.auth403,secureStorage:{get:async k=>data.get(k)??null,set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
   const [active,setActive]=createSignal(true);let dispose!:()=>void;
   const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
   const entryGesture=gesture;
-  return {data,client,requests,plays,routes,dispose,setActive,
+  return {data,client,requests,plays,routes,dispose,setActive,advance:(ms:number)=>{now+=ms;},
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
     swipe:(dy:number)=>entryGesture.onPanEnd({dy}),
     press:()=>nodes(root).find(n=>n.kind==='View'&&n.props.accessibilityRole==='button'&&n.props.class?.includes('rounded-full'))!.props.onPress()};
@@ -116,4 +125,21 @@ test('failed expired anchor replenishes the preload window with fresh feed witho
  f.requests[1]!.reply.resolve(response(['fresh-preload']));
  for(let n=0;n<30;n++)await settle();f.swipe(-80);await settle();
  expect(f.plays.at(-1)?.item.awemeId).toBe('fresh-preload');expect(f.data.has('douyin.cookie')).toBe(true);
+});
+
+
+for(const mode of ['authenticated','unknown'] as const)test(`temporary ${mode} 403 keeps login and retries only when the cooldown timer expires`,async()=>{
+ const f=mount({auth403:{sleep:async()=>{},probe:async()=>mode}});await requestReady(f);
+ f.requests[0]!.reply.resolve(response([],403));await requestReady(f,2);f.requests[1]!.reply.resolve(response([],403));await settled(f);
+ expect(f.text()).toContain('抖音暂时不可用，稍后自动重试');expect(f.data.has('douyin.cookie')).toBe(true);expect(f.routes).toEqual([]);expect(retryTimers.filter(t=>!t.cancelled)).toHaveLength(1);const scheduled=retryTimers.find(t=>!t.cancelled)!;expect(scheduled.ms).toBe(30000);
+ f.press();await settled(f);expect(f.requests).toHaveLength(2);expect(scheduled.cancelled).toBe(true);
+ f.advance(30000);retryTimers.at(-1)!.fire();await requestReady(f,3);f.requests[2]!.reply.resolve(response(['after-cooldown']));await settled(f);
+ f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('after-cooldown');expect(f.data.has('douyin.cookie')).toBe(true);
+});
+
+test('leaving or disposing an entry cancels its temporary-failure retry timer',async()=>{
+ for(const leave of ['inactive','disposed'] as const){
+  retryTimers.length=0;const f=mount({auth403:{sleep:async()=>{}}});await requestReady(f);f.requests[0]!.reply.resolve(response([],403));await requestReady(f,2);f.requests[1]!.reply.resolve(response([],403));await settled(f);
+  const timer=retryTimers[0]!;if(leave==='inactive')f.setActive(false);else f.dispose();await settle();expect(timer.cancelled).toBe(true);f.advance(30000);timer.fire();await settle();expect(f.requests).toHaveLength(2);
+ }
 });
