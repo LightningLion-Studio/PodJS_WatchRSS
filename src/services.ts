@@ -476,7 +476,7 @@ export const cancelLocalLibraryClear=()=>{libraryClearOperation.cancel();library
 /** Phone's explicit wipe preserves standalone notes and credentials. No account lookup. */
 export function clearWatchLibrary(options:LibraryClearOptions={}):Promise<void>{return runLibraryClear(false,options);}
 /** Account ownership clear includes notes, private caches and cursors. */
-export function clearLocalPrivateLibrary():Promise<void>{return runLibraryClear(true,{});}
+export function clearLocalPrivateLibrary(options:LibraryClearOptions={}):Promise<void>{return runLibraryClear(true,options);}
 function runLibraryClear(privateData:boolean,options:LibraryClearOptions):Promise<void>{
  return libraryClearOperation.run(privateData,options,async control=>{
   await init();control.check();

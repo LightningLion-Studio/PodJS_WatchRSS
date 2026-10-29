@@ -18,10 +18,11 @@ export async function clearAccountCloud(host:CloudHostRequest,account:Pick<Watch
 
 /** Refresh without saving under the logout lock, then revoke self with a fresh bearer.
  * The caller continues local cleanup on either refresh or revocation failure. */
-export async function revokeAccountCloud(host:CloudHostRequest,account:WatchAccountState,http?:HttpTransport){
- const rows=await host<{device_id:string}[]>('sql.query',{sql:'SELECT device_id FROM sync_local_identity WHERE id=1',params:[]});const deviceId=rows[0]?.device_id;if(!deviceId)return;
+export async function revokeAccountCloud(host:CloudHostRequest,account:WatchAccountState,http?:HttpTransport,strictOwnership=false,onRefreshed?:(account:WatchAccountState)=>Promise<void>){
+ const rows=await host<{device_id:string}[]>('sql.query',{sql:'SELECT device_id FROM sync_local_identity WHERE id=1',params:[]});const deviceId=rows[0]?.device_id;if(!deviceId){if(strictOwnership)throw Error('pairing_identity_missing');return;}
  const guard={require(){}},transport=http??createCloudTransport(host,guard,{callTimeoutMs:5000});
  const fresh=account.watchRefreshToken?await refreshWatchAccount(account,{backendBaseUrl:account.backendBaseUrl,transport}):account;
+ if(strictOwnership&&onRefreshed&&fresh!==account)await onRefreshed(fresh);
  const client=new WatchCloudClient(transport,{baseUrl:account.backendBaseUrl,accessToken:fresh.watchDeviceToken},{sha256:async()=>{throw Error('unused');}},guard);
- const bootstrap=await client.bootstrap();if(!bootstrap.libraryEpoch)throw Error('client_upgrade_required');client.setEpoch(bootstrap.libraryEpoch);await client.revokeDevice(deviceId);
+ const bootstrap=await client.bootstrap();if(!bootstrap.libraryEpoch)throw Error('client_upgrade_required');client.setEpoch(bootstrap.libraryEpoch);if(strictOwnership)await client.revokeOwnOwnership(deviceId);else await client.revokeDevice(deviceId);
 }
