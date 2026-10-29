@@ -1,3 +1,4 @@
+import {MANUAL_INTENT_KEY,readManualIntent,manualScopeMatches} from './manual-handoff';
 import type {CloudStringStore} from './keys';
 import type {CloudSnapshotHead} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
@@ -18,7 +19,14 @@ export class WatchCloudStateStore {
  async contentGeneration(){this.guard.require();await this.tail;return this.store.get(`watchrss.cloud.content-generation.${this.scope}`);}
  async rememberContentGeneration(generation:string){this.guard.require();if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(generation))throw Error('invalid_content_generation');await this.tail;await this.store.set(`watchrss.cloud.content-generation.${this.scope}`,generation.toLowerCase());}
  async clearContent(){this.guard.require();await this.tail;const sequence=(await this.read()).sequence,value=JSON.stringify({sequence,applied_full:{},applied_state:{}});if(this.store.update)await this.store.update({[this.key]:value},[this.statePrefix]);else{await this.store.set(this.key,value);await this.store.set(this.key+'.restore-v1','');for(let i=0;i<64;i++)await this.store.set(this.key+'.restore-v1.'+i,'');}}
- async acceptEpoch(epoch:string){this.guard.require();if(!epoch)throw Error('client_upgrade_required');const epochKey=this.epochKey,old=await this.store.get(epochKey);if(old!==epoch){await this.clear();await this.store.set(epochKey,epoch);}return old!==undefined&&old!==epoch;}
+ async acceptEpoch(epoch:string){this.guard.require();if(!epoch)throw Error('client_upgrade_required');const epochKey=this.epochKey,old=await this.store.get(epochKey);
+  const raw=await this.store.get(MANUAL_INTENT_KEY),intent=readManualIntent(raw);
+  if(intent&&manualScopeMatches(intent.scope,this.userId,this.backendBaseUrl)){
+   const changed=old!==undefined&&old!==epoch||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch;
+   const value=changed?undefined:intent.version===1||intent.epoch===null?JSON.stringify({...intent,version:2,epoch}):raw;
+   if(value!==raw){if(this.store.compareAndSet)await this.store.compareAndSet(MANUAL_INTENT_KEY,raw,value);else if(await this.store.get(MANUAL_INTENT_KEY)===raw)await this.store.set(MANUAL_INTENT_KEY,value??'');}
+  }
+  if(old!==epoch){await this.clear();await this.store.set(epochKey,epoch);}return old!==undefined&&old!==epoch;}
  nextSequence(serverSequence:number){return this.change(s=>{if(!Number.isSafeInteger(serverSequence)||serverSequence<0)throw Error('无效服务端序列');const next=Math.max(s.sequence,serverSequence)+1;if(!Number.isSafeInteger(next))throw Error('云同步序列溢出');return s.sequence=next;});}
  async applied(deviceId:string,full:boolean){this.guard.require();await this.tail;return (await this.read())[full?'applied_full':'applied_state'][deviceId]??0;}
  markApplied(deviceId:string,sequence:number,full:boolean){return this.change(s=>{if(!deviceId||!Number.isSafeInteger(sequence)||sequence<0)throw Error('无效应用序列');const key=full?'applied_full':'applied_state';s[key]={...s[key],[deviceId]:Math.max(s[key][deviceId]??0,sequence)};});}

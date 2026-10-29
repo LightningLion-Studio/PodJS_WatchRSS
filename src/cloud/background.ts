@@ -1,5 +1,6 @@
-import {MANUAL_INTENT_KEY,readManualIntent} from './manual-handoff';
+import {MANUAL_INTENT_KEY,readManualIntent,manualEpochKey,compareManualIntent,completeManualIntent} from './manual-handoff';
 import {cloudAccountIdentity} from './identity';
+import {CloudSyncDeadlineError} from './execution';
 import {defineBackgroundHandler} from '@podjs/framework/background-handler';
 import {CloudGate} from './gate';
 import {OnboardingStore,ONBOARDING_KEY} from '../onboarding/store';
@@ -20,14 +21,24 @@ export default defineBackgroundHandler(async context=>{
  const guard={require(){gate.require();if(context.isCancelled())throw Error('Cloud worker cancelled');}};
  const host:CloudHostRequest=(method,args)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return raw(method,args);};
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
- const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard);
+ // The host deadline is absolute Unix ms. Leave time for the normal
+ // checkpoint/release path before the native guest's hard interrupt.
+ const execution={begin(){const check=()=>{if(Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
+ const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution);
  const account=await runtime.accounts.read();if(!account)return 'success';
  const payload=context.payload as {manual?:boolean;token?:string}|null;
  let intent:ReturnType<typeof readManualIntent>;
- if(payload?.manual){const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});intent=readManualIntent(stored.value);
-  if(!intent||intent.token!==payload.token||intent.scope!==cloudAccountIdentity(account))return 'success';
+ // Periodic work may win the writer lease before the dedicated manual job.
+ // Honor a live manual grant's exact mode in either entry path.
+ {const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});intent=readManualIntent(stored.value);
+  if(payload?.manual&&(!intent||intent.token!==payload.token))return 'success';
+  if(intent){
+  const epoch=await host<{exists:boolean;value?:string}>('secure.get',{key:manualEpochKey(account)});
+  if(intent.scope!==cloudAccountIdentity(account)||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch.value||intent.version===1&&!epoch.value){await completeManualIntent(host,intent);return 'success';}
+  if(intent.version===1||intent.epoch===null&&epoch.value){intent={...intent,version:2,epoch:epoch.value??null};if(!await compareManualIntent(host,stored.value,JSON.stringify(intent)))return 'success';}
+  }
  }
  const success=await runtime.service.syncNow(!!intent,intent?.mode);
- if(success&&intent){const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});if(readManualIntent(stored.value)?.token===intent.token)await host('secure.delete',{key:MANUAL_INTENT_KEY});}
+ if(success&&intent)await completeManualIntent(host,intent);
  return success||runtime.service.status.retryable===false?'success':'retry';
 });

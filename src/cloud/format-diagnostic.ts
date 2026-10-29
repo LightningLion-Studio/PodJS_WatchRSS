@@ -6,6 +6,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  const message=typeof value.message==='string'?value.message:'';
  const code=typeof value.code==='string'?value.code:'';
  const n=typeof value.status==='number'?value.status:status;
+ if(/cloud_sync_suspended|cloud_operation_superseded/.test(message+' '+code))return 'suspended';
  if(['cloud_writer_busy','cloud_account_busy'].includes(code)||['cloud_writer_busy','cloud_account_busy'].includes(message)||/^account_busy(?::|$)/.test(message)||message==='Cloud lease already owned')return 'busy';
  if(code.startsWith('cloud_account_')||message==='cloud_account_expired'||message==='cloud_account_changed')return 'authorization';
  if(code==='cloud_sync_deadline_exceeded'||/cloud_sync_deadline_exceeded|\b(?:timed? ?out|deadline|SocketTimeoutException)\b/i.test(message))return 'timeout';
@@ -13,7 +14,6 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  if(code==='library_busy'||/Local library changed/.test(message))return 'concurrent-library-change';
  if(/setTimeout is not defined|Can't find variable: setTimeout/.test(message))return 'runtime';
  if(code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(message))return 'storage';
- if(/cloud_sync_suspended|cloud_operation_superseded/.test(message))return 'suspended';
  if(code==='r48_write_feature_disabled'||/cloud_format_(?:write|migration)_disabled/.test(message))return 'gate';
  if(n===401||n===403||/device_session_revoked/.test(code))return 'authorization';
  if(code==='library_owner_mismatch'||/^library_owner_mismatch(?::|$)/.test(message)||n===409)return 'conflict';

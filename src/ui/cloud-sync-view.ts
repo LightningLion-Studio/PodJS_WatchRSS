@@ -18,7 +18,7 @@ const BUSY = new Set<WatchCloudPhase>(['registering', 'downloading', 'merging', 
  * Read-only projection of the account snapshot for 我的 → 云同步; mirrors native CloudSyncUiState.
  * `undefined` = still loading, `null` = no bound account, `cloud` absent = this build has no cloud service.
  */
-export type CloudHandoffPhase = 'idle' | 'foreground' | 'queued' | 'held';
+export type CloudHandoffPhase = 'idle' | 'foreground' | 'queued' | 'held' | 'waiting';
 export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, available: boolean, pending: boolean, now = Date.now(), handoff: CloudHandoffPhase = 'idle'): CloudSyncView {
   const phone = {label: '连接手机', action: 'phone' as const, enabled: true};
   if (status === undefined) return {title: '正在读取', detail: '', tone: 'muted'};
@@ -35,9 +35,11 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
     ...(cloud.lastCompletedAt ? {lastSynced: `上次同步 ${formatSyncTime(cloud.lastCompletedAt, now)}`} : {}),
     ...(cloud.quotaBytes > 0 ? {space: {label: `已用 ${formatBytes(cloud.usedBytes)} / ${formatBytes(cloud.quotaBytes)}`, fraction: Math.min(1, Math.max(0, cloud.usedBytes / cloud.quotaBytes))}} : {}),
   };
+  const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
   // A manual sync that left the foreground: queued is with the system, not finished.
   if (handoff === 'held') return {...base, title: '等待手机同步结束', detail: '蓝牙传输结束后会自动继续云同步。', tone: 'attention', button: {label: '同步中…', action: 'sync', enabled: false}};
-  if (handoff === 'queued' && !BUSY.has(phase)) return {...base, title: '后台同步中', detail: '已移交系统后台继续，完成后这里会更新。', tone: 'busy', button: {label: '在前台同步', action: 'sync', enabled: true}};
+  if ((phase==='waiting'||handoff==='waiting'&&canHandoff)&&!BUSY.has(phase)) return {...base,title:'等待继续',detail:'回到应用或系统后台接手后会自动续做。',tone:'attention',button:{label:'继续同步',action:'sync',enabled:true}};
+  if (handoff === 'queued' && canHandoff && !BUSY.has(phase)) return {...base, title: '后台同步中', detail: '已移交系统后台继续，完成后这里会更新。', tone: 'busy', button: {label: '在前台同步', action: 'sync', enabled: true}};
   if (pending || BUSY.has(phase)) return {...base, title: '正在同步', detail: BUSY.has(phase) ? cloud.message : '正在连接云空间', tone: 'busy', button: {label: '同步中…', action: 'sync', enabled: false}};
   if (phase === 'complete') return {...base, title: '已同步', detail: cloud.message.includes('正文') ? '阅读状态已同步，文章正文会在连上 Wi-Fi 后同步。' : cloud.message.includes('只读') ? '已恢复云端资料；云空间当前只读。' : cloud.message.includes('部分') ? '已同步，部分公共 RSS 稍后重试。' : '手表与云端已一致。'};
   if(cloud.message.includes('重新登记本机'))return{...base,title:'需要重新登记本机',detail:'本机设备公钥与云端不一致，请确认后重新登记。',tone:'attention',button:undefined};

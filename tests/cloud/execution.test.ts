@@ -13,13 +13,13 @@ test('suspending during account IO releases the writer lease without opening a l
  const gate=new CloudForegroundExecution(true),calls:string[]=[];
  const accounts=new WatchAccountStore({get:async()=>{gate.foreground(false);return null;},set:async()=>{throw Error('no writes');},remove:async()=>{throw Error('no deletion');}});
  const runtime=createCloudRuntime(async<T>(method:string)=>{calls.push(method);if(method==='cloud.acquire')return{acquired:true} as T;if(method==='cloud.release')return{} as T;if(method==='file.list')return{entries:[]} as T;if(method==='discovery.networkSnapshot')return{active:true,validated:true,wifi:true,metered:false} as T;throw Error('unexpected '+method);},async()=>{throw Error('repository must stay closed');},{require(){}},accounts,undefined,gate);
- expect(await runtime.service.syncNow()).toBe(false);expect(runtime.service.status.phase).toBe('idle');expect(runtime.service.status.retryAtMillis).toBeGreaterThan(0);expect(calls.at(-1)).toBe('cloud.release');expect(calls).toHaveLength(4);
+ expect(await runtime.service.syncNow()).toBe(false);expect(runtime.service.status.phase).toBe('waiting');expect(runtime.service.status.retryAtMillis).toBeGreaterThan(0);expect(calls.at(-1)).toBe('cloud.release');expect(calls).toHaveLength(4);
 });
 test('suspended records stop immediately and skip the secondary usage refresh; a resumed sync succeeds',async()=>{
  const f=await fixture(),gate=new CloudForegroundExecution(true),check=gate.begin(),original=f.session.assertCurrent;
  f.session.assertCurrent=async()=>{check();await original();check();};
  f.session.records=async()=>({pull:async()=>{gate.foreground(false);await f.session.assertCurrent();return 0;},reapply:async()=>0,flush:async()=>0}) as any;
- expect(await f.service.syncNow()).toBe(false);const count=f.calls.length;await Promise.resolve();expect(f.calls.length).toBe(count);expect(f.service.status.phase).toBe('idle');
+ expect(await f.service.syncNow()).toBe(false);const count=f.calls.length;await Promise.resolve();expect(f.calls.length).toBe(count);expect(f.service.status.phase).toBe('waiting');
  const bootstrap=f.calls.filter(c=>c.url.endsWith('/bootstrap'));expect(bootstrap).toHaveLength(1);
  gate.foreground(true);const next=gate.begin();f.session.assertCurrent=async()=>{next();await original();};f.session.records=async()=>({pull:async()=>0,reapply:async()=>0,flush:async()=>0}) as any;
  expect(await f.service.syncNow()).toBe(true);
@@ -65,5 +65,5 @@ test('pause after server token rotation still commits the new pair, then cancels
   throw Error('unexpected '+method);
  };
  const runtime=createCloudRuntime(host,async()=>{throw Error('repository must stay closed');},{require(){}},accounts,undefined,gate);
- expect(await runtime.service.syncNow()).toBe(false);expect(runtime.service.status.phase).toBe('idle');expect((await accounts.read())?.watchRefreshToken).toBe('new-refresh');expect((await accounts.read())?.watchDeviceToken).toBe('new-access');expect(files.size).toBe(0);expect(calls.at(-1)).toBe('cloud.release');
+ expect(await runtime.service.syncNow()).toBe(false);expect(runtime.service.status.phase).toBe('waiting');expect((await accounts.read())?.watchRefreshToken).toBe('new-refresh');expect((await accounts.read())?.watchDeviceToken).toBe('new-access');expect(files.size).toBe(0);expect(calls.at(-1)).toBe('cloud.release');
 });

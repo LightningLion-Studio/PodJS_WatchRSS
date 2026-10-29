@@ -2,7 +2,7 @@ import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {utf8Encode,type CloudKeyEnvelope,type StoredCloudKeyEnvelope,type CloudTrust} from './types';
 import {commit,rotation,attest,validateTrust,type V2Crypto} from './v2';
 import {cloudDisabled,type CloudGuard} from './guard';
-export interface CloudStringStore {get(key:string):Promise<string|undefined>;set(key:string,value:string):Promise<void>;update?(values:Record<string,string|null>,removePrefixes?:string[]):Promise<void>;}
+export interface CloudStringStore {compareAndSet?(key:string,expected:string|undefined,value:string|undefined):Promise<boolean>;get(key:string):Promise<string|undefined>;set(key:string,value:string):Promise<void>;update?(values:Record<string,string|null>,removePrefixes?:string[]):Promise<void>;}
 export interface DeviceKeyHost {
  publicKey(keyId:string):Promise<string>;
  unwrap(args:{keyId:string;publicKeySpki:string;saltBase64:string;infoBase64:string;nonceBase64:string;ciphertextBase64:string;aadBase64:string}):Promise<Uint8Array>;

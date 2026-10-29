@@ -1,4 +1,4 @@
-import {MANUAL_INTENT_KEY} from '../../src/cloud/manual-handoff';
+import {MANUAL_INTENT_KEY,manualEpochKey} from '../../src/cloud/manual-handoff';
 import {cloudAccountIdentity} from '../../src/cloud/identity';
 import {contentFixture} from './content-fixture';
 import {createHmac} from 'node:crypto';
@@ -14,7 +14,7 @@ const b64=(b:Uint8Array)=>Buffer.from(b).toString('base64'),unb64=(s:string)=>ne
 test('release and debug workers require explicit persisted consent, then skip unbound accounts without network',async()=>{
  for(const debug of [false,true])for(const consent of [false,true]){
   const calls:string[]=[];
-  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{
+  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{
    if(m==='kv.get'){expect(a.key).toBe('watchrss.onboarding');calls.push('consent');return {exists:consent,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};}
    expect(m).toBe('cloud.host');calls.push(a.method);if(a.method==='app.buildInfo')return {debugBuild:debug};if(a.method==='secure.get')return {exists:false};throw Error('unexpected '+a.method);
   }};
@@ -22,11 +22,12 @@ test('release and debug workers require explicit persisted consent, then skip un
  }
 });
 test('automatic and manual headless handlers use actual SQLite/codec/coordinator with durable progress and no UI or real HTTP',async()=>{
- for(const manual of [false,true]){
+ for(const entry of ['automatic','manual','periodic-with-grant']){
+ const manual=entry!=='automatic';
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
- if(manual)secure.set(MANUAL_INTENT_KEY,JSON.stringify({version:1,token:'manual_fixture',scope:cloudAccountIdentity(account),mode:'all',createdAt:1}));
- const epoch='9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff',v2={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
+ if(manual)secure.set(MANUAL_INTENT_KEY,JSON.stringify({version:1,token:'manual_fixture',scope:cloudAccountIdentity(account),mode:'recent128',createdAt:1}));
+ const epoch='9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff';if(manual)secure.set(manualEpochKey(account),epoch);const v2={...crypto,hmac:async(k:Uint8Array,b:Uint8Array)=>createHmac('sha256',k).update(b).digest('hex')};
  secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode(JSON.stringify(['https://backend.invalid','user'])))+'.'+epoch+'.1',b64(key));
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
  const resultFile=async(data:Uint8Array,directory='cloud-crypto')=>{const path=`${directory}/.pod-write-${++id}.part`;files.set(path,data);return {path,size:data.length,sha256:await crypto.sha256(data)};};
@@ -41,7 +42,8 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'discovery.networkSnapshot':return {active:true,validated:true,wifi:true,metered:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
    case 'secure.set':secure.set(a.key,a.value);return {};
-   case 'secure.update':for(const [k,v] of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {};
+   case 'secure.compareAndSet':if((secure.get(a.key)??null)!==a.expected)return {updated:false};if(a.value===null)secure.delete(a.key);else secure.set(a.key,a.value);return {updated:true};
+   case 'secure.update':if(a.expected)for(const [k,v]of Object.entries(a.expected))if((secure.get(k)??null)!==v)return {updated:false};for(const [k,v] of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};
    case 'file.list':return {entries:[]};
    case 'secure.delete':secure.delete(a.key);return {};
    case 'file.createTemp':return resultFile(new Uint8Array(),a.directory);
@@ -84,7 +86,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
   await initializeSchema({query:async (q,p=[])=>sql.query(q).all(...p) as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
-  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:manual?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
+  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:entry==='manual'?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
   expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
  expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);
  }finally{sql.close();}
@@ -93,11 +95,27 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
 
 test('manual headless grant is bound to durable token and backend/account scope before any library, writer or network work',async()=>{
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true}};
- for(const mismatch of ['token','scope']){const methods:string[]=[];const intent={version:1,token:'opaque_1',scope:mismatch==='scope'?'other':cloudAccountIdentity(account),mode:'all',createdAt:1};
- const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:300000,payload:{manual:true,token:mismatch==='token'?'stale':'opaque_1'},isCancelled:()=>false,request:async(method,args:any)=>{
+ for(const mismatch of ['token','scope','epoch']){const methods:string[]=[];const intent={version:2,token:'opaque_1',scope:mismatch==='scope'?'other':cloudAccountIdentity(account),mode:'recent128',createdAt:1,epoch:'old-epoch'};
+ const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:{manual:true,token:mismatch==='token'?'stale':'opaque_1'},isCancelled:()=>false,request:async(method,args:any)=>{
   if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
   methods.push(args.method);if(args.method==='app.buildInfo')return {debugBuild:false};
-  if(args.method==='secure.get')return {exists:true,value:JSON.stringify(args.args.key===MANUAL_INTENT_KEY?intent:account)};throw Error('unauthorized side effect: '+args.method);
- }});expect(result).toBe('success');expect(methods).toEqual(['app.buildInfo','secure.get','secure.get']);
+  if(args.method==='secure.compareAndSet'){expect(args.args.key).toBe(MANUAL_INTENT_KEY);expect(args.args.value).toBeNull();return {updated:true};}if(args.method==='secure.get')return {exists:true,value:args.args.key===manualEpochKey(account)?'new-epoch':JSON.stringify(args.args.key===MANUAL_INTENT_KEY?intent:account)};throw Error('unauthorized side effect: '+args.method);
+ }});expect(result).toBe('success');expect(methods.slice(0,3)).toEqual(['app.buildInfo','secure.get','secure.get']);expect(methods.every(m=>['app.buildInfo','secure.get','secure.compareAndSet'].includes(m))).toBe(true);
  }
+});
+
+test('background cooperative deadline leaves checkpoint cleanup time before the native hard stop',async()=>{
+ const account={userId:'user',watchDeviceToken:'fixture',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true}};
+ const methods:string[]=[];
+ const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+5000,payload:null,isCancelled:()=>false,request:async(method,args:any)=>{
+  if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
+  methods.push(args.method);
+  if(args.method==='app.buildInfo')return {debugBuild:false};
+  if(args.method==='secure.get')return {exists:args.args.key==='state_json',value:args.args.key==='state_json'?JSON.stringify(account):undefined};
+  if(args.method==='cloud.acquire')return {acquired:true};
+  if(args.method==='cloud.release')return {};
+  if(args.method==='discovery.networkSnapshot')return {active:true,validated:true,wifi:true,metered:false};
+  throw Error('Unexpected work after cooperative deadline: '+args.method);
+ }});
+ expect(result).toBe('retry');expect(methods).toContain('cloud.release');expect(methods.some(m=>m.startsWith('sql.')||m==='http.download'||m==='crypto.random')).toBe(false);
 });

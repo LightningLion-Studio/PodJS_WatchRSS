@@ -65,13 +65,13 @@ async function cleanupCrypto(){const {entries}=await operation<{entries:{path:st
 const genericCrypto=createCrypto(operation);
 const v2Crypto={sha256:crypto.sha256,random:crypto.random,hmac:async(k:Uint8Array,b:Uint8Array)=>{guard.require();return hex(hmacSha256Bytes(k,b));},verify:genericCrypto.verifyP256};
 files.removeTree=removeTree;
-const store:CloudStringStore={async get(key){guard.require();return secureStorage.get(key);},async set(key,value){guard.require();await secureStorage.set(key,value);},async update(values,removePrefixes){guard.require();await request('secure.update',{values,removePrefixes});}};
+const store:CloudStringStore={async compareAndSet(key,expected,value){guard.require();const r=await request<{updated:boolean}>('secure.compareAndSet',{key,expected:expected??null,value:value??null});if(typeof r.updated!=='boolean')throw Error('cloud_manual_compare_unavailable');return r.updated;},async get(key){guard.require();return secureStorage.get(key);},async set(key,value){guard.require();await secureStorage.set(key,value);},async update(values,removePrefixes){guard.require();await request('secure.update',{values,removePrefixes});}};
 /** No registration, timer, worker or network starts during module import/factory creation.
  * The coordinator supplies the bounded HTTP transport and owns registration.
  * Callers supply a gate initialized from app.buildInfo; no import-time I/O. */
 function foundation(userId:string,deviceId:string,http:HttpTransport,options:CloudClientOptions){
  guard.require();if(!userId||!deviceId)throw Error('云同步缺少账号或设备身份');
- const scopedStore:CloudStringStore={get:async key=>{await options.assertCurrent?.();return store.get(key);},set:async(key,value)=>{await options.assertCurrent?.();await store.set(key,value);},update:async(values,prefixes)=>{await options.assertCurrent?.();await store.update!(values,prefixes);}};
+ const scopedStore:CloudStringStore={compareAndSet:async(key,expected,value)=>{await options.assertCurrent?.();return store.compareAndSet!(key,expected,value);},get:async key=>{await options.assertCurrent?.();return store.get(key);},set:async(key,value)=>{await options.assertCurrent?.();await store.set(key,value);},update:async(values,prefixes)=>{await options.assertCurrent?.();await store.update!(values,prefixes);}};
  const keys=new WatchCloudKeyManager({sha256:crypto.sha256,hmac:v2Crypto.hmac,publicKey:async keyId=>(await operation<{publicKeySpki:string}>('crypto.ecdhPublicKey',{keyId})).publicKeySpki,unwrap:args=>data('crypto.ecdhUnwrap',args)},scopedStore,guard,options.baseUrl);
  const cache=new WatchCloudCache(files,crypto.sha256,guard,options.baseUrl),state=new WatchCloudStateStore(scopedStore,userId,deviceId,guard,options.baseUrl);
  const invalidate=async()=>{await keys.clear(userId);await state.clear();await cache.clear(userId);};
