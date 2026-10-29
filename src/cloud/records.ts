@@ -26,6 +26,8 @@ export interface RecordPorts {
  /** Numeric work counters only; never include record IDs, keys or plaintext. */
  report?(metrics:RecordPullMetrics):void;
  progress?(metrics:RecordReplayProgress):void;
+ /** Fraction of the server revision range replayed so far; numbers only. */
+ pageProgress?(done:number,total:number):void;
  get(after:string):Promise<RecordPage>;push(items:RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>;
  refreshKeys?():Promise<void>;current():Promise<void>;assertUpload():Promise<void>;
  bookReplacement?(legacy:RecordDocument):Promise<{book:RecordDocument;reading?:RecordDocument}|undefined>;
@@ -133,12 +135,15 @@ export class WatchCloudRecords {
    for(let at=0;at<retained.length;at+=50){await process(retained.slice(at,at+50),true);if(cachedInteractions.length>=500)await applyCachedInteractions();}
    // No GET/cursor advancement or local upload may overtake this replay.
    await applyCachedInteractions(true);
+   const startCursor=cursor;
    for(let pages=0;pages<2000;pages++){
     let page:RecordPage;try{page=await p.get(cursor);}catch(e){if(!restarted&&String(e).includes('cloud_record_cursor_invalid')){restarted=true;this.state=this.empty();this.decoded.clear();cursor='0';continue;}throw e;}
     await p.current();if(page.libraryEpoch!==p.epoch)throw Error('library_epoch_mismatch');if(page.formatVersion===0)throw Error('cloud_records_consent_required');
     check(page.formatVersion===1&&Array.isArray(page.items)&&page.items.length<=50&&typeof page.hasMore==='boolean');revision(page.cursor);revision(page.headRevision);check(cmp(page.cursor,cursor)>=0&&cmp(page.headRevision,page.cursor)>=0&&(page.hasMore?(cmp(page.cursor,cursor)>0&&cmp(page.headRevision,page.cursor)>0&&page.items.length>0):page.cursor===page.headRevision));
     let last=cursor;for(const row of page.items){revision(row.revision);check(ID.test(row.recordId)&&typeof row.tombstone==='boolean'&&cmp(row.revision,last)>0&&cmp(row.revision,page.cursor)<=0);last=row.revision;}
-    await process(page.items);cursor=page.cursor;this.state.cursor=cursor;await this.save();if(!page.hasMore)return changed;
+    await process(page.items);cursor=page.cursor;this.state.cursor=cursor;await this.save();
+    try{const base=BigInt(startCursor);p.pageProgress?.(Number(BigInt(cursor)-base),Number(BigInt(page.headRevision)-base));}catch{}
+    if(!page.hasMore)return changed;
    }throw Error('cloud_record_page_limit');
   }catch(error){if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&p.checkpoint)await p.checkpoint(JSON.stringify(this.state));throw error;}finally{anchor.fill(0);}
  }
