@@ -1,8 +1,9 @@
+import {appLogger} from '../logs/app-logger.ts';
+import {BiliRecommendationHistory,feedCacheKey,recommendationId} from './recommendations.ts';
 import type { BiliClient } from './client.ts';
 import type { BiliHistoryCursor, BiliItem } from './types.ts';
 
 export interface BrowseStore { get<T>(key: string): T | undefined | null; set<T>(key: string, value: T): unknown }
-const FEED_CACHE = 'watchrss.bili.feed-cache.v1';
 const SEARCH_HISTORY = 'watchrss.bili.search-history.v1';
 export const originalContentEnabled = (channel?: { useOriginalContent?: boolean }) => channel?.useOriginalContent ?? true;
 export const videoKey = (item: Pick<BiliItem, "aid" | "bvid" | "title">) => item.bvid?.trim() ? `bvid:${item.bvid}` : item.aid != null ? `aid:${item.aid}` : `title:${item.title ?? ''}`;
@@ -63,41 +64,58 @@ export function historyPager(client: Pick<BiliClient, 'history'>, changed?: (sta
     return { items: result.items, next: result.items.length && advanced && ((next.max ?? 0) > 0 || (next.viewAt ?? 0) > 0) ? next : undefined };
   }, item => `${item.history?.business ?? 'archive'}:${videoKey({ aid: item.history?.oid, bvid: item.history?.bvid, title: item.title })}`, changed);
 }
+export interface FeedBrowseOptions { scope?:()=>string; minimumItems?:number; onFiltered?:(count:number)=>void }
 export class BiliFeedBrowser {
   state: BrowseState<BiliItem> = { items: [], loading: false, canLoadMore: true };
-  private generation = 0;
-  private disposed = false;
-  private watchCursor?:string;
-  constructor(private client: Pick<BiliClient, 'feed'>, private store: BrowseStore, private changed: (state: BrowseState<BiliItem>) => void = () => {}) {}
-  private publish(update: Partial<BrowseState<BiliItem>>) { this.state = { ...this.state, ...update }; this.changed(this.state); }
-  dispose() { this.disposed = true; this.generation++; }
-  refresh = async () => {
-    if (this.disposed) return;
-    const generation = ++this.generation, current = this.state.items;
-    const raw = current.length ? [] : this.store.get<unknown>(FEED_CACHE);
-    const cached = Array.isArray(raw) ? raw.filter((v): v is BiliItem => !!v && typeof v === 'object').slice(0, 50) : [];
-    const prefix = cached.slice(0, 5);
-    this.publish({ loading: true, error: undefined, items: prefix.length ? prefix : current, canLoadMore: true });
+  private generation=0;
+  private disposed=false;
+  private scope?:string;
+  private cursor:Record<string,string|number>={};
+  constructor(private client:Pick<BiliClient,'feed'>,private store:BrowseStore,private changed:(state:BrowseState<BiliItem>)=>void=()=>{},private options:FeedBrowseOptions={}){}
+  private publish(update:Partial<BrowseState<BiliItem>>) { this.state={...this.state,...update};this.changed(this.state); }
+  dispose(){this.disposed=true;this.generation++;}
+  refresh=()=>this.request(true);
+  loadMore=()=>this.request(false);
+  private async request(reset:boolean) {
+    if(this.disposed)return;
+    const scope=this.options.scope?.()??'anonymous';
+    if(scope!==this.scope){reset=true;this.scope=scope;this.cursor={};this.state={items:[],loading:false,canLoadMore:true};}
+    if(!reset&&(this.state.loading||!this.state.canLoadMore))return;
+    const generation=++this.generation,current=this.state.items;
+    const valid=()=>!this.disposed&&generation===this.generation&&scope===(this.options.scope?.()??'anonymous');
+    const history=new BiliRecommendationHistory(this.store,scope),cacheKey=feedCacheKey(scope);
+    const raw=reset&&!current.length?this.store.get<unknown>(cacheKey):undefined;
+    const cached=Array.isArray(raw)?raw.filter((v):v is BiliItem=>!!v&&typeof v==='object').slice(0,50):[];
+    const prefix=cached.slice(0,5);
+    if(prefix.length)history.remember(prefix);
+    this.publish({loading:true,error:undefined,items:prefix.length?prefix:current,canLoadMore:true});
+    let params=reset?{}:this.cursor,webIndex=Number(params.fresh_idx)||0,filtered=0,canLoadMore=false;
+    const fresh:BiliItem[]=[],batch=new Set<string>();
+    if(!reset)for(const item of current){const id=recommendationId(item);if(id)batch.add(id);}
     try {
-      const page = await this.client.feed();
-      if (this.disposed || generation !== this.generation) return;
-      this.watchCursor=page.source==='watch'?page.nextPage:undefined;
-      const fresh = appendUnique([], page.items, videoKey);
-      const items = fresh.length ? appendUnique(prefix, fresh, videoKey) : cached.length ? cached : current;
-      if (fresh.length) this.store.set(FEED_CACHE, fresh.slice(0, 50));
-      this.publish({ items, loading: false, canLoadMore: page.source==='watch'?!!this.watchCursor:items.length > 0 });
-    } catch (error) { if (!this.disposed && generation === this.generation) this.publish({ loading: false, error, items: cached.length ? cached : current }); }
-  };
-  loadMore = async () => {
-    if (this.disposed || this.state.loading || !this.state.canLoadMore) return;
-    const generation = ++this.generation;
-    this.publish({ loading: true, error: undefined });
-    try {
-      const page = await this.client.feed(this.watchCursor?{page_next:this.watchCursor}:{});
-      if (this.disposed || generation !== this.generation) return;
-      this.watchCursor=page.source==='watch'?page.nextPage:undefined;
-      const items = appendUnique(this.state.items, page.items, videoKey);
-      this.publish({ items, loading: false, canLoadMore: page.source==='watch'?!!this.watchCursor&&items.length>this.state.items.length:items.length > this.state.items.length });
-    } catch (error) { if (!this.disposed && generation === this.generation) this.publish({ loading: false, error }); }
-  };
+      if(!valid())return;
+      for(let attempt=0;attempt<3;attempt++){
+        let page:import('./types.ts').BiliFeedPage;
+        try{page=await this.client.feed(Object.keys(params).length?params:undefined);}catch(error){if(!attempt)throw error;break;}
+        if(!valid())return;
+        const seen=new Set(history.read());
+        for(const item of page.items){const id=recommendationId(item);if(id&&(seen.has(id)||batch.has(id))){filtered++;continue;}if(id)batch.add(id);fresh.push(item);}
+        if(page.source==='watch'){
+          const next=page.nextPage;
+          canLoadMore=!!next&&next!==params.page_next;
+          if(canLoadMore)params={page_next:next!};
+        }else{
+          webIndex++;params={fresh_idx:webIndex,fresh_idx_1h:webIndex};canLoadMore=true;
+        }
+        if(fresh.length>=Math.max(1,this.options.minimumItems??5)||!canLoadMore)break;
+      }
+      if(!valid())return;
+      this.cursor=params;
+      const items=reset?(fresh.length?fresh:cached.length?cached:current):[...current,...fresh];
+      history.remember(fresh.length?fresh:cached);
+      if(fresh.length)this.store.set(cacheKey,(reset?fresh:items).slice(0,50));
+      (this.options.onFiltered??(count=>appLogger.i('BiliFeed',JSON.stringify({filteredCount:count}))))(filtered);
+      this.publish({items,loading:false,canLoadMore:canLoadMore&&fresh.length>0});
+    }catch(error){if(valid()){const items=cached.length?cached:current;history.remember(cached);this.publish({loading:false,error,items});}}
+  }
 }

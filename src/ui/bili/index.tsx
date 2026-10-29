@@ -1,3 +1,4 @@
+import {biliFeedScope} from '../../bili/recommendations.ts';
 import {useModalInput} from '../modal-input.ts';
 import type {ModalInput,ModalInputRecovery} from '../service.ts';
 import {restoredSignal,booleanState,stringState} from '../route-activity.tsx';
@@ -106,10 +107,10 @@ function pagedData<T>(source: () => unknown, factory: (changed: (state: BrowseSt
 
 function FeedScreen(props: BiliScreenProps) {
   const session = asyncData(() => props.client.getSession());
-  const feed = pagedData<BiliItem>(() => authenticated(session.value()), changed => new BiliFeedBrowser({ feed: () => authenticated(session.value()) ? props.client.feed() : Promise.resolve({ items: [], source: "web" }) }, {
-    get: <T,>(key: string) => authenticated(session.value()) ? kv.get<T>(key) : undefined,
+  const feed = pagedData<BiliItem>(() => biliFeedScope(session.value()), changed => new BiliFeedBrowser({ feed: params => authenticated(session.value()) ? props.client.feed(params) : Promise.resolve({ items: [], source: "web" }) }, {
+    get: <T,>(key: string) => kv.get<T>(key),
     set: <T,>(key: string, value: T) => kv.set(key, value),
-  }, changed));
+  }, changed, {scope:()=>biliFeedScope(session.value())}));
   // Native BiliFeedItemEntry: swipe left reveals 收藏 / 稍后再看 (disabled while scrolling);
   // results surface as the bottom ToastMessage.
   const [openSwipeId, setOpenSwipeId] = createSignal<string | null>(null);

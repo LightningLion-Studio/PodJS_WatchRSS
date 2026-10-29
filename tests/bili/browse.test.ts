@@ -1,3 +1,4 @@
+import {feedCacheKey} from '../../src/bili/recommendations.ts';
 import { describe, expect, test } from 'bun:test';
 import { BiliFeedBrowser, BiliSearchHistory, BrowsePager, favoritePager, historyPager, originalContentEnabled, searchPager, type BrowseStore } from '../../src/bili/browse.ts';
 import { BiliClient } from '../../src/bili/client.ts';
@@ -12,7 +13,7 @@ const items = (...ids: number[]): BiliItem[] => ids.map(aid => ({ aid, bvid: `BV
 const feed = (...ids: number[]): BiliFeedPage => ({ items: items(...ids), source: 'web' });
 
 describe('B3 recommendation browsing', () => {
-  test('persist fresh feed, show five cached entries before network, merge and deduplicate', async () => {
+  test('show cached entries while loading, then replace with only unseen recommendations', async () => {
     const store = new Store();
     await new BiliFeedBrowser({ feed: async () => feed(1, 2, 3, 4, 5, 6) }, store).refresh();
     const next = deferred<BiliFeedPage>();
@@ -21,32 +22,32 @@ describe('B3 recommendation browsing', () => {
     expect(browser.state.items).toEqual(items(1, 2, 3, 4, 5));
     expect(browser.state.loading).toBe(true);
     next.resolve(feed(5, 7, 7, 8)); await pending;
-    expect(browser.state.items).toEqual(items(1, 2, 3, 4, 5, 7, 8));
-    expect(store.get<BiliItem[]>('watchrss.bili.feed-cache.v1')).toEqual(items(5, 7, 8));
+    expect(browser.state.items).toEqual(items(7, 8));
+    expect(store.get<BiliItem[]>(feedCacheKey())).toEqual(items(7, 8));
   });
   test('failed or empty refresh restores full cached list; explicit fresh refresh replaces it', async () => {
-    const store = new Store(); store.set('watchrss.bili.feed-cache.v1', items(1, 2, 3, 4, 5, 6));
-    let mode = 'fail'; const browser = new BiliFeedBrowser({ feed: async () => { if (mode === 'fail') throw Error('offline'); return mode === 'empty' ? feed() : feed(9); } }, store);
+    const store = new Store(); store.set(feedCacheKey(), items(1, 2, 3, 4, 5, 6));
+    let mode = 'fail'; const browser = new BiliFeedBrowser({ feed: async () => { if (mode === 'fail') throw Error('offline'); return mode === 'empty' ? feed() : feed(9); } }, store, undefined, {minimumItems:1});
     await browser.refresh(); expect(browser.state.items).toHaveLength(6); expect(browser.state.error).toBeDefined();
     mode = 'empty'; await browser.refresh(); expect(browser.state.items).toHaveLength(6);
     mode = 'fresh'; await browser.refresh(); expect(browser.state.items).toEqual(items(9));
   });
   test('append guards concurrent loads, retries failure, and stops on duplicate-only page', async () => {
     const pending = deferred<BiliFeedPage>(); let calls = 0;
-    const browser = new BiliFeedBrowser({ feed: async () => { calls++; if (calls === 1) return feed(1); if (calls === 2) return pending.promise; return feed(1); } }, new Store());
+    const browser = new BiliFeedBrowser({ feed: async () => { calls++; if (calls === 1) return feed(1); if (calls === 2) return pending.promise; return feed(1); } }, new Store(), undefined, {minimumItems:1});
     await browser.refresh(); const loading = browser.loadMore(); await browser.loadMore(); expect(calls).toBe(2);
     pending.reject(Error('offline')); await loading; expect(browser.state.items).toEqual(items(1)); expect(browser.state.canLoadMore).toBe(true);
-    await browser.loadMore(); expect(browser.state.canLoadMore).toBe(false); await browser.loadMore(); expect(calls).toBe(3);
+    await browser.loadMore(); expect(browser.state.canLoadMore).toBe(false); await browser.loadMore(); expect(calls).toBe(5);
   });
   test('new refresh invalidates pending append and disposal prevents cache writes', async () => {
     const old = deferred<BiliFeedPage>(), late = deferred<BiliFeedPage>(); let calls = 0;
-    const store = new Store(); const browser = new BiliFeedBrowser({ feed: async () => { calls++; return calls === 1 ? feed(1) : calls === 2 ? old.promise : calls === 3 ? feed(9) : late.promise; } }, store);
+    const store = new Store(); const browser = new BiliFeedBrowser({ feed: async () => { calls++; return calls === 1 ? feed(1) : calls === 2 ? old.promise : calls === 3 ? feed(9) : late.promise; } }, store, undefined, {minimumItems:1});
     await browser.refresh(); const loading = browser.loadMore(); await browser.refresh(); old.resolve(feed(2)); await loading; expect(browser.state.items).toEqual(items(9));
-    const disposed = browser.refresh(); browser.dispose(); late.resolve(feed(99)); await disposed; expect(store.get<BiliItem[]>('watchrss.bili.feed-cache.v1')).toEqual(items(9));
+    const disposed = browser.refresh(); browser.dispose(); late.resolve(feed(99)); await disposed; expect(store.get<BiliItem[]>(feedCacheKey())).toEqual(items(9));
   });
   test('cache has native 50-item limit', async () => {
     const store = new Store(); await new BiliFeedBrowser({ feed: async () => feed(...Array.from({ length: 70 }, (_, i) => i + 1)) }, store).refresh();
-    expect(store.get<BiliItem[]>('watchrss.bili.feed-cache.v1')).toHaveLength(50);
+    expect(store.get<BiliItem[]>(feedCacheKey())).toHaveLength(50);
   });
 });
 describe('B3 search history and paging', () => {
