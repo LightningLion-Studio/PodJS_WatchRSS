@@ -26,7 +26,7 @@ export interface CloudSession {
  client:Partial<Pick<WatchCloudClient,'refreshR48WriteGate'|'r48WriteEnabled'|'requiredFeatures'>>&Pick<WatchCloudClient,'setEpoch'|'setContentGeneration'|'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
  keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'currentKeyVersion'|'acceptBootstrap'|'accountKey'>&Partial<Pick<WatchCloudKeyManager,'prepareLegacyUpgrade'>>;
  codec:WatchCloudCodec;cache:WatchCloudCache;state:WatchCloudStateStore;uploader:{upload(target:CloudUploadObject,bytes:Uint8Array):Promise<void>};
- library:Partial<Pick<WatchCloudLibraryAdapter,'observePrivateOverlay'>>&Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
+ library:Partial<Pick<WatchCloudLibraryAdapter,'observePrivateOverlay'|'readingInventoryMode'>>&Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
  /** Account identity/revocation must be rechecked after asynchronous IO. */
  assertCurrent():Promise<void>;
  assertUpload?():Promise<void>;
@@ -136,8 +136,9 @@ export class WatchCloudSyncService {
   let inventoryFailures=0;
   if(restore.phase==='snapshots')await restore.phaseDone('inventory');
   {this.set('downloading','正在更新公共 RSS 库',member);const sources=await s.library.publicSources();let completed=0;for(const source of sources){
-   const unit='inventory:'+restore.cycle+':'+await restore.token(JSON.stringify([heads.map(h=>[h.id,h.manifestSha256]).sort((a,b)=>a[0].localeCompare(b[0])),mode,source.url]));if(restore.has(unit)){completed++;continue;}
-   await current();try{const payloadKey=await restore.token(unit),saved=await restore.read(payloadKey);const inventory:Awaited<ReturnType<CloudSession['client']['resolveRssSource']>>=saved?JSON.parse(utf8Decode(saved)):await restore.timed('inventory',0,()=>s.client.resolveRssSource(source.url,mode));if(!saved)await restore.write(payloadKey,utf8Encode(JSON.stringify(inventory)));await current();changed=(await s.library.mergeInventory({...inventory,url:source.url},{checkpoint:restore.apply(unit,(done,total)=>this.set('downloading',`正在更新公共 RSS 库 ${Math.floor((completed+(total?done/total:0))*100/Math.max(1,sources.length))}%`,member)),skipReading:true})>0)||changed;await restore.commit(unit);completed++;this.set('downloading',`正在更新公共 RSS 库 ${Math.floor(completed*100/Math.max(1,sources.length))}%`,member);}catch{await current();inventoryFailures++;}
+   const inventoryMode=full?await s.library.readingInventoryMode?.(source.url,mode)??mode:mode;
+   const unit='inventory:'+restore.cycle+':'+await restore.token(JSON.stringify([heads.map(h=>[h.id,h.manifestSha256]).sort((a,b)=>a[0].localeCompare(b[0])),inventoryMode,source.url]));if(restore.has(unit)){completed++;continue;}
+   await current();try{const payloadKey=await restore.token(unit),saved=await restore.read(payloadKey);const inventory:Awaited<ReturnType<CloudSession['client']['resolveRssSource']>>=saved?JSON.parse(utf8Decode(saved)):await restore.timed('inventory',0,()=>s.client.resolveRssSource(source.url,inventoryMode));if(!saved)await restore.write(payloadKey,utf8Encode(JSON.stringify(inventory)));await current();changed=(await s.library.mergeInventory({...inventory,url:source.url},{checkpoint:restore.apply(unit,(done,total)=>this.set('downloading',`正在更新公共 RSS 库 ${Math.floor((completed+(total?done/total:0))*100/Math.max(1,sources.length))}%`,member)),skipReading:true})>0)||changed;await restore.commit(unit);completed++;this.set('downloading',`正在更新公共 RSS 库 ${Math.floor(completed*100/Math.max(1,sources.length))}%`,member);}catch{await current();inventoryFailures++;}
   }}
   if(resumed){await restore.phaseDone('records');
    // Measured warm records cost ~120s on the watch. Do not start that lane in a

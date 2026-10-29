@@ -6,6 +6,8 @@ import {isImportedContentUrl} from '../core/imported-content';
 import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {rssSourceKey,tryRssArticleId,isLocalOnlyRssSource} from './rss-identity';
 import type {SnapshotCrypto} from './codec';
+import {sha256Hex,hmacSha256Bytes,hex} from '@podjs/framework/crypto';
+import {WorkReceipts} from '@podjs/framework/work-receipts';
 import {utf8Encode,utf8Decode,type CloudTrust} from './types';
 export type RecordKind='article'|'source'|'rss-state'|'book'|'book-reading';
 export interface RecordDocument {kind:string;value:Record<string,any>;features?:CloudFeatures;/** Local intent only; never serialized. */pendingEdit?:boolean;/** Physical-row export suppression only, never wire identity. */projectionAliases?:readonly string[]}
@@ -15,6 +17,7 @@ export interface RecordPage extends CloudTrust {formatVersion:0|1;items:RecordRo
 export interface RecordWrite {recordId:string;expectedRevision:string;envelope:RecordEnvelope;tombstone:boolean}
 export interface RecordPullMetrics {projectionDecryptions?:number;decryptions:number;retired:number;elapsedMillis:number;outcome:'complete'|'paused'|'failed'}
 export interface RecordReplayProgress {event:'records-replay';stage:'decoding'|'merging'|'applied';batchRows:number;documents:number;keyMillis:number;decodeMillis:number;hashMillis:number;applyMillis:number;elapsedMillis:number}
+export interface RecordWorkProgress {event:'records-work';lane:'interactions'|'flush'|'pull';stage:'export'|'identity'|'projection'|'canonicalJSON'|'hash'|'ack-diff'|'encode'|'push'|'checkpoint'|'retire'|'apply-metadata'|'apply-books'|'reading-candidates'|'reading-merge';durationMillis:number;units:number;cached?:boolean;outcome:'complete'|'failed'}
 export interface RecordPorts {
  userId:string;epoch:string;anchorVersion:number;version:number;
  key(version:number):Promise<Uint8Array|undefined>;
@@ -26,15 +29,17 @@ export interface RecordPorts {
  /** Numeric work counters only; never include record IDs, keys or plaintext. */
  report?(metrics:RecordPullMetrics):void;
  progress?(metrics:RecordReplayProgress):void;
+ work?(metrics:RecordWorkProgress):void;
  /** Fraction of the server revision range replayed so far; numbers only. */
  pageProgress?(done:number,total:number):void;
  get(after:string):Promise<RecordPage>;push(items:RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>;
- refreshKeys?():Promise<void>;current():Promise<void>;assertUpload():Promise<void>;
+ readPreparation?():Promise<string|undefined>;writePreparation?(value:string):Promise<void>;
+ refreshKeys?():Promise<void>;check?():void;current():Promise<void>;assertUpload():Promise<void>;
  bookReplacement?(legacy:RecordDocument):Promise<{book:RecordDocument;reading?:RecordDocument}|undefined>;
  /** Restore previously committed in-memory RSS/source projections without SQL writes. */
  hydrate?(documents:RecordDocument[]):Promise<void>;
  reapply?():Promise<number>;
- apply(documents:RecordDocument[]):Promise<number>;export():Promise<RecordDocument[]>;
+ apply(documents:RecordDocument[],work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T)=>Promise<T>):Promise<number>;export(work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T)=>Promise<T>):Promise<RecordDocument[]>;
 }
 const check=(ok:unknown)=>{if(!ok)throw Error('cloud_record_invalid');};
 const ID=/^[a-f0-9]{64}$/;
@@ -57,7 +62,8 @@ export class CloudRecordCodec {
  async id(key:Uint8Array,user:string,doc:RecordDocument){validateRecord(doc);const v=doc.value,identity=doc.kind==='book'?v.bookId:doc.kind==='book-reading'?v.bookId+':'+v.chapterIndex:doc.kind==='rss-state'?v.sourceId+':'+v.articleIdHash:doc.kind==='article'?v.articleId:v.url;const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record-id/v1'));try{return await this.c.hmac(derived,utf8Encode(doc.kind+':'+identity));}finally{derived.fill(0);}}
  mergeArticles(left:RecordDocument,right:RecordDocument){return mergeArticleRegisters(left,right);}
  readPlaintext(text:string):RecordDocument {const node=parseRawJson(text,{maxBytes:65520}),raw=rawJsonValue<any>(node);check(raw&&raw.format==='watchrss-rss-record'&&raw.version===1);let doc:RecordDocument=bindCloudRaw({kind:raw.kind,value:raw.value,...(raw.features===undefined?{}:{features:raw.features})},node,recordRawSchema(raw.kind),16384);if(doc.kind==='article'&&doc.value&&hasArticleRegisters(doc)){if(doc.features?.roCompat?.includes(ARTICLE_REGISTER_FEATURE)&&cloudCompatibility(doc).opaque&&cloudCompatibility(doc).reason!=='invalid_features')return doc;doc=readArticleRegisters(text);if(!cloudCompatibility(doc).readOnly)markCloudReadOnly(doc,'article_provenance_write_disabled');}if(!Object.prototype.hasOwnProperty.call(recordFields,doc.kind))isolateCloudRaw(doc,'unknown_kind');if(!cloudCompatibility(doc).opaque)validateRecord(doc);return doc;}
- async hash(doc:RecordDocument){if(hasArticleRegisters(doc)&&!cloudCompatibility(doc).opaque)return this.c.sha256(utf8Encode(articleKnownCanonical(normalizeArticleRegisters(doc))));if(cloudCompatibility(doc).opaque)return this.c.sha256(utf8Encode(cloudRaw(doc)?.source??canonical(doc)));doc={...doc,value:knownRecordValue(doc.kind,doc.value)};if(doc.kind==='book'||doc.kind==='book-reading'){validateRecord(doc);const v={...doc.value};if('readingProgress'in v)v.readingProgress=Math.floor(v.readingProgress*1e6+.5)/1e6;return this.c.sha256(utf8Encode(doc.kind+':'+canonical(v)));}const value={...doc.value};delete value.sourceDeviceId;if(doc.kind==='source')delete value.createdAt;if('readingProgress'in value)value.readingProgress=Math.floor(value.readingProgress*1e6+.5)/1e6;return this.c.sha256(utf8Encode(canonical({kind:doc.kind,value})));}
+ hashText(doc:RecordDocument){if(hasArticleRegisters(doc)&&!cloudCompatibility(doc).opaque)return articleKnownCanonical(normalizeArticleRegisters(doc));if(cloudCompatibility(doc).opaque)return cloudRaw(doc)?.source??canonical(doc);doc={...doc,value:knownRecordValue(doc.kind,doc.value)};if(doc.kind==='book'||doc.kind==='book-reading'){validateRecord(doc);const v={...doc.value};if('readingProgress'in v)v.readingProgress=Math.floor(v.readingProgress*1e6+.5)/1e6;return doc.kind+':'+canonical(v);}const value={...doc.value};delete value.sourceDeviceId;if(doc.kind==='source')delete value.createdAt;if('readingProgress'in value)value.readingProgress=Math.floor(value.readingProgress*1e6+.5)/1e6;return canonical({kind:doc.kind,value});}
+ async hash(doc:RecordDocument){return this.c.sha256(utf8Encode(this.hashText(doc)));}
  async encode(key:Uint8Array,user:string,id:string,version:number,doc:RecordDocument,basis:RecordDocument=doc):Promise<RecordEnvelope>{
   validateRecord(doc);if(hasArticleRegisters(doc)||hasArticleRegisters(basis))throw Error('cloud_format_read_only');if(doc.kind==='book')await validateBook(doc.value,this.c.sha256);check(ID.test(id)&&Number.isInteger(version)&&version>0);if(cloudCompatibility(basis).readOnly)throw Error('cloud_format_read_only');const text=cloudRaw(basis)?rawRecordText(doc,basis):canonical({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:doc.value});const node=parseRawJson(text);const bound=bindCloudRaw({...doc},node,recordRawSchema(doc.kind),16384);if(cloudCompatibility(bound).readOnly)throw Error('cloud_format_read_only');const bytes=utf8Encode(text);check(bytes.length+16<=65536);const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record/v1'));
   try{const out=await this.c.encrypt(derived,utf8Encode(`watchrss-cloud-record-v1:${user}:${id}:${version}`),bytes);return {algorithm:'A256GCM',keyVersion:version,nonceBase64:bytesToBase64(out.nonce),ciphertextBase64:bytesToBase64(out.ciphertext)};}finally{derived.fill(0);bytes.fill(0);}
@@ -72,7 +78,7 @@ export class CloudRecordCodec {
  }
 }
 interface RecordProjection {ids:string[];keyVersion:number;binding:string;nonceBase64:string;ciphertextBase64:string}
-interface RecordState {projections?:RecordProjection[];protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
+interface RecordState {prepared?:{scope:string;entries:[string,{id:string;hash:string;proof:string}][]};projections?:RecordProjection[];protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
 /** Disposable encrypted projection, account/epoch scoped by the cache; no plaintext library in it. */
 export class WatchCloudRecords {
  private state!:RecordState;private codec:CloudRecordCodec;private decoded=new Map<string,{row:RecordRow;doc:RecordDocument;legacy:boolean}>();
@@ -136,7 +142,7 @@ export class WatchCloudRecords {
    while(cachedInteractions.length>=500||final&&cachedInteractions.length){
     await p.current();const docs=cachedInteractions.splice(0,500),started=Date.now();
     const report=(stage:'merging'|'applied')=>{try{p.progress?.({event:'records-replay',stage,batchRows:docs.length,documents:docs.length,keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:stage==='applied'?Math.max(0,Date.now()-started):0,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};
-    report('merging');if(p.hydrate)await p.hydrate(docs);else changed+=await p.apply(docs);await p.current();report('applied');
+    report('merging');if(p.hydrate)await p.hydrate(docs);else changed+=await this.apply(docs);await p.current();report('applied');
    }
   };
   const process=async(rows:RecordRow[],retained=false)=>{await p.current();const started=Date.now(),times={keyMillis:0,decodeMillis:0,hashMillis:0,applyMillis:0};const timed=async<T>(name:keyof typeof times,run:()=>Promise<T>)=>{const at=Date.now();try{return await run();}finally{times[name]+=Math.max(0,Date.now()-at);}};const progress=(stage:RecordReplayProgress['stage'],documents:number)=>{try{p.progress?.({event:'records-replay',stage,batchRows:rows.length,documents,...times,elapsedMillis:Math.max(0,Date.now()-started)});}catch{}};progress('decoding',0);const docs:RecordDocument[]=[],acks:Record<string,{revision:string;hash:string}>={},retiredIds=new Set<string>();
@@ -162,7 +168,7 @@ export class WatchCloudRecords {
     }catch(error){if(String(error).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE)||String(error).includes('cloud_record_count_limit')||/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|library_epoch_mismatch|账号|client_upgrade_required|commitment|device_attestation/.test(String(error)))throw error;this.decoded.delete(row.recordId);projectionEntries.delete(row.recordId);if(String(error).includes('cloud_record_format_depth'))(this.state.quarantinedRows??={})[row.recordId]=true;/* Retain original ciphertext for replay. A poisoned row cannot disable old validated keys. */}finally{key?.fill(0);}
     this.state.rows[row.recordId]=row;
    }
-   progress('merging',docs.length);if(docs.length)changed+=await timed('applyMillis',()=>p.apply(docs));await p.current();Object.assign(this.state.records,acks);progress('applied',docs.length);
+   progress('merging',docs.length);if(docs.length)changed+=await timed('applyMillis',()=>this.apply(docs));await p.current();Object.assign(this.state.records,acks);progress('applied',docs.length);
    // Authenticated tombstones have been applied. Keep CAS revisions/hashes, but
    // do not decrypt and reapply thousands of retired RSS indexes on every run.
    for(const id of retiredIds){delete this.state.rows[id];this.decoded.delete(id);}
@@ -192,37 +198,83 @@ export class WatchCloudRecords {
    }throw Error('cloud_record_page_limit');
   }catch(error){if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&p.checkpoint)await p.checkpoint(JSON.stringify(this.state));throw error;}finally{anchor.fill(0);}
  }
- async reapply(){await this.p.current();if(this.p.reapply)return this.p.reapply();return this.p.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
+ private async apply(documents:RecordDocument[]){
+  const metrics=new Map<string,RecordWorkProgress>();
+  const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T):Promise<T>=>{const at=Date.now();let success=false;try{const result=await run();success=true;return result;}finally{const old=metrics.get(stage);metrics.set(stage,{event:'records-work',lane:'pull',stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,Date.now()-at),outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
+  try{return await this.p.apply(documents,measure);}finally{for(const m of metrics.values())try{this.p.work?.(m);}catch{}}
+ }
+ async reapply(){await this.p.current();if(this.p.reapply)return this.p.reapply();return this.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
  flush(completedPrivateArticleIds:readonly string[]=[],completedBookIds:readonly string[]=[]){return this.flushRecords(completedPrivateArticleIds,completedBookIds,false);}
  /** Public RSS interactions commit independently of slow private body restore.
   * This lane never publishes private metadata or retires any legacy record. */
  flushInteractions(){return this.flushRecords([],[],true);}
  private async flushRecords(completedPrivateArticleIds:readonly string[],completedBookIds:readonly string[],interactionsOnly:boolean){
-  const p=this.p;await p.current();await p.assertUpload();const anchor=await p.key(p.anchorVersion),key=await p.key(p.version);if(!anchor||!key){anchor?.fill(0);key?.fill(0);throw Error('missing_key_version');}
+  const p=this.p;await p.current();await p.assertUpload();let cleanupAnchor:Uint8Array|undefined,cleanupKey:Uint8Array|undefined;
+  try{const anchor=cleanupAnchor=await this.key(p.anchorVersion),key=cleanupKey=await this.key(p.version);if(!anchor||!key){anchor?.fill(0);key?.fill(0);throw Error('missing_key_version');}
+  const lane=interactionsOnly?'interactions':'flush';
+  const metrics=new Map<string,RecordWorkProgress>();
+  const reportWork=()=>{for(const m of metrics.values())try{p.work?.(m);}catch{}metrics.clear();};
+  const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T,cached=false):Promise<T>=>{const at=Date.now();let success=false;try{const result=await run();success=true;return result;}finally{const k=stage+':'+cached,old=metrics.get(k);metrics.set(k,{event:'records-work',lane,stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,Date.now()-at),cached,outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
+  let saved=this.state.prepared;if(p.readPreparation){try{saved=JSON.parse(await p.readPreparation()??'null')??undefined;}catch(error){await p.current();saved=undefined;}}
+  const scope=sha256Hex(utf8Encode(JSON.stringify(['record-preparation-v1',p.userId,p.epoch,p.anchorVersion,p.version])));
+  const receipts=new WorkReceipts<{id:string;hash:string;proof:string}>(saved?.scope===scope&&Array.isArray(saved.entries)?saved.entries.filter(e=>Array.isArray(e)&&ID.test(e[0])&&e[1]&&ID.test(e[1].id)&&ID.test(e[1].hash)&&ID.test(e[1].proof)):[],100000);
+  const receiptProof=(fingerprint:string,r:{id:string;hash:string})=>hex(hmacSha256Bytes(anchor,utf8Encode('watchrss/local-record-preparation/v1:'+scope+':'+fingerprint+':'+r.id+':'+r.hash)));
+  const persistPreparation=async()=>{const value={scope,entries:receipts.snapshot()};if(p.writePreparation)await p.writePreparation(JSON.stringify(value));else this.state.prepared=value;};
+  const persist=async(cleanup=false,preparationOnly=false)=>measure('checkpoint',1,async()=>{
+   if(!p.writePreparation)this.state.prepared={scope,entries:receipts.snapshot()};
+   if(!preparationOnly||!p.writePreparation){const value=JSON.stringify(this.state);if((cleanup||accepted)&&p.checkpoint)await p.checkpoint(value);else {await p.current();await p.writeState(value);}}
+   if(p.writePreparation)await persistPreparation();
+  });
+  let accepted=false,prepared=0;
   let written=0;const hashById=new Map<string,string>();let batch:RecordWrite[]=[];
-  const flush=async()=>{if(!batch.length)return;await p.current();await p.assertUpload();const response=await p.push(batch);await p.current();check(response.formatVersion===1&&response.items?.length===batch.length);const expected=new Map(batch.map(r=>[r.recordId,r])),seen=new Set<string>();
-   for(const row of response.items){revision(row.revision);const item=expected.get(row.recordId);check(item&&!seen.has(row.recordId)&&cmp(row.revision,item!.expectedRevision)>0);seen.add(row.recordId);this.state.records[row.recordId]={revision:row.revision,hash:hashById.get(row.recordId)!};if(item!.tombstone)delete this.state.rows[row.recordId];else this.state.rows[row.recordId]={recordId:row.recordId,revision:row.revision,envelope:item!.envelope,tombstone:item!.tombstone};}for(const item of batch)if(!item.tombstone){const row=this.state.rows[item.recordId];if(row)this.decoded.set(item.recordId,{row,...await this.codec.decode(key,anchor,p.userId,row)});}written+=batch.length;batch=[];await this.save();};
-  const add=async(id:string,doc:RecordDocument,tombstone=!!doc.value.deleted,original?:RecordRow)=>{const hash=await this.codec.hash(doc),old=this.state.records[id],basis=this.decoded.get(id)?.doc;if(hasArticleRegisters(doc)||(basis&&cloudCompatibility(basis).readOnly)||(!basis&&this.state.rows[id])){if(hasArticleRegisters(doc))(this.state.protectedRows??={})[id]=true;if(doc.pendingEdit||old?.hash!==hash)(this.state.pendingEdits??={})[id]=true;return;}if(old?.hash===hash&&!original){delete this.state.pendingEdits?.[id];return;}const envelope=original?.envelope??await this.codec.encode(key,p.userId,id,p.version,doc,basis??doc);delete this.state.pendingEdits?.[id];const item={recordId:id,expectedRevision:original?.revision??old?.revision??'0',envelope,tombstone};
+  const flush=async()=>{if(!batch.length)return;await p.current();await p.assertUpload();const response=await measure('push',batch.length,()=>p.push(batch));check(response.formatVersion===1&&response.items?.length===batch.length);const expected=new Map(batch.map(r=>[r.recordId,r])),seen=new Set<string>();
+   for(const row of response.items){revision(row.revision);const item=expected.get(row.recordId);check(item&&!seen.has(row.recordId)&&cmp(row.revision,item!.expectedRevision)>0);seen.add(row.recordId);}for(const row of response.items){const item=expected.get(row.recordId)!;this.state.records[row.recordId]={revision:row.revision,hash:hashById.get(row.recordId)!};if(item!.tombstone)delete this.state.rows[row.recordId];else this.state.rows[row.recordId]={recordId:row.recordId,revision:row.revision,envelope:item!.envelope,tombstone:item!.tombstone};}accepted=true;written+=batch.length;await persist();accepted=false;await p.current();for(const item of batch)if(!item.tombstone){const row=this.state.rows[item.recordId];if(row)this.decoded.set(item.recordId,{row,...await this.codec.decode(key,anchor,p.userId,row)});}batch=[];};
+  const add=async(id:string,doc:RecordDocument,tombstone=!!doc.value.deleted,original?:RecordRow,preparedHash?:string)=>{const hash=preparedHash??await measure('hash',1,()=>this.codec.hash(doc)),old=this.state.records[id],basis=this.decoded.get(id)?.doc;const same=await measure('ack-diff',1,()=>old?.hash===hash&&!original);if(hasArticleRegisters(doc)||(basis&&cloudCompatibility(basis).readOnly)||(!basis&&this.state.rows[id])){if(hasArticleRegisters(doc))(this.state.protectedRows??={})[id]=true;if(doc.pendingEdit||old?.hash!==hash)(this.state.pendingEdits??={})[id]=true;return;}if(same){delete this.state.pendingEdits?.[id];return;}const envelope=original?.envelope??await measure('encode',1,()=>this.codec.encode(key,p.userId,id,p.version,doc,basis??doc));delete this.state.pendingEdits?.[id];const item={recordId:id,expectedRevision:original?.revision??old?.revision??'0',envelope,tombstone};
    if(batch.length&&(batch.length>=50||utf8Encode(JSON.stringify({formatVersion:1,items:[...batch,item]})).length>1048576))await flush();hashById.set(id,hash);batch.push(item);};
   try{
-   const documents=(await p.export()).filter(doc=>!interactionsOnly||doc.kind==='rss-state');for(const deleting of [true,false]){for(const doc of documents)if(!!doc.value.deleted===deleting)await add(await this.codec.id(anchor,p.userId,doc),doc);await flush();}
-   if(interactionsOnly){await this.save();return written;}
+   const documents=(await measure('export',1,()=>p.export(measure))).filter(doc=>!interactionsOnly||doc.kind==='rss-state');
+   for(const deleting of [true,false]){for(const doc of documents)if(!!doc.value.deleted===deleting){
+    if(p.check){p.check();if(prepared%50===0)await p.current();}else await p.current();validateRecord(doc);
+    // Hash every exact input locally, including ignored provenance/unknown fields.
+    // These disposable receipts cannot acknowledge a write or bypass CAS/eligibility.
+    const fingerprint=await measure('canonicalJSON',1,()=>sha256Hex(utf8Encode(canonical({kind:doc.kind,value:doc.value,features:doc.features}))));
+    const proof=(r:{id:string;hash:string})=>receiptProof(fingerprint,r);
+    let receipt=receipts.get(fingerprint);if(receipt&&receipt.proof!==proof(receipt))receipt=undefined;
+    if(!receipt){const id=await measure('identity',1,()=>this.codec.id(anchor,p.userId,doc)),text=await measure('canonicalJSON',1,()=>this.codec.hashText(doc)),hash=await measure('hash',1,()=>p.crypto.sha256(utf8Encode(text)));receipt={id,hash,proof:proof({id,hash})};receipts.set(fingerprint,receipt);}
+    else await measure('identity',1,()=>{},true);
+    await add(receipt.id,doc,!!doc.value.deleted,undefined,receipt.hash);
+    // An unchanged library also advances durable preparation. A timeout saves
+    // the remaining completed prefix below; no plaintext documents are stored.
+    if(++prepared%500===0){await persist(false,true);reportWork();}
+   }await flush();}
+
+   if(interactionsOnly){await persist();return written;}
    // R3/S8: obsolete public indexes become entity tombstones only AFTER new states commit.
    const completed=new Set(completedPrivateArticleIds);
    const interactions=new Map(documents.filter(d=>d.kind==='rss-state').map(d=>[d.value.sourceId+':'+d.value.articleIdHash,d]));
-   for(const [id,item]of this.decoded){if(item.row.tombstone)continue;const d=item.doc;if(cloudCompatibility(d).readOnly)continue;
+   const retireScope=await measure('canonicalJSON',1,()=>sha256Hex(utf8Encode(JSON.stringify([completedPrivateArticleIds,completedBookIds,this.state.records]))));let retiredWork=0;
+   for(const [id,item]of this.decoded){
+    if(p.check){p.check();if(retiredWork%50===0)await p.current();}else await p.current();
+    const fingerprint=sha256Hex(utf8Encode('retire:'+retireScope+':'+id+':'+item.row.revision)),old=receipts.get(fingerprint);
+    if(old&&old.proof===receiptProof(fingerprint,old)){retiredWork++;continue;}
+    await measure('retire',1,async()=>{
+     if(item.row.tombstone)return;const d=item.doc;if(cloudCompatibility(d).readOnly)return;
     const replacement=d.kind==='article'?await p.bookReplacement?.(d):undefined;
-    if(replacement){const current=async(doc:RecordDocument)=>this.state.records[await this.codec.id(anchor,p.userId,doc)]?.hash===await this.codec.hash(doc);if(await current(replacement.book)&&(!replacement.reading||await current(replacement.reading))&&(replacement.book.value.deleted||completedBookIds.includes(replacement.book.value.bookId))){const clock=Math.max(0,...Object.entries(d.value).filter(([k,v])=>k.endsWith('At')&&typeof v==='number').map(([,v])=>Number(v)));check(clock<Number.MAX_SAFE_INTEGER);await add(id,{kind:'article',value:{...d.value,bookIndexRetired:true,deleted:true,deletedAt:clock+1,updatedAt:clock+1}},true);}continue;}
+    if(replacement){const current=async(doc:RecordDocument)=>this.state.records[await this.codec.id(anchor,p.userId,doc)]?.hash===await this.codec.hash(doc);if(await current(replacement.book)&&(!replacement.reading||await current(replacement.reading))&&(replacement.book.value.deleted||completedBookIds.includes(replacement.book.value.bookId))){const clock=Math.max(0,...Object.entries(d.value).filter(([k,v])=>k.endsWith('At')&&typeof v==='number').map(([,v])=>Number(v)));check(clock<Number.MAX_SAFE_INTEGER);await add(id,{kind:'article',value:{...d.value,bookIndexRetired:true,deleted:true,deletedAt:clock+1,updatedAt:clock+1}},true);}return;}
     const isPublic=d.kind==='article'&&publicArticleIndex(d.value);
-    if(isPublic&&isLocalOnlyRssSource(d.value.rssSourceUrl))continue;
-    const articleId=isPublic?await tryRssArticleId({link:d.value.url,guid:d.value.guid,title:d.value.title,contentHash:d.value.contentHash},p.crypto.sha256):undefined;if(isPublic&&!articleId)continue;
+    if(isPublic&&isLocalOnlyRssSource(d.value.rssSourceUrl))return;
+    const articleId=isPublic?await tryRssArticleId({link:d.value.url,guid:d.value.guid,title:d.value.title,contentHash:d.value.contentHash},p.crypto.sha256):undefined;if(isPublic&&!articleId)return;
     const state=isPublic?interactions.get(await rssSourceKey(d.value.rssSourceUrl,p.crypto.sha256)+':'+await p.crypto.sha256(utf8Encode(articleId!))):undefined;
     const saved=state?!!(state.value.favoriteSaved||state.value.watchLaterSaved):!!(d.value.favoriteSaved||d.value.watchLaterSaved);
     if(isPublic&&(!saved||completed.has(d.value.articleId))){
-     if((d.value.isRead||d.value.readingProgress||d.value.readingPositionChangedAt||d.value.favoriteChangedAt||d.value.watchLaterChangedAt||d.value.favoriteSaved||d.value.watchLaterSaved)&&(!state||!this.state.records[await this.codec.id(anchor,p.userId,state)]||['readingPositionChangedAt','favoriteChangedAt','watchLaterChangedAt'].some(k=>(state.value[k]??0)<(d.value[k]??0))))continue;
+     if((d.value.isRead||d.value.readingProgress||d.value.readingPositionChangedAt||d.value.favoriteChangedAt||d.value.watchLaterChangedAt||d.value.favoriteSaved||d.value.watchLaterSaved)&&(!state||!this.state.records[await this.codec.id(anchor,p.userId,state)]||['readingPositionChangedAt','favoriteChangedAt','watchLaterChangedAt'].some(k=>(state.value[k]??0)<(d.value[k]??0))))return;
      await add(id,{kind:d.kind,value:{articleId:d.value.articleId,url:d.value.url,rssSourceUrl:d.value.rssSourceUrl,sourceDeviceId:d.value.sourceDeviceId??'',deleted:true,deletedAt:Math.max(1,...Object.entries(d.value).filter(([k,v])=>k.endsWith('At')&&typeof v==='number').map(([,v])=>Number(v)))+1}},true);
     }else if(item.legacy){const newId=await this.codec.id(anchor,p.userId,d);if(this.state.records[newId]){await add(id,d,true,item.row);}}
-   }await flush();await this.save();return written;
-  }catch(error){if((error as {status?:number})?.status===426||(error as {code?:string})?.code==='cloud_format_upgrade_required'){for(const item of batch)(this.state.pendingEdits??={})[item.recordId]=true;await this.save();}throw error;}finally{anchor.fill(0);key.fill(0);this.clearRunKeys();}
+
+    });if(!batch.some(r=>r.recordId===id)){const receipt={id,hash:retireScope};receipts.set(fingerprint,{...receipt,proof:receiptProof(fingerprint,receipt)});}
+    if(++retiredWork%500===0){await flush();await persist(false,true);reportWork();}
+   }await flush();await persist();return written;
+  }catch(error){if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&p.checkpoint)await persist(true);if((error as {status?:number})?.status===426||(error as {code?:string})?.code==='cloud_format_upgrade_required'){for(const item of batch)(this.state.pendingEdits??={})[item.recordId]=true;await this.save();}throw error;}finally{reportWork();}
+  }finally{cleanupAnchor?.fill(0);cleanupKey?.fill(0);this.clearRunKeys();}
  }
 }

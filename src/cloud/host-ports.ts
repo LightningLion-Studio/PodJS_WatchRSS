@@ -1,4 +1,4 @@
-import {createCrypto,hex} from '@podjs/framework/crypto';
+import {createCrypto,hex,hmacSha256Bytes} from '@podjs/framework/crypto';
 import {base64ToBytes,encodeBase64 as bytesToBase64,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
 import type {CloudGuard} from './guard';
 import {CLOUD_HOST_CAPABILITY_UNAVAILABLE} from './execution';
@@ -63,7 +63,7 @@ const files:CloudBlobStore={
 async function removeTree(path:string):Promise<void>{const {entries}=await operation<{entries:{path:string;directory:boolean}[]}>('file.list',{path});for(const entry of entries){if(!entry.path.startsWith(path+'/'))throw Error('invalid_cleanup_path');if(entry.directory)await removeTree(entry.path);else await operation('file.delete',{path:entry.path});}}
 async function cleanupCrypto(){const {entries}=await operation<{entries:{path:string}[]}>('file.list',{path:'cloud-crypto'});for(const e of entries)if(/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(e.path))await operation('file.delete',{path:e.path});}
 const genericCrypto=createCrypto(operation);
-const v2Crypto={sha256:crypto.sha256,random:crypto.random,hmac:async(k:Uint8Array,b:Uint8Array)=>hex(await genericCrypto.hmacSha256(k,b)),verify:genericCrypto.verifyP256};
+const v2Crypto={sha256:crypto.sha256,random:crypto.random,hmac:async(k:Uint8Array,b:Uint8Array)=>{guard.require();return hex(hmacSha256Bytes(k,b));},verify:genericCrypto.verifyP256};
 files.removeTree=removeTree;
 const store:CloudStringStore={async get(key){guard.require();return secureStorage.get(key);},async set(key,value){guard.require();await secureStorage.set(key,value);},async update(values,removePrefixes){guard.require();await request('secure.update',{values,removePrefixes});}};
 /** No registration, timer, worker or network starts during module import/factory creation.

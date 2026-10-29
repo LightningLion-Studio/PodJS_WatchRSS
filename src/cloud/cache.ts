@@ -15,6 +15,8 @@ export class WatchCloudCache {
  private digest(hash:string){if(!/^[0-9a-f]{64}$/.test(hash))throw Error('无效块哈希');return hash;}
  async records(userId:string){this.guard.require();const bytes=await this.files.read(`${await this.root(userId)}/records.json`);return bytes?utf8Decode(bytes):undefined;}
  async storeRecords(userId:string,value:string){this.guard.require();await this.files.writeAtomic(`${await this.root(userId)}/records.json`,utf8Encode(value));}
+ async recordPreparation(userId:string){this.guard.require();const b=await this.files.read(`${await this.root(userId)}/record-preparation.json`);return b?utf8Decode(b):undefined;}
+ async storeRecordPreparation(userId:string,value:string){this.guard.require();await this.files.writeAtomic(`${await this.root(userId)}/record-preparation.json`,utf8Encode(value));}
  async manifest(userId:string,id:string){this.guard.require();return this.files.read(`${await this.root(userId)}/manifests/${this.id(id)}.bin`);}
  async storeManifest(userId:string,id:string,bytes:Uint8Array,localHead=false){this.guard.require();const root=await this.root(userId);await this.files.writeAtomic(`${root}/manifests/${this.id(id)}.bin`,bytes);if(localHead)await this.files.writeAtomic(`${root}/latest`,utf8Encode(id));}
  async latest(userId:string){this.guard.require();const value=await this.files.read(`${await this.root(userId)}/latest`);if(!value)return undefined;const id=this.id(utf8Decode(value).trim()),bytes=await this.manifest(userId,id);return bytes?{id,bytes}:undefined;}
