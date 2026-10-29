@@ -21,6 +21,7 @@ test('cloud file chunks use bounded native Base64 and preserve exact publication
   if(method==='file.write'){const before=files.get(args.path)!;expect(args.expectedOffset).toBe(before.length);const value=Buffer.concat([before,Buffer.from(args.dataBase64,'base64')]);files.set(args.path,value);return {size:value.length} as T;}
   if(method==='file.commit'){const value=files.get(args.path)!;expect(args.expectedSize).toBe(value.length);expect(args.expectedSha256).toBe(createHash('sha256').update(value).digest('hex'));files.set(args.target,value);files.delete(args.path);return {} as T;}
   if(method==='file.delete'){files.delete(args.path);return {} as T;}
+  if(method==='crypto.hash')return {digestBase64:createHash('sha256').update(Buffer.from(args.dataBase64,'base64')).digest('base64')} as T;
   if(method==='file.hash')return {sha256:createHash('sha256').update(files.get(args.path)!).digest('hex')} as T;
   throw Error(method);
  },{require(){}});

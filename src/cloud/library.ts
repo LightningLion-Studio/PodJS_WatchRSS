@@ -3,7 +3,7 @@ import {memoizeSmallDigest} from '../core/digest-cache';
 import {PRIVATE_OVERLAY_NAME,PrivateOverlayReadSet,decodePrivateOverlay} from './private-overlay';
 import type {CloudBookSnapshot,CloudBookPort} from '../books/cloud-port';
 import type {BookState,BookReading} from '../books/protocol';
-import {validateBook,validateBookReading} from '../books/protocol';
+import {mergeBook,mergeBookReading,validateBook,validateBookReading} from '../books/protocol';
 import {parseBookHeader} from '../books/package';
 import {base64ToBytes} from '@podjs/framework/bytes';
 import {isImportedContentUrl} from '../core/imported-content';
@@ -17,6 +17,7 @@ import {writeWrss,readWrss,indexWrss,readWrssEntry,openWrssRange,type WrssRangeR
 import type {LogicalObject,CloudObject} from './codec';
 import {rssSourceKey,rssArticleId,legacyWebArticleId,tryRssArticleId,isLocalOnlyRssSource,canonicalRssUrl} from './rss-identity';
 import {hasArticleRegisters} from './article-register';
+import {knownRecordValue} from './compatibility';
 import {canonical,type RecordDocument,type RecordWorkProgress} from './records';
 export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sources:readonly SyncedSource[];stateArticles:readonly ExportedArticle[];pendingPrivateBodies?:boolean;pendingPrivateArticleIds?:readonly string[]}
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
@@ -36,6 +37,24 @@ const stateJson=(a:ExportedArticle)=>{const {contentHtml,contentText,cloudRssArt
 export class WatchCloudLibraryAdapter {
  private overlay:PrivateOverlayReadSet;
  constructor(private repository:CloudLibraryRepository,private deviceId:string,private crypto:CloudLibraryCrypto,private guard:CloudGuard=cloudDisabled){this.crypto={...crypto,sha256:memoizeSmallDigest(bytes=>crypto.sha256(bytes),{beforeUse:()=>this.guard.require()})};this.overlay=new PrivateOverlayReadSet(this.crypto);}
+ /** A local projection may omit fields held only by an authenticated record.
+  * Resolve that one basis on demand; never turn default clocks into an edit. */
+ projectRecord(local:RecordDocument,basis:RecordDocument):RecordDocument {
+  if(local.kind!==basis.kind)return local;
+  let value=local.value;
+  if(local.kind==='source'){value={...knownRecordValue('source',basis.value),...Object.fromEntries(Object.entries(local.value).filter(([,v])=>v!==undefined))};if(!local.value.sourceId&&basis.value.sourceId)value.sourceId=basis.value.sourceId;}
+  else if(local.kind==='article'||local.kind==='rss-state')value=mergeReadingValue(local.value,basis.value);
+  else if(local.kind==='book-reading')value=mergeBookReading(local.value as BookReading,basis.value as BookReading);
+  else if(local.kind==='book')value=mergeBook(local.value as BookState,basis.value as BookState);
+  return {...local,value};
+ }
+ async inventoryRecordLookups(inventory:RssInventory):Promise<RecordDocument[]>{
+  this.guard.require();const sources=new Set([await rssSourceKey(inventory.url,this.crypto.sha256),inventory.sourceId,this.sourceIds.get(inventory.url)]),out:RecordDocument[]=[];
+  for(const item of inventory.items){const identity=await tryRssArticleId({link:item.identityLink===undefined?item.url:item.identityLink,guid:item.guid,title:item.title,contentHash:item.contentHash,dedupKey:item.dedupKey},this.crypto.sha256);if(!identity)continue;const hash=await this.crypto.sha256(utf8Encode(identity));
+   for(const sourceId of sources)if(sourceId)out.push({kind:'rss-state',value:{sourceId,articleIdHash:hash}});
+   for(const articleId of new Set([identity,await legacyWebArticleId(item.url,this.crypto.sha256)]))out.push({kind:'article',value:{articleId}});
+  }return out;
+ }
  async observePrivateOverlay(payload:Map<string,Uint8Array>,remote:string,descriptors:readonly CloudObject[],trustedApplied=false,work?:{checkpoint:RestoreApplyCheckpoint;resolve:(name:string)=>Promise<Uint8Array|undefined>}){this.guard.require();return this.overlay.observe(payload,remote,descriptors,trustedApplied,work);}
  async publicSources(){this.guard.require();return (await this.repository.cloudSnapshot(false)).sources.filter(s=>!s.deleted&&!isImportedContentUrl(s.url)&&/^https?:\/\//i.test(s.url)&&!isLocalOnlyRssSource(s.url));}
  private async articleIdentity(a:ExportedArticle){return a.cloudRssArticleId??tryRssArticleId({link:a.url,title:a.title,contentHash:a.contentHash},this.crypto.sha256);}

@@ -14,7 +14,7 @@ async function execute(method:string,a:any):Promise<any>{
  switch(method){
   case 'app.buildInfo':return {debugBuild:process.env.CLOUD_RELEASE!=='1'};
   case 'file.createTemp':{const path=`${a.directory}/.pod-write-${++next}.part`;files.set(path,new Uint8Array());return {path};}
-  case 'file.write':{const old=files.get(a.path)!,part=decode(a.dataBase64);expect(part.length).toBeLessThanOrEqual(65536);expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
+  case 'file.write':{const old=a.append?files.get(a.path)!:new Uint8Array(),part=decode(a.dataBase64);expect(part.length).toBeLessThanOrEqual(262144);expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
   case 'file.read':{const file=files.get(a.path)!;return {dataBase64:encode(file.slice(a.offset,a.offset+a.maxBytes)),offset:a.offset,size:file.length,eof:a.offset+a.maxBytes>=file.length};}
   case 'file.stat':{const file=files.get(a.path);return {exists:!!file,file:!!file,directory:false,size:file?.length??0,modified:0};}
   case 'file.hash':{const file=files.get(a.path)!;return {size:file.length,sha256:hash(file)};}
@@ -60,11 +60,11 @@ expect([...files.keys()].every(path=>!path.includes('.pod-write-'))).toBe(true);
 
 // Small record envelopes use the existing bounded authenticated memory service.
 // Large snapshots keep the streamed path. Identical bytes/AAD across the boundary.
-for(const size of [0,1,32768,32769]){
+for(const size of [0,1,32768,32769,131072,131073]){
  const input=new Uint8Array(randomBytes(size)),aad=new TextEncoder().encode('record fixture');
  const before=commands.length,encrypted=await foundation!.crypto.encrypt(key,aad,input),plain=await foundation!.crypto.decrypt(key,aad,encrypted.nonce,encrypted.ciphertext);
  expect(plain).toEqual(input);const used=commands.slice(before);
- if(size<=32768){expect(used).toEqual(['crypto.aesGcmEncrypt','crypto.aesGcmDecrypt']);}
+ if(size<=131072){expect(used).toEqual(['crypto.aesGcmEncrypt','crypto.aesGcmDecrypt']);}
  else{expect(used).toContain('crypto.largeAesGcmEncrypt');expect(used).toContain('crypto.largeAesGcmDecrypt');}
  const wrong=aad.slice();wrong[0]^=1;await expect(foundation!.crypto.decrypt(key,wrong,encrypted.nonce,encrypted.ciphertext)).rejects.toThrow();
  expect([...files.keys()].every(path=>!path.includes('.pod-write-'))).toBe(true);

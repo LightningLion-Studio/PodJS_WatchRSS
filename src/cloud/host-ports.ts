@@ -1,5 +1,5 @@
 import {createCrypto,hex,hmacSha256Bytes} from '@podjs/framework/crypto';
-import {base64ToBytes,encodeBase64 as bytesToBase64,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
+import {decodeBase64 as base64ToBytes,encodeBase64 as bytesToBase64,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
 import type {CloudGuard} from './guard';
 import {CLOUD_HOST_CAPABILITY_UNAVAILABLE} from './execution';
 import {WatchCloudCodec,type SnapshotCrypto} from './codec';
@@ -27,7 +27,7 @@ const data=async(method:string,args:Record<string,unknown>)=>bytes((await operat
 async function withInput<T>(input:Uint8Array,action:(path:string)=>Promise<T>):Promise<T>{
  guard.require();if(input.length>128*1024*1024)throw Error('云加密输入过大');
  const temporary=await fileChunks.createTemp('cloud-crypto');
- try {for(let offset=0;offset<input.length;offset+=32768){const part=input.subarray(offset,offset+32768);const result=await fileChunks.append(temporary.path,b64(part),offset);if(result.size!==offset+part.length)throw Error('云加密输入不完整');}return await action(temporary.path);}
+ try {for(let offset=0;offset<input.length;offset+=262144){const part=input.subarray(offset,offset+262144);const result=await fileChunks.append(temporary.path,b64(part),offset);if(result.size!==offset+part.length)throw Error('云加密输入不完整');}return await action(temporary.path);}
  finally{await fileChunks.remove(temporary.path).catch(()=>{});}
 }
 async function transform(method:string,input:Uint8Array,args:Record<string,unknown>={}){
@@ -49,16 +49,18 @@ const crypto:SnapshotCrypto={
  contiguousOutputLimit:64*1024*1024,
  yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),
  random:async size=>bytes((await operation<{bytesBase64:string}>('crypto.random',{bytes:size})).bytesBase64),
- sha256:async input=>{guard.require();const native=sha256Bytes(input);if(native)return hex(native);return input.length>32768?withInput(input,async path=>(await fileChunks.hash(path)).sha256):Array.from(bytes((await operation<{digestBase64:string}>('crypto.hash',{dataBase64:b64(input)})).digestBase64),b=>b.toString(16).padStart(2,'0')).join('');},
+ sha256:async input=>{guard.require();const native=sha256Bytes(input);if(native)return hex(native);return input.length>131072?withInput(input,async path=>(await fileChunks.hash(path)).sha256):Array.from(bytes((await operation<{digestBase64:string}>('crypto.hash',{dataBase64:b64(input)})).digestBase64),b=>b.toString(16).padStart(2,'0')).join('');},
  hkdf:async(key,salt,info)=>bytes((await operation<{keyBase64:string}>('crypto.hkdfSha256',{inputBase64:b64(key),saltBase64:b64(salt),infoBase64:b64(info)})).keyBase64),
- encrypt:async(key,aad,input)=>{if(input.length<=32768){const value=await operation<{nonceBase64:string;ciphertextBase64:string}>('crypto.aesGcmEncrypt',{keyBase64:b64(key),aadBase64:b64(aad),dataBase64:b64(input)});return {nonce:bytes(value.nonceBase64),ciphertext:bytes(value.ciphertextBase64)};}const value=await transform('crypto.largeAesGcmEncrypt',input,{keyBase64:b64(key),aadBase64:b64(aad)});if(!value.nonceBase64)throw Error('缺少云加密 nonce');return {nonce:bytes(value.nonceBase64),ciphertext:value.bytes};},
- decrypt:async(key,aad,nonce,ciphertext)=>ciphertext.length<=32784?data('crypto.aesGcmDecrypt',{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce),ciphertextBase64:b64(ciphertext)}):(await transform('crypto.largeAesGcmDecrypt',ciphertext,{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce)})).bytes,
+ encrypt:async(key,aad,input)=>{if(input.length<=131072){const value=await operation<{nonceBase64:string;ciphertextBase64:string}>('crypto.aesGcmEncrypt',{keyBase64:b64(key),aadBase64:b64(aad),dataBase64:b64(input)});return {nonce:bytes(value.nonceBase64),ciphertext:bytes(value.ciphertextBase64)};}const value=await transform('crypto.largeAesGcmEncrypt',input,{keyBase64:b64(key),aadBase64:b64(aad)});if(!value.nonceBase64)throw Error('缺少云加密 nonce');return {nonce:bytes(value.nonceBase64),ciphertext:value.bytes};},
+ decrypt:async(key,aad,nonce,ciphertext)=>ciphertext.length<=131088?data('crypto.aesGcmDecrypt',{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce),ciphertextBase64:b64(ciphertext)}):(await transform('crypto.largeAesGcmDecrypt',ciphertext,{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce)})).bytes,
  gzip:async input=>transcode(input,'file.gzip',64*1024*1024),
  gunzip:async(input,maxBytes)=>{guard.require();const native=gunzipBytes(input);if(native){if(native.length>maxBytes)throw Error('cloud_snapshot_inflate_limit');return native;}return transcode(input,'file.gunzip',maxBytes);},
 };
 const files:CloudBlobStore={
- async read(path){guard.require();const stat=await fileChunks.stat(path);guard.require();if(!stat.exists)return undefined;if(!stat.file||!Number.isSafeInteger(stat.size)||stat.size<0||stat.size>64*1024*1024)throw Error('无效云缓存文件');const out=new Uint8Array(stat.size);for(let offset=0;offset<out.length;){guard.require();const part=await fileChunks.read(path,offset,Math.min(32768,out.length-offset));guard.require();const value=bytes(part.dataBase64);if(part.offset!==offset||part.size!==out.length||!value.length||value.length>out.length-offset)throw Error('云缓存读取不完整');out.set(value,offset);offset+=value.length;}return out;},
- async writeAtomic(path,input){guard.require();const temporary=await fileChunks.createTemp('watch-cloud-cache');try{for(let offset=0;offset<input.length;offset+=32768){const part=input.subarray(offset,offset+32768);const written=await fileChunks.append(temporary.path,b64(part),offset);if(written.size!==offset+part.length)throw Error('云缓存写入不完整');}await fileChunks.commit(temporary.path,path,input.length,await crypto.sha256(input));}finally{await fileChunks.remove(temporary.path).catch(()=>{});}},
+ hash:async path=>(await fileChunks.hash(path)).sha256,
+ async append(path,input,offset){guard.require();for(let at=0;at<input.length;at+=262144){const data=input.subarray(at,at+262144),written=await request<{size:number}>("file.write",{path,dataBase64:b64(data),append:offset+at!==0,expectedOffset:offset+at,atomicReplace:offset+at===0});if(written.size!==offset+at+data.length)throw Error("cloud_record_journal_incomplete");}},
+ async read(path){guard.require();const stat=await fileChunks.stat(path);guard.require();if(!stat.exists)return undefined;if(!stat.file||!Number.isSafeInteger(stat.size)||stat.size<0||stat.size>64*1024*1024)throw Error('无效云缓存文件');const out=new Uint8Array(stat.size);for(let offset=0;offset<out.length;){guard.require();const part=await fileChunks.read(path,offset,Math.min(262144,out.length-offset));guard.require();const value=bytes(part.dataBase64);if(part.offset!==offset||part.size!==out.length||!value.length||value.length>out.length-offset)throw Error('云缓存读取不完整');out.set(value,offset);offset+=value.length;}return out;},
+ async writeAtomic(path,input){guard.require();const temporary=await fileChunks.createTemp('watch-cloud-cache');try{for(let offset=0;offset<input.length;offset+=262144){const part=input.subarray(offset,offset+262144);const written=await fileChunks.append(temporary.path,b64(part),offset);if(written.size!==offset+part.length)throw Error('云缓存写入不完整');}await fileChunks.commit(temporary.path,path,input.length,await crypto.sha256(input));}finally{await fileChunks.remove(temporary.path).catch(()=>{});}},
 };
 async function removeTree(path:string):Promise<void>{const {entries}=await operation<{entries:{path:string;directory:boolean}[]}>('file.list',{path});for(const entry of entries){if(!entry.path.startsWith(path+'/'))throw Error('invalid_cleanup_path');if(entry.directory)await removeTree(entry.path);else await operation('file.delete',{path:entry.path});}}
 async function cleanupCrypto(){const {entries}=await operation<{entries:{path:string}[]}>('file.list',{path:'cloud-crypto'});for(const e of entries)if(/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(e.path))await operation('file.delete',{path:e.path});}

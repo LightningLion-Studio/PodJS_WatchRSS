@@ -16,7 +16,7 @@ import type {WatchCloudKeyManager} from './keys';
 import type {WatchCloudCache} from './cache';
 import {type WatchCloudStateStore} from './state';
 import type {WatchCloudLibraryAdapter} from './library';
-import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type CloudSnapshotHead} from './types';
+import {utf8Encode,utf8Decode,type CloudUploadObject,type CloudMemberState,type CloudSnapshotHead,type RssInventory} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 export type WatchCloudPhase='idle'|'waiting'|'registering'|'waiting-approval'|'downloading'|'merging'|'uploading'|'complete'|'error';
 export interface WatchCloudStatus {ownerChoiceRequired?:boolean;errorCode?:'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';formatEvolution?:{writeV1Enabled:boolean;migrationV1Enabled:false;privateOverlayHeads:number;acceptedOutputObjects:number};formatCompatibility?:CloudCompatibilityStatus;phase:WatchCloudPhase;message:string;usedBytes:number;reservedBytes:number;quotaBytes:number;lastCompletedAt:number;member?:CloudMemberState;retryAtMillis?:number;pendingItems?:number;abandonedItems?:number;retryable?:boolean}
@@ -119,9 +119,10 @@ export class WatchCloudSyncService {
   let records:WatchCloudRecords|undefined,recordFailure='',recordStage:RecordFailureStage='open',recordStarted=(this.ports.now??Date.now)();
   const recordStep=async<T>(stage:RecordFailureStage,run:()=>Promise<T>)=>{recordStage=stage;recordStarted=(this.ports.now??Date.now)();let success=false;try{await current();const result=await run();await current();success=true;return result;}finally{try{this.ports.recordDiagnostic?.(JSON.stringify({event:'records-stage',stage,outcome:success?'complete':'failed',durationMillis:Math.max(0,(this.ports.now??Date.now)()-recordStarted)}));}catch{}}};
   const recordError=(e:unknown)=>{const diagnostic=recordFailureDiagnostic(e,recordStage,(this.ports.now??Date.now)()-recordStarted);const classified=JSON.parse(diagnostic);this.recordFailure={code:classified.code,stage:recordStage,category:cloudFormatFailure(e)};try{this.ports.recordDiagnostic?.(diagnostic);}catch{/* Diagnostics must not change sync. */}const text=String(e);if(isLibraryOwnerMismatch(e)||String(e).includes('cloud_sync_deadline_exceeded')||cloudFormatFailure(e)==='suspended'||contentRecovery(e)||text.includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE))throw e;if(/library_epoch_mismatch|cloud_operation_superseded|账号|cloud_account_|client_upgrade_required|device_attestation|commitment|library_owner_mismatch/.test(text))throw e;recordFailure=text.includes('cloud_record_count_limit')?'云记录数量已达上限':text.includes('cloud_quota_exceeded')?'云记录空间不足':text.includes('cloud_records_consent_required')?'请先在手机启用云记录':'云记录待重试';};
+  const openRecords=async()=>{const value=await s.records(bootstrap,current);value.trackProgress?.(unit=>restore.commit('records:'+restore.cycle+':'+unit));return value;};
   // Account checks are done; say what the long part actually is.
   this.set('downloading','正在恢复收藏和阅读进度',member);
-  if(!resumed)try{records=await recordStep('open',()=>s.records(bootstrap,current));if(await recordStep('pull',()=>records!.pull()))this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
+  if(!resumed)try{records=await recordStep('open',openRecords);if(await recordStep('pull',()=>records!.pull()))this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
 
   if(!restore.active)await restore.begin();
   await current();const heads=await s.client.snapshotHeads();heads.forEach(headValid);
@@ -133,20 +134,26 @@ export class WatchCloudSyncService {
   // previous account's public-source projection or issuing its RSS requests.
   // Keep read-only cloud recovery above and recheck again before every upload.
   await current();await s.assertUpload?.();
+  const readingPlans:{unit:string;payloadKey:string;url:string;mode:'all'|'recent128'}[]=[];
   let inventoryFailures=0;
   if(restore.phase==='snapshots')await restore.phaseDone('inventory');
   {this.set('downloading','正在更新公共 RSS 库',member);const sources=await s.library.publicSources();let completed=0;for(const source of sources){
    const inventoryMode=full&&!manual?await s.library.readingInventoryMode?.(source.url,mode)??mode:mode;
-   const unit='inventory:'+restore.cycle+':'+await restore.token(JSON.stringify([heads.map(h=>[h.id,h.manifestSha256]).sort((a,b)=>a[0].localeCompare(b[0])),inventoryMode,source.url]));if(restore.has(unit)){completed++;continue;}
-   await current();try{const payloadKey=await restore.token(unit),saved=await restore.read(payloadKey);const inventory:Awaited<ReturnType<CloudSession['client']['resolveRssSource']>>=saved?JSON.parse(utf8Decode(saved)):await restore.timed('inventory',0,()=>s.client.resolveRssSource(source.url,inventoryMode));if(!saved)await restore.write(payloadKey,utf8Encode(JSON.stringify(inventory)));await current();changed=(await s.library.mergeInventory({...inventory,url:source.url},{checkpoint:restore.apply(unit,(done,total)=>this.set('downloading',`正在更新公共 RSS 库 ${Math.floor((completed+(total?done/total:0))*100/Math.max(1,sources.length))}%`,member)),skipReading:true})>0)||changed;await restore.commit(unit);completed++;this.set('downloading',`正在更新公共 RSS 库 ${Math.floor(completed*100/Math.max(1,sources.length))}%`,member);}catch{await current();inventoryFailures++;}
+   const unit='inventory:'+restore.cycle+':'+await restore.token(JSON.stringify([heads.map(h=>[h.id,h.manifestSha256]).sort((a,b)=>a[0].localeCompare(b[0])),inventoryMode,source.url])),payloadKey=await restore.token(unit);readingPlans.push({unit,payloadKey,url:source.url,mode:inventoryMode});if(restore.has(unit)){completed++;continue;}
+   await current();try{const saved=await restore.read(payloadKey);const inventory:Awaited<ReturnType<CloudSession['client']['resolveRssSource']>>=saved?JSON.parse(utf8Decode(saved)):await restore.timed('inventory',0,()=>s.client.resolveRssSource(source.url,inventoryMode));if(!saved)await restore.write(payloadKey,utf8Encode(JSON.stringify(inventory)));await current();changed=(await s.library.mergeInventory({...inventory,url:source.url},{checkpoint:restore.apply(unit,(done,total)=>this.set('downloading',`正在更新公共 RSS 库 ${Math.floor((completed+(total?done/total:0))*100/Math.max(1,sources.length))}%`,member)),skipReading:true})>0)||changed;await restore.commit(unit);completed++;this.set('downloading',`正在更新公共 RSS 库 ${Math.floor(completed*100/Math.max(1,sources.length))}%`,member);}catch{await current();inventoryFailures++;}
   }}
   if(resumed){await restore.phaseDone('records');
    // Measured warm records cost ~120s on the watch. Do not start that lane in a
    // nearly exhausted snapshot window; never reset/extend the 300s budget.
    if((this.budget?.remainingMillis()??0)<150000){this.value={...this.value,retryAtMillis:(this.ports.now??Date.now)()+1};this.set('idle','云快照检查点已保存，继续恢复阅读状态',member);return false;}
-   try{records=await recordStep('open',()=>s.records(bootstrap,current));if(await recordStep('pull',()=>records!.pull()))this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
+   try{records=await recordStep('open',openRecords);if(await recordStep('pull',()=>records!.pull()))this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
   }
-  if(records&&!recordFailure)try{if(await recordStep('reapply',()=>records!.reapply()))changed=true;}catch(e){recordError(e);}
+  const recordScope='heads:'+await restore.token(JSON.stringify(heads.map(h=>[h.id,h.manifestSha256]).sort((a,b)=>a[0].localeCompare(b[0]))));
+  if(records&&!recordFailure)try{if(await recordStep('reapply',()=>records!.reapply(recordScope,unit=>restore.commit('records-replay:'+recordScope+':'+unit))))changed=true;}catch(e){recordError(e);}
+  if(records&&!recordFailure)try{for(const plan of readingPlans){const unit=plan.unit+':reading-v2';if(restore.has(unit)||!restore.has(plan.unit))continue;await current();let bytes=await restore.read(plan.payloadKey);let inventory:RssInventory;
+   if(bytes)inventory={...JSON.parse(utf8Decode(bytes)),url:plan.url};else{inventory={...await s.client.resolveRssSource(plan.url,plan.mode),url:plan.url};await restore.write(plan.payloadKey,utf8Encode(JSON.stringify(inventory)));const repair=unit+':metadata:'+await restore.token(JSON.stringify(inventory));changed=(await s.library.mergeInventory(inventory,{checkpoint:restore.apply(repair),skipReading:true})>0)||changed;await restore.commit(repair);}
+   changed=(await records.reapplyInventory?.(inventory)>0)||changed;await restore.commit(unit);
+  }}catch(e){recordError(e);}
   if(changed)this.ports.onChanged?.();await current();
   await s.assertUpload?.();
   // Flush after all public refreshes and merges. Failures stay in the records lane.
