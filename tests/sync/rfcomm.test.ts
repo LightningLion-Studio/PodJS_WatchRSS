@@ -22,3 +22,33 @@ test('RFCOMM automatic denies extra actions while active listener default allows
   expect(f.sent[0]?.success).toBe(!filterRequest);expect(handled).toBe(filterRequest?0:1);
  }
 });
+
+import {LocalTransferActivity} from '../../src/sync/local-transfer';
+import {CloudForegroundExecution} from '../../src/cloud/execution';
+import {WatchCloudScheduler} from '../../src/cloud/scheduler';
+const settle=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
+test('passive RFCOMM listen/120s accept timeout never holds the cloud pause; only a decoded request fences it',async()=>{
+ const activity=new LocalTransferActivity(),execution=new CloudForegroundExecution(true),events:boolean[]=[];
+ activity.subscribe(active=>{events.push(active);execution.foreground(!active);});
+ // Three consecutive automatic accepts time out, while the same cloud run is valid.
+ const check=execution.begin();
+ for(let i=0;i<3;i++){const f=setup();let reject!:(e:Error)=>void,accepting!:()=>void;const ready=new Promise<void>(resolve=>accepting=resolve);
+  f.ports.radio.accept=()=>{accepting();return {result:new Promise((_r,r)=>reject=r),cancel(){reject(Error('cancelled'));}};};
+  const run=f.listener.start({acquireSession:()=>activity.acquire()});await ready;check();expect(activity.active).toBe(false);reject(Error('accept timeout 120000'));await expect(run).rejects.toThrow('timeout');check();
+ }
+ expect(events).toEqual([]);
+ const f=setup(),write=f.ports.streams.write;let finish!:()=>void,writing!:()=>void;const ready=new Promise<void>(r=>writing=r),wait=new Promise<void>(r=>finish=r);
+ f.ports.streams.write=(...args)=>{const result=write(...args);writing();return {result:wait.then(()=>result.result),cancel(){finish();}};};
+ const run=f.listener.start({acquireSession:()=>activity.acquire()});await ready;
+ expect(activity.active).toBe(true);expect(check).toThrow('cloud_sync_suspended');finish();await run;expect(activity.active).toBe(false);expect(events).toEqual([true,false]);execution.begin()();expect(check).toThrow('cloud_sync_suspended');
+});
+test('a real decoded local session resumes the interrupted manual cloud run on close, also on protocol failure',async()=>{
+ for(const failed of [false,true]){const activity=new LocalTransferActivity(),execution=new CloudForegroundExecution(true),f=setup(),write=f.ports.streams.write;
+  let finishCloud!:(success:boolean)=>void,finishLocal!:()=>void,writing!:()=>void,calls=0;const ready=new Promise<void>(r=>writing=r),localWait=new Promise<void>(r=>finishLocal=r);
+  const scheduler=new WatchCloudScheduler({sync:async()=>{calls++;return calls===1?new Promise<boolean>(r=>finishCloud=r):true;},now:()=>0,delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},{require(){}});
+  activity.subscribe(active=>{execution.foreground(!active);scheduler.hold(active);});
+  const cloud=scheduler.manual('all');await settle();const check=execution.begin();
+  f.ports.streams.write=(...args)=>{const result=write(...args);writing();return {result:localWait.then(()=>{if(failed)throw Error('peer disconnected');return result.result;}),cancel(){finishLocal();}};};
+  const local=f.listener.start({acquireSession:()=>activity.acquire()});const outcome=local.catch(e=>e);await ready;expect(check).toThrow('cloud_sync_suspended');finishCloud(false);await cloud;await settle();expect(calls).toBe(1);scheduler.foreground(true);expect(calls).toBe(1);finishLocal();const result=await outcome;if(failed)expect(String(result)).toContain('peer disconnected');await settle();expect(activity.active).toBe(false);expect(calls).toBe(2);scheduler.dispose();
+ }
+});

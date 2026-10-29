@@ -57,3 +57,13 @@ test('R47 an in-flight cloud run that completes successfully during a no-change 
  let count=0,finish!:(v:boolean)=>void;const s=new WatchCloudScheduler({now:()=>0,sync:async()=>{count++;return new Promise<boolean>(r=>{finish=r;});},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
  s.foreground(true);s.hold(true);finish(true);await settle();s.hold(false);await settle();expect(count).toBe(1);s.dispose();
 });
+test('account replacement discards a delayed manual all retry and never authorizes a full run for the new account',async()=>{
+ let now=0;const calls:[boolean,string|undefined][]=[],timers:{fn:()=>void;cancelled:boolean}[]=[];
+ const scheduler=new WatchCloudScheduler({now:()=>now,sync:async(manual,mode)=>{calls.push([manual,mode]);return true;},delay:(_ms,fn)=>{const timer={fn,cancelled:false};timers.push(timer);return()=>{timer.cancelled=true;};},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ scheduler.deferUntil(30000,'all');scheduler.foreground(true);expect(calls).toEqual([]);scheduler.accountChanged();await settle();expect(calls).toEqual([[false,'recent128']]);now=30000;for(const timer of timers)if(!timer.cancelled)timer.fn();await settle();expect(calls.every(([manual])=>!manual)).toBe(true);scheduler.dispose();
+});
+test('an old held run cannot restore its manual authorization after an account replacement',async()=>{
+ let finish!:(success:boolean)=>void;const calls:[boolean,string|undefined][]=[];
+ const scheduler=new WatchCloudScheduler({now:()=>0,sync:async(manual,mode)=>{calls.push([manual,mode]);return calls.length===1?new Promise<boolean>(r=>finish=r):true;},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ const run=scheduler.manual('all');await settle();scheduler.hold(true);scheduler.foreground(true);scheduler.accountChanged();finish(false);await run;await settle();scheduler.hold(false);await settle();expect(calls).toEqual([[true,'all'],[false,'recent128']]);scheduler.dispose();
+});
