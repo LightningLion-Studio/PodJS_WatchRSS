@@ -1,3 +1,5 @@
+import {rowAtOffset} from "../reader/content-layout.ts";
+import {novelPageDirection} from "../reader/novel.ts";
 import {AutoScrollAwakeLease} from "../reader/keep-awake.ts";
 import {displayPower} from "@podjs/framework/services";
 import {lifecycle} from "@podjs/framework/watch";
@@ -44,6 +46,7 @@ import {ReaderTextRow,createReaderTextEnvironment} from "./ReaderTextRow.tsx";
 
 export interface ReaderBodyHandle {
   tap:()=>void;
+  ready?:()=>boolean;
   scroller:Scroller;
   playing:()=>boolean;
   setPlaying:(value:boolean)=>void;
@@ -53,6 +56,8 @@ export interface ReaderBodyHandle {
   flushProgress:()=>Promise<void>;
 }
 function ReaderBodyImpl(props:{
+  pageMode?:boolean;
+  onMoving?:(moving:boolean)=>void;
   progressStore?:Pick<ReadingProgressStore,"load"|"save">;
   imported?:{handle:ImportedTextHandle;read:(index:number)=>Promise<string|null>};
   preset?:ReaderPreset;
@@ -199,10 +204,10 @@ function ReaderBodyImpl(props:{
       feedbackTimer=schedule(1500,()=>setFeedback(""));
     }
   };
-  const handle:ReaderBodyHandle={manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset()),flushProgress:save};
+  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset()),flushProgress:save};
   props.ref(handle);
   const tap=()=>{
-    if(!props.active||!restored())return;
+    if(!props.active||!restored()||props.pageMode)return;
     if(tapTimer){tapTimer();tapTimer=undefined;props.onControls(handle);}
     else tapTimer=schedule(300,()=>{tapTimer=undefined;if(props.active)setPlaying(!playing());});
   };
@@ -308,7 +313,7 @@ function ReaderBodyImpl(props:{
   });
   return <View debugName="ReaderViewport" class="absolute left-[0] right-[0]" style={{insetT:props.top??40,height:props.height,bgColor:props.preset?readerColor(props.preset.background.colorArgb):"#000000"}}>
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
-    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={props.footer??[]} indexedEntries={indexedEntries()}/>
+    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{props.onMoving?.(scrolling);if(scrolling&&!followingSpeech)manualScroll();}} onTap={contact=>{if(!props.pageMode)return false;const documentY=contact.y-(props.top??40)+scroller.offset();if(documentY<headerHeight()||documentY>=headerHeight()+layout().height)return false;const row=layout().rows[rowAtOffset(layout().rows,documentY-headerHeight())];if(!row||row.kind!=="text"||blocks()[row.blockIndex]?.type==="text"&&(blocks()[row.blockIndex] as {style:string}).style==="link")return false;const direction=novelPageDirection(contact.x,props.width);if(!direction)return false;manualScroll();scroller.scrollBy(direction*props.height,{durMs:220});return true;}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={props.footer??[]} indexedEntries={indexedEntries()}/>
 
     <View class="absolute left-[12] right-[12] bottom-[0] h-[18] items-center justify-center" style={{opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
   </View>;

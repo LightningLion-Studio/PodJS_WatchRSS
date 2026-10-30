@@ -1,3 +1,4 @@
+import {readNovelDirectory} from "./reader/novel.ts";
 import {followCurrentReaderTheme} from './browser/open';
 import {acquireRssFeed,type RssFetchPurpose,type RssAcquisitionMode} from './rss/acquisition';
 import {OfflineMediaQueue} from './reader/offline-queue';
@@ -237,6 +238,9 @@ export const services: AppServices = {
     FROM channels c LEFT JOIN source_preferences p ON p.channel_id=c.id
     LEFT JOIN sync_source_states s ON s.url=c.url AND s.deleted=0
     ORDER BY c.is_pinned DESC,logical_sort_order DESC,c.created_at DESC`,[],"home.channels")).map(r => ({ id:String(r.id),title:String(r.title),url:String(r.url),description:r.description == null ? null : String(r.description),imageUrl:r.image_url == null ? null : String(r.image_url),isPinned:Boolean(Number(r.is_pinned)),sortOrder:Number(r.logical_sort_order),createdAt:Number(r.created_at),useOriginalContent:Boolean(Number(r.use_original_content)),lastFetchedAt:r.last_fetched_at == null ? null : Number(r.last_fetched_at),unreadCount:Number(r.unread_count) })); },
+  async listNovelChapters(source:string) {
+    await init();return readNovelDirectory(db,source,async()=>{await yieldWorkTurn().result;});
+  },
   async listArticles(query: ArticleQuery = {}) {
     await init();
     const conditions: string[] = [], params: unknown[] = [];

@@ -888,11 +888,14 @@ export default function WatchRSS(props: {
     )
       setLoading(false);
   }
-  async function openArticle(item: Article, fromWatchLater = false) {
+  async function openArticle(item: Article, fromWatchLater = false, replaceReader = false, novelPageMode = false) {
+    const previousReader=replaceReader&&current().page==="reader"?current():undefined;
     setBusy(true);
     try {
       const full = await props.services.getArticle(item.id);
+      if(previousReader&&current()!==previousReader)return;
       await props.services.markRead(item.id);
+      if(previousReader&&current()!==previousReader)return;
       setArticle({ ...(full ?? item), read: true });
       // Reopening an already-read article must not rebuild the retained feed
       // and synchronously remeasure every card for an unchanged read flag.
@@ -907,7 +910,9 @@ export default function WatchRSS(props: {
       traceServiceWork("reader.setPage",()=>setPage("reader", {
         readerArticle: { ...(full ?? item), read: true },
         readerFromWatchLater: fromWatchLater,
+        novelPageMode,
       }));
+      if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1752,6 +1757,7 @@ export default function WatchRSS(props: {
             />
           </Show>
           <ReaderRoutes
+            openNovelChapter={(article,pageMode)=>openArticle(article,false,true,pageMode)}
             entry={entry}
             page={entryPage}
             active={active}

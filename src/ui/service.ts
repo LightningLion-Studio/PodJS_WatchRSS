@@ -87,6 +87,8 @@ export interface AppServices {
   clearLocalContent(id: string): Promise<void>;
   deleteArticle(id: string): Promise<void>;
   listArticles(query?: ArticleQuery): Promise<Article[]>;
+  /** Directory metadata only; never reads chapter bodies. */
+  listNovelChapters?(source:string):Promise<import("../reader/novel.ts").NovelChapter[]>;
   searchArticles?(channelId:string,keyword:string):Promise<Article[]>;
   getArticle(id: string): Promise<Article | null>;
   getOriginalArticle(id: string): Promise<Article>;

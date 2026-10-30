@@ -1,5 +1,7 @@
 import {useModalInput} from '../modal-input.ts';
-import { Show } from "solid-js";
+import {novelBookSource,novelResumeChapter,type NovelChapter} from "../../reader/novel.ts";
+import {Text,View} from "@pocketjs/framework/components";
+import {createEffect,createSignal,onCleanup,Show} from "solid-js";
 import {
   CHANNEL_SHARE_QR_HINT,
   type ShareHandler,
@@ -82,6 +84,16 @@ export function RssRoutes(props: RssRoutesProps) {
   const searchInput=useModalInput({key:'rss-search',title:'搜索文章',value:props.query,input:props.services.input,recovery:props.services.inputRecovery,active:()=>props.active()&&props.page()==='search',onValue:value=>{if(props.entry.channelId)void props.searchChannelArticles(props.entry.channelId,value);},onError:error=>props.setError(String(error))});
   const channel = () =>
     props.channels().find((item) => item.id === props.entry.channelId);
+
+  const [resumeChapter,setResumeChapter]=createSignal<NovelChapter>();
+  createEffect(()=>{
+    const source=novelBookSource(channel()?.url),active=props.active()&&props.page()==='articles'&&!props.busy();
+    let cancelled=false;
+    if(!source){setResumeChapter(undefined);return;}
+    if(active)setResumeChapter(undefined);
+    if(active&&props.services.listNovelChapters)void props.services.listNovelChapters(source).then(chapters=>{if(!cancelled)setResumeChapter(novelResumeChapter(chapters));}).catch(error=>{if(!cancelled)props.setError(String(error));});
+    onCleanup(()=>{cancelled=true;});
+  });
 
   return (
     <>
@@ -211,6 +223,7 @@ export function RssRoutes(props: RssRoutesProps) {
       </Show>
       <Show when={props.page() === "articles"}>
         <RssFeedScreen
+          leading={resumeChapter()?[{height:54,render:()=> <View focusable accessibilityRole="button" accessibilityLabel={'继续阅读：'+resumeChapter()!.title} onPress={()=>{const chapter=resumeChapter();if(chapter&&!props.busy())void props.openArticle(chapter);}} class="absolute inset-0 rounded-[20] bg-[#23272a] items-center justify-center"><Text class="text-sm text-[#f5f5f5]">继续阅读</Text><Text class="text-xs text-[#b6b6b6]">{resumeChapter()!.title.length>16?resumeChapter()!.title.slice(0,16)+'…':resumeChapter()!.title}</Text></View>}]:[]}
           width={props.width}
           height={props.height}
           active={props.active()}

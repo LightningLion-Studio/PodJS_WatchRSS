@@ -38,6 +38,7 @@ interface ReaderRoutesProps {
   article: () => Article | null;
   setArticle: (article: Article) => void;
   openArticle: (article: Article) => Promise<void>;
+  openNovelChapter: (article: Article,pageMode:boolean) => Promise<void>;
   setPage: SetPage;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
@@ -135,6 +136,9 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
       <Show when={props.page() === "reader" && props.entry.readerArticle}>
         {(rss) => (
           <ReaderScreen
+            initialNovelPageMode={props.entry.novelPageMode}
+            onOpenChapter={props.openNovelChapter}
+            onBackHandler={handler=>{props.entry.internalBack=handler;}}
             mediaCacheMode={props.settings().mediaCacheMode}
             highlight={props.speechState()?.highlight}
             llmEnabled={props.settings().llmEnabled}
