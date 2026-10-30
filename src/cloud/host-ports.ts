@@ -1,7 +1,7 @@
 import {createCrypto,hex,hmacSha256Bytes} from '@podjs/framework/crypto';
 import {decodeBase64 as base64ToBytes,encodeBase64 as bytesToBase64,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
 import type {CloudGuard} from './guard';
-import {CLOUD_HOST_CAPABILITY_UNAVAILABLE} from './execution';
+import {cloudHostFailure} from './host-capability';
 import {WatchCloudCodec,type SnapshotCrypto} from './codec';
 import {WatchCloudKeyManager,type CloudStringStore} from './keys';
 import {WatchCloudCache,type CloudBlobStore} from './cache';
@@ -9,7 +9,8 @@ import {WatchCloudStateStore} from './state';
 import {WatchCloudClient} from './client';
 import type {CloudClientOptions,HttpTransport,CloudUploadObject} from './types';
 export type CloudHostRequest=<T>(method:string,args:Record<string,unknown>)=>Promise<T>;
-export function createCloudHostPorts(request:CloudHostRequest,guard:CloudGuard){
+export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuard){
+ const request:CloudHostRequest=async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{try{return await rawRequest<T>(method,args);}catch(error){throw cloudHostFailure(error,method);}};
  const hostOperation=<T>(method:string,args:Record<string,unknown>)=>({result:request<T>(method,args)});
  const fileChunks={
   createTemp:(directory:string)=>request<{path:string}>('file.createTemp',{directory}),
@@ -22,7 +23,7 @@ export function createCloudHostPorts(request:CloudHostRequest,guard:CloudGuard){
  };
  const secureStorage={get:async(key:string)=>{const r=await request<{exists:boolean;value?:string}>('secure.get',{key});return r.exists?r.value:undefined;},set:(key:string,value:string)=>request('secure.set',{key,value})};
  const b64=bytesToBase64,bytes=base64ToBytes;
-async function operation<T>(method:string,args:Record<string,unknown>):Promise<T>{guard.require();try{return await hostOperation<T>(method,args).result;}catch(error){if(String(error).includes('permission_denied'))throw Error(CLOUD_HOST_CAPABILITY_UNAVAILABLE);throw error;}}
+async function operation<T>(method:string,args:Record<string,unknown>):Promise<T>{guard.require();return hostOperation<T>(method,args).result;}
 const data=async(method:string,args:Record<string,unknown>)=>bytes((await operation<{dataBase64:string}>(method,args)).dataBase64);
 async function withInput<T>(input:Uint8Array,action:(path:string)=>Promise<T>):Promise<T>{
  guard.require();if(input.length>128*1024*1024)throw Error('云加密输入过大');

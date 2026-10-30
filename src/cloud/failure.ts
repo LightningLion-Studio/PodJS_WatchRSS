@@ -18,5 +18,6 @@ export async function cloudStage<T>(stage:CloudSyncFailureStage,action:()=>Promi
  * authorization or deadline. No exception text enters the cleanup diagnostic. */
 export function cloudCleanupFailure(primary:unknown,cleanup:unknown){
  const value=primary&&typeof primary==='object'?primary as {message?:unknown;status?:unknown}:{};
- return Object.assign(new Error(typeof value.message==='string'?value.message:'cloud_sync_failed',{cause:primary}),{code:JSON.parse(recordFailureDiagnostic(primary)).code,cleanupCode:JSON.parse(recordFailureDiagnostic(cleanup)).code,stage:cloudFailureStage(primary,'run'),...(typeof value.status==='number'?{status:value.status}:{})});
+ const diagnostic=JSON.parse(recordFailureDiagnostic(primary));
+ return Object.assign(new Error(typeof value.message==='string'?value.message:'cloud_sync_failed',{cause:primary}),{code:diagnostic.code,...(diagnostic.method?{method:diagnostic.method}:{}),cleanupCode:JSON.parse(recordFailureDiagnostic(cleanup)).code,stage:cloudFailureStage(primary,'run'),...(typeof value.status==='number'?{status:value.status}:{})});
 }

@@ -1,7 +1,9 @@
 import {MANUAL_INTENT_KEY,readManualIntent,manualEpochKey,compareManualIntent,completeManualIntent} from './manual-handoff';
 import {backgroundDiagnostics} from './background-diagnostic';
 import {cloudAccountIdentity} from './identity';
-import {CloudSyncDeadlineError} from './execution';
+import {CloudSyncDeadlineError,CLOUD_HOST_CAPABILITY_UNAVAILABLE} from './execution';
+import {cloudHostFailure} from './host-capability';
+import {recordFailureDiagnostic} from './record-diagnostic';
 import {defineBackgroundHandler} from '@podjs/framework/background-handler';
 import {CloudGate} from './gate';
 import {OnboardingStore,ONBOARDING_KEY} from '../onboarding/store';
@@ -12,16 +14,18 @@ import type {CloudHostRequest} from './host-ports';
 export default defineBackgroundHandler(async context=>{
  if(!context.request)return 'failure';
  const gate=new CloudGate();
- const raw:CloudHostRequest=(method,args)=>context.request!('cloud.host',{method,args}) as Promise<any>;
+ let rejected:unknown;
+ const raw:CloudHostRequest=async(method,args)=>{try{return await context.request!('cloud.host',{method,args}) as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ const diagnostic=backgroundDiagnostics(raw);
+ try{
  // This is the same app.buildInfo host method used by application.buildInfo().
- if(!await gate.initialize(()=>raw('app.buildInfo',{})))return 'success';
+ if(!await gate.initialize(()=>raw('app.buildInfo',{}))){if(rejected)throw rejected;return 'success';}
  // Headless workers cannot show consent. Check the same persisted versions as StartupGate.
  const consent=await context.request('kv.get',{key:ONBOARDING_KEY}) as {exists:boolean;value?:unknown};
  const onboarding=new OnboardingStore({get:()=>consent.exists?consent.value:undefined,set:()=>{throw Error('Worker cannot accept consent');}});
  if(startupDestination(onboarding.load())!=='content')return 'success';
  const guard={require(){gate.require();if(context.isCancelled())throw Error('Cloud worker cancelled');}};
  const host:CloudHostRequest=(method,args)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return raw(method,args);};
- const diagnostic=backgroundDiagnostics(raw);
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  // The host deadline is absolute Unix ms. Leave time for the normal
  // checkpoint/release path before the native guest's hard interrupt.
@@ -40,7 +44,16 @@ export default defineBackgroundHandler(async context=>{
   if(intent.version===1||intent.epoch===null&&epoch.value){intent={...intent,version:2,epoch:epoch.value??null};if(!await compareManualIntent(host,stored.value,JSON.stringify(intent)))return 'success';}
   }
  }
- let success:boolean;try{success=await runtime.service.syncNow(!!intent,intent?.mode);}finally{await diagnostic.flush();}
+ const success=await runtime.service.syncNow(!!intent,intent?.mode);
  if(success&&intent)await completeManualIntent(host,intent);
+ // A deterministic missing host capability needs a fixed package, not a false
+ // successful restore or an unbounded retry of the same manual grant.
+ if(!success&&runtime.service.status.errorCode===CLOUD_HOST_CAPABILITY_UNAVAILABLE)return 'failure';
  return success||runtime.service.status.retryable===false?'success':'retry';
-});
+ }catch(error){if((error as {code?:unknown})?.code!==CLOUD_HOST_CAPABILITY_UNAVAILABLE)throw error;diagnostic.report(recordFailureDiagnostic(error));return 'failure';}
+ finally{await diagnostic.flush();}
+},{yieldTurn:async context=>{
+ if(context.isCancelled())throw Error('Cloud worker cancelled');
+ if(Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();
+ try{await context.request!('cloud.host',{method:'runtime.delay',args:{milliseconds:1}});}catch(error){throw cloudHostFailure(error,'runtime.delay');}
+}});

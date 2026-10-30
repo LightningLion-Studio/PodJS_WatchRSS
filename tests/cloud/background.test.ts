@@ -1,7 +1,15 @@
+import {readFileSync,mkdtempSync,rmSync,realpathSync} from 'node:fs';
+import {resolve,join,dirname} from 'node:path';
+import {tmpdir} from 'node:os';
+import {runInNewContext} from 'node:vm';
+import {buildBackground} from '../../../../PodJS/podjs-watch/packages/cli/src/background-build';
+import {javaHostMethods} from '../../../../PodJS/podjs-watch/packages/cli/src/host-method-contract';
+import {WatchCloudCodec} from '../../src/cloud/codec';
+import {writeWrss} from '../../src/cloud/wrss';
 import {MANUAL_INTENT_KEY,manualEpochKey} from '../../src/cloud/manual-handoff';
 import {cloudAccountIdentity} from '../../src/cloud/identity';
 import {contentFixture} from './content-fixture';
-import {createHmac} from 'node:crypto';
+import {createHmac,generateKeyPairSync} from 'node:crypto';
 import {commit,attest} from '../../src/cloud/v2';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
@@ -22,8 +30,15 @@ test('release and debug workers require explicit persisted consent, then skip un
  }
 });
 test('automatic and manual headless handlers use actual SQLite/codec/coordinator with durable progress and no UI or real HTTP',async()=>{
- for(const entry of ['automatic','manual','periodic-with-grant']){
- const manual=entry!=='automatic';
+ const stackLimit=Error.stackTraceLimit;Error.stackTraceLimit=100;
+ const output=mkdtempSync(join(tmpdir(),'wrss-headless-contract-'));
+ const worker=readFileSync(resolve(dirname(realpathSync(resolve(import.meta.dir,'../../node_modules/@podjs/framework/src/bytes.ts'))),'../../../platforms/android/runtime/src/main/java/dev/podjs/runtime/PodCloudWorker.java'),'utf8'),methods=javaHostMethods(worker);
+ const artifact=(await buildBackground({'watchrss-cloud-sync':resolve(import.meta.dir,'../../src/cloud/background.ts')},output))['watchrss-cloud-sync']!;
+ const source=readFileSync(join(output,artifact.file),'utf8');
+ const headless=async(context:BackgroundContext)=>{const realm:Record<string,any>={};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();expect(realm.setTimeout).toBeUndefined();const result=await realm.backgroundHandler(context);expect(realm.__podYieldCodecTurn).toBeUndefined();return result;};
+ try{for(const entry of ['automatic','manual','periodic-with-grant','manual-manifest','manual-manifest-denied','manual-records-denied']){
+ const fixtureSpki=generateKeyPairSync('ec',{namedCurve:'prime256v1'}).publicKey.export({type:'spki',format:'der'}).toString('base64');
+ const manual=entry!=='automatic',withManifest=entry.startsWith('manual-manifest');let denyYield=entry==='manual-manifest-denied',denyRecords=entry==='manual-records-denied';let acknowledgements=0;const logs:string[]=[],yieldStacks:string[]=[];
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
  if(manual)secure.set(MANUAL_INTENT_KEY,JSON.stringify({version:1,token:'manual_fixture',scope:cloudAccountIdentity(account),mode:'recent128',createdAt:1}));
@@ -31,10 +46,15 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
  secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode(JSON.stringify(['https://backend.invalid','user'])))+'.'+epoch+'.1',b64(key));
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
  const resultFile=async(data:Uint8Array,directory='cloud-crypto')=>{const path=`${directory}/.pod-write-${++id}.part`;files.set(path,data);return {path,size:data.length,sha256:await crypto.sha256(data)};};
+ const remote=withManifest?await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},settings:{fixturePadding:'x'.repeat(280000)},objects:[{name:'private-library.wrss',compress:false,bytes:writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode('[]')]]))}]}):undefined;
+ const remoteHash=remote?await crypto.sha256(remote.encryptedManifest):'';const remoteHead=remote?{id:remote.manifest.snapshotId,sourceDeviceId:'phone',deviceSequence:1,keyVersion:1,manifestSha256:remoteHash,manifestSizeBytes:remote.encryptedManifest.length,parentHeads:{},observedHeads:{}}:undefined;
  const request=async(method:string,a:any):Promise<any>=>{
-  calls.push(method);expect(JSON.stringify(a).length).toBeLessThan(1024*1024);
+  calls.push(method);expect(methods.has(method)).toBe(true);expect(JSON.stringify(a).length).toBeLessThan(1024*1024);
+  if(denyYield&&method==='runtime.delay'||denyRecords&&method==='http.download'&&a.url.includes('/records?'))throw Error('permission_denied');
   switch(method){
    case 'app.buildInfo':return {debugBuild:false};
+   case 'runtime.delay':expect(a).toEqual({milliseconds:1});yieldStacks.push(new Error().stack??'');await new Promise(resolve=>setTimeout(resolve,1));return null;
+   case 'log.append':logs.push(a.text);return {};
    case 'cloud.acquire':expect(leased).toBe(false);leased=true;return {acquired:true};
    case 'cloud.release':leased=false;return {};
    case 'secure.acquire':expect(a.key).toBe('watchrss.account.session.v1');return {acquired:true};
@@ -60,7 +80,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'crypto.random':return {bytesBase64:b64(await crypto.random(a.bytes))};
    case 'crypto.hmacSha256':return {digestBase64:createHmac('sha256',unb64(a.keyBase64)).update(unb64(a.dataBase64)).digest('base64')};
    case 'crypto.hash':return {digestBase64:Buffer.from(await crypto.sha256(unb64(a.dataBase64)),'hex').toString('base64')};
-   case 'crypto.ecdhPublicKey':return {publicKeySpki:'fixture-spki'};
+   case 'crypto.ecdhPublicKey':return {publicKeySpki:fixtureSpki};
    case 'crypto.hkdfSha256':return {keyBase64:b64(await crypto.hkdf(unb64(a.inputBase64),unb64(a.saltBase64),unb64(a.infoBase64)))};
    case 'crypto.aesGcmEncrypt':{const sealed=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.dataBase64));return {nonceBase64:b64(sealed.nonce),ciphertextBase64:b64(sealed.ciphertext)};}
    case 'crypto.aesGcmDecrypt':return {dataBase64:b64(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),unb64(a.ciphertextBase64)))};
@@ -70,11 +90,13 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'sql.execute':sql.query(a.sql).run(...a.params);return null;
    case 'sql.transaction':return sql.transaction(()=>{const changes=a.statements.map((s:any)=>{sql.query(s.sql).run(...(s.params??[]));return (sql.query('SELECT changes() AS n').get() as any).n;});return a.reportChanges?changes:null;})();
    case 'http.download':{
-    const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');
-    if(a.url.endsWith('/bootstrap'))response={...contentFixture,member:{plan:'member',active:true,readable:true,writable:true,quotaBytes:1e9},libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],devices:[{deviceId:(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,publicKeySpki:'fixture-spki',attestationKeyVersion:1,attestation:await attest(v2,key,'user',epoch,(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,'fixture-spki')}],keyEnvelopes:[]};
+    const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};if(a.url.startsWith('https://objects.invalid/')){const hash=a.url.split('/').at(-1),body=hash===remoteHash?remote!.encryptedManifest:remote!.newChunks.get(hash)!;expect(body).toBeDefined();files.set(a.path,body.slice());return {path:a.path,size:body.length,status:200,headers:{}};}expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');
+    if(a.url.endsWith('/bootstrap'))response={...contentFixture,member:{plan:'member',active:true,readable:true,writable:true,quotaBytes:1e9},libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],devices:[{deviceId:(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,publicKeySpki:fixtureSpki,attestationKeyVersion:1,attestation:await attest(v2,key,'user',epoch,(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,fixtureSpki)}],keyEnvelopes:[]};
     else if(a.url.includes('/records?'))response={...contentFixture,formatVersion:1,libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],items:[],cursor:'0',headRevision:'0',hasMore:false};
     else if(a.url.endsWith('/records'))response={formatVersion:1,items:j.items.map((v:any,i:number)=>({recordId:v.recordId,revision:String(i+1)}))};
-    else if(a.url.endsWith('/heads'))response={...contentFixture,heads:[]};
+    else if(a.url.endsWith('/heads'))response={...contentFixture,heads:remoteHead?[remoteHead]:[]};
+    else if(a.url.endsWith('/snapshots/headless-remote'))response={snapshot:{manifestSignedUrl:'https://objects.invalid/'+remoteHash},chunks:remote!.manifest.objects.flatMap(o=>o.chunks).map(c=>({sha256:c.ciphertextSha256,sizeBytes:c.ciphertextBytes,signedUrl:'https://objects.invalid/'+c.ciphertextSha256}))};
+    else if(a.url.endsWith('/ack')){acknowledgements++;response={};}
     else if(a.url.endsWith('/reserve')){reserved=j;response={snapshotId:j.snapshotId,reservedBytes:0,missingObjects:[]};}
     else if(a.url.endsWith('/complete'))expect(j.snapshotId).toBe(reserved.snapshotId);
     files.set(a.path,utf8Encode(JSON.stringify(response)));return {path:a.path,size:files.get(a.path)!.length,status:200,headers:{}};
@@ -86,11 +108,21 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
   await initializeSchema({query:async (q,p=[])=>sql.query(q).all(...p) as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
-  expect(await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:entry==='manual'?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}})).toBe('success');
+  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
+  if(denyYield||denyRecords){
+   const deniedMethod=denyYield?'runtime.delay':'http.download';
+   expect(await headless(context)).toBe('failure');expect(leased).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);expect(reserved).toBeUndefined();
+   const diagnostics=logs.join('').trim().split('\n').map(line=>JSON.parse(line.slice(line.indexOf('{'))));
+   expect(diagnostics.some(d=>d.event==='format-sync'&&d.outcome==='failed'&&d.category==='runtime'&&d.code==='cloud_host_capability_unavailable'&&d.method===deniedMethod)).toBe(true);
+   if(denyRecords)expect(diagnostics.some(d=>d.event==='records-failed'&&d.code==='cloud_host_capability_unavailable'&&d.method===deniedMethod)).toBe(true);
+   const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);expect(grant.mode).toBe('recent128');expect(grant.token).toBe('manual_fixture');denyYield=false;denyRecords=false;
+  }
+  expect(await headless(context),entry+' '+logs.join('')).toBe('success');
+  if(withManifest){expect(calls).toContain('crypto.largeAesGcmDecrypt');expect(yieldStacks.some(s=>s.includes('equalBytesAsync'))).toBe(true);expect(yieldStacks.some(s=>s.includes('parseRawJsonAsync'))).toBe(true);expect(acknowledgements).toBe(1);}
   expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
  expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);
  }finally{sql.close();}
- }
+ }}finally{Error.stackTraceLimit=stackLimit;rmSync(output,{recursive:true,force:true});}
 });
 
 test('manual headless grant is bound to durable token and backend/account scope before any library, writer or network work',async()=>{

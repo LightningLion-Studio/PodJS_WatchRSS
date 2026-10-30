@@ -11,6 +11,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  if(code.startsWith('cloud_account_')||message==='cloud_account_expired'||message==='cloud_account_changed')return 'authorization';
  if(code==='cloud_sync_deadline_exceeded'||/cloud_sync_deadline_exceeded|\b(?:timed? ?out|deadline|SocketTimeoutException)\b/i.test(message))return 'timeout';
  if(code==='cloud_snapshot_progress_stalled'||message==='cloud_snapshot_progress_stalled')return 'runtime';
+ if(code==='cloud_host_capability_unavailable'||message==='cloud_host_capability_unavailable')return 'runtime';
  if(code==='library_busy'||/Local library changed/.test(message))return 'concurrent-library-change';
  if(/setTimeout is not defined|Can't find variable: setTimeout/.test(message))return 'runtime';
  if(code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(message))return 'storage';
@@ -36,7 +37,7 @@ export interface CloudFormatHttpMetric {
 export interface CloudFormatSyncMetric {
  event:'format-sync';outcome:'complete'|'deferred'|'failed'|'superseded';
  category:CloudFormatFailure;durationMillis:number;
- cleanupCode?:string;stage?:CloudSyncFailureStage;code?:string;recordCode?:string;recordStage?:import('./record-diagnostic').RecordFailureStage;
+ cleanupCode?:string;stage?:CloudSyncFailureStage;code?:string;method?:string;recordCode?:string;recordStage?:import('./record-diagnostic').RecordFailureStage;
 }
 
 export type CloudFormatDiagnostic=CloudFormatHttpMetric|CloudFormatSyncMetric;
