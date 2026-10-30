@@ -41,7 +41,8 @@ export function shouldUseDouyinVideoSessions(source:PlaybackSource,capable:boole
 }
 
 export function shouldFallbackFromVideoSessions(error:unknown):boolean {
-  return !/cancel|stale/i.test(String(error));
+  const code=String((error as {code?:unknown}|null)?.code??'');
+  return /session_limit|decoder_(?:capacity|limit|unavailable)|resource_busy|too_many_sessions|session_(?:unavailable|unsupported)|capability_missing/i.test(code+' '+String(error));
 }
 
 export function douyinPagerProgress(distanceY:number,height:number):number {

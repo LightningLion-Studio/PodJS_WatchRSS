@@ -159,13 +159,15 @@ function LoginScreen(props: DouyinScreenProps) {
       const available = await douyinBrowserAvailable({ ...browser, hasCapability });
       if (disposed || current !== generation || gate()) return;
       if (!available) { setBrowserAvailable(false); return; }
+      const loginHeaders=await props.client.buildPlaybackHeaders();
+      if(disposed||current!==generation||gate())return;
       authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,qrWait:DOUYIN_QR_WAIT,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
         if (disposed || current !== generation || !acceptingStatus) return;
         loginLog.status(event);
         qrTelemetry.status(event);
         setAuthStatus(state => updateLoginStatus(state, event));
         setMessage(loginStatusMessage(authStatus()));
-      }} : {}),requiredCookieNames:["sessionid"],userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"});
+      }} : {}),requiredCookieNames:["sessionid"],userAgent:loginHeaders["User-Agent"]});
       const result = await authorization.result;
       acceptingStatus = false;
       if (disposed || current !== generation || gate()) return;
@@ -342,7 +344,7 @@ function ActionsScreen(props: DouyinScreenProps & { awemeId: string }) {
 function ShareScreen(props: DouyinScreenProps & { awemeId: string }) {
   const url = douyinShareLink(props.awemeId)??"";
   const [title, setTitle] = createSignal(itemTitle(props.route.name === "share" ? props.route.item : undefined));
-  createEffect(() => { void props.client.fetchDetail(props.awemeId).then(result => { if (result.ok) setTitle(result.data.kind === "video" ? itemTitle(result.data.item) : result.data.description.trim() || "抖音图文"); }).catch(() => {}); });
+  createEffect(() => { void props.client.fetchDetail(props.awemeId).then(result => { if (result.ok) setTitle(result.data.kind === "video" ? itemTitle(result.data.item) : result.data.kind === "note" ? result.data.description.trim() || "抖音图文" : "抖音内容"); }).catch(() => {}); });
   return <SharedShareQrScreen width={props.width} height={props.height} title={title()} url={url} onClose={props.onBack} onError={message => props.onUnsupported?.(`二维码生成失败：${message}`)} />;
 }
 

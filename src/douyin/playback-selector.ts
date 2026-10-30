@@ -12,7 +12,7 @@ export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefine
   return short;
 }
 export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVariant[]):DouyinVideoVariant|undefined {
-  const playable=variants.filter(v=>v.playUrl.trim()&&v.codec!=='h265');
+  const playable=variants.filter(v=>v.playUrl.trim()&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
   const h264=playable.filter(v=>v.codec==='h264'),pool=h264.length?h264:playable;
   const distance=(v:DouyinVideoVariant)=>{const r=normalizedDouyinResolution(v);return r===undefined?536870911:Math.abs(r-DOUYIN_TARGET_RESOLUTION);};
   return pool.reduce<DouyinVideoVariant|undefined>((best,v)=>{
@@ -23,7 +23,7 @@ export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVarian
 }
 export function selectPreferredDouyinUrl(variants:readonly DouyinVideoVariant[],fallback?:string|null):string|undefined {
   const selected=selectPreferredDouyinVariant(variants);if(selected)return selected.playUrl;
-  const url=fallback?.trim();return url&&!variants.some(v=>v.codec==='h265'&&v.playUrl.trim()===url)?url:undefined;
+  const url=fallback?.trim();return url&&!variants.some(v=>v.codec==='h265'&&v.playUrl.trim()===url&&!douyinCodecRuntimePolicy.canDecodeHevc(v))?url:undefined;
 }
 /** Also reapplied at persisted/history/saved and queue boundaries: old snapshots used play_addr. */
 export function applyPreferredDouyinPlayback<T extends DouyinItem>(item:T):T {
@@ -31,9 +31,13 @@ export function applyPreferredDouyinPlayback<T extends DouyinItem>(item:T):T {
   const url=selectPreferredDouyinUrl(Array.isArray(item.variants)?item.variants:[],item.playUrl)??'';
   return url===item.playUrl?item:{...item,playUrl:url};
 }
-/** Native session-scoped sticky policy; H265 is never selected by the default selector. */
+/** Session-scoped sticky policy. HEVC requires explicit device size confirmation. */
 export class DouyinCodecRuntimePolicy {
   private attempts=0;private failures=0;private forced=false;
+  private readonly confirmed=new Set<string>();
+  confirmHevcSize(v:Pick<DouyinVideoVariant,'width'|'height'>,supported:boolean){const key=`${v.width}x${v.height}`;if(supported&&v.width>0&&v.height>0)this.confirmed.add(key);else this.confirmed.delete(key);}
+  canDecodeHevc(v:Pick<DouyinVideoVariant,'width'|'height'>){return !this.forced&&this.confirmed.has(`${v.width}x${v.height}`);}
+
   shouldPreferH264InAutoMode(){return this.forced;}
   recordAutoHevcAttempt(){this.attempts++;return this.update();}
   recordAutoHevcFailure(){this.failures=Math.min(this.failures+1,Math.max(this.attempts,1));return this.update();}

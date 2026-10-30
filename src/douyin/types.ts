@@ -15,7 +15,7 @@ export interface DouyinVideoVariant { playUrl: string; /** Optional for old pers
 export interface DouyinItem { awemeId: string; description: string; createdAtSeconds: number; authorId: string; authorName: string; authorAvatar?: string; likeCount: number; commentCount: number; shareCount: number; collectCount: number; playUrl: string; coverUrl?: string; durationMs: number; variants: DouyinVideoVariant[]; }
 export interface DouyinFeedPage { items: DouyinItem[]; nextCursor: string | null; hasMore: boolean; }
 export interface DouyinFeedSnapshot { items: DouyinItem[]; cursor: string | null; hasMore: boolean; }
-export type DouyinContent = { kind: "video"; item: DouyinItem } | { kind: "note"; awemeId: string; description: string; authorName: string; likeCount: number; imageUrls: string[] };
+export type DouyinContent = {kind:"ad";awemeId:string} | { kind: "video"; item: DouyinItem } | { kind: "note"; awemeId: string; description: string; authorName: string; likeCount: number; imageUrls: string[] };
 export interface DouyinHistoryEntry { item: DouyinItem; watchedAtMillis: number; }
 export type DouyinSavedKind = "favorite" | "watchLater";
 export interface DouyinSavedEntry { platform: "douyin"; awemeId: string; item: DouyinItem; kind: DouyinSavedKind; savedAtMillis: number; shareUrl: string; }

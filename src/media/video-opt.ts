@@ -4,7 +4,7 @@ import {kv} from '@podjs/framework/watch';
 import {selectSustainableVariant, type PlaybackFeedback} from '@podjs/framework/media-policy';
 import {appLogger} from '../logs/app-logger.ts';
 import type {DouyinItem} from '../douyin/types.ts';
-import {selectPreferredDouyinVariant,applyPreferredDouyinPlayback} from '../douyin/playback-selector.ts';
+import {douyinCodecRuntimePolicy,selectPreferredDouyinVariant,applyPreferredDouyinPlayback} from '../douyin/playback-selector.ts';
 
 type Feature = 'recovery' | 'adaptive' | 'metrics' | 'traffic';
 export function videoOptEnabled(feature: Feature): boolean {
@@ -38,7 +38,18 @@ export function preserveSelectedDouyinItem<T extends DouyinItem>(item:T):T {
 }
 /** Experimental selection only publishes a new source after a real decoder probe. */
 export async function decodableDouyinItem<T extends DouyinItem>(item:T):Promise<T> {
-  if(!videoOptEnabled('adaptive')||!hostWatch.hasCapability('media.video.sessions'))return item;
+  if(!hostWatch.hasCapability('media.video.sessions'))return item;
+  if(!item.playUrl.trim()&&!douyinCodecRuntimePolicy.shouldPreferH264InAutoMode()){
+    for(const v of (item.variants??[]).filter(v=>v.codec==='h265'&&v.width>0&&v.height>0).slice(0,4)){
+      try{const result=await hostServices.videoSessions.capabilities({videoMime:'video/hevc',videoWidth:v.width,videoHeight:v.height});
+        const supported=result.decoderSizeSupported===true&&result.decoderRuntimeDowngraded!==true;
+        douyinCodecRuntimePolicy.confirmHevcSize(v,supported);
+        if(supported)return {...item,playUrl:v.playUrl};
+      }catch{return item;}
+    }
+    return item;
+  }
+  if(!videoOptEnabled('adaptive'))return item;
   const selected=adaptiveDouyinItem(item),pool=(item.variants??[]).filter(v=>v.codec==='h264').sort((a,b)=>a.bitrate-b.bitrate);
   const preferred=pool.find(v=>v.playUrl===selected.playUrl);
   const candidates=[...(preferred?[preferred]:[]),...pool.filter(v=>v!==preferred&&(!preferred||v.bitrate<preferred.bitrate))].slice(0,4);

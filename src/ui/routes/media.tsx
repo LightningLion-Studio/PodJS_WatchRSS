@@ -201,8 +201,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ?.onProgress(position, duration)
               .catch((error) => props.setError(String(error)));
           }}
+          onFirstFrame={() => props.douyinReady(props.entry)}
           onCheckpoint={(type, position, duration) => {
-            if (type === "ready") props.douyinReady(props.entry);
             if (props.entry.playback?.url?.startsWith("managed-cache/bili-preview/")) return;
             void props.entry.checkpoint
               ?.onCheckpoint(type, position, duration)

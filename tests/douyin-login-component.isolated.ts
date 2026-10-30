@@ -39,7 +39,7 @@ const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function nodes(value: any): Node[] { if (typeof value === 'function') return nodes(value()); if (Array.isArray(value)) return value.flatMap(nodes); if (!value || typeof value !== 'object' || !('props' in value)) return []; return [value, ...nodes(value.props.children)]; }
 function mount() {
   calls = []; capability = true; statusCapability = true;
-  const root = createRoot(stop => { stops.push(stop); return DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {onAuthExpired:()=>()=>{}}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); });
+  const root = createRoot(stop => { stops.push(stop); return DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {onAuthExpired:()=>()=>{},buildPlaybackHeaders:async()=>({"User-Agent":"SYNTHETIC-UA"})}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); });
   return { root, press: () => nodes(root).find(n => n.kind === 'View' && n.props.focusable && n.props.onPress)!.props.onPress(), text: () => nodes(root).filter(n => n.kind === 'Text').map(n => n.props.children).join('\n') };
 }
 for (const status of ['no_provider', 'initialization_failed'] as const) test(`${status} renders B6 unavailable page without authorizing`, async () => {
@@ -112,7 +112,7 @@ test('M4 renders PNG login and JPEG verification, clears QR and reports webpage 
   expect(authOptions.qrExtractionScript).toBe('framework-status-script');
   expect(authOptions.completeOnLoginPanelHidden).toBe(true);
   expect(authOptions.qrWait).toEqual({message:'正在加载抖音登录二维码，需要 30~60 秒，请您耐心等待'});
-  expect(authOptions.userAgent).toBe('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0');
+  expect(authOptions.userAgent).toBe('SYNTHETIC-UA');
   const emit=authOptions.onStatus;
   emit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'});
   expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toBe('data:image/png;base64,AAAA');

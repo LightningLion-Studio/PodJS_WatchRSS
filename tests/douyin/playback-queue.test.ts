@@ -16,7 +16,7 @@ test("session preview resolves ahead without moving the anchor until promotion",
 test("rapid adjacent previews cancel stale results without changing selection",async()=>{let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);const client={async resolvePlayback(id:string){if(id==="2")await gate;return {ok:true as const,data:item(id),source:"feed-cache" as const};}} as unknown as DouyinClient;const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2")],selectedAwemeId:"1",hasMore:false});const stale=queue.preview("next"),replacement=queue.preview("next");release();expect(await stale).toMatchObject({ok:false,code:"CANCELLED"});expect(await replacement).toMatchObject({ok:true,data:{item:{awemeId:"2"}}});expect(queue.snapshot().item?.awemeId).toBe("1");});
 
 test('diagnostic quarantine IDs come from actual failed candidate removals and return copies',async()=>{
- const client={async resolvePlayback(id:string){return id==='2'?{ok:false as const,code:'REQUEST_FAILED' as const,message:'fixture_failure'}:{ok:true as const,data:item(id)};}} as unknown as DouyinClient;
+ const client={async resolvePlayback(id:string){return id==='2'?{ok:false as const,code:'PARSE_FAILED' as const,message:'fixture_failure'}:{ok:true as const,data:item(id)};}} as unknown as DouyinClient;
  const queue=new DouyinPlaybackQueue(client,{items:[item('1'),item('2'),item('3')],selectedAwemeId:'1',hasMore:false});
  expect(queue.diagnostics().quarantinedAwemeIds).toEqual([]);await queue.preview('next');const d=queue.diagnostics();expect(d.quarantinedAwemeIds).toEqual(['2']);expect(d.itemCount).toBe(2);d.quarantinedAwemeIds.push('forged');expect(queue.diagnostics().quarantinedAwemeIds).toEqual(['2']);expect(queue.snapshot().item?.awemeId).toBe('1');
 });

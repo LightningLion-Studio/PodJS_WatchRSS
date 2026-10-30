@@ -64,18 +64,27 @@ test('cancelling while config/signature awaits suppresses the notice request',as
 test('request config refreshes on the next API call and is shared by headers, params and signing',async()=>{
  let ua='Chrome/155.0.0.0',version='170400';const f=fixture({requestConfig:()=>({userAgent:ua,versionCode:version,browserVersion:'155.0.0.0',fp:'synthetic-fp'})});f.replies.push(page(['1']),page(['2']));await f.client.fetchFeedPage();ua='rollback-UA';version='290100';await f.client.fetchFeedPage({cursor:'1'});expect(f.requests.map(r=>r.headers['User-Agent'])).toEqual(['Chrome/155.0.0.0','rollback-UA']);expect(f.signed.map(p=>p.version_code)).toEqual(['170400','290100']);expect(await f.client.buildPlaybackHeaders()).toMatchObject({'User-Agent':'rollback-UA'});expect(f.signed[1]).toMatchObject({cursor:'1',max_cursor:'1',verifyFp:'synthetic-fp',fp:'synthetic-fp'});
 });
-test('same-page, next-page, refresh and restart filter displayed IDs; duplicate hits do not refresh recency',async()=>{
- const f=fixture();f.replies.push(page(['1','1','2']),page(['2','3'],2),page(['1','3'],3));expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'1'},{awemeId:'2'}]}});expect(await f.client.fetchFeedPage({cursor:'1'})).toMatchObject({data:{items:[{awemeId:'3'}],nextCursor:'2'}});expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[],hasMore:false}});
- const key=douyinFeedSeenKey((await f.client.readCookie())!);expect(JSON.parse(f.values.get(key)!)).toEqual(['1','2','3']);
+test('only first-frame history commits enter the 512 seen IDs across pages and restart',async()=>{
+ const f=fixture();f.replies.push(page(['1','1','2']),page(['2','3'],2),page(['1','3'],3));
+ const first=await f.client.fetchFeedPage();expect(first).toMatchObject({data:{items:[{awemeId:'1'},{awemeId:'2'}]}});
+ const key=douyinFeedSeenKey((await f.client.readCookie())!);expect(f.values.has(key)).toBe(false);
+ if(!first.ok)throw Error('feed');for(const item of first.data.items)await f.client.recordPresented(item);
+ const second=await f.client.fetchFeedPage({cursor:'1'});expect(second).toMatchObject({data:{items:[{awemeId:'3'}],nextCursor:'2'}});
+ if(!second.ok)throw Error('feed');await f.client.recordPresented(second.data.items[0]!);
+ expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[],hasMore:true}});expect(JSON.parse(f.values.get(key)!)).toEqual(['1','2','3']);
  const restarted=new DouyinClient({secureStorage:f.secure,signer:{sign:()=> 'sig'},transport:{request:async()=>page(['3','4'])}});expect(await restarted.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'4'}]}});
 });
-test('512-ID bound evicts only the oldest shown ID and scopes history by account, never raw Cookie',async()=>{
- const f=fixture(),cookie=(await f.client.readCookie())!,key=douyinFeedSeenKey(cookie);f.values.set(key,JSON.stringify(Array.from({length:512},(_,i)=>String(i+1))));f.replies.push(page(['1','513']));expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'513'}]}});const ids=JSON.parse(f.values.get(key)!);expect(ids).toHaveLength(512);expect(ids[0]).toBe('2');expect(ids).not.toContain('1');expect(key).not.toContain('SYNTHETIC_COOKIE');
- await f.client.applyCookie('uid_tt=2; sessionid=B');f.replies.push(page(['513']));expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'513'}]}});await f.client.applyCookie('uid_tt=1; sessionid=ROTATED');f.replies.push(page(['513','514']));expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'514'}]}});
+test('512 seen bound advances on playback and is scoped by account',async()=>{
+ const f=fixture(),cookie=(await f.client.readCookie())!,key=douyinFeedSeenKey(cookie);f.values.set(key,JSON.stringify(Array.from({length:512},(_,i)=>String(i+1))));f.replies.push(page(['1','513']));
+ const result=await f.client.fetchFeedPage();expect(result).toMatchObject({data:{items:[{awemeId:'513'}]}});expect(JSON.parse(f.values.get(key)!)[0]).toBe('1');
+ if(!result.ok)throw Error('feed');await f.client.recordPresented(result.data.items[0]!);
+ const ids=JSON.parse(f.values.get(key)!);expect(ids).toHaveLength(512);expect(ids[0]).toBe('2');expect(ids).not.toContain('1');expect(key).not.toContain('SYNTHETIC_COOKIE');
+ await f.client.applyCookie('uid_tt=2; sessionid=B');f.replies.push(page(['513']));expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'513'}]}});
+ await f.client.applyCookie('uid_tt=1; sessionid=ROTATED');f.replies.push(page(['513','514']));expect(await f.client.fetchFeedPage()).toMatchObject({data:{items:[{awemeId:'514'}]}});
 });
-test('parallel successful feeds publish unique items and stale account data never enters the new scope',async()=>{
- const f=fixture();f.replies.push(page(['1','2']),page(['2','3']));const results=await Promise.all([f.client.fetchFeedPage(),f.client.fetchFeedPage()]);expect(results.flatMap(r=>r.ok?r.data.items.map(i=>i.awemeId):[])).toEqual(['1','2','3']);
- const late=deferred<HttpResponse>();f.replies.push(late.promise);const work=f.client.fetchFeedPage();await until(()=>f.requests.length===3);await f.client.applyCookie('uid_tt=9; sessionid=NEW');late.resolve(page(['OLD']));expect(await work).toMatchObject({code:'CANCELLED'});expect(f.values.has(douyinFeedSeenKey('uid_tt=9; sessionid=NEW'))).toBe(false);
+test('same-page consumers share one publication and stale account data cannot enter a new scope',async()=>{
+ const f=fixture();f.replies.push(page(['1','2']));const results=await Promise.all([f.client.fetchFeedPage(),f.client.fetchFeedPage()]);expect(results[0]).toEqual(results[1]);expect(f.requests).toHaveLength(1);
+ const late=deferred<HttpResponse>();f.replies.push(late.promise);const work=f.client.fetchFeedPage();await until(()=>f.requests.length===2);await f.client.applyCookie('uid_tt=9; sessionid=NEW');late.resolve(page(['OLD']));expect(await work).toMatchObject({code:'CANCELLED'});expect(f.values.has(douyinFeedSeenKey('uid_tt=9; sessionid=NEW'))).toBe(false);
 });
 test('web pagination stays off by default and cannot run without a verified injected adapter',async()=>{
  const f=fixture({requestConfig:()=>({webPagination:true})});f.replies.push(page(['1']));await f.client.fetchFeedPage({cursor:'42'});expect(f.signed[0]).toMatchObject({cursor:'42',max_cursor:'42'});expect(f.signed[0]).not.toHaveProperty('refresh_index');
@@ -90,7 +99,7 @@ test('actual probe errors and status messages do not leak credentials, query or 
 
 for(const html of ['<!DOCTYPE html><html>SYNTHETIC_CHALLENGE_SECRET</html>',' \ufeff<HTML lang="en">SYNTHETIC_CHALLENGE_SECRET</HTML>'])for(const status of [200,403])test(`detail HTML challenge keeps Cookie and stops requests in persistent cooldown (${status}/${html.slice(0,15)})`,async()=>{
  const f=fixture();f.replies.push(response(html,status));expect(await f.client.fetchDetail('1')).toMatchObject({ok:false,code:'TEMPORARILY_UNAVAILABLE',retryAfterMs:30000});expect(await f.client.isLoggedIn()).toBe(true);expect(f.expired()).toBe(0);expect(f.requests).toHaveLength(1);expect(f.values.has(DOUYIN_AUTH403_COOLDOWN_KEY)).toBe(true);
- expect(await f.client.fetchDetail('2')).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});expect(await f.client.fetchFeedPage()).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});expect(f.requests).toHaveLength(1);
+ expect(await f.client.fetchDetail('2')).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});f.replies.push(page(['feed-still-works']));expect(await f.client.fetchFeedPage()).toMatchObject({ok:true});expect(f.requests).toHaveLength(2);
  const restarted=new DouyinClient({secureStorage:f.secure,now:()=>1_000_000,transport:{request:async()=>{throw Error('must remain in cooldown');}}});expect(await restarted.fetchDetail('1')).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});expect(await restarted.isLoggedIn()).toBe(true);
 });
 test('detail request/challenge counters are fixed categories; no secsdk signature is fabricated',async()=>{

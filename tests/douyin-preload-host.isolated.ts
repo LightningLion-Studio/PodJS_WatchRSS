@@ -38,3 +38,10 @@ test('production prefetch event consumer forces one refresh, isolates only neigh
  resultListener({...fresh,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(forces).toEqual(['b']);expect(removed).toEqual(['b']);expect(host.failures()[0]).toMatchObject({id:'b',count:2,reason:'http_403'});
  const current=windows.at(-1).items[0];for(let i=0;i<3;i++){resultListener({...current,result:'failure',httpStatus:0,category:'transport'});await flush();}expect(removed).toEqual(['b']);host.stop(owner);
 });
+
+test('DYFIX backward proxy entries register without detail resolution or prefetch bytes',async()=>{
+ windows=[];registrations=[];const resolved:string[]=[];
+ const localClient={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>{resolved.push(id);return {ok:true,data:items.find(item=>item.awemeId===id)};}};
+ const host=createHostDouyinPreload(localClient as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'c','active');await flush();
+ expect(resolved).toEqual(['c','d']);expect(registrations.map(r=>r.key)).toEqual(['c','d','b','a']);expect(windows.at(-1).items.slice(2).map((v:any)=>v.prefetchBytes)).toEqual([0,0]);host.stop(owner);
+});

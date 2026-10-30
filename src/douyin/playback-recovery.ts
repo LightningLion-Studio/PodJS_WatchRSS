@@ -1,6 +1,7 @@
+import {douyinMediaExpiry} from './media-expiry.ts';
 import {playbackFailure} from '../media/playback-failure.ts';
 import {videoNetworkEpoch} from '../media/video-opt.ts';
-import {PlaybackRecoveryBudget, mediaSourceExpiry} from '@podjs/framework/media-policy';
+import {PlaybackRecoveryBudget} from '@podjs/framework/media-policy';
 import * as services from '@podjs/framework/services';
 import type {DouyinItem} from './types.ts';
 import type {PlaybackSource} from '../ui/VideoPlayerScreen.tsx';
@@ -28,7 +29,7 @@ export class DouyinPlaybackRecovery {
       if(manual){this.budget.reset();this.failed.clear();this.refreshed=false;}
       if(source.url)this.failed.add(source.url);
       const network=this.networkEpoch(),networkChanged=network!==this.epoch;this.epoch=network;
-      let next=category==='expired'||networkChanged?undefined:douyinPlaybackCandidates(this.item).find(url=>!this.failed.has(url)&&mediaSourceExpiry([url],this.now())>this.now());
+      let next=category==='expired'||networkChanged?undefined:douyinPlaybackCandidates(this.item).find(url=>!this.failed.has(url)&&douyinMediaExpiry(url,this.now())>this.now());
       if(!next&&!this.refreshed){
         this.budget.claim(true);this.refreshed=true;
         const item=await this.budget.run(this.refresh,this.timer);
@@ -36,7 +37,7 @@ export class DouyinPlaybackRecovery {
         if(network!==this.networkEpoch())throw new Error('playback_network_changed');
         if(item.awemeId!==this.item.awemeId)throw new Error('playback_recovery_source_changed');
         if(manual)this.failed.clear();
-        this.item=item;next=douyinPlaybackCandidates(item).find(url=>!this.failed.has(url)&&mediaSourceExpiry([url],this.now())>this.now());
+        this.item=item;next=douyinPlaybackCandidates(item).find(url=>!this.failed.has(url)&&douyinMediaExpiry(url,this.now())>this.now());
       } else this.budget.claim();
       this.budget.check();
       if(!current())return;

@@ -1,3 +1,6 @@
+import {playbackFailure} from '../../media/playback-failure.ts';
+import {douyinNetworkFailure} from '../douyin/player-network.ts';
+import {DOUYIN_USER_AGENT} from '../../douyin/request-config.ts';
 import {isDouyinTemporaryFailure} from '../../douyin/errors.ts';
 import {DouyinPlaybackRecovery} from '../../douyin/playback-recovery.ts';
 import {videoOptEnabled,invalidateVideoNetwork,videoNetworkEpoch,VideoPlaybackTrace,registerVideoResolution} from '../../media/video-opt.ts';
@@ -279,8 +282,7 @@ export function createMediaRouteController(
         cookieOrigin: "https://www.douyin.com",
         qrExtractionScript: DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,
         requiredCookieNames: ["sessionid"],
-        userAgent:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0",
+        userAgent:(await douyinClient.buildPlaybackHeaders())["User-Agent"]??DOUYIN_USER_AGENT,
       }).result;
       const saved = await douyinClient.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);
@@ -517,7 +519,15 @@ export function createMediaRouteController(
     try {
       const id = entry.queue.snapshot().item?.awemeId;
       if (!id) return;
-      if (videoOptEnabled('recovery')) {
+      const category=playbackFailure(error);
+      if(manual){entry.queue.resetAutomaticFailures();entry.douyinFailures?.delete(id);}
+      if(!manual&&entry.playback?.immersive){
+        const code=String((error as {code?:unknown}|undefined)?.code??'');
+        if(code==='CANCELLED'||/cancel|abort/i.test(code))return;
+        if(douyinNetworkFailure(error)){dependencies.setError('网络请求失败，请重试');return;}
+        if(error!==undefined&&!entry.queue.claimAutomaticFailure()){dependencies.setError('连续播放失败，请重试');return;}
+      }
+      if (videoOptEnabled('recovery')&&category!=='decode'&&category!=='restricted') {
         const selected=entry.queue.snapshot().item!;
         if(entry.douyinRecovery?.id!==id)entry.douyinRecovery={id,policy:new DouyinPlaybackRecovery(selected,async()=>{
           const result=await douyinClient.resolvePlayback(id,{forceRefresh:true});
@@ -534,7 +544,7 @@ export function createMediaRouteController(
         entry.playback=source;dependencies.setPlayingSource(source);dependencies.setError('');
         dependencies.onActivityStateChange?.();return;
       }
-      if (entry.playback?.url?.startsWith('managed-cache/douyin-preload/')) {
+      if (category!=='restricted'&&category!=='decode'&&entry.playback?.url?.startsWith('managed-cache/douyin-preload/')) {
         await douyinPreload.invalidate(id);
         const remote=await douyinClient.resolvePlayback(id,{forceRefresh:true});
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
@@ -547,7 +557,7 @@ export function createMediaRouteController(
         entry.playback=source;dependencies.setPlayingSource(source);dependencies.setError('');
         dependencies.onActivityStateChange?.();return;
       }
-      if(entry.playback?.previewOnly){
+      if(category!=='restricted'&&category!=='decode'&&entry.playback?.previewOnly){
         const fresh=await douyinClient.resolvePlayback(id,{forceRefresh:true});if(!fresh.ok){dependencies.setError(fresh.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders(),url=await douyinPlaybackUrl(fresh.data,headers);
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
@@ -556,7 +566,7 @@ export function createMediaRouteController(
       }
       if(entry.playback?.url?.startsWith('podjs-media-cache:'))await douyinPreload.invalidate(id);
       if (dependencies.current() !== entry) return;
-      if (entry.playback?.detailPlayback) {
+      if (entry.playback?.detailPlayback&&!(entry.playback.immersive&&(category==='restricted'||category==='decode'))) {
         entry.rssDouyinRecovery ??= new DouyinRssRecovery(douyinClient, id);
         const source = await entry.rssDouyinRecovery.recover(entry.playback, () => dependencies.current() === entry, manual);
         if (!source || dependencies.current() !== entry) return;
@@ -569,14 +579,14 @@ export function createMediaRouteController(
         return;
       }
       const failures = (entry.douyinFailures ??= new Set<string>());
-      const skip = failures.has(id);
+      const skip = !manual&&(category==='decode'||failures.has(id));
       failures.add(id);
       const result = await (skip
         ? entry.queue.discard()
         : entry.queue.recover());
       if (dependencies.current() !== entry) return;
       if (!result.ok) {
-        if(isDouyinTemporaryFailure(result.code))failures.delete(id);
+        if(isDouyinTemporaryFailure(result.code)||result.code==='REQUEST_FAILED'||result.code==='CANCELLED')failures.delete(id);
         if (result.code === "CANCELLED") return;
         if (
           !entry.queue.snapshot().playlist.length &&
@@ -621,6 +631,7 @@ export function createMediaRouteController(
   const paintCheckpoints=new WeakMap<RouteEntry,number>();
   const douyinReady = (entry: RouteEntry) => {
     if (dependencies.current() !== entry || !entry.queue) return;
+    entry.queue.resetAutomaticFailures();
     const selected=entry.queue.snapshot().item,resolved=entry.playback?.url&&douyinPreload.sourceFor?.(entry.playback.url);
     if(resolved&&resolved.awemeId===selected?.awemeId&&resolved.playUrl!==selected.playUrl)entry.queue.refreshPrefetchItem(resolved.awemeId,resolved);
     const queue=entry.queue,id=queue.snapshot().item?.awemeId,revision=(paintCheckpoints.get(entry)??0)+1;

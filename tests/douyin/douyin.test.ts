@@ -16,17 +16,18 @@ test("favorites and watch later are separate local app lists",async()=>{const st
 
 test("cookie import follows Android rule: trimmed non-empty header, no sessionid requirement",async()=>{const store=new MemoryStore(),client=new DouyinClient({transport:{async request(){throw new Error("unused");}},secureStorage:store,signer:{sign:()=>"x"}});expect(await client.applyCookie(" ttwid=only-cookie ")).toEqual({ok:true,data:undefined});expect(await client.readCookie()).toBe("ttwid=only-cookie");expect(await client.applyCookie("  ")).toMatchObject({ok:false,code:"NOT_LOGGED_IN"});});
 
-test("blocked and malformed responses are typed failures",async()=>{const store=new MemoryStore();await store.set("douyin.cookie","x");const replies=["blocked","{"];const client=new DouyinClient({transport:{async request(){return {status:200,headers:{},body:utf8Encode(replies.shift()!) };}},secureStorage:store,signer:{sign:()=>"x"}});expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:"NOT_LOGGED_IN"});expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:"PARSE_FAILED"});});
-
-test("legacy 403 switch expires the session and notifies login navigation, including thrown HTTP failures",async()=>{
+test('blocked responses preserve authentication; malformed JSON is a parse failure',async()=>{
+ const store=new MemoryStore();await store.set('douyin.cookie','x');let now=0;const replies=['blocked','{'];
+ const client=new DouyinClient({now:()=>now,transport:{async request(){return {status:200,headers:{},body:utf8Encode(replies.shift()!) };}},secureStorage:store,signer:{sign:()=> 'x'}});
+ expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'TEMPORARILY_UNAVAILABLE'});expect(await client.isLoggedIn()).toBe(true);
+ now=30000;expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'PARSE_FAILED'});
+});
+test('disabled retry preserves Cookie for both returned and thrown HTTP403',async()=>{
  for(const thrown of [false,true]){
   const store=new MemoryStore();await store.set('douyin.cookie','x');let redirects=0;
-  const client=new DouyinClient({auth403:{enabled:false},secureStorage:store,signer:{sign:()=>"x"},transport:{async request(){if(thrown)throw new Error('http_status:403');return {status:403,headers:{},body:utf8Encode('forbidden')};}}});
-  const unsubscribe=client.onAuthExpired(()=>redirects++);
-  expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'NOT_LOGGED_IN'});
-  expect(await client.isLoggedIn()).toBe(false);expect(redirects).toBe(1);
-  expect(await client.fetchFeedPage()).toMatchObject({ok:false,code:'NOT_LOGGED_IN'});expect(redirects).toBe(1);
-  unsubscribe();
+  const client=new DouyinClient({auth403:{enabled:false},secureStorage:store,signer:{sign:()=> 'x'},transport:{async request(){if(thrown)throw new Error('http_status:403');return {status:403,headers:{},body:utf8Encode('forbidden')};}}});
+  client.onAuthExpired(()=>redirects++);expect(await client.fetchFeedPage()).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
+  expect(await client.isLoggedIn()).toBe(true);expect(redirects).toBe(0);
  }
 });
 

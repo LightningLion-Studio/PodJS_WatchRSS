@@ -187,3 +187,25 @@ test('temporary API throttling never consumes the controller media-failure quara
  const entry=f.stack().at(-1)!;await f.controller.recoverDouyinVideo(entry);await f.controller.recoverDouyinVideo(entry,true);
  expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(entry.queue!.snapshot().playlist).toHaveLength(1);expect(calls).toBe(2);expect(f.error()).toBe('抖音暂时不可用，稍后自动重试');
 });
+
+for(const opt of [false,true])test(`DYFIX three consecutive playback failures stop with retry, first frame resets budget (opt=${opt})`,async()=>{
+ const f=fixture(opt),items=['a','b','c','d','e'].map(item);f.controller.douyinPlay({item:items[0]!,playback:items[0]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let resolutions=0;client.resolvePlayback=async(id)=>{resolutions++;return {ok:true,data:item(id)};};
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'decode_error'});expect(entry.queue!.snapshot().item?.awemeId).toBe('b');
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'decode_error'});expect(entry.queue!.snapshot().item?.awemeId).toBe('c');
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'decode_error'});expect(entry.queue!.snapshot().item?.awemeId).toBe('c');expect(resolutions).toBe(2);expect(f.error()).toBe('连续播放失败，请重试');
+ f.controller.douyinReady(entry);await f.controller.recoverDouyinVideo(entry,false,0,{code:'decode_error'});expect(entry.queue!.snapshot().item?.awemeId).toBe('d');
+ await f.controller.recoverDouyinVideo(entry,true);expect(f.error()).toBe('');
+});
+test('DYFIX restricted proxy foreground force-refreshes once then skips; network failure preserves queue',async()=>{
+ const f=fixture(),a=item('a'),b=item('b');f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;entry.playback={...entry.playback!,url:'podjs-media-cache://play/a.mp4'};const calls:any[]=[];client.resolvePlayback=async(id,options)=>{calls.push([id,options?.forceRefresh]);return {ok:true,data:item(id)};};
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'network_error'});expect(calls).toEqual([]);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(f.error()).toContain('重试');
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'restricted'});expect(calls).toEqual([['a',true]]);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'restricted'});expect(calls).toEqual([['a',true],['b',false]]);expect(entry.queue!.snapshot().item?.awemeId).toBe('b');
+});
+test('DYFIX REQUEST_FAILED during forced recovery never discards or spends media quarantine',async()=>{
+ const f=fixture(),a=item('a');f.controller.douyinPlay({item:a,playback:a,playlist:[a,item('b')],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;client.resolvePlayback=async()=>({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'});
+ await f.controller.recoverDouyinVideo(entry);await f.controller.recoverDouyinVideo(entry);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(entry.queue!.diagnostics().quarantinedAwemeIds).toEqual([]);expect(entry.douyinFailures?.size).toBe(0);
+});

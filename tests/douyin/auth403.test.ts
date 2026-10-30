@@ -35,7 +35,7 @@ for(const thrown of [false,true])test(`403 resigns exactly once without deleting
 });
 test('repeated 403 plus authenticated probe enters persistent cooldown and does not log out',async()=>{
  let probes=0;const f=fixture({probe:async context=>{probes++;expect(context.timeoutMs).toBe(5000);return 'authenticated' as const;}});f.replies.push(forbidden(),forbidden());
- expect(await f.client.fetchFeedPage()).toMatchObject({ok:false,code:'RATE_LIMITED',retryAfterMs:30000,message:'抖音暂时不可用，稍后自动重试'});
+ expect(await f.client.fetchFeedPage()).toMatchObject({ok:false,code:'RATE_LIMITED',retryAfterMs:30000,message:'抖音暂时不可用，请稍后重试'});
  expect(probes).toBe(1);expect(f.waits).toEqual([750]);expect(await f.client.isLoggedIn()).toBe(true);expect(f.redirects()).toBe(0);
  for(let i=0;i<10;i++)expect(await f.client.fetchFeedPage()).toMatchObject({code:'RATE_LIMITED'});
  expect(f.requests).toHaveLength(2);expect(f.signatures()).toBe(2);expect(f.store.values.has(DOUYIN_AUTH403_COOLDOWN_KEY)).toBe(true);
@@ -51,8 +51,8 @@ test('only an explicitly unauthenticated injected probe expires the session',asy
  expect(await f.client.fetchFeedPage()).toMatchObject({code:'NOT_LOGGED_IN'});expect(await f.client.isLoggedIn()).toBe(false);expect(f.redirects()).toBe(1);
  expect(await f.client.fetchFeedPage()).toMatchObject({code:'NOT_LOGGED_IN'});expect(f.requests).toHaveLength(2);expect(f.redirects()).toBe(1);
 });
-for(const body of ['blocked','', '  '])test(`definite expired body after resign still expires authentication (${JSON.stringify(body)})`,async()=>{
- const f=fixture();f.replies.push(forbidden(),response(200,body));expect(await f.client.fetchFeedPage()).toMatchObject({code:'NOT_LOGGED_IN'});expect(await f.client.isLoggedIn()).toBe(false);expect(f.redirects()).toBe(1);
+for(const body of ['blocked','', '  '])test(`blocked or empty body after resign preserves authentication (${JSON.stringify(body)})`,async()=>{
+ const f=fixture();f.replies.push(forbidden(),response(200,body));expect(await f.client.fetchFeedPage()).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});expect(await f.client.isLoggedIn()).toBe(true);expect(f.redirects()).toBe(0);
 });
 test('different simultaneous requests share one probe and one cooldown write',async()=>{
  const gate=deferred<'authenticated'>();let probes=0;const f=fixture({probe:async()=>{probes++;return gate.promise;}});
@@ -63,9 +63,9 @@ test('different simultaneous requests share one probe and one cooldown write',as
  expect(JSON.parse(f.store.values.get(DOUYIN_AUTH403_COOLDOWN_KEY)!).strikes).toBe(1);
 });
 test('same simultaneous requests share one retry as well as one probe',async()=>{
- const gate=deferred<void>();let probes=0;const f=fixture({sleep:()=>gate.promise,probe:async()=>{probes++;return 'authenticated' as const;}});f.replies.push(forbidden(),forbidden(),forbidden());
- const a=f.client.fetchFeedPage(),b=f.client.fetchFeedPage();await until(()=>!(f.requests.length<2));for(let i=0;i<20;i++)await Promise.resolve();gate.resolve();await Promise.all([a,b]);
- expect(f.requests).toHaveLength(3);expect(probes).toBe(1);
+ const gate=deferred<void>();let probes=0;const f=fixture({sleep:()=>gate.promise,probe:async()=>{probes++;return 'authenticated' as const;}});f.replies.push(forbidden(),forbidden());
+ const a=f.client.fetchFeedPage(),b=f.client.fetchFeedPage();await until(()=>f.requests.length===1);for(let i=0;i<20;i++)await Promise.resolve();gate.resolve();await Promise.all([a,b]);
+ expect(f.requests).toHaveLength(2);expect(probes).toBe(1);
 });
 test('cooldown survives client restart, expires, doubles on repeated 403 and resets on success',async()=>{
  const first=fixture();first.replies.push(forbidden(),forbidden());await first.client.fetchFeedPage();
@@ -100,9 +100,9 @@ test('four automatic recovery slots bound unrelated retries without discarding a
  const jobs=Array.from({length:8},(_,i)=>f.client.fetchFeedPage({cursor:String(i)}));await until(()=>!(f.requests.length<8));for(let i=0;i<40;i++)await Promise.resolve();gate.resolve();await Promise.all(jobs);
  expect(f.requests.length).toBeLessThanOrEqual(12);expect(await f.client.isLoggedIn()).toBe(true);expect(f.redirects()).toBe(0);
 });
-test('explicit false restores immediate-expiry behavior even when a cooldown was persisted',async()=>{
+test('explicit false preserves authentication and honors persisted cooldown',async()=>{
  const store=new Store();store.values.set(DOUYIN_AUTH403_COOLDOWN_KEY,JSON.stringify({version:1,until:2_000_000,strikes:2,authenticated:true}));
- const f=fixture({enabled:false},store);f.replies.push(forbidden());expect(await f.client.fetchFeedPage()).toMatchObject({code:'NOT_LOGGED_IN'});expect(f.requests).toHaveLength(1);expect(f.waits).toEqual([]);
+ const f=fixture({enabled:false},store);f.replies.push(forbidden());expect(await f.client.fetchFeedPage()).toMatchObject({code:'RATE_LIMITED'});expect(await f.client.isLoggedIn()).toBe(true);expect(f.requests).toHaveLength(0);expect(f.waits).toEqual([]);
  expect(readDouyin403Enabled({get:()=>undefined})).toBe(true);expect(readDouyin403Enabled({get:<T>(key:string)=>key===DOUYIN_AUTH403_CONFIG_KEY?{enabled:false} as T:undefined})).toBe(false);
 });
 test('metrics contain only fixed categories/counts and never credential or signature text',async()=>{
@@ -146,15 +146,15 @@ test('slow authentication checks cannot erase a newer cooldown or start a duplic
  const gate=deferred<boolean>(),store=new Store();let now=1_000_000,hold=false,checks=0,probes=0;
  const policy=new Douyin403Policy({storage:store,now:()=>now,options:{probe:async()=>{probes++;return 'authenticated' as const;},timer:()=>({result:new Promise(()=>{}),cancel(){}})},metric(){},current:async()=>{checks++;if(hold){hold=false;return gate.promise;}return true;}});
  await policy.resolve('fixture','feed');now+=30000;const version=policy.snapshotVersion();hold=true;const before=checks,success=policy.successful(version);await until(()=>checks>before);
- await policy.resolve('fixture','detail');gate.resolve(true);await success;expect(await policy.cooldown('feed')).toMatchObject({kind:'limited',retryAfterMs:60000});
+ await policy.resolve('fixture','feed');gate.resolve(true);await success;expect(await policy.cooldown('feed')).toMatchObject({kind:'limited',retryAfterMs:60000});
  now+=60000;const gate2=deferred<boolean>();let slow=true;
  const coalesced=new Douyin403Policy({storage:new Store(),now:()=>now,options:{probe:async()=>{probes++;return 'authenticated' as const;},timer:()=>({result:new Promise(()=>{}),cancel(){}})},metric(){},current:async()=>{if(slow){slow=false;return gate2.promise;}return true;}});
- const earlier=coalesced.resolve('fixture','feed');for(let i=0;i<20;i++)await Promise.resolve();const prior=probes;await coalesced.resolve('fixture','detail');gate2.resolve(true);await earlier;expect(probes-prior).toBe(1);
+ const earlier=coalesced.resolve('fixture','feed');for(let i=0;i<20;i++)await Promise.resolve();const prior=probes;await coalesced.resolve('fixture','feed');gate2.resolve(true);await earlier;expect(probes-prior).toBe(1);
 });
 
 
 test('cooldown detail requests retain no pending tokens and send no additional API calls',async()=>{
- const f=fixture();f.replies.push(forbidden(),forbidden());await f.client.fetchFeedPage();
+ const f=fixture();f.replies.push(forbidden(),forbidden());await f.client.fetchDetail('initial');
  for(let i=0;i<100;i++)expect(await f.client.fetchDetail('fixture-'+i)).toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});
  expect(f.requests).toHaveLength(2);expect(Reflect.get(f.client,'detailRequests').size).toBe(0);
 });

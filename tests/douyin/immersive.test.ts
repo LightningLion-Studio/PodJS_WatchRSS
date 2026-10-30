@@ -45,7 +45,7 @@ test("prefetch resolves adjacent URLs without changing selection or history",asy
 });
 
 test("failed source refresh quarantines that item and skips unresolvable successors",async()=>{
-  const requests:string[]=[];const client={async resolvePlayback(id:string,options?:{forceRefresh?:boolean}){requests.push(`${id}:${!!options?.forceRefresh}`);return id==="3"?{ok:true,data:item(id)}:{ok:false,code:"REQUEST_FAILED",message:"expired"};}} as unknown as DouyinClient;
+  const requests:string[]=[];const client={async resolvePlayback(id:string,options?:{forceRefresh?:boolean}){requests.push(`${id}:${!!options?.forceRefresh}`);return id==="3"?{ok:true,data:item(id)}:{ok:false,code:"PARSE_FAILED",message:"expired"};}} as unknown as DouyinClient;
   const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2"),item("3")],selectedAwemeId:"1"});
   expect(await queue.recover()).toMatchObject({ok:true,data:{item:{awemeId:"3"},index:0}});
   expect(requests).toEqual(["1:true","2:false","3:false"]);expect(queue.snapshot().playlist.map(x=>x.awemeId)).toEqual(["3"]);
@@ -64,10 +64,11 @@ test("late recovery cannot replace a newer navigation",async()=>{
   const recovery=queue.recover();await queue.next();release();expect(await recovery).toMatchObject({ok:false,code:"CANCELLED"});expect(queue.snapshot().item?.awemeId).toBe("2");
 });
 
-test("duplicate-only pagination is bounded and does not resurrect quarantined videos",async()=>{
-  let pages=0;const client={async resolvePlayback(){return {ok:false,code:"REQUEST_FAILED",message:"bad"};},async fetchFeedPage(){pages++;return {ok:true,data:{items:[item("1")],nextCursor:"same",hasMore:true}};}} as unknown as DouyinClient;
-  const queue=new DouyinPlaybackQueue(client,{items:[item("1")],selectedAwemeId:"1",cursor:"same",hasMore:true});
-  expect(await queue.discard()).toMatchObject({ok:false});expect(pages).toBe(1);expect(queue.snapshot().playlist).toEqual([]);
+test("duplicate-only pagination stays bounded, preserves Retry and never resurrects quarantined neighbours",async()=>{
+  let pages=0;const client={async resolvePlayback(){return {ok:false,code:"PARSE_FAILED",message:"bad"};},async fetchFeedPage(){pages++;return {ok:true,data:{items:[item("2")],nextCursor:"same",hasMore:true}};}} as unknown as DouyinClient;
+  const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2")],selectedAwemeId:"1",cursor:"same",hasMore:true});
+  expect(queue.quarantinePrefetch("2")).toBe(true);
+  expect(await queue.discard()).toMatchObject({code:"TEMPORARILY_UNAVAILABLE"});expect(pages).toBe(1);expect(queue.snapshot().playlist).toEqual([item("1")]);expect(queue.snapshot().item?.awemeId).toBe("1");expect(queue.snapshot().hasMore).toBe(true);
 });
 
 test("persistent cache tolerates corruption, deduplicates, bounds windows and preserves a late anchor",async()=>{
@@ -101,12 +102,11 @@ test("clearing an exhausted playback window does not delete history",async()=>{
   expect((await client.restoreFeed()).items).toEqual([]);expect(await client.isLoggedIn()).toBe(true);expect(await client.listHistory()).toHaveLength(1);
 });
 
-test('forced 403 source refresh does not reuse old pending resolution or let its late response replace the fresh URL',async()=>{
+test('forced and ordinary concurrent same-id detail share a single fresh response',async()=>{
  const store=new Store();store.values.set('douyin.cookie','sessionid=fixture');const pending:((value:any)=>void)[]=[];
  const client=new DouyinClient({secureStorage:store,signer:{sign:()=>''},transport:{request:()=>new Promise(resolve=>pending.push(resolve))}});
- const old=client.resolvePlayback('same');for(let i=0;i<30;i++)await Promise.resolve();expect(pending).toHaveLength(1);
- const fresh=client.resolvePlayback('same',{forceRefresh:true});for(let i=0;i<30;i++)await Promise.resolve();expect(pending).toHaveLength(2);
- const response=(url:string)=>({status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_detail:{...wire('same'),video:{play_addr:{url_list:[url]}}}}))});
- pending[1]!(response('https://video/fresh'));expect(await fresh).toMatchObject({ok:true,data:{playUrl:'https://video/fresh'}});
- pending[0]!(response('https://video/obsolete'));expect(await old).toMatchObject({ok:false,code:'CANCELLED'});expect(await client.resolvePlayback('same')).toMatchObject({ok:true,data:{playUrl:'https://video/fresh'}});
+ const old=client.resolvePlayback('same');for(let i=0;i<50;i++)await Promise.resolve();expect(pending).toHaveLength(1);
+ const fresh=client.resolvePlayback('same',{forceRefresh:true});for(let i=0;i<50;i++)await Promise.resolve();expect(pending).toHaveLength(1);
+ pending[0]!({status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_detail:{aweme_id:'same',video:{play_addr:{url_list:['https://fresh/same']}}}}))});
+ expect(await old).toMatchObject({ok:true,data:{playUrl:'https://fresh/same'}});expect(await fresh).toMatchObject({ok:true,data:{playUrl:'https://fresh/same'}});
 });

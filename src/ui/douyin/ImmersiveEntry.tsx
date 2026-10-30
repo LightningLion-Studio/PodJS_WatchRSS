@@ -27,9 +27,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const active=()=>!disposed&&(props.active??true);
   const requireLogin=async(current:()=>boolean)=>{
     if(!current())return;cancelRetry();setLogged(false);setItems([]);anchor=null;cursor=null;hasMore=false;setError(formatDouyinError('NOT_LOGGED_IN'));
-    // status_code=8 already expires through the client; ordinary blocked/empty
-    // responses retain the existing active-screen cleanup boundary.
-    if(await props.client.isLoggedIn()&&current())await props.client.clearCookie();
+    // Only the client may expire verified authentication. A screen never infers it.
   };
   const load=async(refresh=false)=>{
     if(!active()||busy())return;
@@ -44,7 +42,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         traceServiceWork("douyin.entry.restoreResult",()=>{setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;});
         // Native restores the title page immediately; a small/incomplete bootstrap
         // needs a 16-item feed request. Expired detail refresh is background work.
-        if(cached.items.length>=3&&(!hasMore||!!cursor?.trim())){
+        if(cached.items.length>=3&&hasMore&&!!cursor?.trim()){
           void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(async result=>{
             if(!current())return;
             if(result.ok){traceServiceWork("douyin.entry.resolveResult",()=>setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item)));return;}

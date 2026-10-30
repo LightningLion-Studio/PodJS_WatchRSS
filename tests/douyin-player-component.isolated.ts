@@ -16,6 +16,7 @@ mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,pressNode(){}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:(props:any)=>element('Poster',props)}));
 mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
+let sessionPrepareError:unknown;
 let sessionsCapable=false,decoderLimit=1,lifecycleState='active';const lifecycleListeners=new Set<(value:string)=>void>();
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},hasCapability:()=>sessionsCapable,lifecycle:()=>lifecycleState,onLifecycleChange:(listener:(value:string)=>void)=>{lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
 let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
@@ -29,9 +30,9 @@ let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
 const video={prepare:(options:any)=>{prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
-mock.module('@podjs/framework/services',()=>({video,videoSessions:{prepare:(options:any)=>({result:Promise.resolve({...state('ready'),sessionId:options.sessionId}),cancel(){}}),play:async()=>state('playing'),state:async()=>current,setTransform:async()=>state('playing'),setBounds:async()=>state('playing'),setLoop:async()=>state('ready'),release:async()=>{sessionReleases++;return {released:true};}},hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,videoSessions:{prepare:(options:any)=>({result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):Promise.resolve({...state('ready'),sessionId:options.sessionId}),cancel(){}}),play:async()=>state('playing'),state:async()=>current,setTransform:async()=>state('playing'),setBounds:async()=>state('playing'),setLoop:async()=>state('ready'),release:async()=>{sessionReleases++;return {released:true};}},hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
+const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];sessionPrepareError=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
 function mount(status:InternetStatus,url='https://video/current',immersive=false,platform:'douyin'|'bili'='douyin',recoveryDeadlineMs?:number){
@@ -242,4 +243,29 @@ test('rendered first frame disarms recovery deadline without stopping successful
 test('successful recovery is not expired again when returning to its retained screen',async()=>{
  const f=mountRetained('douyin',false,Date.now()+1000);await flush();f.setActive(false);await flush();const before=legacyStops;
  f.source.recoveryDeadlineMs=Date.now()-1000;f.setActive(true);await flush();for(const tick of [...ticks])tick();await flush();expect(legacyStops).toBe(before);expect(plays).toBe(2);
+});
+
+for(const code of ['restricted','decode_error'])test(`DYFIX immersive ${code} reaches queue recovery while ordinary playback stays local`,async()=>{
+ nextError={code};const immersive=mount('available','https://fixture/rejected',true);await flush();expect(failures).toBe(1);expect(immersive.text()).toContain('重试');
+ stops.splice(0).forEach(stop=>stop());nextError={code};mount('available','https://fixture/rejected',false);await flush();expect(failures).toBe(0);
+});
+test('DYFIX first-frame callback waits for a decoded frame after prepare and after source changes',async()=>{
+ initial='available';const originalPlay=video.play;video.play=async()=>({...state('playing'),hasRenderedFirstFrame:false});heldPrepare=Promise.resolve({...state('ready'),hasRenderedFirstFrame:false});current={...state('buffering'),hasRenderedFirstFrame:false};
+ let frames=0,setSource!:(source:any)=>void;
+ try{
+  createRoot(stop=>{stops.push(stop);const [source,set]=createSignal<any>({platform:'douyin',immersive:true,url:'https://fixture/a',title:'a'});setSource=set;return VideoPlayerScreen({get source(){return source();},width:233,height:233,active:true,offset:0,round:true,onFirstFrame:()=>frames++});});
+  await flush();expect(frames).toBe(0);current={...state('playing'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();expect(frames).toBe(1);
+  heldPrepare=Promise.resolve({...state('ready'),hasRenderedFirstFrame:false});current={...state('buffering'),hasRenderedFirstFrame:false};setSource({platform:'douyin',immersive:true,url:'https://fixture/b',title:'b'});await flush();expect(frames).toBe(1);
+  current={...state('playing'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();expect(frames).toBe(2);
+ }finally{video.play=originalPlay;}
+});
+
+test('DYFIX standby decode failure keeps video sessions available; capacity failure degrades them',async()=>{
+ for(const code of ['decode_error','video_decoder_limit']){
+  sessionsCapable=true;decoderLimit=2;sessionPrepareError={code};prepares=[];sessionReleases=0;current=state('ready');initial='available';
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'active',url:'https://fixture/active',title:'active'},width:233,height:233,active:true,offset:0,round:true,onPrepareAdjacent:async()=>({key:'next',source:{platform:'douyin',immersive:true,awemeId:'next',url:'https://fixture/next',title:'next'}})});});
+  for(let i=0;i<6;i++)await flush();
+  if(code==='decode_error'){expect(prepares).toHaveLength(0);expect(sessionReleases).toBe(1);}else{expect(prepares).toHaveLength(1);expect(sessionReleases).toBeGreaterThan(0);}
+  stops.splice(0).forEach(stop=>stop());await flush();
+ }
 });

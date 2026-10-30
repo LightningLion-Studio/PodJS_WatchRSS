@@ -52,12 +52,15 @@ export function createHostDouyinPreload(client:DouyinClient) {
   const prepared:{uri:string;prefetchBytes:number;captureBytes:number;itemToken:string;generation:number}[]=[];
   let foregroundBitrate=mode==='active'?selectPreferredDouyinVariant(targets[0]?.variants??[])?.bitrate??0:0;
   for(const item of targets){
-   if(own!==generation)return;const result=await client.resolvePlayback(item.awemeId);if(own!==generation)return;
+   if(own!==generation)return;const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
+   // Backward entries register existing sources only. They never request detail.
+   const backward=mode==='active'&&plan!.items.findIndex(value=>value.awemeId===item.awemeId)<center;
+   const result=backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true});if(own!==generation)return;
    if(!result.ok){appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
    const uri=await register(result.data,headers);if(own!==generation)return;if(!uri)continue;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;
    const itemToken=`p${++token}`;results.bind({id:item.awemeId,itemToken,generation:own,uri,url:result.data.playUrl});
-   prepared.push({uri,itemToken,generation:own,prefetchBytes:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs)});
+   prepared.push({uri,itemToken,generation:own,prefetchBytes:backward?0:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs)});
    if(own!==generation)return;
    // Publish progressively; do not wait for a slow old detail request to warm current+next.
    await mediaPrefixCache.window(prepared,foregroundBitrate).result;
@@ -68,7 +71,7 @@ export function createHostDouyinPreload(client:DouyinClient) {
   const action=results.result(event,foreground);if(action)try{kv.set('watchrss.douyin.prefetch-failures',results.snapshot());}catch{}if(!action||action.action==='none')return;
   const {binding}=action,own=generation,currentPlan=plan;if(!currentPlan)return;
   if(action.action==='refresh'){
-   const fresh=await client.resolvePlayback(binding.id,{forceRefresh:true});
+   const fresh=await client.resolvePlayback(binding.id,{forceRefresh:true,prefetch:!foreground(binding.id)});
    if(own!==generation||plan!==currentPlan||!results.current(binding)||!fresh.ok)return;
    const headers=await client.buildPlaybackHeaders(),uri=await register(fresh.data,headers);
    if(!uri||own!==generation||plan!==currentPlan||!results.current(binding))return;
@@ -100,7 +103,7 @@ export function createHostDouyinPreload(client:DouyinClient) {
   async invalidate(_id:string){sources.clear();await mediaPrefixCache.clear().result;},stop,stats,
   allowBluetooth(value:boolean,expected:unknown){if(bluetoothOwners.has(expected)===value)return;if(value)bluetoothOwners.add(expected);else bluetoothOwners.delete(expected);if(expected===owner)networkChanged();},
   start(next:unknown,items:readonly DouyinItem[],anchor:string|undefined,mode:'active'|'entry',hooks?:DouyinPrefetchHooks){
-   if(next!==owner){results.begin(true);unsubscribe?.();unsubscribe=undefined;lastAllowed=undefined;}owner=next;plan={items,anchor,mode,hooks};
+   if(next!==owner){client.resetPrefetchFailures?.();results.begin(true);unsubscribe?.();unsubscribe=undefined;lastAllowed=undefined;}owner=next;plan={items,anchor,mode,hooks};
    resultOff??=mediaPrefixCache.onResult?.(event=>{void consume(event).catch(()=>appLogger.w('DouyinProxy','prefetch result handling failed'));});
    unsubscribe??=onNetworkChange(networkChanged,networkChanged);void run(++generation).catch(()=>appLogger.w('DouyinProxy','window failed'));
   },

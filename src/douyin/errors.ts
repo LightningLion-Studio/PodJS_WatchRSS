@@ -4,7 +4,7 @@ import type { DouyinErrorCode } from './types.ts';
 export function formatDouyinError(code: DouyinErrorCode): string {
   switch (code) {
     case 'RATE_LIMITED':
-    case 'TEMPORARILY_UNAVAILABLE': return '抖音暂时不可用，稍后自动重试';
+    case 'TEMPORARILY_UNAVAILABLE': return '抖音暂时不可用，请稍后重试';
     case 'NOT_LOGGED_IN': return '需要登录';
     case 'PARSE_FAILED': return '解析失败';
     case 'REQUEST_FAILED': return '网络请求失败';
