@@ -1,3 +1,6 @@
+import {CloudRecordCodec} from '../../src/cloud/records';
+import {rssArticleId,rssSourceKey} from '../../src/cloud/rss-identity';
+import {bookId,bookArticleId} from '../../src/books/protocol';
 import {readFileSync,mkdtempSync,rmSync,realpathSync} from 'node:fs';
 import {resolve,join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -37,9 +40,9 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
  const artifact=(await buildBackground({'watchrss-cloud-sync':resolve(import.meta.dir,'../../src/cloud/background.ts')},output))['watchrss-cloud-sync']!;
  const source=readFileSync(join(output,artifact.file),'utf8');
  const headless=async(context:BackgroundContext,clock?:()=>number)=>{const realm:Record<string,any>={};if(clock)realm.Date=class extends Date{static now(){return clock();}};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();expect(realm.setTimeout).toBeUndefined();const result=await realm.backgroundHandler(context);expect(realm.__podYieldCodecTurn).toBeUndefined();return result;};
- try{for(const entry of ['automatic','manual','periodic-with-grant','manual-manifest','manual-manifest-metadata','manual-manifest-window','manual-manifest-denied','manual-records-denied']){
+ try{for(const entry of ['manual-rss-fast','manual-rss-fast-epoch','manual-book-fast','automatic','manual','periodic-with-grant','manual-manifest','manual-manifest-metadata','manual-manifest-window','manual-manifest-denied','manual-records-denied']){
  const fixtureSpki=generateKeyPairSync('ec',{namedCurve:'prime256v1'}).publicKey.export({type:'spki',format:'der'}).toString('base64');
- const manual=entry!=='automatic',withManifest=entry.startsWith('manual-manifest');const guestDeadline=Date.now()+300000;let guestNow=Date.now(),windowStop=false,windowArmed=false;let denyYield=entry==='manual-manifest-denied',denyRecords=entry==='manual-records-denied';let acknowledgements=0;const logs:string[]=[],yieldStacks:string[]=[];
+ const fastMode=entry.startsWith('manual-rss-fast')||entry==='manual-book-fast';let recordRows:any[]=[],fastBookId='';const manual=entry!=='automatic',withManifest=entry.startsWith('manual-manifest');const guestDeadline=Date.now()+300000;let guestNow=Date.now(),windowStop=false,windowArmed=false;let denyYield=entry==='manual-manifest-denied',denyRecords=entry==='manual-records-denied';let acknowledgements=0;const logs:string[]=[],yieldStacks:string[]=[];
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
  if(manual)secure.set(MANUAL_INTENT_KEY,JSON.stringify({version:1,token:'manual_fixture',scope:cloudAccountIdentity(account),mode:'recent128',createdAt:1}));
@@ -63,7 +66,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'secure.release':expect(a.key).toBe('watchrss.account.session.v1');return {};
    case 'discovery.networkSnapshot':return {active:true,validated:true,wifi:true,metered:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
-   case 'secure.set':secure.set(a.key,a.value);if(entry==='manual-manifest-window'&&!windowStop&&a.key.includes('.restore-v1')){const saved=JSON.parse(a.value);if(windowArmed&&a.key.endsWith('.restore-v1')){windowStop=true;guestNow=guestDeadline-10000;}else if(Object.keys(saved.units??{}).some(k=>k.includes('archive:')&&k.includes(':row:')))windowArmed=true;}return {};
+   case 'secure.set':secure.set(a.key,a.value);if((entry==='manual-manifest-window'||fastMode)&&!windowStop&&a.key.includes('.restore-v1')){const saved=JSON.parse(a.value);if(windowArmed&&a.key.endsWith('.restore-v1')){windowStop=true;guestNow=guestDeadline-10000;}else if(Object.keys(saved.units??{}).some(k=>fastMode?/^records:\d+:(pull:|projection:)/.test(k):k.includes('archive:')&&k.includes(':row:')))windowArmed=true;}return {};
    case 'secure.compareAndSet':if((secure.get(a.key)??null)!==a.expected)return {updated:false};if(a.value===null)secure.delete(a.key);else secure.set(a.key,a.value);return {updated:true};
    case 'secure.update':if(a.expected)for(const [k,v]of Object.entries(a.expected))if((secure.get(k)??null)!==v)return {updated:false};for(const [k,v] of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};
    case 'file.list':return {entries:[]};
@@ -94,7 +97,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'http.download':{
     const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};if(a.url.startsWith('https://objects.invalid/')){const hash=a.url.split('/').at(-1),body=hash===remoteHash?remote!.encryptedManifest:remote!.newChunks.get(hash)!;expect(body).toBeDefined();files.set(a.path,body.slice());return {path:a.path,size:body.length,status:200,headers:{}};}expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');
     if(a.url.endsWith('/bootstrap'))response={...contentFixture,member:{plan:'member',active:true,readable:true,writable:true,quotaBytes:1e9},libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],devices:[{deviceId:(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,publicKeySpki:fixtureSpki,attestationKeyVersion:1,attestation:await attest(v2,key,'user',epoch,(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,fixtureSpki)}],keyEnvelopes:[]};
-    else if(a.url.includes('/records?'))response={...contentFixture,formatVersion:1,libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],items:[],cursor:'0',headRevision:'0',hasMore:false};
+    else if(a.url.includes('/records?'))response={...contentFixture,formatVersion:1,libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],items:fastMode&&new URL(a.url).searchParams.get('after')==='0'?recordRows:[],cursor:fastMode?String(recordRows.length):'0',headRevision:fastMode?String(recordRows.length):'0',hasMore:false};
     else if(a.url.endsWith('/records'))response={formatVersion:1,items:j.items.map((v:any,i:number)=>({recordId:v.recordId,revision:String(i+1)}))};
     else if(a.url.endsWith('/heads'))response={...contentFixture,heads:remoteHead?[remoteHead]:[]};
     else if(a.url.endsWith('/snapshots/headless-remote'))response={snapshot:{manifestSignedUrl:'https://objects.invalid/'+remoteHash},chunks:remote!.manifest.objects.flatMap(o=>o.chunks).map(c=>({sha256:c.ciphertextSha256,sizeBytes:c.ciphertextBytes,signedUrl:'https://objects.invalid/'+c.ciphertextSha256}))};
@@ -110,7 +113,31 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
   await initializeSchema({query:async (q,p=[])=>sql.query(q).all(...p) as Record<string,unknown>[],transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]));})();}},{seedBuiltinChannels:false});
   sql.exec("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,'watchrss://phone-imports','Private',1,1)");
   sql.exec("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'Article','Private body','https://article.invalid/a','a',1)");
+  if(fastMode){
+   const codec=new CloudRecordCodec(v2);let docs:any[]=[];
+   if(entry.startsWith('manual-rss-fast')){
+    const source='https://fixture.invalid/rss',url='https://fixture.invalid/item',guid='fixture-guid',articleId=await rssArticleId({guid},crypto.sha256),sourceId=await rssSourceKey(source,crypto.sha256);
+    sql.query("UPDATE channels SET url=?,title='Feed' WHERE id=1").run(source);sql.query('UPDATE articles SET link=?,guid=?,dedup_key=? WHERE id=1').run(url,guid,guid);
+    const {contentText,contentHtml,...metadata}=article({articleId,url,rssSourceUrl:source,rssSourceTitle:'Feed',title:'Article',independentSaved:false,independentChangedAt:0,isRead:true,readingPositionChangedAt:100});
+    docs=[{kind:'article',value:metadata},{kind:'rss-state',value:{sourceId,articleIdHash:await crypto.sha256(utf8Encode(articleId)),sourceDeviceId:'phone',isRead:true,readingProgress:.75,readingPositionBytes:7,readingPositionContentHash:'original',readingPositionChangedAt:200}}];
+   }else{
+    const source='https://watchrss.local/import-epub/fixture',url=source+'/chapter/1',oldUrl=url.replace('https://watchrss.local/','https://www.watchrss.local/'),fingerprint=await crypto.sha256(utf8Encode('fixture-book'));fastBookId=await bookId(fingerprint,crypto.sha256);const canonicalId=await bookArticleId(fastBookId,1,crypto.sha256),wire=await crypto.sha256(utf8Encode(url));
+    sql.query("UPDATE channels SET url=?,title='Book' WHERE id=1").run(source);sql.query('UPDATE articles SET link=?,dedup_key=? WHERE id=1').run(url,wire);
+    sql.query('INSERT INTO sync_books(book_id,fingerprint,chapter_count,state_json,registration_complete) VALUES(?,?,1,?,1)').run(fastBookId,fingerprint,JSON.stringify({bookId:fastBookId,fingerprint,title:'Book',chapterCount:1,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:1,sourceDeviceId:'watch',sourceUrl:source,kind:'epub'}));
+    sql.query('INSERT INTO sync_book_chapters VALUES(?,1,?,1,?,?)').run(fastBookId,canonicalId,url,wire);for(const [id,bit]of [[canonicalId,0],[wire,1]])sql.query('INSERT INTO sync_book_aliases VALUES(?,1,?,1,?,?,?)').run(fastBookId,id,url,source,bit);
+    const {contentText,contentHtml,...metadata}=article({articleId:await crypto.sha256(utf8Encode(oldUrl)),url:oldUrl,rssSourceUrl:source,rssSourceTitle:'Book',independentSaved:false,independentChangedAt:0,isRead:true,readingProgress:.75,readingPositionBytes:7,readingPositionContentHash:'original',readingPositionChangedAt:200});docs=[{kind:'article',value:metadata}];
+   }
+   for(let n=0;n<docs.length;n++){const recordId=await codec.id(key,'user',docs[n]);recordRows.push({recordId,revision:String(n+1),envelope:await codec.encode(key,'user',recordId,1,docs[n]),tombstone:false});}
+  }
   const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
+  if(entry==='manual-rss-fast-epoch'){const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);secure.set(MANUAL_INTENT_KEY,JSON.stringify({...grant,version:2,epoch:'revoked-epoch'}));expect(await headless(context)).toBe('success');expect(calls).not.toContain('cloud.acquire');expect(calls.some(m=>m.startsWith('sql.')||m==='http.download')).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);continue;}
+  if(fastMode){
+   const value=await headless(context,()=>guestNow);expect(value,logs.join('')).toEqual({status:'retry',progress:true});expect(windowStop).toBe(true);expect(leased).toBe(false);expect(calls).not.toContain('file.gzip');expect(calls).not.toContain('file.gunzip');expect(reserved).toBeUndefined();expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);
+   expect((sql.query('SELECT changed_at,progress FROM article_reading_state WHERE article_id=1').get() as any)).toMatchObject({changed_at:200,progress:.75});
+   if(entry.startsWith('manual-rss-fast')){expect(logs.join('')).toContain('"stage":"reading-index"');expect(sql.query('SELECT revision FROM cloud_reading_commit WHERE id=1').get()).toBeTruthy();}
+   else{expect(logs.join('')).toContain('"stage":"cloudLegacyBookReading"');expect((sql.query('SELECT clock FROM sync_book_reading WHERE book_id=?').get(fastBookId) as any).clock).toBe(200);}
+   continue;
+  }
   if(denyYield||denyRecords){
    const deniedMethod=denyYield?'runtime.delay':'http.download';
    expect(await headless(context)).toBe('failure');expect(leased).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);expect(reserved).toBeUndefined();

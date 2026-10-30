@@ -137,8 +137,8 @@ export class SqlBookStore {
  async readingStates(capture=true){if(capture)await this.captureReading();const rows=await this.rows('SELECT r.* FROM sync_book_reading r LEFT JOIN sync_books b ON b.book_id=r.book_id WHERE b.book_id IS NULL OR r.chapter_index<=b.chapter_count ORDER BY r.book_id,r.chapter_index');return rows.map(r=>JSON.parse(str(r.state_json)) as BookReading);}
  async mergeReading(remote:BookReading):Promise<number>{return this.mergeReadingBatch([remote]);}
  /** One durable page; clocks are merged before projecting each affected book once. */
- async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
- private async mergeReadingBatchValue(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number}={}):Promise<number>{
+ async mergeReadingBatch(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[]}={}):Promise<number>{return this.work('book-reading-batch',()=>this.mergeReadingBatchValue(incoming,options));}
+ private async mergeReadingBatchValue(incoming:readonly BookReading[],options:{capture?:boolean;expectedRevision?:number;guards?:readonly Statement[]}={}):Promise<number>{
   for(const value of incoming)validateBookReading(value);if(!incoming.length)return 0;if(incoming.length>100)throw Error('book_reading_batch_too_large');
   if(options.capture!==false)await this.captureReading();
   for(let attempt=0;attempt<3;attempt++){const revision=options.expectedRevision??await libraryRevision(this.db);try{
@@ -153,9 +153,9 @@ export class SqlBookStore {
     for(const p of ['favorite','watchLater'] as const){const source=next[`${p}SourceDeviceId`]??next.sourceDeviceId;values.push(next[`${p}Saved`]===undefined?null:next[`${p}Saved`]?1:0,next[`${p}ChangedAt`]??null,next[`${p}SortOrder`]??null,next[`${p}Saved`]===undefined?null:source,next[`${p}Saved`]===undefined?null:deviceOrder(source));}
     statements.push({sql:'INSERT INTO sync_book_reading('+cols.join(',')+') VALUES('+cols.map(()=>'?').join(',')+') ON CONFLICT(book_id,chapter_index) DO UPDATE SET '+cols.slice(2).map(c=>c+'=excluded.'+c).join(',')+' WHERE state_json IS NOT excluded.state_json',params:values});
    }
-   if(!affected.size)return 0;if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
+   if(!affected.size){if(options.guards?.length)await this.db.transaction([revisionGuard(revision),...options.guards]);return 0;}if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
    for(const id of affected)statements.push(...this.projectReadingStatements(id,[...merged].filter(([k,v])=>v.bookId===id&&canonical(v)!==canonical(before.get(k)??null)).map(([,v])=>v.chapterIndex)));
-   const counts=await this.db.transactionChanges([revisionGuard(revision),...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));return Math.max(counts.slice(1,1+writes).filter(n=>n>0).length,counts.some(n=>n>0)?1:0);
+   const counts=await this.db.transactionChanges([revisionGuard(revision),...(options.guards??[]),...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));return Math.max(counts.slice(1+(options.guards?.length??0),1+(options.guards?.length??0)+writes).filter(n=>n>0).length,counts.some(n=>n>0)?1:0);
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
  }

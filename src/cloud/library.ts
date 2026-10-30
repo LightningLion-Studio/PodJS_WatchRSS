@@ -1,3 +1,4 @@
+import {legacyBookReadingArticle} from '../books/legacy-cloud-reading';
 import type {RestoreApplyCheckpoint} from './snapshot-checkpoint';
 import {memoizeSmallDigest} from '../core/digest-cache';
 import {PRIVATE_OVERLAY_NAME,PrivateOverlayReadSet,decodePrivateOverlay} from './private-overlay';
@@ -30,6 +31,7 @@ export interface CloudLibraryRepository extends Partial<CloudBookPort> {
  cloudSources?():Promise<readonly SyncedSource[]>;
  cloudRestoreMetadata?(request?:{ids?:readonly string[];urls?:readonly string[];after?:number;limit?:number},check?:()=>void):Promise<{articles:ExportedArticle[];next?:number}>;
  cloudSnapshot(full:boolean,check?:()=>void):Promise<CloudLibrarySnapshot>;
+ mergeCloudLegacyBookReading?(articles:readonly ExportedArticle[],check?:()=>void):Promise<{changed:number;remaining:ExportedArticle[]}>;
  mergeCloudReading?(articles:readonly ExportedArticle[],check?:()=>void):Promise<number>;
  mergeCloudPublicMetadata?(articles:readonly ExportedArticle[],check?:()=>void,work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>):Promise<{changed:number;remaining:ExportedArticle[]}>;
  cloudReadingRevision?():Promise<number>;
@@ -45,7 +47,7 @@ export class WatchCloudLibraryAdapter {
  trackProgress(sink?:(unit:string)=>Promise<void>){this.repository.setCloudProgress?.(sink);}
  private readingRevision?:number;
  private async checkReadingRevision(){const revision=await this.repository.cloudReadingRevision?.();if(revision!==undefined&&revision!==this.readingRevision){this.matchedReading.clear();this.readingRevision=revision;}}
- private async mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check:()=>void=()=>this.guard.require(),work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){this.guard.require();await this.checkReadingRevision();let result=0;if(remote==='cloud-records'&&!sources.length&&articles.length&&articles.every(a=>a.rssSourceUrl&&!privateCloudBody(a)&&!a.deleted&&!a.contentText&&!a.contentHtml)&&this.repository.mergeCloudPublicMetadata){const fast=await this.repository.mergeCloudPublicMetadata(articles,check,work);result=fast.changed;articles=fast.remaining;}if(sources.length||articles.length)result+=await this.repository.mergeCloud(sources,articles,remote,check);this.readingRevision=await this.repository.cloudReadingRevision?.();return result;}
+ private async mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check:()=>void=()=>this.guard.require(),work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){this.guard.require();let result=0;if(remote==='cloud-records'&&articles.some(legacyBookReadingArticle)&&this.repository.mergeCloudLegacyBookReading){const fast=await this.repository.mergeCloudLegacyBookReading(articles,check);result+=fast.changed;articles=fast.remaining;this.matchedReading.clear();this.readingRevision=undefined;if(!sources.length&&!articles.length)return result;}await this.checkReadingRevision();if(remote==='cloud-records'&&!sources.length&&articles.length&&articles.every(a=>a.rssSourceUrl&&!privateCloudBody(a)&&!a.deleted&&!a.contentText&&!a.contentHtml)&&this.repository.mergeCloudPublicMetadata){const fast=await this.repository.mergeCloudPublicMetadata(articles,check,work);result+=fast.changed;articles=fast.remaining;}if(sources.length||articles.length)result+=await this.repository.mergeCloud(sources,articles,remote,check);this.readingRevision=await this.repository.cloudReadingRevision?.();return result;}
  private overlay:PrivateOverlayReadSet;
  constructor(private repository:CloudLibraryRepository,private deviceId:string,private crypto:CloudLibraryCrypto,private guard:CloudGuard=cloudDisabled){this.crypto={...crypto,sha256:memoizeSmallDigest(bytes=>crypto.sha256(bytes),{beforeUse:()=>this.guard.require()})};this.overlay=new PrivateOverlayReadSet(this.crypto);}
  /** A local projection may omit fields held only by an authenticated record.
