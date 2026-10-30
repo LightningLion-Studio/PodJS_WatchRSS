@@ -14,6 +14,7 @@ import {commit,attest} from '../../src/cloud/v2';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import handler from '../../src/cloud/background';
+import {article} from './library-fixture';
 import {crypto,key} from './k2-crypto';
 import {utf8Encode,utf8Decode} from '../../src/cloud/types';
 import {initializeSchema} from '../../src/core/schema';
@@ -36,7 +37,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
  const artifact=(await buildBackground({'watchrss-cloud-sync':resolve(import.meta.dir,'../../src/cloud/background.ts')},output))['watchrss-cloud-sync']!;
  const source=readFileSync(join(output,artifact.file),'utf8');
  const headless=async(context:BackgroundContext)=>{const realm:Record<string,any>={};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();expect(realm.setTimeout).toBeUndefined();const result=await realm.backgroundHandler(context);expect(realm.__podYieldCodecTurn).toBeUndefined();return result;};
- try{for(const entry of ['automatic','manual','periodic-with-grant','manual-manifest','manual-manifest-denied','manual-records-denied']){
+ try{for(const entry of ['automatic','manual','periodic-with-grant','manual-manifest','manual-manifest-metadata','manual-manifest-denied','manual-records-denied']){
  const fixtureSpki=generateKeyPairSync('ec',{namedCurve:'prime256v1'}).publicKey.export({type:'spki',format:'der'}).toString('base64');
  const manual=entry!=='automatic',withManifest=entry.startsWith('manual-manifest');let denyYield=entry==='manual-manifest-denied',denyRecords=entry==='manual-records-denied';let acknowledgements=0;const logs:string[]=[],yieldStacks:string[]=[];
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
@@ -46,7 +47,8 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
  secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode(JSON.stringify(['https://backend.invalid','user'])))+'.'+epoch+'.1',b64(key));
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
  const resultFile=async(data:Uint8Array,directory='cloud-crypto')=>{const path=`${directory}/.pod-write-${++id}.part`;files.set(path,data);return {path,size:data.length,sha256:await crypto.sha256(data)};};
- const remote=withManifest?await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},settings:{fixturePadding:'x'.repeat(280000)},objects:[{name:'private-library.wrss',compress:false,bytes:writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode('[]')]]))}]}):undefined;
+ const original=article({articleId:await crypto.sha256(utf8Encode('https://article.invalid/a')),url:'https://article.invalid/a',title:'Article',contentHtml:null,contentText:'Private body',contentHash:'fixture-original',readingProgress:0,readingPositionChangedAt:1}),stem='bodies/'+await crypto.sha256(utf8Encode(original.articleId)),restoreRows=entry==='manual-manifest-metadata'?[{...original,contentText:undefined,contentHtml:undefined,contentTextEntry:stem+'.txt',contentHtmlEntry:null}]:[];
+ const remote=withManifest?await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},settings:{fixturePadding:'x'.repeat(280000)},objects:[{name:'private-library.wrss',compress:false,bytes:writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode(JSON.stringify(restoreRows))],[stem+'.txt',utf8Encode(original.contentText)]]))}]}):undefined;
  const remoteHash=remote?await crypto.sha256(remote.encryptedManifest):'';const remoteHead=remote?{id:remote.manifest.snapshotId,sourceDeviceId:'phone',deviceSequence:1,keyVersion:1,manifestSha256:remoteHash,manifestSizeBytes:remote.encryptedManifest.length,parentHeads:{},observedHeads:{}}:undefined;
  const request=async(method:string,a:any):Promise<any>=>{
   calls.push(method);expect(methods.has(method)).toBe(true);expect(JSON.stringify(a).length).toBeLessThan(1024*1024);
@@ -119,6 +121,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
   }
   expect(await headless(context),entry+' '+logs.join('')).toBe('success');
   if(withManifest){expect(calls).toContain('crypto.largeAesGcmDecrypt');expect(yieldStacks.some(s=>s.includes('equalBytesAsync'))).toBe(true);expect(yieldStacks.some(s=>s.includes('parseRawJsonAsync'))).toBe(true);expect(acknowledgements).toBe(1);}
+  if(entry==='manual-manifest-metadata'){const diagnostics=logs.join('');expect(diagnostics).toContain('\"stage\":\"cloudMetadata\"');expect(diagnostics).toContain('\"stage\":\"cloudSources\"');}
   expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
  expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);
  }finally{sql.close();}

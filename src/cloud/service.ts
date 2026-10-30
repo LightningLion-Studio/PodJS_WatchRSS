@@ -26,7 +26,7 @@ export interface CloudSession {
  client:Partial<Pick<WatchCloudClient,'refreshR48WriteGate'|'r48WriteEnabled'|'requiredFeatures'>>&Pick<WatchCloudClient,'setEpoch'|'setContentGeneration'|'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
  keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'currentKeyVersion'|'acceptBootstrap'|'accountKey'>&Partial<Pick<WatchCloudKeyManager,'prepareLegacyUpgrade'>>;
  codec:WatchCloudCodec;cache:WatchCloudCache;state:WatchCloudStateStore;uploader:{upload(target:CloudUploadObject,bytes:Uint8Array):Promise<void>};
- library:Partial<Pick<WatchCloudLibraryAdapter,'observePrivateOverlay'|'readingInventoryMode'>>&Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
+ library:Partial<Pick<WatchCloudLibraryAdapter,'observePrivateOverlay'|'readingInventoryMode'|'trackProgress'>>&Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
  /** Account identity/revocation must be rechecked after asynchronous IO. */
  assertCurrent():Promise<void>;
  assertUpload?():Promise<void>;
@@ -119,6 +119,7 @@ export class WatchCloudSyncService {
   let records:WatchCloudRecords|undefined,recordFailure='',recordStage:RecordFailureStage='open',recordStarted=(this.ports.now??Date.now)();
   const recordStep=async<T>(stage:RecordFailureStage,run:()=>Promise<T>)=>{recordStage=stage;recordStarted=(this.ports.now??Date.now)();let success=false;try{await current();const result=await run();await current();success=true;return result;}finally{try{this.ports.recordDiagnostic?.(JSON.stringify({event:'records-stage',stage,outcome:success?'complete':'failed',durationMillis:Math.max(0,(this.ports.now??Date.now)()-recordStarted)}));}catch{}}};
   const recordError=(e:unknown)=>{const diagnostic=recordFailureDiagnostic(e,recordStage,(this.ports.now??Date.now)()-recordStarted);const classified=JSON.parse(diagnostic);this.recordFailure={code:classified.code,stage:recordStage,category:cloudFormatFailure(e)};try{this.ports.recordDiagnostic?.(diagnostic);}catch{/* Diagnostics must not change sync. */}const text=String(e);if(isLibraryOwnerMismatch(e)||String(e).includes('cloud_sync_deadline_exceeded')||cloudFormatFailure(e)==='suspended'||contentRecovery(e)||text.includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE))throw e;if(/library_epoch_mismatch|cloud_operation_superseded|账号|cloud_account_|client_upgrade_required|device_attestation|commitment|library_owner_mismatch/.test(text))throw e;recordFailure=text.includes('cloud_record_count_limit')?'云记录数量已达上限':text.includes('cloud_quota_exceeded')?'云记录空间不足':text.includes('cloud_records_consent_required')?'请先在手机启用云记录':'云记录待重试';};
+  s.library.trackProgress?.(async unit=>restore.commit('library:'+unit));
   const openRecords=async()=>{const value=await s.records(bootstrap,current);value.trackProgress?.(unit=>restore.commit('records:'+restore.cycle+':'+unit));return value;};
   // Account checks are done; say what the long part actually is.
   this.set('downloading','正在恢复收藏和阅读进度',member);
@@ -234,6 +235,6 @@ export class WatchCloudSyncService {
   const messages=[recordFailure,...(writeBlockedByGate&&compatibility.editPending?['新格式写入暂未开放，本机编辑已保留']:[]),...(compatibility.upgradeRequired?['部分云资料需升级后使用，未应用的原数据和本机编辑已保留']:[]),...(deferred?['稍后合并备份']:[]),...(pendingItems?[`部分私有条目缺少元数据或正文（${pendingItems}），等待重试`]:[])].filter(Boolean);
   if(messages.length){await restore.finish();this.set(recordFailure?'error':'idle',[...messages,...(abandonedMessage?[abandonedMessage]:[])].join('；'),member);return false;}
   await restore.finish();this.set('complete',(inventoryFailures?'云状态已同步；部分公共 RSS 待重试':full?'云同步完成':'阅读状态已同步；正文等待Wi-Fi')+(abandonedMessage?'；'+abandonedMessage:''),member);return true;
-  }catch(error){if(this.recordFailure?.code==='cloud_sync_deadline_exceeded')throw error;throw restore.noProgress(error);}finally{restore.close();}
+  }catch(error){if(this.recordFailure?.code==='cloud_sync_deadline_exceeded')throw error;throw restore.noProgress(error);}finally{s.library.trackProgress?.();restore.close();}
  }
 }

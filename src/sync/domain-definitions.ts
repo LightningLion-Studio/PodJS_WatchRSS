@@ -1,3 +1,4 @@
+import {repositoryWork,type RepositoryDiagnostic} from './repository-work';
 import {querySyncPages} from './sql-pages';
 import {querySqlTableInfo} from '@podjs/framework/sql';
 import type {ProjectionVersion,ProjectionVersions} from '@podjs/framework/acked-state-vector';
@@ -21,7 +22,7 @@ export function projectionGuard(generation:string):Statement{return {sql:"INSERT
  * SQLite schema-cookie changes. No identity, body or business cursor is erased. */
 export class SqlDomainDefinitions {
  private ready?:Promise<void>;private cookie=-1;private userVersion=-1;private values:Partial<Record<SyncDomain,DomainDefinition>>={};private pending?:Promise<void>;
- constructor(private readonly db:SqlDatabase,private readonly codec:Pick<SyncBodyCodec,'sha256'>,private readonly encoders:Record<SyncDomain,number>=DOMAIN_ENCODERS,private readonly protocolVersion=PROTOCOL_VERSION){}
+ constructor(private readonly db:SqlDatabase,private readonly codec:Pick<SyncBodyCodec,'sha256'>,private readonly encoders:Record<SyncDomain,number>=DOMAIN_ENCODERS,private readonly protocolVersion=PROTOCOL_VERSION,private readonly diagnostic?:RepositoryDiagnostic){}
  private init(){return this.ready??=this.db.transaction([
   {sql:'CREATE TABLE IF NOT EXISTS sync_fast_definitions(domain TEXT PRIMARY KEY,encoder INTEGER NOT NULL,schema_version INTEGER NOT NULL,definition TEXT NOT NULL,epoch TEXT NOT NULL,generation TEXT NOT NULL,seeded INTEGER NOT NULL DEFAULT 0)'},
   {sql:'CREATE TABLE IF NOT EXISTS sync_fast_versions(domain TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0)'},
@@ -36,7 +37,7 @@ export class SqlDomainDefinitions {
   {sql:'CREATE INDEX IF NOT EXISTS sync_fast_import_article_url ON articles(channel_id,COALESCE(link,dedup_key))'},
   {sql:'CREATE INDEX IF NOT EXISTS sync_fast_import_channel_url ON sync_book_aliases(channel_url)'},
  ]).then(async()=>{if(!(await this.db.query('PRAGMA table_info(sync_fast_receipts)')).some(r=>r.name==='verified_at'))await this.db.execute('ALTER TABLE sync_fast_receipts ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0');}).catch(e=>{this.ready=undefined;throw e;});}
- async ensure(){await this.init();if(this.pending)await this.pending;this.pending=this.inspect();try{await this.pending;}finally{this.pending=undefined;}return this.values as Record<SyncDomain,DomainDefinition>;}
+ async ensure(){await this.init();if(this.pending)await this.pending;this.pending=repositoryWork(this.diagnostic,'definitions',()=>this.inspect());try{await this.pending;}finally{this.pending=undefined;}return this.values as Record<SyncDomain,DomainDefinition>;}
  private async inspect(){
   const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);
   const schema=Number(Object.values((await this.db.query('PRAGMA user_version'))[0]!)[0]);
@@ -72,14 +73,15 @@ export class SqlDomainDefinitions {
   }
   const stored=new Map((await this.db.query('SELECT * FROM sync_fast_definitions')).map(r=>[String(r.domain),r]));
   const legacyDerived=(tableMap.has('sync_projection_header')&&!!(await this.db.query('SELECT 1 FROM sync_projection_header LIMIT 1')).length)||(tableMap.has('sync_snapshot_fingerprints')&&!!(await this.db.query('SELECT 1 FROM sync_snapshot_fingerprints LIMIT 1')).length)||!!(await this.db.query('SELECT 1 FROM sync_fast_receipts LIMIT 1')).length;
-  const statements:Statement[]=[];const next:Partial<Record<SyncDomain,DomainDefinition>>={};
+  const invalidated:SyncDomain[]=[];const invalidationAt=Date.now();const statements:Statement[]=[];const next:Partial<Record<SyncDomain,DomainDefinition>>={};
   for(const d of SYNC_DOMAINS){
    const deps=dependencies[d],owned=desired.get(d)!;
    const layout=deps.map(t=>[t,tableMap.get(t)?.sql??null,columns.get(t)??[]]);
    const effectiveTriggers=triggers.filter(t=>deps.includes(String(t.tbl_name))&&!String(t.name).startsWith('sync_fast_')).map(t=>[t.name,t.tbl_name,revisions.get(String(t.name))??t.sql]);
    const definition=await hashJavaText(JSON.stringify(['watchrss-domain-definition-v2',this.protocolVersion,d,this.encoders[d],schema,layout,effectiveTriggers,[...owned]]),this.codec);
-   const old=stored.get(d),expectedGeneration=old?await hashJavaText('watchrss.ble.library-cache.v1\n'+definition+'\n'+String(old.epoch),this.codec):'',valid=old?.generation===expectedGeneration&&old?.definition===definition&&[...owned].every(([name,sql])=>actual.get(name)===sql)&&![...revisions].some(([name,sql])=>deps.includes(String(triggers.find(t=>t.name===name)?.tbl_name))&&actual.get(name)!==sql);
+   const old=stored.get(d),expectedGeneration=old?await hashJavaText('watchrss.ble.library-cache.v1\n'+definition+'\n'+String(old.epoch),this.codec):'',ownedTriggersChanged=[...owned].some(([name,sql])=>actual.get(name)!==sql),revisionTriggersChanged=[...revisions].some(([name,sql])=>deps.includes(String(triggers.find(t=>t.name===name)?.tbl_name))&&actual.get(name)!==sql),valid=old?.generation===expectedGeneration&&old?.definition===definition&&!ownedTriggersChanged&&!revisionTriggersChanged;
    if(valid){next[d]={encoder:this.encoders[d],schema,definition,epoch:String(old.epoch),generation:String(old.generation),seeded:!!Number(old.seeded)};continue;}
+   invalidated.push(d);try{this.diagnostic?.({event:'library-work',stage:'definitions-invalidate',outcome:'started',domain:d,definitionChanged:old?.definition===definition?0:1,generationChanged:old?.generation===expectedGeneration?0:1,ownedTriggersChanged:ownedTriggersChanged?1:0,revisionTriggersChanged:revisionTriggersChanged?1:0,durationMillis:0});}catch{}
    const epoch=String((await this.db.query('SELECT lower(hex(randomblob(16))) epoch'))[0]!.epoch),generation=await hashJavaText('watchrss.ble.library-cache.v1\n'+definition+'\n'+epoch,this.codec);
    const seeded=d!=='library'||!legacyDerived&&(!old||!!Number(old.seeded));
    next[d]={encoder:this.encoders[d],schema,definition,epoch,generation,seeded};
@@ -98,7 +100,7 @@ export class SqlDomainDefinitions {
      {sql:'INSERT OR IGNORE INTO sync_book_reading_dirty(item_id) SELECT DISTINCT item_id FROM sync_book_aliases WHERE item_id IS NOT NULL'});
    }
   }
-  if(statements.length){for(const [name,cols]of columns)statements.push({sql:'INSERT OR REPLACE INTO sync_fast_table_shapes(name,columns_json) VALUES(?,?)',params:[name,JSON.stringify(cols.map(c=>String(c.name)))]});await this.db.transaction(statements);}
+  if(statements.length){for(const [name,cols]of columns)statements.push({sql:'INSERT OR REPLACE INTO sync_fast_table_shapes(name,columns_json) VALUES(?,?)',params:[name,JSON.stringify(cols.map(c=>String(c.name)))]});try{await this.db.transaction(statements);for(const domain of invalidated)try{this.diagnostic?.({event:'library-work',stage:'definitions-invalidate',domain,outcome:'complete',durationMillis:Date.now()-invalidationAt});}catch{}}catch(error){for(const domain of invalidated)try{this.diagnostic?.({event:'library-work',stage:'definitions-invalidate',domain,outcome:'failed',durationMillis:Date.now()-invalidationAt});}catch{}throw error;}}
   // Reload persisted seed flags; another installer may have observed a changed
   // schema. The enclosing snapshot guards the frozen generation before publish.
   this.values=next;this.userVersion=schema;this.cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);

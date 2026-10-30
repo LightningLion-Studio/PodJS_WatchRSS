@@ -1,3 +1,4 @@
+import {repositoryWork,type RepositoryDiagnostic} from './repository-work';
 import {projectionGuard} from './domain-definitions';
 import {jsonRecordTupleCodec} from '@podjs/framework/record-tuples';
 import {articleMetadataHash} from './article-export';
@@ -34,8 +35,8 @@ export class LibraryProjectionCache {
  private cookie=-1;
  private loaded=new Map<string,ProjectionRow[]>();
  private lazy=new WeakMap<PreparedArticle,{scope:string;generation:string;id:string;sourceItem:number}>();
- constructor(private readonly db:SqlDatabase,private readonly yieldTurn:()=>Promise<unknown>=()=>db.query('SELECT 1')){}
- async initialize(){if(this.ready)await this.ready;const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);if(cookie===this.cookie)return;this.ready=this.install().then(async()=>{this.loaded.clear();this.cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);}).catch(e=>{this.ready=undefined;throw e;});await this.ready;}
+ constructor(private readonly db:SqlDatabase,private readonly yieldTurn:()=>Promise<unknown>=()=>db.query('SELECT 1'),private readonly diagnostic?:RepositoryDiagnostic){}
+ async initialize(){if(this.ready)await this.ready;const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);if(cookie===this.cookie)return;this.ready=repositoryWork(this.diagnostic,'projection-install',()=>this.install()).then(async()=>{this.loaded.clear();this.cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);}).catch(e=>{this.ready=undefined;throw e;});await this.ready;}
  private async install(){
   await this.db.transaction([
    {sql:'CREATE TABLE IF NOT EXISTS sync_projection_header(scope TEXT PRIMARY KEY,generation TEXT NOT NULL,revision INTEGER NOT NULL,seq INTEGER NOT NULL)'},

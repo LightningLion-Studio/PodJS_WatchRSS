@@ -1,3 +1,5 @@
+import {utf8Encode} from '../cloud/types';
+import {repositoryWork,type RepositoryDiagnostic} from './repository-work';
 import {LibraryClearError,type LibraryClearControl} from '../core/library-clear';
 import {knownRecordValue} from '../cloud/compatibility';
 import {ArticleRegisterStore} from './article-register-store';
@@ -57,19 +59,25 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private peerCanonical=new Map<string,boolean>();private peerBooks=new Map<string,boolean>();
  readonly books:SqlBookStore|undefined;private bookActions:BookSyncActions|undefined;
  private readonly projection:LibraryProjectionCache;
+ private cloudProgress?:((unit:string)=>Promise<void>);
+ setCloudProgress(sink?:(unit:string)=>Promise<void>){this.cloudProgress=sink;this.local.setCloudProgress(sink);}
+ private cloudDiagnostic?:RepositoryDiagnostic;
+ setCloudDiagnostic(sink?:RepositoryDiagnostic){this.cloudDiagnostic=sink;}
+ private work<T>(stage:string,run:()=>Promise<T>){return repositoryWork(f=>this.report(f),stage,run,this.ports.now);}
  private readonly definitions:SqlDomainDefinitions;private projectionGeneration?:string;
  private snapshotCache:{canonical:boolean;bookMode:boolean;revision:number;projectionSeq:number;articles:readonly PreparedArticle[];sources:readonly SyncedSource[]}|undefined;
  constructor(private readonly db:SqlDatabase,private readonly ports:SqlLibraryRepositoryPorts){
   this.perf=new FullSyncPerf(ports.diagnostic);this.db=db=this.perf.database(db);this.ports=ports={...ports,codec:this.perf.codec(ports.codec)};
-  this.projection=new LibraryProjectionCache(db,()=>ports.text.yieldTurn?.()??db.query('SELECT 1'));this.definitions=new SqlDomainDefinitions(db,ports.codec);
+  this.projection=new LibraryProjectionCache(db,()=>ports.text.yieldTurn?.()??db.query('SELECT 1'),f=>this.report(f));this.definitions=new SqlDomainDefinitions(db,ports.codec,undefined,undefined,f=>this.report(f));
   if(ports.bookFiles){this.books=new SqlBookStore(db,{sha256:ports.codec.sha256,files:ports.bookFiles,text:ports.files,stableId:url=>stableArticleId(url,ports.text.parseUri,ports.codec),deviceId:()=>this.identity(),warn:code=>this.report({stage:code}),profile:(stage,ms)=>this.perf.add(stage,ms)});this.bookActions=new BookSyncActions(db,this.books);}
-  this.echo=new PeerEchoStore(db,ports.codec);this.now=ports.now??Date.now;this.local=new LocalArticleManifestStore(db,ports.codec,ports.text,ports.files,ports.migrateReading,ports.migrateReadingMany,ports.diagnostic,ports.reencodeStoredBodies);
+  this.echo=new PeerEchoStore(db,ports.codec);this.now=ports.now??Date.now;this.local=new LocalArticleManifestStore(db,ports.codec,ports.text,ports.files,ports.migrateReading,ports.migrateReadingMany,f=>this.report(f),ports.reencodeStoredBodies);
   this.receiver=new SyncArticleReceiver(db,ports.codec,ports.files,ports.migrateReading,this.now,(a,target)=>this.local.resolveIncomingBody(a,target),()=>this.projectionGeneration,(stage,ms)=>this.perf.add(stage,ms));
   this.deletion=new SyncArticleDeletionStore(db,ports.codec,(a,target)=>this.local.resolveIncomingBody(a,target),itemIds=>ports.cleanupRemovedContent({itemIds,channels:[]}));this.sources=new SqlSourceSyncStore(db,ports.uri,this.now,removed=>ports.cleanupRemovedContent({itemIds:removed.itemIds,channels:[removed.channel]}));this.sequence=new SqlLibrarySequenceStore(db,this.now);
  }
- private report(fields:Record<string,string|number>){try{this.ports.diagnostic?.(fields);}catch{/* Diagnostics never change the exchange. */}}
+ private report(fields:Record<string,string|number>){try{this.ports.diagnostic?.(fields);if(fields.event==='library-work')this.cloudDiagnostic?.(fields);}catch{/* Diagnostics never change the exchange. */}}
  private async snapshotRetry(attempt:number,canonical:boolean,revision:number,sequence:number,reason:string){
-  if(!this.ports.diagnostic)return;
+  this.report({event:'library-work',stage:'snapshot-retry',outcome:'deferred',attempt,reason,durationMillis:0});
+  if(!this.ports.diagnostic&&!this.cloudDiagnostic)return;
   try{const counts:Record<string,number>={source:0,url:0,bodyUrl:0,full:0,none:0,bookUrl:0,bookBodyUrl:0,bookOnly:0,cacheUrl:0,cacheNone:0,other:0};
    for(const row of await this.db.query('SELECT kind,COUNT(*) AS n FROM sync_projection_events WHERE seq>? GROUP BY kind',[sequence])){const key=String(row.kind);counts[Object.hasOwn(counts,key)?key:'other']+=Number(row.n);}
    this.report({stage:'repository.snapshot.retry',attempt,canonical:canonical?1:0,reason,revision,observedRevision:await libraryRevision(this.db),projectionSeq:sequence,observedProjectionSeq:await this.projection.sequence(),events:JSON.stringify(counts)});
@@ -79,6 +87,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private async identity():Promise<string>{const row=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!row||!String(row.device_id).trim())throw new Error('Initialize sync identity first');return String(row.device_id);}
  private async migrate(){const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
  private async legacySnapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
+  return this.work('legacySnapshot',async()=>{
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   this.local.restoreReusableBodies([]);check?.();
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
@@ -116,6 +125,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
    await this.snapshotRetry(attempt+1,canonical,revision,projectionSeq,'action');
   }
   throw new LibrarySnapshotBusyError();
+  });
  }
  private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
   if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
@@ -168,10 +178,11 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   throw new LibrarySnapshotBusyError();
  }
  private async needsProjectionSeed(){return !Number((await this.db.query("SELECT seeded FROM sync_fast_definitions WHERE domain='library'"))[0]?.seeded);}
- async prepareFastProjection(){
+ async prepareFastProjection(){return this.work('prepareFastProjection',async()=>{
   await this.projection.initialize();await this.definitions.ensure();await this.projection.initialize();
   const generation=await this.definitions.libraryGeneration();
   if(this.projectionGeneration!==generation){this.projectionGeneration=generation;this.snapshotCache=undefined;this.local.setEncodingGeneration(generation);}
+ });
  }
  async canSkipLibrary(peer:string){
   await this.prepareFastProjection();if(await this.changedIdentityMode(peer)||await this.sequence.fastPathRequiresFull(peer))return false;
@@ -205,13 +216,15 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   }));}
  exportRequested(requests:readonly RequestedArticleBody[],peer?:string){return this.run(async()=>{this.perf.flush('receive.perf.final');try{if(requests.length===0)return [];return await this.snapshot(async articles=>{const ids=new Set(requests.map(r=>r.articleId));const selected=articles.filter(a=>ids.has(a.article.articleId)&&a.manifest.bodyAvailable);const outgoing:PreparedArticle[]=[];for(let start=0;start<selected.length;start+=32)outgoing.push(...await this.local.materializeRequestedBatch(await this.projection.full(selected.slice(start,start+32))));if(peer&&this.peerCanonical.get(peer)){const manifests=await this.wireManifests(outgoing,peer);return outgoing.map((p,i)=>({...p,manifest:manifests[i]!,article:{...p.article,...(manifests[i]!.legacyArticleIds?{legacyArticleIds:manifests[i]!.legacyArticleIds}:{})}}));}return outgoing;},!!(peer&&this.peerCanonical.get(peer)),!!(peer&&this.peerBooks.get(peer)));}finally{if(this.snapshotCache&&this.snapshotCache.articles.reduce((n,a)=>n+(a.encodedBody?.length??0)+2*(a.article.contentHtml?.length??0)+2*a.article.contentText.length,0)>32*1024*1024)this.snapshotCache=undefined;}});}
  /** Cloud uses the same serialization lane and transactional entity merge as phone sync. */
- private async cloudState(db:SqlDatabase=this.db){await db.execute(`CREATE TABLE IF NOT EXISTS cloud_rss_article_ids(item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,article_id TEXT NOT NULL)`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_article_state(article_id TEXT PRIMARY KEY,content_hash TEXT NOT NULL,body_hash TEXT NOT NULL,body_ready INTEGER NOT NULL DEFAULT 0,reading_clock INTEGER NOT NULL DEFAULT 0,reading_source TEXT NOT NULL DEFAULT '')`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_source_state(url TEXT PRIMARY KEY,projection TEXT NOT NULL,changed_at INTEGER NOT NULL,device TEXT NOT NULL)`);}
+ private cloudReady?:Promise<void>;
+ private cloudState(db:SqlDatabase=this.db):Promise<void>{const run=async()=>{await db.execute(`CREATE TABLE IF NOT EXISTS cloud_rss_article_ids(item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,article_id TEXT NOT NULL)`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_article_state(article_id TEXT PRIMARY KEY,content_hash TEXT NOT NULL,body_hash TEXT NOT NULL,body_ready INTEGER NOT NULL DEFAULT 0,reading_clock INTEGER NOT NULL DEFAULT 0,reading_source TEXT NOT NULL DEFAULT '')`);await db.execute(`CREATE TABLE IF NOT EXISTS cloud_source_state(url TEXT PRIMARY KEY,projection TEXT NOT NULL,changed_at INTEGER NOT NULL,device TEXT NOT NULL)`);};if(db!==this.db)return run();return this.cloudReady??=run().catch(error=>{this.cloudReady=undefined;throw error;});}
+
  private sourceProjection(s:SyncedSource){return JSON.stringify([s.title,s.sortOrder,s.isPinned,s.deleted,s.deletedAt]);}
- private async cloudSourcesForExport(sources:readonly SyncedSource[],device:string){
+ private async cloudSourcesForExport(sources:readonly SyncedSource[],device:string,readOnly=false){
   const state=new Map((await querySyncPages(this.db,'SELECT * FROM cloud_source_state ORDER BY url')).map(r=>[String(r.url),r]));const out:SyncedSource[]=[];
   for(const source of sources){const projection=this.sourceProjection(source),old=state.get(source.url);let clock=old?Number(old.changed_at):Math.max(1,source.deletedAt,source.createdAt),provenance=old?String(old.device):device;
    if(old&&old.projection!==projection){clock=Math.max(this.now(),clock+1,source.deletedAt);provenance=device;}
-   if(!old||old.projection!==projection)await this.db.execute('INSERT OR REPLACE INTO cloud_source_state(url,projection,changed_at,device) VALUES(?,?,?,?)',[source.url,projection,clock,provenance]);out.push({...source,updatedAt:clock,sourceDeviceId:provenance});
+   if((!old||old.projection!==projection)&&!readOnly)await this.db.execute('INSERT OR REPLACE INTO cloud_source_state(url,projection,changed_at,device) VALUES(?,?,?,?)',[source.url,projection,clock,provenance]);out.push({...source,updatedAt:clock,sourceDeviceId:provenance});
   }return out;
  }
  private async mergeCloudSources(sources:readonly SyncedSource[],device:string){
@@ -238,12 +251,19 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   const tables=(await this.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ("+optional.map(()=>'?').join(',')+")",optional)).map(r=>String(r.name));
   return !!(await this.db.query("SELECT 1 AS present WHERE EXISTS(SELECT 1 FROM articles) OR EXISTS(SELECT 1 FROM channels WHERE url NOT IN ('builtin:bili','builtin:douyin')) OR EXISTS(SELECT 1 FROM notes)"+tables.map(t=>' OR EXISTS(SELECT 1 FROM '+t+')').join(''))).length;
  });}
- cloudReadingCandidates(check?:()=>void){return this.run(async()=>{await this.cloudState();return this.snapshot(async light=>{const articles=await this.projection.full(light);const identities=await this.perf.time('cloudReading.identities',()=>this.local.cloudRssIdentities(undefined,check)),localIds=new Map(identities.map(r=>[r.articleId,r.localArticleId]));const nativeIds=new Map<string,string>();for(const row of identities)if(!nativeIds.has(row.articleId))nativeIds.set(row.articleId,row.nativeArticleId);const saved=new Map(articles.map(a=>[a.article.url,a.article])),savedById=new Map(articles.map(a=>[a.article.articleId,a.article])),metadata=new Map((await querySyncPages(this.db,'SELECT * FROM cloud_article_state ORDER BY article_id')).map(r=>[String(r.article_id),r]));const excluded=await this.books?.chapterIds();return (await this.perf.time('cloudReading.rows',()=>this.local.cloudReadingStates(true,check))).filter(a=>!excluded?.has(a.articleId)).map(a=>{const m=metadata.get(a.articleId)??metadata.get(localIds.get(a.articleId)??''),state=savedById.get(a.articleId)??savedById.get(nativeIds.get(a.articleId)??'')??saved.get(a.url),s=state?{...a,favoriteSaved:state.favoriteSaved,favoriteChangedAt:state.favoriteChangedAt,favoriteSortOrder:state.favoriteSortOrder,watchLaterSaved:state.watchLaterSaved,watchLaterChangedAt:state.watchLaterChangedAt,watchLaterSortOrder:state.watchLaterSortOrder}:a;return m?{...s,...(a.contentHash===m.body_hash?{contentHash:String(m.content_hash)}:{}),...(a.readingPositionChangedAt===Number(m.reading_clock)?{sourceDeviceId:String(m.reading_source)}:{})}:s;});},true,!!this.books,check);}).finally(()=>this.perf.flush('cloudReading.perf'));}
+ cloudSources(){return this.run(()=>this.work('cloudSources',async()=>{await this.cloudState();const id=await this.identity();const sources=await this.sources.export(id,undefined,true),books=await this.books?.sourceUrls();return this.cloudSourcesForExport(books?sources.filter(s=>!books.has(s.url)):sources,id,true);}));}
+ cloudRestoreMetadata(request:{ids?:readonly string[];urls?:readonly string[];itemIds?:readonly number[];after?:number;limit?:number}={},check?:()=>void){return this.run(()=>this.work('cloudMetadata',async()=>{await this.cloudState();return this.local.cloudRestoreMetadata(request,check);}));}
+ cloudReadingRevision(){return this.run(()=>libraryRevision(this.db));}
+ cloudReadingCandidates(check?:()=>void,hashes?:readonly string[]){return this.run(()=>this.work('cloudReading',async()=>{await this.cloudState();const ids=await this.local.cloudReadingItemIds(hashes,check),out:ExportedArticle[]=[],excluded=await this.books?.chapterIds();for(let at=0;at<ids.length;at+=100){const page=await this.local.cloudRestoreMetadata({itemIds:ids.slice(at,at+100),limit:100},check);out.push(...page.articles.filter(a=>!excluded?.has(a.articleId)));}return out;}));}
 
  private async registerProjectionId(item:number,url:string){const key=String(item)+'\0'+url;let id=this.registerProjectionIds.get(key);if(!id){id=await stableArticleId(url,this.ports.text.parseUri,this.ports.codec);if(this.registerProjectionIds.size>=8192)this.registerProjectionIds.delete(this.registerProjectionIds.keys().next().value!);this.registerProjectionIds.set(key,id);}return id;}
  cloudArticleRegisters(){return this.run(async()=>{const docs=await new ArticleRegisterStore(this.db,this.ports.codec.sha256).documents(),byId=new Map(docs.map(d=>[d.value.articleId,d])),rows=await querySyncPages(this.db,'SELECT p.article_id,a.id,COALESCE(a.link,a.dedup_key) AS url,r.article_id AS rss_id FROM article_register_state p JOIN articles a ON a.id=p.item_id LEFT JOIN cloud_rss_article_ids r ON r.item_id=a.id ORDER BY p.article_id');for(const row of rows){const doc=byId.get(String(row.article_id));if(!doc)continue;const id=await this.registerProjectionId(Number(row.id),String(row.url));doc.projectionAliases=[id,...(row.rss_id?[String(row.rss_id)]:[])];}return docs;});}
- mergeCloudArticleRegisters(documents:RecordDocument[]){return this.run(async()=>{await this.cloudState();await this.migrate();const store=new ArticleRegisterStore(this.db,this.ports.codec.sha256);let changed=0;await this.snapshot(async articles=>{const local=new Map(articles.map(p=>[p.article.articleId,p.article]));for(const doc of documents){let old=local.get(doc.value.articleId);if(!old){const bound=(await this.db.query('SELECT a.id,COALESCE(a.link,a.dedup_key) AS url FROM articles a WHERE a.id=COALESCE((SELECT item_id FROM sync_article_ids WHERE article_id=?),(SELECT item_id FROM cloud_rss_article_ids WHERE article_id=?))',[doc.value.articleId,doc.value.articleId]))[0];if(bound)old=local.get(await this.registerProjectionId(Number(bound.id),String(bound.url)));}const result=await store.apply(doc,old?{kind:'article',value:{...knownRecordValue('article',old),articleId:doc.value.articleId}}:undefined);changed+=result.changed;if(result.removed.length)await this.ports.cleanupRemovedContent({itemIds:result.removed,channels:[]});}},false,!!this.books);if(changed)this.snapshotCache=undefined;return changed;});}
- cloudSnapshot(full:boolean,check?:()=>void){return this.run(async()=>{await this.cloudState();
+ mergeCloudArticleRegisters(documents:RecordDocument[]){return this.run(()=>this.work('cloudMetadata',async()=>{await this.cloudState();await this.migrate();const store=new ArticleRegisterStore(this.db,this.ports.codec.sha256);let changed=0;
+  for(let at=0;at<documents.length;at+=20){const part=documents.slice(at,at+20),page=await this.local.cloudRestoreMetadata({ids:part.map(d=>String(d.value.articleId)),urls:part.flatMap(d=>typeof d.value.url==='string'?[d.value.url]:[]),limit:100}),local=new Map<string,ExportedArticle>();for(const a of page.articles)for(const id of [a.articleId,...(a.cloudLegacyArticleIds??[])])local.set(id,a);
+   for(const doc of part){const old=local.get(doc.value.articleId),result=await store.apply(doc,old?{kind:'article',value:{...knownRecordValue('article',old),articleId:doc.value.articleId}}:undefined);changed+=result.changed;if(result.removed.length)await this.ports.cleanupRemovedContent({itemIds:result.removed,channels:[]});}
+  }if(changed)this.snapshotCache=undefined;return changed;}));}
+
+ cloudSnapshot(full:boolean,check?:()=>void){return this.run(()=>this.work('cloudSnapshot',async()=>{await this.cloudState();
   // An incomplete private body still depends on the legacy encoding witness.
   // Keep that path until receive certifies the body; completed restores share
   // the canonical projection with reading replay instead of rebuilding it.
@@ -282,9 +302,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   const pendingPrivateArticleIds=exported.filter(a=>{const m=metadata.get(a.articleId)??metadata.get((byNative.get(a.articleId)??byCanonical.get(a.articleId))?.localArticleId??'');return !a.deleted&&(a.independentSaved||a.favoriteSaved||a.watchLaterSaved||isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl))&&m&&(bodyHashes.get(a.articleId)===m.body_hash||a.contentHash===m.body_hash)&&!Number(m.body_ready);}).map(a=>a.articleId);
   const project=(rows:ExportedArticle[])=>rows.map(cloudIdentity).filter((a):a is ExportedArticle=>!!a);
   return {articles:project(exported.map(origin).map(savedState).map(normalize)),sources:await this.cloudSourcesForExport(sources,device),stateArticles:project([...states.values()].map(savedState).map(normalize)),pendingPrivateBodies:pendingPrivateArticleIds.length>0,pendingPrivateArticleIds:pendingPrivateArticleIds.map(id=>byNative.get(id)?.articleId??id)};
- },canonical,!!this.books,check);});}
+ },canonical,!!this.books,check);}));}
  mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void){return this.run(async()=>{
-  await this.cloudState();const id=await this.migrate();const identities=await this.local.cloudRssIdentities(undefined,check);let changed=remote==='cloud-records'?await this.mergeCloudSources(sources,id):await this.sources.merge(sources,remote,id,false);
+  await this.cloudState();const id=await this.migrate();const publicUrls=articles.filter(a=>a.rssSourceUrl&&!isImportedContentUrl(a.rssSourceUrl)&&!isLocalOnlyRssSource(a.rssSourceUrl)).map(a=>a.url),identities=publicUrls.length?await this.local.cloudRssIdentitiesForUrls(publicUrls,check,await this.local.cloudReadingItemIds(await Promise.all(articles.map(a=>this.ports.codec.sha256(utf8Encode(a.articleId)))),check)):[];let changed=remote==='cloud-records'?await this.mergeCloudSources(sources,id):await this.sources.merge(sources,remote,id,false);
   const protectedIds=new Set((await querySyncPages(this.db,'SELECT article_id FROM article_register_state ORDER BY article_id')).map(r=>String(r.article_id)));
   for(const incoming of articles){check?.();
    if(protectedIds.has(incoming.articleId)){if(!incoming.deleted&&(incoming.contentText.trim()||incoming.contentHtml?.trim()))changed+=await new ArticleRegisterStore(this.db,this.ports.codec.sha256).restoreBody(incoming,await this.prepareCloudArticle(incoming),this.ports.files);continue;}
@@ -348,7 +368,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   control?.progress('database');
   control?.check();
   const revision=await libraryRevision(db);
-  const caches=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_projection_light','sync_projection_rows','sync_projection_header','sync_projection_events','sync_fast_encoded_cache','sync_fast_library_baseline','sync_fast_roots','sync_fast_receipts')")).map(row=>String(row.name));
+  const caches=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_projection_light','sync_projection_rows','sync_projection_header','sync_projection_events','sync_fast_encoded_cache','sync_fast_library_baseline','sync_fast_roots','sync_fast_receipts','sync_stable_article_ids')")).map(row=>String(row.name));
   const privateTables=privateData?(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('douyin_local_state','external_saved_migrations','sync_snapshot_retained')")).map(row=>String(row.name)):[];
   const channels=[...(retained?.channels??[]),...(await querySyncPages(db,'SELECT id,url FROM channels ORDER BY id')).map(r=>({id:Number(r.id),url:String(r.url)}))];
   const itemIds=[...new Set([...(retained?.itemIds??[]),...(await querySyncPages(db,'SELECT id FROM articles ORDER BY id')).map(r=>Number(r.id))])];

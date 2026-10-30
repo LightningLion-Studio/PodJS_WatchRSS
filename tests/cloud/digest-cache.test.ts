@@ -24,7 +24,7 @@ test('repeated real cloud reading batches reuse identity digests without droppin
   const adapter=new WatchCloudLibraryAdapter(f.repo,'watch',crypto,enabled);
   const articleId=await rssArticleId('https://digest.example/5500',cloudCrypto.sha256),sourceId=await rssSourceKey('https://digest.example/rss',cloudCrypto.sha256),articleIdHash=await cloudCrypto.sha256(utf8Encode(articleId));
   const doc=(clock:number)=>({kind:'rss-state',value:{sourceId,articleIdHash,sourceDeviceId:'phone',isRead:true,readingProgress:.5,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:clock,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0}} as any);
-  await adapter.applyRecords([doc(20)]);const first=hashes;expect(first).toBeGreaterThan(5500);await adapter.applyRecords([doc(30)]);expect(hashes-first).toBeLessThan(10);expect((await f.db.query('SELECT changed_at FROM article_reading_state WHERE article_id=5500'))[0]?.changed_at).toBe(30);
+  await adapter.applyRecords([doc(20)]);const first=hashes;expect(first).toBeLessThan(10);expect((await f.db.query('SELECT COUNT(*) AS n FROM cloud_reading_lookup'))[0]?.n).toBe(5500);await adapter.applyRecords([doc(30)]);expect(hashes-first).toBeLessThan(10);expect((await f.db.query('SELECT changed_at FROM article_reading_state WHERE article_id=5500'))[0]?.changed_at).toBe(30);
  }finally{f.sql.close();}
 });
 

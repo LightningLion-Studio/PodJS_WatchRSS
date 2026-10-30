@@ -12,7 +12,7 @@ test('cloud reading reuses the durable projection across restart and independent
   const restarted=new SqlLibrarySessionRepository(f.db,ports);expect(await restarted.cloudReadingCandidates()).toEqual(first);expect(encodes).toBe(0);
   await f.db.execute('INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash) VALUES(639,.75,40,8,\'hash\')');
   const edited=await restarted.cloudReadingCandidates();expect(edited.find(a=>a.url.endsWith('/639'))).toMatchObject({readingProgress:.75,readingPositionChangedAt:40,readingPositionBytes:8,readingPositionContentHash:'hash'});expect(encodes).toBe(0);
-  await f.db.execute("INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash) VALUES(638,.5,50,4,'new')");await restarted.cloudReadingCandidates();expect(encodes).toBe(1);
+  await f.db.execute("INSERT INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash) VALUES(638,.5,50,4,'new')");const savedEdit=await restarted.cloudReadingCandidates();expect(savedEdit.find(a=>a.url.endsWith('/638'))).toMatchObject({readingProgress:.5,readingPositionChangedAt:50});expect(encodes).toBe(0);
  }finally{f.sql.close();}
 });
 

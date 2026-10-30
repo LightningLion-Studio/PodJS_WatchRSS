@@ -1,12 +1,14 @@
+import {repositoryWork} from './repository-work';
 import {memoizeSmallDigest} from '../core/digest-cache';
 import {HostWorkBudget} from '@podjs/framework/async';
 import {ArticleKeepStore} from './article-keep';
-import {projectionGuard} from './domain-definitions';
+import {projectionGuard,DOMAIN_ENCODERS} from './domain-definitions';
+import {PROTOCOL_VERSION} from './protocol';
 import {orderImportedRows} from './import-order';
 import {matchGzipHash} from '@podjs/framework/crypto';
 import {articleState} from './article-provenance';
 import {utf8Encode} from '../cloud/types';
-import {tryRssArticleId,canonicalRssUrl,isLocalOnlyRssSource} from '../cloud/rss-identity';
+import {tryRssArticleId,legacyWebArticleId,canonicalRssUrl,isLocalOnlyRssSource} from '../cloud/rss-identity';
 import {readSyncSqlText} from "./sql-text.ts";
 import {libraryRevision,revisionGuard} from "./revision.ts";
 import {querySyncPages,querySyncKeysetPages} from './sql-pages.ts';
@@ -85,7 +87,7 @@ interface State {articleId:string;type:string;url:string;saved:boolean;changedAt
 export class LocalArticleManifestStore {
  private readonly identityHash=memoizeSmallDigest((bytes:Uint8Array)=>this.codec.sha256(bytes));
  private encodingGeneration?:string;
- setEncodingGeneration(value:string){if(this.encodingGeneration===value)return;this.encodingGeneration=value;this.rowCache.clear();this.rowCacheBytes=0;this.stableIds.clear();this.reusableBodies.clear();this.bodySourceIds.clear();}
+ setEncodingGeneration(value:string){if(this.encodingGeneration===value)return;this.encodingGeneration=value;this.rowCache.clear();this.rowCacheBytes=0;this.stableIds.clear();this.stableReady=undefined;this.reusableBodies.clear();this.bodySourceIds.clear();}
  private rowSelect(){return this.encodingGeneration?ROW_SELECT.replace(' FROM articles a JOIN channels ch',', (SELECT generation FROM sync_fast_encoded_cache g WHERE g.item_id=a.id AND g.body_hash=c.body_hash) AS body_generation FROM articles a JOIN channels ch'):ROW_SELECT;}
  private bodySourceIds=new Map<string,number>();
  private reusableBodies=new Map<number,PreparedArticle>();
@@ -95,15 +97,21 @@ export class LocalArticleManifestStore {
  private cacheRows=true;
  private rowCache=new Map<string,{stamp:string;prepared:PreparedArticle;bytes:number}>();
  private rowCacheBytes=0;
- private readonly stableIds=new Map<string,string>();
+ private readonly stableIds=new Map<string,string>();private stableReady?:Promise<void>;private stablePending=0;private stableLast='';
+ private preparationRevision?:number;private preparationTail:Promise<unknown>=Promise.resolve();
+ private commitPreparation(unit:string){const next=this.preparationTail.then(()=>this.cloudProgress?.(unit));this.preparationTail=next.catch(()=>{});return next;}
+ private async stableIndex(){if(!this.cloudProgress)return;return this.stableReady??=(async()=>{await this.db.execute('CREATE TABLE IF NOT EXISTS sync_stable_article_ids(definition TEXT NOT NULL,url TEXT NOT NULL,article_id TEXT NOT NULL,proof TEXT NOT NULL,PRIMARY KEY(definition,url))');const key=`stable-v1:${PROTOCOL_VERSION}:${DOMAIN_ENCODERS.library}`;for(const r of await querySyncPages(this.db,'SELECT url,article_id,proof FROM sync_stable_article_ids WHERE definition=? ORDER BY url',[key])){const id=str(r.article_id);if(/^[a-f0-9]{64}$/.test(id)&&str(r.proof)===await this.identityHash(utf8Encode(JSON.stringify([key,str(r.url),id])))){if(this.stableIds.size>=8192)this.stableIds.delete(this.stableIds.keys().next().value!);this.stableIds.set(str(r.url),id);}}})().catch(e=>{this.stableReady=undefined;throw e;});}
+ private async flushStableProgress(){if(!this.stablePending)return;const unit=this.stableLast;this.stablePending=0;await this.commitPreparation(unit);}
+
  constructor(private db:SqlDatabase,private codec:SyncBodyCodec,private text:SyncTextPort,
-  private readonly files:ArticleReceiveFiles,private readonly migrateReading:(id:number)=>Promise<void>,private readonly migrateReadingMany?:(ids:readonly number[])=>Promise<void>,private readonly diagnostic?:(fields:Record<string,string|number>)=>void,private readonly reencodeStored?: (ids:readonly number[])=>Promise<readonly ReencodedBody[]>){ }
+  private readonly files:ArticleReceiveFiles,private readonly migrateReading:(id:number)=>Promise<void>,private readonly migrateReadingMany?:(ids:readonly number[])=>Promise<void>,private readonly diagnostic?:(fields:Record<string,string|number>)=>void,private readonly reencodeStored?: (ids:readonly number[])=>Promise<readonly ReencodedBody[]>,private cloudProgress?:(unit:string)=>Promise<void>){ }
+ setCloudProgress(sink?:(unit:string)=>Promise<void>){this.cloudProgress=sink;}
  private report(fields:Record<string,string|number>){try{this.diagnostic?.(fields);}catch{/* Diagnostics never change the snapshot. */}}
  private async stableId(value:string):Promise<string>{
-  const cached=this.stableIds.get(value);if(cached)return cached;
+  await this.stableIndex();const cached=this.stableIds.get(value);if(cached)return cached;
   const id=await stableArticleId(value,this.text.parseUri,this.codec);
   if(this.stableIds.size>=8192)this.stableIds.delete(this.stableIds.keys().next().value!);
-  this.stableIds.set(value,id);return id;
+  this.stableIds.set(value,id);if(this.cloudProgress){const definition=`stable-v1:${PROTOCOL_VERSION}:${DOMAIN_ENCODERS.library}`;await this.db.execute('INSERT OR REPLACE INTO sync_stable_article_ids VALUES(?,?,?,?)',[definition,value,id,await this.identityHash(utf8Encode(JSON.stringify([definition,value,id])))]);this.stablePending++;this.stableLast='identity:'+definition+':'+await this.identityHash(utf8Encode(value));if(this.stablePending>=16)await this.flushStableProgress();}return id;
  }
  /** Native lookup uses each saved-type binding before source/dedup fallback. */
  async resolveIncomingBody(article:IncomingArticle,targetItemId?:number):Promise<LocalReceiveBody|null>{
@@ -141,17 +149,17 @@ export class LocalArticleManifestStore {
   * rather than assuming an await necessarily gives Android's looper a turn. */
  private workCheckpoint(check?:()=>void){let work=0,slice=Date.now();return async(weight=1)=>{check?.();work+=weight;if(work>=32||Date.now()-slice>=8){await (this.text.yieldTurn?.()??this.db.query('SELECT 1'));check?.();work=0;slice=Date.now();}};}
  /** Cloud identities remain separate from native-wire bindings. Pool IDs are authoritative. */
- private async cloudIdentity(r:Row):Promise<CloudRssIdentity|undefined>{
+ private async cloudIdentity(r:Row,metadataOnly=false):Promise<CloudRssIdentity|undefined>{
   try{
   if(isImportedContentUrl(str(r.channel_url))||isLocalOnlyRssSource(str(r.channel_url)))return;
   const pool=nullable(r.cloud_rss_id);
   const legacyMaterialized=!!r.bound_id&&r.guid===r.bound_id&&r.dedup_key===r.bound_id&&!pool,guid=legacyMaterialized?null:nullable(r.guid);
   let contentHash:string|undefined;
-  if(!pool&&!str(guid).trim()){let web=false;try{canonicalRssUrl(str(r.link),false);web=true;}catch{}if(!web){const full=r.content_inline===undefined?(await this.db.query(this.rowSelect()+' WHERE a.id=?',[r.id]))[0]:r;if(!full)return;await this.hydrateRow(full);const body=await this.bodyFromRow(full);if(!body.available)return;if(body.contentHtml||body.contentText)contentHash=await this.identityHash(utf8Encode(body.contentHtml??body.contentText));}}
+  if(!pool&&!str(guid).trim()){let web=false;try{canonicalRssUrl(str(r.link),false);web=true;}catch{}if(!web){if(metadataOnly)return;const full=r.content_inline===undefined?(await this.db.query(this.rowSelect()+' WHERE a.id=?',[r.id]))[0]:r;if(!full)return;await this.hydrateRow(full);const body=await this.bodyFromRow(full);if(!body.available)return;if(body.contentHtml||body.contentText)contentHash=await this.identityHash(utf8Encode(body.contentHtml??body.contentText));}}
   const articleId=await tryRssArticleId({dedupKey:pool??undefined,link:nullable(r.link),guid,title:str(r.title),contentHash},this.identityHash);if(!articleId)return;
   const url=str(r.link)||str(r.guid)||str(r.dedup_key);
   // A transport binding can be retained even when its URL normalization predates R41.
-  let nativeArticleId:string;try{nativeArticleId=await this.stableId(r.link==null?str(r.dedup_key):str(r.link));}catch{return;}const localArticleId=str(r.bound_id)||articleId;
+  let nativeArticleId:string;try{nativeArticleId=metadataOnly?(str(r.bound_id)||articleId):await this.stableId(r.link==null?str(r.dedup_key):str(r.link));}catch{return;}const localArticleId=str(r.bound_id)||articleId;
   return {itemId:num(r.id),articleId,localArticleId,nativeArticleId,legacyMaterialized,canonicalBinding:!!pool,url,sourceUrl:str(r.channel_url)};
   }catch{return undefined;}
  }
@@ -169,7 +177,7 @@ export class LocalArticleManifestStore {
   const rows=await querySyncKeysetPages(this.db,IDENTITY_SELECT+" WHERE ("+where+") AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id",filter?[filter.sourceUrl,filter.url,...filter.ids,...filter.ids,...filter.ids]:[],{key:'id'}),out:CloudRssIdentity[]=[];
   for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.push(identity);return out;
  }
- async cloudRssIdentitiesForUrls(urls:readonly string[],check?:()=>void):Promise<CloudRssIdentity[]>{const out=new Map<number,CloudRssIdentity>();for(let at=0;at<urls.length;at+=100){const part=urls.slice(at,at+100),marks=part.map(()=>'?').join(',');const rows=await querySyncKeysetPages(this.db,IDENTITY_SELECT+` WHERE (a.link IN (${marks}) OR a.guid IN (${marks}) OR a.dedup_key IN (${marks})) AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id`,[...part,...part,...part],{key:'id'});for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}return [...out.values()].sort((a,b)=>a.itemId-b.itemId);}
+ async cloudRssIdentitiesForUrls(urls:readonly string[],check?:()=>void,itemIds:readonly number[]=[]):Promise<CloudRssIdentity[]>{const out=new Map<number,CloudRssIdentity>();for(let at=0;at<urls.length;at+=100){const part=urls.slice(at,at+100),marks=part.map(()=>'?').join(',');const rows=await querySyncKeysetPages(this.db,IDENTITY_SELECT+` WHERE (a.link IN (${marks}) OR a.guid IN (${marks}) OR a.dedup_key IN (${marks})) AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id`,[...part,...part,...part],{key:'id'});for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}for(let at=0;at<itemIds.length;at+=100){const part=itemIds.slice(at,at+100),rows=await this.db.query(IDENTITY_SELECT+' WHERE a.id IN ('+part.map(()=>'?').join(',')+')',part);for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}return [...out.values()].sort((a,b)=>a.itemId-b.itemId);}
  /** Ordinary read RSS rows are absent from saved-article snapshots. */
  async cloudReadingStates(all=false,check?:()=>void):Promise<ExportedArticle[]>{
   const device=String((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id??'');
@@ -179,10 +187,47 @@ export class LocalArticleManifestStore {
    out.push({articleId,cloudRssArticleId:articleId,sourceDeviceId:str(r.native_reading_source)||device,url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:str(r.cached_body_hash)||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url),rssSourceTitle:str(r.channel_title),independentSaved:false,independentChangedAt:0,independentSortOrder:0,favoriteSaved:false,favoriteChangedAt:0,favoriteSortOrder:0,watchLaterSaved:false,watchLaterChangedAt:0,watchLaterSortOrder:0,deleted:false,deletedAt:0,readingProgress:num(r.progress??r.reading_progress),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:num(r.position_changed_at),isRead:!!num(r.is_read)});
   }return out;
  }
- async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]> {
+ /** Durable identity-only lookup; invalidation compares source columns, never a body witness. */
+ private lookupReady?:Promise<void>;
+ private initReadingLookup(){return this.lookupReady??=this.db.transaction([{sql:`CREATE TABLE IF NOT EXISTS cloud_reading_lookup(item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,link TEXT,guid TEXT,dedup TEXT,title TEXT,source TEXT,pool TEXT,bound TEXT,article_id TEXT NOT NULL,article_hash TEXT NOT NULL,url_hash TEXT NOT NULL,legacy_hash TEXT NOT NULL,bound_hash TEXT NOT NULL,opaque_revision INTEGER NOT NULL)`},...['article_hash','url_hash','legacy_hash','bound_hash'].map(column=>({sql:'CREATE INDEX IF NOT EXISTS cloud_reading_lookup_'+column+' ON cloud_reading_lookup('+column+')'}))]).catch(e=>{this.lookupReady=undefined;throw e;});}
+ async cloudReadingItemIds(hashes?:readonly string[],check?:()=>void){
+  await this.initReadingLookup();
+  for(;;){check?.();const revision=await libraryRevision(this.db),rows=await this.db.query(IDENTITY_SELECT+` LEFT JOIN cloud_reading_lookup k ON k.item_id=a.id WHERE (ch.url LIKE 'http://%' OR ch.url LIKE 'https://%') AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND NOT (k.item_id IS NOT NULL AND k.link IS a.link AND k.guid IS a.guid AND k.dedup IS a.dedup_key AND k.title IS a.title AND k.source IS ch.url AND k.pool IS i.article_id AND k.bound IS m.article_id AND (k.opaque_revision<0 OR k.opaque_revision=${revision})) ORDER BY a.id LIMIT 100`);
+   if(!rows.length)break;const statements:{sql:string;params:SqlParams}[]=[];for(const row of rows){check?.();const fast=await this.cloudIdentity(row,true),identity=fast??await this.cloudIdentity(row),id=identity?.articleId??'';let urlId='',legacyId='';try{urlId=await tryRssArticleId(str(row.link),this.identityHash)??'';legacyId=await legacyWebArticleId(str(row.link),this.identityHash);}catch{}const digest=(v:string)=>v?this.identityHash(utf8Encode(v)):Promise.resolve('');statements.push({sql:'INSERT OR REPLACE INTO cloud_reading_lookup VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',params:[num(row.id),nullable(row.link),nullable(row.guid),nullable(row.dedup_key),nullable(row.title),nullable(row.channel_url),nullable(row.cloud_rss_id),nullable(row.bound_id),id,await digest(id),await digest(urlId),await digest(legacyId),await digest(str(row.bound_id)),fast?-1:revision ]});}
+   for(let at=0;at<statements.length;at+=10){check?.();const part=statements.slice(at,at+10);await this.db.transaction(part);await this.cloudProgress?.('reading-index:'+await this.identityHash(utf8Encode(JSON.stringify(part.map(s=>s.params)))));check?.();}
+  }
+  if(hashes?.length===0)return [];const out=new Set<number>(),groups=hashes?[...new Set(hashes)]:undefined;
+  if(groups)for(let at=0;at<groups.length;at+=100){const part=groups.slice(at,at+100);for(const row of await this.db.query('SELECT k.item_id FROM cloud_reading_lookup k JOIN articles a ON a.id=k.item_id WHERE k.article_hash IN ('+part.map(()=>'?').join(',')+') OR k.url_hash IN ('+part.map(()=>'?').join(',')+') OR k.legacy_hash IN ('+part.map(()=>'?').join(',')+') OR k.bound_hash IN ('+part.map(()=>'?').join(',')+') ORDER BY k.item_id',[...part,...part,...part,...part]))out.add(num(row.item_id));}
+  else for(const row of await querySyncPages(this.db,"SELECT k.item_id FROM cloud_reading_lookup k JOIN articles a ON a.id=k.item_id WHERE k.article_id<>'' ORDER BY k.item_id"))out.add(num(row.item_id));
+  return [...out];
+ }
+ /** Body-free metadata page. Never initializes encoders, projections or domain definitions. */
+ async cloudRestoreMetadata(request:{ids?:readonly string[];urls?:readonly string[];itemIds?:readonly number[];after?:number;limit?:number}={},check?:()=>void){
+  const after=request.after??0,limit=request.limit??100;if(!Number.isSafeInteger(after)||after<0||!Number.isSafeInteger(limit)||limit<1||limit>100)throw Error('cloud_metadata_page_invalid');
+  const ids=[...new Set(request.ids??[])],urls=[...new Set(request.urls??[])];if(ids.length>100||urls.length>100)throw Error('cloud_metadata_page_invalid');
+  if(request.ids&&!ids.length&&!urls.length&&!request.itemIds?.length)return {articles:[] as ExportedArticle[],next:undefined};
+  const marks=ids.map(()=>'?').join(','),urlMarks=urls.map(()=>'?').join(','),filters:string[]=[],params:(string|number|null)[]=[];
+  if(ids.length){filters.push(`a.id IN (SELECT item_id FROM sync_article_ids WHERE article_id IN (${marks}) UNION SELECT item_id FROM cloud_rss_article_ids WHERE article_id IN (${marks}) UNION SELECT item_id FROM sync_saved_states WHERE article_id IN (${marks})) OR a.dedup_key IN (${marks})`);params.push(...ids,...ids,...ids,...ids);}
+  if(request.itemIds?.length){if(request.itemIds.length>100)throw Error('cloud_metadata_page_invalid');filters.push('a.id IN ('+request.itemIds.map(()=>'?').join(',')+')');params.push(...request.itemIds);}
+  if(urls.length){filters.push(`a.link IN (${urlMarks}) OR a.dedup_key IN (${urlMarks})`);params.push(...urls,...urls);}
+  await this.initReadingLookup();const select=READING_SELECT.replace('SELECT a.id,','SELECT a.id,a.is_saved,k.article_id AS cached_public_id,')+` LEFT JOIN cloud_reading_lookup k ON k.item_id=a.id AND k.link IS a.link AND k.guid IS a.guid AND k.dedup IS a.dedup_key AND k.title IS a.title AND k.source IS ch.url AND k.pool IS i.article_id AND k.bound IS m.article_id AND (k.opaque_revision<0 OR k.opaque_revision=(SELECT revision FROM sync_library_revision WHERE id=1))`;
+  const rows=await this.db.query(select+' WHERE '+(filters.length?'('+filters.join(' OR ')+') AND ':'')+'a.id>? ORDER BY a.id LIMIT ?',[...params,after,limit]);check?.();
+  if(!rows.length)return {articles:[] as ExportedArticle[],next:undefined};
+  const itemIds=rows.map(r=>num(r.id)),slots=itemIds.map(()=>'?').join(','),saved=await this.db.query(`SELECT s.article_id item_id,s.save_type,s.saved,CASE WHEN s.saved=1 THEN COALESCE(t.created_at,s.changed_at) ELSE s.changed_at END changed_at,CASE WHEN s.saved=1 THEN COALESCE(t.created_at,s.changed_at) ELSE s.changed_at END sort_order FROM article_saved_states s LEFT JOIN article_saved_entry_times t ON t.article_id=s.article_id AND t.save_type=s.save_type WHERE s.article_id IN (${slots}) UNION ALL SELECT item_id,save_type,saved,changed_at,sort_order FROM sync_saved_states WHERE item_id IN (${slots})`,[...itemIds,...itemIds]);
+  const states=new Map<string,Row>();for(const row of saved){const key=row.item_id+':'+row.save_type,old=states.get(key);if(!old||num(row.changed_at)>=num(old.changed_at))states.set(key,row);}
+  const keys=rows.flatMap(r=>[str(r.bound_id),str(r.cloud_rss_id)]).filter(Boolean),meta=new Map<string,Row>();if(keys.length)for(const r of await this.db.query('SELECT * FROM cloud_article_state WHERE article_id IN ('+keys.map(()=>'?').join(',')+')',keys))meta.set(str(r.article_id),r);
+  const device=str((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id),articles:ExportedArticle[]=[];
+  for(const r of rows){check?.();const publicRow=/^https?:\/\//i.test(str(r.channel_url))&&!isImportedContentUrl(str(r.channel_url));const identity=publicRow?(r.cached_public_id?{articleId:str(r.cached_public_id),localArticleId:str(r.bound_id)||str(r.cached_public_id),nativeArticleId:str(r.bound_id)||str(r.cached_public_id)}:await this.cloudIdentity(r,true)):undefined;
+   if(publicRow&&!identity)continue;const url=str(r.link)||str(r.guid)||str(r.dedup_key),id=identity?.articleId||str(r.bound_id)||await this.stableId(url),m=meta.get(id)??meta.get(str(r.bound_id)),hash=str(r.cached_body_hash),favorite=states.get(r.id+':favorite'),later=states.get(r.id+':watchLater'),clock=num(r.position_changed_at);
+   articles.push({articleId:id,...(identity?{cloudRssArticleId:id,cloudLegacyArticleIds:[identity.localArticleId,identity.nativeArticleId].filter(x=>x!==id)}:{}),sourceDeviceId:str(r.native_reading_source)||(m&&clock===num(m.reading_clock)?str(m.reading_source):device),url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:m&&hash&&hash===str(m.body_hash)?str(m.content_hash):hash||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_url),rssSourceTitle:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_title),independentSaved:str(r.channel_url)==='watchrss://phone-imports',independentChangedAt:str(r.channel_url)==='watchrss://phone-imports'?num(r.fetched_at):0,independentSortOrder:0,favoriteSaved:!!num(favorite?.saved),favoriteChangedAt:num(favorite?.changed_at),favoriteSortOrder:num(favorite?.sort_order),watchLaterSaved:!!num(later?.saved),watchLaterChangedAt:num(later?.changed_at),watchLaterSortOrder:num(later?.sort_order),deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:clock,isRead:!!num(r.is_read)});
+  }return {articles,next:rows.length===limit?num(rows.at(-1)!.id):undefined};
+ }
+ async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls));}
+ private async snapshotValue(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]> {
   if(urls?.length===0)return [];
   await new ArticleKeepStore(this.db).initialize();
   const marks=urls?.map(()=>'?').join(',');
+  const previousPreparation=this.preparationRevision;
   const previousCacheRows=this.cacheRows;this.cacheRows=!canonicalIds;
   const started=Date.now(),stats={sqlMs:0,sqlCalls:0,sqlTransactionMs:0,sqlTransactionCalls:0,htmlMs:0,htmlCalls:0,hashMs:0,hashCalls:0,encodeMs:0,encodeCalls:0};
   const budget=new HostWorkBudget({yieldTurn:()=>this.text.yieldTurn?.()??this.db.query('SELECT 1'),check,stepLimit:32,budgetMs:8});
@@ -195,7 +240,7 @@ export class LocalArticleManifestStore {
   if(!urls)this.bodySourceIds.clear();
   const identity=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!identity)throw new Error('Initialize sync identity first');const device=str(identity.device_id);
   if(!readingPrepared)await this.prepareReadingForSnapshot(urls);
-  const revision=await libraryRevision(this.db);
+  const revision=await libraryRevision(this.db);this.preparationRevision=revision;
   // Select cheap IDs once. OFFSET on the wide correlated SELECT repeatedly
   // evaluated every preceding chapter's body/cache joins on the watch SQLite.
   const orderedIds=await querySyncPages(this.db,'SELECT a.id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE ('+ROW_CONDITION+')'+(urls?' AND COALESCE(a.link,a.dedup_key) IN ('+marks+')':'')+(bookMode?' AND NOT EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE m.item_id=a.id AND b.registration_complete=1)':'')+' ORDER BY a.fetched_at DESC,a.id DESC',urls??[]);
@@ -354,7 +399,7 @@ export class LocalArticleManifestStore {
   for(let at=0;at<cacheUpdates.length;at+=100){const statements:{sql:string;params?:SqlParams}[]=[];for(const update of cacheUpdates.slice(at,at+100)){await checkpoint();statements.push(...await this.cacheMetadataStatements(update.row,update.prepared,update.reencoded));}await this.db.transaction([...(this.encodingGeneration?[projectionGuard(this.encodingGeneration)]:[]),revisionGuard(revision),...statements]);}
   trace('snapshot.complete');
   return out;
-  }finally{this.cacheRows=previousCacheRows;this.reencodedBodies.clear();this.db=originalDb;this.codec=originalCodec;this.text=originalText;}
+  }finally{try{await this.flushStableProgress();}finally{this.preparationRevision=previousPreparation;this.cacheRows=previousCacheRows;this.reencodedBodies.clear();this.db=originalDb;this.codec=originalCodec;this.text=originalText;}}
  }
  restoreReusableBodies(rows:readonly {prepared:PreparedArticle;sourceItem:number}[],complete?:((p:PreparedArticle)=>Promise<PreparedArticle>)){this.completeReusable=complete;this.reusableBodies=new Map(rows.filter(r=>r.sourceItem>0&&r.prepared.manifest.bodyAvailable).map(r=>[r.sourceItem,r.prepared]));}
  private reusableBody(row:Row):CachedBodyManifest|null{const p=this.reusableBodies.get(num(row.id));return p?{bodyHash:p.manifest.bodyHash,bodyByteCount:p.manifest.bodyByteCount,chunkSize:p.manifest.chunkSize,chunkHashes:[...p.manifest.chunkHashes]}:null;}
@@ -511,6 +556,16 @@ export class LocalArticleManifestStore {
   if(receivedMatches)article={...article,sourceDeviceId:str(r.received_source)||device,updatedAt:num(r.received_updated_at),importedAt:num(r.received_imported_at),contentHash:str(r.received_content_hash)||article.contentHash,siteName:str(r.received_site_name),rssSourceTitle:nullable(r.received_source_title)};
   else if(r.received_state)article={...article,updatedAt:Math.max(article.updatedAt,num(r.received_updated_at)+1,article.readingPositionChangedAt)};
   if(str(r.native_reading_source))article.sourceDeviceId=str(r.native_reading_source);
-  return cached?prepareCachedArticle(article,this.codec,cached):prepareArticle(article,this.codecForRow(bodySource),available);
+  const prepared=await (cached?prepareCachedArticle(article,this.codec,cached):prepareArticle(article,this.codecForRow(bodySource),available));
+  // A verified body is an independently durable derived unit. Keep the same
+  // generation/source revision guards used by the final snapshot publication.
+  if(this.cloudProgress&&this.preparationRevision!==undefined&&this.encodingGeneration&&prepared.encodedBody&&r.id===bodySource.id&&prepared.manifest.bodyAvailable){
+   const revision=this.preparationRevision,statements=await this.cacheMetadataStatements(bodySource,prepared),bodyWrite=statements.some(s=>s.sql.includes('article_sync_content'));
+   await this.db.transaction([projectionGuard(this.encodingGeneration),revisionGuard(revision),...statements]);
+   if(bodyWrite){const m=prepared.manifest;Object.assign(bodySource,{cached_body_hash:m.bodyHash,encoded_body_hash:m.bodyHash,body_bytes:m.bodyByteCount,chunk_size:m.chunkSize,chunk_hashes:JSON.stringify(m.chunkHashes),local_encoded_body_hash:m.bodyHash});}
+   bodySource.body_generation=this.encodingGeneration;await this.commitPreparation('body:'+this.encodingGeneration+':'+bodySource.id+':'+prepared.manifest.bodyHash);
+   prepared.encodedBody=null;prepared.article={...prepared.article,contentHtml:null,contentText:''};
+  }
+  return prepared;
  }
 }
