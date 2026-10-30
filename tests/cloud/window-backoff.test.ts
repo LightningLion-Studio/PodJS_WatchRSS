@@ -33,3 +33,8 @@ test('network, suspension, zero-unit deadlines and stalled runs never receive a 
  f.session.client.snapshotHeads=async()=>{now+=300000;return [...f.heads.values()];};const service=new WatchCloudSyncService({...((f.service as any).ports),now:()=>now},enabled);expect(await service.syncNow(true,'recent128')).toBe(false);expect(service.status).toMatchObject({errorCode:'cloud_snapshot_progress_stalled',retryable:false,continuationReady:false});expect(cloudBackgroundOutcome(false,true,service.status)).toBe('failure');
  expect(cloudBackgroundOutcome(false,false,{continuationReady:true})).toBe('retry');expect(cloudBackgroundOutcome(false,true,{continuationReady:true,errorCode:'cloud_host_capability_unavailable'})).toBe('failure');
 });
+
+test('an active writer yields benignly without turning account/network failures into a skip',async()=>{
+ const f=await fixture(),service=new WatchCloudSyncService({...((f.service as any).ports),exclusive:async()=>{throw Error('cloud_writer_busy');}},enabled);
+ expect(await service.syncNow(true,'recent128')).toBe(false);expect(service.status.yieldedToWriter).toBe(true);expect(cloudBackgroundOutcome(false,true,service.status)).toBe('busy');expect(cloudBackgroundOutcome(false,true,{retryable:true})).toBe('retry');
+});

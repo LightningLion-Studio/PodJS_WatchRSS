@@ -30,20 +30,22 @@ export interface CloudLibraryRepository extends Partial<CloudBookPort> {
  cloudSources?():Promise<readonly SyncedSource[]>;
  cloudRestoreMetadata?(request?:{ids?:readonly string[];urls?:readonly string[];after?:number;limit?:number},check?:()=>void):Promise<{articles:ExportedArticle[];next?:number}>;
  cloudSnapshot(full:boolean,check?:()=>void):Promise<CloudLibrarySnapshot>;
+ mergeCloudReading?(articles:readonly ExportedArticle[],check?:()=>void):Promise<number>;
+ mergeCloudPublicMetadata?(articles:readonly ExportedArticle[],check?:()=>void,work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>):Promise<{changed:number;remaining:ExportedArticle[]}>;
  cloudReadingRevision?():Promise<number>;
- cloudReadingCandidates?(check?:()=>void,hashes?:readonly string[]):Promise<readonly ExportedArticle[]>;
+ cloudReadingCandidates?(check?:()=>void,hashes?:readonly string[],work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>):Promise<readonly ExportedArticle[]>;
  /** Each entity commits its source/body/saved/reading state transactionally. No
   * applied cursor or ACK may be advanced until this entire operation succeeds. */
  mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check?:()=>void):Promise<number>;
 }
 export interface CloudLibraryCrypto {yieldTurn?():Promise<void>;gzip(bytes:Uint8Array):Promise<Uint8Array>;gunzip(bytes:Uint8Array,max:number):Promise<Uint8Array>;sha256(bytes:Uint8Array):Promise<string>;stableId(url:string):Promise<string>}
 export const privateCloudBody=(a:Pick<ExportedArticle,'url'|'rssSourceUrl'>)=>isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim();
-const stateJson=(a:ExportedArticle)=>{const {contentHtml,contentText,cloudRssArticleId,cloudLegacyArticleIds,bodySourceDeviceId,...state}=a;return state;};
+const stateJson=(a:ExportedArticle)=>{const {contentHtml,contentText,cloudReadingItemId,cloudRssArticleId,cloudLegacyArticleIds,bodySourceDeviceId,...state}=a;return state;};
 export class WatchCloudLibraryAdapter {
  trackProgress(sink?:(unit:string)=>Promise<void>){this.repository.setCloudProgress?.(sink);}
  private readingRevision?:number;
  private async checkReadingRevision(){const revision=await this.repository.cloudReadingRevision?.();if(revision!==undefined&&revision!==this.readingRevision){this.matchedReading.clear();this.readingRevision=revision;}}
- private async mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check:()=>void=()=>this.guard.require()){this.guard.require();await this.checkReadingRevision();const result=await this.repository.mergeCloud(sources,articles,remote,check);this.readingRevision=await this.repository.cloudReadingRevision?.();return result;}
+ private async mergeCloud(sources:readonly SyncedSource[],articles:readonly ExportedArticle[],remote:string,check:()=>void=()=>this.guard.require(),work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){this.guard.require();await this.checkReadingRevision();let result=0;if(remote==='cloud-records'&&!sources.length&&articles.length&&articles.every(a=>a.rssSourceUrl&&!privateCloudBody(a)&&!a.deleted&&!a.contentText&&!a.contentHtml)&&this.repository.mergeCloudPublicMetadata){const fast=await this.repository.mergeCloudPublicMetadata(articles,check,work);result=fast.changed;articles=fast.remaining;}if(sources.length||articles.length)result+=await this.repository.mergeCloud(sources,articles,remote,check);this.readingRevision=await this.repository.cloudReadingRevision?.();return result;}
  private overlay:PrivateOverlayReadSet;
  constructor(private repository:CloudLibraryRepository,private deviceId:string,private crypto:CloudLibraryCrypto,private guard:CloudGuard=cloudDisabled){this.crypto={...crypto,sha256:memoizeSmallDigest(bytes=>crypto.sha256(bytes),{beforeUse:()=>this.guard.require()})};this.overlay=new PrivateOverlayReadSet(this.crypto);}
  /** A local projection may omit fields held only by an authenticated record.
@@ -140,11 +142,11 @@ export class WatchCloudLibraryAdapter {
    }
   }
   if(hydrateOnly)return 0;
-  if(sources.length||articles.length)changed+=await measure('apply-metadata',sources.length+articles.length,()=>this.mergeCloud(sources,articles,'cloud-records',()=>this.guard.require()));return changed+await this.applyReadingStates(work);
+  if(sources.length||articles.length)changed+=await measure('apply-metadata',sources.length+articles.length,()=>this.mergeCloud(sources,articles,'cloud-records',()=>this.guard.require(),work));return changed+await this.applyReadingStates(work);
  }
  async applyReadingStates(work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T)=>Promise<T>){
-  if(!this.pendingReading.size)return 0;await this.checkReadingRevision();
-  const measure=work??(async<T>(_stage:string,_units:number,run:()=>Promise<T>|T)=>run());let changed=0;const readCandidates=()=>this.repository.cloudReadingCandidates?this.repository.cloudReadingCandidates(()=>this.guard.require(),[...this.pendingReading.entries()].filter(([id])=>!this.matchedReading.has(id)).map(([,d])=>d.value.articleIdHash)):this.repository.cloudSnapshot(false,()=>this.guard.require()).then(s=>s.stateArticles);
+  this.guard.require();if(!this.pendingReading.size)return 0;await this.checkReadingRevision();
+  const measure=work??(async<T>(_stage:string,_units:number,run:()=>Promise<T>|T)=>run());let changed=0;const readCandidates=()=>this.repository.cloudReadingCandidates?this.repository.cloudReadingCandidates(()=>this.guard.require(),[...this.pendingReading.entries()].filter(([id])=>!this.matchedReading.has(id)).map(([,d])=>d.value.articleIdHash),work):this.repository.cloudSnapshot(false,()=>this.guard.require()).then(s=>s.stateArticles);
   let candidates=await measure('reading-candidates',1,readCandidates);const articles:ExportedArticle[]=[];
   // Old clients ACKed public reading records after discarding their metadata.
   // A hydrated ACK certifies authentication, not physical entity presence.
@@ -168,10 +170,11 @@ export class WatchCloudLibraryAdapter {
     // receiver again for each incoming record page.
     if(['isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder'].some(k=>(a as unknown as Record<string,unknown>)[k]!==next[k]))articles.push({...a,...next,articleId:a.articleId,contentHtml:null,contentText:''});
    }
-   if(articles.length>=20){const batch=articles.splice(0);changed+=await measure('reading-merge',batch.length,()=>this.mergeCloud([],batch,'cloud-records'));}
+   if(articles.length>=20){const batch=articles.splice(0);changed+=await measure('reading-merge',batch.length,()=>this.mergeReading(batch));}
   }
-  return changed+(articles.length?await measure('reading-merge',articles.length,()=>this.mergeCloud([],articles,'cloud-records')):0);
+  return changed+(articles.length?await measure('reading-merge',articles.length,()=>this.mergeReading(articles)):0);
  }
+ private async mergeReading(articles:readonly ExportedArticle[]){if(!this.repository.mergeCloudReading)return this.mergeCloud([],articles,'cloud-records');const changed=await this.repository.mergeCloudReading(articles,()=>this.guard.require());this.readingRevision=await this.repository.cloudReadingRevision?.();return changed;}
  /** Hash-only states cannot fabricate a missing article. Expand the normal
   * inventory only for sources with authenticated states still awaiting entries. */
  async readingInventoryMode(url:string,requested:'all'|'recent128'){

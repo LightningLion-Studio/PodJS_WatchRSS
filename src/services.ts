@@ -430,7 +430,7 @@ function libraryRepository(){return librarySyncRepository??=new SqlLibrarySessio
   bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),
   reencodeStoredBodies:reencodeStoredArticleBodies,codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},
   files:{storeText:(key,text)=>importedTextWriter.storeText(key,text),hydrate:hydrateStoredContent},
-  migrateReading:id=>sqlReadingProgress.migrate(id),migrateReadingMany:ids=>sqlReadingProgress.migrateMany(ids),cleanupRemovedContent,
+  migrateReading:id=>sqlReadingProgress.migrate(id),prepareReadingMigration:ids=>sqlReadingProgress.migrationStatements(ids),migrateReadingMany:ids=>sqlReadingProgress.migrateMany(ids),cleanupRemovedContent,
   clearContentFiles:(privateData,control)=>clearPrivateContentFiles(fileChunks,{roots:privateData?undefined:LIBRARY_CONTENT_ROOTS,check:()=>control?.check(),onDeleted:count=>control?.progress('files',count)}),
   finishLibraryClear:finishLibraryClear,
  });

@@ -6,7 +6,7 @@ import type {ArticleManifest} from "./manifest.ts";
 import {isImportedContentUrl} from "../core/imported-content.ts";
 export interface ExportedArticle extends WireIncomingArticle,SyncArticleBody {
  /** Local cloud projection only; excluded from records/archives and native wire metadata. */
- cloudRssArticleId?:string;cloudLegacyArticleIds?:string[];
+ cloudReadingItemId?:number;cloudRssArticleId?:string;cloudLegacyArticleIds?:string[];
  /** Immutable body origin for cloud archives; never sent as article state. */
  bodySourceDeviceId?:string;
 }

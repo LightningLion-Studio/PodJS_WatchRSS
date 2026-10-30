@@ -14,7 +14,8 @@ import type {CloudHostRequest} from './host-ports';
 /** Retry metadata is emitted only after the coordinator certified a new durable
  * unit and a soft deadline. Network errors, suspension and stalled runs do not
  * receive a fast continuation. The next guest revalidates the original grant. */
-export function cloudBackgroundOutcome(success:boolean,authorized:boolean,status:{errorCode?:string;retryable?:boolean;continuationReady?:boolean}):BackgroundOutcome{
+export function cloudBackgroundOutcome(success:boolean,authorized:boolean,status:{errorCode?:string;retryable?:boolean;continuationReady?:boolean;yieldedToWriter?:boolean}):BackgroundOutcome{
+ if(!success&&status.yieldedToWriter)return 'busy';
  if(!success&&[CLOUD_HOST_CAPABILITY_UNAVAILABLE,'cloud_snapshot_progress_stalled'].includes(status.errorCode??''))return 'failure';
  if(!success&&authorized&&status.continuationReady)return {status:'retry',progress:true};
  return success||status.retryable===false?'success':'retry';

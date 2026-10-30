@@ -1,7 +1,7 @@
 import {repositoryStages} from '../sync/repository-work';
 import type {CloudHostRequest} from './host-ports';
 import {cloudDiagnosticHostMethod} from './host-capability';
-const stages=new Set('export identity projection canonicalJSON hash ack-diff encode push checkpoint retire apply-metadata apply-books reading-candidates reading-merge state-read state-validate projection-load original-load replay-unit checkpoint-skip open pull interactions reapply flush decoding merging applied guard lease_acquire network session_open owner bootstrap content device keys run'.split(' '));
+const stages=new Set('export identity projection canonicalJSON hash ack-diff encode push checkpoint retire apply-metadata apply-books reading-candidates reading-index reading-merge state-read state-validate projection-load original-load replay-unit checkpoint-skip open pull interactions reapply flush decoding merging applied guard lease_acquire network session_open owner bootstrap content device keys run'.split(' '));
 for(const stage of repositoryStages)stages.add(stage);
 const categories=new Set('none busy transport authorization conflict capacity storage gate format suspended server timeout concurrent-library-change runtime other'.split(' '));
 const codes=new Set(['cloud_sync_deadline_exceeded','cloud_sync_suspended','cloud_operation_superseded','cloud_snapshot_progress_stalled','cloud_host_capability_unavailable']);

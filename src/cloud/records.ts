@@ -17,7 +17,7 @@ export interface RecordPage extends CloudTrust {formatVersion:0|1;items:RecordRo
 export interface RecordWrite {recordId:string;expectedRevision:string;envelope:RecordEnvelope;tombstone:boolean}
 export interface RecordPullMetrics {projectionDecryptions?:number;decryptions:number;retired:number;elapsedMillis:number;outcome:'complete'|'paused'|'failed'}
 export interface RecordReplayProgress {event:'records-replay';stage:'decoding'|'merging'|'applied';batchRows:number;documents:number;keyMillis:number;decodeMillis:number;hashMillis:number;applyMillis:number;elapsedMillis:number}
-export interface RecordWorkProgress {event:'records-work';lane:'interactions'|'flush'|'pull';stage:'export'|'identity'|'projection'|'canonicalJSON'|'hash'|'ack-diff'|'encode'|'push'|'checkpoint'|'retire'|'apply-metadata'|'apply-books'|'reading-candidates'|'reading-merge'|'state-read'|'state-validate'|'projection-load'|'original-load'|'replay-unit'|'checkpoint-skip';durationMillis:number;units:number;cached?:boolean;outcome:'complete'|'failed'|'started';decryptions?:number;projectionDecryptions?:number}
+export interface RecordWorkProgress {event:'records-work';lane:'interactions'|'flush'|'pull';stage:'export'|'identity'|'projection'|'canonicalJSON'|'hash'|'ack-diff'|'encode'|'push'|'checkpoint'|'retire'|'apply-metadata'|'apply-books'|'reading-candidates'|'reading-index'|'reading-merge'|'state-read'|'state-validate'|'projection-load'|'original-load'|'replay-unit'|'checkpoint-skip';durationMillis:number;units:number;cached?:boolean;outcome:'complete'|'failed'|'started';decryptions?:number;projectionDecryptions?:number}
 export interface RecordPorts {
  userId:string;epoch:string;anchorVersion:number;version:number;
  key(version:number):Promise<Uint8Array|undefined>;
@@ -88,7 +88,7 @@ export class WatchCloudRecords {
  private state!:RecordState;private codec:CloudRecordCodec;private decoded=new Map<string,{row:RecordRow;doc:RecordDocument;legacy:boolean}>();
  private progressCommit?:((unit:string)=>Promise<void>);private savedCursor='0';private savedProjection='';
  trackProgress(commit:(unit:string)=>Promise<void>){this.progressCommit=commit;}
- private replayReady=false;private rowMillis=1000;
+ private replayReady=false;private rowMillis=1000;private replayBatch=1;private applyWarmupMillis=0;
  private now(){return this.p.now?.()??Date.now();}
  private decryptions=0;private projectionDecryptions=0;private retired=0;
  private runKeys=new Map<number,Uint8Array|undefined>();
@@ -224,9 +224,10 @@ export class WatchCloudRecords {
   }catch(error){if(p.writeStateObject&&/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error)))await this.measured('checkpoint-skip',0,async()=>{});if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&!p.writeStateObject&&p.checkpoint)await p.checkpoint(JSON.stringify(this.state));throw error;}finally{anchor.fill(0);}
  }
  private async apply(documents:RecordDocument[]){
+  this.applyWarmupMillis=0;
   const metrics=new Map<string,RecordWorkProgress>();
   const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T):Promise<T>=>{const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const old=metrics.get(stage);metrics.set(stage,{event:'records-work',lane:'pull',stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
-  try{return await this.p.apply(documents,measure);}finally{for(const m of metrics.values())try{this.p.work?.(m);}catch{}}
+  try{return await this.p.apply(documents,measure);}finally{this.applyWarmupMillis=metrics.get('reading-index')?.durationMillis??0;for(const m of metrics.values())try{this.p.work?.(m);}catch{}}
  }
  async reapply(scope='standalone',committed?:(unit:string)=>Promise<void>){await this.p.current();if(this.p.lazyProjections){let changed=0;
   if(this.state.replayScope!==scope){this.state.replayScope=scope;this.state.replayDone={};}
@@ -236,9 +237,9 @@ export class WatchCloudRecords {
    if(at)await committed?.(group.binding+':prefix-'+at);
    while(at<group.ids.length){await this.p.current();const remaining=this.p.remainingMillis?.()??Infinity;
     if(remaining<Math.max(2000,this.rowMillis*2+1000))throw Error('cloud_sync_deadline_exceeded');
-    const count=at===0?1:Math.max(1,Math.min(10,Math.floor((Math.min(5000,remaining/4)-1000)/Math.max(1,this.rowMillis)))),end=Math.min(group.ids.length,at+count),started=this.now();
-    await this.measured('replay-unit',end-at,async()=>{await this.ensureDecoded(group.ids.slice(at,end));const docs=group.ids.slice(at,end).map(id=>this.decoded.get(id)).filter(v=>v&&!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v!.doc);if(docs.length)changed+=await this.apply(docs);(this.state.replayDone??={})[group.binding]={end,proof:proof(group.binding,end)};await this.save();});
-    await committed?.(group.binding+':prefix-'+end);this.rowMillis=Math.max(1,(this.now()-started)/(end-at));at=end;
+    const count=Math.max(1,Math.min(this.replayBatch,50,Math.floor((Math.min(5000,remaining/4)-1000)/Math.max(1,this.rowMillis)))),end=Math.min(group.ids.length,at+count);let started=this.now();
+    await this.measured('replay-unit',end-at,async()=>{await this.ensureDecoded(group.ids.slice(at,end));started=this.now();this.applyWarmupMillis=0;const docs=group.ids.slice(at,end).map(id=>this.decoded.get(id)).filter(v=>v&&!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v!.doc);if(docs.length)changed+=await this.apply(docs);(this.state.replayDone??={})[group.binding]={end,proof:proof(group.binding,end)};await this.save();});
+    await committed?.(group.binding+':prefix-'+end);this.rowMillis=Math.max(1,(this.now()-started-this.applyWarmupMillis)/(end-at));this.replayBatch=Math.min(50,Math.max(count+1,count*2));at=end;
    }
   }this.replayReady=true;return changed;}finally{anchor.fill(0);this.clearRunKeys();}
  }if(this.p.reapply)return this.p.reapply();return this.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}

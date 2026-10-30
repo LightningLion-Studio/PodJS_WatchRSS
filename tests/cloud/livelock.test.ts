@@ -87,3 +87,10 @@ test('completed projections resolve a new inventory unit on demand and preserve 
   expect(v.adapter.projectRecord({kind:'source',value:{url:feed,useOriginalContent:false}},source).value.useOriginalContent).toBe(false);
  }finally{f.sql.close();}
 });
+
+test('118s one-time reading-index preparation does not poison later fast replay batches',async()=>{
+ const docs:RecordDocument[]=Array.from({length:300},(_,n)=>({kind:'rss-state',value:{sourceId:'synthetic',articleIdHash:String(n).padStart(64,'0'),sourceDeviceId:'phone',isRead:true,readingPositionChangedAt:100+n}})),state=await seed(docs),seen=new Set<string>(),sizes:number[]=[];let now=50000,cold=true,checkpoints=0;
+ const current=async()=>{if(now>=290000)throw Error('cloud_sync_deadline_exceeded');};
+ const r=new WatchCloudRecords({userId:'user',epoch,anchorVersion:1,version:1,lazyProjections:true,now:()=>now,remainingMillis:()=>290000-now,crypto:rc,key:async()=>key.slice(),current,assertUpload:current,readState:async()=>{throw Error('object cache required');},writeState:async()=>{throw Error('object cache required');},readStateObject:async()=>state,writeStateObject:async()=>{},get:async after=>({formatVersion:1,libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[],items:[],cursor:after,headRevision:after,hasMore:false}),push:async()=>{throw Error('push forbidden');},export:async()=>[],apply:async(ds,work)=>{if(cold){cold=false;await work!('reading-index',1,async()=>{now+=118082;});}sizes.push(ds.length);for(const d of ds){expect(seen.has(d.value.articleIdHash)).toBe(false);seen.add(d.value.articleIdHash);}now+=ds.length*100;return ds.length;}});
+ await r.pull();await r.reapply('cold-index',async()=>{checkpoints++;now+=40;});expect(seen.size).toBe(300);expect(Math.max(...sizes)).toBeGreaterThanOrEqual(8);expect(now).toBeLessThan(290000);expect(checkpoints).toBe(sizes.length);
+});

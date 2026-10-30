@@ -16,8 +16,9 @@ export class SqlReadingProgressStore {
    {sql:"UPDATE articles SET reading_progress=(SELECT progress FROM article_reading_state WHERE article_id=?) WHERE id=?",params:[articleId,articleId]},
   ]);
  }
- /** One host transaction per page avoids thousands of bridge calls for a book. */
- async migrateMany(articleIds:readonly number[]):Promise<void>{
+ /** Plan legacy migration for inclusion in a caller-owned guarded transaction. */
+ async migrationStatements(articleIds:readonly number[]):Promise<{sql:string;params:(string|number|null)[]}[]>{
+  const result:{sql:string;params:(string|number|null)[]}[]=[];
   const unique=[...new Set(articleIds)];
   for(let offset=0;offset<unique.length;offset+=200){
    const page=unique.slice(offset,offset+200),marks=page.map(()=>'?').join(',');
@@ -32,9 +33,12 @@ export class SqlReadingProgressStore {
    statements.push({sql:`INSERT OR IGNORE INTO article_reading_state(article_id,progress,changed_at,position_bytes,position_hash,state_json)
     SELECT id,reading_progress,0,0,'',NULL FROM articles WHERE id IN (${missingMarks})`,params:missing});
    statements.push({sql:`UPDATE articles SET reading_progress=(SELECT progress FROM article_reading_state WHERE article_id=articles.id) WHERE id IN (${missingMarks})`,params:missing});
-   await this.db.transaction(statements);
+   result.push(...statements);
   }
+  return result;
  }
+ async migrateMany(articleIds:readonly number[]):Promise<void>{for(let at=0;at<articleIds.length;at+=200){const statements=await this.migrationStatements(articleIds.slice(at,at+200));if(statements.length)await this.db.transaction(statements);}}
+
  async load(articleId:number):Promise<ReadingProgress>{
   await this.pending.get(articleId)?.catch(()=>{});
   await this.migrate(articleId);
