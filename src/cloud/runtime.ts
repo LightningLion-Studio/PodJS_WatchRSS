@@ -41,7 +41,7 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
    const runHost=cloudRunHost(host,()=>runGuard.require()),runPorts=createCloudHostPorts(runHost,runGuard),runTransport=createCloudTransport(runHost,runGuard);
    // A completed replay batch may checkpoint after a pause, using the account
    // fence rather than the foreground fence. Other IO remains cancellable.
-   const checkpointCache=new WatchCloudCache(ports.files,ports.crypto.sha256,guard,stored.backendBaseUrl);
+   const checkpointCache=new WatchCloudCache(ports.files,ports.crypto.sha256,guard,stored.backendBaseUrl,fields=>formats.recordDiagnostic?.(JSON.stringify(fields)));
    // A refresh may already have rotated the server token. Finish persisting its
    // response under the account lease, then fence the remaining library work.
    const tokens=new WatchTokenManager(accounts,{backendBaseUrl:stored.backendBaseUrl,transport,appVersion:watchAppVersion});

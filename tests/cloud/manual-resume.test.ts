@@ -77,3 +77,15 @@ test('code-only suspension is waiting/automatic continuation, not failed UI; man
  const g=await fixture();g.session.library.publicSources=async()=>[{url:'https://feed.example/rss'} as any];g.session.library.readingInventoryMode=async()=>{throw Error('Must not widen an authorized manual recent128');};
  expect(await g.service.syncNow(true,'recent128')).toBe(true);expect(g.calls.some(r=>r.url.includes('/entries?limit=128'))).toBe(true);expect(g.calls.some(r=>r.url.includes('/entries?limit=all'))).toBe(false);
 });
+
+test('foreground activation discovers a waiting persisted grant even without in-memory pending and resumes immediately',async()=>{
+ const f=storeHost();f.store.set(MANUAL_INTENT_KEY,JSON.stringify({version:2,token:'waiting_os_backoff',scope,mode:'recent128',createdAt:1,epoch}));let runs=0;
+ const c=new CloudManualHandoff(f.host,async()=>scope,async mode=>{expect(mode).toBe('recent128');runs++;return false;},()=>999,async()=>epoch);
+ c.foregroundChanged(false);c.foregroundChanged(true);await settle();expect(runs).toBe(1);expect(f.random).toBe(0);expect(readManualIntent(f.store.get(MANUAL_INTENT_KEY))?.token).toBe('waiting_os_backoff');c.dispose();
+});
+
+test('foreground durable progress resets the same authorized OS backup and cannot schedule a newer grant from an old completion',async()=>{
+ const f=storeHost(),intent={version:2 as const,token:'progress_grant',scope,mode:'recent128' as const,createdAt:1,epoch};f.store.set(MANUAL_INTENT_KEY,JSON.stringify(intent));const c=new CloudManualHandoff(f.host,async()=>scope,async()=>false,Date.now,async()=>epoch);
+ await c.restore(false);expect(await c.progress(intent)).toBe(true);expect(f.calls.filter(v=>v.method==='cloud.enqueue').at(-1)?.args).toEqual({token:intent.token,progress:true});expect(f.random).toBe(0);
+ const count=f.calls.filter(v=>v.method==='cloud.enqueue').length;f.store.set(MANUAL_INTENT_KEY,JSON.stringify({...intent,token:'newer',mode:'all'}));expect(await c.progress(intent)).toBe(false);expect(f.calls.filter(v=>v.method==='cloud.enqueue')).toHaveLength(count);expect(readManualIntent(f.store.get(MANUAL_INTENT_KEY))).toMatchObject({token:'newer',mode:'all'});c.dispose();
+});

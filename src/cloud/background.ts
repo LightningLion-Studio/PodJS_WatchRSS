@@ -4,13 +4,21 @@ import {cloudAccountIdentity} from './identity';
 import {CloudSyncDeadlineError,CLOUD_HOST_CAPABILITY_UNAVAILABLE} from './execution';
 import {cloudHostFailure} from './host-capability';
 import {recordFailureDiagnostic} from './record-diagnostic';
-import {defineBackgroundHandler} from '@podjs/framework/background-handler';
+import {defineBackgroundHandler,type BackgroundOutcome} from '@podjs/framework/background-handler';
 import {CloudGate} from './gate';
 import {OnboardingStore,ONBOARDING_KEY} from '../onboarding/store';
 import {startupDestination} from '../onboarding/state';
 import {createCloudRuntime} from './runtime';
 import {createBackgroundLibrary} from './background-library';
 import type {CloudHostRequest} from './host-ports';
+/** Retry metadata is emitted only after the coordinator certified a new durable
+ * unit and a soft deadline. Network errors, suspension and stalled runs do not
+ * receive a fast continuation. The next guest revalidates the original grant. */
+export function cloudBackgroundOutcome(success:boolean,authorized:boolean,status:{errorCode?:string;retryable?:boolean;continuationReady?:boolean}):BackgroundOutcome{
+ if(!success&&[CLOUD_HOST_CAPABILITY_UNAVAILABLE,'cloud_snapshot_progress_stalled'].includes(status.errorCode??''))return 'failure';
+ if(!success&&authorized&&status.continuationReady)return {status:'retry',progress:true};
+ return success||status.retryable===false?'success':'retry';
+}
 export default defineBackgroundHandler(async context=>{
  if(!context.request)return 'failure';
  const gate=new CloudGate();
@@ -48,8 +56,7 @@ export default defineBackgroundHandler(async context=>{
  if(success&&intent)await completeManualIntent(host,intent);
  // A deterministic missing host capability needs a fixed package, not a false
  // successful restore or an unbounded retry of the same manual grant.
- if(!success&&runtime.service.status.errorCode===CLOUD_HOST_CAPABILITY_UNAVAILABLE)return 'failure';
- return success||runtime.service.status.retryable===false?'success':'retry';
+ return cloudBackgroundOutcome(success,!!intent,runtime.service.status);
  }catch(error){if((error as {code?:unknown})?.code!==CLOUD_HOST_CAPABILITY_UNAVAILABLE)throw error;diagnostic.report(recordFailureDiagnostic(error));return 'failure';}
  finally{await diagnostic.flush();}
 },{yieldTurn:async context=>{

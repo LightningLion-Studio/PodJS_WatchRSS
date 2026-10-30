@@ -1,0 +1,390 @@
+{
+  "provenance": "1177 readonly aggregate/index only; no IDs, names, URLs, bodies or account fields",
+  "articles": 6542,
+  "channels": 18,
+  "books": [
+    {
+      "index": 0,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 1,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 2,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 3,
+      "chapters": 6,
+      "aliases": 12,
+      "aliasChapters": 6,
+      "aliasItems": 6,
+      "reading": 5,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "txt"
+    },
+    {
+      "index": 4,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 5,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 6,
+      "chapters": 2583,
+      "aliases": 5166,
+      "aliasChapters": 2583,
+      "aliasItems": 2583,
+      "reading": 1199,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "txt"
+    },
+    {
+      "index": 7,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 8,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 9,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 1,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 10,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 11,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 12,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 13,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 1,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 14,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 15,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 16,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 17,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 1,
+      "reading": 1,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "txt"
+    },
+    {
+      "index": 18,
+      "chapters": 845,
+      "aliases": 1690,
+      "aliasChapters": 845,
+      "aliasItems": 845,
+      "reading": 2,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "txt"
+    },
+    {
+      "index": 19,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 20,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 21,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 1,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "txt"
+    },
+    {
+      "index": 22,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 1,
+      "reading": 1,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "txt"
+    },
+    {
+      "index": 23,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    },
+    {
+      "index": 24,
+      "chapters": 25,
+      "aliases": 50,
+      "aliasChapters": 25,
+      "aliasItems": 25,
+      "reading": 8,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "epub"
+    },
+    {
+      "index": 25,
+      "chapters": 14,
+      "aliases": 28,
+      "aliasChapters": 14,
+      "aliasItems": 14,
+      "reading": 1,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [],
+      "kind": "epub"
+    },
+    {
+      "index": 26,
+      "chapters": 1,
+      "aliases": 2,
+      "aliasChapters": 1,
+      "aliasItems": 0,
+      "reading": 0,
+      "registered": 1,
+      "deleted": false,
+      "deletedChapters": [
+        1
+      ],
+      "kind": "txt"
+    }
+  ],
+  "legacyGroups": [
+    {
+      "index": 0,
+      "single": false,
+      "rows": 62,
+      "contentRows": 62,
+      "bodyRows": 62,
+      "registeredBooks": []
+    },
+    {
+      "index": 1,
+      "single": false,
+      "rows": 1944,
+      "contentRows": 1944,
+      "bodyRows": 1944,
+      "registeredBooks": []
+    }
+  ],
+  "retained": 3351,
+  "groups": 72,
+  "baseBytes": 14869335
+}

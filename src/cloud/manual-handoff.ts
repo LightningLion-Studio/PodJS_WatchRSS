@@ -47,9 +47,10 @@ export class CloudManualHandoff {
   // or a killed guest can no longer erase the continuation opportunity.
   await this.arm(intent);return this.continue(intent);
  }
+ async progress(intent:ManualIntent){const current=await this.authorized();if(!current||current.token!==intent.token||current.scope!==intent.scope||current.mode!==intent.mode||current.epoch!==intent.epoch)return false;try{await this.host('cloud.enqueue',{token:intent.token,progress:true});return true;}catch{this.publish('waiting');return false;}}
  captureCompletion(){const intent=this.pending;return(success:boolean)=>intent?this.complete(intent,success):Promise.resolve();}
  private async complete(intent:ManualIntent,success:boolean){if(!success)return;await this.write(async()=>{if(this.pending?.token!==intent.token||this.pending.scope!==intent.scope)return;await completeManualIntent(this.host,intent);if(this.pending?.token===intent.token&&this.pending.scope===intent.scope){this.pending=undefined;this.armed.clear();this.publish('idle');}});}
- foregroundChanged(active:boolean){const changed=this.foreground!==active;this.foreground=active;if(!this.pending||this.disposed)return;if(active&&changed)void this.restore().catch(()=>this.publish('waiting'));else if(!active){this.publish(this.held?'held':'waiting');void this.arm(this.pending);}}
+ foregroundChanged(active:boolean){const changed=this.foreground!==active;this.foreground=active;if(this.disposed)return;if(active&&changed)void this.restore().catch(()=>this.publish('waiting'));else if(!active&&this.pending){this.publish(this.held?'held':'waiting');void this.arm(this.pending);}}
  localTransferChanged(active:boolean){this.held=active;void this.host('cloud.localTransfer',{active,generation:++localTransferRevision}).catch(()=>{});if(this.pending){this.publish(active?'held':'waiting');if(!active){if(this.foreground)void this.restore().catch(()=>this.publish('waiting'));else void this.arm(this.pending);}}}
  accountChanged(){this.revision++;this.pending=undefined;this.armed.clear();this.publish('idle');}
  dispose(){this.disposed=true;this.accountChanged();this.listeners.clear();}

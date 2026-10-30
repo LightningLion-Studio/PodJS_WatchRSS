@@ -21,7 +21,7 @@ const validMap=(v:unknown):v is Record<string,number>=>!!v&&typeof v==='object'&
 export class SnapshotRestoreCheckpoint {
  private shards=Array.from({length:64},()=>({units:{} as Record<string,number>,projections:{} as Record<string,number>}));
  private rangeParts=new Map<string,Uint8Array>();private rangeBytes=0;
- private value!:Journal;private key?:Uint8Array;private startWork=0;private root='';
+ private value!:Journal;private key?:Uint8Array;private startWork=0;private root='';private committedUnits=0;
  private get state(){return this.session.restoreCheckpoint?.state??this.session.state;}
  private get cache(){return this.session.restoreCheckpoint?.cache??this.session.cache;}
  private get codec(){return this.session.restoreCheckpoint?.codec??this.session.codec;}
@@ -39,6 +39,7 @@ export class SnapshotRestoreCheckpoint {
  get phase(){return this.value.phase;}
  get work(){return this.value.work;}
  get advanced(){return this.value.work>this.startWork;}
+ get committed(){return this.committedUnits>0;}
  private async save(){const {units,projections,...header}=this.value;await this.state.storeRestoreJournal(JSON.stringify(header));}
  private shard(key:string){let h=2166136261;for(let i=0;i<key.length;i++)h=Math.imul(h^key.charCodeAt(i),16777619);return (h>>>0)%64;}
  private async saveEntry(kind:'units'|'projections',key:string,value:number){const shard=this.shard(key);this.shards[shard][kind][key]=value;await this.state.storeRestoreJournal(JSON.stringify({scope:this.root,...this.shards[shard]}),shard);}
@@ -47,7 +48,7 @@ export class SnapshotRestoreCheckpoint {
  async phaseDone(phase:Journal['phase']){if(this.value.phase===phase)return;this.value.phase=phase;this.value.work++;await this.save();}
  async finish(){this.value.active=false;this.value.work++;await this.save();}
  has(unit:string){return Object.prototype.hasOwnProperty.call(this.value.units,unit);}
- async commit(unit:string,bytes=0){if(this.has(unit))return;this.value.units[unit]=bytes;this.value.work++;this.value.bytes+=bytes;await this.saveEntry('units',unit,bytes);await this.save();}
+ async commit(unit:string,bytes=0){if(this.has(unit))return;this.value.units[unit]=bytes;this.value.work++;this.value.bytes+=bytes;await this.saveEntry('units',unit,bytes);this.committedUnits++;await this.save();}
  apply(prefix:string,progress?:(done:number,total:number)=>void):RestoreApplyCheckpoint{return {progress,has:unit=>this.has(prefix+':'+unit),result:unit=>this.value.units[prefix+':'+unit]??0,commit:(unit,abandoned=0)=>this.commit(prefix+':'+unit,abandoned),check:this.current};}
  metric(stage:SnapshotMetric['stage'],bytes:number,started:number,cached=false,details:Partial<Pick<SnapshotMetric,'outcome'|'code'|'objectIndex'|'chunkIndex'|'objects'|'chunks'|'maxChunkBytes'>>={}){try{this.report?.({event:'snapshot-work',stage,bytes,durationMillis:Math.max(0,this.now()-started),cached,completedUnits:this.value.work,...details});}catch{}}
  async timed<T>(stage:SnapshotMetric['stage'],bytes:number,run:()=>Promise<T>,cached=false){const at=this.now();let success=false,code:string|undefined;try{const value=await run();success=true;return value;}catch(error){const classified=JSON.parse(recordFailureDiagnostic(error)).code;code=classified==='unclassified'?'cloud_snapshot_'+stage.replace(/-/g,'_')+'_failed':classified;throw error;}finally{this.metric(stage,bytes,at,cached,{outcome:success?'complete':'failed',...(code?{code}:{})});}}
