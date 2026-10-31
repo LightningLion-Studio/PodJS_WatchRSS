@@ -1,6 +1,7 @@
 import {startExternalDebug} from '../debug/external-host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {markFeedArticleRead} from "./reader-open-state.ts";
+import {readerBodyState} from '../reader/body-state.ts';
 import {ActivityLog} from '../logs/activity.ts';
 import {activityStateHub} from '../navigation/activity-host.ts';
 import {captureActivityNavigation,restoreActivityNavigation,readNavigationCheckpoint,writeNavigationCheckpoint,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
@@ -889,19 +890,24 @@ export default function WatchRSS(props: {
     )
       setLoading(false);
   }
+  let articleOpenRevision=0;
+  onCleanup(()=>{articleOpenRevision++;});
   async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
+    const origin=stack(),revision=++articleOpenRevision;
+    const active=()=>revision===articleOpenRevision&&stack()===origin&&foreground()&&motion.phase==="idle";
     const previousReader=replaceReader&&current().page==="reader"?current():undefined;
-    setBusy(true);
     try {
       const full = await props.services.getArticle(item.id);
-      if(previousReader&&current()!==previousReader)return;
-      await props.services.markRead(item.id);
-      if(previousReader&&current()!==previousReader)return;
-      setArticle({ ...(full ?? item), read: true });
+      if(!active())return;
+      if(!full)throw new Error("文章不存在，请返回后重试");
+      const available=!readerBodyState(full),read=available?true:full.read;
+      if(available)await props.services.markRead(item.id);
+      if(!active())return;
+      setArticle({ ...full, read });
       // Reopening an already-read article must not rebuild the retained feed
       // and synchronously remeasure every card for an unchanged read flag.
-      setArticles((items) => markFeedArticleRead(items,item.id));
-      setChannels((items) => item.read ? items :
+      if(available)setArticles((items) => markFeedArticleRead(items,item.id));
+      setChannels((items) => !available||item.read ? items :
         items.map((c) =>
           c.id === item.channelId && !item.read
             ? { ...c, unreadCount: Math.max(0, (c.unreadCount ?? 0) - 1) }
@@ -909,14 +915,12 @@ export default function WatchRSS(props: {
         ),
       );
       traceServiceWork("reader.setPage",()=>setPage("reader", {
-        readerArticle: { ...(full ?? item), read: true },
+        readerArticle: { ...full, read },
         readerFromWatchLater: fromWatchLater,
       }));
       if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
+      if(active())setError(String(e));
     }
   }
   async function openArticleActions(item: Article) {

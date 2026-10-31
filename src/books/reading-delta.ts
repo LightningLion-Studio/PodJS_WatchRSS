@@ -20,7 +20,7 @@ export class BookReadingDelta {
    const meta=(await this.db.query('SELECT * FROM sync_book_reading_meta WHERE id=1'))[0];requireThat(meta);
    let root=meta!.root as string|null,count=Number(meta!.count);
    if(root===null){
-    const dirty=await this.db.query('SELECT book_id FROM sync_book_reading_hash_dirty ORDER BY book_id');
+    const dirty=await querySyncPages(this.db,'SELECT book_id FROM sync_book_reading_hash_dirty ORDER BY book_id');
     for(const d of dirty){const id=String(d.book_id),missing=await querySyncPages(this.db,'SELECT r.chapter_index,r.state_json FROM sync_book_reading r LEFT JOIN sync_book_reading_hashes h ON h.book_id=r.book_id AND h.chapter_index=r.chapter_index WHERE r.book_id=? AND h.hash IS NULL ORDER BY r.chapter_index',[id]);
      for(let at=0;at<missing.length;at+=100){const ss=[];for(const r of missing.slice(at,at+100))ss.push({sql:'INSERT OR REPLACE INTO sync_book_reading_hashes VALUES(?,?,?)',params:[id,r.chapter_index,await readingLeafHash(JSON.parse(String(r.state_json)),this.store.ports.sha256)]});await this.db.transaction([revisionGuard(revision),...ss]);}
      const leaves=(await querySyncPages(this.db,'SELECT chapter_index,hash FROM sync_book_reading_hashes WHERE book_id=? ORDER BY chapter_index',[id])).map(r=>({chapterIndex:Number(r.chapter_index),hash:String(r.hash)}));

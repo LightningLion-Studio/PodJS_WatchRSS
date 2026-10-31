@@ -64,6 +64,7 @@ function ReaderBodyImpl(props:{
   onMoving?:(moving:boolean)=>void;
   progressStore?:Pick<ReadingProgressStore,"load"|"save">;
   imported?:{handle:ImportedTextHandle;read:(index:number)=>Promise<string|null>};
+  onImportedError?:()=>void;
   preset?:ReaderPreset;
   highlight?:SpeechHighlight; speechPlaying?:boolean; speechTitleCenter?:number; highlightColor?:string;
   header?:ScrollEntry[]; footer?:ScrollEntry[];
@@ -87,7 +88,15 @@ function ReaderBodyImpl(props:{
   const [nativeReady,setNativeReady]=createSignal(false);
   const [importedRevision,setImportedRevision]=createSignal(0);
   const importedTasks=new Set<{cancel():void}>();
-  const imported=props.imported?new ImportedReaderDocument(props.imported.handle,props.imported.read,async block=>{
+  let importedReadFailed=false;
+  const reportImportedError=(error:unknown)=>{
+    if(importedReadFailed&&props.onImportedError)props.onImportedError();
+    else props.onError(String(error));
+  };
+  const imported=props.imported?new ImportedReaderDocument(props.imported.handle,async index=>{
+    try{const text=await props.imported!.read(index);if(text===null)throw new Error("加载失败可重试");return text;}
+    catch{importedReadFailed=true;throw new Error("加载失败可重试");}
+  },async block=>{
     const width=props.width-28,size=props.fontSize,preset=props.preset;
     let lines:NativeBlockLayouts= new Map();
     if(hasCapability("text.layout")){
@@ -188,6 +197,7 @@ function ReaderBodyImpl(props:{
   let tapTimer:(()=>void)|undefined,feedbackTimer:(()=>void)|undefined;
   const schedule=(milliseconds:number,callback:()=>void)=>{const timer=delay(Math.max(1,milliseconds));void timer.result.then(callback,()=>{});return ()=>timer.cancel();};
   const currentProgress=()=>{
+    if(importedReadFailed)return;
     if(!restored()||disposed)return;
     const offset=scroller.offset();
     if(props.pageMode&&bookPage()){
@@ -293,7 +303,7 @@ function ReaderBodyImpl(props:{
     const page=props.pageMode&&restored()&&props.active?bookPage():undefined;
     if(page?.loading===undefined||!imported||loadingBookChunk||failedBookChunk===page.loading)return;
     const index=page.loading;let failed=false;
-    loadingBookChunk=imported.ensure(index).catch(error=>{failed=true;failedBookChunk=index;props.onError(String(error));}).finally(()=>{loadingBookChunk=undefined;if(!disposed&&!failed)setBookLoadRevision(value=>value+1);});
+    loadingBookChunk=imported.ensure(index).catch(error=>{failed=true;failedBookChunk=index;if(!disposed)reportImportedError(error);}).finally(()=>{loadingBookChunk=undefined;if(!disposed&&!failed)setBookLoadRevision(value=>value+1);});
   });
   createEffect(()=>{
     const highlight=props.highlight,enabled=props.active&&props.speechPlaying&&restored()&&!props.pageMode,manualAt=lastManualScroll();
@@ -363,7 +373,7 @@ function ReaderBodyImpl(props:{
         lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);return;
       }
       pendingProgress=progress;restoreProgress();
-    }).catch(error=>{if(!disposed){setRestored(true);props.onError(String(error));}});
+    }).catch(error=>{if(!disposed){if(!importedReadFailed)setRestored(true);reportImportedError(error);}});
   });
   onFrame(()=>{
     const now=Date.now();
@@ -376,7 +386,7 @@ function ReaderBodyImpl(props:{
     if(imported&&!props.pageMode){
       const target=props.speechPlaying&&Date.now()-lastManualScroll()>=3000?props.highlight?.importedChunkIndex:undefined;
       const load=target!==undefined&&imported.text(target)===undefined?imported.ensure(target):imported.visible(scroller.offset()-headerHeight(),props.height);
-      void load.catch(error=>{if(!disposed)props.onError(String(error));});
+      void load.catch(error=>{if(!disposed)reportImportedError(error);});
     }
     // A user drag, fling, d-pad chase or crown tween cancels automatic movement.
     if(scroller.state()!=="idle")handle.pause();

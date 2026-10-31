@@ -1,3 +1,4 @@
+import {querySyncPages} from '../sync/sql-pages';
 import {unwrapEscapedHtml} from '@podjs/framework/html';
 import {yieldWorkTurn} from '@podjs/framework/text-layout';
 import {isImportedContentUrl} from './imported-content';
@@ -19,7 +20,7 @@ export async function repairEncodedRssBodies(db:SqlDatabase,options:{id?:number;
   for(const row of rows){
    const id=Number(row.id);cursor=id;
    if(!/^https?:\/\//i.test(String(row.url))||isImportedContentUrl(String(row.url)))continue;
-   const parts=row.content==null?await db.query('SELECT body FROM article_body_chunks WHERE article_id=? ORDER BY chunk_index',[id]):[];
+   const parts=row.content==null?await querySyncPages(db,'SELECT body FROM article_body_chunks WHERE article_id=? ORDER BY chunk_index',[id],1):[];
    const before=row.content==null?parts.map(part=>String(part.body)).join(''):String(row.content),after=unwrapEscapedHtml(before);
    if(before===after)continue;
    const guard=`id=? AND content IS ? AND NOT EXISTS(SELECT 1 FROM article_sync_content s WHERE s.item_id=articles.id)${row.content==null?" AND (SELECT group_concat(body,'') FROM (SELECT body FROM article_body_chunks WHERE article_id=articles.id ORDER BY chunk_index)) IS ?":''}`;

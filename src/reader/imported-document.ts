@@ -44,6 +44,7 @@ export class ImportedReaderDocument {
   const epoch=this.epoch;this.busy=true;
   try{
    const text=await this.read(index);if(this.closed||epoch!==this.epoch)return;
+   if(text===null)throw new Error("加载失败可重试");
    const block:ContentBlock & {type:"text"}={type:"text",style:"body",text:text??""};
    const layout=text!==null&&/[^\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.test(text)?await this.measure(block):{rows:[],height:0,textLength:0};
    if(this.closed||epoch!==this.epoch)return;

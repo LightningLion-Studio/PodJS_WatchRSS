@@ -1,3 +1,4 @@
+import {querySyncPages} from '../sync/sql-pages';
 import type {SqlDatabase,SqlParams} from './types.ts';
 import {isDeletableLocalContentChannel} from './imported-content.ts';
 import {importedTextFileName} from '../reader/imported-text.ts';
@@ -42,7 +43,7 @@ export class ImportedArticleDeletion {
   if((await this.files.stat(path)).exists)throw new Error('删除文件失败：'+path);
  }
  async cleanupPending():Promise<void>{
-  const rows=await this.db.query('SELECT item_id FROM article_deletion_cleanup');
+  const rows=await querySyncPages(this.db,'SELECT item_id FROM article_deletion_cleanup ORDER BY item_id');
   for(const row of rows)await this.cleanup(Number(row.item_id));
  }
  async cleanup(id:number):Promise<void>{

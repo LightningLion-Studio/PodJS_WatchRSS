@@ -14,6 +14,7 @@ export interface Channel {
 }
 
 export interface Article {
+  readerBodyState?: 'restoring' | 'failed';
   importedText?: import("../reader/imported-text.ts").ImportedTextHandle;
   id: string;
   channelId?: string;

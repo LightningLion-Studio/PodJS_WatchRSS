@@ -1,4 +1,5 @@
 import { isImportedTextItemUrl } from "../core/imported-content.ts";
+import {isNovelChapter} from './novel.ts';
 import type { SqlDatabase } from "../core/types.ts";
 import type { Article } from "../ui/service.ts";
 import { importedTextFileName, type ImportedTextHandle, type ImportedTextStore } from "./imported-text.ts";
@@ -16,7 +17,7 @@ export async function importedReaderHandle(db:SqlDatabase,store:ImportedTextStor
   const row = (await db.query(`SELECT link,substr(content,1,512) content,
     (SELECT substr(body,1,512) FROM article_original_chunks WHERE article_id=a.id AND chunk_index=0) original
     FROM articles a WHERE id=?`, [Number(id)],"reader.importedMarker"))[0];
-  if (!row || !isImportedTextItemUrl(String(row.link ?? ""))) return {hasMarker:false,handle:null};
+  if (!row || !(isImportedTextItemUrl(String(row.link ?? ""))||isNovelChapter(String(row.link??"")))) return {hasMarker:false,handle:null};
   const original = String(row.original ?? ""), content = String(row.content ?? "");
   const marker = importedTextFileName(original) ? original : importedTextFileName(content) ? content : null;
   return {hasMarker:!!marker,handle:marker?await store.handle(marker):null};

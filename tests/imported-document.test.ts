@@ -53,3 +53,10 @@ test("byte restore targets and every character offset match unchanged native fun
  for(const row of native.texts){expect(row.bytesFromMinusOne.map((_,i)=>importedBytesBefore(row.text,i-1))).toEqual(row.bytesFromMinusOne);expect(row.charsFromMinusOne.map((_,i)=>importedCharForByte(row.text,i-1))).toEqual(row.charsFromMinusOne);}
  for(const {input,chunkIndex,byteOffset} of native.targets)expect(importedByteTarget({...handle,...input},input.progress)).toEqual({chunkIndex,byteOffset});
 });
+
+test('missing chunks fail explicitly and retry the same coordinate instead of caching an empty body',async()=>{
+ let available=false;const reads:number[]=[];
+ const doc=new ImportedReaderDocument(handle,async index=>{reads.push(index);return available?'恢复正文':null;},measure,()=>{});
+ await expect(doc.ensure(0)).rejects.toThrow('加载失败可重试');expect(doc.text(0)).toBeUndefined();
+ available=true;await doc.ensure(0);expect(doc.text(0)).toBe('恢复正文');expect(reads).toEqual([0,0]);
+});

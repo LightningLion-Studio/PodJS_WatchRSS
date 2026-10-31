@@ -1,11 +1,12 @@
 import {nativeTrim} from './local-manifest.ts';
 import type {JsonObject} from './protocol.ts';
 import type {SqlDatabase} from '../core/types.ts';
+import {querySyncPages} from './sql-pages.ts';
 
 export type SavedLinkType = 'favorite' | 'watchLater';
 
 export async function readSavedLinks(db:Pick<SqlDatabase,'query'>,type:SavedLinkType):Promise<string[]> {
-  const rows=await db.query(`SELECT a.link FROM article_saved_states s JOIN articles a ON a.id=s.article_id
+  const rows=await querySyncPages(db,`SELECT a.link FROM article_saved_states s JOIN articles a ON a.id=s.article_id
     LEFT JOIN article_saved_entry_times t ON t.article_id=s.article_id AND t.save_type=s.save_type
     WHERE s.save_type=? AND s.saved=1
     ORDER BY s.sort_order ASC,COALESCE(t.created_at,s.changed_at) DESC,a.id DESC`,[type]);

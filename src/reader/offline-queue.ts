@@ -1,3 +1,4 @@
+import {querySyncPages} from '../sync/sql-pages';
 import type {SqlDatabase} from '../core/types';
 import {buildArticleBlocksAsync} from './media';
 import {resolveUrl} from '../core/parser';
@@ -64,7 +65,7 @@ export class OfflineMediaQueue {
   // Persist every extracted record BEFORE IO, including failures, for reader retry UI.
   await this.db.transaction([...media].map(([url,kind])=>({sql:'INSERT OR IGNORE INTO offline_media(item_id,media_type,origin_url,relative_path,created_at) SELECT ?,?,?,NULL,? WHERE EXISTS(SELECT 1 FROM offline_media_jobs WHERE item_id=? AND generation=?)',params:[id,kind,url,this.now(),id,job.generation]})));
   let failed=false;const byUrl=new Map<string,string|null>();
-  for(const media of await this.db.query('SELECT id,origin_url,media_type,relative_path FROM offline_media WHERE item_id=? ORDER BY id',[id])){
+  for(const media of await querySyncPages(this.db,'SELECT id,origin_url,media_type,relative_path FROM offline_media WHERE item_id=? ORDER BY id',[id],100)){
    if(!await this.current(job))return;
    const downloadUrl=resolveUrl(String(media.origin_url),base);
    if(!downloadUrl||!/^https?:\/\//i.test(downloadUrl)){failed=true;continue;}

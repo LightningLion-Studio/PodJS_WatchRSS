@@ -1,3 +1,5 @@
+import {readReaderBody} from './reader/body-state.ts';
+import {querySyncPages} from './sync/sql-pages.ts';
 import {readNovelDirectory} from "./reader/novel.ts";
 import {followCurrentReaderTheme} from './browser/open';
 import {acquireRssFeed,type RssFetchPurpose,type RssAcquisitionMode} from './rss/acquisition';
@@ -41,7 +43,7 @@ import {hasCapability} from "@podjs/framework/watch";
 import {kv} from "@podjs/framework/watch";
 import {readUsage,clearUsage,subscribeUsageChanges} from "./llm/usage.ts";
 import { ImportedTextStore, importedTextFileName } from "./reader/imported-text.ts";
-import { importedSpeechSource, importedReaderHandle } from "./reader/imported-speech.ts";
+import { importedSpeechSource } from "./reader/imported-speech.ts";
 import {createSummarySession,summaryAccountStore} from "./llm/runtime.ts";
 import {readCloudAccountStatus,subscribeCloudAccountStatus} from './cloud/status';
 import {accountStatusSnapshot} from "./account/status.ts";
@@ -107,7 +109,7 @@ function init(): Promise<void> { return ready ??= (async()=>{
     for(const platform of ['bili','douyin']){
       if(!legacyHidden.includes(platform))continue;
       const url=`builtin:${platform}`,row=(await db.query('SELECT id FROM channels WHERE url=?',[url]))[0];
-      if(row){const id=Number(row.id),itemIds=(await db.query('SELECT id FROM articles WHERE channel_id=?',[id])).map(item=>Number(item.id));await repo.removeChannel(id);await cleanupRemovedContent({itemIds,channels:[{id,url}]});}
+      if(row){const id=Number(row.id),itemIds=(await querySyncPages(db,'SELECT id FROM articles WHERE channel_id=? ORDER BY id',[id])).map(item=>Number(item.id));await repo.removeChannel(id);await cleanupRemovedContent({itemIds,channels:[{id,url}]});}
     }
     kv.delete('media.hidden-channels');
   }
@@ -215,7 +217,7 @@ export const services: AppServices = {
   async moveChannelToTop(id) { await init(); await localRssActions.moveChannelToTop(Number(id)); },
   async setChannelPinned(id,pinned) { await init(); await localRssActions.setChannelPinned(Number(id),pinned); },
   async markChannelRead(id) { await init(); await localRssActions.markChannelRead(Number(id)); },
-  async deleteChannel(id) { await init(); const channel=(await db.query('SELECT id,url FROM channels WHERE id=?',[Number(id)]))[0];if(!channel)return;const itemIds=(await db.query('SELECT id FROM articles WHERE channel_id=?',[Number(id)])).map(row=>Number(row.id));const job=refreshJobs.get(id);if(job){job.cancelled=true;job.cancel?.();}originalCache.cancelChannel(id);await repo.removeChannel(Number(id));await cleanupRemovedContent({itemIds,channels:[{id:Number(channel.id),url:String(channel.url)}]}); },
+  async deleteChannel(id) { await init(); const channel=(await db.query('SELECT id,url FROM channels WHERE id=?',[Number(id)]))[0];if(!channel)return;const itemIds=(await querySyncPages(db,'SELECT id FROM articles WHERE channel_id=? ORDER BY id',[Number(id)])).map(row=>Number(row.id));const job=refreshJobs.get(id);if(job){job.cancelled=true;job.cancel?.();}originalCache.cancelChannel(id);await repo.removeChannel(Number(id));await cleanupRemovedContent({itemIds,channels:[{id:Number(channel.id),url:String(channel.url)}]}); },
   async deleteArticle(id) { await init();await new ImportedArticleDeletion(db,hostSyncText,hostArticleBodyCodec,fileChunks,itemId=>originalCache.cancelItems([String(itemId)])).delete(Number(id));emitChannel({id:"*",kind:"library"}); },
   async clearLocalContent(id) {
     await init();
@@ -224,7 +226,7 @@ export const services: AppServices = {
     const job=refreshJobs.get(id);
     if(job){job.cancelled=true;job.cancel?.();await job.promise.catch(()=>{});}
     originalCache.cancelChannel(id);
-    const itemIds=(await db.query('SELECT id FROM articles WHERE channel_id=?',[Number(id)])).map(row=>Number(row.id));
+    const itemIds=(await querySyncPages(db,'SELECT id FROM articles WHERE channel_id=? ORDER BY id',[Number(id)])).map(row=>Number(row.id));
     await repo.clearLocalContent(Number(id));
     await cleanupRemovedContent({itemIds,channels:[]});
     emitChannel({id,kind:"refresh"});
@@ -298,7 +300,7 @@ export const services: AppServices = {
       article.searchSnippet=searchSnippet(term,description,content,value(row,'summary_match')||value(row,'summary'));
       return article;});
   },
-  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); await repairEncodedRssBodies(db,{id:Number(id)}); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const imported=await importedReaderHandle(db,importedTextStore,id); rows[0].content = imported.hasMarker ? "" : await repo.getArticleBody(Number(id)) ?? rows[0].description; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); if(imported.handle)article.importedText=imported.handle; article.rawContent=String(rows[0].content??""); article.contentBlocks=await buildArticleBlocksAsync(article.rawContent!,article); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
+  async getArticle(id) { appLogger.d('DetailScreen','Load article'); await init(); await repairEncodedRssBodies(db,{id:Number(id)}); const rows=await db.query("SELECT a.id,a.channel_id,a.title,a.pub_date,a.is_read,a.is_saved,a.link,a.image_url,a.audio_url,a.video_url,p.summary,p.image_url preview_image_url,CASE WHEN p.article_id IS NULL THEN substr(a.content,1,4096) END preview_content,EXISTS(SELECT 1 FROM article_saved_states w WHERE w.article_id=a.id AND w.save_type='watchLater' AND w.saved=1) is_watch_later,substr(a.description,1,2048) description,c.title channel_title FROM articles a JOIN channels c ON c.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id WHERE a.id=?",[Number(id)],"reader.metadata"); if(!rows[0]) return null; const body=await readReaderBody(db,importedTextStore,id,String(rows[0].link??""),()=>repo.getArticleBody(Number(id)),rows[0].description); rows[0].content=body.rawContent; const article=traceServiceWork("reader.mapArticle",()=>mapArticle(rows[0])); article.importedText=body.importedText; article.readerBodyState=body.readerBodyState; article.rawContent=String(rows[0].content??""); article.contentBlocks=await buildArticleBlocksAsync(article.rawContent!,article); article.content=traceServiceWork("reader.contentText",()=>contentText(article.contentBlocks!)); article.useOriginalContent=(await repo.getSourcePreferences(Number(article.channelId))).useOriginalContent; const offline=await readOfflineMedia(db,{stat:path=>fileChunks.stat(path)},Number(id));article.offlineMedia=offline.available;article.offlineMediaFailures=offline.failed;return article; },
   getOriginalArticle(id) { return originalArticle(id); },
   async addChannel(url) {
     await init();
@@ -519,7 +521,7 @@ async function finishLibraryClear(privateData:boolean,check:()=>void){
 }
 
 const offlineMediaQueue=new OfflineMediaQueue(db,{
- body:async id=>{const chunks=await db.query('SELECT body FROM article_original_chunks WHERE article_id=? ORDER BY chunk_index',[id]);return chunks.length?hydrateStoredContent(chunks.map(r=>String(r.body)).join('')):repo.getArticleBody(id);},stat:path=>fileChunks.stat(path),
+ body:async id=>{const chunks=await querySyncPages(db,'SELECT body FROM article_original_chunks WHERE article_id=? ORDER BY chunk_index',[id],1);return chunks.length?hydrateStoredContent(chunks.map(r=>String(r.body)).join('')):repo.getArticleBody(id);},stat:path=>fileChunks.stat(path),
  download:(url,path,maxBytes)=>http.download(url,path,maxBytes),remove:path=>fileChunks.remove(path),
  clearItem:async id=>{const root=`offline/rss/${id}`;for(const entry of (await fileChunks.list(root)).entries){const name=entry.path.slice(root.length+1);if(!entry.path.startsWith(root+'/')||!name||name.includes('/')||name.includes('\\')||entry.directory)throw Error('offline_media_invalid_path');await fileChunks.remove(entry.path);}},
  schedule:(ms,run)=>{const timer=delay(ms);let cancelled=false;void timer.result.then(()=>{if(!cancelled)run();}).catch(()=>{});return()=>{cancelled=true;timer.cancel();};},

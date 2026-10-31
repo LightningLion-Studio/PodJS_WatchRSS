@@ -1,3 +1,4 @@
+import {querySyncPages} from '../sync/sql-pages';
 import type {SqlDatabase,SqlParams} from '../core/types';
 import type {ExportedArticle} from '../sync/article-export';
 import {libraryRevision} from '../sync/revision';
@@ -16,10 +17,10 @@ export async function mergeLegacyBookReading(db:SqlDatabase,store:SqlBookStore,a
  for(let at=0;at<articles.length;at+=50){check();const part=articles.slice(at,at+50),ids=part.map(a=>a.articleId),protectedIds=new Set((await db.query('SELECT article_id FROM article_register_state WHERE article_id IN('+marks(ids)+')',ids)).map(r=>str(r.article_id)));
   await store.captureReading();check();const revision=await libraryRevision(db),readings:BookReading[]=[],guards:{sql:string;params?:SqlParams}[]=[];
   const select='SELECT m.*,b.chapter_count FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id WHERE b.registration_complete=1 AND ';
-  const bindings=await db.query('SELECT article_id,item_id FROM sync_article_ids WHERE article_id IN('+marks(ids)+') UNION SELECT article_id,item_id FROM sync_article_aliases WHERE article_id IN('+marks(ids)+')',[...ids,...ids]),items=new Map<string,number[]>();
+  const bindings=await querySyncPages(db,'SELECT article_id,item_id FROM sync_article_ids WHERE article_id IN('+marks(ids)+') UNION SELECT article_id,item_id FROM sync_article_aliases WHERE article_id IN('+marks(ids)+') ORDER BY article_id,item_id',[...ids,...ids]),items=new Map<string,number[]>();
   for(const r of bindings){const id=str(r.article_id),item=Number(r.item_id);if(item>0)items.set(id,[...(items.get(id)??[]),item]);}
-  const urls=part.map(a=>a.url),physical=[...new Set(bindings.map(r=>Number(r.item_id)).filter(n=>n>0))];
-  const rows=await db.query(select+`(m.article_id IN(${marks(ids)}) OR m.url IN(${marks(urls)})${physical.length?' OR m.item_id IN('+marks(physical)+')':''})`,[...ids,...urls,...physical]);
+  const urls=part.map(a=>a.url),binding=native(ids);
+  const rows=await querySyncPages(db,select+`(m.article_id IN(${marks(ids)}) OR m.url IN(${marks(urls)}) OR ${binding.sql}) ORDER BY m.book_id,m.chapter_index,m.article_id`,[...ids,...urls,...binding.params]);
   for(const a of part){check();if(!legacyBookReadingArticle(a)||protectedIds.has(a.articleId)){remaining.push(a);continue;}
    let candidates=rows.filter(r=>r.article_id===a.articleId),predicate:Predicate={sql:'m.article_id=?',params:[a.articleId]};
    if(!candidates.length){candidates=rows.filter(r=>items.get(a.articleId)?.includes(Number(r.item_id)));predicate=native([a.articleId]);}
@@ -30,7 +31,7 @@ export async function mergeLegacyBookReading(db:SqlDatabase,store:SqlBookStore,a
     try{canonicalRssUrl(a.url,false);}catch{remaining.push(a);continue;}
     const keys=[...new Set([await store.ports.sha256(utf8Encode(a.url)),await store.ports.stableId(a.url),await legacyWebArticleId(a.url,store.ports.sha256)])];
     const binding=native(keys);predicate={sql:`(m.article_id IN(${marks(keys)}) OR ${binding.sql}) AND m.channel_url=?`,params:[...keys,...binding.params,a.rssSourceUrl!]};
-    candidates=await db.query(select+predicate.sql,predicate.params);
+    candidates=await querySyncPages(db,select+predicate.sql+' ORDER BY m.book_id,m.chapter_index,m.article_id',predicate.params);
    }
    const targets=new Set(candidates.map(r=>str(r.book_id)+':'+Number(r.chapter_index))),r=candidates[0];
    if(targets.size!==1||!r||Number(r.chapter_index)<1||Number(r.chapter_index)>Number(r.chapter_count)){remaining.push(a);continue;}

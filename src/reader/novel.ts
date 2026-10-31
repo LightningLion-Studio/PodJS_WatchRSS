@@ -1,5 +1,7 @@
 import {orderLegacyChapters} from '../books/legacy-order.ts';
 import type {Article} from '../ui/service.ts';
+import type {SqlDatabase} from '../core/types.ts';
+import {querySyncKeysetPages} from '../sync/sql-pages.ts';
 
 export interface NovelChapter extends Article {readingPositionChangedAt:number}
 const sourcePattern=/^(https:\/\/watchrss\.local\/import-(?:epub|txt-novel)\/[^/]+)(?:\/chapter\/(\d+)(?:-[^/]+)?)?$/i;
@@ -30,13 +32,12 @@ export function novelMenuAppearance(idleFor:number,moving:boolean){
  return {visible:!moving&&idleFor>=350,opacity:idleFor>=1850?.22:1};
 }
 
-interface DirectoryDatabase {query(sql:string,params:unknown[],label?:string):Promise<Record<string,unknown>[]>}
-export async function readNovelDirectory(db:DirectoryDatabase,source:string,yieldTurn:()=>Promise<void>){
+export async function readNovelDirectory(db:Pick<SqlDatabase,'query'>,source:string,yieldTurn:()=>Promise<void>){
  if(novelBookSource(source)!==source)return [];
  const prefix=source+'/chapter/';
- const rows=await db.query(`SELECT a.id,a.channel_id,a.title,a.link,a.is_read,COALESCE(r.changed_at,0) reading_clock
+ const rows=await querySyncKeysetPages({query:async(sql,params)=>{await yieldTurn();return db.query(sql,params,"reader.novelDirectory");}},`SELECT a.id,a.channel_id,a.title,a.link,a.is_read,COALESCE(r.changed_at,0) reading_clock
    FROM articles a LEFT JOIN article_reading_state r ON r.article_id=a.id
-   WHERE substr(a.link,1,?)=?`,[prefix.length,prefix],"reader.novelDirectory");
+   WHERE substr(a.link,1,?)=? AND a.id>? ORDER BY a.id`,[prefix.length,prefix],{key:'id',pageSize:200});
  return orderedNovelChapters(rows.map(row=>({id:String(row.id),channelId:String(row.channel_id),title:String(row.title),link:String(row.link),content:'',read:!!Number(row.is_read),readingPositionChangedAt:Number(row.reading_clock)})),source,yieldTurn);
 }
 /** A failed progress write must never navigate to a different chapter. */

@@ -3,6 +3,7 @@ import type { SyncBodyCodec } from "./article-body.ts";
 import { stableArticleId, nativeTrim, type SyncTextPort } from "./local-manifest.ts";
 import { changeLogStatement } from "./sequence-store.ts";
 import { isSyncedSourceUrl } from "./source-store.ts";
+import {querySyncKeysetPages} from './sql-pages.ts';
 
 type ChannelRow = Record<string, unknown>;
 
@@ -74,7 +75,7 @@ export class SqlLocalRssActions {
   }
 
   async markChannelRead(id: number): Promise<void> {
-    const rows = await this.db.query("SELECT id,link,dedup_key,(SELECT article_id FROM sync_article_aliases WHERE item_id=articles.id) AS bound_id FROM articles WHERE channel_id=? AND is_read=0 ORDER BY id", [id]);
+    const rows = await querySyncKeysetPages(this.db,"SELECT id,link,dedup_key,(SELECT article_id FROM sync_article_aliases WHERE item_id=articles.id) AS bound_id FROM articles WHERE channel_id=? AND is_read=0 AND id>? ORDER BY id", [id],{key:'id',pageSize:200});
     if (!rows.length) return;
     const deviceId = await this.identity(), at = this.now();
     if (!Number.isSafeInteger(at)) throw new Error("Invalid article read clock");
@@ -91,6 +92,8 @@ export class SqlLocalRssActions {
       statements.push({sql: "UPDATE articles SET is_read=1 WHERE id=? AND channel_id=?", params: [itemId, id]});
       statements.push(changeLogStatement("article", articleId, at, deviceId, "read", at));
     }
-    await this.db.transaction(statements);
+    // Keep each chapter's alias, read flag and journal entry in one transaction.
+    // The Android host caps a transaction at 2048 statements.
+    for(let offset=0;offset<statements.length;offset+=600)await this.db.transaction(statements.slice(offset,offset+600));
   }
 }

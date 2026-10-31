@@ -1,3 +1,4 @@
+import {querySyncPages} from '../sync/sql-pages.ts';
 import type {SqlDatabase} from '../core/types.ts';
 
 export interface OfflineMediaEntry {originUrl:string;mediaType:'IMAGE'|'VIDEO';relativePath:string|null}
@@ -18,7 +19,7 @@ export function offlineMediaPath(itemId:number,value:string|null):string|null {
 
 export async function readOfflineMedia(db:Pick<SqlDatabase,'query'>,files:OfflineMediaFiles,itemId:number):Promise<{available:Record<string,string>;failed:number}> {
   if(!Number.isSafeInteger(itemId)||itemId<=0)return {available:{},failed:0};
-  const rows=await db.query('SELECT origin_url,media_type,relative_path FROM offline_media WHERE item_id=? ORDER BY id',[itemId],"reader.offlineMedia");
+  const rows=await querySyncPages(db,'SELECT origin_url,media_type,relative_path FROM offline_media WHERE item_id=? ORDER BY id',[itemId],100);
   const available:Record<string,string>={};let failed=0;
   for(const row of rows){
     const origin=String(row.origin_url??''),path=offlineMediaPath(itemId,row.relative_path==null?null:String(row.relative_path));
@@ -34,7 +35,7 @@ export async function readOfflineMedia(db:Pick<SqlDatabase,'query'>,files:Offlin
 /** Retry persisted failures without changing their row or discarding an existing good file. */
 export async function retryOfflineMedia(db:Pick<SqlDatabase,'query'|'execute'>,files:OfflineMediaDownloadFiles,itemId:number):Promise<{available:Record<string,string>;failed:number}> {
   if(!Number.isSafeInteger(itemId)||itemId<=0)return {available:{},failed:0};
-  const rows=await db.query('SELECT id,origin_url,media_type,relative_path FROM offline_media WHERE item_id=? ORDER BY id',[itemId],"reader.offlineMedia");
+  const rows=await querySyncPages(db,'SELECT id,origin_url,media_type,relative_path FROM offline_media WHERE item_id=? ORDER BY id',[itemId],100);
   for(const row of rows){
     const url=String(row.origin_url??''),kind=String(row.media_type??''),rowId=Number(row.id);
     const old=offlineMediaPath(itemId,row.relative_path==null?null:String(row.relative_path));
