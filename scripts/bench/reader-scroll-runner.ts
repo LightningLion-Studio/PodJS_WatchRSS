@@ -44,7 +44,7 @@ const metrics={logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeig
   else if(method==="file.delete")value={deleted:true};
   else if(method==="file.stat")value={file:true,size:512};
   else if(method==="file.mkdir")value={created:true};
-  else if(method==="runtime.delay")return;
+  else if(method==="runtime.delay")value=null;
   else {events.push({t:"service.result",id,ok:false,error:{code:"mock-unavailable",message:"Unsupported fixture service"}});return;}
   events.push({t:"service.result",id,ok:true,value});
  },
@@ -59,7 +59,9 @@ const {createContentLayouter}=await import("../../src/reader/content-layout.ts")
 const {defaultReaderPreset}=await import("../../src/reader/preset.ts");
 const html=await Bun.file(arg("html","/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/.codex-tmp/k9-profile/article.html")).text();
 const blocks=parseContent(html),preset=defaultReaderPreset();
-const offlineMedia=Object.fromEntries(blocks.filter(b=>b.type==="image"||b.type==="video").map((b,i)=>{const path=`fixture/source-${i}`;mediaDimensions.set(path,{width:b.type==="image"?b.width??512:512,height:b.type==="image"?b.height??256:256});return [b.url,path];}));
+const dimensionFile=arg("dimensions","");
+const sourceDimensions:Record<string,{width:number;height:number}>=dimensionFile?await Bun.file(dimensionFile).json():{};
+const offlineMedia=Object.fromEntries(blocks.filter(b=>b.type==="image"||b.type==="video").map((b,i)=>{const path=`fixture/source-${i}`;mediaDimensions.set(path,sourceDimensions[b.url]??{width:b.type==="image"?b.width??512:512,height:b.type==="image"?b.height??256:256});return [b.url,path];}));
 const layout=createContentLayouter(ops.measureText,ops.wrapText,()=>({cellHeight:26,baseline:20}))(blocks,205,16,{},preset,new Map());
 let handle:any;
 const errors:string[]=[];
@@ -71,12 +73,13 @@ const stop=render(()=>{
 const microtasks=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 const frame=(globalThis as any).frame;
 if(typeof frame!=="function")throw new Error("PocketJS frame handler missing");
-for(let i=0;i<80;i++){clockMs=i*1000/60;frame(0,undefined);await microtasks();}
+for(let i=0;i<2000&&!handle.ready();i++){clockMs=i*1000/60;frame(0,undefined);await microtasks();}
 const timing=await Bun.file(arg("timing","/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/.codex-tmp/device/t04-scroll-timing.json")).json();
+if(!handle.ready())throw new Error("Reader benchmark started before complete geometry / restore");
 const samples:Sample[]=[];const repeats=Number(arg("repeats","5"));
 let peakTextCached=0;
 for(let round=0;round<repeats;round++){
- handle.scroller.scrollTo(Math.max(0,layout.height-2200),{immediate:true});
+ handle.scroller.scrollTo(Number(arg("start",String(Math.max(0,layout.height-2200)))),{immediate:true});
  for(let warm=0;warm<60;warm++){clockMs+=1000/60;frame(0,undefined);await microtasks();}
  let gesture=-1,dragging=false;
  for(let tick=0;tick<Math.ceil(timing.elapsedSeconds*60);tick++){

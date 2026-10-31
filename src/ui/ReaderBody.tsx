@@ -1,3 +1,4 @@
+import {readerMediaRatio} from '../reader/media-geometry.ts';
 import {rowAtOffset} from "../reader/content-layout.ts";
 import {novelPageDirection} from "../reader/novel.ts";
 import {AutoScrollAwakeLease} from "../reader/keep-awake.ts";
@@ -75,6 +76,7 @@ function ReaderBodyImpl(props:{
     props.width;props.fontSize;props.preset;
     return createReaderTextEnvironment();
   });
+  const normalizedTextLength=createMemo(()=>props.text.replace(/\r\n?/g,"\n").length);
   const fonts=useReaderFonts();const backgrounds=useReaderBackgrounds();
   const [ratios,setRatios]=createSignal<Record<number,number>>({});
   const layoutContent=createContentLayouter((text,slot)=>getOps().measureText(text,slot),(text,slot,width)=>getOps().wrapText?.(text,slot,width),getFontMetrics);
@@ -116,7 +118,7 @@ function ReaderBodyImpl(props:{
   const [prepared,setPrepared]=createSignal<{layout:ReturnType<typeof layoutContent>;entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>;complete:boolean;scope:ContentBlock[]}|undefined>();
   createEffect(()=>{
     if(imported)return;
-    const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios(),complete=nativeReady();
+    const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios(),complete=nativeReady(),viewportHeight=props.height;
     // Native-capable hosts can show their first shaped paragraphs without
     // wrapping the unseen tail in the atlas first. Saved anchors wait for the
     // complete document; portable hosts and failed paragraphs use Rust wrap.
@@ -128,7 +130,7 @@ function ReaderBodyImpl(props:{
       if(!input.length)return;
     }
     const first=!untrack(prepared);
-    const task=prepareTextLayout(layoutContent.steps(input,width,size,ratio,preset,native),{key:readerRowKey,entry:makeEntry,
+    const task=prepareTextLayout(layoutContent.steps(input,width,size,ratio,preset,native,viewportHeight),{key:readerRowKey,entry:makeEntry,
       preview:first?{rows:16,publish:snapshot=>{
         // A saved position must not mount an unrelated start window first.
         if(pendingProgress&&(pendingProgress.textAnchor||pendingProgress.progress>0))return;
@@ -139,7 +141,7 @@ function ReaderBodyImpl(props:{
         const progress=pendingProgress;
         if(complete&&progress&&(progress.textAnchor||progress.progress>0)){
           pendingProgress=undefined;
-          const anchor=progress.textAnchor??{character:progress.progress*props.text.replace(/\r\n?/g,"\n").length,fraction:0};
+          const anchor=progress.textAnchor??{character:progress.progress*normalizedTextLength(),fraction:0};
           const maximum=Math.max(0,headerHeight()+snapshot.layout.height+footerHeight()-props.height);
           const offset=offsetForDocumentAnchor(snapshot.layout,anchor,headerHeight(),maximum);
           // Commit geometry and saved position together, so the window mounts
@@ -180,7 +182,7 @@ function ReaderBodyImpl(props:{
       return normalizeReadingProgress({offset,progress:imported.progress(importedAnchor),updatedAt:Date.now(),importedAnchor});
     }
     const textAnchor=documentAnchorAt(layout(),offset,headerHeight());
-    return normalizeReadingProgress({offset,progress:Math.min(1,textAnchor.character/Math.max(1,props.text.replace(/\r\n?/g,"\n").length)),updatedAt:Date.now(),textAnchor});
+    return normalizeReadingProgress({offset,progress:Math.min(1,textAnchor.character/Math.max(1,normalizedTextLength())),updatedAt:Date.now(),textAnchor});
   };
   const save=():Promise<void>=>{
     if(!restored()||disposed||scroller.offset()===lastOffset)return writes.flush();
@@ -234,7 +236,9 @@ function ReaderBodyImpl(props:{
         const importedAnchor=imported?.anchor(scroller.offset(),previousHeaderHeight,previousLayout);
         const anchor=documentAnchorAt(previousLayout,scroller.offset(),previousHeaderHeight);
         const offset=importedAnchor?imported!.offset(importedAnchor,nextHeaderHeight,maximum):imported?scroller.offset():offsetForDocumentAnchor(nextLayout,anchor,nextHeaderHeight,maximum);
-        controller.setBounds(maximum);controller.setOffset(offset);lastFrame=0;
+        // Bounds also emits the controller's old offset. Publish only the
+        // final anchor, never the stale automatic-scroll position in between.
+        batch(()=>{controller.setBounds(maximum);controller.setOffset(offset);});lastFrame=0;
       }
       previousLayout=nextLayout;previousHeaderHeight=nextHeaderHeight;
     });
@@ -254,7 +258,7 @@ function ReaderBodyImpl(props:{
       restoreTimer=undefined;
       if(!pendingProgress||disposed||!prepared()?.complete)return;
       const progress=pendingProgress;pendingProgress=undefined;
-      const anchor=progress.textAnchor??{character:progress.progress*props.text.replace(/\r\n?/g,"\n").length,fraction:0};
+      const anchor=progress.textAnchor??{character:progress.progress*normalizedTextLength(),fraction:0};
       scroller.scrollTo(!progress.textAnchor&&progress.progress<=0?0:offsetForDocumentAnchor(layout(),anchor,headerHeight(),max()),{immediate:true});
       lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);
     },()=>{restoreTimer=undefined;});
@@ -302,7 +306,7 @@ function ReaderBodyImpl(props:{
   });
   onCleanup(()=>{void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
   function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createWindowValue(raw);return row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,raw(),positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
-      {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&ratios()[row.blockIndex]!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
+      {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>;}};}
   const indexedEntries=createMemo<IndexedScrollEntries>(()=>{
     const snapshot=prepared();

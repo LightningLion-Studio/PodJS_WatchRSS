@@ -124,3 +124,25 @@ duplicates, numeric edge cases, Unicode and cancellation.
 K23 full Douyin navigation: `bun scripts/bench/douyin-entry.ts --framework=<framework wt> --out=/tmp/entry.js`, then `PODJS_BENCH_KV_DIR=<new private scratch directory> cargo run -p podjs-runtime --example service-bench -- /tmp/entry.js` in the framework worktree. `--source-ref=dc26f46 --framework-ref=872698b` compiles the K23 baseline, `--original=false` covers RSS mode, and `--trace=false` checks default-off diagnostics. The runner mounts production WatchRSS/Solid routes, presses the actual connected home card, completes restore, BACKs, and validates persistent resume, Activity snapshots, and telemetry. Compare the `durable` objects between variants. Renderer/font/network/secure IO is synthetic; scratch KV uses real Rust lock/fsync/rename. Lifecycle clocks are deterministic while CPU profiling uses native `__benchNow`. There is no device/FPS assertion.
 
 `bun scripts/bench/feed-restore.ts --framework=<framework wt> --out=/tmp/restore.js` + the same `service-bench` command (scratch KV not needed) checks cached feed restoration against the old mapper on native QuickJS: 618 cases, preserving all item fields, own `__proto__`, key order, negative zero, nonfinite numbers, surrogate strings, malformed/mixed shapes, and feed/queue limits. It uses the production default host scheduler.
+
+READERPERF uses generated public-shaped inputs (20 images, or a 300k-character
+text chapter) and independent natural image dimensions:
+
+```sh
+bun scripts/bench/readerperf-fixtures.ts /tmp/readerperf
+bun scripts/bench/reader-scroll.ts --framework=/path/to/framework --source-ref=3406c78b --out=/tmp/before.js
+bun scripts/bench/reader-scroll.ts --framework=/path/to/framework-worktree --out=/tmp/after.js
+bun /tmp/after.js --html=/tmp/readerperf/images.html --dimensions=/tmp/readerperf/dimensions.json --timing=/tmp/readerperf/timing.json --start=0 --out=/tmp/after.json
+```
+
+The runner completes synthetic timer replies and requires restored, complete
+geometry before timing. Source-ref also freezes the parser and content layout.
+`--start=0` traverses the article instead of replaying only the tail. Generated
+media dimensions are independent of the declared/unknown HTML dimensions.
+The runtime `reader-memory` example accepts `--warmup`, `--start`, and emits
+`bench.frame-times` CPU percentiles per round. These include QuickJS, Rust layout
+and synthetic service draining; they exclude Android decode, GPU and presentation.
+Use `--runtime=quickjs` with the builder and run the example against an isolated
+copy of a built package's `main.pak` and `pod.manifest.json`. Its image service
+currently returns synthetic 512x256 source geometry; this differs from the Bun
+runner's natural-size map and must not be described as a matching image decoder.

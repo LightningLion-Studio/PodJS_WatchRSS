@@ -17,6 +17,7 @@ aliases['@test/spec']=resolve(pocket,'contracts/spec/spec.ts');
 const baseline=process.env.WRSS_IMAGE_BASELINE==='1';
 const result=await Bun.build({entrypoints:[resolve(import.meta.dir,'reader-image-runner.ts')],outdir:process.argv[2],naming:'reader-image.js',target:'bun',conditions:['browser'],plugins:[{name:'production-reader-image',setup(builder){
  builder.onResolve({filter:/.*/},args=>{
+  if(process.env.READERPERF_PAGING_OVERLAY&&args.path.endsWith('/ReaderBody.tsx'))return {path:resolve(process.env.READERPERF_PAGING_OVERLAY,'src/ui/ReaderBody.tsx')};
   if(baseline&&args.path.endsWith('/RemoteImage.tsx'))return {path:resolve(import.meta.dir,'RemoteImage-u3-before.tsx')};
   if(aliases[args.path])return {path:realpathSync(aliases[args.path])};
  });
