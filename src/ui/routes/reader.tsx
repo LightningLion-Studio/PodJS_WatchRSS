@@ -1,3 +1,5 @@
+import {View} from "@pocketjs/framework/components";
+import {readerColor} from "../../reader/content-layout.ts";
 import { Show } from "solid-js";
 import { resolveUrl } from "../../core/parser.ts";
 import type {
@@ -38,7 +40,8 @@ interface ReaderRoutesProps {
   article: () => Article | null;
   setArticle: (article: Article) => void;
   openArticle: (article: Article) => Promise<void>;
-  openNovelChapter: (article: Article,pageMode:boolean) => Promise<void>;
+  openNovelChapter: (article: Article) => Promise<void>;
+  updateSettings:(patch:Partial<SettingsState>)=>void;
   setPage: SetPage;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
@@ -53,6 +56,7 @@ interface ReaderRoutesProps {
 }
 
 export function ReaderRoutes(props: ReaderRoutesProps) {
+  const frame=()=>({left:0,top:0,width:props.width,height:props.height});
   const speechReturnsToArticle = () => {
     const previous = props.stack()[props.stack().indexOf(props.entry) - 1];
     const currentArticle = props.speechState()?.article;
@@ -135,8 +139,12 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
       </Show>
       <Show when={props.page() === "reader" && props.entry.readerArticle}>
         {(rss) => (
+          <View class="absolute inset-0" style={{bgColor:readerColor(props.preset().background.colorArgb)}}>
+          <View debugName="ReaderPageSurface" class="absolute overflow-hidden" style={{insetL:frame().left,insetT:frame().top,width:frame().width,height:frame().height}}>
           <ReaderScreen
-            initialNovelPageMode={props.entry.novelPageMode}
+            pageMode={props.settings().readerPageMode}
+            onPageMode={value=>props.updateSettings({readerPageMode:value})}
+            touchOrigin={frame()}
             onOpenChapter={props.openNovelChapter}
             onBackHandler={handler=>{props.entry.internalBack=handler;}}
             mediaCacheMode={props.settings().mediaCacheMode}
@@ -147,8 +155,8 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
             llmShowTokenUsage={props.settings().llmShowTokenUsage}
             article={rss()}
             services={props.services}
-            width={props.width}
-            height={props.height}
+            width={frame().width}
+            height={frame().height}
             preset={props.preset()}
             fontSize={props.preset().body.fontSizeSp}
             lineHeight={props.lineHeight()}
@@ -156,6 +164,7 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
             autoStart={props.settings().readerAutoStart}
             keepAwake={props.settings().readerKeepAwake}
             speed={props.settings().readerScrollSpeed}
+            pageSeconds={props.settings().readerPageSeconds}
             favorite={
               (props.article()?.id === rss().id ? props.article() : rss())
                 ?.saved ?? false
@@ -225,6 +234,7 @@ export function ReaderRoutes(props: ReaderRoutesProps) {
               props.entry.reader = value;
             }}
           />
+          </View></View>
         )}
       </Show>
     </>

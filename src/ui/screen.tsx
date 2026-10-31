@@ -109,6 +109,7 @@ import { MediaRoutes } from "./routes/media.tsx";
 import { createMediaRouteController } from "./routes/media-controller.ts";
 import { NotesRoutes } from "./routes/notes.tsx";
 import { ReaderRoutes } from "./routes/reader.tsx";
+import {readerControlViewport} from "../reader/viewport.ts";
 import { RssRoutes } from "./routes/rss.tsx";
 import { SavedRoutes } from "./routes/saved.tsx";
 import { createSavedRouteController } from "./routes/saved-controller.ts";
@@ -888,7 +889,7 @@ export default function WatchRSS(props: {
     )
       setLoading(false);
   }
-  async function openArticle(item: Article, fromWatchLater = false, replaceReader = false, novelPageMode = false) {
+  async function openArticle(item: Article, fromWatchLater = false, replaceReader = false) {
     const previousReader=replaceReader&&current().page==="reader"?current():undefined;
     setBusy(true);
     try {
@@ -910,7 +911,6 @@ export default function WatchRSS(props: {
       traceServiceWork("reader.setPage",()=>setPage("reader", {
         readerArticle: { ...(full ?? item), read: true },
         readerFromWatchLater: fromWatchLater,
-        novelPageMode,
       }));
       if(previousReader)setStack(entries=>entries.filter(entry=>entry!==previousReader));
     } catch (e) {
@@ -1493,6 +1493,7 @@ export default function WatchRSS(props: {
     const entryPage = () => entry.page;
     const active = () => current() === entry;
     const selfTitled = () => routeIsSelfTitled(entryPage());
+    const noticeFrame = createMemo(()=>readerControlViewport(width,height,metrics.shape==='round',entryPage()==='reader'&&settings().readerPageMode));
 
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
@@ -1528,12 +1529,12 @@ export default function WatchRSS(props: {
           </View>
         </Show>
         <Show when={error()}>
-          <View class="absolute left-[12] right-[12] top-[38] h-[28] z-10 rounded-[8] bg-[#4b2030] items-center justify-center">
-            <Text class="text-xs text-[#ffd5dc]">{error()}</Text>
+          <View class="absolute h-[28] z-10 overflow-hidden rounded-[8] bg-[#4b2030] items-center justify-center" style={{insetL:noticeFrame().left+12,insetR:noticeFrame().left+12,insetT:noticeFrame().top+38}}>
+            <Text class="text-xs text-[#ffd5dc]" style={{width:noticeFrame().width-24}}>{error()}</Text>
           </View>
         </Show>
         <Show when={busy()}>
-          <Text class="absolute right-[14] top-[18] text-xs text-[#45d6a7]">
+          <Text class="absolute text-xs text-[#45d6a7]" style={{insetR:noticeFrame().left+14,insetT:noticeFrame().top+18}}>
             处理中
           </Text>
         </Show>
@@ -1757,7 +1758,8 @@ export default function WatchRSS(props: {
             />
           </Show>
           <ReaderRoutes
-            openNovelChapter={(article,pageMode)=>openArticle(article,false,true,pageMode)}
+            openNovelChapter={article=>openArticle(article,false,true)}
+            updateSettings={updateSettings}
             entry={entry}
             page={entryPage}
             active={active}

@@ -1,5 +1,7 @@
+import {AutoPageClock} from "../reader/auto-page.ts";
+import {ReaderBookPage} from "./ReaderBookPage.tsx";
+import {createBookPaginator,bookPageForAnchor,type PageAnchor} from "../reader/pagination.ts";
 import {rowAtOffset} from "../reader/content-layout.ts";
-import {novelPageDirection} from "../reader/novel.ts";
 import {AutoScrollAwakeLease} from "../reader/keep-awake.ts";
 import {displayPower} from "@podjs/framework/services";
 import {lifecycle} from "@podjs/framework/watch";
@@ -23,7 +25,7 @@ import { readerColor } from "../reader/content-layout.ts";
 import { requestReaderLayout, requestReaderLayoutBatched } from "../reader/platform-layout.ts";
 import type { NativeBlockLayouts } from "../reader/content-layout.ts";
 import { delay, textLayout } from "@podjs/framework/services";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, batch } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, batch, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { ScrollEntries, type ScrollEntry, type PositionedScrollEntry, type IndexedScrollEntries } from "./ScrollEntries.tsx";
 import { RemoteImage } from "./RemoteImage.tsx";
@@ -57,6 +59,7 @@ export interface ReaderBodyHandle {
 }
 function ReaderBodyImpl(props:{
   pageMode?:boolean;
+  touchOrigin?:{left:number;top:number};
   onMoving?:(moving:boolean)=>void;
   progressStore?:Pick<ReadingProgressStore,"load"|"save">;
   imported?:{handle:ImportedTextHandle;read:(index:number)=>Promise<string|null>};
@@ -65,7 +68,7 @@ function ReaderBodyImpl(props:{
   header?:ScrollEntry[]; footer?:ScrollEntry[];
   articleId:string; top?:number; text:string; blocks:ContentBlock[]; baseUrl?:string; width:number; height:number; lineHeight:number;
   offlineMedia?:Record<string,string>;
-  fontSize:number; onMedia:(block:Exclude<ContentBlock,{type:"text"}>)=>void; active:boolean; autoStart:boolean; keepAwake?:boolean; speed:number;
+  fontSize:number; onMedia:(block:Exclude<ContentBlock,{type:"text"}>)=>void; active:boolean; autoStart:boolean; keepAwake?:boolean; speed:number; pageSeconds?:number;
   onControls:(handle:ReaderBodyHandle)=>void; onError:(message:string)=>void;
   onSpeechControls?:(anchor?:SpeechAnchor)=>void;
   ref:(handle:ReaderBodyHandle)=>void;
@@ -153,6 +156,14 @@ function ReaderBodyImpl(props:{
   });
   const layout=createMemo(()=>{importedRevision();return imported?.layout()??prepared()?.layout??{rows:[],height:0,textLength:0};});
 
+  const [pageAnchor,setPageAnchor]=createSignal<PageAnchor>();
+  const round=()=>getDisplayMetrics().shape==='round';
+  const paginateCached=createBookPaginator((text,slot)=>getOps().measureText(text,slot));
+  const bookPages=createMemo(()=>props.pageMode?paginateCached(blocks(),{width:props.width,height:props.height,round:round(),fontSize:props.fontSize,preset:props.preset,header:props.header?.map(entry=>entry.height),footer:props.footer?.map(entry=>entry.height),unloaded:imported?index=>imported.text(index)===undefined:undefined}):[]);
+  const bookPageIndex=createMemo(()=>bookPageForAnchor(bookPages(),pageAnchor()??{section:'header',character:0,blockIndex:0,sourceStart:0,sectionOffset:0}));
+  const bookPage=()=>bookPages()[bookPageIndex()];
+  let lastBookAnchor:PageAnchor|undefined;
+  createEffect(()=>{if(props.pageMode&&bookPage())lastBookAnchor=bookPage()!.anchor;});
   const [systemCarets,setSystemCarets]=createSignal<ReadonlyMap<ReaderRow,readonly number[]>>(new Map());
   const highlightRects=createMemo(()=>contentHighlightRects(layout(),imported&&props.highlight?.importedChunkIndex!==undefined?{...props.highlight,contentBlockIndex:props.highlight.importedChunkIndex}:props.highlight,props.width-28,(text,slot)=>getOps().measureText(text,slot),systemCarets()));
   const headerHeight=()=>props.header?.reduce((sum,row)=>sum+row.height,0)??0;
@@ -163,10 +174,12 @@ function ReaderBodyImpl(props:{
   const [playing,setPlayingState]=createSignal(false),[restored,setRestored]=createSignal(false),[feedback,setFeedback]=createSignal("");
   const store=new LifecycleReadingProgressStore(props.progressStore??new ReadingProgressStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);}}),kv);
   const writes=new ReadingProgressWriteQueue();
+  let initialBookProgress:Awaited<ReturnType<typeof store.load>>|undefined;
   const [lastManualScroll,setLastManualScroll]=createSignal(-Infinity);
   let followingSpeech=false;
   const manualScroll=()=>{followingSpeech=false;setLastManualScroll(Date.now());handle.pause();};
-  let disposed=false,foreground=lifecycle()==="active",lastFrame=0,lastSave=0,lastOffset=-1;
+  let disposed=false,foreground=lifecycle()==="active",lastFrame=0,lastSave=0,lastOffset=-1,pageTurnAt=0;
+  const autoPages=new AutoPageClock();
   const awake=new AutoScrollAwakeLease((owner,active)=>hasCapability("display.power")?displayPower.keepAwake(owner,active):Promise.resolve(),()=>appLogger.w("ReaderAutoScroll","Display lease update failed"));
   const syncAwake=()=>awake.update({enabled:props.keepAwake===true,scrolling:playing()&&restored(),active:props.active,foreground});
   createEffect(()=>{void syncAwake();});
@@ -175,6 +188,16 @@ function ReaderBodyImpl(props:{
   const currentProgress=()=>{
     if(!restored()||disposed)return;
     const offset=scroller.offset();
+    if(props.pageMode&&bookPage()){
+      const start=bookPage()!.anchor;
+      const section=start.section==='body'?{}:{section:start.section,sectionOffset:start.sectionOffset};
+      if(imported){
+        const importedAnchor={marker:imported.handle.marker,chunkIndex:start.blockIndex,charOffset:start.sourceStart,fraction:0,...section};
+        return normalizeReadingProgress({offset,progress:imported.progress(importedAnchor),updatedAt:Date.now(),importedAnchor});
+      }
+      const textAnchor={character:start.character,fraction:0,...section};
+      return normalizeReadingProgress({offset,progress:start.section==='footer'?1:start.character/Math.max(1,props.text.replace(/\r\n?/g,"\n").length),updatedAt:Date.now(),textAnchor});
+    }
     if(imported){
       const importedAnchor=imported.anchor(offset,headerHeight());if(!importedAnchor)return;
       return normalizeReadingProgress({offset,progress:imported.progress(importedAnchor),updatedAt:Date.now(),importedAnchor});
@@ -182,8 +205,11 @@ function ReaderBodyImpl(props:{
     const textAnchor=documentAnchorAt(layout(),offset,headerHeight());
     return normalizeReadingProgress({offset,progress:Math.min(1,textAnchor.character/Math.max(1,props.text.replace(/\r\n?/g,"\n").length)),updatedAt:Date.now(),textAnchor});
   };
+  let lastPageKey='';
   const save=():Promise<void>=>{
-    if(!restored()||disposed||scroller.offset()===lastOffset)return writes.flush();
+    const pageKey=props.pageMode?JSON.stringify(bookPage()?.anchor):'';
+    if(!restored()||disposed||scroller.offset()===lastOffset&&pageKey===lastPageKey)return writes.flush();
+    lastPageKey=pageKey;
     const value=currentProgress();if(!value)return writes.flush();
     const {offset}=value;
     lastOffset=offset;lastSave=value.updatedAt;
@@ -195,24 +221,80 @@ function ReaderBodyImpl(props:{
     if(value)store.checkpoint(Number(props.articleId),value);
   });
   const setPlaying=(value:boolean,notify=true)=>{
-    if(value){const offset=scroller.offset();controller.setBounds(max());controller.setOffset(offset);controller.start();}
-    else controller.pause();
-    setPlayingState(controller.isRequested());lastFrame=0;
+    autoPages.reset();
+    if(props.pageMode){controller.pause();setPlayingState(value&&bookPageIndex()<bookPages().length-1);}
+    else {
+      if(value){const offset=scroller.offset();controller.setBounds(max());controller.setOffset(offset);controller.start();}
+      else controller.pause();
+      setPlayingState(controller.isRequested());
+    }
+    lastFrame=0;
     if(notify){
-      setFeedback(controller.isRequested()?"自动滚动已开始":"自动滚动已暂停");
+      setFeedback(`${props.pageMode?"自动翻页":"自动滚动"}${playing()?"已开始":"已暂停"}`);
       if(feedbackTimer)feedbackTimer();
       feedbackTimer=schedule(1500,()=>setFeedback(""));
     }
   };
-  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset()),flushProgress:save};
+  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&(props.pageMode?bookPageIndex()===bookPages().length-1:readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset())),flushProgress:save};
   props.ref(handle);
-  const tap=()=>{
-    if(!props.active||!restored()||props.pageMode)return;
-    if(tapTimer){tapTimer();tapTimer=undefined;props.onControls(handle);}
-    else tapTimer=schedule(300,()=>{tapTimer=undefined;if(props.active)setPlaying(!playing());});
+  let tapOrigin:PageAnchor|undefined;
+  const tap=(direction=0)=>{
+    if(!props.active||!restored())return;
+    if(tapTimer){
+      tapTimer();tapTimer=undefined;
+      if(props.pageMode&&tapOrigin)setPageAnchor(tapOrigin);
+      tapOrigin=undefined;props.onControls(handle);return;
+    }
+    if(props.pageMode){
+      handle.pause();tapOrigin=bookPage()?.anchor;
+      if(direction)turnBookPage(direction,true,false);
+    }
+    tapTimer=schedule(300,()=>{tapTimer=undefined;tapOrigin=undefined;if(!props.active)return;if(props.pageMode)void save();else setPlaying(!playing());});
   };
+  const turnBookPage=(direction:number,manual=true,persist=true):boolean=>{
+    const next=Math.max(0,Math.min(bookPages().length-1,bookPageIndex()+direction));
+    if(next===bookPageIndex())return false;
+    if(manual)manualScroll();
+    pageTurnAt=Date.now();setPageAnchor(bookPages()[next]!.anchor);
+    // Persist source anchors after paint, without walking/positioning the continuous document on input.
+    if(persist)lastSave=0;
+    return true;
+  };
+  const restoreContinuousAnchor=(start:PageAnchor)=>{
+    const section=start.section==='body'?{}:{section:start.section,sectionOffset:start.sectionOffset};
+    const target=imported?imported.offset({marker:imported.handle.marker,chunkIndex:start.blockIndex,charOffset:start.sourceStart,fraction:0,...section},headerHeight(),max()):offsetForDocumentAnchor(layout(),{character:start.character,fraction:0,...section},headerHeight(),max());
+    scroller.scrollTo(target,{immediate:true});
+  };
+  let previousPageMode=props.pageMode;
   createEffect(()=>{
-    const highlight=props.highlight,enabled=props.active&&props.speechPlaying&&restored(),manualAt=lastManualScroll();
+    const enabled=props.pageMode,ready=restored();
+    untrack(()=>{
+      if(previousPageMode!==enabled){setPlaying(false,false);if(!enabled&&lastBookAnchor)restoreContinuousAnchor(lastBookAnchor);}
+      previousPageMode=enabled;
+      if(!enabled){setPageAnchor(undefined);initialBookProgress=undefined;return;}
+      if(!ready)return;
+      if(pageAnchor())return;
+      const saved=initialBookProgress?.importedAnchor??imported?.anchor(scroller.offset(),headerHeight());
+      const document=initialBookProgress?.textAnchor??documentAnchorAt(layout(),scroller.offset(),headerHeight());
+      let blockIndex=0,base=0;
+      if(!imported&&!document.section){for(let i=0;i<blocks().length;i++){const block=blocks()[i]!;if(document.mediaIndex===i||block.type==='text'&&document.character<base+block.text.replace(/\r\n?/g,'\n').length+1){blockIndex=i;break;}if(block.type==='text')base+=block.text.replace(/\r\n?/g,'\n').length+1;}}
+      let sourceStart=0,normalized=0;const block=blocks()[blockIndex];
+      if(block?.type==='text')while(normalized<document.character-base&&sourceStart<block.text.length){if(block.text[sourceStart]==='\r'&&block.text[sourceStart+1]==='\n')sourceStart++;sourceStart++;normalized++;}
+      setPageAnchor({section:saved?.section??document.section??'body',character:document.character,blockIndex:saved?.chunkIndex??blockIndex,sourceStart:saved?.charOffset??sourceStart,sectionOffset:saved?.sectionOffset??document.sectionOffset??0});
+      initialBookProgress=undefined;
+    });
+  });
+  let loadingBookChunk:Promise<void>|undefined,failedBookChunk:number|undefined;
+  const [bookLoadRevision,setBookLoadRevision]=createSignal(0);
+  createEffect(()=>{
+    bookLoadRevision();
+    const page=props.pageMode&&restored()&&props.active?bookPage():undefined;
+    if(page?.loading===undefined||!imported||loadingBookChunk||failedBookChunk===page.loading)return;
+    const index=page.loading;let failed=false;
+    loadingBookChunk=imported.ensure(index).catch(error=>{failed=true;failedBookChunk=index;props.onError(String(error));}).finally(()=>{loadingBookChunk=undefined;if(!disposed&&!failed)setBookLoadRevision(value=>value+1);});
+  });
+  createEffect(()=>{
+    const highlight=props.highlight,enabled=props.active&&props.speechPlaying&&restored()&&!props.pageMode,manualAt=lastManualScroll();
     const rectangles=highlightRects();
     const center=highlight?.isTitle?props.speechTitleCenter:highlightCenter(Array.from(rectangles,([row,rect])=>({top:headerHeight()+row.top+rect.top,height:rect.height})));
     const maximum=max();
@@ -241,7 +323,13 @@ function ReaderBodyImpl(props:{
   });
   createEffect(()=>{
     const active=props.active;
-    untrack(()=>{lastFrame=0;controller.setBackground(!active||!foreground);if(!active){save();if(tapTimer){tapTimer();tapTimer=undefined;}}});
+    untrack(()=>{lastFrame=0;autoPages.reset();controller.setBackground(!active||!foreground);if(!active){save();if(tapTimer){tapTimer();tapTimer=undefined;}}});
+  });
+  createEffect(()=>{
+    const ready=restored(),source=blocks(),width=props.width,height=props.height,size=props.fontSize,preset=props.preset;
+    if(!ready||props.pageMode||source.reduce((sum,block)=>sum+(block.type==='text'?block.text.length:0),0)>128*1024)return;
+    const task=delay(80);void task.result.then(()=>{if(!disposed)paginateCached(source,{width,height,round:round(),fontSize:size,preset,unloaded:imported?index=>imported.text(index)===undefined:undefined});},()=>{});
+    onCleanup(()=>task.cancel());
   });
   let pendingProgress:Awaited<ReturnType<typeof store.load>>|undefined;
   let restoreTimer:ReturnType<typeof delay>|undefined;
@@ -263,6 +351,7 @@ function ReaderBodyImpl(props:{
   onMount(()=>{
     void store.load(Number(props.articleId)).then(async progress=>{
       if(disposed)return;
+      initialBookProgress=props.pageMode?progress:undefined;
       if(imported){
         const saved=progress.importedAnchor?.marker===imported.handle.marker?progress.importedAnchor:undefined;
         const target=importedByteTarget(imported.handle,progress.progress),index=Math.min(imported.handle.chunkCount-1,saved?.chunkIndex??target.chunkIndex);
@@ -276,8 +365,13 @@ function ReaderBodyImpl(props:{
   });
   onFrame(()=>{
     const now=Date.now();
-    if(!restored()||!props.active||!foreground){lastFrame=0;return;}
-    if(imported){
+    if(!restored()||!props.active||!foreground){lastFrame=0;autoPages.reset();return;}
+    if(props.pageMode){
+      if(autoPages.tick(now,playing()&&bookPage()?.loading===undefined,props.pageSeconds??5)){if(!turnBookPage(1,false)||bookPageIndex()===bookPages().length-1)setPlaying(false);}
+      if(!tapTimer&&now-pageTurnAt>=100&&now-lastSave>=1000)void save();
+      return;
+    }
+    if(imported&&!props.pageMode){
       const target=props.speechPlaying&&Date.now()-lastManualScroll()>=3000?props.highlight?.importedChunkIndex:undefined;
       const load=target!==undefined&&imported.text(target)===undefined?imported.ensure(target):imported.visible(scroller.offset()-headerHeight(),props.height);
       void load.catch(error=>{if(!disposed)props.onError(String(error));});
@@ -296,7 +390,7 @@ function ReaderBodyImpl(props:{
   });
   const removeLifecycle=__onHostEvent(event=>{
     if(event.t!=="lifecycle")return;
-    foreground=event.state==="active";lastFrame=0;controller.setBackground(!foreground||!props.active);
+    foreground=event.state==="active";lastFrame=0;autoPages.reset();controller.setBackground(!foreground||!props.active);
     void syncAwake();
     if(!foreground)void save();
   });
@@ -313,9 +407,11 @@ function ReaderBodyImpl(props:{
   });
   return <View debugName="ReaderViewport" class="absolute left-[0] right-[0]" style={{insetT:props.top??40,height:props.height,bgColor:props.preset?readerColor(props.preset.background.colorArgb):"#000000"}}>
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
-    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{props.onMoving?.(scrolling);if(scrolling&&!followingSpeech)manualScroll();}} onTap={contact=>{if(!props.pageMode)return false;const documentY=contact.y-(props.top??40)+scroller.offset();if(documentY<headerHeight()||documentY>=headerHeight()+layout().height)return false;const row=layout().rows[rowAtOffset(layout().rows,documentY-headerHeight())];if(!row||row.kind!=="text"||blocks()[row.blockIndex]?.type==="text"&&(blocks()[row.blockIndex] as {style:string}).style==="link")return false;const direction=novelPageDirection(contact.x,props.width);if(!direction)return false;manualScroll();scroller.scrollBy(direction*props.height,{durMs:220});return true;}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX,contact.startY-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={props.footer??[]} indexedEntries={indexedEntries()}/>
+    <Show when={props.pageMode} fallback={<>
+    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{props.onMoving?.(scrolling);if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX-(props.touchOrigin?.left??0),contact.startY-(props.touchOrigin?.top??0)-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={props.footer??[]} indexedEntries={indexedEntries()}/>
+    </>}><Show when={restored()?bookPage():undefined}>{page=><ReaderBookPage page={page()} width={props.width} height={props.height} round={round()} active={props.active&&restored()} touchOrigin={props.touchOrigin} header={props.header??[]} footer={props.footer??[]} blocks={blocks()} preset={props.preset} fontSize={props.fontSize} fonts={fonts()} environment={textEnvironment()} offlineMedia={props.offlineMedia} baseUrl={props.baseUrl} onTap={direction=>tap(direction)} onMedia={props.onMedia} onLongPress={props.onSpeechControls?line=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const start=line?{blockIndex:line.row.blockIndex,sourceStart:line.row.sourceStart??0}:bookPage()!.anchor;props.onSpeechControls?.(imported?{importedChunkIndex:start.blockIndex,importedCharOffset:start.sourceStart}:{contentBlockIndex:start.blockIndex,contentCharOffset:start.sourceStart});}:undefined}/>}</Show></Show>
 
-    <View class="absolute left-[12] right-[12] bottom-[0] h-[18] items-center justify-center" style={{opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
+    <View class="absolute h-[18] items-center justify-center" style={{insetL:(props.width-Math.min(160,props.width-24))/2,width:Math.min(160,props.width-24),...(props.pageMode?{insetT:props.height/2-9}:{insetB:0}),opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
   </View>;
 }
 

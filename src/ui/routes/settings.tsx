@@ -170,6 +170,7 @@ export function SettingsRoutes(props: SettingsRoutesProps) {
         }
       >
         <AutoScrollSettingsScreen
+          active={props.active}
           width={props.width}
           height={props.height}
           state={props.settings()}

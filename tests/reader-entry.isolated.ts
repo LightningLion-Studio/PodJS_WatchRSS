@@ -55,6 +55,7 @@ function paragraph(args:any){const lines:any[]=[];for(let start=0;start<args.tex
 async function pump(){for(let i=0;i<8;i++)await Promise.resolve();for(const req of requests.splice(0)){
  let value:any,ms=1;
  if(req.method==='runtime.delay'){expect(req.args.milliseconds).toBeGreaterThanOrEqual(1);value=null;ms=req.args.milliseconds;}
+ else if(req.method==='text.layout'){ms=10;value=paragraph(req.args);}
  else if(req.method==='text.layoutBatch'){
   ms=10;value={results:req.args.paragraphs.map(paragraph)};
   for(const args of req.args.paragraphs){const block=blocks.find(b=>b.text===args.text)!;native.set(block,paragraph(args).lines.map((l:any,index:number)=>({start:l.start,end:l.end,visibleEnd:l.visibleEnd,height:20,baseline:15,paragraph:{...args,lineIndex:index}})));}
@@ -114,4 +115,115 @@ test('production default ReaderBody checkpoints the latest anchor before any asy
  events.push({t:'checkpoint',reason:'screen-off'});__pumpPodEvents();
  expect(JSON.parse(storage.get('watchrss.reader.checkpoint.12569')!).value.offset).toBe(511);
  dispose();await pump();expect(errors).toEqual([]);expect(frames.size).toBe(0);
+});
+
+if(mode==='saved')test('book pages replace their lines, reverse exactly, preserve anchors and keep double tap',async()=>{
+ let dispose!:()=>void,handle:any,opened=0;
+ const props={articleId:'12570',text,blocks,preset,width:233,height:233,top:0,pageMode:true,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){opened++;},onError:(v:any)=>errors.push(v),ref:(v:any)=>handle=v};
+ const mount=()=>createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,props);});
+ let root=mount();await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+ expect(handle.playing()).toBe(false);
+ expect(nodes(root).filter(n=>n.props.debugName==='ReaderBookPage')).toHaveLength(1);
+ expect([...gestures].some((g:any)=>g.onPanMove)).toBe(false);
+ let gesture=[...gestures].find((g:any)=>g.onTap) as any;
+ const first=visible(root);
+ gesture.onTap({x:215,y:110});await pump();gesture.onTap({x:215,y:110});
+ expect(opened).toBe(1);
+ const cancelledUntil=Date.now()+350;while(Date.now()<cancelledUntil)await pump();expect(visible(root)).toBe(first);
+ gesture.onTap({x:116,y:110});await pump();
+ const centerUntil=Date.now()+350;while(Date.now()<centerUntil)await pump();expect(visible(root)).toBe(first);
+ gesture.onTap({x:215,y:110});expect(visible(root)).not.toBe(first);await pump();await until(()=>visible(root)!==first);
+ const second=visible(root);
+ for(let i=0;i<15;i++)for(const frame of [...frames])frame();
+ expect(visible(root)).toBe(second);
+ gesture.onTap({x:18,y:110});await pump();await until(()=>visible(root)===first);
+ gesture.onTap({x:215,y:110});await pump();await until(()=>visible(root)===second);
+ await handle.flushProgress();
+ const stored=JSON.parse(JSON.parse(storage.get('watchrss.reader.progress.12570')!));expect(stored.textAnchor.character).toBeGreaterThan(0);
+ dispose();await pump();root=mount();await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+ expect(visible(root)).toBe(second);
+ dispose();await pump();expect(frames.size).toBe(0);expect(gestures.size).toBe(0);
+});
+
+if(mode==='saved')test('settings and double-tap controls expose the same persisted segmented selection',async()=>{
+ const {AutoScrollSettingsScreen}=await import('../src/ui/AutoScrollSettingsScreen.tsx');
+ const {DEFAULT_SETTINGS,SettingsStore}=await import('../src/settings/store.ts');
+ let saved:unknown=DEFAULT_SETTINGS;
+ const store=new SettingsStore({get:<T>()=>saved as T,set:(_key:string,value:unknown)=>{saved=value;}});
+ const [state,setState]=createSignal(store.load());
+ const disposers:(()=>void)[]=[];
+ const [auto,setAuto]=createSignal(false);
+ const mount=(reader:boolean)=>createRoot(dispose=>{disposers.push(dispose);return createComponent(AutoScrollSettingsScreen,{width:233,height:233,get state(){return state();},onChange:patch=>setState(store.update(patch)),onNavigate(){},reader:reader?{playing:auto,setPlaying:setAuto}:undefined});});
+ const gestureCount=gestures.size;
+ const settings=mount(false),controls=mount(true);
+ expect(gestures.size).toBe(gestureCount);
+ expect(nodes(settings).some(n=>n.props.debugName==='ScrollControlPanel')).toBe(true);
+ const segment=(root:any,label:string)=>nodes(root).find(n=>n.props.accessibilityLabel===label)!;
+ expect(visible(settings)).toContain('滚动控制');expect(visible(controls)).toContain('滚动控制');
+ expect(segment(settings,'纵向滚动').props.accessibilityState.selected).toBe(true);
+ segment(settings,'点击翻页').props.onPress();
+ expect(segment(controls,'点击翻页').props.accessibilityState.selected).toBe(true);
+ expect(store.load().readerPageMode).toBe(true);
+ expect(visible(controls)).toContain('5 秒/页');
+ segment(controls,'开始自动翻页').props.onPress();expect(auto()).toBe(true);expect(store.load().readerPageMode).toBe(true);
+ segment(controls,'延长翻页间隔').props.onPress();expect(store.load().readerPageSeconds).toBe(6);expect(visible(controls)).toContain('6 秒/页');
+ expect(store.load().readerScrollSpeed).toBe(DEFAULT_SETTINGS.readerScrollSpeed);
+ segment(controls,'暂停自动翻页').props.onPress();expect(auto()).toBe(false);
+ segment(controls,'纵向滚动').props.onPress();
+ expect(segment(settings,'纵向滚动').props.accessibilityState.selected).toBe(true);
+ expect(store.load().readerPageMode).toBe(false);
+ for(const dispose of disposers)dispose();await pump();
+});
+
+if(mode==='saved')test('imported book pages load each chunk without rewriting read pages and cold restore the exact page',async()=>{
+ const chunks=Array.from({length:3},(_,i)=>`Chunk-${i} `+'中文 long '.repeat(40)),reads:number[]=[];
+ const imported={handle:{marker:'watchrss-watch-content:paged-test.txt',byteLength:3000,chunkBytes:1000,chunkCount:3},read:async(index:number)=>{reads.push(index);return chunks[index]??null;}};
+ let dispose!:()=>void,handle:any;
+ const mount=()=>createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12571',text:'',blocks:[],imported,preset,width:233,height:233,top:0,pageMode:true,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>handle=v});});
+ let root=mount();await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+ expect(visible(root)).toContain('Chunk-0');expect(reads).toEqual([0]);
+ let previous=visible(root),count=0;
+ while(!visible(root).includes('Chunk-1')&&count++<12){
+  const gesture=[...gestures].find((g:any)=>g.onTap) as any;gesture.onTap({x:215,y:110});await pump();await until(()=>visible(root)!==previous);previous=visible(root);
+  await until(()=>!visible(root).includes('正在排版')&&pending.size===0&&requests.length===0);
+ }
+ expect(reads).toEqual([0,1]);expect(visible(root)).toContain('Chunk-1');
+ const firstInChunk=visible(root);await handle.flushProgress();
+ const progress=JSON.parse(JSON.parse(storage.get('watchrss.reader.progress.12571')!));expect(progress.importedAnchor).toMatchObject({chunkIndex:1,charOffset:0});
+ dispose();await pump();root=mount();await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+ expect(visible(root)).toBe(firstInChunk);
+ dispose();await pump();expect(frames.size).toBe(0);expect(gestures.size).toBe(0);
+});
+
+if(mode==='saved')test('automatic book paging defaults to five seconds, pauses in background and stops after manual input',async()=>{
+ let dispose!:()=>void,handle:any;
+ const [active,setActive]=createSignal(true);
+ const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12572',text,blocks,preset,width:233,height:233,top:0,pageMode:true,fontSize:16,lineHeight:24,get active(){return active();},autoStart:true,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>handle=v});});
+ await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+ expect(handle.playing()).toBe(true);
+ const first=visible(root),originalNow=Date.now;let now=100000;
+ Date.now=()=>now;
+ try {
+  const frame=()=>{for(const cb of [...frames])cb();};
+  frame();now+=4999;frame();expect(visible(root)).toBe(first);
+  now++;frame();expect(visible(root)).not.toBe(first);expect(handle.playing()).toBe(true);
+  const second=visible(root);setActive(false);now+=60000;frame();expect(visible(root)).toBe(second);
+  setActive(true);frame();now+=4999;frame();expect(visible(root)).toBe(second);
+  now++;frame();expect(visible(root)).not.toBe(second);
+  const gesture=[...gestures].find((g:any)=>g.onTap) as any;gesture.onTap({x:215,y:110});expect(handle.playing()).toBe(false);
+  const manual=visible(root);now+=10000;frame();expect(visible(root)).toBe(manual);
+ }finally{Date.now=originalNow;dispose();await pump();}
+ expect(frames.size).toBe(0);expect(gestures.size).toBe(0);
+});
+
+if(mode==='saved')test('switching modes without scrolling returns to the same book page',async()=>{
+ let dispose!:()=>void,handle:any;
+ const [pageMode,setPageMode]=createSignal(true);
+ const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12573',text,blocks,preset,width:233,height:233,top:0,get pageMode(){return pageMode();},fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>handle=v});});
+ await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+ const gesture=[...gestures].find((g:any)=>g.onTap) as any;gesture.onTap({x:215,y:110});await pump();
+ await until(()=>pending.size===0&&requests.length===0);
+ const expected=visible(root);setPageMode(false);await pump();setPageMode(true);await pump();
+ expect(visible(root)).toBe(expected);
+ dispose();await pump();
 });

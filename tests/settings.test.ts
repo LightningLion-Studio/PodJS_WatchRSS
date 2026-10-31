@@ -19,6 +19,16 @@ describe("settings store", () => {
   });
 });
 
+test("reading mode migrates old preferences and survives a cold settings reload",()=>{
+ const {readerPageMode,...old}={...DEFAULT_SETTINGS,fontSizeSp:22,readerScrollSpeed:3};let stored:unknown=old;
+ const storage={get:<T>()=>stored as T,set:(_key:string,value:unknown)=>{stored=value;}};
+ const store=new SettingsStore(storage);
+ expect(store.load()).toMatchObject({readerPageMode:false,fontSizeSp:22,readerScrollSpeed:3});
+ store.update({readerPageMode:true});
+ expect(new SettingsStore(storage).load()).toMatchObject({readerPageMode:true,fontSizeSp:22,readerScrollSpeed:3});
+ expect(()=>store.update({readerPageMode:"true" as any})).toThrow();
+});
+
 test("old settings retain preferences when speech rate is introduced",()=>{
   const {speechRate,...old}={...DEFAULT_SETTINGS,fontSizeSp:22};
   let stored:unknown=old;
@@ -77,3 +87,11 @@ test('migrated original-mode hint attempts retain native twelve-hour throttle',a
   store.update({readerKeepAwake:false});expect(store.load().readerKeepAwake).toBe(false);
   expect(()=>store.update({readerKeepAwake:"true" as any})).toThrow();
  });
+
+test('automatic page interval defaults to 5 seconds independently of scrolling and persists bounds',()=>{
+ const {readerPageSeconds,...old}={...DEFAULT_SETTINGS,readerPageMode:true,readerScrollSpeed:1.5};let saved:unknown=old;
+ const storage={get:<T>()=>saved as T,set:(_key:string,value:unknown)=>{saved=value;}};
+ const store=new SettingsStore(storage);expect(store.load()).toMatchObject({readerPageSeconds:5,readerScrollSpeed:1.5,readerPageMode:true});
+ store.update({readerPageSeconds:8});expect(new SettingsStore(storage).load()).toMatchObject({readerPageSeconds:8,readerScrollSpeed:1.5});
+ for(const seconds of [0,121,2.5,NaN,Infinity])expect(()=>store.update({readerPageSeconds:seconds})).toThrow();
+});

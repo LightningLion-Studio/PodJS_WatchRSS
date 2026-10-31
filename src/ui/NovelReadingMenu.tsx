@@ -27,8 +27,8 @@ export function NovelReadingMenu(props:{width:number;height:number;active:boolea
    </View>
   </Show>
   <Show when={!props.expanded&&appearance().visible}>
-   <View focusable accessibilityRole="button" accessibilityLabel="阅读方式菜单" onPress={()=>props.onExpanded(true)} class="absolute w-[44] h-[44] items-center justify-center" style={{insetL:(props.width-44)/2,insetT:props.height-52}}>
-    <View class="absolute left-[6] top-[6] w-[32] h-[32] rounded-[16] items-center justify-center" style={{bgColor:chrome().action,borderWidth:1,borderColor:chrome().border,opacity:appearance().opacity}}><Text class="text-[20px]" style={{textColor:chrome().content}}>≡</Text></View>
+   <View focusable accessibilityRole="button" accessibilityLabel="阅读方式菜单" onPress={()=>props.onExpanded(true)} class="absolute items-center justify-center" style={{width:props.pageMode?24:44,height:props.pageMode?24:44,insetL:(props.width-(props.pageMode?24:44))/2,insetT:props.height-(props.pageMode?30:52)}}>
+    <View class="absolute rounded-[16] items-center justify-center" style={{insetL:props.pageMode?2:6,insetT:props.pageMode?2:6,width:props.pageMode?20:32,height:props.pageMode?20:32,bgColor:chrome().action,borderWidth:1,borderColor:chrome().border,opacity:appearance().opacity}}><Text class={props.pageMode?"text-sm":"text-[20px]"} style={{textColor:chrome().content}}>≡</Text></View>
    </View>
   </Show>
  </>;

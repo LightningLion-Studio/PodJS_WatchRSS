@@ -67,7 +67,6 @@ export type RouteEntry = {
   imageFilePath?: string;
   reader?: ReaderBodyHandle;
   readerArticle?: Article;
-  novelPageMode?:boolean;
   readerFromWatchLater?: boolean;
   page: Page;
   channelId?: string;
