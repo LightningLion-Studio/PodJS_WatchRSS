@@ -15,6 +15,13 @@ export class WatchCloudStateStore {
  private change<T>(fn:(state:State)=>T):Promise<T>{this.guard.require();const task=this.tail.then(async()=>{this.guard.require();const s=await this.read(),value=fn(s);await this.store.set(this.key,JSON.stringify(s));return value;});this.tail=task.catch(()=>{});return task;}
  async restoreJournal(shard?:number){this.guard.require();if(shard!==undefined&&(!Number.isInteger(shard)||shard<0||shard>=64))throw Error('cloud_snapshot_checkpoint_invalid');return (await this.store.get(this.key+'.restore-v1'+(shard===undefined?'':'.'+shard)))||undefined;}
  async storeRestoreJournal(value:string,shard?:number){this.guard.require();if(shard!==undefined&&(!Number.isInteger(shard)||shard<0||shard>=64))throw Error('cloud_snapshot_checkpoint_invalid');await this.store.set(this.key+'.restore-v1'+(shard===undefined?'':'.'+shard),value);}
+ /** Publish a receipt and its monotonic header in one secure-store commit.
+  * Legacy test/storage ports retain the ordered fallback. */
+ async storeRestoreJournalEntry(header:string,shard:number,value:string){
+  this.guard.require();if(!Number.isInteger(shard)||shard<0||shard>=64)throw Error('cloud_snapshot_checkpoint_invalid');
+  if(this.store.update)await this.store.update({[this.key+'.restore-v1']:header,[this.key+'.restore-v1.'+shard]:value},[]);
+  else{await this.storeRestoreJournal(value,shard);try{await this.storeRestoreJournal(header);}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{restoreEntryCommitted:true});}}
+ }
  async clear(){this.guard.require();await this.tail;if(this.store.update)await this.store.update({},[this.statePrefix]);else{await this.store.set(this.key,JSON.stringify({sequence:0,applied_full:{},applied_state:{}}));await this.store.set(this.key+'.restore-v1','');for(let i=0;i<64;i++)await this.store.set(this.key+'.restore-v1.'+i,'');}}
  async contentGeneration(){this.guard.require();await this.tail;return this.store.get(`watchrss.cloud.content-generation.${this.scope}`);}
  async rememberContentGeneration(generation:string){this.guard.require();if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(generation))throw Error('invalid_content_generation');await this.tail;await this.store.set(`watchrss.cloud.content-generation.${this.scope}`,generation.toLowerCase());}

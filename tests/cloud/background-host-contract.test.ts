@@ -1,16 +1,18 @@
 import handler from '../../src/cloud/background';
 import {tmpdir} from 'node:os';
-import {buildBackground} from '../../../../PodJS/podjs-watch/packages/cli/src/background-build';
+
 import {test,expect} from 'bun:test';
 import {readFileSync,realpathSync,mkdtempSync,rmSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
-import {javaHostMethods,literalHostMethods} from '../../../../PodJS/podjs-watch/packages/cli/src/host-method-contract';
+
 import {cloudDiagnosticHostMethod,CloudHostCapabilityError} from '../../src/cloud/host-capability';
 import {recordFailureDiagnostic} from '../../src/cloud/record-diagnostic';
 import {cloudCleanupFailure} from '../../src/cloud/failure';
 import {backgroundDiagnostics} from '../../src/cloud/background-diagnostic';
 const root=resolve(import.meta.dir,'../..');
 export const frameworkRoot=resolve(dirname(realpathSync(root+'/node_modules/@podjs/framework/src/bytes.ts')),'../../..');
+const {buildBackground}=await import(resolve(frameworkRoot,'packages/cli/src/background-build.ts'));
+const {javaHostMethods,literalHostMethods}=await import(resolve(frameworkRoot,'packages/cli/src/host-method-contract.ts'));
 export const workerSource=readFileSync(frameworkRoot+'/platforms/android/runtime/src/main/java/dev/podjs/runtime/PodCloudWorker.java','utf8');
 export const workerMethods=javaHostMethods(workerSource);
 test('tree-shaken background source and host-port requests fit the Java closed METHODS set',async()=>{

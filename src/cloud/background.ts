@@ -1,3 +1,4 @@
+import {WorkWindow,windowedHost} from '@podjs/framework/work-window';
 import {MANUAL_INTENT_KEY,readManualIntent,manualEpochKey,compareManualIntent,completeManualIntent} from './manual-handoff';
 import {backgroundDiagnostics} from './background-diagnostic';
 import {cloudAccountIdentity} from './identity';
@@ -24,8 +25,11 @@ export default defineBackgroundHandler(async context=>{
  if(!context.request)return 'failure';
  const gate=new CloudGate();
  let rejected:unknown;
- const raw:CloudHostRequest=async(method,args)=>{try{return await context.request!('cloud.host',{method,args}) as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
- const diagnostic=backgroundDiagnostics(raw);
+ const request:CloudHostRequest=async(method,args)=>{try{return await context.request!('cloud.host',{method,args}) as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ const diagnostic=backgroundDiagnostics(request);
+ const window=new WorkWindow({deadlineMs:context.deadlineMs,reserveMillis:10000,expired:()=>new CloudSyncDeadlineError(),report:metric=>diagnostic.report(JSON.stringify(metric))});
+ const bounded=windowedHost(request,window);let running=false;
+ const raw:CloudHostRequest=(method,args)=>(running?bounded:request)(method,args);
  try{
  // This is the same app.buildInfo host method used by application.buildInfo().
  if(!await gate.initialize(()=>raw('app.buildInfo',{}))){if(rejected)throw rejected;return 'success';}
@@ -38,7 +42,7 @@ export default defineBackgroundHandler(async context=>{
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  // The host deadline is absolute Unix ms. Leave time for the normal
  // checkpoint/release path before the native guest's hard interrupt.
- const execution={remainingMillis:()=>Math.max(0,context.deadlineMs-10000-Date.now()),begin(){const check=()=>{if(Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
+ const execution={remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
  const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution,{recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
  const account=await runtime.accounts.read();if(!account)return 'success';
  const payload=context.payload as {manual?:boolean;token?:string}|null;
@@ -53,12 +57,13 @@ export default defineBackgroundHandler(async context=>{
   if(intent.version===1||intent.epoch===null&&epoch.value){intent={...intent,version:2,epoch:epoch.value??null};if(!await compareManualIntent(host,stored.value,JSON.stringify(intent)))return 'success';}
   }
  }
+ running=window.remainingMillis()>1000;
  const success=await runtime.service.syncNow(!!intent,intent?.mode);
  if(success&&intent)await completeManualIntent(host,intent);
  // A deterministic missing host capability needs a fixed package, not a false
  // successful restore or an unbounded retry of the same manual grant.
  return cloudBackgroundOutcome(success,!!intent,runtime.service.status);
- }catch(error){if((error as {code?:unknown})?.code!==CLOUD_HOST_CAPABILITY_UNAVAILABLE)throw error;diagnostic.report(recordFailureDiagnostic(error));return 'failure';}
+ }catch(error){if(error instanceof CloudSyncDeadlineError)return 'retry';if((error as {code?:unknown})?.code!==CLOUD_HOST_CAPABILITY_UNAVAILABLE)throw error;diagnostic.report(recordFailureDiagnostic(error));return 'failure';}
  finally{await diagnostic.flush();}
 },{yieldTurn:async context=>{
  if(context.isCancelled())throw Error('Cloud worker cancelled');

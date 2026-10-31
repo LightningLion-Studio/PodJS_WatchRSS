@@ -16,12 +16,12 @@ import {utf8Encode,utf8Decode} from '../../src/cloud/types';
 import {writeWrss} from '../../src/cloud/wrss';
 
 async function controlled(){
- const f=await fixture();let now=0,sourceDecryptions=0,pulls=0,interactions=0,decryptMillis=0,applyMillis=0;const sourceAesWall:number[]=[];
+ const f=await fixture();let now=0,sourceDecryptions=0,pulls=0,interactions=0,decryptMillis=0,applyMillis=0,windowStarted=0;const sourceAesWall:number[]=[];
  const metrics:any[]=[],statuses:string[]=[];
- const codec=new WatchCloudCodec({...crypto,decrypt:async(k,aad,nonce,cipher)=>{const started=performance.now(),out=await crypto.decrypt(k,aad,nonce,cipher);if(utf8Decode(aad).startsWith('watchrss-cloud-chunk-v1:')){sourceAesWall.push(performance.now()-started);sourceDecryptions++;now+=decryptMillis;}return out;}},enabled);
+ const codec=new WatchCloudCodec({...crypto,decrypt:async(k,aad,nonce,cipher)=>{if(utf8Decode(aad).startsWith('watchrss-cloud-chunk-v1:')&&now-windowStarted+decryptMillis>=300000)throw Error('cloud_sync_deadline_exceeded');const started=performance.now(),out=await crypto.decrypt(k,aad,nonce,cipher);if(utf8Decode(aad).startsWith('watchrss-cloud-chunk-v1:')){sourceAesWall.push(performance.now()-started);sourceDecryptions++;now+=decryptMillis;}return out;}},enabled);
  f.session.codec=codec;f.session.records=async()=>({pull:async()=>{pulls++;now+=90000;return 0;},flushInteractions:async()=>{interactions++;now+=26000;return 0;},reapply:async()=>0,flush:async()=>0}) as any;
  const original=f.session.library.restorePayloads;f.session.library.restorePayloads=async(...args)=>{const r=await original(...args);now+=applyMillis;return r;};
- const make=()=>{const service=new WatchCloudSyncService({open:async()=>f.session,network:async()=>f.network,hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async fn=>fn(),now:()=>now,snapshotDiagnostic:s=>metrics.push(JSON.parse(s))},enabled);service.subscribe(()=>statuses.push(service.status.message));return service;};
+ const make=()=>{windowStarted=now;const service=new WatchCloudSyncService({open:async()=>f.session,network:async()=>f.network,hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async fn=>fn(),now:()=>now,snapshotDiagnostic:s=>metrics.push(JSON.parse(s))},enabled);service.subscribe(()=>statuses.push(service.status.message));return service;};
  return {f,codec,metrics,statuses,make,sourceAesWall,time:()=>now,delay:(decode:number,apply=0)=>{decryptMillis=decode;applyMillis=apply;},counts:()=>({sourceDecryptions,pulls,interactions}),advance:(n:number)=>{now+=n;}};
 }
 test('snapshot restart resumes source AEAD chunks and committed objects, skipping records warmup until the restore handoff',async()=>{
