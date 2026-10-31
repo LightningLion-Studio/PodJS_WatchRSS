@@ -43,9 +43,9 @@ test('projection ciphertext is scope-bound, tamper repairs from source, and clea
  const projectionPaths=[...f.blobs.keys()].filter(k=>k.includes('/restore-v1/')),bodyPath=projectionPaths.find(p=>!p.endsWith('/'+token+'.bin'))!;f.blobs.get(bodyPath)![15]^=1;expect(await cp.read(token)).toBeUndefined();await cp.write(token,utf8Encode('private-checkpoint-body'));expect(utf8Decode((await cp.read(token))!)).toBe('private-checkpoint-body');cp.close();
  const next=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('epoch-b','generation-a');expect(next.active).toBe(false);expect(await next.read(token)).toBeUndefined();next.close();await f.state.clearContent();expect(await f.state.restoreJournal()).toBeUndefined();
 });
-test('a full deadline window with no new immutable unit yields a fixed stall code instead of endless retries',async()=>{
+test('two deadline windows with no durable units yield a persistent retryable stall code',async()=>{
  const c=await controlled(),{f}=c;await f.phone();await f.state.acceptEpoch('9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff');await f.state.rememberContentGeneration(f.content().contentGeneration);const cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff',f.content().contentGeneration);await cp.begin();cp.close();
- f.session.client.snapshotHeads=async()=>{c.advance(300000);return [...f.heads.values()];};const service=c.make();expect(await service.syncNow()).toBe(false);expect(service.status).toMatchObject({errorCode:'cloud_snapshot_progress_stalled',retryable:false});expect(c.counts().pulls).toBe(0);
+ f.session.client.snapshotHeads=async()=>{c.advance(300000);return [...f.heads.values()];};let service=c.make();expect(await service.syncNow()).toBe(false);expect(service.status.errorCode).toBeUndefined();service=c.make();expect(await service.syncNow()).toBe(false);expect(service.status).toMatchObject({errorCode:'cloud_snapshot_progress_stalled',retryable:true});expect(c.counts().pulls).toBe(0);
 });
 test('inventory source checkpoints survive a deadline; a new completed cycle still refreshes the same sources',async()=>{
  const c=await controlled(),{f}=c;f.session.library.exportPayloads=async()=>({objects:[],fingerprint:'empty'});f.session.library.publicSources=async()=>Array.from({length:5},(_,i)=>({url:'https://pool.invalid/'+i,title:'Feed',description:'',siteUrl:'',imageUrl:'',createdAt:1,sortOrder:i,isPinned:false,sourceDeviceId:'watch',updatedAt:1,deleted:false,deletedAt:0}));const calls:number[]=[];
@@ -99,7 +99,7 @@ test('corrupt cached source ciphertext repairs exactly once instead of pinning a
 
 test('a later stuck export has a fixed no-progress outcome after restored heads, rather than resetting the restore loop forever',async()=>{
  const c=await controlled(),{f}=c;await f.phone({objects:[{name:'reader/complete.txt',bytes:utf8Encode('complete')}]});f.session.library.exportPayloads=async()=>{c.advance(300000);return {objects:[],fingerprint:'empty'};};
- let stalled=false;for(let i=0;i<4;i++){const service=c.make();expect(await service.syncNow()).toBe(false);if(service.status.errorCode==='cloud_snapshot_progress_stalled'){stalled=true;expect(service.status.retryable).toBe(false);break;}}
+ let stalled=false;for(let i=0;i<4;i++){const service=c.make();expect(await service.syncNow()).toBe(false);if(service.status.errorCode==='cloud_snapshot_progress_stalled'){stalled=true;expect(service.status.retryable).toBe(true);break;}}
  expect(stalled).toBe(true);expect(f.merged).toEqual(['reader/complete.txt']);expect(c.counts().sourceDecryptions).toBe(1);
 });
 

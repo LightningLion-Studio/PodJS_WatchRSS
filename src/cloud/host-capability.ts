@@ -4,7 +4,7 @@ const methods=new Set([
  'app.buildInfo','cloud.acquire','cloud.release','discovery.networkSnapshot','runtime.delay',
  'sql.query','sql.execute','sql.transaction','secure.get','secure.set','secure.delete','secure.update','secure.compareAndSet','secure.acquire','secure.release',
  'crypto.random','crypto.hash','crypto.hmacSha256','crypto.verifyP256','crypto.ecdhPublicKey','crypto.ecdhUnwrap','crypto.hkdfSha256',
- 'crypto.aesGcmEncrypt','crypto.aesGcmDecrypt','crypto.largeAesGcmEncrypt','crypto.largeAesGcmDecrypt','crypto.gzip','crypto.gunzip',
+ 'crypto.openSealedParts','crypto.aesGcmEncrypt','crypto.aesGcmDecrypt','crypto.largeAesGcmEncrypt','crypto.largeAesGcmDecrypt','crypto.gzip','crypto.gunzip',
  'log.append','http.download','uri.parse','file.list','file.createTemp','file.read','file.write','file.stat','file.hash','file.commit','file.delete',
  'file.gzip','file.gunzip','file.htmlText','file.openText','file.readTextChunk','file.closeText',
 ]);

@@ -39,3 +39,13 @@ test('runtime mutation proxies fence account, owner, run cancellation and post-I
   }
  }finally{f.sql.close();}
 });
+
+test('runtime batches account reads only while holding its account lease and rechecks the next batch',async()=>{
+ const f=await readingThroughputFixture(1);try{
+  const observed:string[]=[],run=await runtimeSession(Object.assign(f.repo,{deviceId:async()=> 'watch'}),()=>{},{observe:name=>observed.push(name)});
+  observed.length=0;
+  await run.session.restoreCheckpoint!.readBatch!(async()=>{for(let i=0;i<100;i++)await run.session.assertCurrent();});
+  expect(observed.filter(n=>n==='accountRead')).toHaveLength(1);expect(observed.filter(n=>n==='secure.acquire')).toHaveLength(1);expect(observed.filter(n=>n==='secure.release')).toHaveLength(1);
+  run.values.delete('state_json');await expect(run.session.restoreCheckpoint!.readBatch!(()=>run.session.assertCurrent())).rejects.toThrow('cloud_account_changed');expect(observed.filter(n=>n==='secure.release')).toHaveLength(2);
+ }finally{f.sql.close();}
+});

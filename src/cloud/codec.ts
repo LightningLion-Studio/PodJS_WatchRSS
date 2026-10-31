@@ -15,6 +15,8 @@ export interface RestoreCodecCheckpoint {
  resolve?(object:CloudObject):Promise<Uint8Array>;
  entry?(object:CloudObject,path:string):Promise<Uint8Array|undefined>;
  materializeOnly?:boolean;
+ /** Secure receipt for a complete, authenticated local chunk. No plaintext IO. */
+ length?(object:CloudObject,part:string):Promise<number|undefined>;
  link?(object:CloudObject,parts:string[],length:number):Promise<void>;
  reload?(chunk:CloudChunk):Promise<Uint8Array>;
  metric?(stage:'chunk'|'object'|'source-hash'|'decrypt'|'inflate',bytes:number,started:number,cached:boolean,chunkIndex?:number):void;
@@ -31,6 +33,7 @@ export interface SnapshotCrypto {
  decrypt(key:Uint8Array,aad:Uint8Array,nonce:Uint8Array,ciphertext:Uint8Array):Promise<Uint8Array>;
  gzip(bytes:Uint8Array):Promise<Uint8Array>;
  gunzip(bytes:Uint8Array,maxBytes:number):Promise<Uint8Array>;
+ openSealedParts?(key:Uint8Array,parts:{path:string;aadBase64:string;bytes:number}[],length:number):Promise<Uint8Array>;
 }
 export interface CloudChunk {plaintextSha256:string;ciphertextSha256:string;plaintextBytes:number;ciphertextBytes:number;saltBase64:string;nonceBase64:string;}
 export interface CloudObject {features?:CloudFeatures;entryRef?:{object:string;entryPath:string;encoding:'identity'};objectKeyEnvelope?:{version:1;scope:string;saltBase64:string;nonceBase64:string;ciphertextBase64:string};privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;encoding:'gzip-chunks-v1'|'gzip'|'identity';originalBytes:number;encodedBytes:number;chunks:CloudChunk[];readerKeyEnvelope?:{version:number;saltBase64:string;nonceBase64:string;ciphertextBase64:string;scope?:string};}
@@ -169,6 +172,8 @@ export class WatchCloudCodec {
   * AAD binds account/backend/epoch/generation/head/object/position/semantics. */
  async sealRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){const sealed=await this.crypto.encrypt(await this.projectionKey(key),utf8Encode(scope),bytes);return join([sealed.nonce,sealed.ciphertext]);}
  async openRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){check(bytes.length>=28);return this.crypto.decrypt(await this.projectionKey(key),utf8Encode(scope),bytes.subarray(0,12),bytes.subarray(12));}
+ get batchedRestoreParts(){return !!this.crypto.openSealedParts;}
+ async openRestoreParts(key:Uint8Array,parts:{path:string;scope:string;bytes:number}[],length:number){if(!this.crypto.openSealedParts)throw Error('cloud_snapshot_projection_missing');return this.crypto.openSealedParts(await this.projectionKey(key),parts.map(p=>({path:p.path,aadBase64:bytesToBase64(utf8Encode(p.scope)),bytes:p.bytes})),length);}
  async restore(key:Uint8Array,manifest:CloudManifest,read:(hash:string)=>Promise<Uint8Array>,selected:readonly CloudObject[]=manifest.objects,checkpoint?:RestoreCodecCheckpoint):Promise<Map<string,Uint8Array>>{
   this.guard.require();if(!checkpoint?.manifestValidated)validateManifest(manifest);if(cloudCompatibility(manifest).opaque)throw Error('cloud_format_opaque');const result=new Map<string,Uint8Array>();
   for(const o of selected){await checkpoint?.check();if(checkpoint&&o.encoding==='gzip'&&o.originalBytes>(this.crypto.contiguousOutputLimit??MAX_OBJECT_BYTES))throw Object.assign(Error('cloud_snapshot_unit_capacity'),{code:'cloud_snapshot_unit_capacity'});const started=checkpoint?.now?.()??Date.now();if(cloudCompatibility(o).opaque)throw Error('cloud_format_opaque');
@@ -176,7 +181,9 @@ export class WatchCloudCodec {
    if(o.entryRef){const target=manifest.objects.find(x=>x.name===o.entryRef!.object);check(target&&!target.entryRef);let body:Uint8Array|undefined;if(checkpoint?.entry)body=await checkpoint.entry(target,o.entryRef.entryPath);else{const bytes=checkpoint?.resolve?await checkpoint.resolve(target):(await this.restore(key,manifest,read,[target],checkpoint)).get(target.name);check(bytes);body=await readWrssEntry(bytes,o.entryRef.entryPath,(b,max)=>this.crypto.gunzip(b,max),{yield:this.crypto.yieldTurn});}check(body&&body.length===o.originalBytes,'cloud_entry_ref_missing');if(o.contentSha256)check(await this.crypto.sha256(body)===o.contentSha256,'cloud_entry_ref_hash');await checkpoint?.write(o,'object',body);result.set(o.name,body);checkpoint?.metric?.('object',body.length,started,false);continue;}
    const parts:Uint8Array[]=[];let total=0;let root=key;let unwrapped=false;
    try{
-    for(let index=0;index<o.chunks.length;index++){await checkpoint?.check();const c=o.chunks[index],began=checkpoint?.now?.()??Date.now(),saved=await checkpoint?.read(o,'chunk:'+index);let part=saved;
+    for(let index=0;index<o.chunks.length;index++){await checkpoint?.check();const c=o.chunks[index],began=checkpoint?.now?.()??Date.now();
+     if(checkpoint?.materializeOnly&&o.encoding!=='gzip'&&!o.contentSha256){const length=await checkpoint.length?.(o,'chunk:'+index);if(length!==undefined){total+=length;check(total<=o.originalBytes);checkpoint.metric?.('chunk',length,began,true,index);continue;}}
+     const saved=await checkpoint?.read(o,'chunk:'+index);let part=saved;
      if(!part){if(!unwrapped){const envelope=o.objectKeyEnvelope??o.readerKeyEnvelope;if(envelope){check(envelope.version===1);const derived=await this.crypto.hkdf(key,base64ToBytes(envelope.saltBase64),utf8Encode(o.objectKeyEnvelope?'watchrss/cloud/object-key/v1':'watchrss/cloud/reader-key/v1'));try{root=await this.crypto.decrypt(derived,utf8Encode(`${o.objectKeyEnvelope?'watchrss-object-key-v1':'watchrss-reader-key-v1'}:${envelope.scope||o.name}`),base64ToBytes(envelope.nonceBase64),base64ToBytes(envelope.ciphertextBase64));check(root.length===32);}finally{derived.fill(0);}}unwrapped=true;}
       let blob=await read(c.ciphertextSha256);const hashAt=checkpoint?.now?.()??Date.now();if(!(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256)){check(checkpoint?.reload);blob=await checkpoint.reload(c);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);}check(bytesToBase64(blob.subarray(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.subarray(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));checkpoint?.metric?.('source-hash',blob.length,hashAt,false,index);const decryptAt=checkpoint?.now?.()??Date.now();const plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);checkpoint?.metric?.('decrypt',plain.length,decryptAt,false,index);const inflateAt=checkpoint?.now?.()??Date.now();part=o.encoding==='gzip-chunks-v1'?await this.crypto.gunzip(plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total)):plain;if(o.encoding==='gzip-chunks-v1')checkpoint?.metric?.('inflate',part.length,inflateAt,false,index);await checkpoint?.write(o,'chunk:'+index,part);
      }

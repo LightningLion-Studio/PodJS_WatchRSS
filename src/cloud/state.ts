@@ -6,7 +6,7 @@ interface State {warned_heads?:Record<string,string>;sequence:number;applied_ful
 /** One instance per account/device; durable sequence allocation is serialized with all writes. */
 export class WatchCloudStateStore {
  private tail:Promise<unknown>=Promise.resolve();
- constructor(private store:CloudStringStore,private userId:string,private deviceId:string,private guard:CloudGuard=cloudDisabled,private backendBaseUrl=''){}
+ constructor(private store:CloudStringStore,private userId:string,private deviceId:string,private guard:CloudGuard=cloudDisabled,private backendBaseUrl='',private finishStore?:Pick<CloudStringStore,'get'|'compareAndSet'>){}
  private get key(){return `watchrss.cloud.state.${JSON.stringify([this.backendBaseUrl.replace(/\/+$/,''),this.userId,this.deviceId])}`;}
  private get scope(){return JSON.stringify([this.backendBaseUrl.replace(/\/+$/,''),this.userId]);}
  private get epochKey(){return `watchrss.cloud.epoch.${this.scope}`;}
@@ -21,6 +21,14 @@ export class WatchCloudStateStore {
   this.guard.require();if(!Number.isInteger(shard)||shard<0||shard>=64)throw Error('cloud_snapshot_checkpoint_invalid');
   if(this.store.update)await this.store.update({[this.key+'.restore-v1']:header,[this.key+'.restore-v1.'+shard]:value},[]);
   else{await this.storeRestoreJournal(value,shard);try{await this.storeRestoreJournal(header);}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{restoreEntryCommitted:true});}}
+ }
+ async observeRestoreWindow(scope:string,work:number,progress:boolean){
+  this.guard.require();const store=this.finishStore??this.store,key=this.key+'.restore-window-v1',raw=await store.get(key);let previous:any;try{previous=raw?JSON.parse(raw):undefined;}catch{}
+  const same=previous?.scope===scope&&previous.work===work&&Number.isSafeInteger(previous.zeros)&&previous.zeros>=0;
+  const zeros=progress?0:same?Math.min(1000000,previous.zeros+1):1,value=JSON.stringify({scope,work,zeros});
+  if(store.compareAndSet){if(!await store.compareAndSet(key,raw,value))return 0;}
+  else await this.store.set(key,value);
+  return zeros;
  }
  async clear(){this.guard.require();await this.tail;if(this.store.update)await this.store.update({},[this.statePrefix]);else{await this.store.set(this.key,JSON.stringify({sequence:0,applied_full:{},applied_state:{}}));await this.store.set(this.key+'.restore-v1','');for(let i=0;i<64;i++)await this.store.set(this.key+'.restore-v1.'+i,'');}}
  async contentGeneration(){this.guard.require();await this.tail;return this.store.get(`watchrss.cloud.content-generation.${this.scope}`);}

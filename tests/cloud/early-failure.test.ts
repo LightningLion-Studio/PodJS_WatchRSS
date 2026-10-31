@@ -58,7 +58,7 @@ test('release failure cannot replace the primary failure and its diagnostic expo
 test('foreground suspension and exhausted budget before session open have fixed codes and never open an account',async()=>{
  for(const suspended of [true,false]){const events:any[]=[],execution=new CloudForegroundExecution(!suspended);let now=0,opened=0;
  const service=new WatchCloudSyncService({open:async()=>{execution.begin();opened++;return undefined;},network:async()=>{if(!suspended)now=CLOUD_SYNC_BUDGET_MILLIS;return {active:true,validated:true,wifi:true,metered:false};},hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async run=>run(),now:()=>now,formatDiagnostic:v=>events.push(JSON.parse(v))},enabled);
- expect(await service.syncNow()).toBe(false);expect(opened).toBe(0);expect(events.at(-1)).toMatchObject({code:suspended?'cloud_sync_suspended':'cloud_sync_deadline_exceeded',category:suspended?'suspended':'timeout',outcome:suspended?'deferred':'failed'});}
+ expect(await service.syncNow()).toBe(false);expect(opened).toBe(0);expect(events.at(-1)).toMatchObject({code:suspended?'cloud_sync_suspended':'cloud_sync_deadline_exceeded',category:suspended?'suspended':'timeout',outcome:'deferred'});}
 });
 test('writer busy preserves a manual all intent and the scheduler automatically retries after release without a user press',async()=>{
  const f=await fixture();let now=10,busy=true;const timers:{at:number;fn:()=>void;cancelled:boolean}[]=[],events:any[]=[],values=new Map<string,string>(),modes:string[]=[];let runs=0;

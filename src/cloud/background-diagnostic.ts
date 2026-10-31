@@ -6,7 +6,7 @@ for(const stage of repositoryStages)stages.add(stage);
 const categories=new Set('none busy transport authorization conflict capacity storage gate format suspended server timeout concurrent-library-change runtime other'.split(' '));
 const codes=new Set(['cloud_sync_deadline_exceeded','cloud_sync_suspended','cloud_operation_superseded','cloud_snapshot_progress_stalled','cloud_host_capability_unavailable']);
 const events=new Set(['snapshot-work','window-unit','library-work','records-work','records-replay','records-stage','records-failed','format-sync','format-http']);
-const numbers='remainingMillis bytes completedUnits queries queryMillis transactions transactionMillis hashes hashMillis attempt definitionChanged generationChanged ownedTriggersChanged revisionTriggersChanged durationMillis units batchRows documents keyMillis decodeMillis hashMillis applyMillis elapsedMillis decryptions projectionDecryptions retired submittedBytes responseBytes status'.split(' ');
+const numbers='objectIndex chunkIndex remainingMillis bytes completedUnits queries queryMillis transactions transactionMillis hashes hashMillis attempt definitionChanged generationChanged ownedTriggersChanged revisionTriggersChanged durationMillis units batchRows documents keyMillis decodeMillis hashMillis applyMillis elapsedMillis decryptions projectionDecryptions retired submittedBytes responseBytes status'.split(' ');
 /** Closed/numeric schema only. One in-flight append; no unbounded shutdown queue. */
 export function backgroundDiagnostics(host:CloudHostRequest){
  let pending:{line:string;key?:string;fields?:Record<string,unknown>}[]=[],active:Promise<void>|undefined,last=-Infinity,dropped=0;

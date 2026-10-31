@@ -32,6 +32,7 @@ export class WatchCloudCache {
  /** Untrusted source bytes: only the AEAD codec may consume this path; it
   * verifies descriptor length/hash/header before decryption. */
  async rawChunk(userId:string,hash:string){this.guard.require();this.digest(hash);return this.files.read(`${await this.root(userId)}/chunks/${hash.slice(0,2)}/${hash}.bin`);}
+ async restoreProjectionPath(userId:string,id:string){this.guard.require();this.projectionId(id);return `${await this.root(userId)}/restore-v1/${id}.bin`;}
  async restoreProjection(userId:string,id:string){this.guard.require();this.projectionId(id);return this.files.read(`${await this.root(userId)}/restore-v1/${id}.bin`);}
  async storeRestoreProjection(userId:string,id:string,bytes:Uint8Array){this.guard.require();this.projectionId(id);await this.files.writeAtomic(`${await this.root(userId)}/restore-v1/${id}.bin`,bytes);}
  async chunk(userId:string,hash:string){this.guard.require();this.digest(hash);const bytes=await this.files.read(`${await this.root(userId)}/chunks/${hash.slice(0,2)}/${hash}.bin`);return bytes&&await this.hash(bytes)===hash?bytes:undefined;}

@@ -17,7 +17,8 @@ import type {CloudHostRequest} from './host-ports';
  * receive a fast continuation. The next guest revalidates the original grant. */
 export function cloudBackgroundOutcome(success:boolean,authorized:boolean,status:{errorCode?:string;retryable?:boolean;continuationReady?:boolean;yieldedToWriter?:boolean}):BackgroundOutcome{
  if(!success&&status.yieldedToWriter)return 'busy';
- if(!success&&[CLOUD_HOST_CAPABILITY_UNAVAILABLE,'cloud_snapshot_progress_stalled'].includes(status.errorCode??''))return 'failure';
+ if(!success&&status.errorCode===CLOUD_HOST_CAPABILITY_UNAVAILABLE)return 'failure';
+ if(!success&&status.errorCode==='cloud_snapshot_progress_stalled')return 'retry';
  if(!success&&authorized&&status.continuationReady)return {status:'retry',progress:true};
  return success||status.retryable===false?'success':'retry';
 }
@@ -42,7 +43,7 @@ export default defineBackgroundHandler(async context=>{
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  // The host deadline is absolute Unix ms. Leave time for the normal
  // checkpoint/release path before the native guest's hard interrupt.
- const execution={remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
+ const execution={finishRequest:(async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{if(!['secure.get','secure.compareAndSet'].includes(method))throw Error('invalid_window_finalizer');return window.cleanup(()=>request<T>(method,args));}) as CloudHostRequest,remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
  const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution,{recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
  const account=await runtime.accounts.read();if(!account)return 'success';
  const payload=context.payload as {manual?:boolean;token?:string}|null;

@@ -47,6 +47,12 @@ async function transcode(input:Uint8Array,method:string,maximum:number){
  });
 }
 const crypto:SnapshotCrypto={
+ openSealedParts:async(key,parts,length)=>{
+  const result=await operation<{path:string;size:number;sha256:string}>('crypto.openSealedParts',{keyBase64:b64(key),parts,length});
+  if(!/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(result.path))throw Error('cloud_snapshot_projection_missing');
+  try{const output=await files.read(result.path);if(!output||output.length!==length||result.size!==length||await crypto.sha256(output)!==result.sha256)throw Error('cloud_snapshot_projection_missing');return output;}
+  finally{await fileChunks.remove(result.path).catch(()=>{});}
+ },
  contiguousOutputLimit:64*1024*1024,
  yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),
  random:async size=>bytes((await operation<{bytesBase64:string}>('crypto.random',{bytes:size})).bytesBase64),
