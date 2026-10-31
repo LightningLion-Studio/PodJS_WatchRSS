@@ -14,6 +14,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  if(code==='cloud_host_capability_unavailable'||message==='cloud_host_capability_unavailable')return 'runtime';
  if(code==='library_busy'||/Local library changed/.test(message))return 'concurrent-library-change';
  if(/setTimeout is not defined|Can't find variable: setTimeout/.test(message))return 'runtime';
+ if(['secure_quota','secure_store_too_large','secure_read_failed','secure_store_corrupt'].includes(code)||['secure_quota','secure_store_too_large','secure_read_failed','secure_store_corrupt'].includes(message))return 'storage';
  if(code==='ENOSPC'||/ENOSPC|SQLITE_FULL|database or disk is full/.test(message))return 'storage';
  if(code==='r48_write_feature_disabled'||/cloud_format_(?:write|migration)_disabled/.test(message))return 'gate';
  if(n===401||n===403||/device_session_revoked/.test(code))return 'authorization';
