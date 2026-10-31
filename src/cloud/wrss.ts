@@ -1,3 +1,4 @@
+import {cpuWorkAsync,cpuWork} from '@podjs/framework/cpu-work';
 import {utf8Encode,utf8Decode} from './types';
 import {crc32,crc32Async,type CodecWorkOptions} from '@podjs/framework/bytes';
 export {crc32};
@@ -39,7 +40,7 @@ export async function readWrss(bytes:Uint8Array,gunzip:(b:Uint8Array,max:number)
 /** Validate the complete directory once, but inflate/CRC only requested entries.
  * Cloud AEAD still authenticates the whole backing object. No ZIP path is used
  * as a filesystem path. Useful for entryRef and resumable archive projection. */
-export function indexWrss(bytes:Uint8Array){
+export function indexWrss(bytes:Uint8Array){return cpuWork('archive-index','bytes',bytes.length,()=>{
  check(bytes.length>=22&&bytes.length<=MAX);const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let end=bytes.length-22;
  for(;end>=Math.max(0,bytes.length-65557);end--)if(view.getUint32(end,true)===0x06054b50&&end+22+view.getUint16(end+20,true)===bytes.length)break;
  check(end>=0&&end>=bytes.length-65557&&view.getUint16(end+4,true)===0&&view.getUint16(end+6,true)===0);
@@ -50,7 +51,7 @@ export function indexWrss(bytes:Uint8Array){
   check(!(flags&1)&&[0,8].includes(method)&&at+46+n+extra+comment<=end&&local+30<=start);const name=utf8Decode(bytes.subarray(at+46,at+46+n));check(length<=entryLimit(name)&&packed<=entryLimit(name)&&name.length&&!name.startsWith('/')&&!name.split('/').some(p=>p==='..'||p==='.')&&!name.includes('\\')&&!entries.has(name));
   check(view.getUint32(local,true)===0x04034b50&&view.getUint16(local+8,true)===method);const ln=view.getUint16(local+26,true),le=view.getUint16(local+28,true),body=local+30+ln+le;check(body+packed<=start&&utf8Decode(bytes.subarray(local+30,local+30+ln))===name);total+=length;check(total<=MAX);entries.set(name,{body,packed,length,method,crc});at+=46+n+extra+comment;
  }check(at===end);return entries;
-}
+});}
 export async function readWrssEntry(bytes:Uint8Array,name:string,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>,options:CodecWorkOptions={},directory=indexWrss(bytes)){
  const e=directory.get(name);if(!e)return;let raw=bytes.subarray(e.body,e.body+e.packed);
  if(e.method===8){const trailer=new Uint8Array(8),v=new DataView(trailer.buffer);v.setUint32(0,e.crc,true);v.setUint32(4,e.length,true);raw=await gunzip(concat([new Uint8Array([31,139,8,0,0,0,0,0,0,3]),raw,trailer]),e.length);}
@@ -60,7 +61,7 @@ export async function readWrssEntry(bytes:Uint8Array,name:string,gunzip:(b:Uint8
 export interface WrssRangeReader {length:number;read(offset:number,length:number):Promise<Uint8Array>;}
 /** A seekable authenticated backing object. Only the directory and requested
  * entry bytes enter memory; a thousand entryRefs do not re-open the whole ZIP. */
-export async function openWrssRange(reader:WrssRangeReader,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>,options:CodecWorkOptions={}){
+export async function openWrssRange(reader:WrssRangeReader,gunzip:(b:Uint8Array,max:number)=>Promise<Uint8Array>,options:CodecWorkOptions={}){return cpuWorkAsync('archive-index','bytes',reader.length,async ()=>{
  const length=reader.length;check(Number.isSafeInteger(length)&&length>=22&&length<=MAX);const base=Math.max(0,length-65557),tail=await reader.read(base,length-base),view=new DataView(tail.buffer,tail.byteOffset,tail.byteLength);let end=tail.length-22;
  for(;end>=0;end--)if(view.getUint32(end,true)===0x06054b50&&end+22+view.getUint16(end+20,true)===tail.length)break;
  check(end>=0&&view.getUint16(end+4,true)===0&&view.getUint16(end+6,true)===0);const count=view.getUint16(end+10,true),size=view.getUint32(end+12,true),start=view.getUint32(end+16,true);check(view.getUint16(end+8,true)===count&&start+size===base+end);
@@ -71,4 +72,4 @@ export async function openWrssRange(reader:WrssRangeReader,gunzip:(b:Uint8Array,
  return {has:(name:string)=>entries.has(name),async get(name:string){const e=entries.get(name);if(!e)return;const h=await reader.read(e.local,30),v=new DataView(h.buffer,h.byteOffset,h.byteLength);check(v.getUint32(0,true)===0x04034b50&&v.getUint16(8,true)===e.method);const n=v.getUint16(26,true),extra=v.getUint16(28,true),body=e.local+30+n+extra;check(body+e.packed<=start&&utf8Decode(await reader.read(e.local+30,n))===name);let raw=await reader.read(body,e.packed);
   if(e.method===8){const trailer=new Uint8Array(8),t=new DataView(trailer.buffer);t.setUint32(0,e.crc,true);t.setUint32(4,e.length,true);raw=await gunzip(concat([new Uint8Array([31,139,8,0,0,0,0,0,0,3]),raw,trailer]),e.length);}check(raw.length===e.length&&await crc32Async(raw,options)===e.crc);return raw;
  }};
-}
+});}

@@ -1,3 +1,4 @@
+import {cpuWorkAsync} from '@podjs/framework/cpu-work';
 import {repositoryWork,type RepositoryDiagnostic} from './repository-work';
 import {projectionGuard} from './domain-definitions';
 import {jsonRecordTupleCodec} from '@podjs/framework/record-tuples';
@@ -123,19 +124,19 @@ export class LibraryProjectionCache {
   let rows=this.loaded.get(scope+'\0'+[h.generation,h.revision,h.seq].join(':'));
   if(!rows){rows=[];
   const backfill:{sql:string;params:SqlParams}[]=[];
-  for(const r of await querySyncPages(this.db,'SELECT p.article_id,p.source_item,l.json AS light_json,CASE WHEN l.json IS NULL THEN p.json ELSE NULL END AS full_json FROM sync_projection_rows p LEFT JOIN sync_projection_light l ON l.scope=p.scope AND l.generation=p.generation AND l.article_id=p.article_id WHERE p.scope=? AND p.generation=? ORDER BY p.position,p.article_id',[scope,String(h.generation)],400)){
+  const cached=await querySyncPages(this.db,'SELECT p.article_id,p.source_item,l.json AS light_json,CASE WHEN l.json IS NULL THEN p.json ELSE NULL END AS full_json FROM sync_projection_rows p LEFT JOIN sync_projection_light l ON l.scope=p.scope AND l.generation=p.generation AND l.article_id=p.article_id WHERE p.scope=? AND p.generation=? ORDER BY p.position,p.article_id',[scope,String(h.generation)],400);const decodedRows=rows;const valid=await cpuWorkAsync('projection-rebuild','items',cached.length,async()=>{for(const r of cached){
    try{let light=r.light_json!=null,p:CachedProjection;
     try{p=light?readLight(JSON.parse(String(r.light_json))):JSON.parse(String(r.full_json));}
-    catch{if(!light)throw Error('Invalid full projection');const full=(await this.db.query('SELECT json FROM sync_projection_rows WHERE scope=? AND generation=? AND article_id=?',[scope,String(h.generation),r.article_id]))[0];if(!full)return;p=JSON.parse(String(full.json));light=false;}
-    if(!p.article?.articleId||p.article.articleId!==String(r.article_id)||p.manifest?.articleId!==p.article.articleId||p.encodedBody!==null)return;
+    catch{if(!light)throw Error('Invalid full projection');const full=(await this.db.query('SELECT json FROM sync_projection_rows WHERE scope=? AND generation=? AND article_id=?',[scope,String(h.generation),r.article_id]))[0];if(!full)return false;p=JSON.parse(String(full.json));light=false;}
+    if(!p.article?.articleId||p.article.articleId!==String(r.article_id)||p.manifest?.articleId!==p.article.articleId||p.encodedBody!==null)return false;
     let encodedBody:Uint8Array|null=null;
-    if(!Number(r.source_item)&&p.manifest.bodyAvailable){const bytes=p.syntheticBytes;if(!Array.isArray(bytes)||bytes.length<1||bytes.length>256||bytes.some(b=>!Number.isInteger(b)||b<0||b>255))return;encodedBody=Uint8Array.from(bytes);const hash=sha256Hex(encodedBody);if(p.article.contentText!==''||p.article.contentHtml!==null||p.article.independentSaved||p.article.favoriteSaved||p.article.watchLaterSaved||hash!==p.manifest.bodyHash||p.manifest.bodyByteCount!==bytes.length||p.manifest.chunkHashes.length!==1||p.manifest.chunkHashes[0]!==hash)return;}
+    if(!Number(r.source_item)&&p.manifest.bodyAvailable){const bytes=p.syntheticBytes;if(!Array.isArray(bytes)||bytes.length<1||bytes.length>256||bytes.some(b=>!Number.isInteger(b)||b<0||b>255))return false;encodedBody=Uint8Array.from(bytes);const hash=sha256Hex(encodedBody);if(p.article.contentText!==''||p.article.contentHtml!==null||p.article.independentSaved||p.article.favoriteSaved||p.article.watchLaterSaved||hash!==p.manifest.bodyHash||p.manifest.bodyByteCount!==bytes.length||p.manifest.chunkHashes.length!==1||p.manifest.chunkHashes[0]!==hash)return false;}
     const prepared={article:p.article,manifest:p.manifest,encodedBody},sourceItem=Number(r.source_item);
     if(light)this.lazy.set(prepared,{scope,generation:String(h.generation),id:p.article.articleId,sourceItem});
     else backfill.push({sql:'INSERT OR REPLACE INTO sync_projection_light(scope,generation,article_id,json) SELECT scope,generation,article_id,? FROM sync_projection_rows WHERE scope=? AND generation=? AND article_id=?',params:[JSON.stringify(lightProjection(prepared,sourceItem)),scope,String(h.generation),p.article.articleId]});
-    rows.push({prepared,sourceItem});if(rows.length%32===0)await this.yieldTurn();
-   }catch{return;}
-  }
+    decodedRows.push({prepared,sourceItem});if(decodedRows.length%32===0)await this.yieldTurn();
+   }catch{return false;}
+  }return true;});if(!valid)return;
   // Existing full caches remain readable; only disposable local metadata is
   // backfilled, with the same revision guard used by normal publication.
   for(let at=0;at<backfill.length;at+=200)await this.db.transaction([revisionGuard(revision),...backfill.slice(at,at+200)]);
@@ -145,7 +146,7 @@ export class LibraryProjectionCache {
   if(urls.length>64)return;
   return {generation:String(h.generation),revision:Number(h.revision),seq,rows,...(events.length?{urls,readingUrls:[...new Set(events.filter(r=>!['cacheUrl','cacheNone','source','none'].includes(String(r.kind))&&(!bookMode||!['bookUrl','bookBodyUrl'].includes(String(r.kind)))).flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))],bodyUrls:[...new Set(events.filter(r=>r.kind==='bodyUrl'||r.kind==='cacheUrl'||!bookMode&&r.kind==='bookBodyUrl').flatMap(r=>[r.old_url,r.new_url].filter(v=>typeof v==='string'&&v.length>0) as string[]))]}:{})};
  }
- async full(prepared:readonly PreparedArticle[]):Promise<PreparedArticle[]>{
+ async full(prepared:readonly PreparedArticle[]):Promise<PreparedArticle[]>{return cpuWorkAsync('projection-rebuild','items',prepared.length,async()=>{
   const groups=new Map<string,{p:PreparedArticle;ref:{scope:string;generation:string;id:string;sourceItem:number}}[]>();
   for(const p of prepared){const ref=this.lazy.get(p);if(!ref)continue;const key=JSON.stringify([ref.scope,ref.generation]),group=groups.get(key)??[];group.push({p,ref});groups.set(key,group);}
   for(const group of groups.values())for(let at=0;at<group.length;at+=32){const page=group.slice(at,at+32),ref=page[0]!.ref;
@@ -155,7 +156,7 @@ export class LibraryProjectionCache {
     p.article=full.article;this.lazy.delete(p);
    }
   }return [...prepared];
- }
+ });}
  async publish(scope:string,revision:number,articles:readonly PreparedArticle[],bindings:ReadonlyMap<string,number>,previous?:ProjectionPlan,urls?:readonly string[],observedSeq?:number,definitionGeneration?:string){
   await this.initialize();const guards=definitionGeneration?[projectionGuard(definitionGeneration)]:[];let generation=Date.now().toString(36)+'-'+(++serial);const seq=observedSeq??await this.sequence();
   const dirty=urls?new Set(urls):undefined,write=dirty?articles.filter(p=>dirty.has(p.article.url)):articles;

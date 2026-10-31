@@ -1,3 +1,4 @@
+import {cpuSort} from '@podjs/framework/cpu-work';
 import {lengthPrefixFields} from '@podjs/framework/crypto';
 import {encodeUtf8} from '@podjs/framework/bytes';
 export type BookHash=(bytes:Uint8Array)=>Promise<string>;
@@ -29,7 +30,7 @@ const compare=(a:readonly (string|number)[],b:readonly (string|number)[])=>{for(
 export function mergeBook(local:BookState|undefined,remote:BookState):BookState {
  validateBookShape(remote);if(!local)return cleanBook(remote);validateBookShape(local);check(local.bookId===remote.bookId&&local.fingerprint===remote.fingerprint&&local.chapterCount===remote.chapterCount);
  const order=(s:BookState)=>[s.updatedAt,s.sourceDeviceId,s.title,s.sourceUrl??'',s.kind??''];
- return {...cleanBook(compare(order(remote),order(local))>0?remote:local),deletedChapters:[...new Set([...local.deletedChapters,...remote.deletedChapters])].sort((a,b)=>a-b),deletionClock:Math.max(local.deletionClock,remote.deletionClock),deletedAt:Math.max(local.deletedAt,remote.deletedAt),deleted:local.deleted||remote.deleted};
+ return {...cleanBook(compare(order(remote),order(local))>0?remote:local),deletedChapters:cpuSort([...new Set([...local.deletedChapters,...remote.deletedChapters])],(a,b)=>a-b),deletionClock:Math.max(local.deletionClock,remote.deletionClock),deletedAt:Math.max(local.deletedAt,remote.deletedAt),deleted:local.deleted||remote.deleted};
 }
 export function validateBookReading(raw:unknown):asserts raw is BookReading {
  check(!!raw&&typeof raw==='object'&&!Array.isArray(raw));const v=raw as BookReading;

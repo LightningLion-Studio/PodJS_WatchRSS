@@ -1,3 +1,4 @@
+import {cpuWorkAsync,cpuWork,cpuJsonParse,cpuJsonStringify,cpuSort} from '@podjs/framework/cpu-work';
 import {rethrowSnapshotDeferred} from './snapshot-deferral';
 import {legacyBookReadingArticle} from '../books/legacy-cloud-reading';
 import type {RestoreApplyCheckpoint} from './snapshot-checkpoint';
@@ -77,13 +78,13 @@ export class WatchCloudLibraryAdapter {
  private bookMappings=new Map<string,CloudBookSnapshot['mappings'][number][]>();
  private bookStates=new Map<string,BookState>();
  private bookReading=new Map<string,BookReading>();
- private cacheBooks(snapshot:CloudBookSnapshot|undefined){this.bookExport=snapshot;this.bookMappings.clear();this.bookStates.clear();this.bookReading.clear();if(!snapshot)return;for(const m of snapshot.mappings)for(const key of ['id:'+m.articleId,'url:'+m.url]){const rows=this.bookMappings.get(key)??[];rows.push(m);this.bookMappings.set(key,rows);}for(const b of snapshot.books)this.bookStates.set(b.bookId,b);for(const r of snapshot.reading)this.bookReading.set(r.bookId+':'+r.chapterIndex,r);}
+ private cacheBooks(snapshot:CloudBookSnapshot|undefined){return cpuWork('book-match','items',(snapshot?.mappings.length??0)+(snapshot?.books.length??0)+(snapshot?.reading.length??0),()=>{this.bookExport=snapshot;this.bookMappings.clear();this.bookStates.clear();this.bookReading.clear();if(!snapshot)return;for(const m of snapshot.mappings)for(const key of ['id:'+m.articleId,'url:'+m.url]){const rows=this.bookMappings.get(key)??[];rows.push(m);this.bookMappings.set(key,rows);}for(const b of snapshot.books)this.bookStates.set(b.bookId,b);for(const r of snapshot.reading)this.bookReading.set(r.bookId+':'+r.chapterIndex,r);});}
  // Exact public identity inputs only. This cache contains no reading/save
  // values, pool-source bindings, account keys, receipts or persistent state.
  private readingIdentityCache=new Map<string,{canonical:string;hash:string;aliases:string[];bytes:number}>();
  private readingIdentityBytes=0;
  private async readingIdentity(a:ExportedArticle){
-  this.guard.require();const key=JSON.stringify([a.cloudRssArticleId??null,a.articleId,a.url,a.rssSourceUrl,a.title,a.contentHash]);
+  this.guard.require();const key=cpuJsonStringify([a.cloudRssArticleId??null,a.articleId,a.url,a.rssSourceUrl,a.title,a.contentHash]);
   const old=this.readingIdentityCache.get(key);if(old){this.readingIdentityCache.delete(key);this.readingIdentityCache.set(key,old);return old;}
   const articleId=await this.articleIdentity(a);if(!articleId)return;
   const hash=await this.crypto.sha256(utf8Encode(articleId)),sourceId=await rssSourceKey(a.rssSourceUrl!,this.crypto.sha256),aliases:string[]=[];
@@ -99,7 +100,7 @@ export class WatchCloudLibraryAdapter {
  private retainedReadingMetadata=new Map<string,ExportedArticle>();
  private retainedSources=new Map<string,Record<string,any>>();
  async exportRecords(work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T)=>Promise<T>):Promise<RecordDocument[]>{
-  this.guard.require();const measure=work??(async<T>(_stage:string,_units:number,run:()=>Promise<T>|T)=>run());const s=await measure('projection',1,()=>this.repository.cloudSnapshot(false,()=>this.guard.require())),out:RecordDocument[]=[],protectedArticles=await this.repository.cloudArticleRegisters?.()??[],protectedIds=new Set(protectedArticles.flatMap(d=>[d.value.articleId,...(d.projectionAliases??[])]));
+  this.guard.require();const measure=work??(async<T>(_stage:string,_units:number,run:()=>Promise<T>|T)=>run());const s=await measure('projection',1,()=>this.repository.cloudSnapshot(false,()=>this.guard.require())),out:RecordDocument[]=[],protectedArticles=await this.repository.cloudArticleRegisters?.()??[],protectedIds=new Set(protectedArticles.flatMap(d=>[d.value.articleId,...(d.projectionAliases??[])]));return cpuWorkAsync('projection-rebuild','items',s.sources.length+s.stateArticles.length,async()=>{
   for(const source of s.sources){const sourceId=this.sourceIds.get(source.url);out.push({kind:'source',value:{url:source.url,sourceDeviceId:source.sourceDeviceId,sourceId:sourceId??'',title:source.title,sortOrder:source.sortOrder,isPinned:source.isPinned,updatedAt:source.updatedAt,deleted:source.deleted,deletedAt:source.deletedAt,...Object.fromEntries(Object.entries(this.retainedSources.get(source.url)??{}).filter(([k])=>['useOriginalContent','continuePlaybackInBackground'].includes(k)))}});}
   for(const a of s.stateArticles){
    if(protectedIds.has(a.articleId))continue;
@@ -118,8 +119,8 @@ export class WatchCloudLibraryAdapter {
   const ids=new Set(out.filter(d=>d.kind==='rss-state').map(d=>d.value.sourceId+':'+d.value.articleIdHash));for(const [id,doc]of this.pendingReading)if(!ids.has(id)&&!blocked.has(doc.value.sourceId)){const current=combined.get(this.readingAliases.get(id)??'');out.push(current?{kind:doc.kind,value:mergeReadingValue(doc.value,current.value)}:doc);}
   const books=await this.repository.cloudBooks?.();this.cacheBooks(books);if(books){out.push(...books.books.map(value=>({kind:'book',value})),...books.reading.map(value=>({kind:'book-reading',value})));}
   return [...out,...protectedArticles];
- }
- async bookReplacement(legacy:RecordDocument){if(legacy.kind!=='article')return;if(!this.bookExport)this.cacheBooks(await this.repository.cloudBooks?.());if(!this.bookExport)return;const exact=this.bookMappings.get('id:'+legacy.value.articleId)??[],candidates=exact.length?exact:this.bookMappings.get('url:'+legacy.value.url)??[];if(new Set(candidates.map(m=>m.bookId+':'+m.chapterIndex)).size!==1)return;const mapping=candidates[0]!;const book=this.bookStates.get(mapping.bookId);if(!book)return;const reading=this.bookReading.get(book.bookId+':'+mapping.chapterIndex);const interacted=legacy.value.isRead||legacy.value.readingProgress||legacy.value.readingPositionChangedAt||legacy.value.favoriteChangedAt||legacy.value.watchLaterChangedAt||legacy.value.favoriteSaved||legacy.value.watchLaterSaved;
+ });}
+ async bookReplacement(legacy:RecordDocument){if(legacy.kind!=='article')return;if(!this.bookExport)this.cacheBooks(await this.repository.cloudBooks?.());if(!this.bookExport)return;const exact=this.bookMappings.get('id:'+legacy.value.articleId)??[],candidates=exact.length?exact:this.bookMappings.get('url:'+legacy.value.url)??[];if(cpuWork('book-match','items',candidates.length,()=>new Set(candidates.map(m=>m.bookId+':'+m.chapterIndex))).size!==1)return;const mapping=candidates[0]!;const book=this.bookStates.get(mapping.bookId);if(!book)return;const reading=this.bookReading.get(book.bookId+':'+mapping.chapterIndex);const interacted=legacy.value.isRead||legacy.value.readingProgress||legacy.value.readingPositionChangedAt||legacy.value.favoriteChangedAt||legacy.value.watchLaterChangedAt||legacy.value.favoriteSaved||legacy.value.watchLaterSaved;
   if(interacted&&(!reading||['readingPositionChangedAt','favoriteChangedAt','watchLaterChangedAt'].some(k=>((reading as unknown as Record<string,any>)[k]??0)<(legacy.value[k]??0))))return;
   return {book:{kind:'book',value:book},...(reading?{reading:{kind:'book-reading',value:reading}}:{})};
  }
@@ -147,7 +148,7 @@ export class WatchCloudLibraryAdapter {
   if(hydrateOnly)return 0;
   if(sources.length||articles.length)changed+=await measure('apply-metadata',sources.length+articles.length,()=>this.mergeCloud(sources,articles,'cloud-records',()=>this.guard.require(),work));return changed+await this.applyReadingStates(work);
  }
- async applyReadingStates(work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T)=>Promise<T>){
+ async applyReadingStates(work?:<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T)=>Promise<T>){return cpuWorkAsync('alias-match','items',this.pendingReading.size,async ()=>{
   this.guard.require();if(!this.pendingReading.size)return 0;await this.checkReadingRevision();
   const measure=work??(async<T>(_stage:string,_units:number,run:()=>Promise<T>|T)=>run());let changed=0;const readCandidates=()=>this.repository.cloudReadingCandidates?this.repository.cloudReadingCandidates(()=>this.guard.require(),[...this.pendingReading.entries()].filter(([id])=>!this.matchedReading.has(id)).map(([,d])=>d.value.articleIdHash),work):this.repository.cloudSnapshot(false,()=>this.guard.require()).then(s=>s.stateArticles);
   let candidates=await measure('reading-candidates',1,readCandidates);const articles:ExportedArticle[]=[];
@@ -176,7 +177,7 @@ export class WatchCloudLibraryAdapter {
    if(articles.length>=20){const batch=articles.splice(0);changed+=await measure('reading-merge',batch.length,()=>this.mergeReading(batch));}
   }
   return changed+(articles.length?await measure('reading-merge',articles.length,()=>this.mergeReading(articles)):0);
- }
+ });}
  private async mergeReading(articles:readonly ExportedArticle[]){if(!this.repository.mergeCloudReading)return this.mergeCloud([],articles,'cloud-records');const changed=await this.repository.mergeCloudReading(articles,()=>this.guard.require());this.readingRevision=await this.repository.cloudReadingRevision?.();return changed;}
  /** Hash-only states cannot fabricate a missing article. Expand the normal
   * inventory only for sources with authenticated states still awaiting entries. */
@@ -189,7 +190,7 @@ export class WatchCloudLibraryAdapter {
  async exportPayloads(full:boolean):Promise<{objects:LogicalObject[];fingerprint:string;articleIds?:string[];bookIds?:string[];removedArticleIds?:string[];removedArticleUrls?:string[];removedObjectNames?:string[];pendingPrivateArticles?:number}>{
   this.guard.require();if(!full)return {objects:[],fingerprint:''};const s=await this.repository.cloudSnapshot(true,()=>this.guard.require());const pending=new Set(s.pendingPrivateArticleIds??(s.pendingPrivateBodies?s.articles.filter(a=>!a.contentText.trim()&&!a.contentHtml?.trim()).map(a=>a.articleId):[]));
   const retired=new Set(s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId));for(const id of retired)pending.delete(id);
-  const rows=s.articles.filter(a=>!retired.has(a.articleId)&&!pending.has(a.articleId)&&!a.deleted&&(privateCloudBody(a)||a.favoriteSaved||a.watchLaterSaved)).sort((a,b)=>a.articleId<b.articleId?-1:a.articleId>b.articleId?1:0);
+  const rows=cpuSort(s.articles.filter(a=>!retired.has(a.articleId)&&!pending.has(a.articleId)&&!a.deleted&&(privateCloudBody(a)||a.favoriteSaved||a.watchLaterSaved)),(a,b)=>a.articleId<b.articleId?-1:a.articleId>b.articleId?1:0);
   const entries=new Map<string,Uint8Array>(),metadata:Record<string,any>[]=[],fingerprints:any[]=[];
   for(const a of rows){const stem='bodies/'+await this.crypto.sha256(utf8Encode(a.articleId)),text=utf8Encode(a.contentText),html=a.contentHtml===null?undefined:utf8Encode(a.contentHtml);entries.set(stem+'.txt',text);if(html)entries.set(stem+'.html',html);
    const m:Record<string,any>={...stateJson(a),sourceDeviceId:a.bodySourceDeviceId??a.sourceDeviceId,updatedAt:a.importedAt,readingProgress:0,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,isRead:false,contentTextEntry:stem+'.txt',contentHtmlEntry:html?stem+'.html':null};metadata.push(m);
@@ -202,7 +203,7 @@ export class WatchCloudLibraryAdapter {
   return {objects,removedObjectNames,removedArticleUrls:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.url),removedArticleIds:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId),fingerprint:await this.crypto.sha256(utf8Encode(canonical(fingerprints))),articleIds:[...new Set(rows.flatMap(a=>[a.articleId,...(a.cloudLegacyArticleIds??[])]))],bookIds,pendingPrivateArticles:pending.size+missingBooks};
  }
  private async decode(bytes:Uint8Array,state:boolean):Promise<{sources:SyncedSource[];articles:ExportedArticle[]}>{
-  const root=JSON.parse(utf8Decode(bytes));
+  const root=cpuJsonParse(utf8Decode(bytes));
   if(!root||!Array.isArray(root.articles)||root.articles.length>100000)throw Error('无效云资料');
   if(state&&(root.format!=='watchrss-rss-state'||root.version!==1))throw Error('云端RSS状态格式不受支持');
   if(!state&&(root.action!=='syncLibrary'||![13,14].includes(root.version)))throw Error('云资料格式不受支持');
@@ -236,7 +237,7 @@ export class WatchCloudLibraryAdapter {
   // Keep collision order: descriptors use the first live candidate; unmatched
   // payloads use the first candidate allowed by the current overlay.
   let readerIndex:Map<string,ExportedArticle[]>|undefined=options?this.restoreReaderIndex:undefined,readerTail:IterableIterator<ExportedArticle>|undefined=options?(this.restoreReaderTail??=currentArticles.values()):undefined,readerWork=0;
-  const findReader=async(name:string,requireAllowed=false)=>{
+  const findReader=async(name:string,requireAllowed=false):Promise<ExportedArticle|undefined>=>{return cpuWorkAsync('alias-match','items',currentArticles.size+this.restoreReaderPending.length,async()=>{
    this.guard.require();
    readerIndex??=new Map();readerTail??=currentArticles.values();
    const allowed=(a:ExportedArticle)=>!requireAllowed||this.overlay.allow('article',a.articleId,remote);
@@ -253,13 +254,13 @@ export class WatchCloudLibraryAdapter {
    }
    if(this.repository.cloudRestoreMetadata&&!this.restoreMetadataEnded){await options?.checkpoint.check();const page=await this.repository.cloudRestoreMetadata({after:this.restoreMetadataAfter,limit:100},()=>this.guard.require());for(const a of page.articles){currentArticles.set(a.articleId,a);this.restoreReaderPending.push(a);}if(page.next===undefined)this.restoreMetadataEnded=true;else this.restoreMetadataAfter=page.next;return findReader(name,requireAllowed);}
    if(options){this.restoreReaderPending=[];this.restoreReaderPendingAt=0;}return undefined;
-  };
+  });};
   const lost=()=>{abandoned++;warnings.push('已放弃结构不完整、无法恢复的私有条目');};
   const retry=()=>{pending++;warnings.push('私有条目缺少正文，等待重试');};
   for(const [name,state]of [['library-sync.json',false],['rss-state.json',true]] as const){const bytes=payload.get(name);if(bytes){
-   if(options){const cp=options.checkpoint,root=JSON.parse(utf8Decode(bytes));if(!root||!Array.isArray(root.articles)||root.articles.length>100000)throw Error('无效云资料');
+   if(options){const cp=options.checkpoint,root=cpuJsonParse(utf8Decode(bytes));if(!root||!Array.isArray(root.articles)||root.articles.length>100000)throw Error('无效云资料');
     // Bound legacy per-article gzip work. Already committed rows never decode again.
-    for(let offset=0;offset<Math.max(1,root.articles.length);offset++){await cp.check();const unit='legacy:'+name+':'+offset;if(cp.has(unit)){cp.progress?.(offset+1,root.articles.length);continue;}await loadCurrent(root.articles.slice(offset,offset+1));const part=await this.decode(utf8Encode(JSON.stringify({...root,...(state?{sources:offset?[]:root.sources}:{rssSources:offset?[]:root.rssSources}),articles:root.articles.slice(offset,offset+1)})),state);part.articles=part.articles.map(a=>{const known=currentArticles.get(a.articleId);return known&&known.contentHash!==a.contentHash?{...a,contentHash:known.contentHash,contentHtml:null,contentText:''}:a;});bookChanged+=await this.mergeCloud(part.sources,part.articles,remote,()=>this.guard.require());remember(part.articles);await cp.commit(unit);cp.progress?.(offset+1,root.articles.length);}
+    for(let offset=0;offset<Math.max(1,root.articles.length);offset++){await cp.check();const unit='legacy:'+name+':'+offset;if(cp.has(unit)){cp.progress?.(offset+1,root.articles.length);continue;}await loadCurrent(root.articles.slice(offset,offset+1));const part=await this.decode(utf8Encode(cpuJsonStringify({...root,...(state?{sources:offset?[]:root.sources}:{rssSources:offset?[]:root.rssSources}),articles:root.articles.slice(offset,offset+1)})),state);part.articles=part.articles.map(a=>{const known=currentArticles.get(a.articleId);return known&&known.contentHash!==a.contentHash?{...a,contentHash:known.contentHash,contentHtml:null,contentText:''}:a;});bookChanged+=await this.mergeCloud(part.sources,part.articles,remote,()=>this.guard.require());remember(part.articles);await cp.commit(unit);cp.progress?.(offset+1,root.articles.length);}
     continue;
    }
    const value=await this.decode(bytes,state);await loadCurrent(value.articles);value.articles=value.articles.map(a=>{const known=currentArticles.get(a.articleId);return known&&known.contentHash!==a.contentHash?{...a,contentHash:known.contentHash,contentHtml:null,contentText:''}:a;});decoded.push(value);}}
@@ -271,8 +272,8 @@ export class WatchCloudLibraryAdapter {
   for(const archiveName of [...new Set(archiveNames)]){const archive=payload.get(archiveName);if(archive){
    if(options){
     const cp=options.checkpoint;await cp.check();let directory:{has(name:string):boolean},entry:(name:string)=>Promise<Uint8Array|undefined>;try{if(options.archiveReader&&archiveName==='private-library.wrss'){const reader=await openWrssRange(options.archiveReader,(b,max)=>this.crypto.gunzip(b,max),{yield:this.crypto.yieldTurn});directory=reader;entry=reader.get;}else{const index=indexWrss(archive);directory=index;entry=name=>readWrssEntry(archive,name,(b,max)=>this.crypto.gunzip(b,max),{yield:this.crypto.yieldTurn},index);}}catch(error){rethrowSnapshotDeferred(error);await cp.check();if(String(error).includes('cloud_snapshot_projection_missing'))throw error;lost();continue;}
-    let rows:any[];try{const header=JSON.parse(utf8Decode(await entry('manifest.json')??new Uint8Array()));if(header.format!=='watchrss-library-backup'||![1,2,3].includes(header.version))throw Error('cloud_archive_invalid');rows=JSON.parse(utf8Decode(await entry('articles.json')??new Uint8Array()));if(!Array.isArray(rows)||rows.length>100000)throw Error('cloud_archive_invalid');}catch(error){rethrowSnapshotDeferred(error);await cp.check();if(error instanceof SyntaxError||String(error).includes('cloud_archive_invalid'))lost();else retry();continue;}
-    if(archiveName==='private-library.wrss'&&directory.has('books.json')){try{const books=JSON.parse(utf8Decode((await entry('books.json'))!));if(!Array.isArray(books)||books.length>100000)throw Error('cloud_archive_invalid');for(const descriptor of books){await cp.check();if(!cp.has('book:'+descriptor.bookId))bookBodies.push({descriptor,loadBytes:()=>entry(descriptor.packagePath)});}}catch(error){rethrowSnapshotDeferred(error);await cp.check();lost();}}
+    let rows:any[];try{const header=cpuJsonParse(utf8Decode(await entry('manifest.json')??new Uint8Array()));if(header.format!=='watchrss-library-backup'||![1,2,3].includes(header.version))throw Error('cloud_archive_invalid');rows=cpuJsonParse(utf8Decode(await entry('articles.json')??new Uint8Array()));if(!Array.isArray(rows)||rows.length>100000)throw Error('cloud_archive_invalid');}catch(error){rethrowSnapshotDeferred(error);await cp.check();if(error instanceof SyntaxError||String(error).includes('cloud_archive_invalid'))lost();else retry();continue;}
+    if(archiveName==='private-library.wrss'&&directory.has('books.json')){try{const books=cpuJsonParse(utf8Decode((await entry('books.json'))!));if(!Array.isArray(books)||books.length>100000)throw Error('cloud_archive_invalid');for(const descriptor of books){await cp.check();if(!cp.has('book:'+descriptor.bookId))bookBodies.push({descriptor,loadBytes:()=>entry(descriptor.packagePath)});}}catch(error){rethrowSnapshotDeferred(error);await cp.check();lost();}}
     for(let offset=0;offset<rows.length;offset+=20){await cp.check();const unit='archive:'+archiveName+':'+offset;if(cp.has(unit)){abandoned+=cp.result(unit);cp.progress?.(Math.min(rows.length,offset+20),rows.length);continue;}const articles:ExportedArticle[]=[];let broken=0;await loadCurrent(rows.slice(offset,offset+20).filter((_r:any,j:number)=>!cp.has(unit+':row:'+(offset+j))));
      for(let j=offset;j<Math.min(rows.length,offset+20);j++){await cp.check();const rowUnit=unit+':row:'+j;if(cp.has(rowUnit)){broken+=cp.result(rowUnit);continue;}const raw=rows[j];let a:ReturnType<typeof metadata>|undefined,bad=0;
       if(!raw?.deleted&&this.overlay.allow('article',raw?.articleId,remote,archiveName==='private-library.wrss'?undefined:archiveName)){
@@ -288,8 +289,8 @@ export class WatchCloudLibraryAdapter {
     continue;
    }
    let zip:Map<string,Uint8Array>|undefined,rows:any[]=[];
-   try{zip=await readWrss(archive,(b,max)=>this.crypto.gunzip(b,max));const manifest=JSON.parse(utf8Decode(zip.get('manifest.json')??new Uint8Array()));if(manifest.format!=='watchrss-library-backup'||![1,2,3].includes(manifest.version))throw Error('cloud_archive_invalid');rows=JSON.parse(utf8Decode(zip.get('articles.json')??new Uint8Array()));if(!Array.isArray(rows)||rows.length>100000)throw Error('cloud_archive_invalid');}catch(error){rethrowSnapshotDeferred(error);if(error instanceof SyntaxError||String(error).includes('cloud_archive_invalid'))lost();else retry();zip=undefined;}
-   if(archiveName==='private-library.wrss'&&zip?.has('books.json')){try{const directory=JSON.parse(utf8Decode(zip.get('books.json')!));if(!Array.isArray(directory)||directory.length>100000)throw Error('invalid books directory');for(const descriptor of directory)bookBodies.push({descriptor,bytes:zip.get(descriptor.packagePath)});}catch{lost();}}
+   try{zip=await readWrss(archive,(b,max)=>this.crypto.gunzip(b,max));const manifest=cpuJsonParse(utf8Decode(zip.get('manifest.json')??new Uint8Array()));if(manifest.format!=='watchrss-library-backup'||![1,2,3].includes(manifest.version))throw Error('cloud_archive_invalid');rows=cpuJsonParse(utf8Decode(zip.get('articles.json')??new Uint8Array()));if(!Array.isArray(rows)||rows.length>100000)throw Error('cloud_archive_invalid');}catch(error){rethrowSnapshotDeferred(error);if(error instanceof SyntaxError||String(error).includes('cloud_archive_invalid'))lost();else retry();zip=undefined;}
+   if(archiveName==='private-library.wrss'&&zip?.has('books.json')){try{const directory=cpuJsonParse(utf8Decode(zip.get('books.json')!));if(!Array.isArray(directory)||directory.length>100000)throw Error('invalid books directory');for(const descriptor of directory)bookBodies.push({descriptor,bytes:zip.get(descriptor.packagePath)});}catch{lost();}}
    const articles:ExportedArticle[]=[];if(zip)await loadCurrent(rows);if(zip)for(const raw of rows){if(raw?.deleted||!this.overlay.allow('article',raw?.articleId,remote,archiveName==='private-library.wrss'?undefined:archiveName))continue;let a:ReturnType<typeof metadata>;
     try{const base=currentArticles.get(raw?.articleId);a=metadata(raw?.url?raw:base&&base.contentHash===raw?.contentHash&&!base.deleted?base:raw);}catch{lost();continue;}
     const stem='bodies/'+await this.crypto.sha256(utf8Encode(a.articleId));

@@ -135,7 +135,7 @@ test('R48 cancelling the last known archive item retains unread resources/raw me
 test('R48 production host parser uses fenced runtime.delay rather than a QuickJS microtask timer',async()=>{
  const {createCloudHostPorts}=await import('../../src/cloud/host-ports');const calls:{method:string;args:Record<string,unknown>}[]=[];
  const host=createCloudHostPorts((async(method:string,args:Record<string,unknown>)=>{calls.push({method,args});}) as any,enabled);await host.crypto.yieldTurn!();expect(calls).toEqual([{method:'runtime.delay',args:{milliseconds:1}}]);
- let turns=0;const yielding=new WatchCloudCodec({...crypto,yieldTurn:async()=>{turns++;}},enabled),m=manifest([]),text=JSON.stringify({...m,unknown:'x'.repeat(40000)});await yielding.decryptManifest(key,'head',await sealed(text));expect(turns).toBeGreaterThan(1);
+ let turns=0;const yielding=new WatchCloudCodec({...crypto,yieldTurn:async()=>{turns++;}},enabled),m=manifest([]),text=JSON.stringify({...m,unknown:'x'.repeat(400000)});await yielding.decryptManifest(key,'head',await sealed(text));expect(turns).toBeGreaterThan(1);
 });
 test('R48 64 KiB record ciphertext boundary and unknown kinds cannot bypass authentication or known identity checks',async()=>{
  const prefix='{"format":"watchrss-rss-record","version":1,"kind":"article","value":{"articleId":"a","title":"',suffix='"}}',size=65536-16-utf8Encode(prefix+suffix).length;

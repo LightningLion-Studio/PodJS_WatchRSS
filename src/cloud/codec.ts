@@ -1,3 +1,4 @@
+import {cpuWork,cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {PRIVATE_OVERLAY_FEATURE,PRIVATE_OVERLAY_NAME,planPrivateOverlay} from './private-overlay';
 import {mergeCloudArchive,retireCloudArchive} from './archive-compat';
 import {rawJsonUnknownBytes,parseRawJsonAsync,type RawJsonNode} from '@podjs/framework/json-raw';
@@ -54,7 +55,7 @@ export function contentChunks(bytes:Uint8Array):Uint8Array[]{
 const join=(parts:Uint8Array[])=>{const out=new Uint8Array(parts.reduce((n,b)=>n+b.length,0));let at=0;for(const b of parts){out.set(b,at);at+=b.length;}return out;};
 function check(ok:unknown,message='云快照校验失败'):asserts ok {if(!ok)throw Error(message);}
 const size=(v:unknown,max=MAX_OBJECT_BYTES):v is number=>Number.isSafeInteger(v)&&Number(v)>=0&&Number(v)<=max;
-export function validateManifest(m:CloudManifest):void {
+export function validateManifest(m:CloudManifest):void {return cpuWork('manifest-validate','items',m.objects?.length??0,()=>{
  check(m&&m.format==='watchrss-cloud-snapshot'&&m.schemaVersion===2,'不支持的云快照格式');
  check(typeof m.snapshotId==='string'&&/^[a-zA-Z0-9-]{1,128}$/.test(m.snapshotId)&&typeof m.sourceDeviceId==='string'&&m.sourceDeviceId.length>0);
  check(size(m.deviceSequence,Number.MAX_SAFE_INTEGER)&&m.deviceSequence>0&&size(m.keyVersion,Number.MAX_SAFE_INTEGER)&&m.keyVersion>0&&size(m.createdAtMillis,Number.MAX_SAFE_INTEGER));
@@ -72,20 +73,20 @@ export function validateManifest(m:CloudManifest):void {
   for(const c of o.chunks){check(hashPattern.test(c.plaintextSha256)&&hashPattern.test(c.ciphertextSha256)&&size(c.plaintextBytes,8*1024*1024)&&size(c.ciphertextBytes,8*1024*1024)&&c.ciphertextBytes===c.plaintextBytes+51&&typeof c.saltBase64==='string'&&typeof c.nonceBase64==='string');check(base64ToBytes(c.saltBase64).length===16&&base64ToBytes(c.nonceBase64).length===12);}
   check(o.chunks.reduce((n,c)=>n+c.plaintextBytes,0)===o.encodedBytes);
  }
-}
+});}
 function parseManifestText(text:string,node:RawJsonNode=parseRawJson(text,{maxBytes:8*1024*1024})):CloudManifest {const manifest=rawJsonValue<CloudManifest>(node);bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576,[PRIVATE_OVERLAY_FEATURE]);if(cloudCompatibility(manifest).opaque){validateManifest(manifest);return manifest;}check(Array.isArray(manifest.objects)&&manifest.objects.length<=1024);let unknown=0;const objectNodes=rawJsonProperty(node,'objects')?.items??[];for(let i=0;i<(manifest.objects??[]).length;i++){const o=manifest.objects[i],n=objectNodes[i];check(o&&n);const chunkNodes=rawJsonProperty(n,'chunks')?.items??[];let nested=0;for(let j=0;j<(o.chunks??[]).length;j++){const c=o.chunks[j],cn=chunkNodes[j];check(c&&cn);bindCloudRaw(c,cn,schemaFields(chunkFields),4096);nested+=rawJsonUnknownBytes(cn,schemaFields(chunkFields));}for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']],['readerKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['objectKeyEnvelope',['version','scope','saltBase64','nonceBase64','ciphertextBase64']],['entryRef',['object','entryPath','encoding']]] as [string,readonly string[]][]){const child=rawJsonProperty(n,field);if(child)nested+=rawJsonUnknownBytes(child,schemaFields(keys));}bindCloudRaw(o,n,schemaFields(objectFields),4096,['r48.entry-ref.v1','r48.object-key.v1'],nested);unknown+=rawJsonUnknownBytes(n,schemaFields(objectFields))+nested;}bindCloudRaw(manifest,node,{...schemaFields(manifestFields),settings:schemaFields(settingFields)},1048576,[PRIVATE_OVERLAY_FEATURE],unknown);validateManifest(manifest);return manifest;}
 function serializeDescriptor(o:CloudObject,basis?:CloudObject):string {
  const raw=basis&&cloudRaw(basis);if(o===basis&&raw)return rawJsonText(raw);
  const overrides:Record<string,string|undefined>={};
  if(o.entryRef)overrides.chunks=undefined;else overrides.chunks='['+(o.chunks??[]).map(c=>patchCloudObject(c as unknown as Record<string,any>,chunkFields,basis?.chunks?.find(old=>old.ciphertextSha256===c.ciphertextSha256))).join(',')+']';
  for(const field of ['readerKeyEnvelope','objectKeyEnvelope','entryRef'] as const)if(!o[field])overrides[field]=undefined;
- for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']]] as const){const child=raw&&rawJsonProperty(raw,field),v=o[field];if(child&&v){const edits=Object.fromEntries(keys.map(k=>[k,Object.prototype.hasOwnProperty.call(v,k)?JSON.stringify(v[k]):undefined]));overrides[field]=patchRawJsonObject(child,edits);}else if(!v)overrides[field]=undefined;}
- if(basis?.features&&!o.features)overrides.features=JSON.stringify({...basis.features,incompat:basis.features.incompat.filter(x=>x!=='r48.object-key.v1'&&x!=='r48.entry-ref.v1')});
+ for(const [field,keys]of [['privateArticle',recordFields.article],['privateBook',[...recordFields.book,'packagePath']]] as const){const child=raw&&rawJsonProperty(raw,field),v=o[field];if(child&&v){const edits=Object.fromEntries(keys.map(k=>[k,Object.prototype.hasOwnProperty.call(v,k)?cpuJsonStringify(v[k]):undefined]));overrides[field]=patchRawJsonObject(child,edits);}else if(!v)overrides[field]=undefined;}
+ if(basis?.features&&!o.features)overrides.features=cpuJsonStringify({...basis.features,incompat:basis.features.incompat.filter(x=>x!=='r48.object-key.v1'&&x!=='r48.entry-ref.v1')});
  return patchCloudObject(o as unknown as Record<string,any>,objectFields,basis,overrides);
 }
 function serializeManifest(m:CloudManifest,basis?:CloudManifest):string {
  const overrides:Record<string,string>={objects:'['+m.objects.map(o=>serializeDescriptor(o,basis?.objects.find(old=>old.name===o.name))).join(',')+']'};
- const settings=basis&&cloudRaw(basis)&&rawJsonProperty(cloudRaw(basis)!,'settings');if(settings)overrides.settings=patchRawJsonObject(settings,Object.fromEntries(Object.entries(m.settings).map(([k,v])=>[k,JSON.stringify(v)])));
+ const settings=basis&&cloudRaw(basis)&&rawJsonProperty(cloudRaw(basis)!,'settings');if(settings)overrides.settings=patchRawJsonObject(settings,Object.fromEntries(Object.entries(m.settings).map(([k,v])=>[k,cpuJsonStringify(v)])));
  return patchCloudObject(m as unknown as Record<string,any>,manifestFields,basis,overrides);
 }
 /** Writes WRSSCM3, reads WRSSCM2/3; WRSSCC2 format; keys and gzip are supplied by the host. */

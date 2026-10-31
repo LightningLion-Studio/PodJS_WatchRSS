@@ -1,3 +1,4 @@
+import {cpuWorkAsyncIterable} from '@podjs/framework/cpu-work';
 import {repositoryWork} from './repository-work';
 import {memoizeSmallDigest} from '../core/digest-cache';
 import {HostWorkBudget} from '@podjs/framework/async';
@@ -165,7 +166,8 @@ export class LocalArticleManifestStore {
  }
  /** Independent read-only identity work shares four host requests. Ordered
   * collection preserves alias precedence; cancellation drains the current group. */
- private async *cloudIdentityBatches(rows:readonly Row[],check?:()=>void){
+ private cloudIdentityBatches(rows:readonly Row[],check?:()=>void){return cpuWorkAsyncIterable('alias-match','items',rows.length,()=>this.cloudIdentityBatchSteps(rows,check));}
+ private async *cloudIdentityBatchSteps(rows:readonly Row[],check?:()=>void){
   const checkpoint=this.workCheckpoint(check);
   for(let at=0;at<rows.length;at+=4){const part=rows.slice(at,at+4);await checkpoint(part.length);
    const identities=await Promise.all(part.map(row=>this.cloudIdentity(row)));check?.();yield {rows:part,identities};

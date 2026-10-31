@@ -1,3 +1,4 @@
+import {observeCpuWork,pulseCpuWork} from '@podjs/framework/cpu-work';
 import {WorkWindow,windowedHost} from '@podjs/framework/work-window';
 import {MANUAL_INTENT_KEY,readManualIntent,manualEpochKey,compareManualIntent,completeManualIntent} from './manual-handoff';
 import {backgroundDiagnostics} from './background-diagnostic';
@@ -29,8 +30,9 @@ export default defineBackgroundHandler(async context=>{
  const gate=new CloudGate();
  const yieldBudget=new SnapshotYieldBudget();
  let rejected:unknown;
- const request:CloudHostRequest=async(method,args)=>{try{yieldBudget.before(method);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method);return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method);return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
  const diagnostic=backgroundDiagnostics(request);
+ const stopCpu=observeCpuWork(diagnostic.cpu);
  const window=new WorkWindow({deadlineMs:context.deadlineMs,reserveMillis:10000,expired:()=>new CloudSyncDeadlineError(),report:metric=>diagnostic.report(JSON.stringify(metric))});
  const bounded=windowedHost(request,window);let running=false;
  const raw:CloudHostRequest=(method,args)=>(running?bounded:request)(method,args);
@@ -69,7 +71,7 @@ export default defineBackgroundHandler(async context=>{
  // successful restore or an unbounded retry of the same manual grant.
  return cloudBackgroundOutcome(success,!!intent,runtime.service.status);
  }catch(error){if(error instanceof CloudSyncDeadlineError)return 'retry';if((error as {code?:unknown})?.code!==CLOUD_HOST_CAPABILITY_UNAVAILABLE)throw error;diagnostic.report(recordFailureDiagnostic(error));return 'failure';}
- finally{try{await diagnostic.flush();}finally{yieldHosts.delete(context);}}
+ finally{stopCpu();try{await diagnostic.flush();}finally{yieldHosts.delete(context);}}
 },{yieldTurn:async context=>{
  if(context.isCancelled())throw Error('Cloud worker cancelled');
  if(Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();

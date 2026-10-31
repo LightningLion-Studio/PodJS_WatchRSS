@@ -1,3 +1,4 @@
+import {cpuWork,cpuWorkAsync,cpuJsonParse,cpuJsonStringify,cpuSort} from '@podjs/framework/cpu-work';
 import {ARTICLE_REGISTER_FEATURE,hasArticleRegisters,readArticleRegisters,normalizeArticleRegisters,mergeArticleRegisters,articleKnownCanonical} from './article-register';
 import {bindCloudRaw,markCloudReadOnly,isolateCloudRaw,releaseKnownCloudRaw,cloudRaw,cloudCompatibility,recordRawSchema,recordFields,knownRecordValue,rawRecordText,parseRawJson,rawJsonValue,emptyCompatibilityStatus,type CloudFeatures} from './compatibility';
 import {validateBookShape,validateBook,validateBookReading} from '../books/protocol';
@@ -49,7 +50,8 @@ const check=(ok:unknown)=>{if(!ok)throw Error('cloud_record_invalid');};
 const ID=/^[a-f0-9]{64}$/;
 export function revision(v:string){check(typeof v==='string'&&/^(0|[1-9][0-9]{0,18})$/.test(v)&&(v.length<19||v<='9223372036854775807'));return v;}
 const cmp=(a:string,b:string)=>a.length-b.length||(a===b?0:a<b?-1:1);
-export function canonical(value:any):string {if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).filter(k=>value[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value);}
+export function canonical(value:any):string {return cpuWork('canonical-json','items',Array.isArray(value)?value.length:value&&typeof value==='object'?Object.keys(value).length:0,()=>canonicalValue(value));}
+function canonicalValue(value:any):string {if(Array.isArray(value))return '['+value.map(canonicalValue).join(',')+']';if(value&&typeof value==='object')return '{'+cpuSort(Object.keys(value).filter(k=>value[k]!==undefined)).map(k=>cpuJsonStringify(k)+':'+canonicalValue(value[k])).join(',')+'}';return cpuJsonStringify(value);}
 export function validateRecord(doc:RecordDocument){
  check(doc&&typeof doc.kind==='string'&&!!doc.kind&&doc.value&&typeof doc.value==='object'&&!Array.isArray(doc.value));const v=knownRecordValue(doc.kind,doc.value);if(hasArticleRegisters(doc)){normalizeArticleRegisters(doc);return;}
  if(['article','source','rss-state','book','book-reading'].includes(doc.kind))check(!['contentText','contentHtml','contentTextGzip','contentHtmlGzip','body','chapters'].some(k=>k in doc.value));
@@ -65,7 +67,7 @@ export class CloudRecordCodec {
  constructor(private c:RecordPorts['crypto']){}
  async id(key:Uint8Array,user:string,doc:RecordDocument){validateRecord(doc);const v=doc.value,identity=doc.kind==='book'?v.bookId:doc.kind==='book-reading'?v.bookId+':'+v.chapterIndex:doc.kind==='rss-state'?v.sourceId+':'+v.articleIdHash:doc.kind==='article'?v.articleId:v.url;const derived=await this.c.hkdf(key,utf8Encode(user),utf8Encode('watchrss/cloud/record-id/v1'));try{return await this.c.hmac(derived,utf8Encode(doc.kind+':'+identity));}finally{derived.fill(0);}}
  mergeArticles(left:RecordDocument,right:RecordDocument){return mergeArticleRegisters(left,right);}
- readPlaintext(text:string):RecordDocument {const node=parseRawJson(text,{maxBytes:65520}),raw=rawJsonValue<any>(node);check(raw&&raw.format==='watchrss-rss-record'&&raw.version===1);let doc:RecordDocument=bindCloudRaw({kind:raw.kind,value:raw.value,...(raw.features===undefined?{}:{features:raw.features})},node,recordRawSchema(raw.kind),16384);if(doc.kind==='article'&&doc.value&&hasArticleRegisters(doc)){if(doc.features?.roCompat?.includes(ARTICLE_REGISTER_FEATURE)&&cloudCompatibility(doc).opaque&&cloudCompatibility(doc).reason!=='invalid_features')return doc;doc=readArticleRegisters(text);if(!cloudCompatibility(doc).readOnly)markCloudReadOnly(doc,'article_provenance_write_disabled');}if(!Object.prototype.hasOwnProperty.call(recordFields,doc.kind))isolateCloudRaw(doc,'unknown_kind');if(!cloudCompatibility(doc).opaque)validateRecord(doc);return doc;}
+ readPlaintext(text:string):RecordDocument {return cpuWork('records-parse','chars',text.length,()=>{const node=parseRawJson(text,{maxBytes:65520}),raw=rawJsonValue<any>(node);check(raw&&raw.format==='watchrss-rss-record'&&raw.version===1);let doc:RecordDocument=bindCloudRaw({kind:raw.kind,value:raw.value,...(raw.features===undefined?{}:{features:raw.features})},node,recordRawSchema(raw.kind),16384);if(doc.kind==='article'&&doc.value&&hasArticleRegisters(doc)){if(doc.features?.roCompat?.includes(ARTICLE_REGISTER_FEATURE)&&cloudCompatibility(doc).opaque&&cloudCompatibility(doc).reason!=='invalid_features')return doc;doc=readArticleRegisters(text);if(!cloudCompatibility(doc).readOnly)markCloudReadOnly(doc,'article_provenance_write_disabled');}if(!Object.prototype.hasOwnProperty.call(recordFields,doc.kind))isolateCloudRaw(doc,'unknown_kind');if(!cloudCompatibility(doc).opaque)validateRecord(doc);return doc;});}
  hashText(doc:RecordDocument){if(hasArticleRegisters(doc)&&!cloudCompatibility(doc).opaque)return articleKnownCanonical(normalizeArticleRegisters(doc));if(cloudCompatibility(doc).opaque)return cloudRaw(doc)?.source??canonical(doc);doc={...doc,value:knownRecordValue(doc.kind,doc.value)};if(doc.kind==='book'||doc.kind==='book-reading'){validateRecord(doc);const v={...doc.value};if('readingProgress'in v)v.readingProgress=Math.floor(v.readingProgress*1e6+.5)/1e6;return doc.kind+':'+canonical(v);}const value={...doc.value};delete value.sourceDeviceId;if(doc.kind==='source')delete value.createdAt;if('readingProgress'in value)value.readingProgress=Math.floor(value.readingProgress*1e6+.5)/1e6;return canonical({kind:doc.kind,value});}
  async hash(doc:RecordDocument){return this.c.sha256(utf8Encode(this.hashText(doc)));}
  async encode(key:Uint8Array,user:string,id:string,version:number,doc:RecordDocument,basis:RecordDocument=doc):Promise<RecordEnvelope>{
@@ -94,8 +96,8 @@ export class WatchCloudRecords {
  private runKeys=new Map<number,Uint8Array|undefined>();
  private derivedKeys=new Map<string,Uint8Array>();
  private async key(version:number){let key=this.runKeys.get(version);if(!this.runKeys.has(version)){key=await this.p.key(version);this.runKeys.set(version,key);}return key?.slice();}
- private async projectionBinding(ids:string[]){return this.p.crypto.sha256(utf8Encode(JSON.stringify(ids.map(id=>[this.state.rows[id],this.state.records[id]]))));}
- private projectionAad(group:Pick<RecordProjection,'keyVersion'|'binding'>){return utf8Encode(JSON.stringify(['watchrss/local-record-projection/v1',this.p.userId,this.p.epoch,group.keyVersion,group.binding]));}
+ private async projectionBinding(ids:string[]){return this.p.crypto.sha256(utf8Encode(cpuJsonStringify(ids.map(id=>[this.state.rows[id],this.state.records[id]]))));}
+ private projectionAad(group:Pick<RecordProjection,'keyVersion'|'binding'>){return utf8Encode(cpuJsonStringify(['watchrss/local-record-projection/v1',this.p.userId,this.p.epoch,group.keyVersion,group.binding]));}
  private async projectionKey(key:Uint8Array){return this.derive(key,utf8Encode(this.p.userId),utf8Encode('watchrss/local-record-projection/v1'));}
  private async derive(key:Uint8Array,salt:Uint8Array,info:Uint8Array){
   const id=bytesToBase64(key)+':'+bytesToBase64(salt)+':'+bytesToBase64(info);let derived=this.derivedKeys.get(id);
@@ -107,7 +109,7 @@ export class WatchCloudRecords {
  constructor(private p:RecordPorts){this.codec=new CloudRecordCodec({...p.crypto,hkdf:(...args)=>this.derive(...args),decrypt:async(...args)=>{this.decryptions++;return p.crypto.decrypt(...args);}});}
  private empty():RecordState{return {epoch:this.p.epoch,cursor:'0',records:{},rows:{}};}
  private async measured<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>):Promise<T>{const at=this.now(),originals=this.decryptions,projections=this.projectionDecryptions;try{this.p.work?.({event:'records-work',lane:'pull',stage,units,durationMillis:0,outcome:'started'});}catch{}let ok=false;try{const v=await run();ok=true;return v;}finally{try{this.p.work?.({event:'records-work',lane:'pull',stage,units,durationMillis:Math.max(0,this.now()-at),outcome:ok?'complete':'failed',...(['projection-load','original-load'].includes(stage)?{decryptions:this.decryptions-originals,projectionDecryptions:this.projectionDecryptions-projections}:{})});}catch{}}}
- private async save(){return this.measured('checkpoint',1,async()=>{if(this.p.writeStateObject)await this.p.writeStateObject(this.state);else{await this.p.current();await this.p.writeState(JSON.stringify(this.state));}const projection=this.state.projections?.at(-1)?.binding??'';if(this.state.cursor!==this.savedCursor){await this.progressCommit?.('pull:'+this.state.cursor);this.savedCursor=this.state.cursor;}if(projection&&projection!==this.savedProjection){await this.progressCommit?.('projection:'+projection);this.savedProjection=projection;}});}
+ private async save(){return this.measured('checkpoint',1,async()=>{if(this.p.writeStateObject)await this.p.writeStateObject(this.state);else{await this.p.current();await this.p.writeState(cpuJsonStringify(this.state));}const projection=this.state.projections?.at(-1)?.binding??'';if(this.state.cursor!==this.savedCursor){await this.progressCommit?.('pull:'+this.state.cursor);this.savedCursor=this.state.cursor;}if(projection&&projection!==this.savedProjection){await this.progressCommit?.('projection:'+projection);this.savedProjection=projection;}});}
  private async ensureDecoded(ids:readonly string[]){
   const needed=new Set(ids.filter(id=>!this.decoded.has(id)&&this.state.rows[id]&&!this.state.quarantinedRows?.[id]));
   for(const group of this.state.projections??[]){if(!group.ids.some(id=>needed.has(id)))continue;await this.p.current();
@@ -115,8 +117,8 @@ export class WatchCloudRecords {
     if(group.ids.some(id=>!this.state.rows[id]||this.state.quarantinedRows?.[id])||await this.projectionBinding(group.ids)!==group.binding)return;
     key=await this.key(group.keyVersion);if(!key)return;derived=await this.projectionKey(key);this.projectionDecryptions++;
     bytes=await this.p.crypto.decrypt(derived,this.projectionAad(group),base64ToBytes(group.nonceBase64),base64ToBytes(group.ciphertextBase64));check(bytes.length<=8*1024*1024);
-    const data=JSON.parse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
-    const items=data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};});
+    const data=cpuJsonParse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
+    const items=cpuWork('projection-rebuild','items',data.entries.length,()=>data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};}));
     for(const item of items){this.decoded.set(item.row.recordId,item);needed.delete(item.row.recordId);}
    }catch(error){await this.p.current();if(/cloud_host_capability_unavailable|missing_key_version/.test(String(error)))throw error;/* Disposable projection: authenticate the original below. */}finally{key?.fill(0);derived?.fill(0);bytes?.fill(0);}});
   }
@@ -129,14 +131,14 @@ export class WatchCloudRecords {
   finally{this.clearRunKeys();try{this.p.report?.({...(this.projectionDecryptions?{projectionDecryptions:this.projectionDecryptions}:{}),decryptions:this.decryptions,retired:this.retired,elapsedMillis:Math.max(0,this.now()-began),outcome});}catch{/* Diagnostics cannot change sync behavior. */}}
  }
  private async pullRecords(){
-  const p=this.p;this.replayReady=false;await p.current();this.state=this.empty();const raw=await this.measured('state-read',1,()=>p.readStateObject?p.readStateObject():p.readState());const validatedAt=this.now();if(raw)try{const s=typeof raw==='string'?JSON.parse(raw):raw as RecordState;revision(s.cursor);check(s.records&&s.rows&&typeof s.records==='object'&&typeof s.rows==='object'&&!Array.isArray(s.records)&&!Array.isArray(s.rows)&&Object.keys(s.records).length<=50000&&Object.keys(s.rows).length<=50000);
+  const p=this.p;this.replayReady=false;await p.current();this.state=this.empty();const raw=await this.measured('state-read',1,()=>p.readStateObject?p.readStateObject():p.readState());const validatedAt=this.now();if(raw)try{const s=typeof raw==='string'?cpuJsonParse(raw):raw as RecordState;cpuWork('records-validate','items',Object.keys(s.rows??{}).length,()=>{revision(s.cursor);check(s.records&&s.rows&&typeof s.records==='object'&&typeof s.rows==='object'&&!Array.isArray(s.records)&&!Array.isArray(s.rows)&&Object.keys(s.records).length<=50000&&Object.keys(s.rows).length<=50000);
    for(const name of ['protectedRows','pendingEdits','quarantinedRows'])if(s[name]!==undefined)check(s[name]&&typeof s[name]==='object'&&!Array.isArray(s[name])&&Object.keys(s[name]).length<=50000&&Object.entries(s[name]).every(([id,v])=>ID.test(id)&&v===true));
    if(s.protectedVersions!==undefined){check(s.protectedVersions&&typeof s.protectedVersions==='object'&&!Array.isArray(s.protectedVersions));let count=Object.keys(s.rows).length;for(const [id,versions]of Object.entries(s.protectedVersions) as [string,RecordRow[]][]){check(ID.test(id)&&Array.isArray(versions));for(const row of versions){check(row.recordId===id&&row.envelope&&typeof row.tombstone==='boolean');revision(row.revision);}count+=versions.length;}check(count<=50000);}
    for(const [id,v]of Object.entries(s.records) as [string,{revision:string;hash:string}][]){check(ID.test(id)&&v&&ID.test(v.hash));revision(v.revision);}
    for(const [id,v]of Object.entries(s.rows) as [string,RecordRow][]){check(ID.test(id)&&v&&v.recordId===id&&v.envelope&&typeof v.tombstone==='boolean');revision(v.revision);}
    // Projection corruption is not loss of the underlying encrypted row cache.
    if(s.projections!==undefined){let count=0;s.projections=Array.isArray(s.projections)?s.projections.filter((g:RecordProjection)=>{const valid=g&&Array.isArray(g.ids)&&g.ids.length>0&&g.ids.length<=50&&g.ids.every(id=>ID.test(id))&&Number.isSafeInteger(g.keyVersion)&&g.keyVersion>0&&ID.test(g.binding)&&typeof g.nonceBase64==='string'&&g.nonceBase64.length===16&&typeof g.ciphertextBase64==='string'&&g.ciphertextBase64.length<=12*1024*1024;count+=valid?g.ids.length:0;return valid&&count<=50000;}):[];}
-   if(s.replayDone!==undefined&&(!s.replayDone||typeof s.replayDone!=='object'||Array.isArray(s.replayDone)||Object.keys(s.replayDone).length>50000))s.replayDone={};if(s.replayScope!==undefined&&(typeof s.replayScope!=='string'||s.replayScope.length>256)){delete s.replayScope;s.replayDone={};}if(s.epoch===p.epoch)this.state=s;
+   if(s.replayDone!==undefined&&(!s.replayDone||typeof s.replayDone!=='object'||Array.isArray(s.replayDone)||Object.keys(s.replayDone).length>50000))s.replayDone={};if(s.replayScope!==undefined&&(typeof s.replayScope!=='string'||s.replayScope.length>256)){delete s.replayScope;s.replayDone={};}if(s.epoch===p.epoch)this.state=s;});
   }catch{/* Cache loss requires cursor zero, never a library reset. */}
   try{p.work?.({event:'records-work',lane:'pull',stage:'state-validate',units:Object.keys(this.state.rows).length,durationMillis:Math.max(0,this.now()-validatedAt),outcome:'complete'});}catch{}
   this.savedCursor=this.state.cursor;this.savedProjection=this.state.projections?.at(-1)?.binding??'';let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await this.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
@@ -146,15 +148,15 @@ export class WatchCloudRecords {
   const storeProjection=async(rows:RecordRow[])=>{
    const entries=rows.flatMap(row=>{const entry=projectionEntries.get(row.recordId);return entry&&this.state.rows[row.recordId]&&this.state.records[row.recordId]?.revision===row.revision?[entry]:[];});if(!entries.length)return;
    const ids=entries.map(e=>e.id),version=p.version,key=await this.key(version);if(!key)throw Error('missing_key_version');let derived:Uint8Array|undefined,bytes:Uint8Array|undefined;
-   try{const group={ids,keyVersion:version,binding:await this.projectionBinding(ids)};derived=await this.projectionKey(key);bytes=utf8Encode(JSON.stringify({version:1,entries}));check(bytes.length<=8*1024*1024);const encrypted=await p.crypto.encrypt(derived,this.projectionAad(group),bytes);(this.state.projections??=[]).push({...group,nonceBase64:bytesToBase64(encrypted.nonce),ciphertextBase64:bytesToBase64(encrypted.ciphertext)});}finally{key.fill(0);derived?.fill(0);bytes?.fill(0);}
+   try{const group={ids,keyVersion:version,binding:await this.projectionBinding(ids)};derived=await this.projectionKey(key);bytes=utf8Encode(cpuJsonStringify({version:1,entries}));check(bytes.length<=8*1024*1024);const encrypted=await p.crypto.encrypt(derived,this.projectionAad(group),bytes);(this.state.projections??=[]).push({...group,nonceBase64:bytesToBase64(encrypted.nonce),ciphertextBase64:bytesToBase64(encrypted.ciphertext)});}finally{key.fill(0);derived?.fill(0);bytes?.fill(0);}
   };
   const hydrateProjections=async()=>{
    const covered=new Set<string>(),valid:RecordProjection[]=[];
    for(const group of this.state.projections??[]){await p.current();let key:Uint8Array|undefined,derived:Uint8Array|undefined,bytes:Uint8Array|undefined;
     try{if(group.ids.some(id=>covered.has(id)||!this.state.rows[id]||this.state.quarantinedRows?.[id])||await this.projectionBinding(group.ids)!==group.binding)continue;
      key=await this.key(group.keyVersion);if(!key)continue;derived=await this.projectionKey(key);this.projectionDecryptions++;bytes=await p.crypto.decrypt(derived,this.projectionAad(group),base64ToBytes(group.nonceBase64),base64ToBytes(group.ciphertextBase64));check(bytes.length<=8*1024*1024);
-     const data=JSON.parse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
-     const items=data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};});
+     const data=cpuJsonParse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
+     const items=cpuWork('projection-rebuild','items',data.entries.length,()=>data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};}));
      const docs=items.filter((item:any)=>!cloudCompatibility(item.doc).opaque&&item.doc.value.bookIndexRetired!==true&&!(item.row.tombstone&&!item.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(item.doc.kind)).map((item:any)=>item.doc);
      if(p.hydrate)await p.hydrate(docs);else cachedInteractions.push(...docs);
      await p.current();for(const item of items){covered.add(item.row.recordId);this.decoded.set(item.row.recordId,item);}valid.push(group);
@@ -221,7 +223,7 @@ export class WatchCloudRecords {
     try{const base=BigInt(startCursor);p.pageProgress?.(Number(BigInt(cursor)-base),Number(BigInt(page.headRevision)-base));}catch{}
     if(!page.hasMore)return changed;
    }throw Error('cloud_record_page_limit');
-  }catch(error){if(p.writeStateObject&&/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error)))await this.measured('checkpoint-skip',0,async()=>{});if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&!p.writeStateObject&&p.checkpoint)await p.checkpoint(JSON.stringify(this.state));throw error;}finally{anchor.fill(0);}
+  }catch(error){if(p.writeStateObject&&/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error)))await this.measured('checkpoint-skip',0,async()=>{});if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&!p.writeStateObject&&p.checkpoint)await p.checkpoint(cpuJsonStringify(this.state));throw error;}finally{anchor.fill(0);}
  }
  private async apply(documents:RecordDocument[]){
   this.applyWarmupMillis=0;
@@ -229,10 +231,10 @@ export class WatchCloudRecords {
   const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T):Promise<T>=>{const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const old=metrics.get(stage);metrics.set(stage,{event:'records-work',lane:'pull',stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
   try{return await this.p.apply(documents,measure);}finally{this.applyWarmupMillis=metrics.get('reading-index')?.durationMillis??0;for(const m of metrics.values())try{this.p.work?.(m);}catch{}}
  }
- async reapply(scope='standalone',committed?:(unit:string)=>Promise<void>){await this.p.current();if(this.p.lazyProjections){let changed=0;
+ async reapply(scope='standalone',committed?:(unit:string)=>Promise<void>){return cpuWorkAsync('record-merge','items',Object.keys(this.state.rows).length,async ()=>{await this.p.current();if(this.p.lazyProjections){let changed=0;
   if(this.state.replayScope!==scope){this.state.replayScope=scope;this.state.replayDone={};}
   const anchor=await this.key(this.p.anchorVersion);if(!anchor)throw Error('missing_key_version');
-  const proof=(binding:string,end:number)=>hex(hmacSha256Bytes(anchor,utf8Encode(JSON.stringify(['record-replay-v3',this.p.userId,this.p.epoch,scope,binding,end]))));
+  const proof=(binding:string,end:number)=>hex(hmacSha256Bytes(anchor,utf8Encode(cpuJsonStringify(['record-replay-v3',this.p.userId,this.p.epoch,scope,binding,end]))));
   try{for(const group of this.state.projections??[]){const saved=this.state.replayDone?.[group.binding];let at=saved&&Number.isInteger(saved.end)&&saved.end>=0&&saved.end<=group.ids.length&&saved.proof===proof(group.binding,saved.end)?saved.end:0;
    if(at)await committed?.(group.binding+':prefix-'+at);
    while(at<group.ids.length){await this.p.current();const remaining=this.p.remainingMillis?.()??Infinity;
@@ -242,7 +244,7 @@ export class WatchCloudRecords {
     await committed?.(group.binding+':prefix-'+end);this.rowMillis=Math.max(1,(this.now()-started-this.applyWarmupMillis)/(end-at));this.replayBatch=Math.min(50,Math.max(count+1,count*2));at=end;
    }
   }this.replayReady=true;return changed;}finally{anchor.fill(0);this.clearRunKeys();}
- }if(this.p.reapply)return this.p.reapply();return this.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));}
+ }if(this.p.reapply)return this.p.reapply();return this.apply([...this.decoded.values()].filter(v=>!cloudCompatibility(v.doc).opaque&&v.doc.value.bookIndexRetired!==true&&!(v.row.tombstone&&!v.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(v.doc.kind)).map(v=>v.doc));});}
  async reapplyInventory(inventory:RssInventory){
   const lookup=this.p.inventoryLookups;if(!this.p.lazyProjections||!lookup)return 0;await this.p.current();return this.measured('replay-unit',inventory.items.length,async()=>{
   const versions=[...new Set([this.p.anchorVersion,this.p.version,...Object.values(this.state.rows).map(r=>r.envelope.keyVersion)])];
@@ -256,30 +258,30 @@ export class WatchCloudRecords {
  /** Public RSS interactions commit independently of slow private body restore.
   * This lane never publishes private metadata or retires any legacy record. */
  flushInteractions(){if(this.p.lazyProjections)return Promise.resolve(0);return this.flushRecords([],[],true);}
- private async flushRecords(completedPrivateArticleIds:readonly string[],completedBookIds:readonly string[],interactionsOnly:boolean){
+ private async flushRecords(completedPrivateArticleIds:readonly string[],completedBookIds:readonly string[],interactionsOnly:boolean){return cpuWorkAsync('record-diff','items',Math.max(this.decoded.size,Object.keys(this.state.rows).length),async ()=>{
   const p=this.p;await p.current();await p.assertUpload();let cleanupAnchor:Uint8Array|undefined,cleanupKey:Uint8Array|undefined;
   try{const anchor=cleanupAnchor=await this.key(p.anchorVersion),key=cleanupKey=await this.key(p.version);if(!anchor||!key){anchor?.fill(0);key?.fill(0);throw Error('missing_key_version');}
   const lane=interactionsOnly?'interactions':'flush';
   const metrics=new Map<string,RecordWorkProgress>();
   const reportWork=()=>{for(const m of metrics.values())try{p.work?.(m);}catch{}metrics.clear();};
   const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T,cached=false):Promise<T>=>{const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const k=stage+':'+cached,old=metrics.get(k);metrics.set(k,{event:'records-work',lane,stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),cached,outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
-  let saved=this.state.prepared;if(p.readPreparation){try{saved=JSON.parse(await p.readPreparation()??'null')??undefined;}catch(error){await p.current();saved=undefined;}}
-  const scope=sha256Hex(utf8Encode(JSON.stringify(['record-preparation-v1',p.userId,p.epoch,p.anchorVersion,p.version])));
+  let saved=this.state.prepared;if(p.readPreparation){try{saved=cpuJsonParse(await p.readPreparation()??'null')??undefined;}catch(error){await p.current();saved=undefined;}}
+  const scope=sha256Hex(utf8Encode(cpuJsonStringify(['record-preparation-v1',p.userId,p.epoch,p.anchorVersion,p.version])));
   const receipts=new WorkReceipts<{id:string;hash:string;proof:string}>(saved?.scope===scope&&Array.isArray(saved.entries)?saved.entries.filter(e=>Array.isArray(e)&&ID.test(e[0])&&e[1]&&ID.test(e[1].id)&&ID.test(e[1].hash)&&ID.test(e[1].proof)):[],100000);
   const receiptProof=(fingerprint:string,r:{id:string;hash:string})=>hex(hmacSha256Bytes(anchor,utf8Encode('watchrss/local-record-preparation/v1:'+scope+':'+fingerprint+':'+r.id+':'+r.hash)));
   let savedPreparation=saved?.scope===scope&&Array.isArray(saved.entries)?saved.entries.at(-1)?.[0]:undefined;
-  const persistPreparation=async()=>{const value={scope,entries:receipts.snapshot()};if(p.writePreparation)await p.writePreparation(JSON.stringify(value));else this.state.prepared=value;const last=value.entries.at(-1)?.[0];if(last&&last!==savedPreparation){await this.progressCommit?.('prepared:'+scope+':'+last);savedPreparation=last;}};
+  const persistPreparation=async()=>{const value={scope,entries:receipts.snapshot()};if(p.writePreparation)await p.writePreparation(cpuJsonStringify(value));else this.state.prepared=value;const last=value.entries.at(-1)?.[0];if(last&&last!==savedPreparation){await this.progressCommit?.('prepared:'+scope+':'+last);savedPreparation=last;}};
   const persist=async(cleanup=false,preparationOnly=false)=>measure('checkpoint',1,async()=>{
    if(!p.writePreparation)this.state.prepared={scope,entries:receipts.snapshot()};
-   if(!preparationOnly||!p.writePreparation){if(p.writeStateObject){if(!cleanup)await p.writeStateObject(this.state);}else {const value=JSON.stringify(this.state);if((cleanup||accepted)&&p.checkpoint)await p.checkpoint(value);else {await p.current();await p.writeState(value);}}}
-   if(p.writePreparation)await persistPreparation();if(accepted)await this.progressCommit?.('ack:'+sha256Hex(utf8Encode(JSON.stringify(batch.map(r=>[r.recordId,this.state.records[r.recordId]])))));
+   if(!preparationOnly||!p.writePreparation){if(p.writeStateObject){if(!cleanup)await p.writeStateObject(this.state);}else {const value=cpuJsonStringify(this.state);if((cleanup||accepted)&&p.checkpoint)await p.checkpoint(value);else {await p.current();await p.writeState(value);}}}
+   if(p.writePreparation)await persistPreparation();if(accepted)await this.progressCommit?.('ack:'+sha256Hex(utf8Encode(cpuJsonStringify(batch.map(r=>[r.recordId,this.state.records[r.recordId]])))));
   });
   let accepted=false,prepared=0;
   let written=0;const hashById=new Map<string,string>();let batch:RecordWrite[]=[];
   const flush=async()=>{if(!batch.length)return;await p.current();await p.assertUpload();const response=await measure('push',batch.length,()=>p.push(batch));check(response.formatVersion===1&&response.items?.length===batch.length);const expected=new Map(batch.map(r=>[r.recordId,r])),seen=new Set<string>();
    for(const row of response.items){revision(row.revision);const item=expected.get(row.recordId);check(item&&!seen.has(row.recordId)&&cmp(row.revision,item!.expectedRevision)>0);seen.add(row.recordId);}for(const row of response.items){const item=expected.get(row.recordId)!;this.state.records[row.recordId]={revision:row.revision,hash:hashById.get(row.recordId)!};if(item!.tombstone)delete this.state.rows[row.recordId];else this.state.rows[row.recordId]={recordId:row.recordId,revision:row.revision,envelope:item!.envelope,tombstone:item!.tombstone};}accepted=true;written+=batch.length;await persist();accepted=false;await p.current();for(const item of batch)if(!item.tombstone){const row=this.state.rows[item.recordId];if(row)this.decoded.set(item.recordId,{row,...await this.codec.decode(key,anchor,p.userId,row)});}batch=[];};
   const add=async(id:string,doc:RecordDocument,tombstone=!!doc.value.deleted,original?:RecordRow,preparedHash?:string)=>{let hash=preparedHash??await measure('hash',1,()=>this.codec.hash(doc));const old=this.state.records[id];let same=await measure('ack-diff',1,()=>old?.hash===hash&&!original);if(p.lazyProjections&&(!same||this.state.protectedRows?.[id]))await this.ensureDecoded([id]);const basis=this.decoded.get(id)?.doc;if(hasArticleRegisters(doc)||(basis&&cloudCompatibility(basis).readOnly)||(!same&&!basis&&this.state.rows[id])){if(hasArticleRegisters(doc))(this.state.protectedRows??={})[id]=true;if(doc.pendingEdit||old?.hash!==hash)(this.state.pendingEdits??={})[id]=true;return;}if(!same&&basis&&p.project){const projected=await p.project(doc,basis),mergedHash=await measure('hash',1,()=>this.codec.hash(projected));if(mergedHash!==hash&&!tombstone){const changed=await this.apply([projected]);if(changed)await this.progressCommit?.('repair:'+id+':'+mergedHash);}doc=projected;hash=mergedHash;same=old?.hash===hash&&!original;}if(same){delete this.state.pendingEdits?.[id];return;}const envelope=original?.envelope??await measure('encode',1,()=>this.codec.encode(key,p.userId,id,p.version,doc,basis??doc));delete this.state.pendingEdits?.[id];const item={recordId:id,expectedRevision:original?.revision??old?.revision??'0',envelope,tombstone};
-   if(batch.length&&(batch.length>=50||utf8Encode(JSON.stringify({formatVersion:1,items:[...batch,item]})).length>1048576))await flush();hashById.set(id,hash);batch.push(item);};
+   if(batch.length&&(batch.length>=50||utf8Encode(cpuJsonStringify({formatVersion:1,items:[...batch,item]})).length>1048576))await flush();hashById.set(id,hash);batch.push(item);};
   try{
    const documents=(await measure('export',1,()=>p.export(measure))).filter(doc=>!interactionsOnly||doc.kind==='rss-state');
    for(const deleting of [true,false]){for(const doc of documents)if(!!doc.value.deleted===deleting){
@@ -302,7 +304,7 @@ export class WatchCloudRecords {
    // R3/S8: obsolete public indexes become entity tombstones only AFTER new states commit.
    const completed=new Set(completedPrivateArticleIds);
    const interactions=new Map(documents.filter(d=>d.kind==='rss-state').map(d=>[d.value.sourceId+':'+d.value.articleIdHash,d]));
-   const retireScope=await measure('canonicalJSON',1,()=>sha256Hex(utf8Encode(JSON.stringify([completedPrivateArticleIds,completedBookIds,this.state.records]))));let retiredWork=0;
+   const retireScope=await measure('canonicalJSON',1,()=>sha256Hex(utf8Encode(cpuJsonStringify([completedPrivateArticleIds,completedBookIds,this.state.records]))));let retiredWork=0;
    for(const id of p.lazyProjections?Object.keys(this.state.rows):this.decoded.keys()){
     if(p.check){p.check();if(retiredWork%50===0)await p.current();}else await p.current();
     const fingerprint=sha256Hex(utf8Encode('retire:'+retireScope+':'+id+':'+(this.state.rows[id]?.revision??this.decoded.get(id)?.row.revision))),old=receipts.get(fingerprint);
@@ -327,5 +329,5 @@ export class WatchCloudRecords {
    }await flush();await persist();return written;
   }catch(error){if(p.writeStateObject&&/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error)))await this.measured('checkpoint-skip',0,async()=>{});if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&!p.writeStateObject&&p.checkpoint)await persist(true);if((error as {status?:number})?.status===426||(error as {code?:string})?.code==='cloud_format_upgrade_required'){for(const item of batch)(this.state.pendingEdits??={})[item.recordId]=true;await this.save();}throw error;}finally{reportWork();}
   }finally{cleanupAnchor?.fill(0);cleanupKey?.fill(0);this.clearRunKeys();}
- }
+ });}
 }

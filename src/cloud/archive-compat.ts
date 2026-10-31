@@ -1,3 +1,4 @@
+import {cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {equalBytesAsync} from '@podjs/framework/bytes';
 import {parseRawJson,rawJsonProperty,rawJsonValue,rawJsonText,patchRawJsonObject} from '@podjs/framework/json-raw';
 import {featurePolicy,recordFields} from './compatibility';
@@ -19,7 +20,7 @@ export async function mergeCloudArchive(oldBytes:Uint8Array,newBytes:Uint8Array,
  const result:string[]=[],seen=new Set<string>();let unchanged=(oldRows.items?.length??0)===(nextRows.items?.length??0);
  for(const node of nextRows.items??[]){const row=rawJsonValue<any>(node),basis=byId.get(row.articleId);seen.add(row.articleId);
   if(!basis){result.push(rawJsonText(node));unchanged=false;continue;}const before=rawJsonValue<any>(basis);if(featurePolicy(before.features).readOnly)throw Error('cloud_format_read_only');
-  const edits:Record<string,string|undefined>={};for(const k of metadataFields)if(Object.prototype.hasOwnProperty.call(row,k))edits[k]=JSON.stringify(row[k]);
+  const edits:Record<string,string|undefined>={};for(const k of metadataFields)if(Object.prototype.hasOwnProperty.call(row,k))edits[k]=cpuJsonStringify(row[k]);
   result.push(patchRawJsonObject(basis,edits));
   // State clocks and neutral cloud placeholders do not version immutable bodies.
   for(const k of ['articleId','url','title','rssSourceUrl','contentHash','importedAt','independentSaved','favoriteSaved','watchLaterSaved'])if((before[k]??null)!==(row[k]??null))unchanged=false;
@@ -32,8 +33,8 @@ export async function mergeCloudArchive(oldBytes:Uint8Array,newBytes:Uint8Array,
  // its empty placeholders cannot erase the authenticated originals.
  for(const name of ['app_meta.json','reader/manifest.json','books.json','sources.json','saved_items.json'])if(old.has(name)&&(!next.has(name)||utf8Decode(next.get(name)!)==='[]'))next.set(name,old.get(name)!);
  next.set('articles.json',utf8Encode('['+result.join(',')+']'));
- const rootEdits:Record<string,string>={};for(const [k,v]of Object.entries(newRoot))rootEdits[k]=JSON.stringify(v);
- rootEdits.articleCount=String(result.length);for(const k of ['readerPresetCount','readerFontCount','readerBackgroundCount','appMetaCount'])if(oldRoot[k]!==undefined)rootEdits[k]=JSON.stringify(oldRoot[k]);
+ const rootEdits:Record<string,string>={};for(const [k,v]of Object.entries(newRoot))rootEdits[k]=cpuJsonStringify(v);
+ rootEdits.articleCount=String(result.length);for(const k of ['readerPresetCount','readerFontCount','readerBackgroundCount','appMetaCount'])if(oldRoot[k]!==undefined)rootEdits[k]=cpuJsonStringify(oldRoot[k]);
  next.set('manifest.json',utf8Encode(patchRawJsonObject(oldMeta,rootEdits)));
  return {bytes:writeWrss(next),unchanged:false};
 }

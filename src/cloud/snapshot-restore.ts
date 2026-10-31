@@ -1,3 +1,5 @@
+import {cpuWork} from '@podjs/framework/cpu-work';
+import {cpuSort} from '@podjs/framework/cpu-work';
 import {openWrssRange,type WrssRangeReader} from './wrss';
 import {cloudFormatFailure} from './format-diagnostic';
 import type {CloudSession} from './service';
@@ -32,13 +34,13 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
   if(bytes.length<=32*1024*1024){while(memo.size&&memoBytes+bytes.length>32*1024*1024){const first=memo.keys().next().value!;memoBytes-=memo.get(first)!.length;memo.delete(first);}memo.set(o,bytes);memoBytes+=bytes.length;}return bytes;
  };
  try{
-  for(const h of [...p.heads].sort((a,b)=>a.deviceSequence-b.deviceSequence)){
+  for(const h of cpuSort([...p.heads],(a,b)=>a.deviceSequence-b.deviceSequence)){
    await p.current();report();const remote=await s.client.snapshot(h.id);let bytes=await s.cache.manifest(s.userId,h.id);
    if(bytes&&(bytes.length!==h.manifestSizeBytes||await p.hash(bytes)!==h.manifestSha256))bytes=undefined;
    if(!bytes){bytes=await cp.timed('download',h.manifestSizeBytes,()=>s.client.download(remote.manifestUrl,h.manifestSizeBytes,h.manifestSha256));await (s.restoreCheckpoint?.cache??s.cache).storeManifest(s.userId,h.id,bytes);await cp.commit('manifest:'+h.manifestSha256,bytes.length);}
    const manifest=await cp.timed('manifest',bytes.length,()=>p.manifest(h,bytes!));if(!cloudCompatibility(manifest).opaque)for(let i=0;i<manifest.objects.length;i++)indices.set(manifest.objects[i],i);snapshots.push({h,remote,manifest,overlayPayload:new Map()});
   }
-  const objects=snapshots.filter(v=>!cloudCompatibility(v.manifest).opaque).flatMap(v=>v.manifest.objects),chunks=objects.flatMap(o=>o.chunks??[]);cp.metric('plan',objects.reduce((n,o)=>n+o.originalBytes,0),p.now(),false,{objects:objects.length,chunks:chunks.length,maxChunkBytes:chunks.reduce((n,c)=>Math.max(n,c.ciphertextBytes),0)});
+  const plan=cpuWork('manifest-plan','items',snapshots.reduce((n,v)=>n+(v.manifest.objects?.length??0),0),()=>{const objects=snapshots.filter(v=>!cloudCompatibility(v.manifest).opaque).flatMap(v=>v.manifest.objects),chunks=objects.flatMap(o=>o.chunks??[]);return {bytes:objects.reduce((n,o)=>n+o.originalBytes,0),objects:objects.length,chunks:chunks.length,maxChunkBytes:chunks.reduce((n,c)=>Math.max(n,c.ciphertextBytes),0)};});cp.metric('plan',plan.bytes,p.now(),false,plan);
   await publish();
   // Every current head participates before any body is applied. Per-entry
   // authenticated receipts resume validation without weakening overlay LWW.

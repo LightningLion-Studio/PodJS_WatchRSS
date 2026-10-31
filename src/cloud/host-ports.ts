@@ -1,3 +1,4 @@
+import {cpuWorkAsync} from '@podjs/framework/cpu-work';
 import {createCrypto,hex,hmacSha256Bytes} from '@podjs/framework/crypto';
 import {decodeBase64 as base64ToBytes,encodeBase64 as bytesToBase64,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
 import type {CloudGuard} from './guard';
@@ -61,7 +62,7 @@ const crypto:SnapshotCrypto={
  encrypt:async(key,aad,input)=>{if(input.length<=131072){const value=await operation<{nonceBase64:string;ciphertextBase64:string}>('crypto.aesGcmEncrypt',{keyBase64:b64(key),aadBase64:b64(aad),dataBase64:b64(input)});return {nonce:bytes(value.nonceBase64),ciphertext:bytes(value.ciphertextBase64)};}const value=await transform('crypto.largeAesGcmEncrypt',input,{keyBase64:b64(key),aadBase64:b64(aad)});if(!value.nonceBase64)throw Error('缺少云加密 nonce');return {nonce:bytes(value.nonceBase64),ciphertext:value.bytes};},
  decrypt:async(key,aad,nonce,ciphertext)=>ciphertext.length<=131088?data('crypto.aesGcmDecrypt',{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce),ciphertextBase64:b64(ciphertext)}):(await transform('crypto.largeAesGcmDecrypt',ciphertext,{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce)})).bytes,
  gzip:async input=>transcode(input,'file.gzip',64*1024*1024),
- gunzip:async(input,maxBytes)=>{guard.require();const native=gunzipBytes(input);if(native){if(native.length>maxBytes)throw Error('cloud_snapshot_inflate_limit');return native;}return transcode(input,'file.gunzip',maxBytes);},
+ gunzip:async(input,maxBytes)=>cpuWorkAsync('gunzip','bytes',Math.max(input.length,maxBytes),async()=>{guard.require();const native=gunzipBytes(input);if(native){if(native.length>maxBytes)throw Error('cloud_snapshot_inflate_limit');return native;}return transcode(input,'file.gunzip',maxBytes);}),
 };
 const files:CloudBlobStore={
  hash:async path=>(await fileChunks.hash(path)).sha256,

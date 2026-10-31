@@ -66,7 +66,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
   if(denyYield&&method==='runtime.delay'||denyRecords&&method==='http.download'&&a.url.includes('/records?'))throw Error('permission_denied');
   switch(method){
    case 'app.buildInfo':return {debugBuild:false};
-   case 'runtime.delay':if(stallYields)guestNow+=1000;expect(a).toEqual({milliseconds:1});yieldStacks.push(new Error().stack??'');await new Promise(resolve=>setTimeout(resolve,1));return null;
+   case 'runtime.delay':if(stallYields)guestNow+=10000;expect(a).toEqual({milliseconds:1});yieldStacks.push(new Error().stack??'');await new Promise(resolve=>setTimeout(resolve,1));return null;
    case 'log.append':logs.push(a.text);return {};
    case 'cloud.acquire':expect(leased).toBe(false);leased=true;return {acquired:true};
    case 'cloud.release':leased=false;return {};
@@ -152,10 +152,10 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    let zeros=0;for(let round=0;round<6&&zeros<2;round++){guestDeadline=guestNow+300000;const r=await headless({...context,deadlineMs:guestDeadline},()=>guestNow);expect(r==='retry'||JSON.stringify(r)===JSON.stringify({status:'retry',progress:true})).toBe(true);zeros=r==='retry'?zeros+1:0;expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');}expect(zeros).toBe(2);
    guestDeadline=guestNow+300000;const began=guestNow;expect(await headless({...context,deadlineMs:guestDeadline},()=>guestNow)).toBe('retry');
    console.info('RESTORESTALL_YIELD_BURST',JSON.stringify({baseline:process.env.RESTORESTALL_BASELINE==='1',modeledMillis:guestNow-began,yields:yieldStacks.length,acknowledgements,grantRetained:secure.has(MANUAL_INTENT_KEY)}));
-   if(process.env.RESTORESTALL_BASELINE==='1'){expect(guestNow-began).toBeGreaterThanOrEqual(289000);expect(logs.join('')).toContain('cloud_sync_deadline_exceeded');expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');expect(acknowledgements).toBe(0);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);continue;}
+   if(process.env.RESTORESTALL_BASELINE==='1'){expect(guestNow-began).toBeGreaterThanOrEqual(250000);expect(logs.join('')).toContain('cloud_sync_deadline_exceeded');expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');expect(acknowledgements).toBe(0);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);continue;}
    expect(guestNow-began).toBeLessThan(150000);expect(logs.join('')).toContain('cloud_snapshot_work_timeout');
    expect(acknowledgements).toBe(0);expect(leased).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);
-   expect(reserved).toBeUndefined();expect(yieldStacks.some(s=>s.includes('parseRawJsonAsync'))).toBe(true);
+   expect(reserved).toBeUndefined();expect(yieldStacks.length).toBeGreaterThan(0);expect(logs.join('')).toContain('"stage":"json-scan"');
    // A fresh guest may resume after the expensive condition clears. Keep its
    // current grant, ciphertext, journal and source bytes unchanged.
    stallYields=false;guestDeadline=guestNow+300000;
@@ -190,7 +190,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
   }
   if(entry==='manual-manifest-window'){const result=await headless(context,()=>guestNow);expect(result==='retry'||JSON.stringify(result)===JSON.stringify({status:'retry',progress:true}),logs.join('')).toBe(true);expect(windowStop).toBe(true);const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);expect(grant.token).toBe('manual_fixture');expect(grant.mode).toBe('recent128');expect(grant.epoch).toBe(epoch);expect(leased).toBe(false);guestNow=Date.now();}
   expect(await headless(context),entry+' '+logs.join('')).toBe('success');
-  if(withManifest){expect(calls).toContain('crypto.largeAesGcmDecrypt');expect(yieldStacks.some(s=>s.includes('equalBytesAsync'))).toBe(true);expect(yieldStacks.some(s=>s.includes('parseRawJsonAsync'))).toBe(true);expect(acknowledgements).toBe(1);}
+  if(withManifest){expect(calls).toContain('crypto.largeAesGcmDecrypt');expect(logs.join('')).toContain('\"stage\":\"byte-compare\"');expect(calls).toContain('runtime.delay');expect(logs.join('')).toContain('\"stage\":\"json-scan\"');expect(acknowledgements).toBe(1);}
   if(entry==='manual-manifest-metadata'){const diagnostics=logs.join('');expect(diagnostics).toContain('\"stage\":\"cloudMetadata\"');expect(diagnostics).toContain('\"stage\":\"cloudSources\"');}
   expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
  expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);

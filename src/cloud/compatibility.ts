@@ -1,3 +1,4 @@
+import {cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {parseRawJson,rawJsonProperty,rawJsonText,rawJsonValue,patchRawJsonObject,rawJsonUnknownBytes,type RawJsonNode,type RawJsonSchema} from '@podjs/framework/json-raw';
 export {parseRawJson,rawJsonProperty,rawJsonText,rawJsonValue,patchRawJsonObject};
 export interface CloudFeatures {incompat:string[];roCompat:string[]}
@@ -44,12 +45,12 @@ export const settingFields=['snapshotContentLayout','libraryEpoch','contentGener
  * remain slices of authenticated plaintext, never a rounded JS reserialization. */
 export function patchCloudObject(value:Record<string,any>,fields:readonly string[],basis?:object,overrides:Record<string,string|undefined>={}):string {
  const node=basis&&cloudRaw(basis);const edits:Record<string,string|undefined>={};
- for(const key of fields)if(Object.prototype.hasOwnProperty.call(value,key))edits[key]=JSON.stringify(value[key]);
- Object.assign(edits,overrides);return node?patchRawJsonObject(node,edits):'{'+Object.entries(edits).filter(([,v])=>v!==undefined).map(([k,v])=>JSON.stringify(k)+':'+v).join(',')+'}';
+ for(const key of fields)if(Object.prototype.hasOwnProperty.call(value,key))edits[key]=cpuJsonStringify(value[key]);
+ Object.assign(edits,overrides);return node?patchRawJsonObject(node,edits):'{'+Object.entries(edits).filter(([,v])=>v!==undefined).map(([k,v])=>cpuJsonStringify(k)+':'+v).join(',')+'}';
 }
 export function rawRecordText(doc:{kind:string;value:Record<string,any>;features?:CloudFeatures},basis=doc):string {
  requireCloudWritable(basis);const raw=cloudRaw(basis),node=raw&&rawJsonProperty(raw,'value'),known=knownRecordValue(doc.kind,doc.value);
- const body=node?patchRawJsonObject(node,Object.fromEntries((recordFields[doc.kind]??Object.keys(known)).map(k=>[k,Object.prototype.hasOwnProperty.call(known,k)?JSON.stringify(known[k]):undefined]))):JSON.stringify(known);
- return raw?patchRawJsonObject(raw,{kind:JSON.stringify(doc.kind),value:body}):JSON.stringify({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:known});
+ const body=node?patchRawJsonObject(node,Object.fromEntries((recordFields[doc.kind]??Object.keys(known)).map(k=>[k,Object.prototype.hasOwnProperty.call(known,k)?cpuJsonStringify(known[k]):undefined]))):cpuJsonStringify(known);
+ return raw?patchRawJsonObject(raw,{kind:cpuJsonStringify(doc.kind),value:body}):cpuJsonStringify({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:known});
 }
 export const emptyCompatibilityStatus=():CloudCompatibilityStatus=>({opaque:0,readOnly:0,editPending:0,upgradeRequired:false});

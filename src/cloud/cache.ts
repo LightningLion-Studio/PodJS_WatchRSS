@@ -1,3 +1,4 @@
+import {cpuJsonParse,cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {repositoryWork,type RepositoryDiagnostic} from '../sync/repository-work';
 import {JsonDeltaJournal} from '@podjs/framework/json-delta-journal';
 import {utf8Encode,utf8Decode} from './types';
@@ -12,17 +13,17 @@ export class WatchCloudCache {
  async recordsValue(userId:string){this.guard.require();return (await this.journal(userId)).load();}
  async storeRecordsValue(userId:string,value:Record<string,any>){this.guard.require();return (await this.journal(userId)).commit(value);}
  private roots=new Map<string,Promise<string>>();
- private root(userId:string){let root=this.roots.get(userId);if(!root){root=this.hash(utf8Encode(JSON.stringify([this.backendBaseUrl.replace(/\/+$/,''),userId]))).then(h=>`watch-cloud-cache/${h.slice(0,32)}`);if(this.roots.size>=32)this.roots.delete(this.roots.keys().next().value!);this.roots.set(userId,root);void root.catch(()=>this.roots.delete(userId));}return root;}
+ private root(userId:string){let root=this.roots.get(userId);if(!root){root=this.hash(utf8Encode(cpuJsonStringify([this.backendBaseUrl.replace(/\/+$/,''),userId]))).then(h=>`watch-cloud-cache/${h.slice(0,32)}`);if(this.roots.size>=32)this.roots.delete(this.roots.keys().next().value!);this.roots.set(userId,root);void root.catch(()=>this.roots.delete(userId));}return root;}
  private projectionId(id:string){if(!/^[a-f0-9]{64}(?:-[A-Za-z0-9-]{1,160})?$/.test(id))throw Error('cloud_snapshot_checkpoint_invalid');return id;}
 
  async scope(userId:string){this.guard.require();return this.root(userId);}
  async clear(userId:string){this.guard.require();if(!this.files.removeTree)throw Error('cache_cleanup_unavailable');await this.files.removeTree(await this.root(userId));this.journals.delete(userId+":false");this.journals.delete(userId+":true");}
  private id(id:string){if(!/^[a-zA-Z0-9-]{1,128}$/.test(id))throw Error('无效快照 ID');return id;}
  private digest(hash:string){if(!/^[0-9a-f]{64}$/.test(hash))throw Error('无效块哈希');return hash;}
- async records(userId:string){this.guard.require();if(this.files.append){const value=await this.recordsValue(userId);return value.epoch?JSON.stringify(value):undefined;}const bytes=await this.files.read(`${await this.root(userId)}/records.json`);return bytes?utf8Decode(bytes):undefined;}
- async storeRecords(userId:string,value:string){this.guard.require();if(this.files.append){await this.storeRecordsValue(userId,JSON.parse(value));return;}await this.files.writeAtomic(`${await this.root(userId)}/records.json`,utf8Encode(value));}
- async recordPreparation(userId:string){this.guard.require();if(this.files.append){const v=await (await this.journal(userId,true)).load();return v.scope?JSON.stringify(v):undefined;}const b=await this.files.read(`${await this.root(userId)}/record-preparation.json`);return b?utf8Decode(b):undefined;}
- async storeRecordPreparation(userId:string,value:string){this.guard.require();if(this.files.append){await (await this.journal(userId,true)).commit(JSON.parse(value));return;}await this.files.writeAtomic(`${await this.root(userId)}/record-preparation.json`,utf8Encode(value));}
+ async records(userId:string){this.guard.require();if(this.files.append){const value=await this.recordsValue(userId);return value.epoch?cpuJsonStringify(value):undefined;}const bytes=await this.files.read(`${await this.root(userId)}/records.json`);return bytes?utf8Decode(bytes):undefined;}
+ async storeRecords(userId:string,value:string){this.guard.require();if(this.files.append){await this.storeRecordsValue(userId,cpuJsonParse(value));return;}await this.files.writeAtomic(`${await this.root(userId)}/records.json`,utf8Encode(value));}
+ async recordPreparation(userId:string){this.guard.require();if(this.files.append){const v=await (await this.journal(userId,true)).load();return v.scope?cpuJsonStringify(v):undefined;}const b=await this.files.read(`${await this.root(userId)}/record-preparation.json`);return b?utf8Decode(b):undefined;}
+ async storeRecordPreparation(userId:string,value:string){this.guard.require();if(this.files.append){await (await this.journal(userId,true)).commit(cpuJsonParse(value));return;}await this.files.writeAtomic(`${await this.root(userId)}/record-preparation.json`,utf8Encode(value));}
  async manifest(userId:string,id:string){this.guard.require();return this.files.read(`${await this.root(userId)}/manifests/${this.id(id)}.bin`);}
  async storeManifest(userId:string,id:string,bytes:Uint8Array,localHead=false){this.guard.require();const root=await this.root(userId);await this.files.writeAtomic(`${root}/manifests/${this.id(id)}.bin`,bytes);if(localHead)await this.files.writeAtomic(`${root}/latest`,utf8Encode(id));}
  async latest(userId:string){this.guard.require();const value=await this.files.read(`${await this.root(userId)}/latest`);if(!value)return undefined;const id=this.id(utf8Decode(value).trim()),bytes=await this.manifest(userId,id);return bytes?{id,bytes}:undefined;}
