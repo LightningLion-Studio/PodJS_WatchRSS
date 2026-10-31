@@ -1,3 +1,4 @@
+import {rethrowSnapshotDeferred} from './snapshot-deferral';
 import type {RestoreApplyCheckpoint} from './snapshot-checkpoint';
 import {parseRawJson,parseRawJsonAsync,rawJsonValue,rawJsonText,canonicalIntegerJson,rawJsonProperty,patchRawJsonObject,jsonUtf8Bytes} from '@podjs/framework/json-raw';
 import {parseChunkedArticles} from '../sync/article-batches';
@@ -128,7 +129,7 @@ export class PrivateOverlayReadSet {
   const index=await decodePrivateOverlay(bytes,this.crypto.sha256);let pending=0;
   for(const entry of index.entries){await work?.checkpoint.check();let valid=entry.object===null,binding='';const done=work?.checkpoint.has(overlayKey(entry));
    if(entry.object){const descriptor=descriptors.find(o=>o.name===entry.object),body=done?undefined:(payload.get(entry.object)??await work?.resolve(entry.object));binding=descriptor?await this.crypto.sha256(utf8Encode(cloudRaw(descriptor)?rawJsonText(cloudRaw(descriptor)!):JSON.stringify(descriptor))):'missing';
-    if((trustedApplied||done)&&descriptor)valid=true;else if(descriptor&&body)try{if(descriptor.contentSha256&&await this.crypto.sha256(body)!==descriptor.contentSha256)fail();if(entry.kind==='article')await validateMicroArchive(body,entry.id,this.crypto);else{const d=descriptor.privateBook;if(!d||d.bookId!==entry.id||d.packagePath!==entry.object)throw Error('cloud_format_overlay_invalid');const chunks=async function*(){yield utf8Decode(body);};await validateBookPackage(splitBookLines(chunks()),this.crypto.sha256,{bookId:entry.id,fingerprint:String(d.fingerprint),chapterCount:Number(d.chapterCount)});}valid=true;}catch{await work?.checkpoint.check();/* Preserve backing and retry; never translate failure into deletion. */}
+    if((trustedApplied||done)&&descriptor)valid=true;else if(descriptor&&body)try{if(descriptor.contentSha256&&await this.crypto.sha256(body)!==descriptor.contentSha256)fail();if(entry.kind==='article')await validateMicroArchive(body,entry.id,this.crypto);else{const d=descriptor.privateBook;if(!d||d.bookId!==entry.id||d.packagePath!==entry.object)throw Error('cloud_format_overlay_invalid');const chunks=async function*(){yield utf8Decode(body);};await validateBookPackage(splitBookLines(chunks()),this.crypto.sha256,{bookId:entry.id,fingerprint:String(d.fingerprint),chapterCount:Number(d.chapterCount)});}valid=true;}catch(error){rethrowSnapshotDeferred(error);await work?.checkpoint.check();/* Preserve backing and retry; never translate failure into deletion. */}
    }
    if(valid)await work?.checkpoint.commit(overlayKey(entry));else pending++;
    const key=overlayKey(entry),old=this.winners.get(key),order=old?compareOverlayClock(entry,old.entry):1;

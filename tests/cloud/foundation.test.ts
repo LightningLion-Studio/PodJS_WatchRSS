@@ -91,7 +91,7 @@ test('watch registration and signed downloads preserve credentials boundary and 
  const requests:HttpRequest[]=[],body=utf8Encode('snapshot');let bad=false;
  const client=new WatchCloudClient({async request(r){requests.push(r);return {status:200,headers:{},body:r.url.includes('/register')?utf8Encode('{}'):bad?new Uint8Array():body};}},{baseUrl:'https://fixture.invalid',accessToken:'secret'},crypto,guard);
  client.setEpoch('9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff');await client.registerDevice('w','Watch','spki',1);expect(JSON.parse(utf8Decode(requests[0].body!))).toMatchObject({platform:'watch',capabilities:{rtosProtocolReserved:true}});expect(JSON.parse(utf8Decode(requests[0].body!)).capabilities).not.toHaveProperty('rssRecordsVersion');
- expect(await client.download('https://objects.invalid/signed',body.length,await crypto.sha256(body))).toEqual(body);expect(requests[1].headers).toEqual({});bad=true;await expect(client.download('https://objects.invalid/signed',body.length,await crypto.sha256(body))).rejects.toThrow('校验');
+ expect(await client.download('https://objects.invalid/signed',body.length,await crypto.sha256(body))).toEqual(body);expect(requests[1].headers).toEqual({});bad=true;await expect(client.download('https://objects.invalid/signed',body.length,await crypto.sha256(body))).rejects.toMatchObject({code:'cloud_snapshot_object_integrity'});
 });
 test('TUS 409 reconciles offset and cannot falsely mark partial upload complete',async()=>{
  const requests:HttpRequest[]=[],responses:{status:number;headers:Record<string,string>}[]=[{status:201,headers:{Location:'/u'}},{status:200,headers:{'Upload-Offset':'0'}},{status:409,headers:{}},{status:200,headers:{'Upload-Offset':'1'}},{status:204,headers:{'Upload-Offset':'2'}}];

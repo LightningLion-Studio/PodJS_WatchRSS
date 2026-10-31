@@ -6,9 +6,10 @@ import type {CloudSnapshotHead} from './types';
 import {PRIVATE_OVERLAY_NAME,hasPrivateOverlay} from './private-overlay';
 import {cloudCompatibility,emptyCompatibilityStatus} from './compatibility';
 import {SnapshotRestoreCheckpoint} from './snapshot-checkpoint';
+import {snapshotDeferred} from './snapshot-deferral';
 export interface RestoringSnapshot {h:CloudSnapshotHead;remote:Awaited<ReturnType<CloudSession['client']['snapshot']>>;manifest:CloudManifest;overlayPayload:Map<string,Uint8Array>;}
 export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapshotHead[];full:boolean;journal:SnapshotRestoreCheckpoint;current:()=>Promise<void>;manifest:(h:CloudSnapshotHead,bytes:Uint8Array)=>Promise<CloudManifest>;hash:(b:Uint8Array)=>Promise<string>;supported:(o:CloudObject)=>boolean;now:()=>number;status:(percent:number,phase?:'apply')=>void;changed:()=>void}){
- const fatal=(error:unknown)=>cloudFormatFailure(error)==='storage'||/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|cloud_host_capability_unavailable/.test(String(error))||String(error).includes('cloud_snapshot_unit_capacity')||String(error).includes('cloud_snapshot_checkpoint_invalid');
+ const fatal=(error:unknown)=>snapshotDeferred(error)||cloudFormatFailure(error)==='storage'||/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|cloud_host_capability_unavailable/.test(String(error))||String(error).includes('cloud_snapshot_unit_capacity')||String(error).includes('cloud_snapshot_checkpoint_invalid');
  const {session:s,journal:cp}=p,snapshots:RestoringSnapshot[]=[],compatibility=emptyCompatibilityStatus();let pendingItems=0,abandonedItems=0,formatBlocked=!!s.client.requiredFeatures?.length,changed=false,overlayPending=0;
  const indices=new Map<CloudObject,number>(),partTokens=new Map<CloudObject,Map<string,string>>(),objectTokens=new Map<CloudObject,string>(),keys=new Map<number,Uint8Array>(),memo=new Map<CloudObject,Uint8Array>();let memoBytes=0;
  const token=async(h:CloudSnapshotHead,o:CloudObject)=>{let v=objectTokens.get(o);if(!v){const index=indices.get(o);if(index===undefined)throw Error('cloud_snapshot_checkpoint_invalid');v=h.manifestSha256+'-o'+index;objectTokens.set(o,v);}return v;};
@@ -53,13 +54,14 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
    const incompatible=manifest.objects.filter(o=>cloudCompatibility(o).opaque||!p.supported(o));compatibility.opaque+=incompatible.length;compatibility.readOnly+=manifest.objects.filter(o=>!cloudCompatibility(o).opaque&&cloudCompatibility(o).readOnly).length;
    if(already){const blocked=Number(rootPolicy.readOnly)+incompatible.length+manifest.objects.filter(o=>!cloudCompatibility(o).opaque&&cloudCompatibility(o).readOnly).length;if(blocked)pendingItems+=blocked;else if(p.full&&!overlayPending)await s.client.acknowledge(h.id,s.deviceId);continue;}
    const selected=manifest.objects.filter(o=>!cloudCompatibility(o).opaque&&p.supported(o)&&(p.full||o.name==='rss-state.json'));let headAbandoned=0,headPending=Number(overlayPending>0)+Number(rootPolicy.readOnly)+incompatible.length+manifest.objects.filter(o=>!cloudCompatibility(o).opaque&&cloudCompatibility(o).readOnly).length;
-   for(const object of selected){await p.current();const t=await token(h,object);if(cp.has('applied:'+t)){headAbandoned+=cp.apply('applied').result(t);continue;}
+   const warn=async()=>{if(headAbandoned&&!await s.state.warned(h.sourceDeviceId,h.id)){await s.state.markWarned(h.sourceDeviceId,h.id);abandonedItems+=headAbandoned;}};
+   try{for(const object of selected){await p.current();const t=await token(h,object);if(cp.has('applied:'+t)){headAbandoned+=cp.apply('applied').result(t);continue;}
     const payload=new Map(overlayPayload);try{payload.set(object.name,await load(v,object));}catch(error){await p.current();if(fatal(error))throw error;headPending++;continue;}
     await p.current();const restored=await cp.timed('apply',object.originalBytes,async()=>s.library.restorePayloads(payload,h.sourceDeviceId,[object],{archiveReader:ranged(v,object)?await rangeReader(v,object):undefined,checkpoint:cp.apply('rows:'+t,(done,total)=>{applyFractions.set(object,total?Math.min(1,done/total):0);p.status(Math.min(99,Math.floor([...applyFractions.values()].reduce((n,v)=>n+v,0)*100/Math.max(1,weights.size))),'apply');}),skipReading:true}));const result=typeof restored==='number'?{changed:restored,pending:0,abandoned:0}:restored;
     changed=result.changed>0||changed;if(result.changed)p.changed();headPending+=result.pending;headAbandoned+=result.abandoned??0;
     if(!result.pending)await cp.commit('applied:'+t,result.abandoned??0);await update(h,object);
-   }
-   if(headAbandoned&&!await s.state.warned(h.sourceDeviceId,h.id)){await s.state.markWarned(h.sourceDeviceId,h.id);abandonedItems+=headAbandoned;}
+   }}catch(error){if(snapshotDeferred(error)){await warn();Object.assign(error as object,{snapshotAbandonedItems:abandonedItems});}throw error;}
+   await warn();
    pendingItems+=headPending;await p.current();if(p.full&&!headPending){await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,true);await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);await s.client.acknowledge(h.id,s.deviceId);}else if(!headPending&&selected.some(o=>o.name==='rss-state.json'))await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);
   }
   return {snapshots,changed,pendingItems,abandonedItems,formatBlocked,compatibility};

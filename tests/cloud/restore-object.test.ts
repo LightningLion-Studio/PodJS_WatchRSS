@@ -31,10 +31,10 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
  const artifact=(await buildBackground({'watchrss-cloud-sync':resolve(import.meta.dir,'../../src/cloud/background.ts')},output))['watchrss-cloud-sync']!;
  const source=readFileSync(join(output,artifact.file),'utf8');
  const headless=async(context:BackgroundContext,clock?:()=>number)=>{const realm:Record<string,any>={};if(clock)realm.Date=class extends Date{static now(){return clock();}};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();expect(realm.setTimeout).toBeUndefined();const result=await realm.backgroundHandler(context);expect(realm.__podYieldCodecTurn).toBeUndefined();return result;};
- try{for(const entry of (process.env.RESTOREOBJ_SCENARIO?[process.env.RESTOREOBJ_SCENARIO]:['huge','medium','gzip'])){
+ try{for(const entry of (process.env.RESTOREOBJ_SCENARIO?[process.env.RESTOREOBJ_SCENARIO]:['huge','medium','gzip','yield-stall'])){
  const largeWindow=true;let armed=false,armProjection=false,windowCount=0,partWrites=0;const windowProof:any[]=[];
  const fixtureSpki=generateKeyPairSync('ec',{namedCurve:'prime256v1'}).publicKey.export({type:'spki',format:'der'}).toString('base64');
- const fastMode=entry.startsWith('manual-rss-fast')||entry==='manual-book-fast';let recordRows:any[]=[],fastBookId='';const manual=entry!=='automatic',withManifest=true;let guestDeadline=Date.now()+300000;let guestNow=Date.now(),windowStop=false,windowArmed=false;let denyYield=entry==='manual-manifest-denied',denyRecords=entry==='manual-records-denied';let acknowledgements=0;const logs:string[]=[],yieldStacks:string[]=[];
+ const fastMode=entry.startsWith('manual-rss-fast')||entry==='manual-book-fast';let recordRows:any[]=[],fastBookId='';const manual=entry!=='automatic',withManifest=true;let stallYields=entry==='yield-stall';let guestDeadline=Date.now()+300000;let guestNow=Date.now(),windowStop=false,windowArmed=false;let denyYield=entry==='manual-manifest-denied',denyRecords=entry==='manual-records-denied';let acknowledgements=0;const logs:string[]=[],yieldStacks:string[]=[];
  const sql=new Database(':memory:');sql.exec('PRAGMA foreign_keys=ON');const secure=new Map<string,string>(),files=new Map<string,Uint8Array>();let id=0,reserved:any,leased=false;const calls:string[]=[];
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true},telemetryConfig:{}};
  if(manual)secure.set(MANUAL_INTENT_KEY,JSON.stringify({version:1,token:'manual_fixture',scope:cloudAccountIdentity(account),mode:'recent128',createdAt:1}));
@@ -43,7 +43,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
  secure.set('state_json',JSON.stringify(account));secure.set('watchrss.cloud.keys.'+await crypto.sha256(utf8Encode('user')),JSON.stringify({1:b64(key)}));
  const resultFile=async(data:Uint8Array,directory='cloud-crypto')=>{const path=`${directory}/.pod-write-${++id}.part`;files.set(path,data);return {path,size:data.length,sha256:await crypto.sha256(data)};};
  const original=article({articleId:await crypto.sha256(utf8Encode('https://article.invalid/a')),url:'https://article.invalid/a',title:'Article',contentHtml:null,contentText:'Private body',contentHash:'fixture-original',readingProgress:0,readingPositionChangedAt:1}),stem='bodies/'+await crypto.sha256(utf8Encode(original.articleId)),restoreRows=['manual-manifest-metadata','manual-manifest-window'].includes(entry)?[{...original,contentText:undefined,contentHtml:undefined,contentTextEntry:stem+'.txt',contentHtmlEntry:null}]:[];
- let remote=withManifest?await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},settings:{fixturePadding:'x'.repeat(280000)},objects:[{name:'private-library.wrss',compress:false,bytes:writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode(JSON.stringify(restoreRows))],[stem+'.txt',utf8Encode(original.contentText)]]))}]}):undefined;
+ let remote=withManifest?await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},settings:{fixturePadding:'x'.repeat(entry==='yield-stall'?900000:280000)},objects:[{name:'private-library.wrss',compress:false,bytes:writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode(JSON.stringify(restoreRows))],[stem+'.txt',utf8Encode(original.contentText)]]))}]}):undefined;
  if(entry==='huge'||entry==='gzip'){
   const archive=writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode('[]')],...Array.from({length:Math.ceil((Number(process.env.RESTOREOBJ_MIB)||(entry==='gzip'?63:255))/16)},(_,i)=>['padding-'+i+'.bin',new Uint8Array(Math.min(16,(Number(process.env.RESTOREOBJ_MIB)||(entry==='gzip'?63:255))-i*16)*1024*1024).fill(37)] as [string,Uint8Array])]));
   remote=await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},objects:[{name:'private-library.wrss',bytes:archive,compress:false}]});
@@ -53,7 +53,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    const salt=new Uint8Array(16),derived=await crypto.hkdf(key,salt,utf8Encode('watchrss/cloud/manifest/v2/headless-remote')),sealed=await crypto.encrypt(derived,utf8Encode('watchrss-cloud-manifest-v2:headless-remote'),utf8Encode(JSON.stringify(remote.manifest)));
    remote.encryptedManifest=new Uint8Array(Buffer.concat([Buffer.from('WRSSCM3'),salt,sealed.nonce,sealed.ciphertext]));derived.fill(0);
   }
- }else{
+ }else if(entry!=='yield-stall'){
   remote=await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},objects:Array.from({length:160},(_,i)=>({name:'reader/medium-'+i+'.txt',bytes: new Uint8Array(256*1024).fill(33+i%30),compress:false}))});
  }
  const projectionWrites=new Map<string,number>(),sourceDecryptions=new Map<string,number>();
@@ -66,7 +66,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
   if(denyYield&&method==='runtime.delay'||denyRecords&&method==='http.download'&&a.url.includes('/records?'))throw Error('permission_denied');
   switch(method){
    case 'app.buildInfo':return {debugBuild:false};
-   case 'runtime.delay':expect(a).toEqual({milliseconds:1});yieldStacks.push(new Error().stack??'');await new Promise(resolve=>setTimeout(resolve,1));return null;
+   case 'runtime.delay':if(stallYields)guestNow+=1000;expect(a).toEqual({milliseconds:1});yieldStacks.push(new Error().stack??'');await new Promise(resolve=>setTimeout(resolve,1));return null;
    case 'log.append':logs.push(a.text);return {};
    case 'cloud.acquire':expect(leased).toBe(false);leased=true;return {acquired:true};
    case 'cloud.release':leased=false;return {};
@@ -148,6 +148,20 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    for(let n=0;n<docs.length;n++){const recordId=await codec.id(key,'user',docs[n]);recordRows.push({recordId,revision:String(n+1),envelope:await codec.encode(key,'user',recordId,1,docs[n]),tombstone:false});}
   }
   const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
+  if(entry==='yield-stall'){
+   let zeros=0;for(let round=0;round<6&&zeros<2;round++){guestDeadline=guestNow+300000;const r=await headless({...context,deadlineMs:guestDeadline},()=>guestNow);expect(r==='retry'||JSON.stringify(r)===JSON.stringify({status:'retry',progress:true})).toBe(true);zeros=r==='retry'?zeros+1:0;expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');}expect(zeros).toBe(2);
+   guestDeadline=guestNow+300000;const began=guestNow;expect(await headless({...context,deadlineMs:guestDeadline},()=>guestNow)).toBe('retry');
+   console.info('RESTORESTALL_YIELD_BURST',JSON.stringify({baseline:process.env.RESTORESTALL_BASELINE==='1',modeledMillis:guestNow-began,yields:yieldStacks.length,acknowledgements,grantRetained:secure.has(MANUAL_INTENT_KEY)}));
+   if(process.env.RESTORESTALL_BASELINE==='1'){expect(guestNow-began).toBeGreaterThanOrEqual(289000);expect(logs.join('')).toContain('cloud_sync_deadline_exceeded');expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');expect(acknowledgements).toBe(0);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);continue;}
+   expect(guestNow-began).toBeLessThan(150000);expect(logs.join('')).toContain('cloud_snapshot_work_timeout');
+   expect(acknowledgements).toBe(0);expect(leased).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);
+   expect(reserved).toBeUndefined();expect(yieldStacks.some(s=>s.includes('parseRawJsonAsync'))).toBe(true);
+   // A fresh guest may resume after the expensive condition clears. Keep its
+   // current grant, ciphertext, journal and source bytes unchanged.
+   stallYields=false;guestDeadline=guestNow+300000;
+   let result:unknown;for(let round=0;round<8;round++){guestDeadline=guestNow+300000;result=await headless({...context,deadlineMs:guestDeadline},()=>guestNow);if(result==='success')break;}
+   expect(result,logs.join('')).toBe('success');expect(acknowledgements).toBe(1);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);continue;
+  }
   if(entry==='manual-rss-fast-epoch'){const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);secure.set(MANUAL_INTENT_KEY,JSON.stringify({...grant,version:2,epoch:'revoked-epoch'}));expect(await headless(context)).toBe('success');expect(calls).not.toContain('cloud.acquire');expect(calls.some(m=>m.startsWith('sql.')||m==='http.download')).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);continue;}
   if(largeWindow){
    let done=false,lastWork=0;for(;windowCount<40&&!done;windowCount++){

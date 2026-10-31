@@ -22,6 +22,10 @@ export class WatchCloudStateStore {
   if(this.store.update)await this.store.update({[this.key+'.restore-v1']:header,[this.key+'.restore-v1.'+shard]:value},[]);
   else{await this.storeRestoreJournal(value,shard);try{await this.storeRestoreJournal(header);}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{restoreEntryCommitted:true});}}
  }
+ async restoreWindowStalled(scope:string,work:number){
+  this.guard.require();const raw=await this.store.get(this.key+'.restore-window-v1');let previous:any;try{previous=raw?JSON.parse(raw):undefined;}catch{}
+  return previous?.scope===scope&&previous.work===work&&Number.isSafeInteger(previous.zeros)&&previous.zeros>=2;
+ }
  async observeRestoreWindow(scope:string,work:number,progress:boolean){
   this.guard.require();const store=this.finishStore??this.store,key=this.key+'.restore-window-v1',raw=await store.get(key);let previous:any;try{previous=raw?JSON.parse(raw):undefined;}catch{}
   const same=previous?.scope===scope&&previous.work===work&&Number.isSafeInteger(previous.zeros)&&previous.zeros>=0;

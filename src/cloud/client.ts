@@ -1,3 +1,4 @@
+import {snapshotDeferred} from './snapshot-deferral';
 import {cloudFormatFailure,emitCloudFormat,type CloudFormatHttpMetric} from './format-diagnostic';
 import {cloudFormatCapabilities} from './compatibility';
 import {parseContentState,contentGenerationValid,contentWrite} from './content-lifecycle';
@@ -100,9 +101,14 @@ export class WatchCloudClient {
   async download(url:string,size:number,sha256:string):Promise<Uint8Array>{
     this.guard.require();if(!/^https:\/\//.test(url)||!Number.isSafeInteger(size)||size<0||size>8*1024*1024||!/^[0-9a-f]{64}$/.test(sha256))throw Error("无效云对象");
     // Signed storage URLs must never receive account credentials.
-    const r=await this.http.request({method:"GET",url,headers:{}});
-    if(r.status<200||r.status>=300)throw Error(`Cloud download HTTP ${r.status}`);
-    if(r.body.length!==size||await this.crypto.sha256(r.body)!==sha256)throw Error("云对象校验失败");return r.body;
+    let r:HttpResponse;try{r=await this.http.request({method:"GET",url,headers:{}});}catch(error){
+      // Preserve cancellation, window and capability errors. Only an actual
+      // transport timeout becomes an object timeout; never serialize its text.
+      if(!snapshotDeferred(error)&&cloudFormatFailure(error)==='timeout'&&(error as {code?:unknown})?.code!=='cloud_sync_deadline_exceeded'&&String(error)!=='Error: cloud_sync_deadline_exceeded')throw new CloudRequestError(408,'cloud_snapshot_object_timeout');
+      throw error;
+    }
+    if(r.status<200||r.status>=300){const reason=r.status===404||r.status===410?'missing':r.status===401||r.status===403?'unauthorized':r.status===408||r.status===504?'timeout':r.status===429?'rate_limited':r.status>=300&&r.status<400?'redirect':undefined;throw new CloudRequestError(r.status,reason?'cloud_snapshot_object_'+reason:'cloud_snapshot_download_failed');}
+    if(r.body.length!==size||await this.crypto.sha256(r.body)!==sha256)throw new CloudRequestError(502,'cloud_snapshot_object_integrity');return r.body;
   }
   async reserveSnapshot(snapshot: EncryptedCloudSnapshot, retentionDays: number | null = null): Promise<CloudSnapshotReservation> { this.guard.require(); const r48=this.options.r48WriteV1===true||!!snapshot.manifest.features?.incompat?.some(f=>f.startsWith('r48.'))||snapshot.manifest.objects?.some(o=>!!o.entryRef||!!o.objectKeyEnvelope);if(r48&&!await this.refreshR48WriteGate())throw Error('cloud_format_write_disabled');const manifestSha256 = await this.crypto.sha256(snapshot.encryptedManifest); const chunks = snapshot.manifest.allChunks.filter((v, i, a) => a.findIndex(x => x.ciphertextSha256 === v.ciphertextSha256) === i).map(v => ({ sha256: v.ciphertextSha256, sizeBytes: v.ciphertextBytes })); const m = snapshot.manifest; const j = requireOk(await this.request("POST", "/functions/v1/cloud/snapshots/reserve", { contentLayout:3,snapshotId: m.snapshotId, sourceDeviceId: m.sourceDeviceId, deviceSequence: m.deviceSequence, keyVersion: m.keyVersion, manifest: { sha256: manifestSha256, sizeBytes: snapshot.encryptedManifest.length }, parentHeads: m.parentHeads, observedHeads: m.observedHeads, retentionDays, chunks },undefined,r48));if(r48)this.r48Snapshots.add(m.snapshotId); return { snapshotId: String(j.snapshotId), reservedBytes: Number(j.reservedBytes), missingObjects: (j.missingObjects || []).map((v: any): CloudUploadObject => ({ transport:v.transport,uploadUrl:v.uploadUrl,uploadMethod:v.uploadMethod,reservationId:v.reservationId,kind: String(v.kind), sha256: String(v.sha256), sizeBytes: Number(v.sizeBytes), objectPath: String(v.objectPath), signedUrl: String(v.signedUrl), token: String(v.token), tusEndpoint: String(v.tusEndpoint), bucketName: String(v.bucketName) })) }; }
   /** Only v2 epoch-proxy targets receive account credentials; arbitrary signed/TUS URLs never do. */
