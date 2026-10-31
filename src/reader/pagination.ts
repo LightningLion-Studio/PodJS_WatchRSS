@@ -1,3 +1,4 @@
+import {readerMediaRatio} from './media-geometry.ts';
 import type {ContentBlock} from './content.ts';
 import {contentFont,presetContentFont,type ReaderRow} from './content-layout.ts';
 import {breakUnits} from './line-break.ts';
@@ -6,7 +7,7 @@ import type {ReaderPreset} from './preset.ts';
 export interface PageAnchor {section:'header'|'body'|'footer';character:number;blockIndex:number;sourceStart:number;sectionOffset:number}
 export interface PageLine {row:ReaderRow;left:number;top:number;width:number}
 export interface BookPage {anchor:PageAnchor;lines:PageLine[];controls?:{index:number;offset:number;height:number}[];loading?:number}
-export interface PaginationOptions {width:number;height:number;round:boolean;fontSize:number;preset?:ReaderPreset;measure:(text:string,slot:number)=>number;header?:readonly number[];footer?:readonly number[];unloaded?:(index:number)=>boolean}
+export interface PaginationOptions {width:number;height:number;round:boolean;fontSize:number;preset?:ReaderPreset;measure:(text:string,slot:number)=>number;ratios?:Readonly<Record<number,number>>;header?:readonly number[];footer?:readonly number[];unloaded?:(index:number)=>boolean}
 /** The entire line rectangle, including its top and bottom corners, fits the circle. */
 export function circleLineBounds(width:number,height:number,top:number,lineHeight:number,round:boolean,margin=6){
  if(!round)return {left:14,width:Math.max(1,width-28)};
@@ -49,7 +50,7 @@ export function paginateBook(blocks:readonly ContentBlock[],options:PaginationOp
   if(options.unloaded?.(blockIndex)){page=undefined;pages.push({anchor:anchor('body',character,blockIndex),lines:[],loading:blockIndex});continue;}
   if(block.type!=='text'){
    const side=round?Math.floor((Math.min(width,height)-16)/Math.SQRT2):width-28;
-   const ratio=block.type==='image'&&block.width&&block.height?block.width/block.height:16/9;
+   const ratio=readerMediaRatio(block,options.ratios?.[blockIndex]);
    const mediaHeight=Math.min(side,side/ratio,height-28),mediaWidth=Math.min(side,mediaHeight*ratio);
    newPage(anchor('body',character,blockIndex));
    page!.lines.push({row:{kind:block.type,block,blockIndex,character,top:0,height:mediaHeight,gap:0},left:(width-mediaWidth)/2,top:(height-mediaHeight)/2,width:mediaWidth});page=undefined;continue;
@@ -107,6 +108,7 @@ export function bookPageForAnchor(pages:readonly BookPage[],target:PageAnchor):n
 
 /** Cache body geometry across mode switches and header/action updates. Native measurement is expensive. */
 export function createBookPaginator(measure:PaginationOptions['measure']){
+ const resized=new WeakMap<BookPage[],{ratios:PaginationOptions["ratios"];pages:BookPage[]}>();
  const bodies=new WeakMap<readonly ContentBlock[],Map<string,BookPage[]>>(),compositions=new WeakMap<BookPage[],Map<string,BookPage[]>>(),widths=new Map<string,number>();
  const measured=(text:string,slot:number)=>{
   const key=slot+':'+text,cached=widths.get(key);if(cached!==undefined)return cached;
@@ -116,7 +118,21 @@ export function createBookPaginator(measure:PaginationOptions['measure']){
   const key=JSON.stringify([options.width,options.height,options.round,options.fontSize,options.preset,!!options.unloaded]);
   let configurations=bodies.get(blocks);if(!configurations){configurations=new Map();bodies.set(blocks,configurations);}
   let body=configurations.get(key);
-  if(!body){body=paginateBook(blocks,{...options,measure:measured,header:undefined,footer:undefined});if(configurations.size>=2)configurations.delete(configurations.keys().next().value!);configurations.set(key,body);}
+  if(!body){body=paginateBook(blocks,{...options,ratios:undefined,measure:measured,header:undefined,footer:undefined});if(configurations.size>=2)configurations.delete(configurations.keys().next().value!);configurations.set(key,body);}
+  // Media occupy separate pages. Updating decoded ratios must not measure or
+  // paginate the article text again, or change any source page anchor.
+  const cached=resized.get(body);
+  if(cached&&cached.ratios===options.ratios)body=cached.pages;
+  else {
+   const original=body;
+   body=original.map(page=>{
+    const line=page.lines[0];if(!line||line.row.kind==='text')return page;
+    const side=options.round?Math.floor((Math.min(options.width,options.height)-16)/Math.SQRT2):options.width-28;
+    const ratio=readerMediaRatio(line.row.block,options.ratios?.[line.row.blockIndex]);
+    const height=Math.min(side,side/ratio,options.height-28),width=Math.min(side,height*ratio);
+    return {...page,lines:[{...line,row:{...line.row,height},left:(options.width-width)/2,top:(options.height-height)/2,width}]};
+   });resized.set(original,{ratios:options.ratios,pages:body});
+  }
   const chromeKey=JSON.stringify([options.header??[],options.footer??[]]);
   let combined=compositions.get(body);if(!combined){combined=new Map();compositions.set(body,combined);}
   const existing=combined.get(chromeKey);if(existing)return existing;

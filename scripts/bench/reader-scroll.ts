@@ -16,6 +16,7 @@ const profile=(name:string,body:any)=>t.callExpression(t.memberExpression(t.memb
 const count=(name:string)=>t.expressionStatement(t.callExpression(t.memberExpression(t.memberExpression(t.identifier("globalThis"),t.identifier("__readerProfile")),t.identifier("count")),[t.stringLiteral(name)]));
 const instrument=()=>({visitor:{
  FunctionDeclaration(path:any){
+  if(["contentLayoutSteps","createLiveWindowRows","createWindowRows"].includes(path.node.id?.name))path.node.body.body.unshift(count(path.node.id.name));
   if(path.node.id?.name==="ReaderTextRow")path.node.body=t.blockStatement([t.returnStatement(profile("readerTextRow",path.node.body))]);
   if(path.node.id?.name==="SystemTextLine")path.node.body=t.blockStatement([t.returnStatement(profile("systemTextLine",path.node.body))]);
  },
@@ -32,6 +33,9 @@ const instrument=()=>({visitor:{
   const fn=path.node.argument;fn.body=profile("forDiff",fn.body);
  },
  CallExpression(path:any){
+  if(path.node.callee?.type==="MemberExpression"&&path.node.callee.property?.name==="replace"&&path.node.callee.object?.type==="MemberExpression"&&path.node.callee.object.object?.name==="props"&&path.node.callee.object.property?.name==="text"){
+   const original=t.cloneNode(path.node);path.replaceWith(profile("progressTextNormalize",original));path.skip();return;
+  }
   if(path.node.callee?.type==="MemberExpression"&&path.node.callee.property?.name==="render"&&path.node.callee.object?.name==="row"){
    const original=t.cloneNode(path.node);path.replaceWith(profile("rowMount",original));path.skip();
   }
@@ -52,7 +56,11 @@ for(const [key,value] of Object.entries(pkg.exports) as [string,any][]){
  const file=typeof value==="string"?value:value.import??value.default;
  if(typeof file==="string")aliases[`@pocketjs/framework/${key.slice(2)}`]=resolve(pocket,file);
 }
-for(const name of ["watch","services","text","media-surface","debug-memory","windowed-list"])aliases[`@podjs/framework/${name}`]=resolve(framework,`packages/framework/src/${name}.${["text","media-surface"].includes(name)?"tsx":"ts"}`);
+const frameworkPackage=await Bun.file(resolve(framework,"packages/framework/package.json")).json();
+for(const [key,value] of Object.entries(frameworkPackage.exports) as [string,any][]){
+ const file=typeof value==="string"?value:value.import??value.default;
+ if(typeof file==="string")aliases["@podjs/framework"+(key==="."?"":key.slice(1))]=resolve(framework,"packages/framework",file);
+}
 const {solidConditionalProps}=await import(resolve(pocket,"framework/compiler/solid-props.ts"));
 const classLiterals=new Set<string>();
 const native=arg("runtime","bun")==="quickjs";
@@ -68,7 +76,7 @@ const built=await Bun.build({entrypoints:[resolve(import.meta.dir,native?"reader
  builder.onLoad({filter:/\.(tsx|ts|js)$/},async args=>{
   if(!args.path.includes("/src/")&&!args.path.endsWith("/solid.js")&&!(native&&args.path===resolve(import.meta.dir,"reader-memory-runner.tsx")))return;
   let source:string;
-  if(sourceRef&&["src/ui/ScrollEntries.tsx","src/ui/ReaderBody.tsx","src/ui/windowed-rows.ts","src/reader/content-layout.ts"].some(name=>args.path===resolve(appRoot,name))){
+  if(sourceRef&&["src/ui/ScrollEntries.tsx","src/ui/ReaderBody.tsx","src/ui/windowed-rows.ts","src/reader/content-layout.ts","src/reader/content.ts"].some(name=>args.path===resolve(appRoot,name))){
    const original=Bun.spawnSync(["git","show",`${sourceRef}:${args.path.slice(appRoot.length+1)}`],{cwd:appRoot});
    if(original.exitCode!==0)throw new Error(original.stderr.toString());source=original.stdout.toString();
   }else source=await Bun.file(args.path).text();

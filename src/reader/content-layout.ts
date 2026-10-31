@@ -1,3 +1,4 @@
+import {readerMediaHeight} from './media-geometry.ts';
 import type {TextParagraphLine} from "@podjs/framework/services";
 import type {ContentBlock, ContentStyle} from "./content.ts";
 import {wrapAtlasText} from "@podjs/framework/text-wrap";
@@ -51,17 +52,17 @@ function measuredHardWrap(text:string,width:number,measure:(value:string)=>numbe
 export function createContentLayouter(measure:(text:string,slot:number)=>number,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined){
  const textCache=new WeakMap<object,TextBlockLayout>(),widths=new Map<string,number>();
  const measured=(text:string,slot:number)=>{if(text.length>128)return measure(text,slot);const key=slot+":"+text,hit=widths.get(key);if(hit!==undefined){widths.delete(key);widths.set(key,hit);return hit;}const value=measure(text,slot);if(widths.size>=4096)widths.delete(widths.keys().next().value!);widths.set(key,value);return value;};
- const steps=(blocks:readonly ContentBlock[],width:number,fontSize:number,ratios:Readonly<Record<number,number>>={},preset?:ReaderPreset,native?:NativeBlockLayouts)=>contentLayoutSteps(blocks,width,fontSize,measured,ratios,textCache,wrap,preset,native,atlasMetrics);
+ const steps=(blocks:readonly ContentBlock[],width:number,fontSize:number,ratios:Readonly<Record<number,number>>={},preset?:ReaderPreset,native?:NativeBlockLayouts,viewportHeight=width)=>contentLayoutSteps(blocks,width,fontSize,measured,ratios,textCache,wrap,preset,native,atlasMetrics,viewportHeight);
  return Object.assign((...args:Parameters<typeof steps>)=>finishContentLayout(steps(...args)),{steps});
 }
-export function layoutContent(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined):ContentLayout {
- return finishContentLayout(contentLayoutSteps(blocks,width,fontSize,measure,ratios,textCache,wrap,preset,native,atlasMetrics));
+export function layoutContent(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined,viewportHeight=width):ContentLayout {
+ return finishContentLayout(contentLayoutSteps(blocks,width,fontSize,measure,ratios,textCache,wrap,preset,native,atlasMetrics,viewportHeight));
 }
 function finishContentLayout(steps:Generator<ReaderRow,ContentLayout>):ContentLayout {
  let next=steps.next();while(!next.done)next=steps.next();return next.value;
 }
 /** The synchronous and sliced paths share every geometry calculation. */
-export function* contentLayoutSteps(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined):Generator<ReaderRow,ContentLayout> {
+export function* contentLayoutSteps(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined,viewportHeight=width):Generator<ReaderRow,ContentLayout> {
  const rows:ReaderRow[]=[];let top=0,character=0;
  for(let blockIndex=0;blockIndex<blocks.length;blockIndex++){
   const block=blocks[blockIndex]!;
@@ -90,9 +91,7 @@ export function* contentLayoutSteps(blocks:readonly ContentBlock[],width:number,
     rows.push({kind:"text",text,blockIndex,sourceStart:rawOffset,character:character+start,top,height,gap:rowGap,...font,lineHeight,textOffsetY,...(metrics?.baseline!==undefined?{nativeBaseline:metrics.baseline}:{}),...(metrics?.paragraph?{nativeParagraph:metrics.paragraph}:{})});top+=height;yield rows[rows.length-1]!;}
    character+=normalized.length+1;
   }else{
-   const declared=block.type==="image"&&block.width&&block.height?block.width/block.height:0;
-   const ratio=ratios[blockIndex]||declared||(block.type==="video"?16/9:0);
-   const height=gap+(ratio>0?width/ratio:100);
+   const height=gap+readerMediaHeight(block,width,ratios[blockIndex],viewportHeight);
    rows.push({kind:block.type,block,blockIndex,character,top,height,gap});top+=height;yield rows[rows.length-1]!;
   }
  }

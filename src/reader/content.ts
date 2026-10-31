@@ -1,8 +1,8 @@
-import {parseHtmlFragment,normalizeHtmlWhitespace,unwrapEscapedHtml,textWorkChunks,type HtmlElement} from '@podjs/framework/html';
+import {parseHtmlFragment,normalizeHtmlWhitespace,unwrapEscapedHtml,textWorkChunks,htmlImageAttributes,type HtmlElement} from '@podjs/framework/html';
 import { resolveUrl } from "../core/parser.ts";
 import { decodeHtml } from "../core/html.ts";
 export type ContentStyle = "body" | "title" | "subtitle" | "quote" | "code" | "link";
-export type ContentBlock = {type:"text";text:string;style:ContentStyle} | {type:"image";url:string;alt?:string;width?:number;height?:number} | {type:"video";url:string;poster?:string};
+export type ContentBlock = {type:"text";text:string;style:ContentStyle} | {type:"image";url:string;alt?:string;width?:number;height?:number;aspectRatio?:number} | {type:"video";url:string;poster?:string};
 type Element = HtmlElement;
 const voidTags=new Set("area base br col embed hr img input link meta param source track wbr".split(" "));
 const excludedTags=new Set("script style noscript template header footer nav aside".split(" "));
@@ -44,7 +44,6 @@ function text(node:Element|string):string {
     for(let i=n.children.length-1;i>=0;i--)stack.push(n.children[i]);}
   return (preserve?parts.join(""):normalizeHtmlWhitespace(parts.join(""))).trim();
 }
-function dimension(node:Element,name:string):number|undefined {const attr=node.attrs[name]??"";const value=/^\d+$/.test(attr)?Number(attr):Number(node.attrs.style?.match(new RegExp(`${name}\\s*:\\s*(\\d+(?:\\.\\d+)?)px`,"i"))?.[1]);return Number.isFinite(value)&&value>0?Math.round(value):undefined;}
 function compact(blocks:ContentBlock[]):ContentBlock[]{
   const result:ContentBlock[]=[];
   for(const block of blocks){if(block.type!=="text"){result.push(block);continue;}
@@ -63,7 +62,10 @@ function parseContentTree(raw:string,tree:Element|null):ContentBlock[]{
   const root=candidates.find(n=>n&&(text(n)||descendants(n).some(c=>["img","video","iframe"].includes(c.tag))))??body;
   const blocks:ContentBlock[]=[];
   const add=(value:string,style:ContentStyle="body")=>{if(value.trim())blocks.push({type:"text",text:value.trim(),style});};
-  const media=(n:Element)=>{const url=(n.attrs.src||(n.tag==="video"?descendants(n).find(c=>c.tag==="source"&&c.attrs.src)?.attrs.src:"")||"").trim();if(!url)return;if(n.tag==="img")blocks.push({type:"image",url,alt:n.attrs.alt?.trim()||undefined,width:dimension(n,"width"),height:dimension(n,"height")});else blocks.push({type:"video",url,poster:n.attrs.poster?.trim()||undefined});};
+  const media=(n:Element)=>{
+    if(n.tag==="img"){const {url,...size}=htmlImageAttributes(n.attrs);if(url)blocks.push({type:"image",url,alt:n.attrs.alt?.trim()||undefined,...size});}
+    else {const url=(n.attrs.src||(n.tag==="video"?descendants(n).find(c=>c.tag==="source"&&c.attrs.src)?.attrs.src:"")||"").trim();if(url)blocks.push({type:"video",url,poster:n.attrs.poster?.trim()||undefined});}
+  };
   const pending=[...root.children].reverse();
   while(pending.length){const n=pending.pop()!;if(typeof n==="string"){add(text(n));continue;}
     if(["img","video","iframe"].includes(n.tag)){media(n);continue;}
@@ -92,8 +94,9 @@ function readableTree(raw:string,baseUrl:string,native:Element|null):string|null
   if(!text(root)&&!nodes.some(n=>["img","video","iframe"].includes(n.tag)))return null;
   for(const n of nodes){
     if(n.tag==="img"){
-      const src=["src","data-src","data-original","data-lazy-src","data-actualsrc","data-url"].map(k=>n.attrs[k]?.trim()).find(Boolean);
-      if(src)n.attrs.src=resolveUrl(src,baseUrl)??src;delete n.attrs.srcset;
+      const src=htmlImageAttributes(n.attrs).url;
+      if(src)n.attrs.src=resolveUrl(src,baseUrl)??src;
+      delete n.attrs.srcset;
     }else if(["video","source","iframe"].includes(n.tag)&&n.attrs.src?.trim())n.attrs.src=resolveUrl(n.attrs.src.trim(),baseUrl)??n.attrs.src.trim();
   }
   const escape=(s:string)=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
