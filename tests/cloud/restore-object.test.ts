@@ -66,7 +66,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
   calls.push(method);expect(methods.has(method)).toBe(true);expect(JSON.stringify(a).length).toBeLessThan(1024*1024);
   if(denyYield&&method==='runtime.delay'||denyRecords&&method==='http.download'&&a.url.includes('/records?'))throw Error('permission_denied');
   switch(method){
-   case 'app.buildInfo':return {debugBuild:false};
+   case 'app.buildInfo':return {debugBuild:false,buildIdentity:'fixture-package-1'};
    case 'runtime.delay':if(stallYields)guestNow+=10000;expect(a).toEqual({milliseconds:1});yieldStacks.push(new Error().stack??'');await new Promise(resolve=>setTimeout(resolve,1));return null;
    case 'log.append':logs.push(a.text);return {};
    case 'cloud.acquire':expect(leased).toBe(false);leased=true;return {acquired:true};
@@ -152,11 +152,20 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
   }
   const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
   if(entry==='yield-stall'){
-   let zeros=0;for(let round=0;round<6&&zeros<2;round++){guestDeadline=guestNow+300000;const r=await headless({...context,deadlineMs:guestDeadline},()=>guestNow);expect(r==='retry'||JSON.stringify(r)===JSON.stringify({status:'retry',progress:true})).toBe(true);zeros=r==='retry'?zeros+1:0;expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');}expect(zeros).toBe(2);
-   guestDeadline=guestNow+300000;const began=guestNow;expect(await headless({...context,deadlineMs:guestDeadline},()=>guestNow)).toBe('retry');
-   console.info('RESTORESTALL_YIELD_BURST',JSON.stringify({baseline:process.env.RESTORESTALL_BASELINE==='1',modeledMillis:guestNow-began,yields:yieldStacks.length,acknowledgements,grantRetained:secure.has(MANUAL_INTENT_KEY)}));
-   if(process.env.RESTORESTALL_BASELINE==='1'){expect(guestNow-began).toBeGreaterThanOrEqual(250000);expect(logs.join('')).toContain('cloud_sync_deadline_exceeded');expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');expect(acknowledgements).toBe(0);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);continue;}
-   expect(guestNow-began).toBeLessThan(150000);expect(logs.join('')).toContain('cloud_snapshot_work_timeout');
+   // Scheduling itself has no source/offset identity. A prior zero-progress
+   // streak cannot prove that the CPU preparation is a repeated completed part.
+   const bounded={status:'retry',retryClass:'bounded'};
+   let zeros=0;for(let round=0;round<6&&zeros<2;round++){
+    guestDeadline=guestNow+300000;const r=await headless({...context,deadlineMs:guestDeadline},()=>guestNow);
+    const stalled=JSON.stringify(r)===JSON.stringify(bounded);
+    expect(r==='retry'||stalled||JSON.stringify(r)===JSON.stringify({status:'retry',progress:true})).toBe(true);
+    zeros=r==='retry'||stalled?zeros+1:0;expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');
+   }expect(zeros).toBe(2);
+   guestDeadline=guestNow+300000;const began=guestNow;
+   expect(await headless({...context,deadlineMs:guestDeadline},()=>guestNow)).toEqual(bounded);
+   console.info('STALLGUARD_CPU_PREPARATION',JSON.stringify({modeledMillis:guestNow-began,yields:yieldStacks.length,acknowledgements,grantRetained:secure.has(MANUAL_INTENT_KEY)}));
+   expect(guestNow-began).toBeGreaterThanOrEqual(250000);expect(guestNow).toBeLessThan(guestDeadline);
+   expect(logs.join('')).toContain('cloud_sync_deadline_exceeded');expect(logs.join('')).not.toContain('cloud_snapshot_work_timeout');
    expect(acknowledgements).toBe(0);expect(leased).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);
    expect(reserved).toBeUndefined();expect(yieldStacks.length).toBeGreaterThan(0);expect(logs.join('')).toContain('"stage":"json-scan"');
    // A fresh guest may resume after the expensive condition clears. Keep its

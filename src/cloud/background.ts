@@ -13,7 +13,7 @@ import {startupDestination} from '../onboarding/state';
 import {createCloudRuntime} from './runtime';
 import {createBackgroundLibrary} from './background-library';
 import type {CloudHostRequest} from './host-ports';
-import {SnapshotYieldBudget} from './snapshot-deferral';
+import {SnapshotYieldBudget,SNAPSHOT_GUARD_VERSION} from './snapshot-deferral';
 const yieldHosts=new WeakMap<BackgroundContext,CloudHostRequest>();
 /** Retry metadata is emitted only after the coordinator certified a new durable
  * unit and a soft deadline. Network errors, suspension and stalled runs do not
@@ -21,7 +21,7 @@ const yieldHosts=new WeakMap<BackgroundContext,CloudHostRequest>();
 export function cloudBackgroundOutcome(success:boolean,authorized:boolean,status:{errorCode?:string;retryable?:boolean;continuationReady?:boolean;yieldedToWriter?:boolean}):BackgroundOutcome{
  if(!success&&status.yieldedToWriter)return 'busy';
  if(!success&&status.errorCode===CLOUD_HOST_CAPABILITY_UNAVAILABLE)return 'failure';
- if(!success&&status.errorCode==='cloud_snapshot_progress_stalled')return 'retry';
+ if(!success&&['cloud_snapshot_progress_stalled','cloud_snapshot_work_timeout'].includes(status.errorCode??''))return {status:'retry',retryClass:'bounded'};
  if(!success&&authorized&&status.continuationReady)return {status:'retry',progress:true};
  return success||status.retryable===false?'success':'retry';
 }
@@ -29,8 +29,8 @@ export default defineBackgroundHandler(async context=>{
  if(!context.request)return 'failure';
  const gate=new CloudGate();
  const yieldBudget=new SnapshotYieldBudget();
- let rejected:unknown;
- const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method);return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ let rejected:unknown;let buildIdentity='unknown';
+ const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method,args);if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
  const diagnostic=backgroundDiagnostics(request);
  const stopCpu=observeCpuWork(diagnostic.cpu);
  const window=new WorkWindow({deadlineMs:context.deadlineMs,reserveMillis:10000,expired:()=>new CloudSyncDeadlineError(),report:metric=>diagnostic.report(JSON.stringify(metric))});
@@ -50,7 +50,7 @@ export default defineBackgroundHandler(async context=>{
  // The host deadline is absolute Unix ms. Leave time for the normal
  // checkpoint/release path before the native guest's hard interrupt.
  const execution={finishRequest:(async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{if(!['secure.get','secure.compareAndSet'].includes(method))throw Error('invalid_window_finalizer');return window.cleanup(()=>request<T>(method,args));}) as CloudHostRequest,remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
- const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution,{restoreStalled:value=>yieldBudget.stalled(value),recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
+ const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution,{restoreGuardVersion:SNAPSHOT_GUARD_VERSION+':'+buildIdentity,restoreStalled:value=>yieldBudget.stalled(value),recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
  const account=await runtime.accounts.read();if(!account)return 'success';
  const payload=context.payload as {manual?:boolean;token?:string}|null;
  let intent:ReturnType<typeof readManualIntent>;

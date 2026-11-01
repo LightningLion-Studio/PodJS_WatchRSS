@@ -12,7 +12,8 @@ const fw=resolve(dirname(realpathSync(resolve(import.meta.dir,'../../node_module
 const {buildBackground}=await import(fw+'/packages/cli/src/background-build.ts');
 const b64=(b:Uint8Array)=>Buffer.from(b).toString('base64'),unb64=(s:string)=>new Uint8Array(Buffer.from(s,'base64'));
 
-test('RESTOREREDO frozen headless previous-object unit: 51 source parts, 50s inflate, durable convergence',async()=>{
+function registerRestoreTest(stallguard:boolean,oldGuard:boolean,identicalRedo=false){
+ test(identicalRedo?'STALLGUARD identical completed source redo stays below the full window':stallguard?'STALLGUARD persisted history: '+(oldGuard?'baseline never reaches a receipt':'candidate reaches streamed gzip and converges'):'RESTOREREDO frozen headless previous-object unit: 51 source parts, 50s inflate, durable convergence',async()=>{
  const baseline=process.env.RESTOREREDO_BASELINE==='1',output=mkdtempSync(join(tmpdir(),'restore-redo-'));
  try{
  const artifact=(await buildBackground({redo:resolve(import.meta.dir,'fixtures/restore-redo-entry.ts')},output)).redo!;
@@ -32,7 +33,7 @@ test('RESTOREREDO frozen headless previous-object unit: 51 source parts, 50s inf
  const salt=new Uint8Array(16),derived=await crypto.hkdf(key,salt,utf8Encode('watchrss/cloud/manifest/v2/fixture-prior')),sealed=await crypto.encrypt(derived,utf8Encode('watchrss-cloud-manifest-v2:fixture-prior'),utf8Encode(JSON.stringify(manifest))),encrypted=new Uint8Array(Buffer.concat([Buffer.from('WRSSCM3'),salt,sealed.nonce,sealed.ciphertext]));
  files.set(root+'/manifests/fixture-prior.bin',encrypted);
  const head={id:manifest.snapshotId,sourceDeviceId:manifest.sourceDeviceId,deviceSequence:1,keyVersion:1,manifestSha256:await crypto.sha256(encrypted),manifestSizeBytes:encrypted.length,parentHeads:{},observedHeads:{}};
- let now=Date.now(),deadline=now+300000,id=0,inflated=false,sourceDecrypts=0,gzipCalls=0;
+ let now=Date.now(),deadline=now+300000,id=0,inflated=false,sourceDecrypts=0,gzipCalls=0,firstDecrypt=true;
  const calls:string[]=[],written=new Map<string,number>(),proof:any[]=[];const streams=new Map<string,Uint8Array>();
  const resultFile=async(bytes:Uint8Array,directory='cloud-crypto')=>{const path=directory+'/.pod-write-'+ ++id+'.part';files.set(path,bytes);return {path,size:bytes.length,sha256:await crypto.sha256(bytes)};};
  const request=async<T>(method:string,a:any):Promise<T>=>{
@@ -55,7 +56,7 @@ test('RESTOREREDO frozen headless previous-object unit: 51 source parts, 50s inf
    case 'crypto.hkdfSha256':return {keyBase64:b64(await crypto.hkdf(unb64(a.inputBase64),unb64(a.saltBase64),unb64(a.infoBase64)))};
    case 'crypto.aesGcmEncrypt':{const r=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.dataBase64));return {nonceBase64:b64(r.nonce),ciphertextBase64:b64(r.ciphertext)};}
    case 'crypto.aesGcmDecrypt':return {dataBase64:b64(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),unb64(a.ciphertextBase64)))};
-   case 'crypto.largeAesGcmDecrypt':if(Buffer.from(a.aadBase64,'base64').toString().startsWith('watchrss-cloud-chunk-v1:'))sourceDecrypts++;now+=500;return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));
+   case 'crypto.largeAesGcmDecrypt':if(Buffer.from(a.aadBase64,'base64').toString().startsWith('watchrss-cloud-chunk-v1:'))sourceDecrypts++;now+=stallguard&&firstDecrypt?45000:500;firstDecrypt=false;return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));
    case 'crypto.largeAesGcmEncrypt':{const r=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),files.get(a.inputPath)!);return {...await resultFile(r.ciphertext),nonceBase64:b64(r.nonce)};}
    case 'file.gunzip':now+=50000;gzipCalls++;inflated=true;return resultFile(new Uint8Array(gunzipSync(files.get(a.path)!)));
    case 'crypto.closeSealedGzip':streams.delete(a.outputPrefix);return {};
@@ -68,18 +69,24 @@ test('RESTOREREDO frozen headless previous-object unit: 51 source parts, 50s inf
   }};return await execute() as T;
  };
  let done=false,lastWork=0;
- for(let window=0;window<(baseline?3:15)&&!done;window++){
-  calls.length=0;const before=sourceDecrypts,at=now;deadline=now+300000;inflated=false;streams.clear();const realm:Record<string,any>={Date:class extends Date{static now(){return now;}}};runInNewContext(source+';globalThis.__bytesCtor=Uint8Array;',realm);
+ for(let window=0;window<(baseline||oldGuard||identicalRedo?3:15)&&!done;window++){
+  calls.length=0;const before=sourceDecrypts,at=now;deadline=now+300000;inflated=false;firstDecrypt=true;streams.clear();const realm:Record<string,any>={Date:class extends Date{static now(){return now;}}};runInNewContext(source+';globalThis.__bytesCtor=Uint8Array;',realm);
   // Match the old and new pure native capability surfaces, without exposing UI.
   const Bytes=realm.__bytesCtor;realm.__podByteCodecs={sha256Bytes:(b:Uint8Array)=>{return b.length<=262144?new Bytes(createHash('sha256').update(b).digest()):null;},...(!baseline?{sha256Create:()=>{const h=createHash('sha256');return {update:(b:Uint8Array)=>{expect(b.length).toBeLessThanOrEqual(262144);h.update(b);return true;},finish:()=>new Bytes(h.digest())};}}:{})};
-  const result=await realm.backgroundHandler({deadlineMs:deadline,isCancelled:()=>false,request,payload:{head,encrypted,key,bytes:body}});done=result.status==='success';expect(now).toBeLessThan(deadline);expect(result.work).toBeGreaterThanOrEqual(lastWork);
-  proof.push({window:window+1,modeledMillis:now-at,sourceDecryptions:sourceDecrypts-before,gunzipCalls:gzipCalls,writes:calls.filter(x=>x==='file.write').length,commits:calls.filter(x=>x==='file.commit').length,work:result.work,newWork:result.work-lastWork,done});lastWork=result.work;
+  const result=await realm.backgroundHandler({deadlineMs:deadline,isCancelled:()=>false,request,payload:{head,encrypted,key,bytes:body,seedStall:stallguard&&window===0,legacyGuard:oldGuard,identicalRedo}});done=result.status==='success';expect(now).toBeLessThan(deadline);expect(result.work).toBeGreaterThanOrEqual(lastWork);
+  proof.push({window:window+1,modeledMillis:now-at,sourceDecryptions:sourceDecrypts-before,gunzipCalls:gzipCalls,writes:calls.filter(x=>x==='file.write').length,commits:calls.filter(x=>x==='file.commit').length,work:result.work,newWork:result.work-lastWork,done,guardTimeout:!!result.guardTimeout});lastWork=result.work;
   console.info('RESTOREREDO_WINDOW',JSON.stringify(proof.at(-1)));
   // Native temporary files are disposable on process teardown, not receipts.
   for(const p of files.keys())if(p.includes('.pod-write-'))files.delete(p);
  }
  console.info('RESTOREREDO_SUMMARY',JSON.stringify({baseline,sourceParts:51,decodedParts:Math.ceil(body.length/262144),proof}));
- if(baseline){expect(done).toBe(false);expect(proof.every(p=>p.commits===0)).toBe(true);expect(proof.every(p=>p.sourceDecryptions===51)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);}
+ if(stallguard&&!oldGuard&&!identicalRedo){expect(proof.every(p=>!p.guardTimeout)).toBe(true);expect(proof.some(p=>p.gunzipCalls>0)).toBe(true);}
+ if(identicalRedo){expect(done).toBe(false);expect(proof.every(p=>p.guardTimeout&&p.modeledMillis<120000&&p.commits===0&&p.sourceDecryptions===2)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);}
+ else if(oldGuard){expect(done).toBe(false);expect(proof.every(p=>p.guardTimeout)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);expect(proof.every(p=>p.commits===0)).toBe(true);}
+ else if(baseline){expect(done).toBe(false);expect(proof.every(p=>p.commits===0)).toBe(true);expect(proof.every(p=>p.sourceDecryptions===51)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);}
  else{expect(done).toBe(true);expect(proof.length).toBeGreaterThan(1);expect(sourceDecrypts).toBeLessThanOrEqual(51+proof.length);expect([...written].filter(([p])=>/-p\d+\.bin$/.test(p)).every(([,n])=>n===1)).toBe(true);expect(proof.some(p=>p.newWork>1)).toBe(true);}
  }finally{rmSync(output,{recursive:true,force:true});}
 },240000);
+}
+if(process.env.STALLGUARD==='1')registerRestoreTest(true,process.env.STALLGUARD_BASELINE==='1');
+else {registerRestoreTest(false,false);if(process.env.RESTOREREDO_BASELINE!=='1'){registerRestoreTest(true,true);registerRestoreTest(true,false);registerRestoreTest(true,false,true);}}

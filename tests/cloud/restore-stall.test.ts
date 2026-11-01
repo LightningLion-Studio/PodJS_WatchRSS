@@ -9,20 +9,29 @@ import {fixture as serviceFixture} from './service-fixture';
 import {WatchCloudSyncService} from '../../src/cloud/service';
 import {utf8Encode} from '../../src/cloud/types';
 
-test('first attempts retain their full CPU window and a durable receipt disables the guard',()=>{
- let now=0;const budget=new SnapshotYieldBudget(()=>now);
- for(let i=0;i<2000;i++){now+=1000;expect(()=>budget.before('runtime.delay')).not.toThrow();}
- budget.stalled(true);budget.before('runtime.delay');now+=30000;expect(()=>budget.before('runtime.delay')).toThrow('cloud_snapshot_work_timeout');
- budget.stalled(false);expect(()=>budget.before('runtime.delay')).not.toThrow();
+test('persisted stalls never shorten distinct source parts, stream offsets or CPU preparation',()=>{
+ const budget=new SnapshotYieldBudget();budget.stalled(true);
+ for(let i=0;i<3000;i++){
+  const args={aadBase64:'source-'+i,nonceBase64:'nonce'};
+  budget.before('crypto.largeAesGcmDecrypt',args);budget.completed('crypto.largeAesGcmDecrypt',args);
+  budget.before('runtime.delay');budget.completed('runtime.delay');
+  budget.before('file.write');budget.completed('file.write');
+  budget.before('crypto.gunzipSealedParts',{outputPrefix:'fixture',offset:i*262144});
+  budget.completed('crypto.gunzipSealedParts',{outputPrefix:'fixture',offset:i*262144});
+ }
 });
 
-test('yield-only work stops after 30s despite log traffic and releases; real IO starts a fresh burst',()=>{
- let now=0;const budget=new SnapshotYieldBudget(()=>now);budget.stalled(true);
- for(let i=0;i<30;i++){budget.before('runtime.delay');now+=1000;budget.completed('runtime.delay');budget.completed('log.append');budget.completed('secure.release');}
- expect(()=>budget.before('runtime.delay')).toThrow('cloud_snapshot_work_timeout');
- budget.completed('file.read');expect(()=>budget.before('runtime.delay')).not.toThrow();
- for(let i=0;i<1023;i++)budget.before('runtime.delay');
- expect(()=>budget.before('runtime.delay')).toThrow('cloud_snapshot_work_timeout');
+test('only repeated completed authenticated inputs or output offsets consume the guard',()=>{
+ const budget=new SnapshotYieldBudget();budget.stalled(true);
+ const method='crypto.largeAesGcmDecrypt',args={aadBase64:'source-part',nonceBase64:'nonce'};
+ // An unsuccessful attempt gets a full retry, without consuming replay evidence.
+ budget.before(method,args);budget.before(method,args);
+ for(let i=0;i<2;i++){budget.before(method,args);budget.completed(method,args);}
+ budget.completed('log.append');budget.completed('secure.get');budget.completed('secure.release');
+ expect(()=>budget.before(method,args)).toThrow('cloud_snapshot_work_timeout');
+ expect(()=>budget.before(method,{...args,nonceBase64:'different-source'})).not.toThrow();
+ expect(()=>budget.before('file.delete')).not.toThrow();expect(()=>budget.before('crypto.closeSealedGzip')).not.toThrow();
+ budget.stalled(false);expect(()=>budget.before(method,args)).not.toThrow();
 });
 
 for(const [status,reason] of [[404,'missing'],[410,'missing'],[401,'unauthorized'],[403,'unauthorized'],[408,'timeout'],[504,'timeout'],[429,'rate_limited'],[307,'redirect'],[503,undefined]] as const)
@@ -41,14 +50,14 @@ test('native download timeout is distinct from the outer window deadline and inv
  await expect(client.download('https://objects.invalid/a',1,'0'.repeat(64))).rejects.toMatchObject({code:'cloud_snapshot_object_integrity'});
 });
 
-for(const code of SNAPSHOT_DEFER_CODES)test(code+' escapes the object catch, keeps the checkpoint and returns ordinary queue backoff',async()=>{
+for(const code of SNAPSHOT_DEFER_CODES)test(code+' escapes the object catch, keeps the checkpoint and returns bounded stall backoff or ordinary transport backoff',async()=>{
  const f=await serviceFixture();const remote=await f.phone({objects:[{name:'reader/a.txt',bytes:utf8Encode('a'),compress:false},{name:'reader/b.txt',bytes:utf8Encode('b'),compress:false}]});
  const target=remote.snap.manifest.objects[0].chunks[0].ciphertextSha256;
  const download=f.session.client.download.bind(f.session.client);let failed=false;
  f.session.client.download=async(url,...args)=>{if(url.endsWith(target)&&!failed){failed=true;throw Object.assign(Error(code),{code});}return download(url,...args);};
  const diagnostics:string[]=[];const service=new WatchCloudSyncService({open:async()=>f.session,network:async()=>f.network,hash:crypto.sha256,uuid:async()=> 'unused',exclusive:fn=>fn(),formatDiagnostic:s=>diagnostics.push(s)},enabled);
  expect(await service.syncNow()).toBe(false);expect(service.status).toMatchObject({errorCode:code,retryable:true,continuationReady:false});
- expect(service.status.retryAtMillis).toBeGreaterThan(Date.now());expect(cloudBackgroundOutcome(false,true,service.status)).toBe('retry');
+ expect(service.status.retryAtMillis).toBeGreaterThan(Date.now());expect(cloudBackgroundOutcome(false,true,service.status)).toEqual(code==='cloud_snapshot_work_timeout'?{status:'retry',retryClass:'bounded'}:'retry');
  expect(diagnostics.join('')).toContain('"code":"'+code+'"');expect(f.calls.filter(r=>r.url.includes('/ack'))).toHaveLength(0);expect(f.merged).toHaveLength(0);
  expect(await service.syncNow()).toBe(true);expect(f.merged).toEqual(['reader/a.txt','reader/b.txt']);
 });
@@ -71,15 +80,19 @@ test('stall history is scoped to the current journal work and successful receipt
  cp=await open();expect(seen.at(-1)).toBe(false);expect(cp.has('current-prefix')).toBe(true);expect(cp.has('next-receipt')).toBe(true);cp.close();
 });
 
-test('stalled temporary IO cannot reset its own budget; only durable receipts do',()=>{
- let now=0;const budget=new SnapshotYieldBudget(()=>now);budget.stalled(true);
- for(let i=0;i<30;i++){budget.before('file.write');budget.completed('file.write');budget.completed('secure.get');now+=1000;}
- expect(()=>budget.before('file.write')).toThrow('cloud_snapshot_work_timeout');
- budget.stalled(false);for(let i=0;i<300;i++){budget.before('file.write');now+=1000;budget.completed('file.write');}
- budget.stalled(true);for(let i=0;i<256;i++){budget.before('file.read');budget.completed('file.read');}
- expect(()=>budget.before('crypto.largeAesGcmDecrypt')).toThrow('cloud_snapshot_work_timeout');
- // Cleanup remains available even after exhaustion; it cannot certify work.
- expect(()=>budget.before('file.delete')).not.toThrow();expect(()=>budget.before('crypto.closeSealedGzip')).not.toThrow();
+test('build and code-path upgrades ignore old guard streaks without changing journal scope or receipts',async()=>{
+ const f=await serviceFixture(),seen:boolean[]=[];
+ f.session.restoreCheckpoint={state:f.state,cache:f.cache,codec:f.session.codec,stalled:v=>seen.push(v),guardVersion:'old-package:old-path'};
+ const {SnapshotRestoreCheckpoint}=await import('../../src/cloud/snapshot-checkpoint');
+ const open=()=>new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('same-epoch','same-generation');
+ let cp=await open();await cp.begin();await cp.commit('user-current-prefix');const work=cp.work;cp.close();
+ for(const version of ['old-package:old-path','new-package:old-path','new-package:new-path']){
+  f.session.restoreCheckpoint.guardVersion=version;
+  cp=await open();expect(seen.at(-1)).toBe(false);expect(cp.has('user-current-prefix')).toBe(true);expect(cp.work).toBe(work);
+  await cp.noProgress(Error('cloud_sync_deadline_exceeded'));cp.close();
+  cp=await open();await cp.noProgress(Error('cloud_sync_deadline_exceeded'));cp.close();
+  cp=await open();expect(seen.at(-1)).toBe(true);expect(cp.work).toBe(work);cp.close();
+ }
 });
 
 test('a paused foreground still closes its bounded sealed stream',async()=>{

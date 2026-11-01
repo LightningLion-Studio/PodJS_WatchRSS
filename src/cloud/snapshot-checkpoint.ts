@@ -1,5 +1,5 @@
 import {cpuWork,cpuJsonParse,cpuJsonStringify} from '@podjs/framework/cpu-work';
-import {snapshotDeferred} from './snapshot-deferral';
+import {snapshotDeferred,SNAPSHOT_GUARD_VERSION} from './snapshot-deferral';
 import {recordFailureDiagnostic} from './record-diagnostic';
 import type {CloudSession} from './service';
 import {bytesToBase64} from '@podjs/framework/bytes';
@@ -26,6 +26,7 @@ export class SnapshotRestoreCheckpoint {
  private indices=new Map<string,ProjectionIndex>();
  private rangeParts=new Map<string,Uint8Array>();private rangeBytes=0;
  private value!:Journal;private key?:Uint8Array;private startWork=0;private root='';private committedUnits=0;
+ private get guardVersion(){return this.session.restoreCheckpoint?.guardVersion??SNAPSHOT_GUARD_VERSION;}
  private get state(){return this.session.restoreCheckpoint?.state??this.session.state;}
  private get cache(){return this.session.restoreCheckpoint?.cache??this.session.cache;}
  private get codec(){return this.session.restoreCheckpoint?.codec??this.session.codec;}
@@ -38,7 +39,7 @@ export class SnapshotRestoreCheckpoint {
   this.value=saved?.version===1&&saved.scope===this.root&&Number.isSafeInteger(saved.cycle)&&saved.cycle>=0&&typeof saved.active==='boolean'&&['snapshots','inventory','records'].includes(saved.phase)&&Number.isSafeInteger(saved.work)&&saved.work>=0&&Number.isSafeInteger(saved.bytes)&&saved.bytes>=0?saved:{version:1,scope:this.root,cycle:0,active:false,phase:'snapshots',units:{},projections:{},work:0,bytes:0};
   this.value.units={};this.value.projections={};
   for(let i=0;i<64;i++){await this.current();const raw=await this.state.restoreJournal(i);if(!raw)continue;let shard:{scope:string;units:Record<string,number>;projections:Record<string,number>};try{shard=cpuJsonParse(raw);}catch{throw Error('cloud_snapshot_checkpoint_invalid');}if(shard.scope!==this.root)continue;if(!validMap(shard.units)||!validMap(shard.projections))throw Error('cloud_snapshot_checkpoint_invalid');this.shards[i]={units:shard.units,projections:shard.projections};Object.assign(this.value.units,shard.units);Object.assign(this.value.projections,shard.projections);}
-  this.startWork=this.value.work;this.session.restoreCheckpoint?.stalled?.(this.value.active&&await this.state.restoreWindowStalled(this.root,this.value.work));await this.accountKey();return this;}catch(error){throw await this.noProgress(error);}
+  this.startWork=this.value.work;this.session.restoreCheckpoint?.stalled?.(this.value.active&&await this.state.restoreWindowStalled(this.root,this.value.work,this.guardVersion));await this.accountKey();return this;}catch(error){throw await this.noProgress(error);}
  }
  get cycle(){return this.value.cycle;}
  get active(){return this.value.active;}
@@ -52,7 +53,7 @@ export class SnapshotRestoreCheckpoint {
 
  async begin(){const dirty=new Set<number>();for(const unit of Object.keys(this.value.units))if(unit.startsWith('inventory:')){delete this.value.units[unit];const shard=this.shard(unit);delete this.shards[shard].units[unit];dirty.add(shard);}for(const shard of dirty)await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[shard]}),shard);this.value.cycle++;this.value.work++;this.value.active=true;this.value.phase='snapshots';await this.save();}
  async phaseDone(phase:Journal['phase']){if(this.value.phase===phase)return;this.value.phase=phase;this.value.work++;await this.save();}
- async finish(){this.value.active=false;this.value.work++;await this.save();await this.state.observeRestoreWindow(this.root,this.work,true);}
+ async finish(){this.value.active=false;this.value.work++;await this.save();await this.state.observeRestoreWindow(this.root,this.work,true,this.guardVersion);}
  has(unit:string){return Object.prototype.hasOwnProperty.call(this.value.units,unit);}
  private async record(kind:'units'|'projections',id:string,bytes:number){
   const work=this.value.work,total=this.value.bytes,previous=this.value[kind][id],shard=this.shard(id);
@@ -130,7 +131,7 @@ export class SnapshotRestoreCheckpoint {
  close(){this.indices.clear();for(const b of this.rangeParts.values())b.fill(0);this.rangeParts.clear();this.rangeBytes=0;if(this.key)this.codec.clearRestoreProjectionKey(this.key);this.key?.fill(0);this.key=undefined;}
  async noProgress(error:unknown){
   if(!this.value?.active||!String(error).includes('cloud_sync_deadline_exceeded'))return error;
-  let zeros=0;try{zeros=await this.state.observeRestoreWindow(this.root,this.work,this.committed);}catch{/* Keep the original retryable deadline if diagnostics cannot persist. */}
+  let zeros=0;try{zeros=await this.state.observeRestoreWindow(this.root,this.work,this.committed,this.guardVersion);}catch{/* Keep the original retryable deadline if diagnostics cannot persist. */}
   if(zeros>=2){this.metric('object',0,this.now(),false,{outcome:'deferred',code:'cloud_snapshot_progress_stalled'});return Object.assign(Error('cloud_snapshot_progress_stalled'),{code:'cloud_snapshot_progress_stalled'});}
   return error;
  }
