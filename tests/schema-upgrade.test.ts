@@ -34,7 +34,7 @@ test('real installed pre-clear v9 opens without replaying backfills or altering 
   // Exact startup lookup in services.ts must succeed on an existing installation.
   expect(await f.db.query('SELECT id FROM library_clear_journal WHERE id=1')).toEqual([]);
   expect(f.transactions).toBe(count+1);
-  const after=f.dump();delete after.library_clear_journal;expect(after).toEqual(before);
+  const after=f.dump();delete after.library_clear_journal;for(const table of ['sync_book_install','sync_book_validation']){expect(after[table]).toEqual([]);delete after[table];}expect(after).toEqual(before);
   // Guard future additions to base DDL: every additive declaration must reach
   // an installed v9 too, not only fresh databases used by most fixtures.
   for(const sql of SCHEMA){const object=/^CREATE (TABLE|INDEX|TRIGGER) IF NOT EXISTS (\w+)/.exec(sql);if(object)expect(f.raw.query('SELECT name FROM sqlite_master WHERE type=? AND name=?').get(object[1]!.toLowerCase(),object[2]!)).not.toBeNull();}
@@ -42,7 +42,7 @@ test('real installed pre-clear v9 opens without replaying backfills or altering 
   const schema=f.raw.query('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all(),changes=f.raw.query('SELECT total_changes() AS n').get();
   await initializeSchema(f.db);expect(f.raw.query('SELECT total_changes() AS n').get()).toEqual(changes);
   expect(f.raw.query('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all()).toEqual(schema);
-  f.reopen();await initializeSchema(f.db);expect(f.dump()).toEqual({...before,library_clear_journal:[]});
+  f.reopen();await initializeSchema(f.db);expect(f.dump()).toEqual({...before,library_clear_journal:[],sync_book_install:[],sync_book_validation:[]});
   expect(await f.db.query('PRAGMA integrity_check')).toEqual([{integrity_check:'ok'}]);expect(await f.db.query('PRAGMA foreign_key_check')).toEqual([]);
  }finally{await f.close();}
 });

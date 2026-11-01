@@ -1,4 +1,9 @@
 import {BOOK_READING_SCHEMA} from './reading-schema';
+export const BOOK_INSTALL_SCHEMA=[
+ // Disposable install receipts never replace a live package or reading state.
+ `CREATE TABLE IF NOT EXISTS sync_book_install(binding TEXT PRIMARY KEY,header TEXT NOT NULL,header_offset INTEGER NOT NULL,validated_index INTEGER NOT NULL,validated_offset INTEGER NOT NULL,complete INTEGER NOT NULL DEFAULT 0,fingerprint TEXT,stage_index INTEGER NOT NULL DEFAULT 0,stage_offset INTEGER NOT NULL DEFAULT 0,stage_revision INTEGER NOT NULL DEFAULT -1)`,
+ `CREATE TABLE IF NOT EXISTS sync_book_validation(binding TEXT NOT NULL,chapter_index INTEGER NOT NULL,chapter_hash TEXT NOT NULL,source_url TEXT NOT NULL,line_end INTEGER NOT NULL,PRIMARY KEY(binding,chapter_index))`,
+];
 /** R44 identity and original packages outlive physical chapter rows. */
 export const BOOK_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS sync_book_display(book_id TEXT PRIMARY KEY,projection TEXT NOT NULL)`,
@@ -25,5 +30,6 @@ export const BOOK_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS sync_book_parts(book_id TEXT NOT NULL,package_sha256 TEXT NOT NULL,fingerprint TEXT NOT NULL,byte_count INTEGER NOT NULL,chunk_count INTEGER NOT NULL,chunk_index INTEGER NOT NULL,path TEXT NOT NULL,PRIMARY KEY(book_id,package_sha256,chunk_index))`,
  `CREATE INDEX IF NOT EXISTS sync_saved_states_item ON sync_saved_states(item_id)`,
  `CREATE INDEX IF NOT EXISTS articles_sync_order ON articles(fetched_at DESC,id DESC)`,
+ ...BOOK_INSTALL_SCHEMA,
  ...BOOK_READING_SCHEMA,
 ];

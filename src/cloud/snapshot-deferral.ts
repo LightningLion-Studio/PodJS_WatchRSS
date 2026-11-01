@@ -23,16 +23,19 @@ export const SNAPSHOT_GUARD_VERSION='snapshot-replay-v2:'+REPEATED_WORK_VERSION;
  * A new receipt changes the frontier and clears all in-memory replay evidence.
  */
 export class SnapshotYieldBudget {
+ private validation=new RepeatedWorkGuard({maximumCompletions:1,repeated:()=>Object.assign(Error('cloud_snapshot_work_timeout'),{code:'cloud_snapshot_work_timeout'})});
  private guard=new RepeatedWorkGuard({repeated:()=>Object.assign(Error('cloud_snapshot_work_timeout'),{code:'cloud_snapshot_work_timeout'})});
- stalled(active:boolean){this.guard.reset(active);}
+ stalled(active:boolean){this.guard.reset(active);this.validation.reset(active);}
  private identity(method:string,args:Record<string,unknown>):string|undefined {
   // AAD + nonce identify the authenticated input, independent of fresh temp
   // names. Never persist/log keys, content, URLs or these local identities.
   if((method==='crypto.largeAesGcmDecrypt'||method==='crypto.aesGcmDecrypt')&&typeof args.aadBase64==='string'&&typeof args.nonceBase64==='string')return JSON.stringify([method,args.aadBase64,args.nonceBase64]);
   if(method==='crypto.openSealedParts'&&Array.isArray(args.parts))return JSON.stringify([method,args.parts,args.length]);
   if(method==='crypto.gunzipSealedParts'&&typeof args.outputPrefix==='string'&&Number.isSafeInteger(args.offset))return JSON.stringify([method,args.outputPrefix,args.offset]);
+  if(method==='file.read'&&typeof args.path==='string'&&Number.isSafeInteger(args.offset))return JSON.stringify([method,args.path,args.offset,args.maxBytes]);
   return undefined;
  }
- before(method:string,args:Record<string,unknown>={}){this.guard.before(this.identity(method,args));}
- completed(method:string,args:Record<string,unknown>={}){this.guard.complete(this.identity(method,args));}
+ private validationIdentity(method:string,args:Record<string,unknown>){return method==='file.openText'&&args.strictUtf8===true&&typeof args.path==='string'&&args.path.startsWith('books/')?args.path:undefined;}
+ before(method:string,args:Record<string,unknown>={}){this.validation.before(this.validationIdentity(method,args));this.guard.before(this.identity(method,args));}
+ completed(method:string,args:Record<string,unknown>={}){this.validation.complete(this.validationIdentity(method,args));this.guard.complete(this.identity(method,args));}
 }

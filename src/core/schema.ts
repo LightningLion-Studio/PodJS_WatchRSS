@@ -2,7 +2,7 @@ import {ARTICLE_REGISTER_SCHEMA} from '../sync/article-register-store';
 import {ArticleKeepStore,ARTICLE_KEEP_SCHEMA} from '../sync/article-keep';
 import {LOCAL_RSS_SCHEMA} from '../rss/acquisition';
 import {OFFLINE_QUEUE_SCHEMA} from '../reader/offline-queue-schema';
-import {BOOK_SCHEMA} from '../books/schema';
+import {BOOK_INSTALL_SCHEMA,BOOK_SCHEMA} from '../books/schema';
 import {BOOK_READING_SCHEMA} from '../books/reading-schema';
 import {TOKEN_USAGE_CURSOR_SCHEMA} from '../sync/token-usage';
 import {BUILTIN_CHANNELS} from './builtin-channels.ts';
@@ -18,7 +18,7 @@ const changed=(table:string)=>revisionColumns[table]!.map(c=>`OLD.${c} IS NOT NE
 const libraryClearSchema = `CREATE TABLE IF NOT EXISTS library_clear_journal (id INTEGER PRIMARY KEY CHECK(id=1),private_data INTEGER NOT NULL CHECK(private_data IN (0,1)),content_json TEXT NOT NULL)`;
 const deletionCleanupSchema = `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`;
 const rssArticleIdsSchema = `CREATE TABLE IF NOT EXISTS cloud_rss_article_ids (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)`;
-const AUXILIARY_SCHEMA = [libraryClearSchema, ...ARTICLE_REGISTER_SCHEMA, deletionCleanupSchema, rssArticleIdsSchema];
+const AUXILIARY_SCHEMA = [libraryClearSchema, ...ARTICLE_REGISTER_SCHEMA, deletionCleanupSchema, rssArticleIdsSchema, ...BOOK_INSTALL_SCHEMA];
 
 export const SCHEMA = [
   libraryClearSchema,
