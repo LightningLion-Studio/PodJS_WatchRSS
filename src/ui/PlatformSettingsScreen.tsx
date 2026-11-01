@@ -29,7 +29,7 @@ export interface PlatformSettingsProps {
   width: number; height: number; loggedIn: () => boolean | undefined;
   showOriginalContent?: boolean; originalContentEnabled: boolean; onToggleOriginal: () => void;
   showContinuePlaybackInBackground?: boolean; continuePlaybackInBackgroundEnabled: boolean; onToggleContinuePlaybackInBackground?: () => void;
-  deleteEnabled?: boolean; onDelete?: () => unknown; onLogout: () => Promise<void>; onError: (error: unknown) => void;
+  deleteEnabled?: boolean; onDelete?: () => unknown; onLogin?: () => void; onLogout: () => Promise<void>; onError: (error: unknown) => void;
   ref?: (value: { scroller: Scroller; onRootBack: () => boolean }) => void;
 }
 /** Native BiliSettingsScreen — DouyinSettingsActivity reuses it verbatim (same captions and download prompt). */
@@ -47,7 +47,8 @@ export function PlatformSettingsScreen(props: PlatformSettingsProps) {
         : [spacerEntry(4)]),
       ...(props.showContinuePlaybackInBackground ? [switchRow("在后台继续播放", props.continuePlaybackInBackgroundEnabled, props.onToggleContinuePlaybackInBackground), spacerEntry(8)] : []),
       { height: 65, render: () => <View onPress={() => setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] top-[0] h-[57] rounded-[16] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[8.5] text-[17px] leading-[20] text-[#f5f5f5]">{prompt}</Text></View> },
-      dangerEntry("退出登录", "../assets/icons/exit-to-app.svg", loggedIn ? () => { void props.onLogout().catch(props.onError); } : undefined),
+      dangerEntry(loggedIn === undefined ? "读取登录状态…" : loggedIn ? "退出登录" : props.onLogin ? "登录" : "退出登录", "../assets/icons/exit-to-app.svg",
+        loggedIn === undefined ? undefined : loggedIn ? () => { if(props.loggedIn()===true)void props.onLogout().catch(props.onError); } : props.onLogin ? () => { if(props.loggedIn()===false)props.onLogin?.(); } : undefined),
       spacerEntry(4),
       dangerEntry("删除频道", "../assets/icons/delete-outline.svg", props.deleteEnabled && props.onDelete ? () => setConfirmDelete(true) : undefined),
       spacerEntry(20),

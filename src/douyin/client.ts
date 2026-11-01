@@ -1,3 +1,4 @@
+import {douyinBench} from './bench.ts';
 import {douyinMediaExpiry} from './media-expiry.ts';
 import {rememberRecommendationIds} from '../media/recommendation-history.ts';
 import {douyinRequestProfile,resolveDouyinRequestConfig,DOUYIN_USER_AGENT,DOUYIN_REFERER,type DouyinRequestConfig} from './request-config.ts';
@@ -28,10 +29,18 @@ const FEED_CACHE_LIMIT=60;
 export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
+export type DouyinAuthState='unknown'|'logged-in'|'logged-out';
 export class DouyinClient {
+  private authentication:DouyinAuthState='unknown';
+  private readonly authListeners=new Set<(state:DouyinAuthState)=>void>();
+  authState():DouyinAuthState{return this.authentication;}
+  subscribeAuth(listener:(state:DouyinAuthState)=>void){this.authListeners.add(listener);return ()=>{this.authListeners.delete(listener);};}
+  private setAuth(state:DouyinAuthState){this.authentication=state;for(const listener of this.authListeners)listener(state);}
+  private cookieRead?:{generation:number;result:Promise<string|null>};
   private readonly authExpiredListeners=new Set<()=>void>();
   onAuthExpired(listener:()=>void){this.authExpiredListeners.add(listener);return ()=>{this.authExpiredListeners.delete(listener);};}
   private authGeneration=0;
+  private cookieApplication?:{generation:number;result:Promise<DouyinResult<void>>};
   private cookieWrites:Promise<unknown>=Promise.resolve();
   private policy?:{generation:number;cookie:string;value:Douyin403Policy};
   private readonly forbiddenRequests=new Map<string,Promise<DouyinResult<string>>>();
@@ -87,19 +96,45 @@ export class DouyinClient {
   private readonly history:DouyinHistoryStore;
 
   constructor(private readonly options:DouyinClientOptions){this.feedStore=new DouyinFeedStore(options.historyStorage??options.secureStorage);this.history=new DouyinHistoryStore(options.historyStorage??options.secureStorage);this.now=options.now??Date.now;this.signer=options.signer??new ABogusSigner();this.saved=options.savedStore??new DouyinSavedStore(options.savedStorage??options.historyStorage??options.secureStorage,this.now);}
-  async readCookie(){const raw=await traceServiceWork("douyin.cookie.request",()=>this.options.secureStorage.get(COOKIE_KEY));return traceServiceWork("douyin.cookie.result",()=>raw?.trim()||null,raw?.length??0);}
-  async isLoggedIn(){return (await this.readCookie())!==null;}
+  async readCookie():Promise<string|null>{
+    // A deliberate logout is authoritative in this guest, including failed cleanup.
+    if(this.authentication==='logged-out')return null;
+    const generation=this.authGeneration;
+    if(this.cookieApplication?.generation===generation){await this.cookieApplication.result;return this.readCookie();}
+    if(this.cookieRead?.generation===generation)return this.cookieRead.result;
+    const result=(async()=>{
+      const raw=await traceServiceWork("douyin.cookie.request",()=>this.options.secureStorage.get(COOKIE_KEY));
+      if(generation!==this.authGeneration)return null;
+      const value=traceServiceWork("douyin.cookie.result",()=>raw?.trim()||null,raw?.length??0);
+      this.setAuth(value?'logged-in':'logged-out');return value;
+    })();
+    this.cookieRead={generation,result};
+    try{return await result;}finally{if(this.cookieRead?.result===result)this.cookieRead=undefined;}
+  }
+  async isLoggedIn(){return this.authentication==='unknown'?(await this.readCookie())!==null:this.authentication==='logged-in';}
   private clearFeedCache(){this.detailRequests.clear();this.feedRequests.clear();this.prefetchFailures.clear();this.detailTimes=[];this.playbackResolutions.clear();this.feedCache.clear();this.feedCursor=null;this.feedHasMore=false;}
   async applyCookie(raw:string,commitCookie:(value:string)=>Promise<void>=value=>this.options.secureStorage.set(COOKIE_KEY,value)){
     const value=raw.trim();if(!value)return fail<void>('NOT_LOGGED_IN','缺少有效 Cookie');
-    this.authGeneration++;this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
-    return this.enqueueCookie(async()=>{await commitCookie(value);await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();return {ok:true,data:undefined} as DouyinResult<void>;});
+    const benchAttempt=douyinBench.attempt(this);
+    const generation=++this.authGeneration;this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
+    const result=this.enqueueCookie(async()=>{await commitCookie(value);await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();if(generation===this.authGeneration){this.cookieApplication=undefined;this.setAuth('logged-in');if(benchAttempt)douyinBench.persisted(this,benchAttempt);}return {ok:true,data:undefined} as DouyinResult<void>;});
+    this.cookieApplication={generation,result};this.setAuth('unknown');
+    try{return await result;}finally{if(this.cookieApplication?.result===result)this.cookieApplication=undefined;}
   }
-  async clearCookie(commitCookie:()=>Promise<void>=()=>this.options.secureStorage.remove(COOKIE_KEY)){
-    this.authGeneration++;this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
-    await this.enqueueCookie(async()=>{await commitCookie();await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();});
+  async clearCookie(commitCookie?:()=>Promise<void>,cleanup?:()=>Promise<void>){
+    const observation=douyinBench.authClear(this);
+    const commit=commitCookie??(()=>this.options.secureStorage.remove(COOKIE_KEY,observation));
+    this.authGeneration++;this.setAuth('logged-out');this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
+    // Submit browser cleanup now, before a new login can submit browser authorization.
+    // Keep its completion in the write chain so it cannot erase a newly applied Cookie.
+    const extra=Promise.resolve().then(()=>cleanup?.()).then(()=>({status:'fulfilled',value:undefined} as const),reason=>({status:'rejected',reason} as const));
+    await this.enqueueCookie(async()=>{
+      const results=await Promise.allSettled([(async()=>{await commit();await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();})()]);
+      results.push(await extra);
+      const failure=results.find(r=>r.status==='rejected');if(failure?.status==='rejected')throw failure.reason;
+    });
   }
-  async logout(){await this.clearCookie();await this.options.onLogout?.();}
+  logout(){return this.clearCookie(undefined,this.options.onLogout);}
   async buildPlaybackHeaders():Promise<Record<string,string>>{const cookie=await this.readCookie(),profile=douyinRequestProfile(await resolveDouyinRequestConfig(this.options.requestConfig));return {...profile.headers,...(cookie?{Cookie:cookie}:{})};}
   private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig):Promise<DouyinResult<string>> {
     await this.cookieWrites.catch(()=>{});

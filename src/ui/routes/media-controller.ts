@@ -1,3 +1,4 @@
+import {douyinBench} from '../../douyin/bench.ts';
 import {playbackFailure} from '../../media/playback-failure.ts';
 import {douyinNetworkFailure} from '../douyin/player-network.ts';
 import {DOUYIN_USER_AGENT} from '../../douyin/request-config.ts';
@@ -275,6 +276,7 @@ export function createMediaRouteController(
   };
 
   const douyinLogin = async () => {
+    const benchAttempt=douyinBench.loginEntry(douyinClient);let nativeCompleted=false;
     dependencies.setError("");
     try {
       const result = await authorizeInBrowser({
@@ -284,15 +286,20 @@ export function createMediaRouteController(
         qrWait: DOUYIN_QR_WAIT,
         onStatus: () => {},
         completeOnLoginPanelHidden: true,
+        completeOnRequiredCookies: true,
+        lowMemory: true,
+        benchmark: {seq:benchAttempt.seq,attempt:benchAttempt.attempt},
         requiredCookieNames: ["sessionid"],
         userAgent:DOUYIN_USER_AGENT,
       }).result;
+      nativeCompleted=true;
       const saved = await douyinClient.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);
       dependencies.setPage("douyin", { douyinRoute: { name: "entry" } });
     } catch (error) {
+      if(nativeCompleted)douyinBench.error(benchAttempt);
       dependencies.setError(String(error));
-    }
+    } finally {douyinBench.leaveLogin(douyinClient,benchAttempt);}
   };
 
   const douyinPlaybackUrl=async(item:import('../../douyin/types.ts').DouyinItem,headers:Record<string,string>,forward=false)=>{
@@ -474,8 +481,8 @@ export function createMediaRouteController(
     const result=entry.queue.commitPreview(prepared.key);
     if(!result.ok||dependencies.current()!==entry)return false;
     entry.playback=prepared.source;dependencies.setError("");dependencies.setPlayingSource(prepared.source);
-    await entry.queue.persist();
-    if(dependencies.current()===entry)dependencies.onActivityStateChange?.();
+    // Publication commits playback. Persistence must not hold the paging strip.
+    void entry.queue.persist().then(()=>{if(dependencies.current()===entry)dependencies.onActivityStateChange?.();}).catch(error=>{if(dependencies.current()===entry)dependencies.setError(error instanceof Error?error.message:"视频进度保存失败");});
     return true;
   };
 

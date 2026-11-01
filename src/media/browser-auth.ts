@@ -11,6 +11,9 @@ export interface BrowserAuthorizationOptions {
   qrWait?: BrowserQrWaitOptions
   onQrWait?: (status: BrowserQrWaitStatus) => void
   onStatus?: (status: BrowserAuthStatus) => void
+  benchmark?: {seq:number;attempt:number}
+  completeOnRequiredCookies?: boolean
+  lowMemory?: boolean
   completeOnLoginPanelHidden?: boolean
 }
 
@@ -28,6 +31,9 @@ export function authorizeInBrowser(options: BrowserAuthorizationOptions): HostOp
     requiredCookieNames: [...options.requiredCookieNames],
     ...(options.userAgent ? { userAgent: options.userAgent } : {}),
     ...(options.qrExtractionScript ? { qrExtractionScript: options.qrExtractionScript } : {}),
+    ...(options.benchmark ? {benchmark:options.benchmark} : {}),
+    ...(options.completeOnRequiredCookies ? {completeOnRequiredCookies:true} : {}),
+    ...(options.lowMemory ? {lowMemory:true} : {}),
   })
 }
 

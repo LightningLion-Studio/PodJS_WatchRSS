@@ -133,9 +133,9 @@ mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:element('RemoteImage')
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(listener:any)=>{listener(internet);return ()=>{};}}));
 mock.module('../src/logs/app-logger.ts',()=>({createLogConsole:()=>({warn(){},error(){}}),appLogger:{d(){},i(){},w(){},e(){}}}));
 let inlineCalls=0;
-mock.module('@podjs/framework/services',()=>({textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
+mock.module('@podjs/framework/services',()=>({onVideoFirstFrame:()=>()=>{},textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
  captureFrame:async(options:any)=>{frameCaptures.push(options);return {available:true,kind:"actual_frame",path:"video-frames/test.jpg"};},captureBackdrop:async()=>{},prepare:(options:any)=>{prepareLoops.push(options.loop);return {result:Promise.resolve(videoState()),cancel(){}};},setLoop:async(loop:boolean)=>{loopCalls.push(loop);return videoState();},
- play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
+ retire:async()=>({...videoState(),state:'paused'}),play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
  setBounds:async()=>{},setTransform:async(value:any)=>{transforms.push(value);},setVolume:async(value:number)=>{volumes.push(value);return {...videoState(),volume:value};},
 },videoSessions:{},hostOperation:()=>{throw Error('unexpected native operation');},delay:(milliseconds:number)=>{let fire!:()=>void;const result=new Promise<void>(r=>fire=r),timer={milliseconds,fire};videoTimers.add(timer);return {result,cancel(){videoTimers.delete(timer);}};}}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));

@@ -4,6 +4,7 @@
  */
 export const DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT = `
 (function() {
+ try {
   const secondVerify = document.getElementById('uc-second-verify');
   if (secondVerify && secondVerify.tagName.toLowerCase() === 'div') return null;
 
@@ -19,5 +20,6 @@ export const DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT = `
     if (src && src.startsWith('data:image/png;base64,')) return src;
   }
   return null;
+ } catch (_) { return null; }
 })();
 `

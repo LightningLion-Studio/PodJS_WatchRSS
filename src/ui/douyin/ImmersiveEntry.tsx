@@ -1,3 +1,5 @@
+import {douyinBench} from '../../douyin/bench.ts';
+import {observeDouyinAuth} from './auth-state.ts';
 import * as hostServices from '@podjs/framework/services';
 import {DOUYIN_AUTH403_MAX_COOLDOWN_MS} from '../../douyin/auth403.ts';
 import {debugGate} from '../../debug/host.ts';
@@ -13,7 +15,9 @@ import type { DouyinItem } from "../../douyin/types.ts";
 
 /** Title page owns no player; the single host session starts only on entering the flow. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
-  const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[logged,setLogged]=createSignal(true);
+  let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
+  const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal("");
+  const auth=observeDouyinAuth(props.client),logged=()=>auth()==='logged-in';
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
   let retryTimer:{cancel():void}|undefined;
   const cancelRetry=()=>{retryTimer?.cancel();retryTimer=undefined;};
@@ -26,16 +30,16 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   };
   const active=()=>!disposed&&(props.active??true);
   const requireLogin=async(current:()=>boolean)=>{
-    if(!current())return;cancelRetry();setLogged(false);setItems([]);anchor=null;cursor=null;hasMore=false;setError(formatDouyinError('NOT_LOGGED_IN'));
+    if(!current())return;cancelRetry();setItems([]);anchor=null;cursor=null;hasMore=false;setError(formatDouyinError('NOT_LOGGED_IN'));
     // Only the client may expire verified authentication. A screen never infers it.
   };
   const load=async(refresh=false)=>{
     if(!active()||busy())return;
     cancelRetry();
     const own=++generation,current=()=>active()&&own===generation;
+    if(auth()!=='logged-in')return;
     setBusy(true);setError("");
     try{
-      const signed=await props.client.isLoggedIn();if(!current())return;setLogged(signed);if(!signed){setItems([]);setError(formatDouyinError('NOT_LOGGED_IN'));return;}
       if(!refresh){
         const feed=await traceServiceWork("douyin.entry.restoreFeed",()=>props.client.restoreFeed()),queue=await traceServiceWork("douyin.entry.restoreQueue",()=>props.client.restorePlaybackQueue());if(!current())return;
         const cached=queue.items.length?queue:feed;
@@ -75,7 +79,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     finally{if(current()){setBusy(false);appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
   };
   const enter=async()=>{
-    if(!active()||busy())return;if(!logged()){props.onNavigate({name:'login'});return;}
+    if(!active()||auth()==='unknown')return;if(!logged()){douyinBench.loginTap(props.client,logged,()=>props.onNavigate({name:'login'}));return;}if(busy())return;
     if(!items().length){await load(true);return;}
     // Native enterVideoFlow only switches pages. Do not hold "刷新中" while
     // serially resolving old queue entries; the player's recovery owns failures.
@@ -95,12 +99,13 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       void untrack(enter);
     }
   });
+  createEffect(()=>{const enabled=props.active??true;if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':busy()?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
-  createEffect(()=>{if(props.active??true)void untrack(()=>load());else{generation++;cancelRetry();setBusy(false);}});onCleanup(()=>{disposed=true;generation++;cancelRetry();gesture.dispose();});
+  createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;cancelRetry();setBusy(false);}});onCleanup(()=>{disposed=true;generation++;cancelRetry();gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
-  const hint=()=>!logged()?"需要登录，请重新登录":busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
+  const hint=()=>auth()==='unknown'?"正在读取登录状态…":!logged()?"需要登录，请重新登录":busy()?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
   return <View class="absolute inset-0 bg-black">
    <View class="absolute inset-0">
     <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
@@ -109,7 +114,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
     </View>
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text></Show>
-    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={()=>logged()?void enter():props.onNavigate({name:"login"})} focusable accessibilityRole="button" accessibilityLabel={logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">登录</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
+    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={auth()==='unknown'?undefined:()=>void enter()} focusable={auth()!=='unknown'} accessibilityRole="button" accessibilityLabel={auth()==='unknown'?"正在读取登录状态…":logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
   </View></View>;
 }
 

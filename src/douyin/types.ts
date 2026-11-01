@@ -1,6 +1,6 @@
 import type { HttpTransport } from "../cloud/types.ts";
 
-export interface DouyinSecureStorage { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void>; remove(key: string): Promise<void>; }
+export interface DouyinSecureStorage { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void>; remove(key: string, benchmark?:{seq:number;attempt?:number}): Promise<void>; }
 export interface DouyinHistoryStorage extends DouyinSecureStorage {}
 export interface DouyinSavedStorage extends DouyinSecureStorage {}
 export interface DouyinSigner { sign(params: Readonly<Record<string, string>>): Promise<string> | string; }

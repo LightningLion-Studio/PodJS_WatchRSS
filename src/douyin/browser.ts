@@ -23,23 +23,28 @@ function record(diagnostic: BrowserDiagnostic, message: string): void {
   try { diagnostic(message); } catch {}
 }
 
-export async function clearDouyinBrowserData(browser: DouyinBrowser, diagnostic: BrowserDiagnostic = warn): Promise<void> {
+export async function clearDouyinBrowserData(browser: DouyinBrowser, diagnostic: BrowserDiagnostic = warn): Promise<boolean> {
   try {
     if (!browser.hasCapability('system.browser.siteData')) {
       record(diagnostic, 'siteData capability_missing');
-      return;
+      return true;
     }
     const results = await browser.clearSiteData({ origins: DOUYIN_SITE_ORIGINS }).result;
+    let success=true;
     for (const result of results) {
       // Only known origins and statuses: never log cookies, names or host error messages.
       if (!DOUYIN_SITE_ORIGINS.some(origin => origin === result.origin)) continue;
-      if (result.cookies.status === 'remaining' || result.cookies.status === 'failed')
-        record(diagnostic, `siteData ${result.origin} cookies=${result.cookies.status}`);
-      if (result.webStorage.status === 'failed')
-        record(diagnostic, `siteData ${result.origin} webStorage=failed`);
+      if (result.cookies.status === 'remaining' || result.cookies.status === 'failed') {
+        success=false;record(diagnostic, `siteData ${result.origin} cookies=${result.cookies.status}`);
+      }
+      if (result.webStorage.status === 'failed') {
+        success=false;record(diagnostic, `siteData ${result.origin} webStorage=failed`);
+      }
     }
+    return success;
   } catch {
     record(diagnostic, 'siteData operation_failed');
+    return false;
   }
 }
 

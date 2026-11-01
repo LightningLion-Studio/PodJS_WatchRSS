@@ -26,7 +26,7 @@ test('missing siteData capability retains B6 cache cleanup and records a diagnos
   await clearDouyinLogoutData({ async clearBucket(bucket) { f.calls.push(bucket); } }, f.browser, f.diagnostic);
   expect(f.calls).toEqual(['douyin-preload']); expect(f.logs).toEqual(['siteData capability_missing']);
 });
-test('remaining/failed statuses are diagnostic only; host messages and cookie names are not logged', async () => {
+test('remaining/failed statuses surface sanitized cleanup failure; no host messages or cookie names', async () => {
   const f = fixture();
   f.browser.clearSiteData = () => ({ result: Promise.resolve([
     { origin: DOUYIN_SITE_ORIGINS[0], cookies: { status: 'remaining', remainingNames: ['secret'], message: 'sensitive' }, webStorage: { status: 'deletion_requested' } },
@@ -36,12 +36,12 @@ test('remaining/failed statuses are diagnostic only; host messages and cookie na
   const client = new DouyinClient({ transport: { request: async () => { throw Error('unexpected network'); } }, secureStorage: {
     get: async key => secure.get(key) ?? null, set: async (key, value) => { secure.set(key, value); }, remove: async key => { secure.delete(key); },
   }, onLogout: () => clearDouyinLogoutData({ async clearBucket(bucket) { f.calls.push(bucket); } }, f.browser, f.diagnostic) });
-  await client.logout(); expect(await client.isLoggedIn()).toBe(false); expect(f.calls).toEqual(['douyin-preload']);
+  await expect(client.logout()).rejects.toThrow('douyin_browser_cleanup_failed'); expect(await client.isLoggedIn()).toBe(false); expect(f.calls).toEqual(['douyin-preload']);
   expect(f.logs).toEqual(['siteData https://www.douyin.com cookies=remaining', 'siteData https://douyin.com cookies=failed', 'siteData https://douyin.com webStorage=failed']);
 });
 for (const sync of [false, true]) test(`siteData ${sync ? 'throw' : 'rejection'} cannot block cleanup`, async () => {
   const f = fixture(); f.browser.clearSiteData = () => { if (sync) throw Error('secret'); return { result: Promise.reject(Error('secret')) }; };
-  await clearDouyinLogoutData({ async clearBucket(bucket) { f.calls.push(bucket); } }, f.browser, f.diagnostic);
+  await expect(clearDouyinLogoutData({ async clearBucket(bucket) { f.calls.push(bucket); } }, f.browser, f.diagnostic)).rejects.toThrow('douyin_browser_cleanup_failed');
   expect(f.calls).toEqual(['douyin-preload']); expect(f.logs).toEqual(['siteData operation_failed']);
   await clearDouyinBrowserData(f.browser, () => { throw Error('logger failed'); });
 });

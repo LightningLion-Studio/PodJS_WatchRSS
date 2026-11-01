@@ -34,19 +34,20 @@ function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value
 const settle=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
 // Feed parsing now yields host turns. Observe the public settled state instead
 // of assuming every response is synchronous after one event-loop turn.
-async function settled(f:{text:()=>string}){const end=Date.now()+2000;while(f.text().includes('刷新中...')&&Date.now()<end)await settle();}
+async function settled(f:{text:()=>string}){const end=Date.now()+2000;while((f.text().includes('刷新中...')||f.text().includes('正在读取登录状态'))&&Date.now()<end)await settle();}
 async function requestReady(f:{requests:unknown[]},count=1){const end=Date.now()+2000;while(f.requests.length<count&&Date.now()<end)await settle();}
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
-function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options}={}){
+function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean}={}){
   let now=1_000_000;
   const data=new Map<string,string>();if(options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
   const items=Array.from({length:options.cacheCount??0},(_,i)=>({awemeId:String(i+1),description:'cached',playUrl:`https://old.test/${i+1}`,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}));
   const cached={items,anchorAwemeId:items[0]?.awemeId??null,cursor:options.cursor??null,hasMore:options.hasMore??false,savedAtMillis:1,resolved:{}};
   data.set(FEED_KEY,JSON.stringify(cached));data.set(QUEUE_KEY,JSON.stringify(cached));
   const requests:{request:HttpRequest;reply:ReturnType<typeof deferred<HttpResponse>>}[]=[],plays:any[]=[],routes:any[]=[];
-  const client=new DouyinClient({auth403:options.auth403,secureStorage:{get:async k=>data.get(k)??null,set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
+  const client=new DouyinClient({auth403:options.auth403,secureStorage:{get:async k=>{await options.secureGate;return data.get(k)??null;},set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
+  if(options.logoutBeforeMount)void client.logout();
   const [active,setActive]=createSignal(true);let dispose!:()=>void;
   const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
   const entryGesture=gesture;
@@ -154,4 +155,20 @@ test('cached anchor status8 replaces cached playback with a login action',async(
 test('DYFIX exhausted saved feed is refreshed instead of reused as a ready bootstrap',async()=>{
  const f=mount({cacheCount:4,hasMore:false,cursor:'old'});await requestReady(f);expect(new URL(f.requests[0]!.request.url).pathname).toBe('/aweme/v2/web/module/feed/');expect(f.text()).toContain('刷新中...');
  f.requests[0]!.reply.resolve(response(['new']));await settled(f);f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('new');
+});
+
+ test('DYUI remembered logout renders login immediately even with secure reads blocked',async()=>{
+ const gate=deferred<void>();const f=mount({logoutBeforeMount:true,secureGate:gate.promise});
+ const initial=f.text();f.press();const routes=[...f.routes];gate.resolve();await settle();
+ expect(initial).toContain('需要登录');expect(initial).not.toContain('刷新中');expect(routes).toEqual([{name:'login'}]);
+ });
+
+test('DYBENCH entry requests native needs_login presentation and cancels it on deactivation',async()=>{
+ const before=(globalThis as any).pod,events:any[]=[];let seq=300;
+ (globalThis as any).pod={benchmark:(raw:string)=>{const value=JSON.parse(raw);if(!value.seq)value.seq=++seq;events.push(value);return value.seq;}};
+ try{
+  const f=mount({logged:false});await settle();const begin=events.find(x=>x.code==='entry_start'),present=events.find(x=>x.code==='needs_login'&&x.presented);
+  expect(begin).toBeDefined();expect(present?.seq).toBe(begin.seq);expect(events.some(x=>x.code==='refreshing')).toBe(false);
+  f.setActive(false);await settle();expect(events.some(x=>x.code==='needs_login'&&x.cancel_presented&&x.seq===begin.seq)).toBe(true);
+ }finally{(globalThis as any).pod=before;}
 });

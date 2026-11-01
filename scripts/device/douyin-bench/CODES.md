@@ -67,9 +67,11 @@ with the corresponding IDs; never substitute a success endpoint on failure.
 | `gesture_release` | ACTION_UP/gesture commit decision; seq, direction=next/prev/cancel/fling, prewarmed=true/false, generation=target, source_generation=old |
 | `previous_audio_stopped` | **Observed mixer** old track silent/inactive, not pause request completion; seq, source_generation, backend=mixer. If verified silent before release, emit current verified observation at release (zero delay). Never invent this from player state. |
 | `incoming_first_frame` | Target generation decoded frame is **presented at target bounds**, after promotion; same seq/generation. Hidden prewarm first-frame callback is not this event. |
+| `spinner_shown` | Loading ring first visibly rendered after the 400 ms first-frame wait, same seq/generation; no hidden/prewarmed spinner endpoint. |
 | `snap_back` | Cancel settles original bounds and original generation resumes, same seq/generation (release generation=original for cancel) |
 | `fling_done` | One fling settles the actual target two indices away; same seq, delta=2 (absolute index difference; no content ID) |
 | `mute_changed` | System mute change observed while current generation plays; seq, kind=on/off, muted=true/false |
+| `player_audio_applied` | Current player gain read-back equals the applied request; same seq and kind, observed muted=true/false, backend=player. This is not mixer/PCM or physical sound evidence and never satisfies mute latency acceptance. |
 | `mixer_match` | Calibrated actual mixer/PCM state matches requested transition; same seq, kind, muted, backend=mixer. Requested player volume is **not** evidence. |
 | `login_entry` | Login UI activation before opening WebView; seq, attempt |
 | `login_tap` | 登录 handler before any auth/navigation change; seq, attempt |

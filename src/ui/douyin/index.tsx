@@ -1,3 +1,5 @@
+import {douyinBench} from '../../douyin/bench.ts';
+import {observeDouyinAuth} from './auth-state.ts';
 import {usageTelemetry} from '../../telemetry/host.ts';
 import {DouyinQrLoadTelemetry} from '../../telemetry/qr-load.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
@@ -120,18 +122,20 @@ function statusCard(title: string, detail: string): ScrollEntry[] {
 }
 
 function ChannelInfoScreen(props: DouyinScreenProps) {
-  const [loggedIn,setLoggedIn]=createSignal(false);
-  createEffect(()=>{void props.client.isLoggedIn().then(setLoggedIn);});
+  const auth=observeDouyinAuth(props.client);
+  const loggedIn=()=>auth()==='logged-in';
   const entries=createMemo<ScrollEntry[]>(()=>[
-    header("腕上RSS · 抖音频道"),...statusCard("频道说明",loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
+    header("腕上RSS · 抖音频道"),...statusCard("频道说明",auth()==='unknown'?"正在读取登录状态…":loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
     ...statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),platformCardEntry(props.width-36,platformScope),
-    ...(!loggedIn()?[button("登录",()=>props.onNavigate({name:"login"}))]:[]),
+    ...(auth()==='logged-out'?[button("登录",()=>douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({name:"login"})))]:[]),
     button("设置",()=>props.onNavigate({name:"settings"})),button("播放历史",()=>props.onNavigate({name:"history"})),button("返回",props.onBack)
   ]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref}/>;
 }
 
 function LoginScreen(props: DouyinScreenProps) {
+  let benchAttempt=douyinBench.loginEntry(props.client),benchStarted=false;
+  onCleanup(()=>douyinBench.leaveLogin(props.client,benchAttempt));
   const loginLog=new DouyinLoginLog();
   const qrTelemetry=new DouyinQrLoadTelemetry(ms=>{loginLog.qrLoaded(ms);usageTelemetry.recordDouyinQrLoadTime(ms);});
   const [failed, setFailed] = createSignal(false);
@@ -151,6 +155,9 @@ function LoginScreen(props: DouyinScreenProps) {
   onCleanup(() => { loginLog.dispose(); disposed = true; generation++; authorization?.cancel(); });
   const openLogin = async () => {
     if (gate() || busy()) return;
+    if(benchStarted)benchAttempt=douyinBench.loginEntry(props.client,true);
+    benchStarted=true;
+    const currentBench=benchAttempt;let nativeCompleted=false,benchRequested=false;
     const current = ++generation;
     setBusy(true);
     setStatusMode(hasCapability("system.browser.auth.status"));
@@ -160,15 +167,17 @@ function LoginScreen(props: DouyinScreenProps) {
     try {
       const available = await douyinBrowserAvailable({ ...browser, hasCapability });
       if (disposed || current !== generation || gate()) return;
-      if (!available) { setBrowserAvailable(false); return; }
+      if (!available) { douyinBench.error(currentBench);setBrowserAvailable(false); return; }
       authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,qrWait:DOUYIN_QR_WAIT,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
         if (disposed || current !== generation || !acceptingStatus) return;
         loginLog.status(event);
         qrTelemetry.status(event);
         setAuthStatus(state => updateLoginStatus(state, event));
         setMessage(loginStatusMessage(authStatus()));
-      }} : {}),requiredCookieNames:["sessionid"],userAgent:DOUYIN_USER_AGENT});
+      }} : {}),benchmark:{seq:currentBench.seq,attempt:currentBench.attempt},completeOnRequiredCookies:true,lowMemory:true,requiredCookieNames:["sessionid"],userAgent:DOUYIN_USER_AGENT});
+      benchRequested=true;
       const result = await authorization.result;
+      nativeCompleted=true;
       acceptingStatus = false;
       if (disposed || current !== generation || gate()) return;
       setAuthStatus(finishLoginStatus(authStatus()));
@@ -177,6 +186,7 @@ function LoginScreen(props: DouyinScreenProps) {
       loginLog.completed();
       if (!disposed && current === generation) { feedSnapshots.delete(props.client); props.onNavigate({name:"entry"}); }
     } catch (error) {
+      if(nativeCompleted||!benchRequested)douyinBench.error(currentBench);
       acceptingStatus = false;
       if (!disposed && current === generation) setAuthStatus(finishLoginStatus(authStatus()));
       if (!disposed && current === generation) { setFailed(true); const failure = loginError(error); appLogger.w("DouyinLogin", "code=" + douyinLoginFailureCode(error)); if(failure.unavailable)appLogger.e("DouyinLoginScreen","Failed to initialize WebView"); setMessage(failure.message); if (failure.unavailable) setBrowserAvailable(false); }
@@ -226,6 +236,8 @@ function detailNavigation(props: DouyinScreenProps, onRecorded?: () => Promise<v
 }
 
 function FeedScreen(props: DouyinScreenProps) {
+  let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,entryActive=props.active??true;
+  const auth=observeDouyinAuth(props.client);
   const openDetail = detailNavigation(props);
   const [resume, setResume] = createSignal<Awaited<ReturnType<DouyinClient["restorePlaybackQueue"]>>>();
   onMount(() => { let current = true; onCleanup(() => { current = false; }); void props.client.restorePlaybackQueue().then(value => { if (current) setResume(value); }).catch(() => {}); });
@@ -243,25 +255,25 @@ function FeedScreen(props: DouyinScreenProps) {
   const [feed, setFeed] = createSignal(controller.state), [error, setError] = createSignal("");
   const items = () => feed().items, hasMore = () => feed().hasMore, loading = () => feed().loading;
   const [refreshing, setRefreshing] = createSignal(false);
-  const load = (append = false) => { setError(""); if (append) return controller.loadMore(); setRefreshing(true); return controller.refresh().finally(() => setRefreshing(false)); };
+  createEffect(()=>{const enabled=props.active??true;if(enabled&&!entryActive)entrySeq=douyinBench.entry(props.client);entryActive=enabled;const code=auth()==='logged-out'?'needs_login':refreshing()?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
+  const load = (append = false) => { if(auth()!=='logged-in')return Promise.resolve(); setError(""); if (append) return controller.loadMore(); setRefreshing(true); return controller.refresh().finally(() => setRefreshing(false)); };
   createEffect(() => setError(feed().error));
   onCleanup(() => controller.dispose());
-  createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
+  createEffect(() => { if ((props.route.name === "feed" || props.route.name === "entry") && auth()==='logged-in' && !feedSnapshots.has(props.client)) void untrack(() => load(false)); });
   // Native DouyinRssFeedScreen reuses FeedHeader / FeedItemEntry / FeedActions: swipe reveals 收藏 / 稍后再看
   // (toggle + toast), long press opens the actions page with the item, pull refresh and auto load near the end.
-  const [loggedIn, setLoggedIn] = createSignal<boolean | null>(null);
-  createEffect(() => { if (props.route.name === "feed" || props.route.name === "entry") void Promise.resolve().then(() => props.client.isLoggedIn()).then(setLoggedIn, () => setLoggedIn(null)); });
+  const loggedIn=()=>auth()==='unknown'?null:auth()==='logged-in';
   const toast = (message: string) => { void hostOperation("ui.toast", { message }).result.catch(() => {}); };
   const byId = createMemo(() => new Map(items().map(item => [item.awemeId, item])));
-  const articles = createMemo<Article[]>(() => loggedIn() === false ? [] : items().map(item => ({ id: item.awemeId, title: itemTitle(item), excerpt: itemSummary(item), content: "", read: true })));
+  const articles = createMemo<Article[]>(() => auth() !== 'logged-in' ? [] : items().map(item => ({ id: item.awemeId, title: itemTitle(item), excerpt: itemSummary(item), content: "", read: true })));
   const withItem = (article: Article, run: (item: DouyinItem) => void) => { const item = byId().get(article.id); if (item) run(item); };
   const toggleSaved = (item: DouyinItem, kind: "favorite" | "watchLater") => void props.client.toggleSaved(item, kind).then(saved => toast(kind === "favorite" ? saved ? "已收藏" : "已取消收藏" : saved ? "已加入稍后再看" : "已从稍后再看移除"), error => toast(error instanceof Error ? error.message : String(error)));
-  const leading = createMemo<ScrollEntry[]>(() => (loggedIn() === false
-    ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => props.onNavigate({ name: "login" }))]
+  const leading = createMemo<ScrollEntry[]>(() => (auth() === 'unknown' ? [feedEmptyStateEntry("读取登录状态…", "", props.width)] : loggedIn() === false
+    ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({ name: "login" })))]
     : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : []));
-  const empty = createMemo<ScrollEntry[]>(() => loggedIn() === false || (loading() && !error()) ? [] : [feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width)]);
+  const empty = createMemo<ScrollEntry[]>(() => auth() !== 'logged-in' || (loading() && !error()) ? [] : [feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width)]);
   return <RssFeedScreen width={props.width} height={props.height} title="抖音" active={props.active !== false} onInfo={() => props.onNavigate({ name: "channel-info" })}
-    items={articles()} refreshing={refreshing() || (loading() && !items().length)} loadingMore={loading() && !refreshing() && items().length > 0} canNext={hasMore() && loggedIn() !== false}
+    items={articles()} refreshing={auth()==='logged-in' && (refreshing() || (loading() && !items().length))} loadingMore={loading() && !refreshing() && items().length > 0} canNext={hasMore() && auth() === 'logged-in'}
     onOpen={article => withItem(article, item => void openDetail(item).catch(error => setError(String(error))))}
     onActions={article => withItem(article, item => props.onNavigate({ name: "actions", awemeId: item.awemeId, item }))}
     onFavorite={article => withItem(article, item => toggleSaved(item, "favorite"))} onWatchLater={article => withItem(article, item => toggleSaved(item, "watchLater"))}
@@ -350,14 +362,19 @@ function ShareScreen(props: DouyinScreenProps & { awemeId: string }) {
 
 /** Native DouyinSettingsActivity renders BiliSettingsScreen + DeleteConfirmDialog; messages toast. */
 function SettingsScreen(props: DouyinScreenProps) {
-  const [loggedIn, setLoggedIn] = createSignal<boolean | undefined>(undefined);
-  createEffect(() => { if (props.route.name === "settings") void Promise.resolve().then(() => props.client.isLoggedIn()).then(setLoggedIn, () => setLoggedIn(false)); });
+  const auth=observeDouyinAuth(props.client);
+  const loggedIn=()=>auth()==='unknown'?undefined:auth()==='logged-in';
   const toast = (message: string) => { void hostOperation("ui.toast", { message }).result.catch(() => {}); };
   return <PlatformSettingsScreen width={props.width} height={props.height} loggedIn={loggedIn}
     showOriginalContent originalContentEnabled={props.settings.originalContentEnabled} onToggleOriginal={() => props.settings.onOriginalContentChange(!props.settings.originalContentEnabled)}
     showContinuePlaybackInBackground continuePlaybackInBackgroundEnabled={props.settings.continuePlaybackInBackgroundEnabled} onToggleContinuePlaybackInBackground={() => props.settings.onContinuePlaybackInBackgroundChange(!props.settings.continuePlaybackInBackgroundEnabled)}
     deleteEnabled onDelete={async () => { await props.settings.onDeleteChannel(); feedSnapshots.delete(props.client); }}
-    onLogout={async () => { try { await props.client.logout(); feedSnapshots.delete(props.client); setLoggedIn(false); props.onLogoutSuccess?.(); } catch (error) { toast(`退出失败：${String(error)}`); } }}
+    onLogin={()=>douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({name:'login'}))}
+    onLogout={() => {
+      douyinBench.logoutStart(props.client);
+      const cleanup=props.client.logout();feedSnapshots.delete(props.client);props.onLogoutSuccess?.();
+      return cleanup.catch(error=>{toast(`退出清理失败：${String(error)}`);});
+    }}
     onError={error => toast(error instanceof Error ? error.message : String(error))} ref={props.ref} />;
 }
 

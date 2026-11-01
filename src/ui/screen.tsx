@@ -1,3 +1,4 @@
+import {douyinBench} from '../douyin/bench.ts';
 import {startExternalDebug} from '../debug/external-host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {markFeedArticleRead} from "./reader-open-state.ts";
@@ -1466,6 +1467,8 @@ export default function WatchRSS(props: {
     motion.reset();
     setBackOffset(0);
   };
+  createEffect(()=>{if(page()!=='home')douyinBench.cancelLogoutFeedback(douyinClient);});
+  onCleanup(()=>douyinBench.cancelLogoutFeedback(douyinClient));
   const returnHomeAfterDouyinLogout = () => {
     for (const entry of stack()) entry.queue?.cancel();
     batch(() => {
@@ -1477,6 +1480,7 @@ export default function WatchRSS(props: {
     motion.reset();
     void video.stop().catch(() => {});
     void hostToast("已退出登录");
+    douyinBench.logoutFeedback(douyinClient);
   };
   const openAddedChannel = async (channel: Channel) => {
     await loadChannels();

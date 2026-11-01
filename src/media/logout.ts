@@ -11,6 +11,7 @@ export async function clearBiliLogoutData(store: { delete(key: string): unknown 
 
 /** Cookie and recent-window cleanup live in DouyinClient; watch history and saved items survive logout. */
 export async function clearDouyinLogoutData(cache: LogoutCache, browser?: DouyinBrowser, diagnostic?: BrowserDiagnostic): Promise<void> {
-  if (browser) await clearDouyinBrowserData(browser, diagnostic);
+  const cleared=browser?await clearDouyinBrowserData(browser, diagnostic):true;
   await cache.clearBucket('douyin-preload');
+  if(!cleared)throw Error('douyin_browser_cleanup_failed');
 }

@@ -22,11 +22,11 @@ mock.module('../src/media/browser-auth.ts', () => ({ authorizeInBrowser: (option
 mock.module('../src/onboarding/network-host.ts', () => ({ observeHostInternet: (fn: typeof network) => { network = fn; fn('available'); return () => {}; } }));
 mock.module('../src/ui/ScrollEntries.tsx', () => ({ ScrollEntries: (p: Node['props']) => element('ScrollEntries', { children: createMemo(() => p.entries.map((entry: any) => entry.render())) }) }));
 for (const [path, name] of [['../src/ui/douyin/ImmersiveEntry.tsx', 'ImmersiveEntry'], ['../src/ui/RemoteImage.tsx', 'RemoteImage'], ['../src/ui/SafeQrScreen.tsx', 'SafeQrScreen'], ['../src/ui/ShareQrScreen.tsx', 'ShareQrScreen']] as const) mock.module(path, () => ({ [name]: () => null }));
-let readerProps: any;
+let readerProps: any, rssProps: any;
 const realHost = await import('@pocketjs/framework/host');
 mock.module('@pocketjs/framework/host', () => ({ ...realHost, getOps: () => ({ measureText: (text: string) => text.length * 12 }) }));
 mock.module('../src/ui/RssScreens.tsx', () => ({
-  RssFeedScreen: (p: any) => element('RssFeedScreen', { children: createMemo(() => p.items.map((a: any) => element('View', { onPress: () => p.onOpen(a), children: element('Text', { children: a.title }) }))) }),
+  RssFeedScreen: (p: any) => {rssProps=p;return element('RssFeedScreen', { children: createMemo(() => p.items.map((a: any) => element('View', { onPress: () => p.onOpen(a), children: element('Text', { children: a.title }) }))) });},
   feedEmptyStateEntry: (title: string) => ({ height: 48, render: () => element('Text', { children: title }) }),
   feedPillEntry: (label: string, _width: number, onPress?: () => void) => ({ height: 52, render: () => element('View', { onPress, children: element('Text', { children: label }) }) }),
 }));
@@ -66,7 +66,7 @@ test('probe errors reuse B6 unavailable handling', async () => {
 });
 test('successful settings logout delegates clear-task navigation to the route owner',async()=>{
  let returned=0,navigated=0,logout=0;
- const client={onAuthExpired:()=>()=>{},isLoggedIn:async()=>true,logout:async()=>{logout++;}};
+ const client={authState:()=> 'logged-in',subscribeAuth:()=>()=>{},onAuthExpired:()=>()=>{},isLoggedIn:async()=>true,logout:async()=>{logout++;}};
  const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'settings'},client,onBack(){},onNavigate(){navigated++;},onLogoutSuccess(){returned++;},onPlay(){},settings:{originalContentEnabled:false,onOriginalContentChange(){},continuePlaybackInBackgroundEnabled:false,onContinuePlaybackInBackgroundChange(){},onDeleteChannel(){}},input:async()=>null} as unknown as DouyinScreenProps);});
  await settle();
  const exit=nodes(root).find(node=>node.kind==='View'&&node.props.onPress&&nodes(node.props.children).some(child=>child.kind==='Text'&&child.props.children==='退出登录'))!;
@@ -94,7 +94,7 @@ test('history row marks before navigation without passing a history playback que
 
 test('feed row marks watched even without playback before opening offline detail', async () => {
   let destination:any;const writes:any[]=[];
-  const client={onAuthExpired:()=>()=>{},restorePlaybackQueue:async()=>({items:[]}),fetchFeedPage:async()=>({ok:true,data:{items:[sample('list')],hasMore:false}}),recordHistory:async(item:any)=>{expect(destination).toBeUndefined();writes.push(item);}};
+  const client={authState:()=> 'logged-in',subscribeAuth:()=>()=>{},onAuthExpired:()=>()=>{},restorePlaybackQueue:async()=>({items:[]}),fetchFeedPage:async()=>({ok:true,data:{items:[sample('list')],hasMore:false}}),recordHistory:async(item:any)=>{expect(destination).toBeUndefined();writes.push(item);}};
   const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'feed'},client,onNavigate:(value:any)=>destination=value,settings:{originalContentEnabled:false}} as unknown as DouyinScreenProps);});
   await settle();const row=nodes(root).find(n=>n.props.onPress&&nodes(n).some(child=>child.kind==='Text'&&String(child.props.children).includes('title list')))!;
   row.props.onPress();await settle();expect(writes).toEqual([sample('list')]);expect(destination.item).toEqual(sample('list'));
@@ -203,4 +203,61 @@ test('DYLOGIN opens official page without reading cookie or playback configurati
  calls=[];await settle();nodes(root).find(n=>n.props.focusable&&n.props.onPress)!.props.onPress();await settle();
  expect(calls).toEqual(['probe','authorize']);expect(cookieReads).toBe(0);
  rejectAuth({code:'cancelled'});await settle();
+});
+
+test('DYUI logout feedback precedes slow cleanup and its completion cannot dismiss a later login',async()=>{
+ const {DouyinClient}=await import('../src/douyin/client.ts');
+ let release!:()=>void;const blocked=new Promise<void>(r=>release=r),data=new Map([['douyin.cookie','fixture']]);
+ const client=new DouyinClient({secureStorage:{get:async k=>data.get(k)??null,set:async(k,v)=>{data.set(k,v);},remove:async k=>{await blocked;data.delete(k);}},transport:{request:async()=>{throw Error('unused');}}});
+ let returned=0,page='settings';const routes:any[]=[];
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'settings'},client,settings:{},onLogoutSuccess:()=>{returned++;page='home';},onNavigate:(r:unknown)=>routes.push(r)} as unknown as DouyinScreenProps);});
+ await settle();const exit=nodes(root).find(n=>n.props.onPress&&nodes(n.props.children).some(c=>c.props.children==='退出登录'))!;
+ exit.props.onPress();await settle();
+ // Record before unblocking even on the broken baseline.
+ const immediateReturns=returned;
+ page='login';routes.push({name:'login'});release();await settle();await settle();
+ console.log('DYUI_logout_navigation',JSON.stringify({immediateReturns,returned,page}));
+ expect(immediateReturns).toBe(1);expect(returned).toBe(1);expect(page).toBe('login');expect(routes).toEqual([{name:'login'}]);
+});
+
+test('DYUI unknown settings state is non-actionable; logged-out login never calls logout',async()=>{
+ const {DouyinClient}=await import('../src/douyin/client.ts');
+ let finish!:(value:string|null)=>void;let logout=0;const routes:any[]=[];
+ const client=new DouyinClient({secureStorage:{get:k=>k==='douyin.cookie'?new Promise(r=>finish=r):Promise.resolve(null),set:async()=>{},remove:async()=>{}},transport:{request:async()=>{throw Error('unused');}}});
+ const original=client.logout.bind(client);client.logout=()=>{logout++;return original();};
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'settings'},client,settings:{},onNavigate:(r:unknown)=>routes.push(r)} as unknown as DouyinScreenProps);});
+ await settle();const placeholder=nodes(root).find(n=>n.props.accessibilityLabel==='读取登录状态…')!;expect(placeholder.props.onPress).toBeUndefined();
+ finish(null);await settle();const login=nodes(root).find(n=>n.props.accessibilityLabel==='登录')!;login.props.onPress();
+ expect(routes).toEqual([{name:'login'}]);expect(logout).toBe(0);
+});
+test('DYUI retained logout handler cannot log out a state that changed to logged-out',async()=>{
+ const {DouyinClient}=await import('../src/douyin/client.ts');let logout=0;
+ const client=new DouyinClient({secureStorage:{get:async k=>k==='douyin.cookie'?'fixture':null,set:async()=>{},remove:async()=>{}},transport:{request:async()=>{throw Error('unused');}}});
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'settings'},client,settings:{}} as unknown as DouyinScreenProps);});
+ await settle();const retained=nodes(root).find(n=>n.props.accessibilityLabel==='退出登录')!.props.onPress;
+ await client.logout();client.logout=async()=>{logout++;};retained();await settle();expect(logout).toBe(0);
+});
+test('DYUI login requests native cookie completion and compact rendering',async()=>{
+ probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
+ expect(authOptions.completeOnRequiredCookies).toBe(true);expect(authOptions.lowMemory).toBe(true);
+});
+
+test('DYUI RSS unknown state renders a non-actionable placeholder and cannot refresh before authentication',async()=>{
+ const {DouyinClient}=await import('../src/douyin/client.ts');let finish!:(value:string|null)=>void,requests=0;
+ const client=new DouyinClient({secureStorage:{get:k=>k==='douyin.cookie'?new Promise(r=>finish=r):Promise.resolve(null),set:async()=>{},remove:async()=>{}},transport:{request:async()=>{requests++;throw Error('unexpected request');}}});
+ createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'feed'},client,settings:{originalContentEnabled:false}} as unknown as DouyinScreenProps);});
+ await settle();expect(rssProps.refreshing).toBe(false);expect(rssProps.canNext).toBe(false);expect(rssProps.items).toEqual([]);
+ const placeholder=rssProps.leading[0].render();expect(placeholder.props.children).toBe('读取登录状态…');expect(placeholder.props.onPress).toBeUndefined();
+ rssProps.onRefresh();rssProps.onNext();expect(requests).toBe(0);finish(null);await settle();expect(client.authState()).toBe('logged-out');expect(rssProps.leading).toHaveLength(2);
+});
+
+test('DYBENCH an older failed probe keeps its own attempt after a network retry',async()=>{
+ const before=(globalThis as any).pod,events:any[]=[];let seq=500,fail!:(e:unknown)=>void,ready!:(v:BrowserAvailability)=>void;
+ (globalThis as any).pod={benchmark:(raw:string)=>{const value=JSON.parse(raw);if(!value.seq)value.seq=++seq;events.push(value);return value.seq;}};
+ try{
+  probe=()=>new Promise((_resolve,reject)=>fail=reject);const f=mount();await settle();f.press();await settle();const first=events.find(x=>x.code==='login_entry')!;
+  network('unavailable');network('available');probe=()=>new Promise(resolve=>ready=resolve);f.press();await settle();const entries=events.filter(x=>x.code==='login_entry');expect(entries).toHaveLength(2);
+  fail(Error('synthetic old probe'));await settle();expect(events.filter(x=>x.code==='error').map(x=>x.seq)).toEqual([first.seq]);
+  ready({status:'available'});await settle();expect(authOptions.benchmark).toEqual({seq:entries[1].seq,attempt:entries[1].attempt});
+ }finally{(globalThis as any).pod=before;}
 });

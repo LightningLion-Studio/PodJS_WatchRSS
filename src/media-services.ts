@@ -37,7 +37,7 @@ export const douyinClient=new DouyinClient({
  onLogout:()=>clearDouyinLogoutData(managedCache, { ...browser, hasCapability }),
  transport:mediaTransport,
  savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
- secureStorage:{get:secure.get,set:secure.set,remove:secure.delete},
+ secureStorage:{get:secure.get,set:secure.set,remove:(key,observation)=>secure.delete(key,observation)},
  historyStorage:new DouyinSqlStateStorage(async()=>(await getExternalSavedStore()).db,{get:async key=>kv.get<string>(key)??null,set:async()=>{throw Error("Legacy Douyin data is read-only");},remove:async key=>{kv.delete(key);}})
 });
 
