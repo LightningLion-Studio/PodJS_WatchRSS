@@ -1,0 +1,108 @@
+# Timing sources and missing closed codes
+
+This inventory was read offline, not observed on build 1196. Application paths
+refer to `ffb73a86`. Framework paths refer to the current `podjs-watch` checkout;
+Lead must check the actual APK source revision. No product instrumentation was
+added in this patch. A parser for proposed events is not proof they exist.
+
+## Existing sources
+
+Framework root: `/home/wilf/data/PodJS/podjs-watch`.
+
+| Source | Existing signal | Limitation |
+|---|---|---|
+| `platforms/android/runtime/src/main/java/dev/podjs/runtime/PodBrowserAuthServices.java:104` | Direct release logcat `PodBrowserAuth code=requested` | No explicit attempt ID/uptime |
+| Same file, lines 167,174,313 | `page_started`, `page_finished`, `opened` | Navigation/dialog events, not visible QR |
+| Same file, lines 152,183 | `browser_script_error`, `webview_renderer_gone` | Script diagnostic is any page console ERROR; renderer event lacks PID binding |
+| Same file, lines 351,474 | `completed`, `qr_ready` | Native completion/QR extraction; not app persistence/rendered QR proof |
+| Same file, lines 109,360 | `service_closed`, `unavailable`, `busy`, `invalid_argument`, `webview_unavailable`, `cancelled`, `webview_http_<status>`, `webview_load_<integer>` | `service_closed` can occur with no pending request |
+| `PodBrowserAuthDeadline.java:6,24-27` | `browser_auth_timeout`, `browser_qr_timeout`, `browser_script_error` | 300 s session deadline; 75 s no-QR deadline; diagnostic and terminal code can share spelling |
+| `src/logs/logger-host.ts:11-14` | AppLogger forwards redacted lines to console | Does not guarantee a fixed Android logcat tag or release availability; do not parse arbitrary free text |
+| `src/ui/douyin/ImmersiveEntry.tsx:64,75` | `DouyinEntry` feed requested/settled with reason/item count/login state | Settled JS state is not a presented card; free-text format, no gesture correlation |
+| `src/douyin/client.ts:257`, `src/ui/VideoPlayerScreen.tsx:147,170` | `DouyinTiming` resolve, firstFrameObserved; `VideoPlayer` ready | First frame polling can be delayed, no common release timestamp; ready can still show a cover |
+| `src/media/video-opt.ts:82-88` | `VideoOpt` JSON stages api/candidate/prepare/first_frame/sample/exit; numeric sourceGeneration/firstFrameMs/rebuffer/dropped fields | Douyin metrics require the metrics feature flag; optional/debug evidence, not unconditional release codes |
+| `src/ui/douyin/video-sessions.ts:148,192` | Debug lookahead prewarm start / promotion messages | Contains platform IDs; intentionally not persisted by this harness; start is not prewarm completion |
+| `platforms/android/runtime/src/main/java/dev/podjs/runtime/PodVideoSessionServices.java` | Session state/capability/transition/promote/hasRenderedFirstFrame fields | No unconditional release timing log for touch release, audio cutoff, or displayed target frame found |
+| `src/cloud/background-diagnostic.ts:39`, framework `PodCloudWorker.java:32-54,99-101,126` | Closed/numeric CloudRecords file diagnostics are summarized as `PodJSCloudWorker guestStage=… outcome=…`, progress/stage, finished/status | Collector preserves an allowlisted coarse activity subset. Not continuous running/idle restore coverage; finished may schedule another window |
+
+The harness captures only `PodBrowserAuth`, proposed `DYBENCH`, and coarse
+`PodJSCloudWorker` from logcat. It never dumps private app_log.txt or retains
+free-text console logs. Existing browser events are counted, not automatically
+paired into trustworthy latency: overlapping requests, missing begins, and the
+shared script-error spelling make inferred request numbering unsafe.
+
+## Proposed unconditional release contract for Lead
+
+Emit a dedicated native Android tag **DYBENCH**, INFO level, with closed codes,
+booleans, and bounded nonnegative integers only. A generic framework telemetry
+host method can carry the closed app event; do not add arbitrary text logging to
+release. No URLs, cookies, tokens, QR pixels/payloads, content IDs, user IDs,
+descriptions, title text, or service arguments.
+
+Wire format example:
+
+```text
+I DYBENCH: code=gesture_release seq=41 mono_ms=5060123 direction=next prewarmed=true generation=18 source_generation=17
+I DYBENCH: code=incoming_first_frame seq=41 mono_ms=5060160 generation=18
+```
+
+Every event carries `mono_ms = SystemClock.uptimeMillis()` at the actual event,
+not after async logging. Uptime shares the HWUI frame clock domain; **do not use
+elapsedRealtime** (deep sleep changes that offset). `seq` is a monotonically
+increasing action ID for the capture; auth events also carry `attempt`. Never
+reuse a seq in one capture. Every begin and its terminal observation carry the
+same `(seq, attempt)`; duplicates/overlap/missing IDs invalidate that sample.
+For mute ON and OFF, allocate separate seq values. Emit failures as `code=error`
+with the corresponding IDs; never substitute a success endpoint on failure.
+
+| Code | Exact emission point and required fields |
+|---|---|
+| `entry_start` | Cold entry/controller activation or explicit post-logout re-entry, before work; seq |
+| `home_entry` | Home Douyin activation handler before navigation/work; seq |
+| `first_card` | First actual feed card presented by renderer, not feed fetch resolution; same seq |
+| `refresh_start` | Accepted pull-to-refresh release before network work; seq |
+| `refresh_done` | Result UI actually presented (normal/error UI), same seq; accompany closed error on failure |
+| `player_visible` | Foreground player-only heartbeat every ≤1 s, state=present/absent; present only while unobscured by auth/settings/system UI. Required fresh (≤2 s) before automated swipe/record; missing heartbeat stops safely. |
+| `gesture_down` | Native gesture owner accepts touch; seq, direction |
+| `gesture_release` | ACTION_UP/gesture commit decision; seq, direction=next/prev/cancel/fling, prewarmed=true/false, generation=target, source_generation=old |
+| `previous_audio_stopped` | **Observed mixer** old track silent/inactive, not pause request completion; seq, source_generation, backend=mixer. If verified silent before release, emit current verified observation at release (zero delay). Never invent this from player state. |
+| `incoming_first_frame` | Target generation decoded frame is **presented at target bounds**, after promotion; same seq/generation. Hidden prewarm first-frame callback is not this event. |
+| `snap_back` | Cancel settles original bounds and original generation resumes, same seq/generation (release generation=original for cancel) |
+| `fling_done` | One fling settles the actual target two indices away; same seq, delta=2 (absolute index difference; no content ID) |
+| `mute_changed` | System mute change observed while current generation plays; seq, kind=on/off, muted=true/false |
+| `mixer_match` | Calibrated actual mixer/PCM state matches requested transition; same seq, kind, muted, backend=mixer. Requested player volume is **not** evidence. |
+| `login_entry` | Login UI activation before opening WebView; seq, attempt |
+| `login_tap` | 登录 handler before any auth/navigation change; seq, attempt |
+| `qr_ready` | QR image first **visibly rendered** in login UI; same seq, attempt. Distinct from PodBrowserAuth extracted QR status. |
+| `scan_accepted` | Watch receives scanned/verified status from auth flow; seq, attempt. This measures watch receipt→persisted, not the unknown physical phone scan instant. |
+| `auth_persisted` | Application credential persistence succeeds and logged-in UI state is published; same seq, attempt. No credential data. |
+| `logout_start` | Approved logout action handler before async work; seq |
+| `logout_feedback` | First visible feedback frame after that handler; same seq |
+| `auth_cleared` | Actual auth clear operation executes; same seq/attempt when applicable. Count as regression during login_tap. |
+| `auth_state` | Before and after login tap, closed state=present/absent; no account identity. Preserve existing auth state across tap. |
+| `needs_login` | 需要登录 UI is first presented on entry; same seq as entry_start |
+| `refreshing` | 刷新中 UI is presented on the post-logout entry. Its presence is a regression even if needs_login follows. |
+| `restore_state` | Foreground heartbeat every ≤1 s; state=running/idle/unknown, mono_ms. State comes from authoritative restore coordinator, covers between windows; idle only after verifying no active restore/continuation. Log transitions immediately. No mutation of restore state. |
+| `renderer_process` | Known WebView renderer is bound to this app/auth attempt; pid, attempt. Supply independent attribution evidence; candidate ps name alone is insufficient. |
+| `error` | Terminal closed error observation for current action, seq/attempt; no message/body |
+
+Required additions are the events in this table plus stable seq/attempt/uptime
+correlation. None is silently inferred from existing free-text logging. The
+`renderer_process` event is retained for attribution review; the harness does
+not blindly trust a reused PID across process lifetimes. Attach the capture's
+app/process/renderer relationship and mark the manifest only after review.
+
+## Actual audio dependency and acceptance provenance
+
+`dumpsys audio`/`media.audio_flinger` are sampled today for ringer/master-mute/focus
+metadata. Dump schemas and session bindings must be verified on OWW242 before
+adding a per-track adapter. Polling these large dumps every 5 s cannot establish
+50–100 ms behavior. Lead must provide an audited ≤20 ms native mixer observer or
+external capture with timestamps and track binding to support the proposed audio
+codes. A host player volume callback alone must never emit `backend=mixer`.
+
+Supply the adapter/capture path and SHA256 with results. Set
+`audio_adapter_reviewed` only after this check. For the mute scenario also retain
+`mute_restored_by_operator=true` from the runtime prompt. Without both, mute
+acceptance stays PENDING. Soak needs `renderer_attribution=true` plus PID binding
+proof; the runner deliberately leaves that false by default.

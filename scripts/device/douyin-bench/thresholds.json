@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "review_state": "APPROVED by lead 2026-11-01",
+  "frame_budget_ms": 16.666667,
+  "jank_percent_max": 5,
+  "memory_mib_per_minute_max": 1,
+  "limits": {
+    "first_card_ms": {"p95": 2000, "max": 4000},
+    "refresh_ms": {"p95": 2000, "max": 4000},
+    "previous_audio_stop_ms": {"p95": 50, "max": 100},
+    "incoming_first_frame_ms": {"p95": 100, "max": 200},
+    "snap_back_ms": {"p95": 200, "max": 300},
+    "two_card_ms": {"p95": 300, "max": 500},
+    "mute_on_ms": {"p95": 100, "max": 200},
+    "mute_off_ms": {"p95": 100, "max": 200},
+    "qr_ms": {"p95": 5000, "max": 10000},
+    "after_scan_ms": {"p95": 2000, "max": 5000},
+    "feedback_ms": {"p95": 100, "max": 200},
+    "needs_login_ms": {"p95": 100, "max": 200}
+  },
+  "scenarios": {
+    "cold_open": {"n": 5, "seconds_per_trial": 15},
+    "home_entry": {"n": 5, "seconds_per_trial": 15},
+    "refresh": {"n": 30, "seconds_per_trial": 10},
+    "next": {"n": 30, "seconds_per_trial": 8},
+    "prev": {"n": 30, "seconds_per_trial": 8},
+    "cancel": {"n": 30, "seconds_per_trial": 8},
+    "fling": {"n": 30, "seconds_per_trial": 8},
+    "soak": {"n": 200, "seconds_per_trial": 8},
+    "mute": {"n": 20, "seconds_per_trial": 15},
+    "login": {"n": 1, "seconds_per_trial": 150},
+    "logout": {"n": 1, "seconds_per_trial": 15},
+    "login_tap": {"n": 1, "seconds_per_trial": 15}
+  }
+}
