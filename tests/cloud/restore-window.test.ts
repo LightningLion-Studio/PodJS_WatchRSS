@@ -76,8 +76,8 @@ test('interruption after every atomic part file but before its receipt preserves
 });
 
 
-test('native materialization never receives an over-64MiB projection; larger representations retain the portable reader',async()=>{
+test('native materialization never receives an over-64MiB projection; larger representations use bounded direct native pieces',async()=>{
  const f=await fixture(),body=new Uint8Array(65*1024*1024).fill(41);let native=0;
- f.session.codec=new WatchCloudCodec({...crypto,openSealedParts:async()=>{native++;throw Error('native aggregate limit exceeded');}},{require(){}});
- const cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('current-epoch','current-generation');await cp.begin();const token=await cp.token('large-local-projection');await cp.write(token,body);expect(await cp.read(token)).toEqual(body);expect(native).toBe(0);cp.close();
+ f.session.codec=new WatchCloudCodec({...crypto,openSealedParts:async(k,parts,length)=>{native++;expect(length).toBeLessThanOrEqual(262144);expect(parts).toHaveLength(1);const p=parts[0],sealed=f.blobs.get(p.path)!;return crypto.decrypt(k,new Uint8Array(Buffer.from(p.aadBase64,'base64')),sealed.subarray(0,12),sealed.subarray(12));}},{require(){}});
+ const cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('current-epoch','current-generation');await cp.begin();const token=await cp.token('large-local-projection');await cp.write(token,body);expect(await cp.read(token)).toEqual(body);expect(native).toBe(260);cp.close();
 });

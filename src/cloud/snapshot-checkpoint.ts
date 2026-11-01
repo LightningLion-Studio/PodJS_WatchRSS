@@ -10,6 +10,7 @@ import {CLOUD_SYNC_SUSPENDED} from './execution';
 /** Bump when projection/application semantics change, never the cloud format. */
 export const SNAPSHOT_RESTORE_VERSION=1;
 export interface RestoreApplyCheckpoint {
+ scope?():Promise<string>;
  has(unit:string):boolean;
  commit(unit:string,abandoned?:number):Promise<void>;
  result(unit:string):number;
@@ -62,12 +63,17 @@ export class SnapshotRestoreCheckpoint {
   try{await this.saveEntry(kind,id,bytes);this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}this.session.restoreCheckpoint?.stalled?.(false);}catch(error){if((error as {restoreEntryCommitted?:boolean})?.restoreEntryCommitted){this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}}this.value.work=work;this.value.bytes=total;if(previous===undefined){delete this.value[kind][id];delete this.shards[shard][kind][id];}else{this.value[kind][id]=previous;this.shards[shard][kind][id]=previous;}throw error;}
  }
  async commit(unit:string,bytes=0){if(this.has(unit))return;await this.record('units',unit,bytes);}
- apply(prefix:string,progress?:(done:number,total:number)=>void):RestoreApplyCheckpoint{return {progress,has:unit=>this.has(prefix+':'+unit),result:unit=>this.value.units[prefix+':'+unit]??0,commit:(unit,abandoned=0)=>this.commit(prefix+':'+unit,abandoned),check:this.current};}
+ apply(prefix:string,progress?:(done:number,total:number)=>void):RestoreApplyCheckpoint{return {scope:()=>this.token('files:'+prefix),progress,has:unit=>this.has(prefix+':'+unit),result:unit=>this.value.units[prefix+':'+unit]??0,commit:(unit,abandoned=0)=>this.commit(prefix+':'+unit,abandoned),check:this.current};}
  metric(stage:SnapshotMetric['stage'],bytes:number,started:number,cached=false,details:Partial<Pick<SnapshotMetric,'outcome'|'code'|'objectIndex'|'chunkIndex'|'objects'|'chunks'|'maxChunkBytes'>>={}){try{this.report?.({event:'snapshot-work',stage,bytes,durationMillis:Math.max(0,this.now()-started),cached,completedUnits:this.value.work,...details});}catch{}}
  async timed<T>(stage:SnapshotMetric['stage'],bytes:number,run:()=>Promise<T>,cached=false,details:Partial<Pick<SnapshotMetric,'objectIndex'|'chunkIndex'>>={}){const at=this.now();let success=false,code:string|undefined;try{const value=await run();success=true;return value;}catch(error){const classified=cpuJsonParse(recordFailureDiagnostic(error)).code;code=classified==='unclassified'?'cloud_snapshot_'+stage.replace(/-/g,'_')+'_failed':classified;throw error;}finally{this.metric(stage,bytes,at,cached,{...details,outcome:success?'complete':snapshotDeferred({code})||['cloud_sync_deadline_exceeded','cloud_snapshot_progress_stalled','cloud_sync_suspended'].includes(code??'')?'deferred':'failed',...(code?{code}:{})});}}
  async token(value:string){return this.hash(utf8Encode(this.root+':'+value));}
  private async accountKey(){return this.key??=await this.session.keys.accountKey(this.session.userId,await this.session.keys.currentKeyVersion(this.session.userId));}
- private async readBlob(id:string){await this.session.restoreCheckpoint?.assertCurrent?.();const key=await this.accountKey();if(!key)throw Error('missing_key_version');const bytes=await this.cache.restoreProjection(this.session.userId,id);if(!bytes)return;try{return await this.codec.openRestoreProjection(key,this.root+':'+id,bytes);}catch(error){await this.current();if(String(error).includes(CLOUD_SYNC_SUSPENDED))throw error;this.metric('checkpoint-invalid',bytes.length,this.now(),true,{outcome:'failed'});return;}}
+ private async readBlob(id:string){await this.session.restoreCheckpoint?.assertCurrent?.();const key=await this.accountKey();if(!key)throw Error('missing_key_version');
+  // Receipted body parts already live in authenticated immutable files. Open
+  // them directly on the host instead of copying ciphertext through withInput.
+  const length=this.value.projections[id];
+  if(length>131072&&this.codec.batchedRestoreParts){try{return await this.codec.openRestoreParts(key,[{path:await this.cache.restoreProjectionPath(this.session.userId,id),scope:this.root+':'+id,bytes:length}],length);}catch(error){await this.current();if(!String(error).includes('sealed_part_invalid_'))throw error;this.metric('checkpoint-invalid',length,this.now(),true,{outcome:'failed'});return;}}
+  const bytes=await this.cache.restoreProjection(this.session.userId,id);if(!bytes)return;try{return await this.codec.openRestoreProjection(key,this.root+':'+id,bytes);}catch(error){await this.current();if(String(error).includes(CLOUD_SYNC_SUSPENDED))throw error;this.metric('checkpoint-invalid',bytes.length,this.now(),true,{outcome:'failed'});return;}}
  private async writeBlob(id:string,bytes:Uint8Array){this.indices.delete(id);await this.session.restoreCheckpoint?.assertCurrent?.();const key=await this.accountKey();if(!key)throw Error('missing_key_version');await this.cache.storeRestoreProjection(this.session.userId,id,await this.codec.sealRestoreProjection(key,this.root+':'+id,bytes));}
  /** Split the disposable decoded representation so a large old object also
   * checkpoints its assembly. Only complete AEAD-authenticated parts are reused. */

@@ -46,3 +46,13 @@ test('real repository cloud export collapses registered chapters, immutable body
 });
 
 test('retirement lookup snapshots chapter mappings once per export and late legacy replay cannot resurrect a book deletion',async()=>{const f=await bookFixture();try{await seedChapters(f,source,v.chapters);const r=repo(f),a=adapter(r);let snapshots=0;const read=r.cloudBooks.bind(r);r.cloudBooks=()=>{snapshots++;return read();};await a.exportRecords();for(let i=0;i<50;i++)expect(await a.bookReplacement({kind:'article',value:{articleId:'old',url:source+'/chapter/1'}})).toBeDefined();expect(snapshots).toBe(1);await f.db.execute('DELETE FROM articles WHERE link=?',[source+'/chapter/1']);const old=f.packet;const {article}=await import('../sync/ble-v2-fixture');await r.receiveArticle(await old(article({articleId:await crypto.sha256(utf8Encode(source+'/chapter/1')),url:source+'/chapter/1',rssSourceUrl:source,contentText:'old body'})),'legacy-phone',false);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:1}]);}finally{f.sql.close();}});
+
+test('restore adapter forwards the immutable checkpoint through repository book staging without changing saved reading state',async()=>{
+ const f=await bookFixture();try{
+  let received:unknown,bookId:unknown;const files={...f.files,writeBytes:async(bytes:Uint8Array,checkpoint?:unknown,id?:string)=>{received=checkpoint;bookId=id;return f.files.writeBytes(bytes);}};
+  const r=new SqlLibrarySessionRepository(f.db,{...f.ports,bookFiles:files}),a=adapter(r),checkpoint={scope:async()=> 'current-scope',has:()=>false,commit:async()=>{},result:()=>0,check:async()=>{}};
+  const book={...state,bookId:cliSingle.bookId,fingerprint:cliSingle.fingerprint,chapterCount:1,sourceUrl:cliSingle.sourceUrl,kind:'txt'};await a.applyRecords([{kind:'book',value:book}]);
+  const bytes=utf8Encode(cliSingle.packageUtf8),name='books/'+book.bookId+'.jsonl',descriptor={name,encoding:'identity' as const,originalBytes:bytes.length,encodedBytes:bytes.length,chunks:[],privateBook:{...book,packagePath:name}};
+  expect((await a.restorePayloads(new Map([[name,bytes]]),'cli',[descriptor],{checkpoint})).pending).toBe(0);expect(received).toBe(checkpoint);expect(bookId).toBe(book.bookId);expect(await f.db.query('SELECT content FROM articles')).toEqual([{content:cliSingle.chapter.contentText}]);
+ }finally{f.sql.close();}
+});

@@ -5,7 +5,7 @@ const methods=new Set([
  'sql.query','sql.execute','sql.transaction','secure.get','secure.set','secure.delete','secure.update','secure.compareAndSet','secure.acquire','secure.release',
  'crypto.random','crypto.hash','crypto.hmacSha256','crypto.verifyP256','crypto.ecdhPublicKey','crypto.ecdhUnwrap','crypto.hkdfSha256',
  'crypto.gunzipSealedParts','crypto.closeSealedGzip','crypto.openSealedParts','crypto.aesGcmEncrypt','crypto.aesGcmDecrypt','crypto.largeAesGcmEncrypt','crypto.largeAesGcmDecrypt','crypto.gzip','crypto.gunzip',
- 'log.append','http.download','uri.parse','file.list','file.createTemp','file.read','file.write','file.stat','file.hash','file.commit','file.delete',
+ 'log.append','http.download','uri.parse','file.list','file.createTemp','file.read','file.write','file.stat','file.hash','file.commit','file.compose','file.delete',
  'file.gzip','file.gunzip','file.htmlText','file.openText','file.readTextChunk','file.closeText',
 ]);
 export const cloudDiagnosticHostMethod=(value:unknown):string|undefined=>typeof value==='string'&&methods.has(value)?value:undefined;

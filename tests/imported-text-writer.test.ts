@@ -71,3 +71,10 @@ test("UTF-8 generator preserves supplementary characters across every relevant c
   expect(Buffer.concat([...javaUtf8Chunks(value)]).equals(Buffer.from(value))).toBe(true);
  }
 });
+
+test('resumable publication preserves the cancellation fence before returning a marker',async()=>{
+ const h=await harness();try{let cancelled=false,checkpointSeen:unknown;const checkpoint={scope:async()=> 'scope',has:()=>false,commit:async()=>{},check:async()=>{}};
+  h.port.resumable=async(_key,_text,cp)=>{checkpointSeen=cp;cancelled=true;return 'watchrss-watch-content:published';};
+  await expect(h.writer.storeText('id','body',()=>cancelled,checkpoint)).rejects.toThrow('已取消');expect(checkpointSeen).toBe(checkpoint);expect((await readdir(h.root)).length).toBe(0);
+ }finally{await h.cleanup();}
+});

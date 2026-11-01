@@ -49,3 +49,12 @@ test('runtime batches account reads only while holding its account lease and rec
   run.values.delete('state_json');await expect(run.session.restoreCheckpoint!.readBatch!(()=>run.session.assertCurrent())).rejects.toThrow('cloud_account_changed');expect(observed.filter(n=>n==='secure.release')).toHaveLength(2);
  }finally{f.sql.close();}
 });
+
+test('real runtime book proxy forwards the scoped file checkpoint and rejects a changed owner before file IO',async()=>{
+ const f=await readingThroughputFixture(1);try{
+  let received:unknown,calls=0;const checkpoint={scope:async()=> 'current-scope',has:()=>false,commit:async()=>{},check:async()=>{}};
+  const repo=Object.assign(f.repo,{deviceId:async()=> 'watch',receiveCloudBook:async(_id:string,_bytes:Uint8Array,cp?:unknown)=>{calls++;received=cp;return 3;}}),run=await runtimeSession(repo);
+  expect(await run.proxy.receiveCloudBook!('a'.repeat(64),new Uint8Array([1]),checkpoint)).toBe(3);expect(received).toBe(checkpoint);
+  run.values.set('watchrss.library.owner','other');await expect(run.proxy.receiveCloudBook!('a'.repeat(64),new Uint8Array([1]),checkpoint)).rejects.toThrow();expect(calls).toBe(1);
+ }finally{f.sql.close();}
+});

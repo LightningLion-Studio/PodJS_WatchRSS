@@ -1,6 +1,8 @@
+import type {FileCheckpoint} from '@podjs/framework/work-window';
 import {encodeUtf8} from '@podjs/framework/bytes';
 /** Native FileArticleContentStore v2 naming and Java UTF-8 encoding. */
 export interface ImportedTextWritePort {
+  resumable?(articleId:string,text:string,checkpoint:FileCheckpoint):Promise<string>;
   createTemp(directory:string):Promise<{path:string}>;
   write(path:string,bytes:Uint8Array):Promise<{size:number}>;
   append(path:string,bytes:Uint8Array,expectedOffset:number):Promise<{size:number}>;
@@ -25,9 +27,10 @@ function checkedDigest(value:{size:number;sha256:string},size:number):string {
 export class ImportedTextWriter {
   constructor(private readonly files:ImportedTextWritePort) {}
   /** Returns a marker only after verified atomic publication. Does not update any DB row. */
-  async storeText(articleId:string,text:string,cancelled:()=>boolean=()=>false):Promise<string>{
+  async storeText(articleId:string,text:string,cancelled:()=>boolean=()=>false,checkpoint?:FileCheckpoint):Promise<string>{
     const check=()=>{if(cancelled())throw new Error("导入正文写入已取消");};
     check();
+    if(checkpoint?.scope&&this.files.resumable){const marker=await this.files.resumable(articleId,text,checkpoint);check();return marker;}
     const {path}=await this.files.createTemp(DIRECTORY);
     try {
       if(!/^article_content\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(path))throw new Error("导入正文临时路径非法");

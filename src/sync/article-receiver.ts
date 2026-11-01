@@ -18,8 +18,9 @@ export interface IncomingArticle {
  readingProgress:number;readingPositionBytes:number;readingPositionContentHash:string;readingPositionChangedAt:number;isRead:boolean;
  deleted:boolean;
 }
+import type {FileCheckpoint} from '@podjs/framework/work-window';
 export interface ArticleReceiveFiles {
- storeText(key:string,text:string):Promise<string>;
+ storeText(key:string,text:string,checkpoint?:FileCheckpoint):Promise<string>;
  hydrate(text:string):Promise<string>;
 }
 export interface LocalReceiveBody {itemId:number;body:SyncArticleBody|null;available:boolean;hasStoredBody:boolean}

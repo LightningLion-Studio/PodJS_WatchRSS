@@ -3,10 +3,10 @@ import {HostCallsiteTrace,hostSizeBand} from '@podjs/framework/work-window';
  * callsiteId = route index * 16 + operation index. Never renumber entries. */
 export const RESTORE_ROUTES=['runtime','snapshot','previous','entry-ref','projection','archive','pending'] as const;
 export type RestoreCallsite=typeof RESTORE_ROUTES[number];
-export const RESTORE_OPERATIONS=['other-crypto','hkdf','encrypt','decrypt','large-encrypt','large-decrypt','gzip','gunzip','hash','sealed-gzip','sealed-open','cache-write','journal-append','reserved','sealed-close'] as const;
-const operations:Record<string,number>={'crypto.random':0,'crypto.ecdhPublicKey':0,'crypto.ecdhUnwrap':0,'crypto.verifyP256':0,'crypto.hkdfSha256':1,'crypto.aesGcmEncrypt':2,'crypto.aesGcmDecrypt':3,'crypto.largeAesGcmEncrypt':4,'crypto.largeAesGcmDecrypt':5,'file.gzip':6,'file.gunzip':7,'crypto.hash':8,'crypto.gzip':6,'crypto.gunzip':7,'file.hash':8,'crypto.gunzipSealedParts':9,'crypto.openSealedParts':10,'file.write':11,'crypto.closeSealedGzip':14};
-export const RESTORE_RECEIPTS=['none','source-part','inflate-part','object','entry','applied','download','other'] as const;
-export const restoreCallsiteTrace=()=>new HostCallsiteTrace(RESTORE_ROUTES.flatMap((_,i)=>RESTORE_OPERATIONS.flatMap((op,j)=>op==='reserved'?[]:[i*16+j])),RESTORE_RECEIPTS.map((_,i)=>i));
+export const RESTORE_OPERATIONS=['other-crypto','hkdf','encrypt','decrypt','large-encrypt','large-decrypt','gzip','gunzip','hash','sealed-gzip','sealed-open','cache-write','journal-append','book-write','sealed-close','article-write'] as const;
+const operations:Record<string,number>={'crypto.random':0,'crypto.ecdhPublicKey':0,'crypto.ecdhUnwrap':0,'crypto.verifyP256':0,'crypto.hkdfSha256':1,'crypto.aesGcmEncrypt':2,'crypto.aesGcmDecrypt':3,'crypto.largeAesGcmEncrypt':4,'crypto.largeAesGcmDecrypt':5,'file.gzip':6,'file.gunzip':7,'crypto.hash':8,'crypto.gzip':6,'crypto.gunzip':7,'file.hash':8,'crypto.gunzipSealedParts':9,'crypto.openSealedParts':10,'file.write':11,'file.compose':11,'file.commit':11,'crypto.closeSealedGzip':14};
+export const RESTORE_RECEIPTS=['none','source-part','inflate-part','object','entry','applied','download','other','published-part','published-file'] as const;
+export const restoreCallsiteTrace=()=>new HostCallsiteTrace(RESTORE_ROUTES.flatMap((_,i)=>RESTORE_OPERATIONS.map((_,j)=>i*16+j)),RESTORE_RECEIPTS.map((_,i)=>i));
 /** Metadata is added to requests, never inferred from an arbitrary path or ID. */
 export function restoreRequestMetadata(site:RestoreCallsite){
  const sizes=new Map<string,number>();
@@ -28,6 +28,8 @@ export function restoreRequestMetadata(site:RestoreCallsite){
 export function restoreReceiptClass(kind:'units'|'projections',id:string){
  if(kind==='projections')return id.includes('-object-p')||!id.includes('-chunk-')?2:1;
  if(id.startsWith('applied:'))return 5;
+ if(/(?:^|:)file:[a-f0-9]{64}:[0-9]+$/.test(id))return 8;
+ if(/(?:^|:)file:[a-f0-9]{64}$/.test(id))return 9;
  if(id.startsWith('download:')||id.startsWith('manifest:'))return 6;
  if(id.startsWith('decoded:'))return id.includes('-chunk-')?1:id.includes('-object')?3:4;
  return 7;

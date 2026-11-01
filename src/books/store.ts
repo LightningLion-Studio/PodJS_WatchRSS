@@ -1,3 +1,4 @@
+import type {FileCheckpoint} from '@podjs/framework/work-window';
 import {repositoryWork,type RepositoryDiagnostic} from '../sync/repository-work';
 import {encodeUtf8} from '@podjs/framework/bytes';
 import {authoritativeBody,previewEquivalent,matchingBodyDigest} from './body-authority';
@@ -159,7 +160,7 @@ export class SqlBookStore {
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
  }
- async installPackage(info:BookFileInfo,id:string):Promise<number>{
+ async installPackage(info:BookFileInfo,id:string,checkpoint?:FileCheckpoint):Promise<number>{
   await this.capture();const existing=await this.record(id),expected=existing?this.state(existing):undefined;
   const verified=await validateBookPackage(this.ports.files.lines(info.path),this.ports.sha256,expected);if(verified.bookId!==id||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_package_identity_or_size');
   const actual=await this.ports.files.hash(info.path);if(actual.size!==info.size||actual.sha256!==info.sha256)throw Error('book_package_changed');
@@ -173,7 +174,7 @@ export class SqlBookStore {
    if(!index++){parseBookHeader(line);continue;}const c=parseBookChapter(line,index-1),mapped=mappings.get(c.chapterIndex),candidate=present.get(c.url);const found=mapped?.item_id!=null?byItem.get(num(mapped.item_id)):undefined,old=found&&!usedItems.has(num(found.id))?found:undefined;if(old)usedItems.add(num(old.id));
    const collision=!!candidate&&!old||usedUrls.has(c.url),bookArticle=mapped?str(mapped.article_id):await bookArticleId(id,c.chapterIndex,this.ports.sha256),url=old?str(old.link):collision?`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}/chapter/${c.chapterIndex}`:c.url,wireId=old?.article_id?str(old.article_id):await this.ports.stableId(url),single=header.sourceUrl.startsWith('https://watchrss.local/import-content/txt/'),channel=old?str(old.channel_url):candidate&&!old?`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}`:single?'https://watchrss.local/import-content':header.sourceUrl;
    usedUrls.add(url);const clock=legacyDeletes.get(c.url)??0;if(clock>state.updatedAt){deletionSet.add(c.chapterIndex);maxDelete=Math.max(maxDelete,clock);}
-   const store=async(text:string|null,key:string)=>text===null||text.length<=50000?text:this.ports.text.storeText(key,text),chosen=c.contentHtml?.trim()?c.contentHtml:c.contentText;
+   const store=async(text:string|null,key:string)=>text===null||text.length<=50000?text:this.ports.text.storeText(key,text,checkpoint),chosen=c.contentHtml?.trim()?c.contentHtml:c.contentText;
    const content=await store(chosen,`${id}-${c.chapterIndex}-content`),html=await store(c.contentHtml,`${id}-${c.chapterIndex}-html`),text=await store(c.contentText,`${id}-${c.chapterIndex}-text`);
    staged.push({sql:'INSERT INTO sync_book_stage(book_id,package_sha256,chapter_index,book_article_id,wire_id,url,channel_url,channel_title,title,content,html,text,deleted,existing_item,chapter_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',params:[id,info.sha256,c.chapterIndex,bookArticle,wireId,url,channel,single?'导入内容':state.title,c.title,content,html,text,state.deleted||deletionSet.has(c.chapterIndex)?1:0,old?num(old.id):null,verified.chapterHashes[c.chapterIndex-1]!]});
    if(staged.length>=200){await this.db.transaction(staged);staged=[];}

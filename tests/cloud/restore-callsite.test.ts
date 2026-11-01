@@ -75,3 +75,19 @@ test('detached entryRef projection identity binds the complete backing descripto
  }
  cp.close();
 });
+
+test('repeated projection small decrypt and sealed-open stop before the third redo; distinct parts and durable receipts reset admission',async()=>{
+ const {SnapshotYieldBudget}=await import('../../src/cloud/snapshot-deferral');
+ for(const [method,args]of [['crypto.aesGcmDecrypt',{aadBase64:'scope',nonceBase64:'nonce'}],['crypto.openSealedParts',{parts:[{path:'immutable',aadBase64:'scope',bytes:1}],length:1}]] as const){
+  const budget=new SnapshotYieldBudget();budget.stalled(true);for(let i=0;i<2;i++){budget.before(method,args);budget.completed(method,args);}expect(()=>budget.before(method,args)).toThrow('cloud_snapshot_work_timeout');
+  budget.before(method,method==='crypto.openSealedParts'?{...args,parts:[{path:'other',aadBase64:'scope',bytes:1}]}:{...args,nonceBase64:'other'});
+  budget.stalled(false);budget.before(method,args);budget.completed(method,args);budget.stalled(true);budget.before(method,args);
+ }
+});
+
+
+test('publication diagnostics distinguish book and article pieces; secure receipts identify published pieces and final files',()=>{
+ const metadata=restoreRequestMetadata('projection');expect(metadata.args('file.write',{dataBase64:'AA=='},13).callsiteId).toBe(77);expect(metadata.args('file.compose',{},15).callsiteId).toBe(79);
+ expect(restoreReceiptClass('units','rows:current:file:'+'a'.repeat(64)+':262144')).toBe(8);expect(restoreReceiptClass('units','rows:current:file:'+'a'.repeat(64))).toBe(9);
+ const trace=restoreCallsiteTrace();trace.observe(metadata.args('file.write',{dataBase64:'AA=='},13));trace.receipt(8);expect(trace.summary()).toMatchObject({counts:[[77,1]],lastReceiptClass:8,receipts:1});
+});

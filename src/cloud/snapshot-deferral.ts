@@ -28,7 +28,8 @@ export class SnapshotYieldBudget {
  private identity(method:string,args:Record<string,unknown>):string|undefined {
   // AAD + nonce identify the authenticated input, independent of fresh temp
   // names. Never persist/log keys, content, URLs or these local identities.
-  if(method==='crypto.largeAesGcmDecrypt'&&typeof args.aadBase64==='string'&&typeof args.nonceBase64==='string')return JSON.stringify([method,args.aadBase64,args.nonceBase64]);
+  if((method==='crypto.largeAesGcmDecrypt'||method==='crypto.aesGcmDecrypt')&&typeof args.aadBase64==='string'&&typeof args.nonceBase64==='string')return JSON.stringify([method,args.aadBase64,args.nonceBase64]);
+  if(method==='crypto.openSealedParts'&&Array.isArray(args.parts))return JSON.stringify([method,args.parts,args.length]);
   if(method==='crypto.gunzipSealedParts'&&typeof args.outputPrefix==='string'&&Number.isSafeInteger(args.offset))return JSON.stringify([method,args.outputPrefix,args.offset]);
   return undefined;
  }

@@ -72,7 +72,7 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
     mergeCloudPublicMetadata:repo.mergeCloudPublicMetadata?(articles,check,work)=>invoke(()=>repo.mergeCloudPublicMetadata!(articles,current(check),work)):undefined,
     cloudBooks:repo.cloudBooks?check=>invoke(()=>repo.cloudBooks!(current(check))):undefined,
     cloudBookBody:repo.cloudBookBody?id=>invoke(()=>repo.cloudBookBody!(id)):undefined,
-    receiveCloudBook:repo.receiveCloudBook?(id,bytes)=>invoke(()=>repo.receiveCloudBook!(id,bytes)):undefined,
+    receiveCloudBook:repo.receiveCloudBook?(id,bytes,checkpoint)=>invoke(()=>repo.receiveCloudBook!(id,bytes,checkpoint)):undefined,
     mergeCloudBooks:repo.mergeCloudBooks?(books,reading,check)=>invoke(()=>repo.mergeCloudBooks!(books,reading,current(check))):undefined,
     cloudSnapshot:(full,check)=>invoke(()=>repo.cloudSnapshot(full,current(check))),
     mergeCloud:(sources,articles,remote,check)=>invoke(()=>repo.mergeCloud(sources,articles,remote,current(check))),

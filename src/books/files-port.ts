@@ -1,3 +1,6 @@
+import {checkpointedFile} from '@podjs/framework/work-window';
+import {sha256Hex,hex} from '@podjs/framework/crypto';
+import {sha256Stream} from '@podjs/framework/sha256-stream';
 import {base64ToBytes,bytesToBase64,writeByteStream,writeUtf8Stream} from '@podjs/framework/bytes';
 import {splitBookLines} from './package';
 import {BOOK_MAX_PACKAGE_BYTES} from './protocol';
@@ -8,7 +11,7 @@ const owned=/^books\/(?:\.pod-write-[A-Za-z0-9_-]+\.part|part-[A-Za-z0-9_-]+\.bi
 const path=(value:string)=>{if(!owned.test(value))throw Error('book_file_path_invalid');return value;};
 /** Foreground/background use identical private file operations. Native hash,
  * atomic commit and bounded UTF-8 readers keep entire books out of JS strings. */
-export function createBookFiles(host:BookFileRequest):BookFiles {
+export function createBookFiles(host:BookFileRequest,hashBytes:(b:Uint8Array)=>Promise<string>=async b=>{const digest=await sha256Stream(b,async()=>{await host('runtime.delay',{milliseconds:1});});if(digest)return hex(digest);if(b.length>262144)throw Error('cloud_snapshot_unit_capacity');return sha256Hex(b);}):BookFiles {
  const append=async(file:string,bytes:Uint8Array,offset:number)=>(await host<{size:number}>('file.write',{path:path(file),append:true,expectedOffset:offset,dataBase64:bytesToBase64(bytes)})).size;
  const temp=async()=>{const result=await host<{path:string}>('file.createTemp',{directory:'books'});if(!temporary.test(result.path))throw Error('book_file_path_invalid');return result.path;};
  const hash=async(file:string)=>host<{size:number;sha256:string}>('file.hash',{path:path(file)});
@@ -16,7 +19,7 @@ export function createBookFiles(host:BookFileRequest):BookFiles {
  async function write(bytes:AsyncIterable<Uint8Array>|Iterable<Uint8Array>,max:number,existing?:string){const file=existing??await temp();try{const size=await writeByteStream(bytes,(b,o)=>append(file,b,o),{maxBytes:Math.min(max,BOOK_MAX_PACKAGE_BYTES)}),digest=await hash(file);if(digest.size!==size)throw Error('book_file_changed');return {path:file,...digest};}catch(error){await remove(file);throw error;}}
  const files:BookFiles={
   write:async(parts,max)=>{const file=await temp();try{const size=await writeUtf8Stream(parts,(b,o)=>append(file,b,o),{maxBytes:Math.min(max,BOOK_MAX_PACKAGE_BYTES),surrogatePolicy:'question'}),digest=await hash(file);if(digest.size!==size)throw Error('book_file_changed');return {path:file,...digest};}catch(error){await remove(file);throw error;}},
-  writeBytes:async bytes=>{const info=await write([bytes],BOOK_MAX_PACKAGE_BYTES);const stem=info.path.slice('books/.pod-write-'.length,-'.part'.length),target='books/part-'+stem+'.bin';try{const result=await host<{path:string;size:number;sha256:string}>('file.commit',{path:info.path,target,expectedSize:info.size,expectedSha256:info.sha256});if(result.path!==target||result.size!==info.size||result.sha256!==info.sha256)throw Error('book_file_commit_invalid');return result;}finally{await remove(info.path);}},
+  writeBytes:async(bytes,checkpoint,bookId)=>{if(bookId&&!/^[a-f0-9]{64}$/.test(bookId))throw Error('book_file_identity_invalid');if(checkpoint?.scope)return checkpointedFile(host,bytes,{directory:'books',identity:'book-package-v1',checkpoint,hash:hashBytes,target:(binding,digest)=>bookId?'books/'+bookId+'-'+digest+'.jsonl':'books/part-'+binding+'.bin'});const info=await write([bytes],BOOK_MAX_PACKAGE_BYTES);const stem=info.path.slice('books/.pod-write-'.length,-'.part'.length),target='books/part-'+stem+'.bin';try{const result=await host<{path:string;size:number;sha256:string}>('file.commit',{path:info.path,target,expectedSize:info.size,expectedSha256:info.sha256});if(result.path!==target||result.size!==info.size||result.sha256!==info.sha256)throw Error('book_file_commit_invalid');return result;}finally{await remove(info.path);}},
   publish:async(info,id)=>{if(!/^[a-f0-9]{64}$/.test(id)||!/^[a-f0-9]{64}$/.test(info.sha256)||!Number.isSafeInteger(info.size)||info.size<1||info.size>BOOK_MAX_PACKAGE_BYTES)throw Error('book_file_identity_invalid');const target='books/'+id+'-'+info.sha256+'.jsonl';if(info.path===target){const current=await hash(target);if(current.size!==info.size||current.sha256!==info.sha256)throw Error('book_file_changed');return info;}const result=await host<{path:string;size:number;sha256:string}>('file.commit',{path:path(info.path),target,expectedSize:info.size,expectedSha256:info.sha256});if(result.path!==target||result.size!==info.size||result.sha256!==info.sha256)throw Error('book_file_commit_invalid');return result;},
   stat:file=>host('file.stat',{path:path(file)}),hash,
   read:async(file,offset,maxBytes)=>{if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(maxBytes)||maxBytes<1||maxBytes>65536)throw Error('book_file_read_bounds');const r=await host<{size:number;dataBase64:string}>('file.read',{path:path(file),offset,maxBytes});return {size:r.size,bytes:base64ToBytes(r.dataBase64)};},
