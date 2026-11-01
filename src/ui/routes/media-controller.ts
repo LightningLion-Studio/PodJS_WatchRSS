@@ -23,7 +23,7 @@ import { DouyinRssRecovery } from "../../douyin/rss-recovery.ts";
 import { managedCache } from "../../cache/host.ts";
 import { resolveUrl } from "../../core/parser.ts";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
-import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
+import { DOUYIN_QR_WAIT } from "../douyin/login-state.ts";
 import { biliClient, biliPreviewCache, douyinClient, douyinPreload } from "../../media-services.ts";
 import { resolveBiliPlaybackWithPreview, createBiliPlaybackRetry } from "../../playback.ts";
 import { biliVideoTarget, douyinVideoTarget } from "../../reader/media.ts";
@@ -280,9 +280,12 @@ export function createMediaRouteController(
       const result = await authorizeInBrowser({
         url: "https://www.douyin.com/chat?isPopup=1",
         cookieOrigin: "https://www.douyin.com",
-        qrExtractionScript: DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,
+        qrExtractionScript: hostServices.DOUYIN_AUTH_STATUS_SCRIPT,
+        qrWait: DOUYIN_QR_WAIT,
+        onStatus: () => {},
+        completeOnLoginPanelHidden: true,
         requiredCookieNames: ["sessionid"],
-        userAgent:(await douyinClient.buildPlaybackHeaders())["User-Agent"]??DOUYIN_USER_AGENT,
+        userAgent:DOUYIN_USER_AGENT,
       }).result;
       const saved = await douyinClient.applyCookie(result.cookie);
       if (!saved.ok) throw new Error(saved.message);

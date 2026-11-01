@@ -12,3 +12,13 @@ test('native QR wait ignores page loading, follows QR and verification, and stop
   expect(loginQrWaitStatus(ended).visible).toBe(false);expect(updateLoginStatus(ended,{type:'qrCleared'})).toBe(ended);
  }
 });
+
+test('DYLOGIN closes error vocabulary without leaking vendor messages or invalid code types',async()=>{
+ const {loginError,douyinLoginFailureCode}=await import('../src/ui/douyin/login-state.ts');
+ for(const error of [null,undefined,{code:123},{code:'sessionid=PRIVATE'},new Error('PRIVATE')]){
+  expect(loginError(error).message).toBe('加载失败，请重试');expect(douyinLoginFailureCode(error)).toBe('browser_auth_failed');
+ }
+ for(const code of ['browser_qr_timeout','browser_auth_timeout','browser_script_error','webview_renderer_gone','webview_http_403']){
+  expect(loginError({code}).message).toContain('重试登录');expect(douyinLoginFailureCode({code})).toBe(code);
+ }
+});

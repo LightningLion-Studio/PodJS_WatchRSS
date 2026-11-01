@@ -19,11 +19,22 @@ const WEBVIEW_ERRORS: Record<string, string> = {
   '-15': '请求过于频繁，请稍后重试', '-16': '页面存在安全风险，已被拦截',
 };
 export function loginError(error: unknown): { unavailable: boolean; message: string } {
-  const code = (error as { code?: string } | null)?.code;
+  const raw = (error as { code?: unknown } | null)?.code;
+  const code = typeof raw === 'string' ? raw : undefined;
   if (code === 'webview_unavailable' || code === 'unsupported' || code === 'unavailable')
     return { unavailable: true, message: '当前设备无法初始化 WebView，无法打开登录页' };
   if (typeof code === 'string' && code.startsWith('webview_load_'))
     return { unavailable: false, message: WEBVIEW_ERRORS[code.slice('webview_load_'.length)] ?? '加载失败，请重试' };
+  const closed: Record<string, string> = {
+    browser_qr_timeout: '登录二维码加载超时，请点“重试登录”',
+    browser_auth_timeout: '登录等待超时，请点“重试登录”',
+    browser_script_error: '登录页脚本运行失败，请点“重试登录”',
+    webview_renderer_gone: '登录页停止运行，请点“重试登录”',
+    webview_http_403: '登录页要求验证，请点“重试登录”',
+    busy: '已有登录页打开，请关闭后重试',
+  };
+  if (code && closed[code]) return { unavailable: false, message: closed[code] };
+  if (code?.startsWith('webview_http_')) return { unavailable: false, message: '登录页请求失败，请点“重试登录”' };
   if (code === 'cancelled') return { unavailable: false, message: '已取消登录' };
   return { unavailable: false, message: '加载失败，请重试' };
 }
@@ -64,4 +75,11 @@ export function loginQrWaitStatus(state:LoginStatusState){
 }
 export function finishLoginStatus(state:LoginStatusState):LoginStatusState {
  return {...state,qr:undefined,loading:false,verifying:false,ended:true};
+}
+
+/** Never emit vendor messages or unknown codes (which can contain credentials). */
+export function douyinLoginFailureCode(error: unknown): string {
+ const code = (error as {code?: unknown}|null)?.code;
+ return typeof code === 'string' && /^(browser_(qr_timeout|auth_timeout|script_error)|webview_(unavailable|renderer_gone|load_-?\d{1,2}|http_\d{3})|cancelled|busy|unavailable|unsupported)$/.test(code)
+   ? code : 'browser_auth_failed';
 }

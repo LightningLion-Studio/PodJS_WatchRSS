@@ -112,7 +112,7 @@ test('M4 renders PNG login and JPEG verification, clears QR and reports webpage 
   expect(authOptions.qrExtractionScript).toBe('framework-status-script');
   expect(authOptions.completeOnLoginPanelHidden).toBe(true);
   expect(authOptions.qrWait).toEqual({message:'正在加载抖音登录二维码，需要 30~60 秒，请您耐心等待'});
-  expect(authOptions.userAgent).toBe('SYNTHETIC-UA');
+  expect(authOptions.userAgent).toBe((await import('../src/douyin/request-config.ts')).DOUYIN_USER_AGENT);
   const emit=authOptions.onStatus;
   emit({type:'qr',kind:'login',mime:'image/png',imageBase64:'AAAA'});
   expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toBe('data:image/png;base64,AAAA');
@@ -184,4 +184,23 @@ test('D2 history detail initial refresh failure retains the native direct-URL fa
  createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'detail',awemeId:item.awemeId,item},client,onPlay:(value:any)=>request=value,onNavigate(){},settings:{}} as unknown as DouyinScreenProps);});
  await settle();readerProps.onMedia({type:'video'});await settle();
  expect(request).toMatchObject({playback:item,playlist:[item],hasMore:false,detailPlayback:true});
+});
+
+for (const code of ['browser_qr_timeout','browser_auth_timeout','browser_script_error','webview_renderer_gone','webview_http_403']) test(`DYLOGIN ${code} shows a closed reason and permits fresh retry`,async()=>{
+ probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
+ expect(f.text().replaceAll('\n','')).toContain('正在加载抖音登录页');
+ const oldEmit=authOptions.onStatus;
+ rejectAuth({code,message:'SECRET sessionid=PRIVATE'});await settle();
+ expect(f.text().replaceAll('\n','')).toContain('重试登录');expect(f.text()).not.toContain('SECRET');
+ f.press();await settle();expect(calls.filter(c=>c==='authorize')).toHaveLength(2);
+ oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'OLD'});
+ expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+ rejectAuth({code:'cancelled'});await settle();
+});
+test('DYLOGIN opens official page without reading cookie or playback configuration',async()=>{
+ probe=async()=>({status:'available'});let cookieReads=0;
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'login'},client:{onAuthExpired:()=>()=>{},buildPlaybackHeaders:()=>{cookieReads++;return new Promise(()=>{});}},settings:{},onBack(){},onNavigate(){},onPlay(){},input:async()=>null} as unknown as DouyinScreenProps);});
+ calls=[];await settle();nodes(root).find(n=>n.props.focusable&&n.props.onPress)!.props.onPress();await settle();
+ expect(calls).toEqual(['probe','authorize']);expect(cookieReads).toBe(0);
+ rejectAuth({code:'cancelled'});await settle();
 });

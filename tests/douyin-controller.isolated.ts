@@ -4,6 +4,8 @@ import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
 let client:DouyinClient;let optRecovery=false;
+let loginOptions:any,completeLogin:(value:{cookie:string;origin:string})=>void;
+mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any)=>{loginOptions=options;return {result:new Promise(resolve=>completeLogin=resolve),cancel(){}};}}));
 let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
@@ -13,7 +15,7 @@ mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:st
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
-mock.module('@podjs/framework/services',()=>({video:{captureBackdrop:async()=>{},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
@@ -208,4 +210,15 @@ test('DYFIX REQUEST_FAILED during forced recovery never discards or spends media
  const f=fixture(),a=item('a');f.controller.douyinPlay({item:a,playback:a,playlist:[a,item('b')],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
  const entry=f.stack().at(-1)!;client.resolvePlayback=async()=>({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'});
  await f.controller.recoverDouyinVideo(entry);await f.controller.recoverDouyinVideo(entry);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(entry.queue!.diagnostics().quarantinedAwemeIds).toEqual([]);expect(entry.douyinFailures?.size).toBe(0);
+});
+
+test('DYLOGIN route login dispatches before secure playback reads and captures Cookie only after completion',async()=>{
+ const f=fixture();let reads=0;
+ client.buildPlaybackHeaders=()=>{reads++;return new Promise(()=>{});};
+ const pending=f.controller.douyinLogin();await Promise.resolve();
+ expect(reads).toBe(0);expect(loginOptions).toMatchObject({url:'https://www.douyin.com/chat?isPopup=1',cookieOrigin:'https://www.douyin.com',requiredCookieNames:['sessionid'],qrExtractionScript:'test-status-script',completeOnLoginPanelHidden:true});
+ expect(loginOptions.qrWait.message).toContain('正在加载');expect(typeof loginOptions.onStatus).toBe('function');
+ expect(await client.readCookie()).toBeNull();
+ completeLogin({cookie:'sessionid=fixture',origin:'https://www.douyin.com'});await pending;
+ expect(await client.readCookie()).toBe('sessionid=fixture');expect(f.stack().at(-1)?.douyinRoute).toEqual({name:'entry'});
 });
