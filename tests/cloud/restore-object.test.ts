@@ -56,6 +56,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
  }else if(entry!=='yield-stall'){
   remote=await new WatchCloudCodec(crypto,{require(){}}).create({accountKey:key,keyVersion:1,sourceDeviceId:'phone',sequence:1,snapshotId:'headless-remote',createdAtMillis:1,parentHeads:{},observedHeads:{},objects:Array.from({length:160},(_,i)=>({name:'reader/medium-'+i+'.txt',bytes: new Uint8Array(256*1024).fill(33+i%30),compress:false}))});
  }
+ const nativeStreams=new Map<string,Uint8Array>();
  const projectionWrites=new Map<string,number>(),sourceDecryptions=new Map<string,number>();
  let checkpointDecryptions=0;
 
@@ -96,6 +97,8 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    case 'uri.parse':{const u=new URL(a.value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};}
    case 'file.htmlText':return resultFile(utf8Encode(utf8Decode(files.get(a.path)!).replace(/<[^>]*>/g,'')));
    case 'file.gzip':return resultFile(await crypto.gzip(files.get(a.path)!));
+   case 'crypto.closeSealedGzip':nativeStreams.delete(a.outputPrefix);return {};
+   case 'crypto.gunzipSealedParts':{let output=nativeStreams.get(a.outputPrefix);if(!output){const chunks:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const part=a.parts[i],sealed=files.get(part.path);if(!sealed)throw Error('sealed_part_invalid_'+i);chunks.push(await crypto.decrypt(unb64(a.keyBase64),unb64(part.aadBase64),sealed.subarray(0,12),sealed.subarray(12)));}const packed=Buffer.concat(chunks);output=await crypto.gunzip(packed,a.maxOutputBytes);nativeStreams.set(a.outputPrefix,output);}const piece=output.subarray(a.offset,a.offset+262144);const sealed=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),piece);files.set(a.outputPrefix+a.offset+'.bin',new Uint8Array(Buffer.concat([sealed.nonce,sealed.ciphertext])));const done=a.offset+piece.length===output.length;return {offset:a.offset,bytes:piece.length,done,...(done?{sha256:await crypto.sha256(output)}:{})};}
    case 'file.gunzip':return resultFile(await crypto.gunzip(files.get(a.path)!,a.maxOutputBytes));
    case 'crypto.random':return {bytesBase64:b64(await crypto.random(a.bytes))};
    case 'crypto.hmacSha256':return {digestBase64:createHmac('sha256',unb64(a.keyBase64)).update(unb64(a.dataBase64)).digest('base64')};
@@ -171,7 +174,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
     windowProof.push({window:windowCount+1,elapsed:300000-(guestDeadline-guestNow),work,partWrites,newParts:partWrites-beforeParts,checkpointDecryptions:checkpointDecryptions-beforeReads,secureGets:calls.filter(c=>c==='secure.get').length,result});console.info('RESTOREOBJ_'+entry+'_WINDOW',JSON.stringify(windowProof.at(-1)));expect(guestNow).toBeLessThan(guestDeadline);expect(leased).toBe(false);
     done=result==='success';if(!done){expect(result==='retry'||JSON.stringify(result)===JSON.stringify({status:'retry',progress:true}),logs.join('')).toBe(true);expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);guestNow=Date.now();guestDeadline=guestNow+300000;}
    }
-   console.info('RESTOREOBJ_'+entry+'_SUMMARY',JSON.stringify(windowProof));expect(done).toBe(true);expect(windowCount).toBeGreaterThan(1);expect(acknowledgements).toBeGreaterThanOrEqual(1);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);expect(logs.join('')).toContain('"event":"window-unit"');expect(logs.join('')).toContain('"event":"snapshot-work"');expect([...projectionWrites.values()].every(n=>n===1)).toBe(true);expect([...sourceDecryptions.values()].reduce((n,x)=>n+x,0)).toBeLessThanOrEqual(remote!.manifest.objects.reduce((n,o)=>n+o.chunks.length,0)+windowCount);expect((sql.query('SELECT content FROM articles WHERE id=1').get() as any).content).toBe('Private body');continue;
+   console.info('RESTOREOBJ_'+entry+'_SUMMARY',JSON.stringify(windowProof));expect(done).toBe(true);expect(windowCount).toBeGreaterThanOrEqual(entry==='gzip'?1:2);expect(acknowledgements).toBeGreaterThanOrEqual(1);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);expect(logs.join('')).toContain('"event":"window-unit"');expect(logs.join('')).toContain('"event":"snapshot-work"');expect([...projectionWrites.values()].every(n=>n===1)).toBe(true);expect([...sourceDecryptions.values()].reduce((n,x)=>n+x,0)).toBeLessThanOrEqual(remote!.manifest.objects.reduce((n,o)=>n+o.chunks.length,0)+windowCount);expect((sql.query('SELECT content FROM articles WHERE id=1').get() as any).content).toBe('Private body');continue;
   }
   if(fastMode){
    const value=await headless(context,()=>guestNow);expect(value,logs.join('')).toEqual({status:'retry',progress:true});expect(windowStop).toBe(true);expect(leased).toBe(false);expect(calls).not.toContain('file.gzip');expect(calls).not.toContain('file.gunzip');expect(reserved).toBeUndefined();expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);

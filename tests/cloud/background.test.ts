@@ -61,6 +61,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
   const salt=new Uint8Array(16),derived=await crypto.hkdf(key,salt,utf8Encode('watchrss/cloud/manifest/v2/headless-remote')),sealed=await crypto.encrypt(derived,utf8Encode('watchrss-cloud-manifest-v2:headless-remote'),utf8Encode(JSON.stringify(remote.manifest)));
   remote.encryptedManifest=new Uint8Array(Buffer.concat([Buffer.from('WRSSCM3'),salt,sealed.nonce,sealed.ciphertext]));derived.fill(0);
  }
+ const nativeStreams=new Map<string,Uint8Array>();
  const remoteHash=remote?await crypto.sha256(remote.encryptedManifest):'';const remoteHead=remote?{id:remote.manifest.snapshotId,sourceDeviceId:'phone',deviceSequence:1,keyVersion:1,manifestSha256:remoteHash,manifestSizeBytes:remote.encryptedManifest.length,parentHeads:{},observedHeads:{}}:undefined;
  const request=async(method:string,a:any):Promise<any>=>{
   if(largeWindow&&armed){guestNow+=method.startsWith('secure.')?200:method==='file.write'||method==='file.commit'?250:20;if(guestNow>=guestDeadline)throw Error('RESTOREWIN_NATIVE_HARD_DEADLINE');}
@@ -98,6 +99,8 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'uri.parse':{const u=new URL(a.value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};}
    case 'file.htmlText':return resultFile(utf8Encode(utf8Decode(files.get(a.path)!).replace(/<[^>]*>/g,'')));
    case 'file.gzip':return resultFile(await crypto.gzip(files.get(a.path)!));
+   case 'crypto.closeSealedGzip':nativeStreams.delete(a.outputPrefix);return {};
+   case 'crypto.gunzipSealedParts':{let output=nativeStreams.get(a.outputPrefix);if(!output){const chunks:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const part=a.parts[i],sealed=files.get(part.path);if(!sealed)throw Error('sealed_part_invalid_'+i);chunks.push(await crypto.decrypt(unb64(a.keyBase64),unb64(part.aadBase64),sealed.subarray(0,12),sealed.subarray(12)));}output=await crypto.gunzip(Buffer.concat(chunks),a.maxOutputBytes);nativeStreams.set(a.outputPrefix,output);}const piece=output.subarray(a.offset,a.offset+262144),sealed=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),piece);files.set(a.outputPrefix+a.offset+'.bin',new Uint8Array(Buffer.concat([sealed.nonce,sealed.ciphertext])));partWrites++;const done=a.offset+piece.length===output.length;return {offset:a.offset,bytes:piece.length,done,...(done?{sha256:await crypto.sha256(output)}:{})};}
    case 'file.gunzip':return resultFile(await crypto.gunzip(files.get(a.path)!,a.maxOutputBytes));
    case 'crypto.random':return {bytesBase64:b64(await crypto.random(a.bytes))};
    case 'crypto.hmacSha256':return {digestBase64:createHmac('sha256',unb64(a.keyBase64)).update(unb64(a.dataBase64)).digest('base64')};
@@ -155,7 +158,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
     const journals=[...secure.entries()].filter(([k])=>k.endsWith('.restore-v1')).map(([,v])=>JSON.parse(v));const work=journals[0]?.work??0;
     expect(work).toBeGreaterThanOrEqual(lastWork);lastWork=work;
     windowProof.push({window:windowCount+1,elapsed:300000-(guestDeadline-guestNow),work,partWrites,result});console.info('RESTOREWIN_BUNDLE_WINDOW',JSON.stringify(windowProof.at(-1)));expect(guestNow).toBeLessThan(guestDeadline);expect(leased).toBe(false);
-    done=result==='success';if(!done){expect(result).toEqual({status:'retry',progress:true});expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);guestNow=Date.now();guestDeadline=guestNow+300000;}
+    done=result==='success';if(!done){expect(result,logs.join('')).toEqual({status:'retry',progress:true});expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);guestNow=Date.now();guestDeadline=guestNow+300000;}
    }
    console.info('RESTOREWIN_PRODUCTION_BUNDLE',JSON.stringify(windowProof));expect(done).toBe(true);expect(windowCount).toBeGreaterThan(1);expect(acknowledgements).toBeGreaterThanOrEqual(1);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);expect(logs.join('')).toContain('"event":"window-unit"');expect(logs.join('')).toContain('"event":"snapshot-work"');continue;
   }

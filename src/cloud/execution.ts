@@ -4,7 +4,7 @@ export const CLOUD_HOST_CAPABILITY_UNAVAILABLE='cloud_host_capability_unavailabl
 /** Fence every chunk request, while allowing resource cleanup after a pause. */
 export function cloudRunHost(host:CloudHostRequest,current:()=>void):CloudHostRequest {
  return (async<R>(method:string,args:Record<string,unknown>)=>{
-  if(method!=='file.delete'&&method!=='secure.release'&&method!=='cloud.release')current();
+  if(method!=='file.delete'&&method!=='crypto.closeSealedGzip'&&method!=='secure.release'&&method!=='cloud.release')current();
   return host<R>(method,args);
  });
 }

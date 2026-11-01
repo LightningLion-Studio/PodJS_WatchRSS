@@ -139,3 +139,30 @@ test('legacy one-stream gzip exceeding the host contiguous-buffer limit gives a 
  const m=remote.snap.manifest,salt=new Uint8Array(16),derived=await crypto.hkdf(key,salt,utf8Encode('watchrss/cloud/manifest/v2/'+m.snapshotId)),sealed=await crypto.encrypt(derived,utf8Encode('watchrss-cloud-manifest-v2:'+m.snapshotId),utf8Encode(JSON.stringify(m))),bytes=new Uint8Array(Buffer.concat([Buffer.from('WRSSCM3'),salt,sealed.nonce,sealed.ciphertext])),hash=await crypto.sha256(bytes);derived.fill(0);f.objects.set(hash,bytes);f.heads.set('phone',{...remote.head,manifestSha256:hash,manifestSizeBytes:bytes.length});f.session.restoreCheckpoint={cache:f.cache,state:f.state,codec:new WatchCloudCodec({...crypto,contiguousOutputLimit:8},enabled)};
  const service=c.make();expect(await service.syncNow()).toBe(false);expect(service.status).toMatchObject({errorCode:'cloud_snapshot_unit_capacity',retryable:false});expect(await f.state.applied('phone',true)).toBe(0);expect(f.merged).toEqual([]);expect(f.calls.some(r=>r.url.endsWith('/ack'))).toBe(false);
 });
+
+test('provisional stream output stays unreadable until the final secure publish, across part and receipt interruptions',async()=>{
+ const {SnapshotRestoreCheckpoint}=await import('../../src/cloud/snapshot-checkpoint');
+ const f=await fixture(),body=new Uint8Array(2*262144+17).fill(37),source=await crypto.gzip(body),token='a'.repeat(64)+'-object',child='a'.repeat(64)+'-chunk-0';
+ let stopAfter=1,calls=0,invalidHash=false;
+ const codec=f.session.codec,stream=async(_key:Uint8Array,parts:any[],length:number,prefix:string,aadPrefix:string,maximum:number,offset:number,receipt:(v:any)=>Promise<void>)=>{
+  expect(length).toBe(source.length);expect(maximum).toBe(body.length);
+  for(let at=offset;at<body.length;at+=262144){const part=body.subarray(at,at+262144),sealed=await codec.sealRestoreProjection(key,aadPrefix+at,part);f.blobs.set(prefix+at+'.bin',sealed);calls++;await receipt({offset:at,bytes:part.length,done:at+part.length===body.length});if(calls===stopAfter)throw Error('cloud_sync_deadline_exceeded');}
+  return invalidHash?'0'.repeat(64):crypto.sha256(body);
+ };
+ (codec as any).streamRestoreGzip=stream;
+ const open=()=>new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('stream-epoch','generation');
+ let cp=await open();await cp.begin();await cp.write(child,source);
+ await expect(cp.gunzip(token,[child],body.length,await crypto.sha256(body))).rejects.toThrow('cloud_sync_deadline_exceeded');expect(cp.committed).toBe(true);expect(cp.has('decoded:'+token)).toBe(false);expect(await cp.read(token)).toBeUndefined();const provisional=(await cp.index(token))!;expect(provisional.parts.at(-1)).toBe(token+'-pending');expect(provisional.lengths.at(-1)).toBe(0);expect(provisional.parts.some(id=>!Object.prototype.hasOwnProperty.call((cp as any).value.projections,id))).toBe(true);await expect(cp.range(token,0,1)).rejects.toThrow('cloud_snapshot_projection_missing');const previous=cp.work;cp.close();
+ cp=await open();expect(cp.work).toBe(previous);stopAfter=100;invalidHash=true;await expect(cp.gunzip(token,[child],body.length,await crypto.sha256(body))).rejects.toThrow('cloud_snapshot_projection_integrity');expect(await cp.read(token)).toBeUndefined();expect(cp.has('decoded:'+token)).toBe(false);cp.close();
+ cp=await open();invalidHash=false;const before=calls;await cp.gunzip(token,[child],body.length,await crypto.sha256(body));expect(calls).toBe(before);expect(await cp.read(token)).toEqual(body);expect((await cp.index(token))!.parts).not.toContain(token+'-pending');cp.close();
+ cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('different-epoch','generation');expect(cp.has('decoded:'+token)).toBe(false);expect(await cp.read(token)).toBeUndefined();cp.close();
+});
+
+test('outgoing materialization after a ranged inbound restore reopens the full projection instead of its empty marker',async()=>{
+ const {restoreSnapshots}=await import('../../src/cloud/snapshot-restore');const f=await fixture();
+ const archive=writeWrss(new Map([['manifest.json',utf8Encode(JSON.stringify({format:'watchrss-library-backup',version:3}))],['articles.json',utf8Encode('[]')],['padding.bin',new Uint8Array(9*1024*1024).fill(37)]]));
+ await f.phone({objects:[{name:'private-library.wrss',bytes:archive,compress:false}]});f.session.client.setEpoch((await f.session.client.bootstrap()).libraryEpoch);f.session.client.setContentGeneration(f.content().contentGeneration);f.session.library.restorePayloads=async()=>({changed:0,pending:0,abandoned:0,warnings:[]});
+ const cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('ranged-epoch','generation');await cp.begin();
+ const restored=await restoreSnapshots({session:f.session,heads:[...f.heads.values()],full:true,journal:cp,current:async()=>{},manifest:(h,b)=>f.session.codec.decryptManifest(key,h.id,b),hash:crypto.sha256,supported:()=>true,now:()=>0,status:()=>{},changed:()=>{}});
+ const manifest=restored.snapshots[0].manifest;expect(await restored.readObject(manifest,manifest.objects[0])).toEqual(archive);cp.close();
+});

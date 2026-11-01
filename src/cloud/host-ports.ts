@@ -1,3 +1,5 @@
+import {sha256Stream} from '@podjs/framework/sha256-stream';
+import {sealedGzip} from '@podjs/framework/sealed-gzip';
 import {cpuWorkAsync} from '@podjs/framework/cpu-work';
 import {createCrypto,hex,hmacSha256Bytes} from '@podjs/framework/crypto';
 import {decodeBase64 as base64ToBytes,encodeBase64 as bytesToBase64,sha256Bytes,gunzipBytes} from '@podjs/framework/bytes';
@@ -48,6 +50,7 @@ async function transcode(input:Uint8Array,method:string,maximum:number){
  });
 }
 const crypto:SnapshotCrypto={
+ gunzipSealedParts:(key,parts,length,outputPrefix,aadPrefix,maxOutputBytes,offset,receipt)=>sealedGzip(<T>(method:string,args:Record<string,unknown>)=>method==='crypto.closeSealedGzip'?request<T>(method,args):operation<T>(method,args),{keyBase64:b64(key),parts,length,outputPrefix,aadPrefix,maxOutputBytes},offset,receipt),
  openSealedParts:async(key,parts,length)=>{
   const result=await operation<{path:string;size:number;sha256:string}>('crypto.openSealedParts',{keyBase64:b64(key),parts,length});
   if(!/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(result.path))throw Error('cloud_snapshot_projection_missing');
@@ -57,7 +60,7 @@ const crypto:SnapshotCrypto={
  contiguousOutputLimit:64*1024*1024,
  yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),
  random:async size=>bytes((await operation<{bytesBase64:string}>('crypto.random',{bytes:size})).bytesBase64),
- sha256:async input=>{guard.require();const native=sha256Bytes(input);if(native)return hex(native);return input.length>131072?withInput(input,async path=>(await fileChunks.hash(path)).sha256):Array.from(bytes((await operation<{digestBase64:string}>('crypto.hash',{dataBase64:b64(input)})).digestBase64),b=>b.toString(16).padStart(2,'0')).join('');},
+ sha256:async input=>{guard.require();const native=sha256Bytes(input)??await sha256Stream(input,async()=>{guard.require();await operation('runtime.delay',{milliseconds:1});});if(native)return hex(native);return input.length>131072?withInput(input,async path=>(await fileChunks.hash(path)).sha256):Array.from(bytes((await operation<{digestBase64:string}>('crypto.hash',{dataBase64:b64(input)})).digestBase64),b=>b.toString(16).padStart(2,'0')).join('');},
  hkdf:async(key,salt,info)=>bytes((await operation<{keyBase64:string}>('crypto.hkdfSha256',{inputBase64:b64(key),saltBase64:b64(salt),infoBase64:b64(info)})).keyBase64),
  encrypt:async(key,aad,input)=>{if(input.length<=131072){const value=await operation<{nonceBase64:string;ciphertextBase64:string}>('crypto.aesGcmEncrypt',{keyBase64:b64(key),aadBase64:b64(aad),dataBase64:b64(input)});return {nonce:bytes(value.nonceBase64),ciphertext:bytes(value.ciphertextBase64)};}const value=await transform('crypto.largeAesGcmEncrypt',input,{keyBase64:b64(key),aadBase64:b64(aad)});if(!value.nonceBase64)throw Error('缺少云加密 nonce');return {nonce:bytes(value.nonceBase64),ciphertext:value.bytes};},
  decrypt:async(key,aad,nonce,ciphertext)=>ciphertext.length<=131088?data('crypto.aesGcmDecrypt',{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce),ciphertextBase64:b64(ciphertext)}):(await transform('crypto.largeAesGcmDecrypt',ciphertext,{keyBase64:b64(key),aadBase64:b64(aad),nonceBase64:b64(nonce)})).bytes,

@@ -70,3 +70,20 @@ test('stall history is scoped to the current journal work and successful receipt
  cp=await open();expect(seen.at(-1)).toBe(true);await cp.commit('next-receipt');expect(seen.at(-1)).toBe(false);cp.close();
  cp=await open();expect(seen.at(-1)).toBe(false);expect(cp.has('current-prefix')).toBe(true);expect(cp.has('next-receipt')).toBe(true);cp.close();
 });
+
+test('stalled temporary IO cannot reset its own budget; only durable receipts do',()=>{
+ let now=0;const budget=new SnapshotYieldBudget(()=>now);budget.stalled(true);
+ for(let i=0;i<30;i++){budget.before('file.write');budget.completed('file.write');budget.completed('secure.get');now+=1000;}
+ expect(()=>budget.before('file.write')).toThrow('cloud_snapshot_work_timeout');
+ budget.stalled(false);for(let i=0;i<300;i++){budget.before('file.write');now+=1000;budget.completed('file.write');}
+ budget.stalled(true);for(let i=0;i<256;i++){budget.before('file.read');budget.completed('file.read');}
+ expect(()=>budget.before('crypto.largeAesGcmDecrypt')).toThrow('cloud_snapshot_work_timeout');
+ // Cleanup remains available even after exhaustion; it cannot certify work.
+ expect(()=>budget.before('file.delete')).not.toThrow();expect(()=>budget.before('crypto.closeSealedGzip')).not.toThrow();
+});
+
+test('a paused foreground still closes its bounded sealed stream',async()=>{
+ const {cloudRunHost}=await import('../../src/cloud/execution');const calls:string[]=[];
+ const request=cloudRunHost(async<T>(method:string)=>{calls.push(method);return {} as T;},()=>{throw Error('paused');});
+ await request('crypto.closeSealedGzip',{outputPrefix:'public-fixture/p'});await expect(request('crypto.gunzipSealedParts',{})).rejects.toThrow('paused');expect(calls).toEqual(['crypto.closeSealedGzip']);
+});
