@@ -1,9 +1,11 @@
-import {cpuWork} from '@podjs/framework/cpu-work';
+import type {RestoreCallsite} from './restore-callsite';
+import {utf8Encode} from './types';
+import {cpuJsonStringify,cpuWork} from '@podjs/framework/cpu-work';
 import {cpuSort} from '@podjs/framework/cpu-work';
 import {openWrssRange,type WrssRangeReader} from './wrss';
 import {cloudFormatFailure} from './format-diagnostic';
 import type {CloudSession} from './service';
-import type {CloudManifest,CloudObject,RestoreCodecCheckpoint} from './codec';
+import {validateManifest,type CloudManifest,type CloudObject,type RestoreCodecCheckpoint} from './codec';
 import type {CloudSnapshotHead} from './types';
 import {PRIVATE_OVERLAY_NAME,hasPrivateOverlay} from './private-overlay';
 import {cloudCompatibility,emptyCompatibilityStatus} from './compatibility';
@@ -22,13 +24,25 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
  const directories=new Map<CloudObject,Awaited<ReturnType<typeof openWrssRange>>>();
  const rangeReader=async(v:RestoringSnapshot,o:CloudObject):Promise<WrssRangeReader>=>{const t=await partToken(v.h,o,'object'),index=await cp.index(t);if(!index)throw Error('cloud_snapshot_projection_missing');return {length:o.originalBytes,read:async(offset,length)=>{try{return await cp.range(t,offset,length,index);}catch(error){await cp.invalidate('decoded:'+t);throw error;}}};};
  const ranged=(v:RestoringSnapshot,o:CloudObject)=>o.originalBytes>8*1024*1024&&!o.entryRef&&(o.name==='private-library.wrss'||!o.name.startsWith('private/articles/')&&!o.privateBook&&v.manifest.objects.some(x=>x.entryRef?.object===o.name));
- const load=async(v:RestoringSnapshot,o:CloudObject,materialize=false):Promise<Uint8Array>=>{
+ const inflateArchive=async(input:Uint8Array,maximum:number)=>{
+  const codec=(s.restoreCheckpoint?.codec??s.codec).atCallsite('archive');
+  if(!codec.streamedRestoreGzip)return codec.inflateRestoreEntry(input,maximum);
+  const token=await cp.token('archive-gzip-v1:'+await p.hash(input)+':'+maximum);
+  if(!cp.has('decoded:'+token)){const child=token+'-input';if(!cp.has('decoded:'+child)||!await cp.index(child))await cp.write(child,input);await cp.gunzip(token,[child],maximum,undefined,true);}
+  return await cp.read(token)??Promise.reject(Error('cloud_snapshot_projection_missing'));
+ };
+ const load=async(v:RestoringSnapshot,o:CloudObject,materialize=false,site:RestoreCallsite='snapshot'):Promise<Uint8Array>=>{
+  const codec=(s.restoreCheckpoint?.codec??s.codec).atCallsite(site);
   await p.current();const objectToken=await partToken(v.h,o,'object');if(!materialize&&ranged(v,o)&&cp.has('decoded:'+objectToken)&&await cp.index(objectToken))return new Uint8Array();const cached=memo.get(o);if(cached&&(!materialize||cached.length===o.originalBytes))return cached;
   const key=keys.get(v.h.keyVersion)??await s.keys.accountKey(s.userId,v.h.keyVersion);if(!key)throw Error('missing_key_version');keys.set(v.h.keyVersion,key);
   const descriptors=new Map(v.remote.chunks.map(c=>[c.sha256,c]));
   const reload=async(hash:string)=>{await p.current();const target=descriptors.get(hash);if(!target)throw Error('cloud_snapshot_chunk_missing');const b=await cp.timed('download',target.sizeBytes,()=>s.client.download(target.signedUrl,target.sizeBytes,hash));await (s.restoreCheckpoint?.cache??s.cache).storeChunk(s.userId,hash,b);await cp.commit('download:'+hash,b.length);return b;};
-  const work:RestoreCodecCheckpoint={materializeOnly:!materialize&&ranged(v,o),inflate:(s.restoreCheckpoint?.codec??s.codec).streamedRestoreGzip?async(object,parts)=>{const token=await partToken(v.h,object,'object');if(!cp.has('decoded:'+token))await cp.gunzip(token,await Promise.all(parts.map(part=>partToken(v.h,object,part))),object.originalBytes,object.contentSha256);return !materialize&&ranged(v,object)?new Uint8Array():await cp.read(token)??Promise.reject(Error('cloud_snapshot_projection_missing'));}:undefined,link:async(object,parts,length)=>cp.link(await partToken(v.h,object,'object'),await Promise.all(parts.map(part=>partToken(v.h,object,part))),length),entry:async(target,path)=>{const t=await partToken(v.h,target,'object');if(!cp.has('decoded:'+t))await load(v,target);let dir=directories.get(target);if(!dir){dir=await openWrssRange(await rangeReader(v,target),(b,max)=>(s.restoreCheckpoint?.codec??s.codec).inflateRestoreEntry(b,max),{yield:async()=>{await p.current();await (s.restoreCheckpoint?.codec??s.codec).yieldRestoreTurn();}});if(directories.size>=4)directories.delete(directories.keys().next().value!);directories.set(target,dir);}return dir.get(path);},reload:chunk=>reload(chunk.ciphertextSha256),length:async(object,part)=>cp.length(await partToken(v.h,object,part)),manifestValidated:true,check:p.current,now:p.now,read:async(object,part)=>part==='object'&&!materialize&&ranged(v,object)?undefined:cp.read(await partToken(v.h,object,part)),write:async(object,part,bytes)=>{await cp.write(await partToken(v.h,object,part),bytes);await update(v.h,object);},resolve:object=>load(v,object),metric:(stage,bytes,at,hit,chunkIndex)=>cp.metric(stage,bytes,at,hit,{objectIndex:indices.get(o),...(chunkIndex===undefined?{}:{chunkIndex})})};
-  const bytes=(await cp.timed('object',o.originalBytes,()=>(s.restoreCheckpoint?.codec??s.codec).restore(key,v.manifest,async hash=>{
+  const inflate=async(token:string,input:Uint8Array,maximum:number)=>{
+   if(!cp.has('decoded:'+token)){const child=token+'-input';if(!cp.has('decoded:'+child)||!await cp.index(child))await cp.write(child,input);await cp.gunzip(token,[child],maximum,undefined,true);}
+   return await cp.read(token)??Promise.reject(Error('cloud_snapshot_projection_missing'));
+  };
+  const work:RestoreCodecCheckpoint={inflateChunk:codec.streamedRestoreGzip?async(object,index,plain,maximum)=>inflate(await partToken(v.h,object,'chunk:'+index),plain,maximum):undefined,materializeOnly:!materialize&&ranged(v,o),inflate:codec.streamedRestoreGzip?async(object,parts)=>{const token=await partToken(v.h,object,'object');if(!cp.has('decoded:'+token))await cp.gunzip(token,await Promise.all(parts.map(part=>partToken(v.h,object,part))),object.originalBytes,object.contentSha256);return !materialize&&ranged(v,object)?new Uint8Array():await cp.read(token)??Promise.reject(Error('cloud_snapshot_projection_missing'));}:undefined,link:async(object,parts,length)=>cp.link(await partToken(v.h,object,'object'),await Promise.all(parts.map(part=>partToken(v.h,object,part))),length),entry:async(target,path)=>{const t=await partToken(v.h,target,'object');if(!cp.has('decoded:'+t))await load(v,target,false,site);let dir=directories.get(target);if(!dir){dir=await openWrssRange(await rangeReader(v,target),inflateArchive,{yield:async()=>{await p.current();await codec.yieldRestoreTurn();}});if(directories.size>=4)directories.delete(directories.keys().next().value!);directories.set(target,dir);}return dir.get(path);},reload:chunk=>reload(chunk.ciphertextSha256),length:async(object,part)=>cp.length(await partToken(v.h,object,part)),manifestValidated:true,check:p.current,now:p.now,read:async(object,part)=>part==='object'&&!materialize&&ranged(v,object)?undefined:cp.read(await partToken(v.h,object,part)),write:async(object,part,bytes)=>{await cp.write(await partToken(v.h,object,part),bytes);await update(v.h,object);},resolve:object=>load(v,object,false,site),metric:(stage,bytes,at,hit,chunkIndex)=>cp.metric(stage,bytes,at,hit,{objectIndex:indices.get(o),...(chunkIndex===undefined?{}:{chunkIndex})})};
+  const bytes=(await cp.timed('object',o.originalBytes,()=>codec.restore(key,v.manifest,async hash=>{
    return await s.cache.rawChunk(s.userId,hash)??reload(hash);
   },[o],work),false,{objectIndex:indices.get(o)})).get(o.name);if(!bytes)throw Error('cloud_snapshot_object_missing');
   if(bytes.length<=32*1024*1024){while(memo.size&&memoBytes+bytes.length>32*1024*1024){const first=memo.keys().next().value!;memoBytes-=memo.get(first)!.length;memo.delete(first);}memo.set(o,bytes);memoBytes+=bytes.length;}return bytes;
@@ -48,7 +62,7 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
    if(!p.full||!s.library.observePrivateOverlay){overlayPending++;formatBlocked=true;continue;}
    const index=manifest.objects.find(o=>o.name===PRIVATE_OVERLAY_NAME)!;if(cloudCompatibility(index).opaque)throw Error('cloud_format_overlay_invalid');overlayPayload.set(index.name,await load(v,index));
    const trusted=h.deviceSequence<=await s.state.applied(h.sourceDeviceId,true),prefix='overlay:'+await token(h,index);
-   const result=await cp.timed('overlay',index.originalBytes,()=>s.library.observePrivateOverlay!(overlayPayload,h.sourceDeviceId,manifest.objects,trusted,{checkpoint:cp.apply(prefix),resolve:async name=>{const o=manifest.objects.find(o=>o.name===name);if(!o||cloudCompatibility(o).opaque)return;try{return await load(v,o);}catch(error){await p.current();if(fatal(error))throw error;return;}}}));overlayPending+=result.pending;
+   const result=await cp.timed('overlay',index.originalBytes,()=>s.library.observePrivateOverlay!(overlayPayload,h.sourceDeviceId,manifest.objects,trusted,{checkpoint:cp.apply(prefix),inflate:inflateArchive,resolve:async name=>{const o=manifest.objects.find(o=>o.name===name);if(!o||cloudCompatibility(o).opaque)return;try{return await load(v,o);}catch(error){await p.current();if(fatal(error))throw error;return;}}}));overlayPending+=result.pending;
   }}
   pendingItems+=overlayPending;
   for(const v of snapshots){const {h,remote,manifest,overlayPayload}=v;await p.current();const rootPolicy=cloudCompatibility(manifest),already=h.deviceSequence<=await s.state.applied(h.sourceDeviceId,p.full);
@@ -59,13 +73,21 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
    const warn=async()=>{if(headAbandoned&&!await s.state.warned(h.sourceDeviceId,h.id)){await s.state.markWarned(h.sourceDeviceId,h.id);abandonedItems+=headAbandoned;}};
    try{for(const object of selected){await p.current();const t=await token(h,object);if(cp.has('applied:'+t)){headAbandoned+=cp.apply('applied').result(t);continue;}
     const payload=new Map(overlayPayload);try{payload.set(object.name,await load(v,object));}catch(error){await p.current();if(fatal(error))throw error;headPending++;continue;}
-    await p.current();const restored=await cp.timed('apply',object.originalBytes,async()=>s.library.restorePayloads(payload,h.sourceDeviceId,[object],{archiveReader:ranged(v,object)?await rangeReader(v,object):undefined,checkpoint:cp.apply('rows:'+t,(done,total)=>{applyFractions.set(object,total?Math.min(1,done/total):0);p.status(Math.min(99,Math.floor([...applyFractions.values()].reduce((n,v)=>n+v,0)*100/Math.max(1,weights.size))),'apply');}),skipReading:true}));const result=typeof restored==='number'?{changed:restored,pending:0,abandoned:0}:restored;
+    await p.current();const restored=await cp.timed('apply',object.originalBytes,async()=>s.library.restorePayloads(payload,h.sourceDeviceId,[object],{inflate:inflateArchive,archiveReader:ranged(v,object)?await rangeReader(v,object):undefined,checkpoint:cp.apply('rows:'+t,(done,total)=>{applyFractions.set(object,total?Math.min(1,done/total):0);p.status(Math.min(99,Math.floor([...applyFractions.values()].reduce((n,v)=>n+v,0)*100/Math.max(1,weights.size))),'apply');}),skipReading:true}));const result=typeof restored==='number'?{changed:restored,pending:0,abandoned:0}:restored;
     changed=result.changed>0||changed;if(result.changed)p.changed();headPending+=result.pending;headAbandoned+=result.abandoned??0;
     if(!result.pending)await cp.commit('applied:'+t,result.abandoned??0);await update(h,object);
    }}catch(error){if(snapshotDeferred(error)){await warn();Object.assign(error as object,{snapshotAbandonedItems:abandonedItems});}throw error;}
    await warn();
    pendingItems+=headPending;await p.current();if(p.full&&!headPending){await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,true);await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);await s.client.acknowledge(h.id,s.deviceId);}else if(!headPending&&selected.some(o=>o.name==='rss-state.json'))await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);
   }
-  return {snapshots,changed,pendingItems,abandonedItems,formatBlocked,compatibility,readObject:async(manifest:CloudManifest,object:CloudObject)=>{const v=snapshots.find(v=>v.manifest===manifest);if(!v||!manifest.objects.includes(object))throw Error('cloud_snapshot_checkpoint_invalid');try{return await load(v,object,true);}finally{for(const key of keys.values())key.fill(0);keys.clear();}}};
+  return {snapshots,changed,pendingItems,abandonedItems,formatBlocked,compatibility,inflateArchive,readObject:async(manifest:CloudManifest,object:CloudObject,site:RestoreCallsite='previous')=>{
+   if(!manifest.objects.includes(object))throw Error('cloud_snapshot_checkpoint_invalid');
+   let v=snapshots.find(v=>v.manifest===manifest);
+   if(!v){if(site==='previous')site='pending';validateManifest(manifest);if(cloudCompatibility(manifest).opaque)throw Error('cloud_format_opaque');
+    for(let i=0;i<manifest.objects.length;i++){const o=manifest.objects[i];indices.set(o,i);if(!objectTokens.has(o))objectTokens.set(o,await p.hash(utf8Encode(cpuJsonStringify(['restore-object-v1',manifest.keyVersion,o,...(o.entryRef?[manifest.objects.find(target=>target.name===o.entryRef!.object)]:[])]))));}
+    v={h:{keyVersion:manifest.keyVersion} as CloudSnapshotHead,manifest,remote:{chunks:[],manifestUrl:''} as RestoringSnapshot['remote'],overlayPayload:new Map()};
+   }
+   try{return await load(v,object,true,site);}finally{for(const key of keys.values())key.fill(0);keys.clear();}
+  }};
  }finally{for(const key of keys.values())key.fill(0);keys.clear();if(cp.advanced)p.changed();}
 }

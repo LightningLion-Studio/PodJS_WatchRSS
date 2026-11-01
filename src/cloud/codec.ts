@@ -1,3 +1,4 @@
+import type {RestoreCallsite} from './restore-callsite';
 import type {SealedGzipStep,SealedPart} from '@podjs/framework/sealed-gzip';
 import {cpuWork,cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {PRIVATE_OVERLAY_FEATURE,PRIVATE_OVERLAY_NAME,planPrivateOverlay} from './private-overlay';
@@ -18,6 +19,7 @@ export interface RestoreCodecCheckpoint {
  entry?(object:CloudObject,path:string):Promise<Uint8Array|undefined>;
  materializeOnly?:boolean;
  inflate?(object:CloudObject,parts:string[]):Promise<Uint8Array>;
+ inflateChunk?(object:CloudObject,index:number,plain:Uint8Array,maximum:number):Promise<Uint8Array>;
  /** Secure receipt for a complete, authenticated local chunk. No plaintext IO. */
  length?(object:CloudObject,part:string):Promise<number|undefined>;
  link?(object:CloudObject,parts:string[],length:number):Promise<void>;
@@ -28,6 +30,7 @@ export interface RestoreCodecCheckpoint {
 export interface SnapshotCrypto {
  /** Host limit for operations that must return one contiguous decoded buffer. */
  contiguousOutputLimit?:number;
+ atCallsite?(site:RestoreCallsite):SnapshotCrypto;
  yieldTurn?():Promise<void>;
  random(size:number):Promise<Uint8Array>;
  sha256(bytes:Uint8Array):Promise<string>;
@@ -36,7 +39,7 @@ export interface SnapshotCrypto {
  decrypt(key:Uint8Array,aad:Uint8Array,nonce:Uint8Array,ciphertext:Uint8Array):Promise<Uint8Array>;
  gzip(bytes:Uint8Array):Promise<Uint8Array>;
  gunzip(bytes:Uint8Array,maxBytes:number):Promise<Uint8Array>;
- gunzipSealedParts?(key:Uint8Array,parts:SealedPart[],length:number,outputPrefix:string,aadPrefix:string,maxOutputBytes:number,offset:number,receipt:(step:SealedGzipStep)=>Promise<void>):Promise<string>;
+ gunzipSealedParts?(key:Uint8Array,parts:SealedPart[],length:number,outputPrefix:string,aadPrefix:string,maxOutputBytes:number,offset:number,receipt:(step:SealedGzipStep)=>Promise<void>,allowShortOutput?:boolean):Promise<string>;
  openSealedParts?(key:Uint8Array,parts:{path:string;aadBase64:string;bytes:number}[],length:number):Promise<Uint8Array>;
 }
 export interface CloudChunk {plaintextSha256:string;ciphertextSha256:string;plaintextBytes:number;ciphertextBytes:number;saltBase64:string;nonceBase64:string;}
@@ -44,7 +47,7 @@ export interface CloudObject {features?:CloudFeatures;entryRef?:{object:string;e
 export interface CloudManifest {features?:CloudFeatures;format:'watchrss-cloud-snapshot';schemaVersion:2;snapshotId:string;sourceDeviceId:string;deviceSequence:number;keyVersion:number;createdAtMillis:number;parentHeads:Record<string,string>;observedHeads:Record<string,number>;objects:CloudObject[];settings:Record<string,unknown>;credentialEnvelopes:Record<string,never>;}
 export interface LogicalObject {privateBook?:Record<string,unknown>;privateArticle?:Record<string,unknown>;contentSha256?:string;name:string;bytes:Uint8Array;compress?:boolean;}
 const authenticatedRoots=new WeakMap<CloudManifest,string>();
-export interface SnapshotInput {reuseManifests?:readonly CloudManifest[];removedPrivateArticleUrls?:readonly string[];features?:CloudFeatures;removedObjectNames?:readonly string[];readPreviousChunk?:(hash:string)=>Promise<Uint8Array>;readPreviousObject?:(object:CloudObject)=>Promise<Uint8Array>;removedPrivateArticleIds?:readonly string[];accountKey:Uint8Array;keyVersion:number;sourceDeviceId:string;sequence:number;objects:LogicalObject[];parentHeads:Record<string,string>;observedHeads:Record<string,number>;snapshotId:string;createdAtMillis:number;previous?:CloudManifest;carried?:CloudObject[];settings?:Record<string,unknown>;}
+export interface SnapshotInput {restoreInflate?:(bytes:Uint8Array,maximum:number)=>Promise<Uint8Array>;readRestoreObject?:(manifest:CloudManifest,object:CloudObject,site:RestoreCallsite)=>Promise<Uint8Array>;reuseManifests?:readonly CloudManifest[];removedPrivateArticleUrls?:readonly string[];features?:CloudFeatures;removedObjectNames?:readonly string[];readPreviousChunk?:(hash:string)=>Promise<Uint8Array>;readPreviousObject?:(object:CloudObject)=>Promise<Uint8Array>;removedPrivateArticleIds?:readonly string[];accountKey:Uint8Array;keyVersion:number;sourceDeviceId:string;sequence:number;objects:LogicalObject[];parentHeads:Record<string,string>;observedHeads:Record<string,number>;snapshotId:string;createdAtMillis:number;previous?:CloudManifest;carried?:CloudObject[];settings?:Record<string,unknown>;}
 export interface CloudCodecWriteGates {writeV1():boolean;migrationV1?():boolean}
 export const CLOUD_CHUNK_BYTES=4*1024*1024;
 const MAX_OBJECT_BYTES=256*1024*1024;
@@ -95,6 +98,7 @@ function serializeManifest(m:CloudManifest,basis?:CloudManifest):string {
 /** Writes WRSSCM3, reads WRSSCM2/3; WRSSCC2 format; keys and gzip are supplied by the host. */
 export class WatchCloudCodec {
  constructor(private crypto:SnapshotCrypto,private guard:CloudGuard=cloudDisabled,private writeGates?:CloudCodecWriteGates){}
+ atCallsite(site:RestoreCallsite){return this.crypto.atCallsite?new WatchCloudCodec(this.crypto.atCallsite(site),this.guard,this.writeGates):this;}
  private requireWriteV1(){this.guard.require();check(this.writeGates?.writeV1()===true,'cloud_format_write_disabled');}
  /** This creates only the wrapping envelope. Output chunks remain encrypted
   * under the per-plan read-only root; ordinary edits always use accountKey. */
@@ -121,15 +125,16 @@ export class WatchCloudCodec {
  async create(input:SnapshotInput):Promise<EncryptedCloudSnapshot & {manifest:CloudManifest & {allChunks:CloudChunk[]};newChunks:Map<string,Uint8Array>}>{
   this.guard.require();check(input.accountKey.length===32&&input.sequence>0&&input.keyVersion>0);
   if(input.previous)requireCloudWritable(input.previous);
-  const readPrevious=async(o:CloudObject)=>input.readPreviousObject?input.readPreviousObject(o):(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk!,[o])).get(o.name)!;
+  const restoreCrypto=input.restoreInflate?{...this.crypto,gunzip:input.restoreInflate}:this.crypto;
+  const readPrevious=async(o:CloudObject)=>input.readRestoreObject?input.readRestoreObject(input.previous!,o,'previous'):input.readPreviousObject?input.readPreviousObject(o):(await this.restore(input.accountKey,input.previous!,input.readPreviousChunk!,[o])).get(o.name)!;
   const rootIdentity=await this.crypto.sha256(input.accountKey);if(input.previous?.keyVersion===input.keyVersion)check(authenticatedRoots.get(input.previous)===rootIdentity,'cloud_format_reuse_scope');
   if(input.previous?.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE)||input.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE))this.requireWriteV1();
   const overlayWrite=this.writeGates?.writeV1()===true;
   if(overlayWrite&&input.previous?.objects.some(o=>o.name==='private-library.wrss'||o.name===PRIVATE_OVERLAY_NAME)&&(input.objects.some(o=>o.name==='private-library.wrss')||input.removedPrivateArticleIds?.length||input.removedObjectNames?.length))check(input.readPreviousChunk,'cloud_format_previous_missing');
-  if(overlayWrite&&input.previous&&input.readPreviousChunk)input=await planPrivateOverlay(input,this.crypto,readPrevious);
+  if(overlayWrite&&input.previous&&input.readPreviousChunk)input=await planPrivateOverlay(input,restoreCrypto,readPrevious);
   if(input.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE))this.requireWriteV1();
   const requested=new Set(input.objects.map(o=>o.name)),explicit=input.carried??[];const retained=(input.previous?.keyVersion===input.keyVersion?input.previous.objects:[]).filter(o=>!requested.has(o.name)&&!explicit.some(c=>c.name===o.name)&&!['rss-state.json','library-sync.json'].includes(o.name)&&!input.removedObjectNames?.includes(o.name));
-  const logicalObjects=[...input.objects];const oldArchive=retained.find(o=>o.name==='private-library.wrss');if(oldArchive&&input.readPreviousChunk&&input.removedPrivateArticleIds?.length){requireCloudWritable(oldArchive);const bytes=await readPrevious(oldArchive);const remaining=await retireCloudArchive(bytes,input.removedPrivateArticleIds,(b,max)=>this.crypto.gunzip(b,max));retained.splice(retained.indexOf(oldArchive),1);if(remaining)logicalObjects.push({name:oldArchive.name,bytes:remaining,compress:false});}
+  const logicalObjects=[...input.objects];const oldArchive=retained.find(o=>o.name==='private-library.wrss');if(oldArchive&&input.readPreviousChunk&&input.removedPrivateArticleIds?.length){requireCloudWritable(oldArchive);const bytes=await readPrevious(oldArchive);const remaining=await retireCloudArchive(bytes,input.removedPrivateArticleIds,(b,max)=>restoreCrypto.gunzip(b,max));retained.splice(retained.indexOf(oldArchive),1);if(remaining)logicalObjects.push({name:oldArchive.name,bytes:remaining,compress:false});}
   for(const o of explicit)if((o.entryRef||o.objectKeyEnvelope)&&!input.previous?.objects.includes(o)){this.requireWriteV1();if(o.objectKeyEnvelope)check(this.writeGates?.migrationV1?.()===true,'cloud_format_migration_disabled');}
   const carried=[...explicit,...retained];
   for(const o of input.previous?.objects??[])if(cloudCompatibility(o).readOnly&&(requested.has(o.name)||!carried.some(c=>c.name===o.name)))throw Error('cloud_format_read_only');
@@ -139,7 +144,7 @@ export class WatchCloudCodec {
   const reusable=new Map(input.previous?.keyVersion===input.keyVersion?input.previous.objects.filter(o=>!o.readerKeyEnvelope&&!o.objectKeyEnvelope&&!o.entryRef&&!cloudCompatibility(o).opaque).flatMap(o=>o.chunks??[]).map(c=>[c.plaintextSha256,c]):[]);
   for(const m of input.reuseManifests??[])if(!cloudCompatibility(m).readOnly)for(const o of m.objects)if(!o.readerKeyEnvelope&&!o.objectKeyEnvelope&&!o.entryRef&&!cloudCompatibility(o).readOnly)for(const c of o.chunks??[])if(!reusable.has(c.plaintextSha256))reusable.set(c.plaintextSha256,c);
   const newChunks=new Map<string,Uint8Array>();const canonical=(c:CloudChunk)=>({...c,saltBase64:bytesToBase64(base64ToBytes(c.saltBase64)),nonceBase64:bytesToBase64(base64ToBytes(c.nonceBase64))});const objects:CloudObject[]=[...carried];
-  for(const original of logicalObjects){let logical=original;const old=input.previous?.objects.find(o=>o.name===logical.name);if(old&&(old.objectKeyEnvelope||old.readerKeyEnvelope)&&input.previous?.keyVersion===input.keyVersion&&input.readPreviousChunk&&this.writeGates?.writeV1()===true){const bytes=await readPrevious(old);if(bytes.length===logical.bytes.length&&await this.crypto.sha256(bytes)===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}}if(old&&input.previous?.keyVersion===input.keyVersion&&old.contentSha256&&old.originalBytes===logical.bytes.length&&old.contentSha256===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}if(input.objects.includes(original)&&old&&input.previous?.keyVersion===input.keyVersion&&logical.name==='private-library.wrss'&&input.readPreviousChunk){const previous=await readPrevious(old);if(await equalBytesAsync(previous,logical.bytes,{yield:this.crypto.yieldTurn})){objects.push(old);continue;}const merged=await mergeCloudArchive(previous,logical.bytes,(b,max)=>this.crypto.gunzip(b,max),input.removedPrivateArticleIds);if(merged.unchanged){objects.push(old);continue;}logical={...logical,bytes:merged.bytes};}
+  for(const original of logicalObjects){let logical=original;const old=input.previous?.objects.find(o=>o.name===logical.name);if(old&&(old.objectKeyEnvelope||old.readerKeyEnvelope)&&input.previous?.keyVersion===input.keyVersion&&input.readPreviousChunk&&this.writeGates?.writeV1()===true){const bytes=await readPrevious(old);if(bytes.length===logical.bytes.length&&await this.crypto.sha256(bytes)===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}}if(old&&input.previous?.keyVersion===input.keyVersion&&old.contentSha256&&old.originalBytes===logical.bytes.length&&old.contentSha256===await this.crypto.sha256(logical.bytes)){objects.push({...old,...(logical.privateArticle?{privateArticle:logical.privateArticle}:{}),...(logical.privateBook?{privateBook:logical.privateBook}:{})});continue;}if(input.objects.includes(original)&&old&&input.previous?.keyVersion===input.keyVersion&&logical.name==='private-library.wrss'&&input.readPreviousChunk){const previous=await readPrevious(old);if(await equalBytesAsync(previous,logical.bytes,{yield:this.crypto.yieldTurn})){objects.push(old);continue;}const merged=await mergeCloudArchive(previous,logical.bytes,(b,max)=>restoreCrypto.gunzip(b,max),input.removedPrivateArticleIds);if(merged.unchanged){objects.push(old);continue;}logical={...logical,bytes:merged.bytes};}
    check(logical.bytes.length<=MAX_OBJECT_BYTES);const chunks:CloudChunk[]=[];let encodedBytes=0;
    for(const slice of contentChunks(logical.bytes)){
     const plain=logical.compress===false?slice:await this.crypto.gzip(slice);
@@ -156,7 +161,9 @@ export class WatchCloudCodec {
   // cannot prove that the immutable target contains the requested bytes.
   for(const o of explicit)if(o.entryRef&&!input.previous?.objects.includes(o)){
    check(input.readPreviousChunk,'cloud_entry_ref_unverified');
-   const body=(await this.restore(input.accountKey,manifest,input.readPreviousChunk,[manifest.objects.find(x=>x.name===o.name)!])).get(o.name)!;
+   const descriptor=manifest.objects.find(x=>x.name===o.name)!;
+   const body=input.readRestoreObject?await input.readRestoreObject(manifest,descriptor,'entry-ref'):(await this.restore(input.accountKey,manifest,input.readPreviousChunk,[descriptor])).get(o.name)!;
+   check(body.length===o.originalBytes,'cloud_entry_ref_missing');
    if(o.contentSha256)check(await this.crypto.sha256(body)===o.contentSha256,'cloud_entry_ref_hash');
    this.requireWriteV1();
   }
@@ -171,7 +178,7 @@ export class WatchCloudCodec {
  async yieldRestoreTurn(){await this.crypto.yieldTurn?.();}
  async inflateRestoreEntry(bytes:Uint8Array,max:number){return this.crypto.gunzip(bytes,max);}
  get streamedRestoreGzip(){return !!this.crypto.gunzipSealedParts;}
- async streamRestoreGzip(key:Uint8Array,parts:SealedPart[],length:number,prefix:string,aadPrefix:string,maximum:number,offset:number,receipt:(step:SealedGzipStep)=>Promise<void>){if(!this.crypto.gunzipSealedParts)throw Error('cloud_snapshot_unit_capacity');return this.crypto.gunzipSealedParts(await this.projectionKey(key),parts,length,prefix,aadPrefix,maximum,offset,receipt);}
+ async streamRestoreGzip(key:Uint8Array,parts:SealedPart[],length:number,prefix:string,aadPrefix:string,maximum:number,offset:number,receipt:(step:SealedGzipStep)=>Promise<void>,allowShortOutput=false){if(!this.crypto.gunzipSealedParts)throw Error('cloud_snapshot_unit_capacity');return this.crypto.gunzipSealedParts(await this.projectionKey(key),parts,length,prefix,aadPrefix,maximum,offset,receipt,allowShortOutput);}
  private projectionKeys=new WeakMap<Uint8Array,Uint8Array>();
  private async projectionKey(key:Uint8Array){let derived=this.projectionKeys.get(key);if(!derived){derived=await this.crypto.hkdf(key,utf8Encode('watchrss-local-restore-v1'),utf8Encode('watchrss/cloud/local-restore-projection/v1'));this.projectionKeys.set(key,derived);}return derived;}
  clearRestoreProjectionKey(key:Uint8Array){this.projectionKeys.get(key)?.fill(0);this.projectionKeys.delete(key);}
@@ -191,8 +198,10 @@ export class WatchCloudCodec {
     for(let index=0;index<o.chunks.length;index++){await checkpoint?.check();const c=o.chunks[index],began=checkpoint?.now?.()??Date.now();
      if((checkpoint?.materializeOnly&&o.encoding!=='gzip'&&!o.contentSha256)||o.encoding==='gzip'&&checkpoint?.inflate){const length=await checkpoint.length?.(o,'chunk:'+index);if(length!==undefined){total+=length;check(total<=(o.encoding==='gzip'?o.encodedBytes:o.originalBytes));checkpoint.metric?.('chunk',length,began,true,index);continue;}}
      const saved=await checkpoint?.read(o,'chunk:'+index);let part=saved;
-     if(!part){if(!unwrapped){const envelope=o.objectKeyEnvelope??o.readerKeyEnvelope;if(envelope){check(envelope.version===1);const derived=await this.crypto.hkdf(key,base64ToBytes(envelope.saltBase64),utf8Encode(o.objectKeyEnvelope?'watchrss/cloud/object-key/v1':'watchrss/cloud/reader-key/v1'));try{root=await this.crypto.decrypt(derived,utf8Encode(`${o.objectKeyEnvelope?'watchrss-object-key-v1':'watchrss-reader-key-v1'}:${envelope.scope||o.name}`),base64ToBytes(envelope.nonceBase64),base64ToBytes(envelope.ciphertextBase64));check(root.length===32);}finally{derived.fill(0);}}unwrapped=true;}
-      let blob=await read(c.ciphertextSha256);const hashAt=checkpoint?.now?.()??Date.now();if(!(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256)){check(checkpoint?.reload);blob=await checkpoint.reload(c);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);}check(bytesToBase64(blob.subarray(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.subarray(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));checkpoint?.metric?.('source-hash',blob.length,hashAt,false,index);const decryptAt=checkpoint?.now?.()??Date.now();const plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);checkpoint?.metric?.('decrypt',plain.length,decryptAt,false,index);const inflateAt=checkpoint?.now?.()??Date.now();part=o.encoding==='gzip-chunks-v1'?await this.crypto.gunzip(plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total)):plain;if(o.encoding==='gzip-chunks-v1')checkpoint?.metric?.('inflate',part.length,inflateAt,false,index);await checkpoint?.write(o,'chunk:'+index,part);
+     if(!part){let plain=o.encoding==='gzip-chunks-v1'&&checkpoint?.inflateChunk?await checkpoint.read(o,'chunk:'+index+'-input'):undefined;
+      if(!plain){if(!unwrapped){const envelope=o.objectKeyEnvelope??o.readerKeyEnvelope;if(envelope){check(envelope.version===1);const derived=await this.crypto.hkdf(key,base64ToBytes(envelope.saltBase64),utf8Encode(o.objectKeyEnvelope?'watchrss/cloud/object-key/v1':'watchrss/cloud/reader-key/v1'));try{root=await this.crypto.decrypt(derived,utf8Encode(`${o.objectKeyEnvelope?'watchrss-object-key-v1':'watchrss-reader-key-v1'}:${envelope.scope||o.name}`),base64ToBytes(envelope.nonceBase64),base64ToBytes(envelope.ciphertextBase64));check(root.length===32);}finally{derived.fill(0);}}unwrapped=true;}
+      let blob=await read(c.ciphertextSha256);const hashAt=checkpoint?.now?.()??Date.now();if(!(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256)){check(checkpoint?.reload);blob=await checkpoint.reload(c);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);}check(bytesToBase64(blob.subarray(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.subarray(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));checkpoint?.metric?.('source-hash',blob.length,hashAt,false,index);const decryptAt=checkpoint?.now?.()??Date.now();plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);checkpoint?.metric?.('decrypt',plain.length,decryptAt,false,index);}
+      const inflateAt=checkpoint?.now?.()??Date.now();part=o.encoding==='gzip-chunks-v1'?(checkpoint?.inflateChunk?await checkpoint.inflateChunk(o,index,plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total)):await this.crypto.gunzip(plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total))):plain;if(o.encoding==='gzip-chunks-v1')checkpoint?.metric?.('inflate',part.length,inflateAt,false,index);if(!(o.encoding==='gzip-chunks-v1'&&checkpoint?.inflateChunk))await checkpoint?.write(o,'chunk:'+index,part);
      }
      total+=part.length;check(total<=(o.encoding==='gzip'?o.encodedBytes:o.originalBytes));if(!(o.encoding==='gzip'&&checkpoint?.inflate)&&(!checkpoint?.materializeOnly||o.encoding==='gzip'||!!o.contentSha256))parts.push(part);checkpoint?.metric?.('chunk',part.length,began,!!saved,index);
     }

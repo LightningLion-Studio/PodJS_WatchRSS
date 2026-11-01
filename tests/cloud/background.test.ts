@@ -160,6 +160,9 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
     windowProof.push({window:windowCount+1,elapsed:300000-(guestDeadline-guestNow),work,partWrites,result});console.info('RESTOREWIN_BUNDLE_WINDOW',JSON.stringify(windowProof.at(-1)));expect(guestNow).toBeLessThan(guestDeadline);expect(leased).toBe(false);
     done=result==='success';if(!done){expect(result,logs.join('')).toEqual({status:'retry',progress:true});expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);guestNow=Date.now();guestDeadline=guestNow+300000;}
    }
+   const summaries=logs.flatMap(text=>text.trim().split('\n')).filter(line=>line.includes('"event":"host-callsite-summary"')).map(line=>JSON.parse(line.slice(line.indexOf('{'))));
+   expect(summaries).toHaveLength(windowProof.length);expect(summaries.every(row=>row.receipts>0&&row.lastReceiptClass>0)).toBe(true);expect(summaries.some(row=>row.counts.some(([id,n]:number[])=>id>=16&&id<32&&n>0))).toBe(true);
+   expect(summaries.every(row=>Object.keys(row).sort().join(',')==='bands,counts,event,lastReceiptClass,receipts')).toBe(true);
    console.info('RESTOREWIN_PRODUCTION_BUNDLE',JSON.stringify(windowProof));expect(done).toBe(true);expect(windowCount).toBeGreaterThan(1);expect(acknowledgements).toBeGreaterThanOrEqual(1);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);expect(logs.join('')).toContain('"event":"window-unit"');expect(logs.join('')).toContain('"event":"snapshot-work"');continue;
   }
   if(fastMode){

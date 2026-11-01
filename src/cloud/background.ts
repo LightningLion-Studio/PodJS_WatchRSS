@@ -1,3 +1,4 @@
+import {restoreCallsiteTrace} from './restore-callsite';
 import {observeCpuWork,pulseCpuWork} from '@podjs/framework/cpu-work';
 import {WorkWindow,windowedHost} from '@podjs/framework/work-window';
 import {MANUAL_INTENT_KEY,readManualIntent,manualEpochKey,compareManualIntent,completeManualIntent} from './manual-handoff';
@@ -29,8 +30,9 @@ export default defineBackgroundHandler(async context=>{
  if(!context.request)return 'failure';
  const gate=new CloudGate();
  const yieldBudget=new SnapshotYieldBudget();
+ const callsites=restoreCallsiteTrace();
  let rejected:unknown;let buildIdentity='unknown';
- const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method,args);if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);callsites.observe(args);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method,args);if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
  const diagnostic=backgroundDiagnostics(request);
  const stopCpu=observeCpuWork(diagnostic.cpu);
  const window=new WorkWindow({deadlineMs:context.deadlineMs,reserveMillis:10000,expired:()=>new CloudSyncDeadlineError(),report:metric=>diagnostic.report(JSON.stringify(metric))});
@@ -50,7 +52,7 @@ export default defineBackgroundHandler(async context=>{
  // The host deadline is absolute Unix ms. Leave time for the normal
  // checkpoint/release path before the native guest's hard interrupt.
  const execution={finishRequest:(async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{if(!['secure.get','secure.compareAndSet'].includes(method))throw Error('invalid_window_finalizer');return window.cleanup(()=>request<T>(method,args));}) as CloudHostRequest,remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
- const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution,{restoreGuardVersion:SNAPSHOT_GUARD_VERSION+':'+buildIdentity,restoreStalled:value=>yieldBudget.stalled(value),recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
+ const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,undefined,execution,{restoreReceipt:id=>callsites.receipt(id),restoreGuardVersion:SNAPSHOT_GUARD_VERSION+':'+buildIdentity,restoreStalled:value=>yieldBudget.stalled(value),recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
  const account=await runtime.accounts.read();if(!account)return 'success';
  const payload=context.payload as {manual?:boolean;token?:string}|null;
  let intent:ReturnType<typeof readManualIntent>;
@@ -71,7 +73,7 @@ export default defineBackgroundHandler(async context=>{
  // successful restore or an unbounded retry of the same manual grant.
  return cloudBackgroundOutcome(success,!!intent,runtime.service.status);
  }catch(error){if(error instanceof CloudSyncDeadlineError)return 'retry';if((error as {code?:unknown})?.code!==CLOUD_HOST_CAPABILITY_UNAVAILABLE)throw error;diagnostic.report(recordFailureDiagnostic(error));return 'failure';}
- finally{stopCpu();try{await diagnostic.flush();}finally{yieldHosts.delete(context);}}
+ finally{stopCpu();try{await diagnostic.flush();if(running)try{await request('log.append',{path:'app_log.txt',text:' [I] CloudRestore '+JSON.stringify(callsites.summary())+'\n',maxBytes:5*1024*1024});}catch{/* Diagnostics cannot change restore outcome. */}}finally{yieldHosts.delete(context);}}
 },{yieldTurn:async context=>{
  if(context.isCancelled())throw Error('Cloud worker cancelled');
  if(Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();

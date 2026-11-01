@@ -1,3 +1,4 @@
+import {restoreReceiptClass} from './restore-callsite';
 import {cpuWork,cpuJsonParse,cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {snapshotDeferred,SNAPSHOT_GUARD_VERSION} from './snapshot-deferral';
 import {recordFailureDiagnostic} from './record-diagnostic';
@@ -58,7 +59,7 @@ export class SnapshotRestoreCheckpoint {
  private async record(kind:'units'|'projections',id:string,bytes:number){
   const work=this.value.work,total=this.value.bytes,previous=this.value[kind][id],shard=this.shard(id);
   this.value[kind][id]=bytes;this.value.work++;this.value.bytes+=bytes;
-  try{await this.saveEntry(kind,id,bytes);this.committedUnits++;this.session.restoreCheckpoint?.stalled?.(false);}catch(error){if((error as {restoreEntryCommitted?:boolean})?.restoreEntryCommitted)this.committedUnits++;this.value.work=work;this.value.bytes=total;if(previous===undefined){delete this.value[kind][id];delete this.shards[shard][kind][id];}else{this.value[kind][id]=previous;this.shards[shard][kind][id]=previous;}throw error;}
+  try{await this.saveEntry(kind,id,bytes);this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}this.session.restoreCheckpoint?.stalled?.(false);}catch(error){if((error as {restoreEntryCommitted?:boolean})?.restoreEntryCommitted){this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}}this.value.work=work;this.value.bytes=total;if(previous===undefined){delete this.value[kind][id];delete this.shards[shard][kind][id];}else{this.value[kind][id]=previous;this.shards[shard][kind][id]=previous;}throw error;}
  }
  async commit(unit:string,bytes=0){if(this.has(unit))return;await this.record('units',unit,bytes);}
  apply(prefix:string,progress?:(done:number,total:number)=>void):RestoreApplyCheckpoint{return {progress,has:unit=>this.has(prefix+':'+unit),result:unit=>this.value.units[prefix+':'+unit]??0,commit:(unit,abandoned=0)=>this.commit(prefix+':'+unit,abandoned),check:this.current};}
@@ -74,7 +75,7 @@ export class SnapshotRestoreCheckpoint {
  length(token:string){return this.has('decoded:'+token)?this.value.units['decoded:'+token]:undefined;}
  async read(token:string):Promise<Uint8Array|undefined>{return this.readBatch(()=>this.readProjection(token));}
  private async readProjection(token:string):Promise<Uint8Array|undefined>{
-  await this.current();const at=this.now(),m=await this.index(token);if(!m||m.provisional&&!this.has('decoded:'+token))return;// Partial shapes resume their suffix without decrypting the committed prefix.
+  await this.current();const at=this.now(),m=await this.index(token);if(!m){if(this.has('decoded:'+token))await this.invalidate('decoded:'+token);return;}if(m.provisional&&!this.has('decoded:'+token))return;// Partial shapes resume their suffix without decrypting the committed prefix.
   if(m.parts.length>1&&m.parts.some(id=>!Object.prototype.hasOwnProperty.call(this.value.projections,id)))return;
   if(m.length>256*1024&&m.length<=64*1024*1024&&this.codec.batchedRestoreParts){
    const key=await this.accountKey();if(!key)throw Error('missing_key_version');
@@ -91,7 +92,7 @@ export class SnapshotRestoreCheckpoint {
  private async readRange(token:string,offset:number,length:number,index?:ProjectionIndex){await this.current();const m=index??await this.index(token);if(!m||m.provisional&&!this.has('decoded:'+token)||!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>m.length)throw Error('cloud_snapshot_projection_missing');const out=new Uint8Array(length);let start=0,at=0;
   for(let i=0;i<m.parts.length&&at<length;i++){const end=start+m.lengths[i];if(end>offset&&start<offset+length){await this.current();const id=m.parts[i];let b=this.rangeParts.get(id);if(!b){const began=this.now();b=await this.readBlob(id);if(!b||b.length!==m.lengths[i]){await this.forgetProjection(id);throw Error('cloud_snapshot_projection_missing');}while(this.rangeParts.size&&this.rangeBytes+b.length>8*1024*1024){const first=this.rangeParts.keys().next().value!;this.rangeBytes-=this.rangeParts.get(first)!.length;this.rangeParts.delete(first);}this.rangeParts.set(id,b);this.rangeBytes+=b.length;this.metric('checkpoint-range-piece',b.length,began,true);}else{this.rangeParts.delete(id);this.rangeParts.set(id,b);}const from=Math.max(0,offset-start),to=Math.min(b.length,offset+length-start);out.set(b.subarray(from,to),at);at+=to-from;}start=end;}if(at!==length)throw Error('cloud_snapshot_projection_missing');return out;
  }
- private async forgetProjection(id:string){const token=id.replace(/-p[0-9]+$/,'');if(this.has('decoded:'+token))await this.invalidate('decoded:'+token);delete this.value.projections[id];const shard=this.shard(id);delete this.shards[shard].projections[id];await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[shard]}),shard);}
+ private async forgetProjection(id:string){const token=id.replace(/-p[0-9]+$/,'');if(this.has('decoded:'+token))await this.invalidate('decoded:'+token);if(this.has('decoded:'+token+'-eof'))await this.invalidate('decoded:'+token+'-eof');delete this.value.projections[id];const shard=this.shard(id);delete this.shards[shard].projections[id];await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[shard]}),shard);}
  async write(token:string,bytes:Uint8Array){
   const began=this.now(),parts:string[]=[];for(let offset=0;offset<bytes.length||!parts.length;offset+=256*1024)parts.push(token+'-p'+offset);
   // Publish authenticated shape first. A partially written projection is never
@@ -106,7 +107,7 @@ export class SnapshotRestoreCheckpoint {
  }
  /** Output parts are provisional until native EOF/CRC and optional content hash.
   * The scope binds immutable source descriptors. Old published state stays live. */
- async gunzip(token:string,children:string[],length:number,contentHash?:string){
+ async gunzip(token:string,children:string[],length:number,contentHash?:string,allowShortOutput=false){
   await this.current();const parts:{path:string;aadBase64:string;bytes:number}[]=[];let inputBytes=0;
   for(const child of children){const index=await this.index(child);if(!index||!this.has('decoded:'+child))throw Error('cloud_snapshot_projection_missing');
    for(let i=0;i<index.parts.length;i++){const id=index.parts[i];parts.push({path:await this.cache.restoreProjectionPath(this.session.userId,id),aadBase64:bytesToBase64(utf8Encode(this.root+':'+id)),bytes:index.lengths[i]});inputBytes+=index.lengths[i];}}
@@ -118,15 +119,20 @@ export class SnapshotRestoreCheckpoint {
   let offset=0;for(let i=0;i<ids.length;i++){if(this.value.projections[ids[i]]!==lengths[i])break;offset+=lengths[i];}
   const key=await this.accountKey();if(!key)throw Error('missing_key_version');
   const prefix=(await this.cache.restoreProjectionPath(this.session.userId,token)).replace(/\.bin$/,'-p');
-  try{const hash=await this.codec.streamRestoreGzip(key,parts,inputBytes,prefix,this.root+':'+token+'-p',length,offset,async step=>{
+  let actualLength=length;
+  const completed=this.length(token+'-eof');
+  if(allowShortOutput&&completed!==undefined)actualLength=completed;
+  else try{const hash=await this.codec.streamRestoreGzip(key,parts,inputBytes,prefix,this.root+':'+token+'-p',length,offset,async step=>{
     await this.session.restoreCheckpoint?.assertCurrent?.();if((step.bytes||length===0)&&!Object.prototype.hasOwnProperty.call(this.value.projections,token+'-p'+step.offset))await this.record('projections',token+'-p'+step.offset,step.bytes);
+    if(allowShortOutput&&step.done){if(contentHash&&step.sha256!==contentHash)throw Error('cloud_snapshot_projection_integrity');actualLength=step.offset+step.bytes;await this.commit('decoded:'+token+'-eof',actualLength);}
     await this.current();
-   });if(contentHash&&hash!==contentHash)throw Error('cloud_snapshot_projection_integrity');
+   },allowShortOutput);if(contentHash&&hash!==contentHash)throw Error('cloud_snapshot_projection_integrity');
   }catch(error){const match=/sealed_part_invalid_([0-9]+)/.exec(String(error));if(match){const id=parts[Number(match[1])]?.path.split('/').at(-1)?.replace(/\.bin$/,'');if(id)await this.forgetProjection(id);}throw error;}
   // Only verified output may replace the provisional shape. Both the old and
   // new readers can recover this valid publication if the final receipt stops.
-  await this.writeBlob(token,utf8Encode(cpuJsonStringify({length,parts:ids,lengths})));
-  await this.commit('decoded:'+token,length);
+  const finalIds=allowShortOutput?ids.filter((_,i)=>i*262144<actualLength):ids;
+  await this.writeBlob(token,utf8Encode(cpuJsonStringify({length:actualLength,parts:finalIds,lengths:finalIds.map((_,i)=>Math.min(262144,actualLength-i*262144))})));
+  await this.commit('decoded:'+token,actualLength);
  }
  close(){this.indices.clear();for(const b of this.rangeParts.values())b.fill(0);this.rangeParts.clear();this.rangeBytes=0;if(this.key)this.codec.clearRestoreProjectionKey(this.key);this.key?.fill(0);this.key=undefined;}
  async noProgress(error:unknown){
