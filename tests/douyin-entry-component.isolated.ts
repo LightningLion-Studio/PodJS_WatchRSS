@@ -99,7 +99,7 @@ for(const options of [{cacheCount:1},{cacheCount:2},{cacheCount:4,hasMore:true,c
 test('cached feed refresh failure remains retryable without serial detail probes',async()=>{
   const f=mount({cacheCount:4,hasMore:true,cursor:'c'});await requestReady(f);f.swipe(80);await settle();
   expect(f.requests).toHaveLength(2);expect(f.text()).not.toContain('刷新中...');
-  f.requests[1]!.reply.resolve(response([],503));await settle();expect(f.text()).toContain('网络请求失败');expect(f.text()).not.toContain('刷新中...');
+  f.requests[1]!.reply.resolve(response([],503));const deadline=Date.now()+2000;while(!f.text().includes('网络请求失败')&&Date.now()<deadline)await settle();expect(f.text()).toContain('网络请求失败');expect(f.text()).not.toContain('刷新中...');
   f.swipe(-80);await settle();expect(f.plays).toHaveLength(1);expect(f.requests).toHaveLength(2);
 });
 

@@ -159,3 +159,37 @@ presentation. This is a configured UI budget, not measured device latency or a
 claim that a new network feed succeeded within 1500 ms. Slow or failed requests
 show a retryable error while retaining cached content. Network, renderer and JS
 scheduling can still exceed the target; actual paired device samples decide it.
+
+### T-1200 closed request outcomes
+
+`douyin_request` uses the existing synchronous release PodBenchmark path. Native
+owns seq and uptime. All eight fields are mandatory; extra fields are rejected:
+
+- `category`: `feed`, `detail`, `auth_probe`, `media`.
+- `http_status`: integer 0..599; 0 means no response status observed.
+- `douyin_status_code`: integer -1..2147483647; -1 means absent/unreadable/not applicable.
+- `challenge`: boolean; API uses the existing leading HTML detector. Media does
+  not inspect payload bytes, so false does not rule out an upstream challenge.
+- `signing_ok`: boolean; true only means local signing returned successfully. It
+  does not prove that the server accepted the signature. Media is unsigned here
+  and reports false (not applicable).
+- `cookie_present`: boolean; presence in the request headers only. This does not
+  prove server-side authentication.
+- `retry_after_ms`: nonnegative safe integer; response Retry-After or actual
+  policy delay. Zero means no delay was observed, not permission to retry.
+- `error_code`: `success`, `forbidden`, `http`, `signing`, `challenge`, `empty`,
+  `blocked`, `api_status`, `timeout`, `cancelled`, `network`, `cooldown`,
+  `client_limit`, `decode`.
+
+Each signed attempt reports separately, including its single policy retry.
+Cooldown transitions and suppressed calls report `cooldown` with HTTP 0/API -1;
+these are not network requests. The detail request also covers play-URL resolve.
+Cache-only resolves do not imply a network outcome. Probe cancellation is logged
+when the actual operation settles, not fabricated when its timeout wins a race.
+Media sources report open/read failure, EOF, or intentional close exactly once.
+A prefix close can be successful without downloading the entire video. Both
+prefetch range sources and foreground cache misses use the same native wrapper;
+cache hits alone do not fabricate a network request.
+
+No URLs, content identifiers, cookies, tokens, raw errors or body text enter this
+path. Existing performance counters do not use request events as frame evidence.

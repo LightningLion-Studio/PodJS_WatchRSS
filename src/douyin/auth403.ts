@@ -1,3 +1,4 @@
+import {douyinRequestDiagnostic} from './request-diagnostics.ts';
 import * as hostServices from '@podjs/framework/services';
 import type {DouyinSecureStorage} from './types.ts';
 
@@ -113,6 +114,7 @@ export class Douyin403Policy {
     catch{this.ports.metric({stage:'storage',api,count:1,result:'failed'});}
     if(!await this.ports.current())return {kind:'cancelled'};
     this.ports.metric({stage:'cooldown',api,count:1,result:'entered',delayMs});
+    douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:true,retry_after_ms:delayMs,error_code:'cooldown'});
     return {kind:'limited',authenticated:this.states[api].authenticated,retryAfterMs:Math.max(0,this.states[api].until-this.ports.now())};
   }
 }

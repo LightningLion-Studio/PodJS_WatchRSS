@@ -1,3 +1,4 @@
+import {douyinRequestDiagnostic,douyinRetryAfter} from './request-diagnostics.ts';
 import {douyinBench} from './bench.ts';
 import {douyinMediaExpiry} from './media-expiry.ts';
 import {rememberRecommendationIds} from '../media/recommendation-history.ts';
@@ -144,18 +145,20 @@ export class DouyinClient {
     const profile=douyinRequestProfile(config??await resolveDouyinRequestConfig(this.options.requestConfig));params={...profile.params,...params};
     const api:DouyinApiCategory=path==='/aweme/v2/web/module/feed/'?'feed':path==='/aweme/v1/web/aweme/detail/'?'detail':'other';
     const policy=this.recoveryPolicy(cookie,generation);
-    if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited')return this.limited(limited);}
+    if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}}
     const policyVersion=policy.snapshotVersion(api);
     const attempt=async():Promise<DouyinResult<string>|{forbidden:true}>=>{
+      const observed:Parameters<typeof douyinRequestDiagnostic>[0]={category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:0,error_code:'cancelled'};
+      try {
       if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
       let signed:string;
-      try{signed=await this.signer.sign({...params});}
-      catch{appLogger.e('DouyinClient',`request failed path=${path} category=signing`);return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));}
+      try{signed=await this.signer.sign({...params});observed.signing_ok=true;}
+      catch{observed.error_code='signing';appLogger.e('DouyinClient',`request failed path=${path} category=signing`);return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));}
       if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-      const active=policy?.activeCooldown(api);if(active)return this.limited(active);
+      const active=policy?.activeCooldown(api);if(active){observed.error_code='cooldown';observed.retry_after_ms=active.retryAfterMs;return this.limited(active);}
       if(api==='detail'){
         this.detailTimes=this.detailTimes.filter(time=>time>this.now()-DOUYIN_DETAIL_WINDOW_MS);
-        if(this.detailTimes.length>=DOUYIN_DETAIL_MAX_REQUESTS)return {...fail<string>('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:Math.max(1,this.detailTimes[0]+DOUYIN_DETAIL_WINDOW_MS-this.now())};
+        if(this.detailTimes.length>=DOUYIN_DETAIL_MAX_REQUESTS){observed.error_code='client_limit';observed.retry_after_ms=Math.max(1,this.detailTimes[0]+DOUYIN_DETAIL_WINDOW_MS-this.now());return {...fail<string>('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:observed.retry_after_ms};}
         this.detailTimes.push(this.now());
       }
       const url=`https://www.douyin.com${path}?${query({...params,a_bogus:signed})}`;
@@ -163,37 +166,39 @@ export class DouyinClient {
         if(api==='detail')appLogger.i('DouyinDetail',JSON.stringify({event:'request',api:'detail',count:1,mode:'abogus_only'}));
         const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
           timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
+        observed.http_status=r.status;observed.retry_after_ms=douyinRetryAfter(r.headers);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
-        const detailBody=await decodeMediaText(r.body);
+        observed.error_code='decode';const detailBody=await decodeMediaText(r.body);const detailStatusCode=await readDouyinStatusCode(detailBody);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        if(isDouyinHtmlChallenge(detailBody)){
+        if(isDouyinHtmlChallenge(detailBody)){observed.challenge=true;observed.error_code='challenge';
           appLogger.w('DouyinDetail',JSON.stringify({event:'challenge',api:'detail',count:1,mode:'abogus_only'}));
           const decision=await policy?.challenge(api);
           if(!await this.currentAuth(cookie,generation)||decision?.kind==='cancelled')return fail('CANCELLED',formatDouyinError('CANCELLED'));
-          return {...fail('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:decision?.kind==='limited'?decision.retryAfterMs:30000};
+          observed.retry_after_ms=decision?.kind==='limited'?decision.retryAfterMs:30000;return {...fail('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:observed.retry_after_ms};
         }
-        if(r.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
-        if(r.status!==200){appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
+        if(r.status===403){observed.error_code='forbidden';appLogger.e('DouyinClient',`request failed path=${path} category=http status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
+        if(r.status!==200){observed.error_code='http';appLogger.e('DouyinClient',`request failed path=${path} category=http status=${r.status}`);return fail('REQUEST_FAILED',`请求失败，状态码：${r.status}（仅支持200）`);}
         const body=detailBody??await decodeMediaText(r.body);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        if(!body.trim()||body==='blocked'){
+        if(!body.trim()||body==='blocked'){observed.error_code=body==='blocked'?'blocked':'empty';
           appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=${body==='blocked'?'blocked':'empty'}`);
           return this.authDecision(policy,cookie,generation,api);
         }
-        const statusCode=await readDouyinStatusCode(body);
+        const statusCode=detailStatusCode;
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        if(statusCode===8){appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=status8`);return this.expireAuthentication(cookie,generation);}
-        if(statusCode!==undefined&&statusCode!==0)return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));
-        await policy.successful(policyVersion,api);
+        if(statusCode===8){observed.error_code='api_status';appLogger.w('DouyinClient',`request failed path=${path} category=authentication reason=status8`);return this.expireAuthentication(cookie,generation);}
+        if(statusCode!==undefined&&statusCode!==0){observed.error_code='api_status';return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));}
+        observed.error_code='success';await policy.successful(policyVersion,api);
         return await this.currentAuth(cookie,generation)?{ok:true,data:body}:fail('CANCELLED',formatDouyinError('CANCELLED'));
       }catch(error){
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        const failure=mediaRequestFailure(error);
+        const failure=mediaRequestFailure(error);observed.error_code=failure.category==='http'&&failure.status===403?'forbidden':failure.category;observed.http_status=failure.status??observed.http_status;
         if(failure.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category} status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
         appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
         return fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`);
       }
+      } finally {douyinRequestDiagnostic(observed);}
     };
     const first=await attempt();if(!('forbidden' in first))return first;
     if(!this.recoveryEnabled())return this.authDecision(policy,cookie,generation,api);
@@ -202,7 +207,7 @@ export class DouyinClient {
     const pending=(async():Promise<DouyinResult<string>>=>{
       try{await policy.backoff(api);}catch{return fail('CANCELLED',formatDouyinError('CANCELLED'));}
       if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-      const limited=await policy.cooldown(api);if(limited?.kind==='limited')return this.limited(limited);
+      const limited=await policy.cooldown(api);if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}
       const retried=await attempt();
       if('forbidden' in retried)return this.authDecision(policy,cookie,generation,api);
       if(!retried.ok&&retried.code==='NOT_LOGGED_IN')return this.expireAuthentication(cookie,generation);
