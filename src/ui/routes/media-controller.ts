@@ -527,6 +527,16 @@ export function createMediaRouteController(
 
   onFrame(()=>{const entry=dependencies.current(),state=entry.queue?.snapshot();douyinDebug.updateContext(state?.item?.awemeId??'',state?.playlist[(state?.index??0)+1]?.awemeId??'',entry.page==='video'&&!!entry.queue,entry.queue);void douyinDebug.tick(Date.now(),lifecycle()==='active'&&entry.page==='video'&&!!entry.queue,()=>changeDouyinVideo(entry,'next')).catch(error=>dependencies.setError(String(error)));});
 
+  const adjacentHeaderCache=new WeakMap<RouteEntry,{authorization:number;value:Promise<Record<string,string>>}>();
+  const adjacentHeaders=async(entry:RouteEntry)=>{
+    const authorization=douyinClient.playbackAuthorizationVersion?.()??0,known=adjacentHeaderCache.get(entry);
+    if(known?.authorization===authorization)return known.value;
+    // A playing route already owns authenticated headers. Coalesce subsequent
+    // reads after an auth change before either neighbour queues decoder work.
+    const record={authorization,value:!known&&entry.playback?.headers?Promise.resolve(entry.playback.headers):douyinClient.buildPlaybackHeaders()};
+    adjacentHeaderCache.set(entry,record);
+    try{return await record.value;}catch(error){if(adjacentHeaderCache.get(entry)===record)adjacentHeaderCache.delete(entry);throw error;}
+  };
   const prepareDouyinAdjacent = async (
     entry:RouteEntry,
     direction:"next"|"previous",
@@ -535,7 +545,7 @@ export function createMediaRouteController(
     if(!entry.queue||dependencies.current()!==entry)return;
     const result=await entry.queue.preview(direction,distance);
     if(dependencies.current()!==entry||!result.ok)return;
-    const headers=await douyinClient.buildPlaybackHeaders();
+    const headers=await adjacentHeaders(entry);
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
     if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
     const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next');
@@ -615,7 +625,7 @@ export function createMediaRouteController(
       if ((videoOptEnabled('recovery')||entry.playback?.immersive&&error!==undefined)&&category!=='decode'&&category!=='restricted') {
         const selected=entry.queue.snapshot().item!;
         if(entry.douyinRecovery?.id!==id)entry.douyinRecovery={id,policy:new DouyinPlaybackRecovery(selected,async()=>{
-          const result=await douyinClient.resolvePlayback(id,{forceRefresh:true});
+          const result=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});
           if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code,retryAfterMs:result.retryAfterMs});
           return result.data;
         })};
@@ -631,7 +641,7 @@ export function createMediaRouteController(
       }
       if (category!=='restricted'&&category!=='decode'&&entry.playback?.url?.startsWith('managed-cache/douyin-preload/')) {
         await douyinPreload.invalidate(id);
-        const remote=await douyinClient.resolvePlayback(id,{forceRefresh:true});
+        const remote=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
         if(!remote.ok){dependencies.setError(remote.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders();
@@ -643,7 +653,7 @@ export function createMediaRouteController(
         dependencies.onActivityStateChange?.();return;
       }
       if(category!=='restricted'&&category!=='decode'&&entry.playback?.previewOnly){
-        const fresh=await douyinClient.resolvePlayback(id,{forceRefresh:true});if(!fresh.ok){dependencies.setError(fresh.message);return;}
+        const fresh=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});if(!fresh.ok){dependencies.setError(fresh.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders(),url=await douyinPlaybackUrl(fresh.data,headers);
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
         entry.queue.refreshPrefetchItem(id,fresh.data);entry.playback={...entry.playback,url,headers,previewOnly:false};await entry.queue.persist();

@@ -58,7 +58,7 @@ export class DouyinPlaybackQueue {
     const write=this.persistence.catch(()=>{}).then(async()=>{await this.client.recordPresented?.(item);await this.client.recordHistory(item);await this.client.saveRecentWindow(state.playlist,item.awemeId,state.cursor,state.hasMore);await this.client.savePlaybackQueue(state.playlist,item.awemeId,state.cursor,state.hasMore);});
     this.persistence=write;await write;
   }
-  async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true});}}
+  async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
   async preview(direction:"next"|"previous",distance:1|2=1):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const epoch=this.previewGeneration,op=++this.previewRevisions[direction],nav=this.generation;
@@ -150,14 +150,14 @@ export class DouyinPlaybackQueue {
 
   private async resolveAt(target:number,op:number,forceRefresh=false):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const candidate=this.items[target];if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
-    const resolved:DouyinResult<DouyinItem>=this.fixedSources||!forceRefresh&&await this.options.localPlayback?.(candidate.awemeId)?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId,{forceRefresh});
+    const resolved:DouyinResult<DouyinItem>=this.fixedSources||!forceRefresh&&await this.options.localPlayback?.(candidate.awemeId)?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId,{forceRefresh,feedItem:candidate,allowDetail:false});
     if(op!==this.generation)return cancelled();if(!resolved.ok)return resolved;
     this.items[target]=resolved.data;this.index=target;
     return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};
   }
   private async resolvePreviewAt(target:number,current:()=>boolean):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const candidate=this.items[target];if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
-    const resolved:DouyinResult<DouyinItem>=this.fixedSources||await this.options.localPlayback?.(candidate.awemeId)?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId);
+    const resolved:DouyinResult<DouyinItem>=this.fixedSources||await this.options.localPlayback?.(candidate.awemeId)?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId,{feedItem:candidate,allowDetail:false});
     if(!current())return cancelled();
     target=this.items.findIndex(item=>item.awemeId===candidate.awemeId);
     if(target<0||target===this.index)return cancelled();if(!resolved.ok)return resolved;

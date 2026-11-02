@@ -1,4 +1,5 @@
 import {expect,test} from 'bun:test';
+import {URL as NodeURL} from 'node:url';
 import {DouyinClient} from '../../src/douyin/client.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
 import {DOUYIN_AUTH403_COOLDOWN_KEY} from '../../src/douyin/auth403.ts';
@@ -43,4 +44,43 @@ test('fresh feed supersedes an outstanding stale detail request without waiting 
  while(f.requests.length===0)await new Promise(r=>setTimeout(r,1));f.replies.push(response({aweme_list:[wire('a')]}));await f.client.fetchFeedPage();
  expect(await f.client.resolvePlayback('a')).toMatchObject({ok:true,source:'feed-cache'});expect(await f.client.fetchDetail('a')).toMatchObject({ok:true,source:'feed-cache'});
  complete(response({},403));f.replies.push(response({},403));await stale;expect(await f.client.resolvePlayback('a')).toMatchObject({ok:true,source:'feed-cache'});
+});
+
+test('DYSWIPE3 200 feed swipes, both neighbours and refills never use detail across soft expiry/LRU eviction',async()=>{
+ let now=1_000_000,feed=0,detail=0;const values=new Map([['douyin.cookie','fixture']]);
+ const client=new DouyinClient({now:()=>now,secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},signer:{sign:()=> 'fixture'},transport:{request:async request=>{
+  const url=new NodeURL(request.url);if(url.pathname.includes('/detail/')){detail++;return response({},403);}
+  expect(url.pathname).toContain('/feed/');feed++;const start=Number(url.searchParams.get('cursor')??url.searchParams.get('max_cursor')??0);
+  return response({aweme_list:Array.from({length:4},(_,i)=>wire(String(start+i))),max_cursor:start+4,has_more:1});
+ }}});
+ const first=await client.fetchFeedPage();if(!first.ok)throw Error(JSON.stringify(first));
+ const queue=new DouyinPlaybackQueue(client,{items:first.data.items,selectedAwemeId:'0',cursor:first.data.nextCursor,hasMore:true});
+ now+=300001;
+ for(let i=0;i<200;i++){
+  if(i)expect((await queue.preview('previous')).ok).toBe(true);
+  const next=await queue.preview('next');expect(detail).toBe(0);expect(next.ok).toBe(true);if(!next.ok)throw Error(next.message);
+  expect((await client.resolvePlayback(next.data.item.awemeId,{prefetch:true,feedItem:next.data.item,allowDetail:false})).ok).toBe(true);
+  await queue.prefetch();expect((await queue.next()).ok).toBe(true);now+=1000;
+ }
+ expect(detail).toBe(0);expect(feed).toBeGreaterThan(1);expect(queue.snapshot().item?.awemeId).toBe('200');
+ console.log('DYSWIPE3_FEED_MODEL '+JSON.stringify({swipes:200,detail,feed,softExpiryCrossed:true,queueBound:40}));
+});
+
+test('DYSWIPE3 expired feed-owned URL never starts implicit detail; explicit detail cooldown cannot block it',async()=>{
+ const f=fixture();f.replies.push(response({},403),response({},403));await f.client.fetchDetail('explicit',{forceRefresh:true});const before=detailCount(f);
+ const supplied={awemeId:'cold',description:'',createdAtSeconds:0,authorId:'',authorName:'',likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:'https://fixture.invalid/cold',durationMs:1000,variants:[]};
+ expect(await f.client.resolvePlayback('cold',{feedItem:supplied,allowDetail:false})).toMatchObject({ok:true,source:'feed-cache'});
+ f.advance(300001);expect(await f.client.resolvePlayback('cold',{feedItem:supplied,allowDetail:false,prefetch:true})).toMatchObject({ok:true});
+ expect(detailCount(f)).toBe(before);
+});
+
+test('DYSWIPE3 variant-only feed metadata and expired/rejected URLs use feed instead of detail',async()=>{
+ const f=fixture();f.replies.push(response({aweme_list:[wire('a')]}));const page=await f.client.fetchFeedPage();if(!page.ok)throw Error('feed');
+ const item=page.data.items[0]!;f.advance(300001);
+ expect(await f.client.resolvePlayback('a',{feedItem:{...item,playUrl:''},allowDetail:false})).toMatchObject({ok:true});
+ f.advance(2_000_000_000_000);
+ for(const options of [{forceRefresh:true,feedItem:item},{feedItem:{...item,variants:[],playUrl:'https://fixture.invalid/a?expires=100000000'}}]){
+  f.advance(300001);f.replies.push(response({aweme_list:[wire('a')]}));expect(await f.client.resolvePlayback('a',{...options,allowDetail:false})).toMatchObject({ok:true});
+ }
+ expect(detailCount(f)).toBe(0);expect(f.requests).toHaveLength(3);
 });

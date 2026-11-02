@@ -537,3 +537,19 @@ test('DYSWIPE loading ring requires empty buffer and measured network stall, nev
   }
  }finally{Date.now=realNow;}
 });
+
+test('DYSWIPE3 pending publication retains a second swipe and a later cancellation exactly once',async()=>{
+ sessionsCapable=false;initial='available';gestures.length=0;ticks=[];prepares=[];
+ const realNow=Date.now,originalPod=(globalThis as any).pod;let time=1000,seq=1,selected=100,calls=0;Date.now=()=>time;
+ const marks:any[]=[];(globalThis as any).pod={benchmark:(line:string)=>{const value=JSON.parse(line);marks.push(value);return value.seq??++seq;}};
+ let publish!:()=>void;const gate=new Promise<void>(r=>publish=r);
+ const source=(n:number)=>({platform:'douyin' as const,immersive:true,awemeId:String(n),url:'local/'+n,title:'fixture'});
+ try{
+  createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source(selected));return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,onPrepareAdjacent:async()=>undefined,onNext:async()=>{if(++calls===1)await gate;set(source(++selected));}});});await flush();
+  const g=gestures[0],advance=async(ms:number)=>{for(let n=0;n<ms;n+=16){time+=16;ticks.splice(0).forEach(t=>t());await flush();}};
+  g.onPanStart({dy:-12});g.onPanMove({dy:-120});g.onPanEnd({vy:-500});await advance(128);expect(calls).toBe(1);
+  g.onPanStart({dy:-12});g.onPanMove({dy:-120});g.onPanEnd({vy:-500});await flush();
+  g.onPanStart({dy:-12});g.onPanMove({dy:-10});g.onPanEnd({vy:0});await flush();
+  publish();await advance(800);expect(selected).toBe(102);expect(calls).toBe(2);expect(marks.filter(v=>v.code==='gesture_release')).toHaveLength(3);expect(marks.filter(v=>v.code==='gesture_release'&&v.direction==='cancel')).toHaveLength(1);
+ }finally{Date.now=realNow;(globalThis as any).pod=originalPod;}
+});

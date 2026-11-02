@@ -128,7 +128,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const media={
     prepare:(options:VideoPrepare)=>usingSessions()?sessionPool!.prepare(sessionSource(props.source),options):video.prepare(options),
     retire:()=>usingSessions()?sessionPool!.retire():video.retire(),
-    play:()=>usingSessions()?sessionPool!.play():video.play(),pause:()=>usingSessions()?sessionPool!.pause():video.pause(),
+    play:()=>usingSessions()?sessionPool!.play():video.play(),pause:(action?:VideoBenchmarkAction)=>usingSessions()?sessionPool!.pause(action):video.pause(),
     seek:(positionMs:number)=>usingSessions()?sessionPool!.seek(positionMs):video.seek(positionMs),
     stop:()=>usingSessions()?sessionPool!.stop():video.stop(),state:()=>usingSessions()?sessionPool!.state():video.state(),
     setBounds:(value:VideoBounds)=>usingSessions()?sessionPool!.setBounds(value):video.setBounds(value),
@@ -324,6 +324,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     forwardWarm=pending;return pending;
   };
   let dragRevision=0,dragDirection:DouyinPagerDirection|undefined,dragTarget:DouyinPreparedSource|undefined,dragTargetPromise:Promise<DouyinPreparedSource|undefined>|undefined,dragSettling=false;
+  type DeferredDrag={distanceY:number;velocityY:number;cancel:boolean;seq:number;action?:VideoBenchmarkAction};
+  let deferredPan:DeferredDrag|undefined,drainingDeferred=false,replayingDeferred=false;
+  const deferredDrags:DeferredDrag[]=[];
   const clearDrag=()=>{setNativeDrag(false);dragDirection=undefined;setDragAxis(undefined);dragTarget=undefined;dragTargetPromise=undefined;dragSettling=false;setDragPoster(null);setDragProgress(0);};
   const ensureDragTarget=(direction:DouyinPagerDirection,revision:number)=>{
     const queueDirection:"next"|"previous"=direction==="up"?"next":"previous";
@@ -343,11 +346,15 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     });
   };
   const beginDouyinDrag=(distanceY=0,measured=false)=>{
-    if(props.source.platform!=="douyin"||dragSettling)return;
+    if(props.source.platform!=="douyin")return;
+    if(!replayingDeferred&&(dragSettling||deferredDrags.length||drainingDeferred)){
+      deferredPan={distanceY,velocityY:0,cancel:false,seq:measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0};return;
+    }
     benchmarkSeq=measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0;
     dragRevision++;setNativeDrag(false);dragDirection=undefined;dragTarget=undefined;dragTargetPromise=undefined;setDragProgress(0);setDragPoster(null);
   };
   const moveDouyinDrag=(distanceY:number)=>{
+    if(deferredPan&&!replayingDeferred){deferredPan.distanceY=distanceY;return;}
     if(props.source.platform!=="douyin"||dragSettling||distanceY===0)return;
     const direction:DouyinPagerDirection=distanceY<0?"up":"down",progress=douyinPagerProgress(distanceY,props.height),revision=dragRevision;
     setDragProgress(progress);
@@ -368,17 +375,30 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     return true;
   };
-  const finishDouyinDrag=async(velocityY:number,forceCancel=false)=>{
+  const finishDouyinDrag=async(velocityY:number,forceCancel=false,replayed?:DeferredDrag)=>{
+    if(deferredPan&&!replayed){
+      const queued=deferredPan;deferredPan=undefined;queued.velocityY=velocityY;queued.cancel=forceCancel;
+      const direction=queued.distanceY<0?'up':'down',progress=douyinPagerProgress(queued.distanceY,props.height);
+      const settles=!forceCancel&&!!(direction==='up'?props.onNext:props.onPrevious)&&shouldSettleDouyinPager(progress,velocityY,direction);
+      const delta=settles?douyinPagerDelta(progress,velocityY,direction):0;
+      if(queued.seq){queued.action={seq:queued.seq,generation:settles?++benchmarkGeneration:benchmarkGeneration,source_generation:state()?.sourceGeneration??0,delta:delta===2?2:1};benchmark.mark('gesture_release',queued.seq,{direction:settles?(delta===2?'fling':direction==='up'?'next':'prev'):'cancel',delta,prewarmed:false,generation:queued.action.generation,source_generation:queued.action.source_generation});}
+      // Bound retained intent. Never let a slow publication allocate indefinitely.
+      if(deferredDrags.length<16)deferredDrags.push(queued);
+      else if(queued.seq)benchmark.mark('error',queued.seq,{reason:'capacity'});
+      void drainDeferred();return;
+    }
     if(disposed||!props.active||videoSessionOwner!==sessionOwner||props.source.platform!=="douyin"||dragSettling)return;
     const revision=dragRevision,direction=dragDirection,progress=dragProgress();if(!direction){clearDrag();return;}
     dragSettling=true;const move=direction==="up"?props.onNext:props.onPrevious;
     const wantsSettle=!forceCancel&&!!move&&shouldSettleDouyinPager(progress,velocityY,direction);
     // Stop outgoing playback at release, including a cold two-item fling.
     // Keep its decoded surface for the strip; cancellation never enters here.
-    if(wantsSettle){const stoppedGeneration=generation;void media.pause().catch(value=>{if(!disposed&&revision===dragRevision&&stoppedGeneration===generation&&videoSessionOwner===sessionOwner)failed(value);});}
     let delta:1|2=1;
     const requestedDelta=wantsSettle?douyinPagerDelta(progress,velocityY,direction):0;
-    if(benchmarkSeq){pendingBenchmarkSource=props.source;pendingBenchmark={seq:benchmarkSeq,generation:wantsSettle?++benchmarkGeneration:benchmarkGeneration,source_generation:state()?.sourceGeneration??0,delta};benchmark.mark("gesture_release",benchmarkSeq,{direction:wantsSettle?(requestedDelta===2?'fling':direction==='up'?'next':'prev'):'cancel',delta:requestedDelta,prewarmed:requestedDelta===1&&!!(usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)),generation:pendingBenchmark.generation,source_generation:pendingBenchmark.source_generation});}
+    if(replayed){pendingBenchmarkSource=props.source;pendingBenchmark=replayed.action;}
+    else if(benchmarkSeq){pendingBenchmarkSource=props.source;pendingBenchmark={seq:benchmarkSeq,generation:wantsSettle?++benchmarkGeneration:benchmarkGeneration,source_generation:state()?.sourceGeneration??0,delta};benchmark.mark("gesture_release",benchmarkSeq,{direction:wantsSettle?(requestedDelta===2?'fling':direction==='up'?'next':'prev'):'cancel',delta:requestedDelta,prewarmed:requestedDelta===1&&!!(usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)),generation:pendingBenchmark.generation,source_generation:pendingBenchmark.source_generation});}
+
+    if(wantsSettle){const stoppedGeneration=generation;void media.pause(pendingBenchmark).catch(value=>{if(!disposed&&revision===dragRevision&&stoppedGeneration===generation&&videoSessionOwner===sessionOwner)failed(value);});}
 
     if(wantsSettle&&douyinPagerDelta(progress,velocityY,direction)===2&&props.onPrepareAdjacent){
       // Resolve the two-item target without publishing the intermediate item.
@@ -401,6 +421,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       finally{deadline.cancel();}
     }
     if(revision!==dragRevision||disposed)return;
+    const followingKeys:string[]=[];
+    if(wantsSettle&&delta===1&&requestedDelta===1&&usingSessions()&&sessionPool!.neighbourCapacity>=2&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)&&props.onPrepareAdjacent){
+      // The decoded outgoing item becomes the opposite neighbour. Reuse its
+      // other slot now, overlapping following-item decode with the settle.
+      void props.onPrepareAdjacent(direction==='up'?'next':'previous',2).then(async following=>{
+        if(!following||!usingSessions()||disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
+        followingKeys.push(following.key);
+        await sessionPool!.prewarm(following,{...following.source,bounds:bounds(),loop:loopMode()==='single',autoplay:false,muted:true},direction==='up'?'next':'prev');
+      }).catch(()=>{});
+    }
     try{
       if(!await animateDouyinTransition(revision,direction,wantsSettle?1:0))return;
       if(!wantsSettle){if(!usingSessions()&&pendingBenchmark)await media.setBounds({...bounds(),benchmark:pendingBenchmark});pendingBenchmark=undefined;clearDrag();neighborRevision++;if(usingSessions())void warmForward();return;}
@@ -408,13 +438,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(usingSessions()&&target&&sessionPool!.hasStandby(target.key)){
         const ownGeneration=++generation;pollTimer?.cancel();
         sessionPool!.selectStandby(target.key);
-        const promoted=await sessionPool!.promote(direction,bounds(),props.active&&lifecycle()==="active",pendingBenchmark);
+        const promoted=await sessionPool!.promote(direction,bounds(),props.active&&lifecycle()==="active",pendingBenchmark,followingKeys);
         if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
         // Install ownership BEFORE publishing the reactive source. Publication
         // must not schedule another prepare/release of the surface on screen.
         let publication:Promise<boolean>|undefined;
         batch(()=>{preparedSource=promoted.source.source;publication=props.onPromoteAdjacent?.(promoted.source);setState(promoted.state);setReady(true);setFirstFrame(promoted.state.hasRenderedFirstFrame===true);setError("");setSpinnerDue(false);clearDrag();});
-        forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;
+        forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;forwardResolved=false;
         playbackTrace?.event('exit');playbackTrace=takeVideoResolution(promoted.source.source.url??promoted.source.source.videoUrl??'',promoted.source.source.platform??'rss');playbackTrace.event('prepare');resetViewing(promoted.source.source);lastPlaybackState="";preparedSource=promoted.source.source;setState(promoted.state);setReady(true);setError("");checkpointPosition=promoted.state.positionMs;checkpointDuration=promoted.state.durationMs;virtualVolume=promoted.state.volume;observedVolume=promoted.state.volume;
         emitCheckpoint("ready",promoted.state.positionMs,promoted.state.durationMs);clearDrag();neighborRevision++;if(delta===2)sessionPool!.retainNeighbours([]);void requestTransform();void warmForward();void poll(ownGeneration);
         if(!await publication)throw new Error("video session queue promotion was cancelled");
@@ -434,6 +464,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(disposed||revision!==dragRevision)return;
       clearDrag();failed(value);
     }else if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);}
+    finally{void drainDeferred();}
+  };
+  const drainDeferred=async()=>{
+    if(disposed||!props.active||videoSessionOwner!==sessionOwner||props.source.platform!=='douyin'){deferredDrags.length=0;deferredPan=undefined;return;}
+    if(dragSettling||drainingDeferred||!deferredDrags.length)return;
+    const queued=deferredDrags.shift()!;drainingDeferred=true;
+    try{
+      replayingDeferred=true;beginDouyinDrag(queued.distanceY);benchmarkSeq=queued.seq;moveDouyinDrag(queued.distanceY);replayingDeferred=false;
+      await finishDouyinDrag(queued.velocityY,queued.cancel,queued);
+    }finally{replayingDeferred=false;drainingDeferred=false;void drainDeferred();}
   };
   const advanceAfterEnd=()=>autoAdvance.ended(loopMode(),async()=>{
     if(!props.active||lifecycle()!=="active"||!props.onNext||!props.onPrepareAdjacent)return false;
@@ -452,7 +492,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   let resumeAfterOverlay=false;
   createEffect(()=>{const active=props.active;if(!active){if(props.source.platform==='douyin'){
-    resumeAfterOverlay=false;autoplayAllowed=false;autoAdvance.cancel();generation++;neighborRevision++;dragRevision++;
+    deferredDrags.length=0;deferredPan=undefined;resumeAfterOverlay=false;autoplayAllowed=false;autoAdvance.cancel();generation++;neighborRevision++;dragRevision++;
     prepareOp?.cancel();pollTimer?.cancel();tapTimer?.cancel();volumeTimer?.cancel();
     const current=untrack(state);if(videoSessionOwner===sessionOwner&&current)emitCheckpoint("pause_or_exit",current.positionMs,current.durationMs);
     forwardTarget=undefined;clearDrag();setReady(false);setFirstFrame(false);
@@ -476,7 +516,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await media.setVolume(target); observedVolume = next.volume; if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
   const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; showVolumeOverlay(); void submitVolume(); return true; };
   props.ref?.({ invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,onCrown: adjustVolume, canSwipeBack: () => { const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; } });
-  onCleanup(() => { recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
+  onCleanup(() => { recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233) / 2, uiTop = () => (props.height - 233) / 2;
   const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
   const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));

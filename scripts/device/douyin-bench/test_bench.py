@@ -75,6 +75,17 @@ class Logs(unittest.TestCase):
         rows=[event('gesture_release',100,generation=2),event('incoming_first_frame',130,generation=1)]
         self.assertEqual(paired(rows,'gesture_release','incoming_first_frame')['n'],0)
 
+    def test_pause_is_player_diagnostic_and_requires_both_generations(self):
+        raw='1800000000.125 12 13 I DYBENCH: code=player_paused seq=2 generation=3 source_generation=4 backend=player url=PRIVATE mono_ms=125'
+        parsed=parse_log(raw)
+        self.assertEqual(parsed['backend'],'player')
+        self.assertNotIn('PRIVATE',json.dumps(parsed))
+        start=event('gesture_release',100,seq=2,generation=3,source_generation=4)
+        self.assertEqual(paired([start,parsed],'gesture_release','player_paused')['max'],25)
+        parsed['source_generation']=5
+        self.assertEqual(paired([start,parsed],'gesture_release','player_paused')['n'],0)
+        self.assertEqual(paired([start,parsed],'gesture_release','previous_audio_stopped')['n'],0)
+
     def test_wrong_attempt_never_pairs(self):
         self.assertEqual(paired([event('a',100,attempt=1),event('b',110,attempt=2)],'a','b')['n'],0)
 

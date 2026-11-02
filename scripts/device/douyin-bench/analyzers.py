@@ -10,7 +10,7 @@ from collections import Counter
 
 BROWSER_CODES = set('requested opened page_started page_finished qr_ready completed cancelled service_closed unavailable invalid_argument busy browser_script_error webview_renderer_gone webview_unavailable browser_auth_timeout browser_qr_timeout'.split())
 # Proposed contract, not evidence that the shipping app emits these codes.
-CODES = set('startup_stage home_first_frame entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
+CODES = set('startup_stage home_first_frame entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release player_paused previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
 ENUMS = {'startup_stage':set('stock_saved process_start home_mounted home_tap entry_mounted play_tap headers_ready preview_start preview_ready source_ready persist_start persist_done backdrop_start backdrop_done player_mounted prepare_start prepare_admitted player_constructed prepare_dispatched video_format_ready decoder_configured decoded_first_frame initial_frame_adopted'.split()), 'state': {'running', 'idle', 'unknown', 'present', 'absent', 'paused'}, 'direction': {'next', 'prev', 'cancel', 'fling'},
          'muted': {'true', 'false'}, 'prewarmed': {'true', 'false'}, 'network_stalled': {'true', 'false'}, 'kind': {'on', 'off'},
          'reason': {'stale','capacity','release','failure','bidirectional','single_neighbour','foreground_media','media_stopped','timeout','candidate_retry','exhausted','hidden','network_stalled'}, 'backend': {'mixer', 'player'}}
@@ -103,7 +103,10 @@ def paired(events, start, end, *, where=None, require=None):
         if not all(b.get(k) == v for k, v in require.items()):
             missing += 1
             continue
-        if end in ('incoming_first_frame','snap_back','fling_done') and (a.get('generation') is None or a.get('generation') != b.get('generation')):
+        if end in ('incoming_first_frame','snap_back','fling_done','player_paused') and (a.get('generation') is None or a.get('generation') != b.get('generation')):
+            missing += 1
+            continue
+        if end == 'player_paused' and (a.get('source_generation') is None or a.get('source_generation') != b.get('source_generation')):
             missing += 1
             continue
         # Host monotonic timestamps prevent wall-clock jumps and logcat buffering bias.

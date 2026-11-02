@@ -339,3 +339,14 @@ test('unclassified foreground prepare failure uses playback copy and does not be
  f.controller.douyinPlay({item:selected,playback:selected,immersive:true,onFailure:value=>failures.push(value)});
  await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});expect(failures).toEqual([{code:'PLAYBACK_FAILED'}]);expect(f.stack().at(-1)?.page).toBe('douyin');
 });
+
+test('DYSWIPE3 neighbours reuse playing headers and coalesce a fresh read after authorization changes',async()=>{
+ const f=fixture(),a=item('a'),b=item('b'),c=item('c');f.controller.douyinPlay({item:b,playback:b,playlist:[a,b,c],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'b'});
+ const entry=f.stack().at(-1)!;let reads=0,authorization=0;
+ client.resolvePlayback=async id=>({ok:true,data:[a,b,c].find(v=>v.awemeId===id)!});
+ client.playbackAuthorizationVersion=()=>authorization;
+ client.buildPlaybackHeaders=async()=>{reads++;return {'X-Fixture':'fresh'};};
+ await Promise.all([f.controller.prepareDouyinAdjacent(entry,'next'),f.controller.prepareDouyinAdjacent(entry,'previous')]);expect(reads).toBe(0);
+ authorization++;
+ const sources=await Promise.all([f.controller.prepareDouyinAdjacent(entry,'next'),f.controller.prepareDouyinAdjacent(entry,'previous')]);expect(reads).toBe(1);expect(sources.every(v=>v?.source.headers?.['X-Fixture']==='fresh')).toBe(true);
+});

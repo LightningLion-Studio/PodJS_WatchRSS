@@ -31,6 +31,7 @@ export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
 export type DouyinAuthState='unknown'|'logged-in'|'logged-out';
+export interface DouyinPlaybackOptions {forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean}
 export class DouyinClient {
   private authentication:DouyinAuthState='unknown';
   private readonly authListeners=new Set<(state:DouyinAuthState)=>void>();
@@ -290,15 +291,27 @@ export class DouyinClient {
     })();this.detailRequests.set(id,work);
     try{return await work;}finally{if(this.detailRequests.get(id)===work)this.detailRequests.delete(id);}
   }
-  private async resolvePlaybackInner(awemeId:string,options:{forceRefresh?:boolean;prefetch?:boolean}={}):Promise<DouyinResult<DouyinItem>>{
+  private async resolvePlaybackInner(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
     const id=awemeId.trim();
     const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh)return {ok:true,data:cached,source:'feed-cache'};
+    if(options.allowDetail===false){
+      // The live queue owns its feed metadata independently of the process LRU
+      // and its soft five-minute TTL. Neither can turn a swipe into a detail API.
+      const item=options.feedItem?applyPreferredDouyinPlayback(options.feedItem):undefined;
+      if(!options.forceRefresh&&item?.awemeId===id&&item.playUrl.trim()&&this.now()<douyinMediaExpiry(item.playUrl,this.now()))return {ok:true,data:item,source:'feed-cache'};
+      if(!item?.playUrl.trim())return fail('UNSUPPORTED','推荐内容缺少视频播放地址');
+      // A known expired/rejected CDN URL is refreshed only through feed. Detail
+      // remains an explicit caller choice with its own endpoint cooldown.
+      const page=await this.fetchFeedPage({count:12});if(!page.ok)return page;
+      const refreshed=page.data.items.find(value=>value.awemeId===id&&value.playUrl.trim());
+      return refreshed?{ok:true,data:refreshed,source:'feed-cache'}:{...fail<DouyinItem>('TEMPORARILY_UNAVAILABLE','推荐播放地址暂不可用'),retryAfterMs:1500};
+    }
     const failure=this.prefetchFailures.get(id);if(options.prefetch&&failure&&failure.until>this.now())return failure.result;
     const r=await this.fetchDetail(id,options);
     return !r.ok?r:r.data.kind==='video'?{ok:true,data:r.data.item,source:r.source}:fail('UNSUPPORTED','此内容没有视频播放流');
   }
-  async resolvePlayback(awemeId:string,options:{forceRefresh?:boolean;prefetch?:boolean}={}):Promise<DouyinResult<DouyinItem>>{
-    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true]);const cached=!options.forceRefresh?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
+  async resolvePlayback(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
+    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true,options.allowDetail!==false]);const cached=!options.forceRefresh?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
     if(result.ok){const item=await decodableDouyinItem(applyPreferredDouyinPlayback(result.data));if(!item.playUrl.trim()){const unavailable=fail<DouyinItem>('UNSUPPORTED','没有可用的视频播放流');if(options.prefetch)this.cachePrefetchFailure(id,unavailable);return unavailable;}const v=item.variants?.find(v=>v.playUrl===item.playUrl);const trace=new VideoPlaybackTrace('douyin',start);trace.event('api',{apiMs:Date.now()-start,cacheHit:result.source==='feed-cache'?1:0});trace.event('candidate',{width:v?.width,height:v?.height,bitrate:v?.bitrate});for(const url of [item.playUrl,...(item.variants?.find(v=>v.playUrl===item.playUrl)?.playUrls??[]).slice(0,8)])registerVideoResolution(url,trace);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);return {...result,data:item};}
     if(options.prefetch)this.cachePrefetchFailure(id,result);
     appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=${result.code}`);return result;
