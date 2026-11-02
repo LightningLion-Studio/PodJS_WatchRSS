@@ -28,7 +28,7 @@ function fixture(opt=false,initial?:any){
  let controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
  createRoot(stop=>{stops.push(stop);const [entries,setStack]=createSignal<RouteEntry[]>([{page:'home'},{page:'douyin',douyinRoute:{name:'history'}}]);stack=entries;
  const [busy,setBusy]=createSignal(false),[message,setError]=createSignal(''),[playing,setPlaying]=createSignal<any>();error=message;
- controller=createMediaRouteController({initialVideoBounds:initial?()=>({x:0,y:0,width:233,height:233}):undefined,createInitialVideoPool:initial?()=>initial:undefined,current:()=>entries().at(-1)!,motion:{phase:'idle'},busy,setBusy,setError,settings:()=>({mediaVolumeControl:true,mediaVolumeGuard:false,playbackStartVolumeLimit:null}) as any,
+ controller=createMediaRouteController({initialVideoBounds:initial?()=>({x:0,y:0,width:233,height:233}):undefined,createInitialVideoPool:initial?()=>typeof initial==='function'?initial():initial:undefined,current:()=>entries().at(-1)!,motion:{phase:'idle'},busy,setBusy,setError,settings:()=>({mediaVolumeControl:true,mediaVolumeGuard:false,playbackStartVolumeLimit:null}) as any,
  playingSource:playing,setPlayingSource:((v:any)=>{source=typeof v==='function'?v(playing()):v;return setPlaying(v);}) as any,
  channels:()=>[],setChannels:(()=>[]) as any,setOriginalModes:(()=>({})) as any,setStack,setPage:(page,data)=>setStack(rows=>[...rows,{page,...data}]),popPage:()=>{setStack(rows=>rows.slice(0,-1));return true;},services:{} as any});
  });
@@ -46,6 +46,38 @@ test('stock selection uses one validated URI/frame bundle and does not repeat sl
  expect((await client.restorePlaybackQueue()).anchorAwemeId).toBe('a');expect(f.requests()).toBe(0);
 });
 
+test('entry predecodes verified stock once, and entering adopts that exact hidden pool',async()=>{
+ let primed=0,released=0;const pool={prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}};
+ const f=fixture(false,pool),a=item('entry-first'),owner={};await f.controller.douyinNavigate({name:'entry'});const entry=f.stack().at(-1)!;
+ readyOverride=async()=>({url:'podjs-media-cache://play/entry.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/entry.jpg'}}});
+ await f.controller.primeDouyinEntry(entry,owner,[a],null,7);expect(primed).toBe(1);expect(entry.page).toBe('douyin');expect((await client.restorePlaybackQueue()).items).toEqual([]);
+ await f.controller.primeDouyinEntry(entry,owner,[a],null,7);expect(primed).toBe(1);
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true,entrySeq:7});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ expect(primed).toBe(1);expect(f.stack().at(-1)?.initialVideoPool).toBe(pool as any);expect((await client.restorePlaybackQueue()).anchorAwemeId).toBe(a.awemeId);
+ f.controller.stopDouyinEntry(owner);expect(released).toBe(0);
+});
+test('stopping or leaving entry fences a late stock lookup before any decoder is allocated',async()=>{
+ let primed=0,finish!:(value:any)=>void;const pool={prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{}};
+ const f=fixture(false,pool),a=item('late-entry'),owner={};await f.controller.douyinNavigate({name:'entry'});const entry=f.stack().at(-1)!;
+ readyOverride=()=>new Promise(resolve=>finish=resolve);const warm=f.controller.primeDouyinEntry(entry,owner,[a],null,8);f.controller.stopDouyinEntry(owner);await f.controller.douyinNavigate({name:'history'});
+ finish({url:'podjs-media-cache://play/late.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/late.jpg'}}});await warm;expect(primed).toBe(0);expect(f.stack().at(-1)?.douyinRoute?.name).toBe('history');
+});
+test('a changed cache capability or authorization cannot adopt the old entry decoder',async()=>{
+ for(const change of ['capability','authorization']){
+  let primed=0,released=0,version=1;const pools=Array.from({length:2},()=>({prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}}));let created=0;
+  const f=fixture(false,()=>pools[created++]),a=item('changed-'+change),owner={};client.playbackAuthorizationVersion=()=>version;await f.controller.douyinNavigate({name:'entry'});const entry=f.stack().at(-1)!;
+  let uri='podjs-media-cache://play/original.mp4';readyOverride=async()=>({url:uri,previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/changed.jpg'}}});
+  await f.controller.primeDouyinEntry(entry,owner,[a],null,9);if(change==='capability')uri='podjs-media-cache://play/replaced.mp4';else version++;
+  f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true,entrySeq:9});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+  expect(primed).toBe(2);expect(released).toBe(1);expect(f.stack().at(-1)?.initialVideoPool).toBe(pools[1] as any);
+ }
+});
+test('entry never allocates a decoder for remote content or a missing verified first frame',async()=>{
+ let primed=0;const pool={prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{}};
+ const f=fixture(false,pool),a=item('uncached-entry'),owner={};await f.controller.douyinNavigate({name:'entry'});const entry=f.stack().at(-1)!;
+ readyOverride=async()=>undefined;await f.controller.primeDouyinEntry(entry,owner,[a],null,10);f.controller.stopDouyinEntry(owner);
+ readyOverride=async()=>({url:'https://fixture.invalid/video',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/no.jpg'}}});await f.controller.primeDouyinEntry(entry,owner,[a],null,10);expect(primed).toBe(0);
+});
 test('initial decoder starts while navigation persistence is pending, and the route receives the same pool',async()=>{
  let primed=0,released=0,finish!:()=>void;const pool={prime:()=>{primed++;return {result:Promise.resolve({}),cancel(){}};},releaseAll:async()=>{released++;}};
  const f=fixture(false,pool),a=item('prime');const save=client.savePlaybackQueue.bind(client);client.savePlaybackQueue=async(...args:any[])=>{await new Promise<void>(yes=>finish=yes);return save(...args as Parameters<typeof save>);};

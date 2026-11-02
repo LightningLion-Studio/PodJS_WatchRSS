@@ -58,6 +58,8 @@ interface MediaRoutesProps {
   openBili: (route: BiliRoute) => Promise<void>;
   openDouyin: (route: DouyinRoute) => Promise<void>;
   playDouyin: (request: DouyinPlayRequest) => void;
+  primeDouyinEntry?:(entry:RouteEntry,owner:unknown,items:import("../../douyin/types.ts").DouyinItem[],anchor:string|null,seq?:number)=>void;
+  stopDouyinEntry?:(owner:unknown)=>void;
   loginDouyin: () => Promise<void>;
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
@@ -153,8 +155,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
           route={props.entry.douyinRoute ?? { name: "entry" }}
           client={douyinClient}
           restoreStock={()=>douyinStock.restore()}
-          onPreloadWindow={(owner,items,anchor)=>douyinPreload.start(owner,items,anchor??undefined,'entry')}
-          onPreloadStop={owner=>douyinPreload.stop(owner)}
+          onPreloadWindow={(owner,items,anchor,seq)=>{douyinPreload.start(owner,items,anchor??undefined,'entry');void props.primeDouyinEntry?.(props.entry,owner,items,anchor,seq);}}
+          onPreloadStop={owner=>{douyinPreload.stop(owner);props.stopDouyinEntry?.(owner);}}
           settings={{
             originalContentEnabled: props.douyinOriginal(),
             onOriginalContentChange: (value) =>

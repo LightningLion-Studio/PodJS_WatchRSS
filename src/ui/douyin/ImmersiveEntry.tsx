@@ -15,7 +15,7 @@ import type { DouyinItem } from "../../douyin/types.ts";
 
 export const DOUYIN_ENTRY_TIMEOUT_MS=1500;
 
-/** Title page owns no player; the single host session starts only on entering the flow. */
+/** Verified stock may prepare one hidden first-frame session; only entering starts playback. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal("");
@@ -107,7 +107,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   };
   benchmark.mark('startup_stage',entrySeq,{startup_stage:'entry_mounted'});
   const preloadOwner={};
-  createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor);else props.onPreloadStop?.(preloadOwner);});
+  createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor,entrySeq);else props.onPreloadStop?.(preloadOwner);});
   onCleanup(()=>props.onPreloadStop?.(preloadOwner));
   // External entry intents may select an anchor, but only a tap/swipe enters
   // the player. Ignore legacy debugAutoEnterFlow, including in debug builds.

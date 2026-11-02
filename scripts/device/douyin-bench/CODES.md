@@ -228,3 +228,5 @@ T-1201 MUTESYNC: `player_visible` additionally accepts `system_index`, `system_m
 The `stock_saved` startup stage carries `slots=0..3`, the saved stock metadata count. It is readiness bookkeeping, not a decoded playback frame or a cache-hit proof. Actual first-frame cache counters remain required.
 
 `PodMediaCache cache_first_card` is a numeric counter snapshot from the same native visible frame commit as `first_card`. It carries that action's seq and uptime. The older `cache_stats` line is a decoded-frame observation and is not the visible-frame counter proof for a reserved initial decoder.
+
+Cold prepare substages (native uptime, same entry seq): `prepare_admitted` after capability/memory/session admission, `player_constructed` after ExoPlayer construction, `prepare_dispatched` after setMediaSource/prepare, `video_format_ready` when the extracted video input format reaches the renderer. These are diagnostic stages, not visible frame proof.

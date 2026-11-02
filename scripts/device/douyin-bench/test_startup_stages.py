@@ -11,3 +11,8 @@ class StartupStages(unittest.TestCase):
   e=parse_log('1793603025.217 19610 19610 I DYBENCH: code=startup_stage seq=12 mono_ms=10 startup_stage=stock_saved slots=3');self.assertEqual(e['slots'],3)
   self.assertIsNone(parse_log('1793603025.217 19610 19610 I DYBENCH: code=startup_stage seq=12 mono_ms=10 startup_stage=stock_saved slots=4'))
   self.assertIsNone(parse_log('1793603025.217 19610 19610 I DYBENCH: code=startup_stage seq=12 mono_ms=10 startup_stage=prepare_start slots=3'))
+
+class ColdPrepareStagesTest(unittest.TestCase):
+ def test_closed_native_prepare_stages(self):
+  for stage in ['prepare_admitted', 'player_constructed', 'prepare_dispatched', 'video_format_ready', 'initial_frame_adopted']:
+   self.assertEqual(parse_log("1793603025.217 19610 19610 I DYBENCH: code=startup_stage seq=12 mono_ms=10 startup_stage="+stage)["startup_stage"],stage)

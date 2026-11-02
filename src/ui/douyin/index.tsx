@@ -81,7 +81,7 @@ export interface DouyinScreenProps {
   onBack: () => void;
   onPlay: (request: DouyinPlayRequest) => void;
   restoreStock?:()=>Promise<DouyinItem[]>;
-  onPreloadWindow?:(owner:unknown,items:DouyinItem[],anchor:string|null)=>void;
+  onPreloadWindow?:(owner:unknown,items:DouyinItem[],anchor:string|null,entrySeq?:number)=>void;
   onPreloadStop?:(owner:unknown)=>void;
   onPlaybackCommand?: (command: DouyinPlaybackCommand) => void;
   playbackState?: { playing: boolean; positionMs?: number; durationMs?: number };

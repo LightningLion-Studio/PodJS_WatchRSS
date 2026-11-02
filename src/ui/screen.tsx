@@ -1353,6 +1353,8 @@ export default function WatchRSS(props: {
     restoreDouyinVideo,
     douyinLogin,
     douyinPlay,
+    primeDouyinEntry,
+    stopDouyinEntry,
     douyinNavigate,
     changeDouyinVideo,
     prepareDouyinAdjacent,
@@ -1626,6 +1628,8 @@ export default function WatchRSS(props: {
               openBili={biliNavigate}
               openDouyin={douyinNavigate}
               playDouyin={douyinPlay}
+              primeDouyinEntry={primeDouyinEntry}
+              stopDouyinEntry={stopDouyinEntry}
               loginDouyin={douyinLogin}
               openUrl={openUrl}
               popPage={popPage}

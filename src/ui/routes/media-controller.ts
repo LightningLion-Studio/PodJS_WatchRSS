@@ -319,6 +319,32 @@ export function createMediaRouteController(
     const override=douyinDebug.playbackUrl(item.awemeId,item.playUrl,forward);
     return override!==item.playUrl?override:douyinPreload.playback?douyinPreload.playback(item,headers):item.playUrl;
   };
+  // Only the verified local first item owns a hidden decoder on the title page.
+  // Nothing plays before the user enters; navigation adopts this exact pool.
+  let entryInitial:{entry:RouteEntry;owner:unknown;id:string;remoteUrl:string;seq:number;version:number;source?:PlaybackSource;pool?:DouyinVideoSessionPool;pending:Promise<void>}|undefined;
+  const stopDouyinEntry=(owner?:unknown)=>{
+    if(entryInitial&&(owner===undefined||entryInitial.owner===owner)){const old=entryInitial;entryInitial=undefined;void old.pool?.releaseAll().catch(()=>{});}
+  };
+  createEffect(()=>{const entry=dependencies.current(),active=lifecycle()==='active';if(entryInitial&&(entryInitial.entry!==entry||!active))stopDouyinEntry();});
+  onCleanup(()=>stopDouyinEntry());
+  const primeDouyinEntry=async(entry:RouteEntry,owner:unknown,items:import('../../douyin/types.ts').DouyinItem[],anchor:string|null,seq?:number)=>{
+    const bounds=dependencies.initialVideoBounds?.();
+    if(!seq||!bounds||dependencies.current()!==entry||entry.page!=='douyin'||(entry.douyinRoute?.name??'entry')!=='entry'||lifecycle()!=='active')return;
+    const requested=entry.douyinRoute?.name==='entry'?entry.douyinRoute.resumeAwemeId:undefined;
+    const item=applyPreferredDouyinPlayback(items.find(x=>x.awemeId===(requested??anchor))??items[0]);if(!item)return;
+    if(entryInitial?.entry===entry&&entryInitial.owner===owner&&entryInitial.id===item.awemeId&&entryInitial.remoteUrl===item.playUrl&&entryInitial.seq===seq)return entryInitial.pending;
+    stopDouyinEntry();
+    const own:NonNullable<typeof entryInitial>={entry,owner,id:item.awemeId,remoteUrl:item.playUrl,seq,version:0,pending:Promise.resolve()};entryInitial=own;
+    own.pending=(async()=>{
+      const bundle=await douyinPreload.readySource?.(item);
+      if(entryInitial!==own||dependencies.current()!==entry||lifecycle()!=='active'||!bundle?.previewFrame||!bundle.url.startsWith('podjs-media-cache:'))return;
+      own.version=douyinClient.playbackAuthorizationVersion();
+      const source:PlaybackSource={startupSeq:seq,immersive:true,awemeId:item.awemeId,posterUrl:item.coverUrl,previewFrame:bundle.previewFrame,url:bundle.url,...douyinDecoderProfile(bundle.item??item),title:item.description,headers:{},...playbackPreferences(),platform:'douyin',webUrl:`https://www.douyin.com/video/${item.awemeId}`,backgroundPlayback:douyinBackground()};
+      own.source=source;own.pool=dependencies.createInitialVideoPool?.()??new DouyinVideoSessionPool();
+      void own.pool.prime({key:item.awemeId,source},{...source,bounds,autoplay:false}).result.catch(()=>{});
+    })().catch(()=>{});
+    await own.pending;
+  };
   let pendingInitialPool:{origin:RouteEntry;pool:DouyinVideoSessionPool}|undefined;
   createEffect(()=>{const entry=dependencies.current();if(pendingInitialPool&&pendingInitialPool.origin!==entry){void pendingInitialPool.pool.releaseAll().catch(()=>{});pendingInitialPool=undefined;}});
   onCleanup(()=>{void pendingInitialPool?.pool.releaseAll().catch(()=>{});});
@@ -376,8 +402,13 @@ export function createMediaRouteController(
         const source = await pending;
         if(!current())return;
         benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'source_ready'});
+        const warm=entryInitial;
+        if(warm&&warm.entry===origin&&warm.id===source.awemeId){await warm.pending;if(!current())return;}
+        if(warm&&entryInitial===warm&&warm.entry===origin&&warm.id===source.awemeId&&warm.seq===request?.entrySeq&&warm.pool&&warm.source?.url===source.url&&warm.version===douyinClient.playbackAuthorizationVersion()){
+          initialPool=warm.pool;entryInitial=undefined;pendingInitialPool={origin,pool:initialPool};
+        }else if(warm&&entryInitial===warm)stopDouyinEntry();
         const bounds=dependencies.initialVideoBounds?.();
-        if(bounds&&source.immersive&&source.previewFrame&&source.url?.startsWith('podjs-media-cache:')&&lifecycle()==='active'){
+        if(!initialPool&&bounds&&source.immersive&&source.previewFrame&&source.url?.startsWith('podjs-media-cache:')&&lifecycle()==='active'){
           initialPool=dependencies.createInitialVideoPool?.()??new DouyinVideoSessionPool();pendingInitialPool={origin,pool:initialPool};
           void initialPool.prime({key:source.awemeId??source.url,source},{...source,bounds,autoplay:false}).result.catch(()=>{});
         }
@@ -815,6 +846,8 @@ export function createMediaRouteController(
     biliNavigate,
     douyinLogin,
     douyinPlay,
+    primeDouyinEntry,
+    stopDouyinEntry,
     douyinNavigate,
     changeDouyinVideo,
     prepareDouyinAdjacent,
