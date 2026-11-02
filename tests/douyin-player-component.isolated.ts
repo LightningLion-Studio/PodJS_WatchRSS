@@ -587,3 +587,36 @@ test('DYINTENT a network prompt during a drag still records its cancelled releas
   expect(marks.filter(v=>v.code==='gesture_down')).toHaveLength(1);expect(marks.filter(v=>v.code==='gesture_release')).toMatchObject([{direction:'cancel',delta:0}]);
  }finally{(globalThis as any).pod=original;heldPrepare=undefined;}
 });
+
+test('DYLOSS reverse boundary records each release and snaps back without retiring a cold source',async()=>{
+ initial='available';sessionsCapable=false;gestures.length=0;ticks=[];prepares=[];retires=0;pauses=0;
+ const realNow=Date.now,originalPod=(globalThis as any).pod;let time=1000,seq=1,selected=0;Date.now=()=>time;
+ const marks:any[]=[];(globalThis as any).pod={benchmark:(line:string)=>{const value=JSON.parse(line);marks.push(value);return value.seq??++seq;}};
+ heldPrepare=new Promise(()=>{});
+ try{
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/0',title:'boundary'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},canSelectTarget:direction=>direction==='next'||selected>0,onSelectTarget:()=>{selected++;}});});await flush();
+  const before=retires,g=gestures[0];
+  for(let n=0;n<50;n++){
+   g.onPanStart({dy:12});g.onPanMove({dy:100});g.onPanEnd({vy:500});
+   for(let t=0;t<280;t+=16){time+=16;ticks.splice(0).forEach(f=>f());await flush();}
+  }
+  expect(selected).toBe(0);expect(pauses).toBe(0);expect(retires).toBe(before);expect(prepares).toHaveLength(1);
+  const releases=marks.filter(v=>v.code==='gesture_release');expect(releases).toHaveLength(50);expect(releases.every(v=>v.direction==='cancel'&&v.delta===0&&v.reason==='boundary')).toBe(true);
+ }finally{Date.now=realNow;(globalThis as any).pod=originalPod;heldPrepare=undefined;}
+});
+
+test('DYLOSS a new swipe interrupts boundary settling without losing either direction',async()=>{
+ initial='available';sessionsCapable=false;gestures.length=0;ticks=[];prepares=[];
+ const original=(globalThis as any).pod,marks:any[]=[];let seq=1,index=0;
+ (globalThis as any).pod={benchmark:(line:string)=>{const v=JSON.parse(line);marks.push(v);return v.seq??++seq;}};
+ const source=(n:number)=>({platform:'douyin' as const,immersive:true,url:'local/'+n,awemeId:String(n),title:'fixture'});
+ try{
+  createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source(index));return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},canSelectTarget:d=>d==='next'||index>0,onSelectTarget:(d,n)=>{index+=d==='next'?n:-n;set(source(index));}});});await flush();
+  const g=gestures[0];g.onPanStart({dy:12});g.onPanMove({dy:100});g.onPanEnd({vy:500});await flush();
+  // The boundary rebound is still in its first await. Neither following
+  // selection may be swallowed by the obsolete settling guard.
+  g.onPanStart({dy:-12});g.onPanMove({dy:-100});g.onPanEnd({vy:-500});await flush();
+  g.onPanStart({dy:12});g.onPanMove({dy:100});g.onPanEnd({vy:500});await flush();
+  expect(index).toBe(0);expect(marks.filter(v=>v.code==='gesture_release')).toMatchObject([{direction:'cancel',reason:'boundary'},{direction:'next',reason:'release'},{direction:'prev',reason:'release'}]);
+ }finally{(globalThis as any).pod=original;}
+});

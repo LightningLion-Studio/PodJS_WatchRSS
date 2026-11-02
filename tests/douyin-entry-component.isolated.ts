@@ -297,3 +297,16 @@ test('DYENTRY normal refresh after the slow hint completes once with no timeout 
   f.press();expect(f.plays[0]?.item.awemeId).toBe('normal-refresh');
  }finally{(globalThis as any).pod=before;}
 });
+
+test('DYLOSS only the full 10 second refresh deadline emits entry timeout once',async()=>{
+ const original=(globalThis as any).pod,events:any[]=[];let seq=1200;
+ (globalThis as any).pod={benchmark:(raw:string)=>{const value=JSON.parse(raw);if(!value.seq)value.seq=++seq;events.push(value);return value.seq;}};
+ try{
+  const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.swipe(80);await requestReady(f);
+  const start=events.find(e=>e.code==='refresh_start');expect(start).toBeDefined();
+  retryTimers.find(t=>t.ms===1500&&!t.cancelled)!.fire();await settle();expect(events.filter(e=>e.code==='error')).toHaveLength(0);
+  const deadline=retryTimers.find(t=>t.ms===10000&&!t.cancelled)!;expect(deadline).toBeDefined();deadline.fire();await settle();
+  expect(events.filter(e=>e.code==='error')).toMatchObject([{seq:start.seq,failure_stage:'entry',failure_code:'timeout'}]);
+  f.requests[0]!.reply.resolve(response(['late']));await settle();await settle();expect(events.filter(e=>e.code==='error')).toHaveLength(1);
+ }finally{(globalThis as any).pod=original;}
+});

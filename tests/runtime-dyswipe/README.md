@@ -63,3 +63,18 @@ With `setprop log.tag.PodJSService DEBUG`, native `decoder_budget in_use=N peak=
 lines record every successful lease acquisition and every release. `peak` includes
 short-lived leases between samples and stays monotonic for the process. These
 counts are shared decoder leases, not a system-wide MediaCodec process count.
+
+
+## Reverse history boundary (T-DYLOSS)
+
+SLOW FRONT / SLOW TAIL start at index 100 for 50 continuous previous selections.
+BOUND FRONT / BOUND TAIL start at index 4, then rebound at zero without leaving
+this player. Their physical tap coordinates are (120, 410) and (326, 410).
+Each boundary release has direction=cancel, delta=0, reason=boundary. It neither
+pauses nor retires the current source. Native snap_back requires the retained
+decoded surface and an actual frame commit. The route adapter uses the same
+canSelectTarget predicate as production media.tsx; production controller tests
+also exercise the previous boundary without the fixture callback.
+Other release reasons are release, threshold, cancelled and network_prompt.
+Use the assigned task port (T-DYLOSS: 5558). The slow URL port stays 18756 inside
+the emulator; the host server can use a private port via adb reverse.

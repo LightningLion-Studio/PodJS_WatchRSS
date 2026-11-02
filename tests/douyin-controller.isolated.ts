@@ -385,3 +385,12 @@ test('DYINTENT selects through delayed URL registration and rejects every stale 
  for(let k=0;k<30;k++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'50',previewOnly:true,url:undefined});
  pending.get('50')!('https://local/50');for(let k=0;k<30;k++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'50',previewOnly:false,url:'https://local/50'});expect(f.requests()).toBe(0);
 });
+
+test('DYLOSS reverse boundary keeps the immersive route and its selected source',async()=>{
+ const f=fixture(),a=item('a'),b=item('b');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!,source=f.source(),depth=f.stack().length;
+ for(let n=0;n<50;n++)f.controller.selectDouyinTarget(entry,'previous',1);
+ expect(f.stack()).toHaveLength(depth);expect(f.stack().at(-1)).toBe(entry);expect(f.source()).toBe(source);expect(entry.queue!.snapshot().index).toBe(0);expect(f.requests()).toBe(0);
+ await f.controller.changeDouyinVideo(entry,'previous');expect(f.stack().at(-1)).toBe(entry);
+});

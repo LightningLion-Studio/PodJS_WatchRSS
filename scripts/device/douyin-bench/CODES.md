@@ -241,3 +241,13 @@ source_generation)`. A prewarm uses its `prewarm_requested` seq. Stages are
 bounded numeric counters; `surface_ready` is boolean; `playback_state` is 1..4.
 `is_prewarm` describes the original prepare, including after adoption. This event
 never substitutes for decoded-and-presented `incoming_first_frame` proof.
+
+
+### Reverse-boundary release reasons (T-DYLOSS)
+
+`gesture_release.reason` accepts closed values `release`, `boundary`,
+`threshold`, `cancelled`, `network_prompt` for the swipe outcome. `boundary`
+means direction=cancel and delta=0; the current route/source stay selected.
+The SDK, native validator and offline collector share these values. A release
+records intent. Native `snap_back` records the retained decoded surface's
+real commit; a reason alone does not prove a decoded frame or mixer behavior.
