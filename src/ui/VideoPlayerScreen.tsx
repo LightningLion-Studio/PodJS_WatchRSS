@@ -25,7 +25,7 @@ import { onFrame } from "@pocketjs/framework/lifecycle";
 import { hasCapability, lifecycle, onLifecycleChange, normalizedRelativeAxisStep } from "@podjs/framework/watch";
 import { video, onVideoAudioChanged, onVideoFirstFrame, delay, type HostOperation, type VideoPrepare, type VideoBounds, type VideoState } from "@podjs/framework/services";
 import { formatPlayerTime, systemVolumePercent, guardedCrownVolume, nextScaleMode, playerPanRange, progressWidth, seekHoldStep, type CrownVolumeGuardState, type PlayerScaleMode } from "./video-player.ts";
-import { DouyinVideoSessionPool, douyinPagerDelta, douyinPagerProgress, douyinPagerSettleProgress, shouldFallbackFromVideoSessions, shouldSettleDouyinPager, shouldUseDouyinVideoSessions, type DouyinPagerDirection, type DouyinPreparedSource } from "./douyin/video-sessions.ts";
+import { DouyinVideoSessionPool, douyinPagerDelta, douyinPagerProgress, douyinPagerSettleDuration, douyinPagerSettleProgress, shouldFallbackFromVideoSessions, shouldSettleDouyinPager, shouldUseDouyinVideoSessions, type DouyinPagerDirection, type DouyinPreparedSource } from "./douyin/video-sessions.ts";
 import { RemoteImage } from "./RemoteImage.tsx";
 
 // The host exposes one session, even when navigation retains several screens.
@@ -356,13 +356,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
   };
   const animateDouyinTransition=async(revision:number,direction:DouyinPagerDirection,to:0|1)=>{
-    const from=dragProgress(),started=Date.now();
+    const from=dragProgress(),started=Date.now(),duration=douyinPagerSettleDuration(to);
     if(from===to){if(usingSessions()&&nativeDrag()&&to===0)await sessionPool!.transition(to,direction,bounds(),pendingBenchmark);return revision===dragRevision&&!disposed;}
     while(true){
       const elapsed=Date.now()-started,next=douyinPagerSettleProgress(from,to,elapsed);setDragProgress(next);
-      if(usingSessions()&&nativeDrag()&&!(to===1&&elapsed>=220))await sessionPool!.transition(next,direction,bounds(),to===0&&elapsed>=220?pendingBenchmark:undefined);
+      if(usingSessions()&&nativeDrag()&&!(to===1&&elapsed>=duration))await sessionPool!.transition(next,direction,bounds(),to===0&&elapsed>=duration?pendingBenchmark:undefined);
       if(revision!==dragRevision||disposed)return false;
-      if(elapsed>=220)break;await delay(16).result;
+      if(elapsed>=duration)break;await delay(16).result;
     }
     return true;
   };
@@ -371,6 +371,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const revision=dragRevision,direction=dragDirection,progress=dragProgress();if(!direction){clearDrag();return;}
     dragSettling=true;const move=direction==="up"?props.onNext:props.onPrevious;
     const wantsSettle=!forceCancel&&!!move&&shouldSettleDouyinPager(progress,velocityY,direction);
+    // Stop outgoing playback at release, including a cold two-item fling.
+    // Keep its decoded surface for the strip; cancellation never enters here.
+    if(wantsSettle){const stoppedGeneration=generation;void media.pause().catch(value=>{if(!disposed&&revision===dragRevision&&stoppedGeneration===generation&&videoSessionOwner===sessionOwner)failed(value);});}
     let delta:1|2=1;
     const requestedDelta=wantsSettle?douyinPagerDelta(progress,velocityY,direction):0;
     if(benchmarkSeq){pendingBenchmarkSource=props.source;pendingBenchmark={seq:benchmarkSeq,generation:wantsSettle?++benchmarkGeneration:benchmarkGeneration,source_generation:state()?.sourceGeneration??0,delta};benchmark.mark("gesture_release",benchmarkSeq,{direction:wantsSettle?(requestedDelta===2?'fling':direction==='up'?'next':'prev'):'cancel',delta:requestedDelta,prewarmed:requestedDelta===1&&!!(usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)),generation:pendingBenchmark.generation,source_generation:pendingBenchmark.source_generation});}

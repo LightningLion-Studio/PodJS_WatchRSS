@@ -45,7 +45,8 @@ let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
 const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
-mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionPort,hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
+mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
@@ -149,7 +150,7 @@ for(const direction of ['up','down'] as const)test(`legacy ${direction} 403 paus
   await flush();const surface=gestures[0];surface.onPanStart({dy:-1});surface.onPanMove({dy:direction==='up'?-110:110});await flush();expect(pauses).toBe(0);
   surface.onPanEnd({vy:direction==='up'?-2:2});await flush();
   for(let i=0;i<15&&attempts===0;i++){time+=60;ticks.splice(0).forEach(t=>t());await flush();}
-  expect(attempts).toBe(1);expect(pauses).toBe(1);expect(current.state).toBe('paused');
+  expect(attempts).toBe(1);expect(pauses).toBe(2);expect(current.state).toBe('paused');
   expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
   expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join(' ')).toContain('播放失败');
   expect(boundsCalls.at(-1)).toMatchObject({translateY:0,visible:true});
@@ -453,4 +454,86 @@ test('DYFIX slow two-item resolution includes the wait in release timing and sta
   stops.pop()!();resolve({key:'c',source:{platform:'douyin',immersive:true,awemeId:'c',url:'managed/c',title:'c'}});await flush();
   expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(0);
  }finally{(globalThis as any).pod=original;}
+});
+
+// Runs the real component and pool with a frame clock and decoded-frame host
+// acknowledgements. These counts are offline model evidence, not codec/PCM proof.
+async function swipeClock(){
+ sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
+ const originalNow=Date.now,originalPort={...sessionPort};let time=1000,selected=100;
+ Date.now=()=>time;
+ const jobs:Array<{at:number;run:()=>void}>=[],stopsAt:Array<{id:string;at:number}>=[],presentations:Array<{key:string;decoded:boolean;at:number}>=[];
+ let rings=0,posters=0;
+ const source=(id:number)=>({platform:'douyin' as const,immersive:true,awemeId:String(id),url:'managed/'+id,posterUrl:'cover/'+id,title:String(id)});
+ sessionPort.prepare=(options:any)=>{
+  sessionCalls.push({method:'prepare',...options});let cancelled=false;
+  const value={...state(options.prewarm?'prewarmed':'ready'),key:String(options.url).split('/').at(-1),sessionId:options.sessionId,hasRenderedFirstFrame:false,presented:!options.prewarm,bufferedMs:1500,networkStalled:false};
+  sessionStates.set(options.sessionId,value);
+  const result=new Promise<any>((resolve,reject)=>{const run=()=>{if(cancelled){reject(Error('cancelled'));return;}value.hasRenderedFirstFrame=true;resolve(value);};if(options.prewarm)jobs.push({at:time+32,run});else run();});
+  return {result,cancel(){cancelled=true;}};
+ };
+ sessionPort.pause=async(id:string)=>{stopsAt.push({id,at:time});return originalPort.pause(id);};
+ sessionPort.retire=async(id:string)=>{stopsAt.push({id,at:time});return originalPort.retire(id);};
+ sessionPort.promote=async(id:string,options:any)=>{
+  const value=sessionValue(id);presentations.push({key:String(value.key??''),decoded:value.hasRenderedFirstFrame===true,at:time});
+  stopsAt.push({id:options.replaceSessionId,at:time});const valueAfter=await originalPort.promote(id,options);sessionStates.get(options.replaceSessionId).presented=false;return valueAfter;
+ };
+ sessionPort.release=async(id?:string)=>{if(id)sessionStates.delete(id);return {released:true};};
+ let dispose!:()=>void;
+ const root=createRoot(stop=>{dispose=stop;const [current,setCurrent]=createSignal(source(selected));return VideoPlayerScreen({get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:async()=>{},onPrevious:async()=>{},
+  onPrepareAdjacent:async(direction,distance=1)=>{const id=selected+(direction==='next'?distance:-distance);return {key:String(id),source:source(id)};},
+  onPromoteAdjacent:async target=>{selected=Number(target.key);setCurrent(target.source as ReturnType<typeof source>);return true;}});});
+ const sample=()=>{const all=nodes(root);rings+=all.filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length;posters+=all.filter(n=>n.kind==='Poster').length;};
+ const advance=async(ms:number)=>{const end=time+ms;do{time=Math.min(end,time+16);for(const job of jobs.filter(j=>j.at<=time)){jobs.splice(jobs.indexOf(job),1);job.run();}ticks.splice(0).forEach(t=>t());await flush();frames.forEach(frame=>frame());await flush();sample();}while(time<end);};
+ await flush();await advance(64);
+ const release=async(sign:number,cancel=false,fling=false)=>{const g=gestures[0];g.onPanStart({dy:-sign*12});g.onPanMove({dy:-sign*116});await flush();const at=time;if(cancel)g.onCancel();else g.onPanEnd({vy:-sign*(fling?2400:500)});await flush();return at;};
+ return {advance,release,stopsAt,presentations,get selected(){return selected;},get rings(){return rings;},get posters(){return posters;},get now(){return time;},close(){dispose();Date.now=originalNow;Object.assign(sessionPort,originalPort);}};
+}
+
+test('DYSWIPE old player stops within 100ms of release, before any settle animation completes',async()=>{
+ const f=await swipeClock();try{const at=await f.release(1);await f.advance(100);expect(f.stopsAt.some(s=>s.at-at<=100)).toBe(true);}finally{f.close();}
+});
+
+for(const scenario of ['next','prev','rapid_forward','rapid_alternate','fling','cancel'] as const)test(`DYSWIPE deterministic ${scenario}: decoded surfaces, no cover/ring, correct anchor`,async()=>{
+ const f=await swipeClock();const count=scenario==='fling'?10:scenario==='cancel'?15:30,interval=scenario.startsWith('rapid_')?200:320;
+ try{
+  let expected=100;const stopLatency:number[]=[];const before=sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm).length;
+  for(let i=0;i<count;i++){
+   const sign=scenario==='prev'?-1:scenario==='rapid_alternate'||scenario==='fling'?i%2===0?1:-1:1;
+   const cancelled=scenario==='cancel',at=await f.release(sign,cancelled,scenario==='fling');
+   await f.advance(interval);if(!cancelled)expected+=sign*(scenario==='fling'?2:1);
+   expect(f.selected,`${scenario} sample ${i+1}`).toBe(expected);
+   if(!cancelled){const latency=Math.min(...f.stopsAt.filter(s=>s.at>=at).map(s=>s.at-at));stopLatency.push(latency);expect(latency,`old stop ${i+1}`).toBeLessThanOrEqual(100);}
+   const active=sessionCalls.filter(c=>c.method==='promote').at(-1)?.id??sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm).sessionId;
+   const neighbours=[...sessionStates.entries()].filter(([id])=>id!==active).map(([,v])=>v);
+   expect(neighbours.map(v=>Number(v.key))).toContain(expected-1);expect(neighbours.map(v=>Number(v.key))).toContain(expected+1);
+   expect(neighbours.every(v=>v.hasRenderedFirstFrame)).toBe(true);if(cancelled)expect(sessionStates.get(active).state).toBe('playing');
+  }
+  expect(f.rings).toBe(0);expect(f.posters).toBe(0);expect(f.presentations.every(p=>p.decoded)).toBe(true);
+  expect(f.presentations.length).toBe(scenario==='cancel'?0:count);
+  expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(before);
+  if(scenario==='cancel')expect(f.stopsAt).toHaveLength(0);
+  const active=sessionCalls.filter(c=>c.method==='promote').at(-1)?.id;
+  const warm=[...sessionStates.entries()].filter(([id])=>id!==active).map(([,value])=>Number(value.key));
+  expect(warm).toContain(f.selected-1);expect(warm).toContain(f.selected+1);
+  console.log('DYSWIPE_MODEL '+JSON.stringify({scenario,attempts:count,committed:f.presentations.length,intervalMs:interval,ringSamples:f.rings,coverSamples:f.posters,decoded:f.presentations.filter(p=>p.decoded).length,maxOldStopMs:stopLatency.length?Math.max(...stopLatency):null,deviceProof:false}));
+ }finally{f.close();}
+},30000);
+
+test('DYSWIPE loading ring requires empty buffer and measured network stall, never CPU/decoder wait',async()=>{
+ const realNow=Date.now;let time=1000;Date.now=()=>time;
+ try{
+  const cases=[
+   {name:'healthy_throughput',bufferedMs:0,networkStalled:false,throughputBps:5000000,ring:0},
+   {name:'buffered_network_stall',bufferedMs:1000,networkStalled:true,throughputBps:0,ring:0},
+   {name:'unknown_buffer',bufferedMs:undefined,networkStalled:true,throughputBps:0,ring:0},
+   {name:'empty_network_stall',bufferedMs:0,networkStalled:true,throughputBps:0,ring:1},
+  ];
+  for(const c of cases){
+   initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,bufferedMs:c.bufferedMs,networkStalled:c.networkStalled,metrics:{throughputBps:c.throughputBps}};heldPrepare=new Promise(()=>{});ticks=[];
+   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/stall',title:'stall'},width:233,height:233,active:true,offset:0,round:true});});await flush();
+   time+=1000;frames.forEach(f=>f());expect(nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length,c.name).toBe(c.ring);
+   console.log('DYSWIPE_STALL_MODEL '+JSON.stringify({scenario:c.name,ring:c.ring,bufferedMs:c.bufferedMs,throughputBps:c.throughputBps,networkStalled:c.networkStalled,deviceProof:false}));stops.pop()!();await flush();
+  }
+ }finally{Date.now=realNow;}
 });

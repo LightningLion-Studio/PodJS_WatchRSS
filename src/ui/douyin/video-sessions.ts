@@ -1,4 +1,5 @@
 import {VideoSessionPool} from '@podjs/framework/video-session-pool';
+export {videoPagerSettleDuration as douyinPagerSettleDuration} from '@podjs/framework/video-paging';
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { DouyinItem } from "../../douyin/types.ts";
 
