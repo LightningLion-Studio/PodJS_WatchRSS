@@ -92,9 +92,19 @@ class Safety(unittest.TestCase):
         good=[event('player_visible',1000,state='present')]
         require_player(good,1500)
         for rows in ([],[event('player_visible',1000,state='absent')],
-                     good+[{'tag':'PodBrowserAuth','code':'requested','t_ms':1100}]):
+                     good+[{'tag':'PodBrowserAuth','code':'requested','t_ms':1100}],
+                     good+[event('error_page',1100,reason='exhausted')]):
             with self.assertRaises(RuntimeError):require_player(rows,1500)
         with self.assertRaises(RuntimeError):require_player(good,4001)
+
+    def test_prewarm_and_ring_observations_keep_only_closed_fields(self):
+        row=parse_log('1793500000.0 1 1 I DYBENCH: code=prewarm_ready seq=7 mono_ms=100 generation=2 buffered_ms=1200 url=PRIVATE')
+        self.assertEqual(row['code'],'prewarm_ready')
+        self.assertEqual(row['buffered_ms'],1200)
+        self.assertNotIn('url',row)
+        row=parse_log('1793500000.0 1 1 I DYBENCH: code=background_gate seq=7 mono_ms=100 state=paused reason=foreground_media')
+        self.assertEqual(row['reason'],'foreground_media')
+        self.assertEqual(row['state'],'paused')
 
     def test_live_requires_execute_and_logout_opt_in_before_device_work(self):
         from argparse import Namespace

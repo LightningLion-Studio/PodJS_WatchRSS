@@ -28,3 +28,17 @@ for(const code of ['RATE_LIMITED','TEMPORARILY_UNAVAILABLE'] as const)test(`${co
  expect(await queue.recover()).toMatchObject({code});expect(await queue.next()).toMatchObject({code});expect(await queue.preview('next')).toMatchObject({code});
  expect(queue.snapshot().item?.awemeId).toBe('1');expect(queue.snapshot().playlist).toHaveLength(3);expect(queue.diagnostics().quarantinedAwemeIds).toEqual([]);expect(calls).toBe(3);
 });
+
+
+test('PREWARM opposite previews resolve concurrently without cancelling each other; navigation still rejects both late results',async()=>{
+ const pending=new Map<string,(value:any)=>void>();
+ const client={resolvePlayback:(id:string)=>new Promise(resolve=>pending.set(id,resolve))} as unknown as DouyinClient;
+ const queue=new DouyinPlaybackQueue(client,{items:[item('1'),item('2'),item('3')],selectedAwemeId:'2',hasMore:false});
+ const next=queue.preview('next'),prev=queue.preview('previous');
+ await Promise.resolve();await Promise.resolve();
+ pending.get('3')!({ok:true,data:item('3')});pending.get('1')!({ok:true,data:item('1')});
+ expect(await next).toMatchObject({ok:true,data:{item:{awemeId:'3'}}});expect(await prev).toMatchObject({ok:true,data:{item:{awemeId:'1'}}});expect(queue.snapshot().item?.awemeId).toBe('2');
+ const staleNext=queue.preview('next'),stalePrev=queue.preview('previous');await Promise.resolve();await Promise.resolve();queue.commitPreview('3');
+ pending.get('3')!({ok:true,data:item('3')});pending.get('1')!({ok:true,data:item('1')});
+ expect(await staleNext).toMatchObject({ok:false,code:'CANCELLED'});expect(await stalePrev).toMatchObject({ok:false,code:'CANCELLED'});expect(queue.snapshot().item?.awemeId).toBe('3');
+});

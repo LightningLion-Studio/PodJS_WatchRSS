@@ -199,10 +199,11 @@ for(const opt of [false,true])test(`DYFIX three consecutive playback failures st
  f.controller.douyinReady(entry);await f.controller.recoverDouyinVideo(entry,false,0,{code:'decode_error'});expect(entry.queue!.snapshot().item?.awemeId).toBe('d');
  await f.controller.recoverDouyinVideo(entry,true);expect(f.error()).toBe('');
 });
-test('DYFIX restricted proxy foreground force-refreshes once then skips; network failure preserves queue',async()=>{
+test('DYFIX restricted proxy foreground force-refreshes once then skips; network failure tries candidate and preserves queue',async()=>{
  const f=fixture(),a=item('a'),b=item('b');f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
  const entry=f.stack().at(-1)!;entry.playback={...entry.playback!,url:'podjs-media-cache://play/a.mp4'};const calls:any[]=[];client.resolvePlayback=async(id,options)=>{calls.push([id,options?.forceRefresh]);return {ok:true,data:item(id)};};
- await f.controller.recoverDouyinVideo(entry,false,0,{code:'network_error'});expect(calls).toEqual([]);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(f.error()).toContain('重试');
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'network_error'});expect(calls).toEqual([]);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');expect(f.error()).toBe('');expect(f.source().url).toBe(a.playUrl);
+ entry.queue!.resetAutomaticFailures();
  await f.controller.recoverDouyinVideo(entry,false,0,{code:'restricted'});expect(calls).toEqual([['a',true]]);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');
  await f.controller.recoverDouyinVideo(entry,false,0,{code:'restricted'});expect(calls).toEqual([['a',true],['b',false]]);expect(entry.queue!.snapshot().item?.awemeId).toBe('b');
 });
@@ -221,4 +222,13 @@ test('DYLOGIN route login dispatches before secure playback reads and captures C
  expect(await client.readCookie()).toBeNull();
  completeLogin({cookie:'sessionid=fixture',origin:'https://www.douyin.com'});await pending;
  expect(await client.readCookie()).toBe('sessionid=fixture');expect(f.stack().at(-1)?.douyinRoute).toEqual({name:'entry'});
+});
+
+test('PREWARM production controller resolves next and previous concurrently and keeps the playing anchor',async()=>{
+ const f=fixture(),a=item('a'),b=item('b'),c=item('c');f.controller.douyinPlay({item:b,playback:b,playlist:[a,b,c],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'b'});
+ const entry=f.stack().at(-1)!,pending=new Map<string,(value:any)=>void>();client.resolvePlayback=(id:string)=>new Promise(resolve=>pending.set(id,resolve));
+ const next=f.controller.prepareDouyinAdjacent(entry,'next'),previous=f.controller.prepareDouyinAdjacent(entry,'previous');
+ for(let n=0;n<20;n++)await Promise.resolve();
+ pending.get('a')!({ok:true,data:a});pending.get('c')!({ok:true,data:c});
+ expect((await next)?.key).toBe('c');expect((await previous)?.key).toBe('a');expect(entry.queue!.snapshot().item?.awemeId).toBe('b');expect(f.source().awemeId).toBe('b');
 });

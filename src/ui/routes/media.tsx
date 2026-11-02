@@ -210,7 +210,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           }}
           onPlaybackFailure={
             props.entry.queue
-              ? (position,error) => void props.recoverDouyinVideo(props.entry,false,position,error)
+              ? (position,error) => props.recoverDouyinVideo(props.entry,false,position,error)
               : props.entry.rssDouyinRecovery
                 ? (position,error) => void props.recoverRssDouyinVideo(props.entry,false,position,error)
                 : props.entry.playback?.platform === "bili" && props.entry.retryPlayback

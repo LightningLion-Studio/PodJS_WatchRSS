@@ -534,10 +534,10 @@ export function createMediaRouteController(
       if(!manual&&entry.playback?.immersive){
         const code=String((error as {code?:unknown}|undefined)?.code??'');
         if(code==='CANCELLED'||/cancel|abort/i.test(code))return;
-        if(douyinNetworkFailure(error)){dependencies.setError('网络请求失败，请重试');return;}
+
         if(error!==undefined&&!entry.queue.claimAutomaticFailure()){dependencies.setError('连续播放失败，请重试');return;}
       }
-      if (videoOptEnabled('recovery')&&category!=='decode'&&category!=='restricted') {
+      if ((videoOptEnabled('recovery')||entry.playback?.immersive&&error!==undefined)&&category!=='decode'&&category!=='restricted') {
         const selected=entry.queue.snapshot().item!;
         if(entry.douyinRecovery?.id!==id)entry.douyinRecovery={id,policy:new DouyinPlaybackRecovery(selected,async()=>{
           const result=await douyinClient.resolvePlayback(id,{forceRefresh:true});
@@ -632,7 +632,7 @@ export function createMediaRouteController(
       await entry.queue.persist();
       if (dependencies.current() === entry) dependencies.onActivityStateChange?.();
     } catch (error) {
-      dependencies.setError(String(error));
+      dependencies.setError(error instanceof Error?error.message:String(error));
     } finally {
       entry.douyinRecovering = false;
     }

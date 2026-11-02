@@ -44,7 +44,7 @@ let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
 const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
-mock.module('@podjs/framework/services',()=>({video,onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionPort,hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionPort,hostOperation:(method:string)=>{if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
@@ -119,7 +119,7 @@ test('legacy one-decoder drag never waits on unresolved adjacent playback and hi
   surface.onPanEnd({vy:-2});await flush();
   for(let i=0;i<15&&!moveStarted;i++){time+=60;const pending=ticks.splice(0);pending.forEach(t=>t());await flush();}
   expect(moveStarted).toBe(true);expect(prepares).toHaveLength(1);expect(boundsCalls.at(-1).visible).toBe(false);
-  expect(nodes(root).filter(n=>n.kind==='Poster').map(n=>n.props.url)).toEqual([b.posterUrl]);
+  expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
   releaseMove();await flush();expect(prepares).toHaveLength(2);expect(prepares[1].bounds).toMatchObject({visible:true,translateY:0});
   // Native video calls are ordered: once the new prepare is queued the surface stays transparent until its own first frame, so handoff ends here.
   expect(boundsCalls.at(-1).visible).toBe(true);
@@ -128,12 +128,12 @@ test('legacy one-decoder drag never waits on unresolved adjacent playback and hi
  } finally {Date.now=now;}
 });
 
-test('legacy douyin poster yields to the first decoded frame before prepare settles',async()=>{
+test('immersive legacy never substitutes a cover while waiting for its decoded frame',async()=>{
  const source={platform:'douyin' as const,immersive:true,awemeId:'c',url:'https://video/c',posterUrl:'https://cover/c',title:'c'};
  let settle!:(value:any)=>void;heldPrepare=new Promise(resolve=>settle=resolve);current=state('buffering');
  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true});});
  await flush();const posters=()=>nodes(root).filter(n=>n.kind==='Poster').length;
- expect(posters()).toBe(1);ticks.splice(0).forEach(t=>t());await flush();expect(posters()).toBe(1);
+ expect(posters()).toBe(0);ticks.splice(0).forEach(t=>t());await flush();expect(posters()).toBe(0);
  current={...state('buffering'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();
  expect(posters()).toBe(0);settle(current=state('ready'));await flush();expect(posters()).toBe(0);
 });
@@ -157,12 +157,12 @@ for(const direction of ['up','down'] as const)test(`legacy ${direction} 403 paus
  }finally{Date.now=now;}
 });
 
-test('ready without a decoded frame keeps the cover until the subsequent state poll',async()=>{
+test('ready without a decoded frame never displays a cover',async()=>{
  initial='available';heldPrepare=Promise.resolve({...state('ready'),hasRenderedFirstFrame:false});
  const originalPlay=video.play;video.play=async()=>({...state('playing'),hasRenderedFirstFrame:false});current={...state('buffering'),hasRenderedFirstFrame:false};
  try{
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://video/late-frame',title:'late frame',posterUrl:'https://cover/late-frame'},width:233,height:233,active:true,offset:0,round:true});});
-  await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(1);
+  await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
   current={...state('playing'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
  }finally{video.play=originalPlay;}
 });
@@ -279,7 +279,7 @@ test('DYFIX standby decode failure keeps video sessions available; capacity fail
   sessionsCapable=true;decoderLimit=2;sessionPrepareError={code};prepares=[];sessionReleases=0;current=state('ready');initial='available';
   createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'active',url:'https://fixture/active',title:'active'},width:233,height:233,active:true,offset:0,round:true,onPrepareAdjacent:async()=>({key:'next',source:{platform:'douyin',immersive:true,awemeId:'next',url:'https://fixture/next',title:'next'}})});});
   for(let i=0;i<6;i++)await flush();
-  if(code==='decode_error'){expect(prepares).toHaveLength(0);expect(sessionReleases).toBe(1);}else{expect(prepares).toHaveLength(1);expect(sessionReleases).toBeGreaterThan(0);}
+  if(code==='decode_error'){expect(prepares).toHaveLength(0);expect(sessionReleases).toBe(2);}else{expect(prepares).toHaveLength(1);expect(sessionReleases).toBeGreaterThan(0);}
   stops.splice(0).forEach(stop=>stop());await flush();
  }
 });
@@ -329,7 +329,7 @@ test('SWIPEFEED legacy settle retires outgoing before a contended route result',
 test('SWIPEFEED spinner waits from settle and decoded frame event removes it without a state poll',async()=>{
  const realNow=Date.now;let time=1000;Date.now=()=>time;
  try{
-  initial='available';current={...state('buffering'),hasRenderedFirstFrame:false};heldPrepare=new Promise(()=>{});
+  initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,bufferedMs:0,networkStalled:true};heldPrepare=new Promise(()=>{});
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'managed/late',posterUrl:'cover/late',title:'late'},width:233,height:233,active:true,offset:0,round:true});});
   await flush();const spinner=()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length;
   time+=399;frames.forEach(f=>f());expect(spinner()).toBe(0);
@@ -363,8 +363,56 @@ test('SWIPEFEED DYBENCH action correlation reaches the native promotion without 
   createRoot(stop=>{stops.push(stop);const [current,setCurrent]=createSignal(source('a'));return VideoPlayerScreen({get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:async()=>{},onPrepareAdjacent:async()=>({key:'b',source:source('b')}),onPromoteAdjacent:async prepared=>{selected=prepared.key;setCurrent(prepared.source as ReturnType<typeof source>);return true;}});});
   await flush();const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-120});g.onPanEnd({vy:-500});await flush();
   for(let i=0;i<16&&selected==='a';i++){time+=16;ticks.splice(0).forEach(f=>f());await flush();}
-  const begin=marks.find(e=>e.code==='gesture_down'),release=marks.find(e=>e.code==='gesture_release');expect(begin.direction).toBe('next');expect(release).toMatchObject({seq:101,direction:'next',prewarmed:true,generation:2});
-  expect(sessionCalls.find(c=>c.method==='promote').benchmark).toMatchObject({seq:101,generation:2});expect(marks.some(e=>e.code==='incoming_first_frame'||e.code==='previous_audio_stopped')).toBe(false);
+  const begin=marks.find(e=>e.code==='gesture_down'),release=marks.find(e=>e.code==='gesture_release');expect(begin.direction).toBe('next');expect(release).toMatchObject({seq:marks.find(e=>e.code==='gesture_release').seq,direction:'next',prewarmed:true,generation:2});
+  expect(sessionCalls.find(c=>c.method==='promote').benchmark).toMatchObject({seq:release.seq,generation:2});expect(marks.some(e=>e.code==='incoming_first_frame'||e.code==='previous_audio_stopped')).toBe(false);
   expect(JSON.stringify(marks)).not.toMatch(/managed|cover|awemeId|Cookie|mono_ms/);
  }finally{Date.now=realNow;(globalThis as any).pod=original;}
+});
+
+
+test('PREWARM production component resolves both neighbours, strips background preference, and promotes five forward/backward swipes without a prepare at settle',async()=>{
+ sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
+ const realNow=Date.now;let time=1000;Date.now=()=>time;
+ try{
+  const source=(id:number)=>({platform:'douyin' as const,immersive:true,backgroundPlayback:true,awemeId:String(id),url:'managed/'+id,posterUrl:'cover/'+id,title:String(id)});
+  let selected=10;const requests:string[]=[];
+  const root=createRoot(stop=>{stops.push(stop);const [current,setCurrent]=createSignal(source(selected));
+   return VideoPlayerScreen({get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:async()=>{},onPrevious:async()=>{},
+    onPrepareAdjacent:async direction=>{const id=selected+(direction==='next'?1:-1);requests.push(String(id));return {key:String(id),source:source(id)};},
+    onPromoteAdjacent:async target=>{selected=Number(target.key);setCurrent(target.source as ReturnType<typeof source>);return true;}});
+  });await flush();await flush();
+  expect(requests).toContain('9');expect(requests).toContain('11');
+  expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(3);
+  expect(sessionCalls.filter(c=>c.method==='prepare').every(c=>c.backgroundPlayback===undefined)).toBe(true);
+  const gesture=gestures[0];
+  for(const sign of [1,1,1,1,1,-1,-1,-1,-1,-1]){
+   const from=selected,before=sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm).length;
+   gesture.onPanStart({dy:-sign*12});gesture.onPanMove({dy:-sign*120});await flush();gesture.onPanEnd({vy:-sign*500});await flush();
+   for(let i=0;i<20&&selected===from;i++){time+=16;ticks.splice(0).forEach(t=>t());await flush();}
+   await flush();expect(selected).toBe(from+sign);expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(before);
+   expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
+  }
+  expect(selected).toBe(10);expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(10);
+ }finally{Date.now=realNow;}
+});
+
+test('PREWARM transient failure waits for the same-item candidate recovery before exposing an error page',async()=>{
+ initial='available';current=state('idle');gestures.length=0;nextError={code:'cdn_error'};
+ let recover!:()=>void,calls=0;const gate=new Promise<void>(r=>recover=r);
+ const root=createRoot(stop=>{stops.push(stop);const [source,setSource]=createSignal({platform:'douyin' as const,immersive:true,awemeId:'same',url:'https://fixture/cdn-a',title:'same'});
+  return VideoPlayerScreen({get source(){return source();},width:233,height:233,active:true,offset:0,round:true,onPlaybackFailure:async()=>{calls++;await gate;setSource({...source(),url:'https://fixture/cdn-b'});}});
+ });await flush();expect(calls).toBe(1);expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join(' ')).not.toContain('播放失败');
+ recover();await flush();expect(prepares.at(-1).url).toBe('https://fixture/cdn-b');expect(current.state).toBe('playing');
+});
+
+test('PREWARM no ring for CPU wait, unknown buffer, positive buffer, or healthy network',async()=>{
+ const realNow=Date.now;let time=1000;Date.now=()=>time;
+ try{
+  for(const [bufferedMs,networkStalled] of [[undefined,true],[1,true],[0,false],[0,true]] as const){
+   initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,bufferedMs,networkStalled};heldPrepare=new Promise(()=>{});ticks=[];
+   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/wait',title:'wait'},width:233,height:233,active:true,offset:0,round:true});});await flush();
+   time+=1000;frames.forEach(f=>f());expect(nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length).toBe(bufferedMs===0&&networkStalled?1:0);
+   stops.pop()!();await flush();
+  }
+ }finally{Date.now=realNow;}
 });

@@ -13,6 +13,7 @@ export class DouyinPlaybackQueue {
   private hasMore:boolean;
   private generation=0;
   private previewGeneration=0;
+  private previewRevisions={next:0,previous:0};
   private quarantined=new Set<string>();
   private persistence:Promise<void>=Promise.resolve();
   private pageRequest?:Promise<DouyinResult<null>>;
@@ -60,12 +61,13 @@ export class DouyinPlaybackQueue {
   async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true});}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
   async preview(direction:"next"|"previous"):Promise<DouyinResult<DouyinPlaybackQueueState>>{
-    const op=++this.previewGeneration,nav=this.generation;
+    const epoch=this.previewGeneration,op=++this.previewRevisions[direction],nav=this.generation;
+    const current=()=>epoch===this.previewGeneration&&op===this.previewRevisions[direction]&&nav===this.generation;
     if(direction==='previous'){
       if(this.index<=0)return {ok:false,code:'UNSUPPORTED',message:'已经是第一个视频'};
-      return this.resolvePreviewAt(this.index-1,op);
+      return this.resolvePreviewAt(this.index-1,current);
     }
-    return this.advance(()=>op===this.previewGeneration&&nav===this.generation,target=>this.resolvePreviewAt(target,op));
+    return this.advance(current,target=>this.resolvePreviewAt(target,current));
   }
   private preservesItem(code:string){return ['NOT_LOGGED_IN','CANCELLED','REQUEST_FAILED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'].includes(code);}
   private async loadPage():Promise<DouyinResult<null>>{
@@ -145,10 +147,12 @@ export class DouyinPlaybackQueue {
     this.items[target]=resolved.data;this.index=target;
     return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};
   }
-  private async resolvePreviewAt(target:number,op:number):Promise<DouyinResult<DouyinPlaybackQueueState>>{
+  private async resolvePreviewAt(target:number,current:()=>boolean):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const candidate=this.items[target];if(!candidate)return {ok:false,code:"UNSUPPORTED",message:"播放队列为空"};
     const resolved:DouyinResult<DouyinItem>=this.fixedSources||await this.options.localPlayback?.(candidate.awemeId)?{ok:true,data:candidate}:await this.client.resolvePlayback(candidate.awemeId);
-    if(op!==this.previewGeneration||target<0||target>=this.items.length)return cancelled();if(!resolved.ok)return resolved;
+    if(!current())return cancelled();
+    target=this.items.findIndex(item=>item.awemeId===candidate.awemeId);
+    if(target<0||target===this.index)return cancelled();if(!resolved.ok)return resolved;
     this.items[target]=resolved.data;
     return {ok:true,data:{item:resolved.data,playlist:[...this.items],index:target,cursor:this.cursor,hasMore:this.hasMore},source:resolved.source};
   }

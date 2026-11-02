@@ -245,6 +245,8 @@ def require_player(events,stamp):
     visible=[e for e in events if e.get('tag')=='DYBENCH' and e.get('code')=='player_visible']
     if not visible or visible[-1].get('state')!='present' or not 0 <= stamp-visible[-1]['t_ms'] <= 2000:
         raise RuntimeError('fresh player_visible heartbeat required before swipe/record; stop on unknown UI')
+    if any(e.get('tag')=='DYBENCH' and e.get('code')=='error_page' and e.get('reason')=='exhausted' and e['t_ms']>=visible[-1]['t_ms'] for e in events):
+        raise RuntimeError('terminal player error; no swipe or video capture')
     if any(e.get('tag')=='PodBrowserAuth' and e.get('code')=='requested' and e['t_ms']>=visible[-1]['t_ms'] for e in events):
         raise RuntimeError('auth dialog active; no swipe or video capture')
 

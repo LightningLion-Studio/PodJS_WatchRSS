@@ -108,3 +108,25 @@ Supply the adapter/capture path and SHA256 with results. Set
 `mute_restored_by_operator=true` from the runtime prompt. Without both, mute
 acceptance stays PENDING. Soak needs `renderer_attribution=true` plus PID binding
 proof; the runner deliberately leaves that false by default.
+
+
+## PREWARM candidate contract (offline verified, device PENDING)
+
+The historical inventory above describes the baseline. The PREWARM candidate
+adds these codes to the production native/guest allowlists and the collector:
+
+| Code / field | Meaning and authority |
+|---|---|
+| `prewarm_policy`, `slots`, `reason` | Probed codec/session capacity; `bidirectional` (three slots), `single_neighbour` (two), or `capacity` (unavailable). Not a measured memory/thermal guarantee. |
+| `prewarm_requested` | Pool dispatched a host preparation. No content ID or URL. |
+| `prewarm_ready`, `buffered_ms` | Host returned a decoded hidden first frame; same request seq. Does not prove on-screen presentation. |
+| `prewarm_evicted`, `reason` | Slot invalidated: `stale`, `capacity`, `release`, `failure`, or `timeout`. |
+| `background_gate`, `state`, `reason` | Native foreground-media owner pauses/resumes background admission. `paused/foreground_media` and `running/media_stopped`; running means admission reopened, not a restore ACK. |
+| `restore_state` | Native worker heartbeat each second, including media wait. `running` means an active worker, `paused` means foreground-media policy holds it. End emits `unknown`. This does not establish logical idle or provide coordinator coverage between windows. |
+| `spinner_shown`, `buffered_ms` | Ring committed only with zero buffered duration and a native outstanding network transfer without byte progress for 800ms. Unknown buffer is not treated as zero. |
+| `error_page`, `reason` | `candidate_retry` means the player suppresses a transient overlay while same-item recovery runs. `exhausted` means terminal overlay. The collector stops before another swipe on this state. `player_visible` also becomes absent for error/network overlays. |
+| `fling_done`, `delta=1` | A native retained-slot promotion survives decoded-frame presentation commits. Current paging advances one item per gesture. This does **not** satisfy the existing two-index fling requirement (`delta=2`); thresholds stay unchanged. |
+
+All fields remain closed enums, booleans or nonnegative integers. This candidate
+does not add mixer/PCM evidence and does not turn hidden first frames into
+`incoming_first_frame` observations.
