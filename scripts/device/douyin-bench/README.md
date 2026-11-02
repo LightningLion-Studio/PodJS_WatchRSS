@@ -282,3 +282,14 @@ observations. Unreviewed video statistics are observations, not confirmed defect
 See [CODES.md](CODES.md) for the exact existing-source inventory and proposed
 closed-code contract. Baseline builds will intentionally report PENDING for
 unsupported timing, actual audio, renderer attribution, and restore coverage.
+
+`cadence.py` drives bounded 200/500/1000 ms paces from one device process.
+The emulator uses one shell script with `input swipe` and measured sleeps.
+On the watch, launching `input` for every swipe took over one second even in
+one shell script. The watch driver therefore starts one shell VM and invokes
+Android's existing `Input.main(swipe...)` plus `SystemClock.sleep` repeatedly.
+Build tools compile `input/DyPrepCadence.java`; no app input interface is added.
+All starts/ends use the device clock. Report actual cadence, including overruns.
+The caller must hold T-DYPREP ownership and run the live traffic guard. On stop,
+`stop_watch_driver` validates the captured driver PID's class before killing it.
+The endpoints x=233, y=220..330 exclude the mute button on the 466x466 layout.

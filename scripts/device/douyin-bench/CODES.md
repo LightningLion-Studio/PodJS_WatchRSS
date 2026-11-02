@@ -232,3 +232,12 @@ The `stock_saved` startup stage carries `slots=0..3`, the saved stock metadata c
 Cold prepare substages (native uptime, same entry seq): `prepare_admitted` after capability/memory/session admission, `player_constructed` after ExoPlayer construction, `prepare_dispatched` after setMediaSource/prepare, `video_format_ready` when the extracted video input format reaches the renderer. These are diagnostic stages, not visible frame proof.
 
 `player_paused`: native-only session diagnostic. Emits after playWhenReady becomes false, with matching action/source generation and backend=player. Native uptime is the event clock. This does not prove mixer/PCM silence and does not replace previous_audio_stopped.
+
+`prepare_stage` is native-only diagnostic evidence. Identity is `(pid, seq,
+source_generation)`. A prewarm uses its `prewarm_requested` seq. Stages are
+`start`, `dispatched`, `network_open`, `network_start`, `network_first_byte`,
+`network_end`, `decoder_configured`, `format_ready`, `first_frame`, `timeout`,
+`cancel`, `adopt`, `retire`, `release`. `network_bytes` and `position_bytes` are
+bounded numeric counters; `surface_ready` is boolean; `playback_state` is 1..4.
+`is_prewarm` describes the original prepare, including after adoption. This event
+never substitutes for decoded-and-presented `incoming_first_frame` proof.
