@@ -637,6 +637,52 @@ test('DYSWAP release publishes the decoded neighbour in the immediate-selection 
  expect(sessionCalls.filter(c=>c.method==='promote')[0].autoplay).toBe(true);
 });
 
+for(const direction of ['next','previous'] as const)test(`DYDRAG ${direction} pan start predicts and draws before another move or release`,async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
+ const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+ createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:source('a'),width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},onSelectTarget:()=>{},
+  onPrepareAdjacent:async d=>({key:d==='next'?'b':'z',source:source(d==='next'?'b':'z')})});});
+ await flush();await flush();sessionCalls.length=0;
+ const sign=direction==='next'?-1:1;
+ gestures[0].onPanStart({dy:sign*12});await flush();
+ const transitions=sessionCalls.filter(c=>c.method==='transition');
+ expect(transitions.length).toBeGreaterThan(0);
+ expect(transitions.at(-1)).toMatchObject({direction:direction==='next'?'up':'down',progress:12/233,trackPointer:true});
+ expect(sessionStates.get(transitions.at(-1).fromSessionId).state).toBe('playing');
+ expect(sessionStates.get(transitions.at(-1).toSessionId).state).toBe('prewarmed');
+ expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(0);
+});
+
+test('DYDRAG native strip owns bounds during drag, including adoption of a late neighbour',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
+ const saved=sessionPort.setBounds;sessionPort.setBounds=async(id:string)=>{sessionCalls.push({method:'setBounds',id});return sessionValue(id);};
+ try{
+  const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:source('a'),width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},onSelectTarget:()=>{},onPrepareAdjacent:async d=>({key:d==='next'?'b':'z',source:source(d==='next'?'b':'z')})});});
+  await flush();await flush();const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-90});await flush();sessionCalls.length=0;
+  g.onPanMove({dy:-120});await flush();
+  expect(sessionCalls.some(c=>c.method==='transition'&&c.progress===120/233)).toBe(true);
+  expect(sessionCalls.filter(c=>c.method==='setBounds')).toHaveLength(0);
+ }finally{sessionPort.setBounds=saved;}
+});
+
+test('DYDRAG a cold neighbour joins the strip before release without a late bounds reset',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
+ const savedPrepare=sessionPort.prepare,savedBounds=sessionPort.setBounds;let ready!:()=>void;const gate=new Promise<void>(r=>ready=r);
+ sessionPort.prepare=(options:any)=>{const op=savedPrepare(options);return options.prewarm?{...op,result:gate.then(()=>op.result)}:op;};
+ sessionPort.setBounds=async(id:string)=>{sessionCalls.push({method:'setBounds',id});return sessionValue(id);};
+ try {
+  const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:source('a'),width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},onSelectTarget:()=>{},onPrepareAdjacent:async d=>({key:d==='next'?'b':'z',source:source(d==='next'?'b':'z')})});});
+  await flush();const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-100});await flush();
+  expect(sessionCalls.filter(c=>c.method==='transition')).toHaveLength(0);sessionCalls.length=0;
+  ready();await flush();await flush();
+  const index=sessionCalls.findIndex(c=>c.method==='transition');expect(index).toBeGreaterThanOrEqual(0);
+  expect(sessionCalls[index]).toMatchObject({progress:100/233,direction:'up',trackPointer:true});
+  expect(sessionCalls.slice(index+1).some(c=>c.method==='setBounds')).toBe(false);
+ } finally {sessionPort.prepare=savedPrepare;sessionPort.setBounds=savedBounds;}
+});
+
 test('DYHIT release adopts an already decoded slot while neighbour resolution remains pending',async()=>{
  sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
  const {DouyinVideoSessionPool}=await import('../src/ui/douyin/video-sessions.ts');

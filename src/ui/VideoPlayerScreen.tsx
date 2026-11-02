@@ -277,8 +277,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
   });
   let updating = false, dirty = false;
-  const syncBounds = async () => { if (updating) { dirty = true; return; } updating = true; const requestGeneration=generation; try { do { dirty = false; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'bounds');else failed(value,false,'bounds');} } finally { updating = false; } };
-  createEffect(() => { props.offset; props.active; dragOffsetY(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner) void syncBounds(); });
+  const stripOwnsBounds=()=>usingSessions()&&nativeDrag()&&props.active&&props.offset===0&&!handoff();
+  const syncBounds = async () => { if(stripOwnsBounds())return; if (updating) { dirty = true; return; } updating = true; const requestGeneration=generation; try { do { dirty = false; if(stripOwnsBounds())break; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'bounds');else failed(value,false,'bounds');} } finally { updating = false; } };
+  createEffect(() => { props.offset; props.active; dragOffsetY(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner&&!stripOwnsBounds()) void syncBounds(); });
   const toggle = async () => { try { const pausing = state()?.state === "playing", next = await (pausing ? media.pause() : media.play()); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) emitCheckpoint("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
   const seekTo = async (delta: number) => { const current = state(); if (!current) return; if (!seekRunning) desiredSeek = current.positionMs; desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta)); if (seekRunning) return; seekRunning = true; try { do { const target = desiredSeek, next = await media.seek(target); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (target === desiredSeek) break; } while (!disposed); } catch (value) { failed(value); } finally { seekRunning = false; } };
   const rotate = () => { rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now(); };
@@ -366,7 +367,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const existing=sessionPool?.sourceFor(props.onAdjacentKey?.(queueDirection))??(candidate&&sessionPool?.hasStandby(candidate.key)?candidate:undefined);
     if(existing){sessionPool!.selectStandby(existing.key);dragTarget=existing;setNativeDrag(true);setDragPoster(null);return Promise.resolve(existing);}
     const ownNeighbor=neighborRevision;
-    const pending=usingSessions()?prepareAdjacent(queueDirection,ownNeighbor,true):previewAdjacent(queueDirection,ownNeighbor,true);
+    const pending=(direction==="up"?forwardWarm:backwardWarm)??prepareAdjacent(queueDirection,ownNeighbor,true);
     return pending.then(target=>{
       if(revision!==dragRevision||direction!==dragDirection)return;
       dragTarget=target;if(target&&usingSessions()){sessionPool!.selectStandby(target.key);setNativeDrag(true);setDragPoster(null);void sessionPool!.transition(dragProgress(),direction,bounds()).catch(value=>{if(!cancelledSessionError(value))void degradeSessions(value);});}return target;
@@ -377,9 +378,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(!props.onSelectTarget&&!replayingDeferred&&(dragSettling||deferredDrags.length||drainingDeferred)){
       deferredPan={distanceY,velocityY:0,cancel:false,seq:measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0};return;
     }
+    if(measured)sessionPool?.beginDrag();else sessionPool?.endDrag();
     if(props.onSelectTarget)clearDrag();
     benchmarkSeq=measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0;
     dragRevision++;setNativeDrag(false);dragDirection=undefined;dragTarget=undefined;dragTargetPromise=undefined;setDragProgress(0);setDragPoster(null);
+    // Pan-start already carries the slop-crossing displacement. Predict, select
+    // and place the neighbour now, even if the finger then holds still.
+    if(distanceY!==0)moveDouyinDrag(distanceY);
   };
   const moveDouyinDrag=(distanceY:number)=>{
     if(deferredPan&&!replayingDeferred){deferredPan.distanceY=distanceY;return;}
@@ -418,6 +423,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     if(disposed||!props.active||videoSessionOwner!==sessionOwner||props.source.platform!=="douyin"||dragSettling)return;
     const revision=dragRevision,direction=dragDirection,progress=dragProgress();if(!direction){clearDrag();return;}
+    sessionPool?.endDrag();
     dragSettling=true;const move=direction==="up"?props.onNext:props.onPrevious;
     const boundary=props.canSelectTarget?.(direction==='up'?'next':'previous')===false;
     const wantsSettle=!forceCancel&&!boundary&&!!move&&shouldSettleDouyinPager(progress,velocityY,direction);

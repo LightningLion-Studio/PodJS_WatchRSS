@@ -88,8 +88,11 @@ describe("Douyin video sessions",()=>{
     const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);
     await pool.prepare(source("1"),{...source("1").source,bounds}).result;
     await pool.releaseAll();
-    expect(port.calls.filter(call=>call.method==="release")).toHaveLength(3);
-    expect(new Set(port.calls.filter(call=>call.method==="release").map(call=>call.sessionId)).size).toBe(3);
+    // Logical slots include the SDK's full host window; native admission remains capacity-bounded.
+    const releases=port.calls.filter(call=>call.method==="release").map(call=>call.sessionId);
+    const prepared=port.calls.filter(call=>call.method==="prepare"||call.method==="prewarm").map(call=>call.sessionId);
+    for(const id of prepared)expect(releases).toContain(id);
+    expect(new Set(releases).size).toBe(releases.length);
   });
 });
 
