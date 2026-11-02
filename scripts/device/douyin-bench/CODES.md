@@ -65,7 +65,7 @@ with the corresponding IDs; never substitute a success endpoint on failure.
 | `player_visible` | Foreground player-only heartbeat every ≤1 s, state=present/absent; present only while unobscured by auth/settings/system UI. Required fresh (≤2 s) before automated swipe/record; missing heartbeat stops safely. |
 | `gesture_down` | Native gesture owner accepts touch; seq, direction |
 | `gesture_release` | ACTION_UP/gesture commit decision; seq, direction=next/prev/cancel/fling, prewarmed=true/false, generation=target, source_generation=old |
-| `previous_audio_stopped` | **Observed mixer** old track silent/inactive, not pause request completion; seq, source_generation, backend=mixer. If verified silent before release, emit current verified observation at release (zero delay). Never invent this from player state. |
+| `previous_audio_stopped` | Native old-track acknowledgement: observed mixer silent/inactive (`backend=mixer`) or actual AudioTrack paused/stopped (`backend=audiotrack`, contract below). Never infer it from player state. Track acknowledgement does not establish physical silence. |
 | `incoming_first_frame` | Target generation decoded frame is **presented at target bounds**, after promotion; same seq/generation. Hidden prewarm first-frame callback is not this event. |
 | `spinner_shown` | Loading ring first visibly rendered after the 400 ms first-frame wait, same seq/generation; no hidden/prewarmed spinner endpoint. |
 | `snap_back` | Cancel settles original bounds and original generation resumes, same seq/generation (release generation=original for cancel) |
@@ -252,3 +252,9 @@ means direction=cancel and delta=0; the current route/source stay selected.
 The SDK, native validator and offline collector share these values. A release
 records intent. Native `snap_back` records the retained decoded surface's
 real commit; a reason alone does not prove a decoded frame or mixer behavior.
+
+## T-DYREGRESS AudioTrack pause acknowledgement
+
+`previous_audio_stopped backend=audiotrack audio_ack=pause|flush audio_track_state=paused|stopped` is emitted only by the native Media3 sink after reading the outgoing AudioTrack. It carries `seq`, `generation`, `source_generation` and native `mono_ms`. Pairing requires the same process and both generations. Missing tracks, incomplete acknowledgements and player getter events never satisfy this metric. This is a track pause acknowledgement, not physical speaker silence. The next/prev/fling old-stop metric accepts this backend as well as the existing mixer backend; system-mute metrics still require mixer evidence.
+
+`decoder_admission` is native-only. `admission_reason` is closed to allowed/memory/codec/lease. Numeric capacity, decoder, keyframe, trim and headroom fields diagnose admission; they are not first-frame or audio proof. No URL, item identity or credentials belong in either event.

@@ -10,11 +10,11 @@ from collections import Counter
 
 BROWSER_CODES = set('requested opened page_started page_finished qr_ready completed cancelled service_closed unavailable invalid_argument busy browser_script_error webview_renderer_gone webview_unavailable browser_auth_timeout browser_qr_timeout'.split())
 # Proposed contract, not evidence that the shipping app emits these codes.
-CODES = set('pool_stage swap_stage media_variant prepare_stage startup_stage home_first_frame entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release player_paused previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
-ENUMS = {'pool_stage':{'select','neighbour'},'swap_stage':set('promote_enter surface_promoted play_command texture_updated rendered_first_frame ui_confirm observer_armed window_commit_1 window_commit_2'.split()),'variant_outlet':{'feed','detail','foreground'},'codec':{'h264','h265','unknown'},'selected':{'true','false'},'prepare_stage':set('start dispatched network_open network_start network_first_byte network_end decoder_configured format_ready first_frame timeout cancel adopt retire release'.split()),'surface_ready':{'true','false'},'startup_stage':set('stock_saved process_start home_mounted home_tap entry_mounted play_tap headers_ready preview_start preview_ready source_ready persist_start persist_done backdrop_start backdrop_done player_mounted prepare_start prepare_admitted player_constructed prepare_dispatched video_format_ready decoder_configured decoded_first_frame initial_frame_adopted'.split()), 'state': {'running', 'idle', 'unknown', 'present', 'absent', 'paused'}, 'direction': {'next', 'prev', 'cancel', 'fling'},
+CODES = set('decoder_admission pool_stage swap_stage media_variant prepare_stage startup_stage home_first_frame entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release player_paused previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
+ENUMS = {'admission_reason':{'allowed','memory','codec','lease'},'pool_stage':{'select','neighbour'},'swap_stage':set('promote_enter surface_promoted play_command texture_updated rendered_first_frame ui_confirm observer_armed window_commit_1 window_commit_2'.split()),'variant_outlet':{'feed','detail','foreground'},'codec':{'h264','h265','unknown'},'selected':{'true','false'},'prepare_stage':set('start dispatched network_open network_start network_first_byte network_end decoder_configured format_ready first_frame timeout cancel adopt retire release'.split()),'surface_ready':{'true','false'},'startup_stage':set('stock_saved process_start home_mounted home_tap entry_mounted play_tap headers_ready preview_start preview_ready source_ready persist_start persist_done backdrop_start backdrop_done player_mounted prepare_start prepare_admitted player_constructed prepare_dispatched video_format_ready decoder_configured decoded_first_frame initial_frame_adopted'.split()), 'state': {'running', 'idle', 'unknown', 'present', 'absent', 'paused'}, 'direction': {'next', 'prev', 'cancel', 'fling'},
          'muted': {'true', 'false'}, 'prewarmed': {'true', 'false'}, 'network_stalled': {'true', 'false'}, 'kind': {'on', 'off'},
-         'reason': {'stale','capacity','release','failure','bidirectional','single_neighbour','foreground_media','media_stopped','timeout','candidate_retry','exhausted','hidden','network_stalled','boundary','network_prompt','threshold','cancelled'}, 'backend': {'mixer', 'player'}}
-NUMBERS = {'source_ordinal','slot_ordinal','pool_generation','queue_index','anchor_index','cache_read_bytes','decoder_index','decoder_instances','admission_ms','deadline_ms','cache_network_bytes','cache_range_requests','cache_bytes','cache_entry','variant_index','variant_count','width','height','bitrate','gear','range_requests','ttfb_ms','steady_ms','position_bytes','network_bytes','playback_state','duration_ms', 'seq', 'attempt', 'delta', 'generation', 'pid', 'mono_ms', 'active_tracks', 'source_generation', 'buffered_ms', 'slots'}
+         'reason': {'stale','capacity','release','failure','bidirectional','single_neighbour','foreground_media','media_stopped','timeout','candidate_retry','exhausted','hidden','network_stalled','boundary','network_prompt','threshold','cancelled'}, 'backend': {'mixer', 'player', 'audiotrack'}, 'audio_ack': {'pause','flush'}, 'audio_track_state': {'paused','stopped'}}
+NUMBERS = {'decoder_in_use','system_headroom_bytes','trim_level','keyframe_bytes','keyframe_entries','source_ordinal','slot_ordinal','pool_generation','queue_index','anchor_index','cache_read_bytes','decoder_index','decoder_instances','admission_ms','deadline_ms','cache_network_bytes','cache_range_requests','cache_bytes','cache_entry','variant_index','variant_count','width','height','bitrate','gear','range_requests','ttfb_ms','steady_ms','position_bytes','network_bytes','playback_state','duration_ms', 'seq', 'attempt', 'delta', 'generation', 'pid', 'mono_ms', 'active_tracks', 'source_generation', 'buffered_ms', 'slots'}
 _PLAYER_ERRORS=json.loads((Path(__file__).parent/'player-error-schema.json').read_text())
 ENUMS.update({key:set(values)for key,values in _PLAYER_ERRORS['enums'].items()})
 NUMBERS.update(_PLAYER_ERRORS['numbers'])
@@ -45,6 +45,12 @@ def parse_log(line):
         return None
     if tag != 'DYBENCH' or code not in CODES:
         return None
+    if fields.get('backend')=='audiotrack' and code!='previous_audio_stopped':return None
+    if {'audio_ack','audio_track_state'}.intersection(fields) and (code!='previous_audio_stopped' or fields.get('backend')!='audiotrack'):return None
+    if fields.get('backend')=='audiotrack' and (fields.get('audio_ack')not in {'pause','flush'} or fields.get('audio_track_state')not in {'paused','stopped'}):return None
+    admission={'admission_reason','decoder_in_use','system_headroom_bytes','trim_level','keyframe_bytes','keyframe_entries'}
+    if admission.intersection(fields) and code!='decoder_admission':return None
+    if code=='decoder_admission' and fields.get('admission_reason')not in ENUMS['admission_reason']:return None
     if code=='pool_stage' and fields.get('pool_stage')not in ENUMS['pool_stage']:return None
     if 'pool_stage'in fields and code!='pool_stage':return None
     if 'swap_stage'in fields and (code!='swap_stage' or fields['swap_stage']not in ENUMS['swap_stage']):return None
@@ -64,7 +70,7 @@ def parse_log(line):
     if 'audio_gain_milli'in fields and (not fields['audio_gain_milli'].isdigit()or int(fields['audio_gain_milli'])>1000):return None
     if 'offset_abs_milli'in fields and (not fields['offset_abs_milli'].isdigit()or int(fields['offset_abs_milli'])>1000000000):return None
     player_fields=set(_PLAYER_ERRORS['enums'])|set(_PLAYER_ERRORS['numbers'])
-    if player_fields.intersection(fields) and code not in {'error','error_page','prepare_stage'}:return None
+    if player_fields.intersection(fields) and code not in {'error','error_page','prepare_stage','decoder_admission'}:return None
     for key,values in _PLAYER_ERRORS['enums'].items():
         if key in fields and fields[key] not in values:return None
     for key,limit in _PLAYER_ERRORS['numbers'].items():
@@ -108,7 +114,7 @@ def paired(events, start, end, *, where=None, require=None):
             missing += 1
             continue
         a, b = rows[0], targets[0]
-        if not all(b.get(k) == v for k, v in require.items()):
+        if not all(b.get(k) in v if isinstance(v,(set,tuple)) else b.get(k)==v for k,v in require.items()):
             missing += 1
             continue
         if end in ('incoming_first_frame','snap_back','fling_done','player_paused') and (a.get('generation') is None or a.get('generation') != b.get('generation')):
@@ -117,6 +123,13 @@ def paired(events, start, end, *, where=None, require=None):
         if end == 'player_paused' and (a.get('source_generation') is None or a.get('source_generation') != b.get('source_generation')):
             missing += 1
             continue
+        if end=='previous_audio_stopped' and b.get('backend')=='audiotrack':
+            if (a.get('generation') is None or a.get('generation')!=b.get('generation')
+                or a.get('source_generation') is None or a.get('source_generation')!=b.get('source_generation')
+                or a.get('pid')!=b.get('pid') or b.get('audio_ack')not in {'pause','flush'}
+                or b.get('audio_track_state')not in {'paused','stopped'}):
+                missing+=1
+                continue
         # Host monotonic timestamps prevent wall-clock jumps and logcat buffering bias.
         if 'mono_ms' not in a or 'mono_ms' not in b or b['mono_ms'] < a['mono_ms']:
             missing += 1
@@ -202,14 +215,14 @@ METRICS = {
  'cold_open': [('first_card_ms','entry_start','first_card',{}, {})],
  'home_entry': [('first_card_ms','home_entry','first_card',{}, {})],
  'refresh': [('refresh_ms','refresh_start','refresh_done',{}, {})],
- 'next': [('previous_audio_stop_ms','gesture_release','previous_audio_stopped',{'direction':'next'},{'backend':'mixer'}),
+ 'next': [('previous_audio_stop_ms','gesture_release','previous_audio_stopped',{'direction':'next'},{'backend':('mixer','audiotrack')}),
           ('incoming_first_frame_ms','gesture_release','incoming_first_frame',{'direction':'next'}, {})],
- 'prev': [('previous_audio_stop_ms','gesture_release','previous_audio_stopped',{'direction':'prev'},{'backend':'mixer'}),
+ 'prev': [('previous_audio_stop_ms','gesture_release','previous_audio_stopped',{'direction':'prev'},{'backend':('mixer','audiotrack')}),
           ('incoming_first_frame_ms','gesture_release','incoming_first_frame',{'direction':'prev'}, {})],
  'cancel': [('snap_back_ms','gesture_release','snap_back',{'direction':'cancel'}, {})],
  'fling': [('two_card_ms','gesture_release','fling_done',{'direction':'fling'},{'delta':2})],
  'soak': [('incoming_first_frame_ms','gesture_release','incoming_first_frame',{}, {}),
-          ('previous_audio_stop_ms','gesture_release','previous_audio_stopped',{}, {'backend':'mixer'})],
+          ('previous_audio_stop_ms','gesture_release','previous_audio_stopped',{}, {'backend':('mixer','audiotrack')})],
  'mute': [('mute_on_ms','mute_changed','mixer_match',{'kind':'on'},{'backend':'mixer','muted':'true'}),
           ('mute_off_ms','mute_changed','mixer_match',{'kind':'off'},{'backend':'mixer','muted':'false'})],
  'login': [('qr_ms','login_entry','qr_ready',{}, {}),
