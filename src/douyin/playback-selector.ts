@@ -1,7 +1,7 @@
 import type {DouyinItem,DouyinVideoVariant} from './types.ts';
 
-export const DOUYIN_TARGET_RESOLUTION=540;
-/** Matches native DouyinPlaybackSelector, including short-side buckets and stable ties. */
+export const DOUYIN_TARGET_RESOLUTION=480;
+/** Prefer a rendition covering the 466 px watch without paying for redundant pixels. */
 export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefined {
   const label=[v.definition,v.quality,v.gearName].filter(x=>x!=null).join(' ').toLowerCase();
   const match=/(?<!\d)(2160|1440|1080|720|540|480)(?:p)?(?!\d)/.exec(label);
@@ -13,11 +13,11 @@ export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefine
 }
 export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVariant[]):DouyinVideoVariant|undefined {
   const playable=variants.filter(v=>v.playUrl.trim()&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
-  const h264=playable.filter(v=>v.codec==='h264'),pool=h264.length?h264:playable;
-  const distance=(v:DouyinVideoVariant)=>{const r=normalizedDouyinResolution(v);return r===undefined?536870911:Math.abs(r-DOUYIN_TARGET_RESOLUTION);};
+  const known=playable.filter(v=>v.codec!=='unknown'),pool=known.length?known:playable;
+  const distance=(v:DouyinVideoVariant)=>{const r=normalizedDouyinResolution(v);return r===undefined?536870911:r>=466?r-466:100000+466-r;};
   return pool.reduce<DouyinVideoVariant|undefined>((best,v)=>{
     if(!best)return v;
-    const compare=distance(v)-distance(best)||(v.codec==='h264'?0:1)-(best.codec==='h264'?0:1)||best.bitrate-v.bitrate||Math.max(best.width,best.height)-Math.max(v.width,v.height);
+    const compare=distance(v)-distance(best)||(v.bitrate>0?v.bitrate:Number.MAX_SAFE_INTEGER)-(best.bitrate>0?best.bitrate:Number.MAX_SAFE_INTEGER)||(v.codec==='h264'?0:1)-(best.codec==='h264'?0:1)||Math.max(best.width,best.height)-Math.max(v.width,v.height);
     return compare<0?v:best;
   },undefined);
 }

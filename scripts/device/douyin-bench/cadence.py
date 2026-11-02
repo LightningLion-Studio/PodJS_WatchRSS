@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def script(count, pace_ms, direction='next', duration_ms=120):
-    if not 1 <= count <= 200 or pace_ms not in (200, 500, 1000):
+    if not 1 <= count <= 200 or pace_ms not in (200, 500, 1000, 2000, 3000):
         raise ValueError('count/pace outside bounded matrix')
     if direction not in ('next', 'prev') or not 1 <= duration_ms < pace_ms:
         raise ValueError('invalid direction/duration')
@@ -47,22 +47,23 @@ def build_driver(out):
     return out/'classes.dex'
 
 
-def start(serial, count, pace_ms, direction='next', duration_ms=None):
+def start(serial, count, pace_ms, direction='next', duration_ms=None, task_tag='T-DYPREP'):
+    if task_tag not in ('T-DYPREP','T-DYBYTES'):raise ValueError('invalid task owner')
     duration_ms = (120 if pace_ms == 200 else 260) if duration_ms is None else duration_ms
     payload = script(count, pace_ms, direction, duration_ms) # validate first
     if serial not in ('e3aca8af', 'emulator-5560'):
         raise ValueError('only T-DYPREP targets')
     if serial == 'e3aca8af':
         owner = Path('/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/.codex-tmp/device/DEVICE_OWNER')
-        if owner.read_text().strip() != 'T-DYPREP':
+        if owner.read_text().strip() != task_tag:
             raise RuntimeError('T-DYPREP device ownership required')
         # One shell VM invokes Android Input.main repeatedly. A fresh input VM
         # per gesture cost >1 s on this watch, even inside one shell script.
         with tempfile.TemporaryDirectory(prefix='dyprep-driver-') as directory:
             dex = build_driver(directory)
             subprocess.run(['adb', '-s', serial, 'push', str(dex),
-                            '/data/local/tmp/T-DYPREP-input.dex'], check=True, capture_output=True)
-        payload = ('export CLASSPATH=/system/framework/input.jar:/data/local/tmp/T-DYPREP-input.dex\n'
+                            f'/data/local/tmp/{task_tag}-input.dex'], check=True, capture_output=True)
+        payload = (f'export CLASSPATH=/system/framework/input.jar:/data/local/tmp/{task_tag}-input.dex\n'
                    'exec app_process /system/bin DyPrepCadence '+str(count)+' '+str(pace_ms)+' '+direction+' '+str(duration_ms)+'\n')
     process = subprocess.Popen(['adb', '-s', serial, 'shell', 'sh'], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -87,7 +88,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--serial', required=True, choices=['e3aca8af', 'emulator-5560'])
     p.add_argument('--count', required=True, type=int)
-    p.add_argument('--pace-ms', required=True, type=int, choices=[200, 500, 1000])
+    p.add_argument('--pace-ms', required=True, type=int, choices=[200, 500, 1000, 2000, 3000])
     p.add_argument('--direction', default='next', choices=['next', 'prev'])
     p.add_argument('--out', required=True, type=Path)
     a = p.parse_args()
@@ -105,10 +106,10 @@ if __name__ == '__main__':
         raise SystemExit('device cadence incomplete')
 
 
-def stop_watch_driver(process, pid):
+def stop_watch_driver(process, pid, task_tag='T-DYPREP'):
     """Stop only the captured task class, before disconnecting the adb shell."""
     owner = Path('/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/.codex-tmp/device/DEVICE_OWNER')
-    if owner.read_text().strip() != 'T-DYPREP':
+    if owner.read_text().strip() != task_tag:
         raise RuntimeError('T-DYPREP device ownership required')
     if pid is not None and isinstance(pid, int) and pid > 1:
         p = subprocess.run(['adb', '-s', 'e3aca8af', 'shell', 'cat', f'/proc/{pid}/cmdline'], capture_output=True)

@@ -15,7 +15,7 @@ class PrepareTrace(unittest.TestCase):
             self.assertIsNone(parse_log(line.replace(original, bad)))
 
     def test_three_paces_use_one_device_script_and_safe_endpoints(self):
-        for pace in (200, 500, 1000):
+        for pace in (200, 500, 1000, 2000, 3000):
             body = script(50, pace)
             self.assertIn('input swipe 233 330 233 220 120', body)
             self.assertIn('sleep', body)

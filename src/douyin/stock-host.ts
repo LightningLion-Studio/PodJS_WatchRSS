@@ -3,7 +3,7 @@ import {backgroundMediaWork} from '../media/background-work.ts';
 import {kv} from '@podjs/framework/watch';
 import {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
 import {discovery,video} from '@podjs/framework/services';
-import {videoOptEnabled,preserveSelectedDouyinItem} from '../media/video-opt.ts';
+import {videoOptEnabled,preserveSelectedDouyinItem,decodableDouyinItem} from '../media/video-opt.ts';
 import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
 import {DouyinStock,DOUYIN_STOCK_KEY,stockContentKey,stockNetworkAllowed,STOCK_COUNT} from './stock.ts';
@@ -25,10 +25,10 @@ export function createHostDouyinStock(client:DouyinClient){
   read:()=>kv.get(DOUYIN_STOCK_KEY),write:entries=>{kv.set(DOUYIN_STOCK_KEY,entries);benchmark.begin('startup_stage',{startup_stage:'stock_saved',slots:entries.length});},now:Date.now,
   allowed:async()=>kv.get<boolean>('watchrss.douyin.stock.enabled')!==false&&await client.isLoggedIn()&&stockNetworkAllowed(await discovery.networkSnapshot(),videoOptEnabled('traffic'),kv.get<boolean>('watchrss.douyin.stock.wifi-only')!==false),
   watched:()=>client.listWatchedIds(),
-  feed:async()=>{const work=backgroundMediaWork();feedWork=work;let result;try{result=await client.fetchFeedPage({count:12,background:work});}finally{if(feedWork===work)feedWork=undefined;}return result.ok?result.data.items.map(preserveSelectedDouyinItem):[];},
+  feed:async()=>{const work=backgroundMediaWork();feedWork=work;let result;try{result=await client.fetchFeedPage({count:12,background:work});}finally{if(feedWork===work)feedWork=undefined;}return result.ok?await Promise.all(result.data.items.map(async item=>preserveSelectedDouyinItem(await decodableDouyinItem(item)))):[];},
   prepare:async(item,bytes)=>{
    const stats=await mediaPrefixCache.stats().result;
-   const budget=Math.max(512*1024,Math.min(bytes,Math.floor(stats.maxBytes/STOCK_COUNT)));
+   const budget=Math.max(128*1024,Math.min(bytes,Math.floor(stats.maxBytes/STOCK_COUNT)));
    return mediaPrefixCache.prepare(await register(item),budget,`douyin:${item.awemeId}`).result;
   },
   lookup:async(entry,headers)=>{

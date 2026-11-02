@@ -1,5 +1,6 @@
 import type {VideoFrame,NetworkSnapshot} from '@podjs/framework/services';
 import type {DouyinItem} from './types.ts';
+import {douyinPreviewBytes} from './proxy-policy.ts';
 import {douyinMediaExpiry} from './media-expiry.ts';
 
 export function stockNetworkAllowed(network:NetworkSnapshot,trafficSaving:boolean,wifiOnly=true):boolean {
@@ -9,8 +10,7 @@ export const DOUYIN_STOCK_KEY='watchrss.douyin.stock.v1';
 export const STOCK_COUNT=3,STOCK_ENTRY_BYTES=4*1024*1024;
 export function stockPreviewBytes(item:DouyinItem):number {
  const bitrate=item.variants.find(v=>v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl))?.bitrate??0;
- const seconds=Math.min(30,Math.max(1,item.durationMs/1000||30));
- return Math.min(STOCK_ENTRY_BYTES,Math.max(512*1024,Math.ceil((bitrate>0?bitrate*seconds/8:2*1024*1024)+512*1024)));
+ return douyinPreviewBytes(undefined,item.durationMs,bitrate);
 }
 export interface StockEntry {item:DouyinItem;expiresAt:number;prefixBytes:number;tailBytes:number;}
 export interface StockReadySource {uri:string;frame?:VideoFrame;item?:DouyinItem}

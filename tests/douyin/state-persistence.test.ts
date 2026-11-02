@@ -79,6 +79,6 @@ test('preferred playback memo retains unchanged DTO identity, but scalar or in-p
  const video=item('memo');const selected=normalizeItems([video])[0]!;expect(normalizeItems([video])[0]).toBe(selected);
  video.description='new';expect(normalizeItems([video])[0]!.description).toBe('new');
  video.variants[0]!.playUrl='https://new-selected';expect(normalizeItems([video])[0]!.playUrl).toBe('https://new-selected');
- video.variants.push({codec:'h264',playUrl:'https://better',width:960,height:540,bitrate:20});expect(normalizeItems([video])[0]!.playUrl).toBe('https://better');
+ video.variants.push({codec:'h264',playUrl:'https://better',width:960,height:540,bitrate:5});expect(normalizeItems([video])[0]!.playUrl).toBe('https://better');
  video.awemeId='  trim  ';expect(normalizeItems([video])[0]!.awemeId).toBe('trim');
 });

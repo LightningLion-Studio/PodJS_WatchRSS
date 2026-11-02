@@ -36,18 +36,20 @@ export function preserveSelectedDouyinItem<T extends DouyinItem>(item:T):T {
   if(videoOptEnabled('adaptive')&&item.variants?.some(v=>v.codec==='h264'&&(v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl))))return item;
   return applyPreferredDouyinPlayback(item);
 }
+const hevcProbes=new Map<string,Promise<boolean>>();
 /** Experimental selection only publishes a new source after a real decoder probe. */
 export async function decodableDouyinItem<T extends DouyinItem>(item:T):Promise<T> {
   if(!hostWatch.hasCapability('media.video.sessions'))return item;
-  if(!item.playUrl.trim()&&!douyinCodecRuntimePolicy.shouldPreferH264InAutoMode()){
-    for(const v of (item.variants??[]).filter(v=>v.codec==='h265'&&v.width>0&&v.height>0).slice(0,4)){
-      try{const result=await hostServices.videoSessions.capabilities({videoMime:'video/hevc',videoWidth:v.width,videoHeight:v.height});
-        const supported=result.decoderSizeSupported===true&&result.decoderRuntimeDowngraded!==true;
-        douyinCodecRuntimePolicy.confirmHevcSize(v,supported);
-        if(supported)return {...item,playUrl:v.playUrl};
-      }catch{return item;}
+  if(!douyinCodecRuntimePolicy.shouldPreferH264InAutoMode()){
+    const candidates=(item.variants??[]).filter(v=>v.codec==='h265'&&v.width>0&&v.height>0).sort((a,b)=>Math.min(a.width,a.height)-Math.min(b.width,b.height)||a.bitrate-b.bitrate).slice(0,4);
+    const sizes=new Set<string>();
+    for(const v of candidates){
+      const key=`${v.width}x${v.height}`;if(sizes.has(key))continue;sizes.add(key);
+      let probe=hevcProbes.get(key);
+      if(!probe){probe=Promise.resolve().then(()=>hostServices.videoSessions.capabilities({videoMime:'video/hevc',videoWidth:v.width,videoHeight:v.height})).then(result=>result.decoderSizeSupported===true&&result.decoderRuntimeDowngraded!==true).catch(()=>false).finally(()=>hevcProbes.delete(key));hevcProbes.set(key,probe);}
+      douyinCodecRuntimePolicy.confirmHevcSize(v,await probe);
     }
-    return item;
+    item=applyPreferredDouyinPlayback(item);
   }
   if(!videoOptEnabled('adaptive'))return item;
   const selected=adaptiveDouyinItem(item),pool=(item.variants??[]).filter(v=>v.codec==='h264').sort((a,b)=>a.bitrate-b.bitrate);

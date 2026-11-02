@@ -11,10 +11,10 @@ const items=['a','b','c','d'].map(awemeId=>({awemeId,playUrl:'https://fixture/'+
 const client={resolvePlayback:async(id:string)=>({ok:true,data:items.find(x=>x.awemeId===id)}),buildPlaybackHeaders:async()=>({Cookie:'fixture',Referer:'https://www.douyin.com/'})};
 test('production factory cleans whole files once, preserves pre-READY consent, bounds proxy window and clears on logout',async()=>{
  const host=createHostDouyinPreload(client as any),a={},b={};host.allowBluetooth(true,a);host.start(a,items as any,'a','active');await flush();
- expect(oldClears).toBe(1);expect(registrations).toHaveLength(3);expect(registrations[0]).toMatchObject({headers:{Cookie:'fixture'}});expect(windows.at(-1).items.map((x:any)=>x.prefetchBytes)).toEqual([2097152,1572864,1048576]);
+ expect(oldClears).toBe(1);expect(registrations).toHaveLength(4);expect(registrations[0]).toMatchObject({headers:{Cookie:'fixture'}});expect(windows.at(-1).items.map((x:any)=>x.prefetchBytes)).toEqual([0,229376,229376,229376]);
  expect(await host.lookup('a')).toBeUndefined();expect(await host.playback(items[0] as any,{})).toBe('podjs-media-cache://play/a.mp4');expect(oldClears).toBe(1);
  const before=windows.length;for(let i=0;i<10;i++)change();await flush();expect(windows).toHaveLength(before);
- host.start(b,items as any,'a','active');await flush();expect(windows.at(-1).items).toEqual([]);host.allowBluetooth(true,b);await flush();expect(windows.at(-1).items).toHaveLength(3);
+ host.start(b,items as any,'a','active');await flush();expect(windows.at(-1).items).toEqual([]);host.allowBluetooth(true,b);await flush();expect(windows.at(-1).items).toHaveLength(4);
  host.stop(a);const stable=windows.length;host.allowBluetooth(true,b);change();await flush();expect(windows).toHaveLength(stable);
  await producer.clear();expect(clears).toBe(1);host.stop();
  const count=registrations.length;(client as any).resolvePlayback=async()=>({ok:false,code:'REQUEST_FAILED',message:'请求失败，状态码：403'});await expect(host.playback(items[0] as any,{})).rejects.toThrow('403');expect(registrations).toHaveLength(count);
@@ -40,11 +40,11 @@ test('production prefetch event consumer forces one refresh, isolates only neigh
  const current=windows.at(-1).items[0];for(let i=0;i<3;i++){resultListener({...current,result:'failure',httpStatus:0,category:'transport'});await flush();}expect(removed).toEqual(['b']);host.stop(owner);
 });
 
-test('DYFIX backward proxy entries register without detail resolution or prefetch bytes',async()=>{
+test('backward entries fetch bounded prefixes without detail resolution',async()=>{
  windows=[];registrations=[];const resolved:string[]=[];
  const localClient={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>{resolved.push(id);return {ok:true,data:items.find(item=>item.awemeId===id)};}};
  const host=createHostDouyinPreload(localClient as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'c','active');await flush();
- expect(resolved).toEqual(['c','d']);expect(registrations.map(r=>r.key)).toEqual(['c','d','b','a']);expect(windows.at(-1).items.slice(2).map((v:any)=>v.prefetchBytes)).toEqual([0,0]);host.stop(owner);
+ expect(resolved).toEqual(['c','d']);expect(registrations.map(r=>r.key)).toEqual(['c','d','b','a']);expect(windows.at(-1).items.slice(2).map((v:any)=>v.prefetchBytes)).toEqual([229376,229376]);host.stop(owner);
 });
 
 test('DYERR foreground resolution preserves the code and cooldown without registering a failed source',async()=>{
@@ -105,3 +105,13 @@ test('consuming the visible stock item preserves cached current and previous win
   expect(resolved).toEqual([]);expect(headerReads).toBe(1);console.log('DYSWIPE3_STOCK_MODEL '+JSON.stringify({swipes:200,resolutions:0,detail:0,headerReads}));
  }finally{host.stop(owner);legacyBytes=484675145;}
 });
+
+ test('progressive publication retains a still-wanted in-flight neighbour while resolution waits',async()=>{
+  windows=[];registrations=[];let slow=false,release!:(value:any)=>void;
+  const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>slow&&id==='d'?await new Promise(r=>release=r):({ok:true,data:items.find(x=>x.awemeId===id)})};
+  const host=createHostDouyinPreload(local as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'b','active');await flush();
+  const oldD=windows.at(-1).items.find((x:any)=>x.uri.endsWith('/d.mp4'));expect(oldD).toBeDefined();
+  slow=true;host.start(owner,items as any,'c','active');await flush();expect(release).toBeDefined();
+  expect(windows.at(-1).items.some((x:any)=>x.uri===oldD.uri)).toBe(true);
+  release({ok:true,data:items[3]});await flush();host.stop(owner);
+ });

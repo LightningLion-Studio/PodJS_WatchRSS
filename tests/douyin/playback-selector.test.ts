@@ -1,13 +1,14 @@
 import {test,expect} from 'bun:test';
 import fixture from './selector-native-fixture.json';
+import watchPolicy from './bytes-selection-fixture.json';
 import {applyPreferredDouyinPlayback,selectPreferredDouyinUrl,DouyinCodecRuntimePolicy} from '../../src/douyin/playback-selector.ts';
 import {parseDouyinFeed,parseDouyinDetail} from '../../src/douyin/parser.ts';
 import {normalizeItems} from '../../src/douyin/feed-store.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
 import type {DouyinVideoVariant,DouyinItem} from '../../src/douyin/types.ts';
 
-test('same input vectors produce byte-identical URLs to actual compiled native selector',()=>{
- for(const c of fixture.cases)expect(selectPreferredDouyinUrl(c.variants as DouyinVideoVariant[],c.fallback)??null,c.name).toBe(c.expected);
+test('legacy native input vectors use the 466px watch bandwidth policy',()=>{
+ for(const c of fixture.cases)expect(selectPreferredDouyinUrl(c.variants as DouyinVideoVariant[],c.fallback)??null,c.name).toBe((watchPolicy.native as Record<string,string|null>)[c.name]??null);
 });
 test('native codec policy vectors: minimum two, strictly more than half, session-sticky',()=>{
  const p=new DouyinCodecRuntimePolicy();p.recordAutoHevcAttempt();p.recordAutoHevcFailure();expect(p.shouldPreferH264InAutoMode()).toBe(false);expect(p.snapshot()).toEqual({autoHevcAttempts:1,autoHevcFailures:1,autoForceH264:false});p.recordAutoHevcAttempt();expect(p.shouldPreferH264InAutoMode()).toBe(false);expect(p.recordAutoHevcFailure()).toBe(true);p.recordAutoHevcAttempt();p.recordAutoHevcAttempt();expect(p.snapshot()).toEqual({autoHevcAttempts:4,autoHevcFailures:2,autoForceH264:true});

@@ -22,6 +22,8 @@ export interface DouyinPrefetchHooks {
 /** Business window/consent only. Range transport, storage bounds and cancellation live in PodJS. */
 export function createHostDouyinPreload(client:DouyinClient,stock?:import('./stock.ts').DouyinStock) {
  let owner:unknown,plan:{items:readonly DouyinItem[];anchor?:string;mode:'active'|'entry';hooks?:DouyinPrefetchHooks}|undefined;
+ type Target={uri:string;prefetchBytes:number;captureBytes:number;itemToken:string;generation:number};
+ const published=new Map<string,Target>();
  let generation=0,lastAllowed:boolean|undefined,unsubscribe:(()=>void)|undefined,networkGeneration=0;
  let saved:PrefetchFailure[]=[];try{const value=kv.get<unknown>('watchrss.douyin.prefetch-failures');if(Array.isArray(value))saved=value;}catch{}
  const results=new DouyinPrefetchResults(Date.now,saved);let resultOff:(()=>void)|undefined,token=0;
@@ -49,12 +51,17 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  };
  const run=async(own:number)=>{
   if(!plan)return;const enabled=await allowed();if(own!==generation)return;lastAllowed=enabled;
-  if(!enabled){await mediaPrefixCache.window([]).result;return;}
+  if(!enabled){published.clear();await mediaPrefixCache.window([]).result;return;}
   await cleanupOldFiles();if(own!==generation||!plan)return;
   results.begin();const targets=douyinProxyWindow(plan.items,plan.anchor,plan.mode).slice(0,videoOptEnabled('traffic')?2:undefined),mode=plan.mode;
   const headers=await headersForOwner();if(own!==generation)return;
   // Foreground resolution stays independent: one rejected neighbour cannot block its prepare.
-  const prepared:{uri:string;prefetchBytes:number;captureBytes:number;itemToken:string;generation:number}[]=[];
+  const prepared:{id:string;target:Target}[]=[];
+  const publish=async(foregroundBitrate:number)=>{
+   const resolved=new Map(prepared.map(x=>[x.id,x.target])),window=targets.map(item=>({id:item.awemeId,target:resolved.get(item.awemeId)??published.get(item.awemeId)})).filter((x):x is {id:string;target:Target}=>!!x.target);
+   await mediaPrefixCache.window(window.map(x=>x.target),foregroundBitrate).result;
+   if(own===generation){published.clear();for(const x of window)published.set(x.id,x.target);}
+  };
   let foregroundBitrate=mode==='active'?selectPreferredDouyinVariant(targets[0]?.variants??[])?.bitrate??0:0;
   for(const item of targets){
    if(own!==generation)return;const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
@@ -62,16 +69,16 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    const backward=mode==='active'&&plan!.items.findIndex(value=>value.awemeId===item.awemeId)<center;
    const stocked=await playbackLookup(item.awemeId);if(own!==generation)return;
    const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});if(own!==generation)return;
-   if(!result.ok){appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
+   if(!result.ok){published.delete(item.awemeId);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
    const uri=stocked??await register(result.data,headers);if(own!==generation)return;if(!uri)continue;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;
-   const itemToken=`p${++token}`;results.bind({id:item.awemeId,itemToken,generation:own,uri,url:result.data.playUrl});
-   prepared.push({uri,itemToken,generation:own,prefetchBytes:stocked||backward?0:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs)});
+   const itemToken=`p${++token}`;const bitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;results.bind({id:item.awemeId,itemToken,generation:own,uri,url:result.data.playUrl});
+   prepared.push({id:item.awemeId,target:{uri,itemToken,generation:own,prefetchBytes:stocked||mode==='active'&&item.awemeId===plan?.anchor?0:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length,bitrate),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs,bitrate)}});
    if(own!==generation)return;
-   // Publish progressively; do not wait for a slow old detail request to warm current+next.
-   await mediaPrefixCache.window(prepared,foregroundBitrate).result;
+   // Preserve still-wanted transfers while publishing newly resolved sources.
+   await publish(foregroundBitrate);
   }
-  if(own===generation)await stats();
+  if(own===generation){await publish(foregroundBitrate);await stats();}
  };
  const consume=async(event:MediaPrefetchResult)=>{
   const action=results.result(event,foreground);if(action)try{kv.set('watchrss.douyin.prefetch-failures',results.snapshot());}catch{}if(!action||action.action==='none')return;
@@ -94,7 +101,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  };
  const stop=(expected?:unknown)=>{
   if(expected!==undefined){bluetoothOwners.delete(expected);if(expected!==owner)return;}else bluetoothOwners.clear();
-  results.begin();resultOff?.();resultOff=undefined;generation++;networkGeneration++;lastAllowed=undefined;ownerHeaders=undefined;owner=undefined;plan=undefined;unsubscribe?.();unsubscribe=undefined;
+  published.clear();results.begin();resultOff?.();resultOff=undefined;generation++;networkGeneration++;lastAllowed=undefined;ownerHeaders=undefined;owner=undefined;plan=undefined;unsubscribe?.();unsubscribe=undefined;
   void mediaPrefixCache.window([]).result.catch(()=>{});
  };
  const networkChanged=()=>{const op=++networkGeneration;void allowed().then(value=>{if(op!==networkGeneration||!plan||value===lastAllowed)return;void run(++generation).catch(()=>appLogger.w('DouyinProxy','window failed'));}).catch(()=>{});};
@@ -116,7 +123,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   async invalidate(_id:string){sources.clear();await mediaPrefixCache.clear().result;},stop,stats,
   allowBluetooth(value:boolean,expected:unknown){if(bluetoothOwners.has(expected)===value)return;if(value)bluetoothOwners.add(expected);else bluetoothOwners.delete(expected);if(expected===owner)networkChanged();},
   start(next:unknown,items:readonly DouyinItem[],anchor:string|undefined,mode:'active'|'entry',hooks?:DouyinPrefetchHooks){
-   if(next!==owner){client.resetPrefetchFailures?.();results.begin(true);unsubscribe?.();unsubscribe=undefined;lastAllowed=undefined;}owner=next;plan={items,anchor,mode,hooks};
+   if(next!==owner){published.clear();client.resetPrefetchFailures?.();results.begin(true);unsubscribe?.();unsubscribe=undefined;lastAllowed=undefined;}owner=next;plan={items,anchor,mode,hooks};
    resultOff??=mediaPrefixCache.onResult?.(event=>{void consume(event).catch(()=>appLogger.w('DouyinProxy','prefetch result handling failed'));});
    unsubscribe??=onNetworkChange(networkChanged,networkChanged);void run(++generation).catch(()=>appLogger.w('DouyinProxy','window failed'));
   },

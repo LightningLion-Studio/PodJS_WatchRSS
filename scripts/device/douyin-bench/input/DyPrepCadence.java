@@ -4,7 +4,7 @@ import java.lang.reflect.Method;
 public final class DyPrepCadence {
  public static void main(String[] args)throws Exception {
   int count=Integer.parseInt(args[0]),pace=Integer.parseInt(args[1]);boolean prev=args[2].equals("prev");int duration=Integer.parseInt(args[3]);
-  if(count<1||count>200||(pace!=200&&pace!=500&&pace!=1000)||duration<1||duration>=pace)throw new IllegalArgumentException();
+  if(count<1||count>200||(pace!=200&&pace!=500&&pace!=1000&&pace!=2000&&pace!=3000)||duration<1||duration>=pace)throw new IllegalArgumentException();
   Method input=Class.forName("com.android.commands.input.Input").getMethod("main",String[].class);
   System.out.println("driver_pid="+android.os.Process.myPid());
   for(int i=0;i<count;i++){
