@@ -19,6 +19,8 @@ const publish=(v:boolean)=>{conflict=v;for(const fn of observers)fn();};
 mock.module('../src/cloud/status.ts',()=>({readCloudAccountStatus:()=>({ownerChoiceRequired:conflict}),subscribeCloudAccountStatus:(fn:()=>void)=>{observers.add(fn);return()=>observers.delete(fn);}}));
 mock.module('../src/services.ts',()=>({clearLocalPrivateLibrary:async()=>{actions.push('clearLocal');if(failClear)throw Error('private path must never leak');}}));
 mock.module('../src/cloud/application.ts',()=>({manualCloudSync:async()=>{syncs++;},applicationCloudApproval:{},applicationCloudHandoff:{},applicationCloudActions:{logout:async()=>{throw Error('no logout');},reregister:async()=>{},resolveOwner:async(choice:string,confirmed:boolean,clear?:()=>Promise<void>)=>{expect(confirmed).toBe(true);actions.push(choice);if(choice==='clear')await clear!();publish(false);}}}));
+// The owner-choice route does not invoke platform media clients.
+mock.module('../src/media-services.ts',()=>({douyinClient:{}}));
 const {HomeRoutes}=await import('../src/ui/routes/home');
 const stops:(()=>void)[]=[];afterEach(()=>{for(const stop of stops.splice(0))stop();observers.clear();actions.length=0;conflict=false;failClear=false;syncs=0;});
 const settle=async()=>{for(let i=0;i<25;i++)await Promise.resolve();};

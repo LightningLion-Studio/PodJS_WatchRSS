@@ -1,7 +1,8 @@
 import {SCALE_LOOPBACK_BULK_ACK_MS,SCALE_LOOPBACK_TEST_MS} from './scale-loopback-budget';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
-import {createServer,connect,type Socket} from 'node:net';
+import type {Socket} from 'node:net';
+import {pairedLoopback} from './paired-loopback';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -31,16 +32,15 @@ async function fixture(path:string,id:string){
 // Match the native TCP transport: framing writes its short length prefix separately.
 function connection(socket:Socket){ socket.setNoDelay(true);const endpoints={localPort:socket.localPort,remotePort:socket.remotePort};
  const chunks:Uint8Array[]=[];let ended=false,notify:(()=>void)|undefined,total=0,readBytes=0,readCalls=0,activeReads=0,maxActiveReads=0;
- socket.on('data',(b:Buffer)=>{chunks.push(new Uint8Array(b));notify?.();});socket.on('end',()=>{ended=true;notify?.();});socket.on('close',()=>{ended=true;notify?.();});socket.on('error',()=>{ended=true;notify?.();});
+ socket.on('data',(b:Buffer)=>{chunks.push(new Uint8Array(b));notify?.();});socket.on('end',()=>{ended=true;notify?.();});socket.on('close',()=>{ended=true;notify?.();});socket.on('error',()=>{ended=true;notify?.();});socket.resume();
  const conn=new StreamFrameConnection({read:async(max,timeout)=>{readCalls++;activeReads++;maxActiveReads=Math.max(maxActiveReads,activeReads);try{while(!chunks.length&&!ended){await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{notify=undefined;reject(new Error('loopback read timed out'));},timeout);notify=()=>{clearTimeout(timer);notify=undefined;resolve();};});}const b=chunks.shift();if(!b)return null;if(b.length>max)chunks.unshift(b.subarray(max));const bytes=b.subarray(0,max);readBytes+=bytes.length;return bytes;}finally{activeReads--;}},write:async b=>{total+=b.length;await new Promise<void>((resolve,reject)=>socket.write(b,error=>error?reject(error):resolve()));},close:async()=>{socket.destroy();}});
  return {conn,bytes:()=>total,diagnostics:()=>({...endpoints,readCalls,readBytes,maxActiveReads})};
 }
 async function exchange(serverRepo:SqlLibrarySessionRepository,phone:Awaited<ReturnType<typeof fixture>>,options:{checkpoint:boolean;interruptAt?:number;dropFinalAck?:boolean}){
  
- const accepted:Promise<Socket>=new Promise(resolve=>{server.once('connection',resolve);});
- const socket=connect({host:'127.0.0.1',port:(server.address() as any).port});
- await new Promise<void>(resolve=>socket.once('connect',resolve));const remote=await accepted;
+ const {socket,remote}=await server.pair();
  const paired=remote.remotePort===socket.localPort&&remote.localPort===socket.remotePort;
+ expect(paired).toBe(true);
  const a=connection(remote),b=connection(socket);let phases:Record<string,number>={},phaseStart=performance.now(),last='request';
  const session=new LibrarySyncSession(a.conn,serverRepo,{responseAckTimeoutMs:options.checkpoint?10000:SCALE_LOOPBACK_BULK_ACK_MS,onStatus:status=>{const now=performance.now();phases[last]=(phases[last]??0)+now-phaseStart;phaseStart=now;last=status.phase;}});
  const running=session.run();void running.catch(error=>{if(error instanceof FrameLengthError)console.error('T39_FRAME_DIAGNOSTIC '+JSON.stringify({length:error.length,maxFrameBytes:error.maxFrameBytes,paired,server:a.diagnostics(),client:b.diagnostics()}));});let requests=0,fullBodies=0,completed=0,frames=0;const started=performance.now();
@@ -71,10 +71,9 @@ async function exchange(serverRepo:SqlLibrarySessionRepository,phone:Awaited<Ret
  }finally{console.log('T39 exchange progress '+JSON.stringify({options,elapsedMs:performance.now()-started,completed,requests,frames,phases,paired,server:a.diagnostics(),client:b.diagnostics()}));await b.conn.close();await a.conn.close();await running.catch(()=>{});}
 }
 // Each exchange uses actual localhost TCP and production framing/coordinator/SQLite repositories.
-const activeSockets=new Set<Socket>();
-const server=createServer(socket=>{activeSockets.add(socket);socket.once('close',()=>activeSockets.delete(socket));});
+let server:Awaited<ReturnType<typeof pairedLoopback>>;
 test('5500 articles over TCP: legacy compatibility, durable resume, lost ACK and one-article delta',async()=>{
- const root=mkdtempSync(join(tmpdir(),'wrss-t39-'));await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const root=mkdtempSync(join(tmpdir(),'wrss-t39-'));server=await pairedLoopback();
  let watch=await fixture(join(root,'watch.sqlite'),'watch'),phone=await fixture(join(root,'phone.sqlite'),'phone');
  try{
   const source='https://watchrss.local/import-txt-novel/'+'39'.repeat(16),body='T39 中文🙂 complete body '.repeat(65)+' END';
@@ -97,5 +96,5 @@ test('5500 articles over TCP: legacy compatibility, durable resume, lost ACK and
   const retry=await exchange(watch.repo,phone,{checkpoint:true});expect(retry.fullBodies).toBe(0);expect(phone.count()).toBe(5500);
   expect((await watch.repo.cursor('phone')).lastLocalSeqAckedByPeer).toBeGreaterThan(beforeLost.lastLocalSeqAckedByPeer);
 
- }finally{watch.sql.close();phone.sql.close();for(const socket of activeSockets)socket.destroy();server.close();server.unref();expect(server.listening).toBe(false);rmSync(root,{recursive:true,force:true});}
+ }finally{watch.sql.close();phone.sql.close();await server.close();rmSync(root,{recursive:true,force:true});}
 },SCALE_LOOPBACK_TEST_MS);
