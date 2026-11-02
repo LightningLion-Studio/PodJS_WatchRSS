@@ -113,9 +113,13 @@ test('missing login leaves refresh state without a network request',async()=>{
   const f=mount({logged:false});await settle();expect(f.requests).toHaveLength(0);expect(f.text()).not.toContain('刷新中...');expect(f.text()).toContain('需要登录');f.swipe(-80);await settle();expect(f.routes).toEqual([{name:'login'}]);
 });
 
-for(const debug of [false,true])test(`external auto-enter obeys build gate debug=${debug}`,async()=>{
+for(const debug of [false,true])test(`external entry never auto-plays, including a legacy auto-enter flag debug=${debug}`,async()=>{
  debugAllowed=debug;const f=mount({cacheCount:4,hasMore:true,cursor:'c',autoEnter:true,resume:'2'});await settled(f);await settle();
- expect(f.plays.length).toBe(debug?1:0);if(debug){expect(f.plays[0].item.awemeId).toBe('2');expect(f.plays[0].immersive).toBe(true);}
+ expect(f.plays).toHaveLength(0);expect(f.routes).toHaveLength(0);
+ f.setActive(false);f.setActive(true);await settled(f);await settle();
+ expect(f.plays).toHaveLength(0);
+ f.press();expect(f.plays).toHaveLength(1);
+ expect(f.plays[0].item.awemeId).toBe('2');expect(f.plays[0].immersive).toBe(true);
 });
 
 

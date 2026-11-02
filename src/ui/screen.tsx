@@ -5,7 +5,8 @@ import {markFeedArticleRead} from "./reader-open-state.ts";
 import {readerBodyState} from '../reader/body-state.ts';
 import {ActivityLog} from '../logs/activity.ts';
 import {activityStateHub} from '../navigation/activity-host.ts';
-import {captureActivityNavigation,restoreActivityNavigation,readNavigationCheckpoint,writeNavigationCheckpoint,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
+import {captureActivityNavigation,resolveActivityNavigation,routeMemory,CONTENT_ACTIVITY_KEY} from '../navigation/activity-navigation.ts';
+import {startupActivityNavigation} from '../navigation/startup-navigation.ts';
 import {InformationActivity} from '../navigation/information-activity.ts';
 import {RouteActivityProvider} from './route-activity.tsx';
 import { startupFirstScreen, startupMark } from "../core/startup-trace.ts";
@@ -99,11 +100,6 @@ import type { InformationPage } from "./InformationScreens.tsx";
 import { checkpointInformationSnapshot } from "./information-route-state.ts";
 import type { RecommendedChannel } from "../rss/recommendations.ts";
 import { memoRepository } from "../services.ts";
-import {
-  AppResumeStore,
-  resolveResumeTarget,
-  resumeTargetForStack,
-} from "../navigation/resume-state.ts";
 import type { HomePlatformLoginState } from "./home-extras.ts";
 import { HomeRoutes } from "./routes/home.tsx";
 import { InfoRoutes } from "./routes/info.tsx";
@@ -158,31 +154,21 @@ export default function WatchRSS(props: {
     180,
     metrics.logicalHeight - metrics.safeInsets.top - metrics.safeInsets.bottom,
   );
-  const resumeStore = new AppResumeStore(kv);
-  const startupResume = resumeStore.read();
-  // Like Android, routes come back only when the Activity is recreated (a saved Bundle exists);
-  // a fresh launch (force-stop, task removed) starts at home. The KV checkpoint is the newest
-  // synchronous copy of that same saved state.
-  const hostActivity=activityStateHub.read(),recreated=Object.keys(hostActivity.saved).length>0;
-  const activityEntries=recreated
-    ?readNavigationCheckpoint(kv,debugGate.allowed)??restoreActivityNavigation(hostActivity,debugGate.allowed)
-    :null;
+  // Only the host's task-scoped Bundle can resume navigation. Durable KV
+  // checkpoints and legacy last-screen records are not launch instructions.
+  const activityEntries=startupActivityNavigation(activityStateHub.read(),debugGate.allowed);
   const [resumeReady, setResumeReady] = createSignal(false);
   const [stack, setStack] = createSignal<Entry[]>([{ page: "home" }]);
   const checkpoints=new Map<Entry,Set<()=>void>>();
   const saveActivity=()=>traceServiceWork("navigation.saveActivity",()=>untrack(()=>{
     if(!resumeReady())return;
     traceServiceWork("navigation.checkpoints",()=>{for(const handlers of checkpoints.values())for(const checkpoint of handlers)checkpoint();});
-    traceServiceWork("navigation.resume",()=>resumeStore.save(resumeTargetForStack(stack())));
     const next=captureActivityNavigation(activityStateHub.read(),stack());
     void activityStateHub.write(next,[CONTENT_ACTIVITY_KEY]).catch(error=>logConsole.warn('Activity state save failed',String(error)));
   }));
   onCleanup(onLifecycleCheckpoint(()=>{
     if(!resumeReady())return;
     saveActivity();
-    // Only saved descriptors/scroll anchors survive a cold launch. Retained
-    // drafts, article payloads and live handles keep their Activity-only scope.
-    writeNavigationCheckpoint(kv,activityStateHub.read());
   }));
   const informationActivity=new InformationActivity(saveActivity,error=>logConsole.warn('Information restore',String(error)));
   onCleanup(()=>informationActivity.close());
@@ -332,7 +318,7 @@ export default function WatchRSS(props: {
   // Cold start renders the home list from the last snapshot (synchronous KV) so the first screen
   // does not wait for database setup; the live list replaces it a moment later. Only used when
   // the app resumes to home, otherwise the snapshot would flash before the restored page.
-  const homeSnapshot = (activityEntries?.length??0)>1 ? undefined : readHomeChannelSnapshot(kv, startupResume);
+  const homeSnapshot = (activityEntries?.length??0)>1 ? undefined : readHomeChannelSnapshot(kv, null);
   const [channels, setChannels] = createSignal<Channel[]>(homeSnapshot ?? []);
   const notesPlacementStore = new HomeEntryPlacementStore();
   const [notesHomePlacement, setNotesHomePlacement] = createSignal(notesPlacementStore.read());
@@ -764,57 +750,7 @@ export default function WatchRSS(props: {
         const search=entries.at(-1);
         if(search?.page==='search'&&search.channelId){const draft=routeMemory(search).retained.query;if(typeof draft==='string')await searchChannelArticles(search.channelId,draft);}
         if(stack()!==entries)return;
-        const playback=entries.at(-1);
-        if(playback?.page==='video'&&playback.videoTarget){
-          const target=playback.videoTarget;
-          // Restore identities from Activity memory; Douyin URLs come from the secure queue, headers from current credentials.
-          owned=entries.slice(0,-1);setStack(owned);
-          if(target.kind==='bili')await biliNavigate({...target,name:'player'},playback.memory);
-          else if(target.kind==='douyin')await restoreDouyinVideo(target.awemeId,target.immersive,playback.memory,target.detailPlayback);
-          else {const rss=await props.services.getArticle(target.articleId);if(rss&&stack()===owned)await openRssVideo(rss,target.url,playback.memory);}
-        }
-        return;
       }
-      const target = await resolveResumeTarget(startupResume, {
-        hasChannel: (id) => channels().some((channel) => channel.id === id),
-        getArticle: (id) => props.services.getArticle(id),
-      });
-      if(stack()!==baseline)return;
-      if (target.kind === "home") return;
-      if (target.kind === "articles") {
-        setStack([
-          { page: "home" },
-          { page: "articles", channelId: target.channelId },
-        ]);
-        await loadFeedArticles(target.channelId, 12, true);
-        return;
-      }
-      if (target.kind === "reader") {
-        batch(() => {
-          setArticle(target.article);
-          setStack([
-            { page: "home" },
-            { page: "reader", readerArticle: target.article },
-          ]);
-        });
-        return;
-      }
-      if (target.kind === "bili") {
-        setStack([
-          { page: "home" },
-          { page: "bili", biliRoute: target.route as BiliRoute },
-        ]);
-        return;
-      }
-      if (target.route.name === "player" && target.route.savedQueue === true) {
-        owned=[{ page: "home" }, { page: "douyin", douyinRoute: { name: "entry" } }];setStack(owned);
-        await restoreDouyinVideo(String(target.route.awemeId),target.route.immersive===true,undefined,target.route.detailPlayback===true);
-        return;
-      }
-      setStack([
-        { page: "home" },
-        { page: "douyin", douyinRoute: target.route as DouyinRoute },
-      ]);
     } catch (error) {
       if(stack()===owned)setError(`无法恢复上次内容：${String(error)}`);
     } finally {
@@ -1296,7 +1232,7 @@ export default function WatchRSS(props: {
     });
     onCleanup(unsubscribe);
     if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
-    void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",debugAutoEnterFlow:true,resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));});
+    void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));});
   });
   createEffect(() => setNavigationState({ canGoBack: stack().length > 1 }));
   const removeHostEvent = __onHostEvent((event) => {

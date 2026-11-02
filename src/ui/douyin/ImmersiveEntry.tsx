@@ -2,7 +2,6 @@ import {douyinBench} from '../../douyin/bench.ts';
 import {observeDouyinAuth} from './auth-state.ts';
 import * as hostServices from '@podjs/framework/services';
 import {DOUYIN_AUTH403_MAX_COOLDOWN_MS} from '../../douyin/auth403.ts';
-import {debugGate} from '../../debug/host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import { createSignal, createEffect, untrack, onCleanup, Show } from "solid-js";
 import { View, Text, Image } from "@pocketjs/framework/components";
@@ -97,7 +96,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     if(!items().length){await load(true);return;}
     // Native enterVideoFlow only switches pages. Do not hold "刷新中" while
     // serially resolving old queue entries; the player's recovery owns failures.
-    const index=Math.max(0,items().findIndex(item=>item.awemeId===anchor)),item=items()[index];
+    const requested=props.route.name==='entry'?props.route.resumeAwemeId:undefined;
+    const index=Math.max(0,items().findIndex(item=>item.awemeId===(requested??anchor))),item=items()[index];
     setError("");
     props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true});
     props.onNavigate({name:"player",awemeId:item.awemeId});
@@ -105,14 +105,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const preloadOwner={};
   createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor);else props.onPreloadStop?.(preloadOwner);});
   onCleanup(()=>props.onPreloadStop?.(preloadOwner));
-  let debugEntered=false;
-  createEffect(()=>{
-    const route=props.route;
-    if(debugGate.allowed&&route.name==='entry'&&route.debugAutoEnterFlow&&!debugEntered&&active()&&!busy()&&logged()&&items().length){
-      debugEntered=true;if(route.resumeAwemeId)anchor=route.resumeAwemeId;
-      void untrack(enter);
-    }
-  });
+  // External entry intents may select an anchor, but only a tap/swipe enters
+  // the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
   createEffect(()=>{const enabled=props.active??true;if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':busy()?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
   createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();setBusy(false);}});onCleanup(()=>{disposed=true;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
