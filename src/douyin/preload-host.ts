@@ -1,3 +1,4 @@
+import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
 import {video} from '@podjs/framework/services';
@@ -46,7 +47,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const playbackLookup=async(id:string)=>stock?.playbackReady?(await stock.playbackReady(id))?.uri:stock?.lookup(id);
  const register=async(item:DouyinItem,headers:Record<string,string>)=>{
   const selected=preserveSelectedDouyinItem(item);if(!selected.playUrl)return undefined;
-  const uri=(await mediaPrefixCache.register(selected.awemeId,selected.playUrl,headers).result).uri;
+  const uri=(await mediaPrefixCache.register(selected.awemeId,selected.playUrl,headers,false,douyinPlaybackMirrors(selected)).result).uri;
   registerVideoResolution(uri,takeVideoResolution(selected.playUrl,'douyin'));return remember(uri,selected);
  };
  const run=async(own:number)=>{

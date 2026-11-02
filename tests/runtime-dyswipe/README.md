@@ -78,3 +78,51 @@ also exercise the previous boundary without the fixture callback.
 Other release reasons are release, threshold, cancelled and network_prompt.
 Use the assigned task port (T-DYLOSS: 5558). The slow URL port stays 18756 inside
 the emulator; the host server can use a private port via adb reverse.
+
+## Network-first keyframe comparison (T-DYNET)
+
+The fixture supports two independent loopback authorities and a per-connection
+TLS-like setup delay. It still serves only generated media, with no upstream.
+
+```sh
+python3 tests/runtime-dyswipe/slow-cdn.py --root /tmp/dynet-media \
+  --port 18766 --alternate-port 18767 --kbps 300 \
+  --ttfb-ms 600 --alternate-ttfb-ms 120 --handshake-ms 350 \
+  --log /tmp/dynet-server.jsonl
+adb -s emulator-5556 reverse tcp:18756 tcp:18766
+adb -s emulator-5556 reverse tcp:18757 tcp:18767
+```
+
+`connection`, `cold`, and `host` are numeric connection/authority diagnostics.
+Both authorities serve identical bytes. `host=0` is the primary; `host=1` is the
+alternate. The handshake delay is applied only to a connection's first request.
+The log contains no request URL, header, credentials or account information.
+Limits are per connection, as in the original fixture, not a model of aggregate
+radio capacity. The 350 ms setup delay is not real TLS or DNS measurement.
+
+Build the framework's `PodMediaNetworkTest` with the local runtime:
+
+```sh
+ANDROID_HOME=/home/wilf/Android/Sdk ./gradlew :runtime:assembleDebugAndroidTest \
+  -PpodAbis=x86_64 -x externalNativeBuildDebug -x mergeDebugNativeLibs
+adb -s emulator-5556 install -r runtime/build/outputs/apk/androidTest/debug/runtime-debug-androidTest.apk
+adb -s emulator-5556 shell am instrument -w -r \
+  -e class dev.podjs.runtime.PodMediaNetworkTest -e phase candidate -e samples 10 \
+  dev.podjs.runtime.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Run Gradle from the framework's `platforms/android` directory. This standalone
+instrumentation APK exercises production Java cache/transport and the Android
+media decoder, without JNI, the account app, or a UI cover. Use T-EMU's harness
+to boot/stop the assigned emulator. Do not import cookies. Install the standalone
+APK with serial-scoped ADB because the harness installer targets the account-app
+package. The same instrumentation test can compile on the card's base; unknown
+`alternates` are ignored there. `-e race false` disables alternates for ablation.
+
+`decodable_ms` ends at a successful cache-only MediaMetadataRetriever frame at
+time zero. It includes polling and decode cost. `network_bytes` is application
+transport bytes at that time, including any concurrent remainder read. Neither
+is a UI first-frame measurement. Inspect `keyframe_prefix` separately and compare
+`keyframe_end` with ffprobe's first video packet `pos + size`. A byte plan is not
+a decoder result. The first candidate's 128 KiB probe was too short for the
+extractor's read-ahead; the final stage uses 192 KiB plus a sample-derived guard.

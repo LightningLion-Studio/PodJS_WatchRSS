@@ -1,3 +1,4 @@
+import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {benchmark} from '@podjs/framework/benchmark';
 import {backgroundMediaWork} from '../media/background-work.ts';
 import {kv} from '@podjs/framework/watch';
@@ -16,7 +17,7 @@ export function createHostDouyinStock(client:DouyinClient){
   const key=stockContentKey(item),version=authorization(),known=registrations.get(key);
   if(!force&&!headers&&known?.remote===item.playUrl&&known.authorization===version)return known.uri;
   const currentHeaders=headers??await client.buildPlaybackHeaders();if(version!==authorization())throw Error('authorization_changed');
-  const {uri}=await mediaPrefixCache.register(key,item.playUrl,currentHeaders,true).result;
+  const {uri}=await mediaPrefixCache.register(key,item.playUrl,currentHeaders,true,douyinPlaybackMirrors(item)).result;
   if(version!==authorization())throw Error('authorization_changed');
   registrations.set(key,{uri,remote:item.playUrl,authorization:version});while(registrations.size>16)registrations.delete(registrations.keys().next().value!);
   return uri;

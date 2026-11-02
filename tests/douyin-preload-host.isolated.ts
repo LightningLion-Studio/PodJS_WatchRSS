@@ -2,7 +2,7 @@ import {test,expect,mock} from 'bun:test';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 const result=(value:any)=>({result:Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any)=>{registrations.push({key,url,headers});return result({uri:'podjs-media-cache://play/'+key+'.mp4'});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[])=>{registrations.push({key,url,headers,persistent,alternates});return result({uri:'podjs-media-cache://play/'+key+'.mp4'});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
@@ -66,13 +66,13 @@ test('persistent stock enters the title window and playback without detail or pr
 test('fresh feed opens production proxy and warms forward and backward sources without detail',async()=>{
  const {DouyinClient}=await import('../src/douyin/client.ts');const {utf8Encode}=await import('../src/cloud/types.ts');
  windows=[];registrations=[];const paths:string[]=[],store=new Map([['douyin.cookie','fixture']]);
- const real=new DouyinClient({secureStorage:{get:async k=>store.get(k)??null,set:async(k,v)=>{store.set(k,v);},remove:async k=>{store.delete(k);}},signer:{sign:()=> 'fixture'},transport:{request:async r=>{paths.push(new URL(r.url).pathname);return {status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_list:['a','b','c','d'].map(id=>({aweme_id:id,video:{play_addr:{url_list:['https://fixture.invalid/'+id]}}}))}))};}}});
+ const real=new DouyinClient({secureStorage:{get:async k=>store.get(k)??null,set:async(k,v)=>{store.set(k,v);},remove:async k=>{store.delete(k);}},signer:{sign:()=> 'fixture'},transport:{request:async r=>{paths.push(new URL(r.url).pathname);return {status:200,headers:{},body:utf8Encode(JSON.stringify({aweme_list:['a','b','c','d'].map(id=>({aweme_id:id,video:{play_addr:{url_list:['https://fixture.invalid/'+id,'https://mirror.invalid/'+id]}}}))}))};}}});
  const page=await real.fetchFeedPage();if(!page.ok)throw Error('feed failed');
  const host=createHostDouyinPreload(real),owner={};host.allowBluetooth(true,owner);host.start(owner,page.data.items,'b','active');
  const end=Date.now()+2000;while(registrations.length<4&&Date.now()<end)await new Promise(r=>setTimeout(r,1));
  expect(await host.playback(page.data.items[1]!,{})).toBe('podjs-media-cache://play/b.mp4');
  expect(registrations.map(r=>r.key)).toContain('a');expect(registrations.map(r=>r.key)).toContain('c');
- expect(windows.at(-1).items.length).toBeGreaterThanOrEqual(3);expect(paths).toEqual(['/aweme/v2/web/module/feed/']);host.stop(owner);
+ expect(windows.at(-1).items.length).toBeGreaterThanOrEqual(3);expect(paths).toEqual(['/aweme/v2/web/module/feed/']);expect(registrations.find(r=>r.key==='b').alternates).toEqual(['https://mirror.invalid/b']);host.stop(owner);
 });
 
 test('legacy whole-file cleanup failure never blocks fresh feed playback or deletes persistent prefixes',async()=>{
