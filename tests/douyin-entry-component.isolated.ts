@@ -232,7 +232,7 @@ test('DYERR accepted refresh pairs native presentation with its own sequence and
   const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.swipe(80);await requestReady(f);
   expect(f.text()).not.toContain('刷新中');const start=events.find(e=>e.code==='refresh_start');expect(start).toBeDefined();
   expect(events.some(e=>e.code==='refresh_done')).toBe(false);
-  const deadline=[...retryTimers].reverse().find(t=>t.ms===1500&&!t.cancelled)!;deadline.fire();await settle();
+  const deadline=[...retryTimers].reverse().find(t=>t.ms===DOUYIN_NETWORK_TIMEOUT_MS&&!t.cancelled)!;deadline.fire();await settle();
   expect(f.text()).toContain('内容加载较慢，请稍候');expect(events.filter(e=>e.code==='refresh_done'&&e.presented)).toEqual([{code:'refresh_done',seq:start.seq,presented:true}]);
   expect(events.some(e=>e.code==='error'&&e.seq===start.seq)).toBe(true);
   expect(events.some(e=>e.code==='first_card')).toBe(false);
@@ -276,4 +276,24 @@ test('navigation still fences a late successful feed after the UI deadline',asyn
  const f=mount();await requestReady(f);retryTimers.find(t=>t.ms===1500&&!t.cancelled)!.fire();await settle();f.setActive(false);
  f.requests[0]!.reply.resolve(response(['retired']));for(let i=0;i<30;i++)await settle();expect(f.plays).toHaveLength(0);
  expect(f.text()).not.toContain('向上进入短视频流');
+});
+
+
+test('DYENTRY normal refresh after the slow hint completes once with no timeout or retry UI',async()=>{
+ const before=(globalThis as any).pod,events:any[]=[];let seq=900;
+ (globalThis as any).pod={benchmark:(raw:string)=>{const value=JSON.parse(raw);if(!value.seq)value.seq=++seq;events.push(value);return value.seq;}};
+ try {
+  const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.swipe(80);await requestReady(f);
+  const start=events.find(e=>e.code==='refresh_start');expect(start).toBeDefined();
+  const notice=[...retryTimers].reverse().find(t=>t.ms===1500&&!t.cancelled)!;notice.fire();await settle();
+  expect(f.text()).toContain('内容加载较慢，请稍候');expect(f.text()).not.toContain('重试');
+  expect(events.filter(e=>e.seq===start.seq&&['error','refresh_done'].includes(e.code))).toEqual([]);
+  f.swipe(80);await settle();expect(f.requests).toHaveLength(1);
+  f.requests[0]!.reply.resolve(response(['normal-refresh']));
+  const end=Date.now()+2000;while(f.text().includes('内容加载较慢')&&Date.now()<end)await settle();
+  expect(f.text()).not.toContain('内容加载较慢');expect(f.text()).not.toContain('重试');
+  expect(events.filter(e=>e.seq===start.seq&&e.code==='error')).toEqual([]);
+  expect(events.filter(e=>e.seq===start.seq&&e.code==='refresh_done'&&e.presented)).toHaveLength(1);
+  f.press();expect(f.plays[0]?.item.awemeId).toBe('normal-refresh');
+ }finally{(globalThis as any).pod=before;}
 });

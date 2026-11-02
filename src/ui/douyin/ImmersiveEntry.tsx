@@ -2,6 +2,7 @@ import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
 import {observeDouyinAuth} from './auth-state.ts';
 import * as hostServices from '@podjs/framework/services';
+import {DOUYIN_NETWORK_TIMEOUT_MS} from '../../douyin/client.ts';
 import {DOUYIN_AUTH403_MAX_COOLDOWN_MS} from '../../douyin/auth403.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import { createSignal, createEffect, untrack, onCleanup, Show } from "solid-js";
@@ -13,12 +14,12 @@ import { isDouyinTemporaryFailure,isDouyinRetryableFailure,formatDouyinError } f
 import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 
-export const DOUYIN_ENTRY_TIMEOUT_MS=1500;
+export const DOUYIN_ENTRY_SLOW_MS=1500;
 
 /** Verified stock may prepare one hidden first-frame session; only entering starts playback. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
-  const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal("");
+  const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[slow,setSlow]=createSignal(false);
   const auth=observeDouyinAuth(props.client),logged=()=>auth()==='logged-in';
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
   const [opening,setOpening]=createSignal(false);
@@ -48,13 +49,14 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     if(auth()!=='logged-in')return;
     retryPlayback=false;
     if(measureRefresh){if(presentedRefresh)douyinBench.cancelPresented('refresh_done',presentedRefresh);presentedRefresh=0;refreshSeq=douyinBench.refreshStart();}
-    setBusy(true);setError("");
-    // Cached content remains navigable while replacement runs in the background.
-    // Bound the whole UI operation, including queued storage and auth probes.
-    // The UI deadline releases the busy state, not a still-current feed result.
-    // Navigation and newer loads continue to fence late continuations.
-    const deadline=hostServices.delay(DOUYIN_ENTRY_TIMEOUT_MS);loadTimer=deadline;
-    void deadline.result.then(()=>{if(current()){setBusy(false);setError('内容加载较慢，请稍候');finishRefresh(true,{code:'timeout'});}},()=>{});
+    setBusy(true);setError("");setSlow(false);
+    // A slow notice is not a failed request. Keep the refresh pending until
+    // its feed settles or the full operation exceeds the transport budget.
+    const notice=hostServices.delay(DOUYIN_ENTRY_SLOW_MS);
+    void notice.result.then(()=>{if(current())setSlow(true);},()=>{});
+    const deadline=hostServices.delay(DOUYIN_NETWORK_TIMEOUT_MS);
+    const timer={cancel(){notice.cancel();deadline.cancel();}};loadTimer=timer;
+    void deadline.result.then(()=>{if(current()){setBusy(false);setSlow(false);setError('内容加载较慢，请稍候');finishRefresh(true,{code:'timeout'});}},()=>{});
     try{
       if(!refresh){
         const stock=await props.restoreStock?.()??[];if(!current())return;
@@ -85,7 +87,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         }
       }
     }catch{if(current()){setError(formatDouyinError('REQUEST_FAILED'));scheduleRetry({code:'REQUEST_FAILED'},current);}}
-    finally{deadline.cancel();if(loadTimer===deadline)loadTimer=undefined;if(current()){setBusy(false);finishRefresh(!!error());appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
+    finally{timer.cancel();if(loadTimer===timer)loadTimer=undefined;if(current()){setBusy(false);setSlow(false);finishRefresh(!!error());appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
   };
   const enter=async()=>{
     if(!active()||auth()==='unknown')return;if(!logged()){douyinBench.loginTap(props.client,logged,()=>props.onNavigate({name:'login'}));return;}if(opening())return;
@@ -117,7 +119,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
-  const hint=()=>auth()==='unknown'?"正在读取登录状态…":!logged()?"需要登录，请重新登录":(busy()&&!items().length)?"刷新中...":items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
+  const hint=()=>auth()==='unknown'?"正在读取登录状态…":!logged()?"需要登录，请重新登录":(busy()&&!items().length)?(slow()?"内容加载较慢，请稍候":"刷新中..."):items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
   return <View class="absolute inset-0 bg-black">
    <View class="absolute inset-0">
     <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
@@ -125,6 +127,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       <Image src="../assets/icons/info-hint.svg" class="absolute top-[3.4]" style={{insetL:groupLeft-18+titleWidth+hintGap-3.6,width:hintBox,height:hintBox}}/>
       <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
     </View>
+    <Show when={slow()&&items().length>0&&!error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#b6b6b6]">内容加载较慢，请稍候</Text></Show>
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text>
       <View class="absolute left-[65] right-[65] top-[92] h-[36] rounded-[18] items-center justify-center bg-[#2a2a2a]" onPress={()=>void (retryPlayback?enter():load(true,true))} focusable accessibilityRole="button" accessibilityLabel="重试"><Text class="text-sm text-[#f5f5f5]">重试</Text></View>
     </Show>

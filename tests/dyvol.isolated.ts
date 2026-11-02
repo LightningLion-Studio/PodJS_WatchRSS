@@ -67,3 +67,14 @@ test('20 UI mute pairs act on the current system stream and restart reads system
  }
  muted=true;dispose!();mount();await flush();expect(walk(tree).some(n=>n.props?.accessibilityLabel==='取消系统静音')).toBe(true);expect(muted).toBe(true);
 });
+
+
+test('DYENTRY in-app mute toggles the current system snapshot before a queued external push',async()=>{
+ let tree:any;createRoot(stop=>{dispose=stop;tree=VideoPlayerScreen({source:{url:'https://fixture.invalid/video',title:'fixture',platform:'douyin'},width:233,height:233,offset:0,round:true,active:true});});
+ await flush();muted=true; // External change; its JS observer has not run yet.
+ walk(tree).find(n=>n.props?.accessibilityLabel==='系统静音').props.onPress();await flush();
+ expect(muted).toBe(false);expect(walk(tree).some(n=>n.props?.accessibilityLabel==='系统静音')).toBe(true);
+ muted=false;audioChanged(value());await flush();muted=true;audioChanged(value());await flush();
+ muted=false; // The inverse race must also use fresh readback.
+ walk(tree).find(n=>n.props?.accessibilityLabel==='取消系统静音').props.onPress();await flush();expect(muted).toBe(true);
+});

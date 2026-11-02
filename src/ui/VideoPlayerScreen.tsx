@@ -148,7 +148,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   }));
   const toggleSystemMute=async()=>{
     const own=generation;
-    try{const next=await media.setMuted(state()?.muted!==true);if(disposed||own!==generation||videoSessionOwner!==sessionOwner)return;setState(next);virtualVolume=next.volume;observedVolume=next.volume;showVolumeOverlay();}
+    try{const current=await media.state();if(disposed||own!==generation||videoSessionOwner!==sessionOwner||!props.active)return;const next=await media.setMuted(current.muted!==true);if(disposed||own!==generation||videoSessionOwner!==sessionOwner)return;setState(next);virtualVolume=next.volume;observedVolume=next.volume;showVolumeOverlay();}
     catch(error){failed(error,false,'volume');}
   };
   const captureFrame=()=>{
