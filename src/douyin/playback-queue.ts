@@ -119,6 +119,14 @@ export class DouyinPlaybackQueue {
     }
     this.retryAt=Date.now()+500;return lastFailure;
   }
+  /** Selection follows input, independently of transport or decoder readiness.
+   * Advancing the generation fences all older resolutions and previews. */
+  selectIntent(direction:"next"|"previous",distance:1|2=1):DouyinResult<DouyinPlaybackQueueState>{
+    const target=this.index+(direction==='next'?distance:-distance);
+    const clamped=Math.max(0,Math.min(this.items.length-1,target));
+    if(clamped===this.index)return {ok:false,code:'UNSUPPORTED',message:'没有相邻视频'};
+    return this.commitPreview(this.items[clamped]!.awemeId);
+  }
   /** Commit only the item previously resolved for a pager promotion. */
   commitPreview(awemeId:string):DouyinResult<DouyinPlaybackQueueState>{
     const target=this.items.findIndex(item=>item.awemeId===awemeId);this.previewGeneration++;this.generation++;

@@ -1,6 +1,7 @@
 import type { InternetStatus } from '../../onboarding/state.ts';
 
 export function douyinSourceNeedsInternet(url?: string): boolean {
+  if(url&&/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?(?:\/|$)/i.test(url.trim()))return false;
   return !!url && /^(?:https?:\/\/|podjs-media-cache:\/\/)/i.test(url.trim());
 }
 

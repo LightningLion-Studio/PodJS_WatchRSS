@@ -52,7 +52,7 @@ function PlayerButton(props: { left: number; top: number; size: number; icon: "f
   </View>;
 }
 
-export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; offset: number; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2)=>Promise<DouyinPreparedSource|undefined>; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
+export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; offset: number; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2)=>Promise<DouyinPreparedSource|undefined>; onSelectTarget?:(direction:"next"|"previous",distance:1|2)=>void; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
   benchmark.mark('startup_stage',props.source.startupSeq??0,{startup_stage:'player_mounted'});
   onCleanup(()=>props.onPlaybackActiveChanged?.(undefined,false));
   const loopPreferences=new VideoLoopPreferences(kv);
@@ -83,7 +83,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const [sessionsDisabled,setSessionsDisabled]=createSignal(false),[dragProgress,setDragProgress]=createSignal(0),[dragPoster,setDragPoster]=createSignal<{url:string;direction:DouyinPagerDirection}|null>(null),[dragAxis,setDragAxis]=createSignal<DouyinPagerDirection|undefined>(),[handoff,setHandoff]=createSignal(false),[firstFrame,setFirstFrame]=createSignal(false),[nativeDrag,setNativeDrag]=createSignal(false),[spinnerDue,setSpinnerDue]=createSignal(false);
   let benchmarkSeq=0,benchmarkGeneration=1,lastBenchmarkHeartbeat=0;
   let pendingBenchmark:VideoBenchmarkAction|undefined,pendingBenchmarkSource:PlaybackSource|undefined;
-  const frameWait=new VideoFirstFrameWait();frameWait.reset();
+  const frameWait=new VideoFirstFrameWait(Date.now,1000);frameWait.reset();
   const [startLimitConsumed,setStartLimitConsumed]=restoredSignal('saved','player-start-limit-consumed',false,booleanState,saveablePlayer);
   const sessionCapable=shouldUseDouyinVideoSessions(props.source,hasCapability("media.video.sessions"));
   const sessionPool=sessionCapable?(props.initialPool??new DouyinVideoSessionPool()):undefined;
@@ -106,7 +106,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(pendingBenchmark&&props.source!==pendingBenchmarkSource){benchmark.confirmVideoFrame(pendingBenchmark.seq,pendingBenchmark.generation);pendingBenchmark=undefined;}
   }});
   onCleanup(onVideoFirstFrame(value=>{
-    if(disposed||videoSessionOwner!==sessionOwner||!props.active||handoff())return;
+    if(disposed||videoSessionOwner!==sessionOwner||!props.active||handoff()||props.source.previewOnly||preparedSource!==props.source)return;
     if(usingSessions()?!value.sessionId||!sessionPool!.ownsActiveSession(value.sessionId):!!value.sessionId)return;
     if(state()?.sourceGeneration!==undefined&&state()!.sourceGeneration!==value.sourceGeneration)return;
     if(!value.hasRenderedFirstFrame)return;
@@ -253,7 +253,12 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});
     }else if(ready())void media.pause().then(value=>{if(disposed)return;setState(value);checkpointPosition=value.positionMs;checkpointDuration=value.durationMs;emitCheckpoint("pause_or_exit",value.positionMs,value.durationMs);}).catch(failed);
   });
-  createEffect(() => { const source=props.source;if(props.active&&!networkPrompt()&&source!==preparedSource)untrack(prepare); });
+  createEffect(() => { const source=props.source;
+    if(props.active&&source.previewOnly&&source!==preparedSource){
+      generation++;prepareOp?.cancel();pollTimer?.cancel();setReady(false);setFirstFrame(false);setState(null);
+    }
+    if(props.active&&!networkPrompt()&&source!==preparedSource)untrack(prepare);
+  });
   // Immersive native stopForegroundPlayback pauses buffering; it preserves the selected item.
   let networkPaused = false;
   createEffect(() => {
@@ -347,9 +352,10 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   const beginDouyinDrag=(distanceY=0,measured=false)=>{
     if(props.source.platform!=="douyin")return;
-    if(!replayingDeferred&&(dragSettling||deferredDrags.length||drainingDeferred)){
+    if(!props.onSelectTarget&&!replayingDeferred&&(dragSettling||deferredDrags.length||drainingDeferred)){
       deferredPan={distanceY,velocityY:0,cancel:false,seq:measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0};return;
     }
+    if(props.onSelectTarget)clearDrag();
     benchmarkSeq=measured?benchmark.begin("gesture_down",{direction:distanceY<0?"next":"prev"}):0;
     dragRevision++;setNativeDrag(false);dragDirection=undefined;dragTarget=undefined;dragTargetPromise=undefined;setDragProgress(0);setDragPoster(null);
   };
@@ -399,6 +405,23 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     else if(benchmarkSeq){pendingBenchmarkSource=props.source;pendingBenchmark={seq:benchmarkSeq,generation:wantsSettle?++benchmarkGeneration:benchmarkGeneration,source_generation:state()?.sourceGeneration??0,delta};benchmark.mark("gesture_release",benchmarkSeq,{direction:wantsSettle?(requestedDelta===2?'fling':direction==='up'?'next':'prev'):'cancel',delta:requestedDelta,prewarmed:requestedDelta===1&&!!(usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)),generation:pendingBenchmark.generation,source_generation:pendingBenchmark.source_generation});}
 
     if(wantsSettle){const stoppedGeneration=generation;void media.pause(pendingBenchmark,true).catch(value=>{if(!disposed&&revision===dragRevision&&stoppedGeneration===generation&&videoSessionOwner===sessionOwner)failed(value);});}
+
+    if(wantsSettle&&props.onSelectTarget){
+      // Input commits selection before any native/URL/persistence await. There
+      // is no retained queue: every new gesture replaces the pending target.
+      const selectedDelta=requestedDelta===2?2:1;
+      if(pendingBenchmark)pendingBenchmark.delta=selectedDelta;
+      const from=props.source;
+      generation++;neighborRevision++;dragRevision++;
+      prepareOp?.cancel();pollTimer?.cancel();recoveryDeadline.cancel();
+      forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;forwardResolved=false;
+      void media.retire(true).catch(()=>{});
+      batch(()=>{setHandoff(true);setFirstFrame(false);setReady(false);setState(null);setError('');frameWait.reset();setSpinnerDue(false);clearDrag();
+        props.onSelectTarget!(direction==='up'?'next':'previous',selectedDelta);
+        sessionPool?.retainNeighbours([sessionSource(props.source).key]);setHandoff(false);});
+      if(props.source===from)setHandoff(false);
+      return;
+    }
 
     if(wantsSettle&&douyinPagerDelta(progress,velocityY,direction)===2&&props.onPrepareAdjacent){
       // Resolve the two-item target without publishing the intermediate item.
@@ -502,7 +525,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
     onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
     onDown: () => { panVelocity = 0; }, onPanStart: contact => { panningStart = pan();if(props.source.platform==="douyin")beginDouyinDrag(contact.dy,true); }, onPanMove: contact => { if(props.source.platform==="douyin"){moveDouyinDrag(contact.dy);return;}const r = range(); if(r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
-    onPanEnd: contact => { if (networkPrompt()) return;if(props.source.platform==="douyin"){void finishDouyinDrag(contact.vy);return;} if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now(); } props.onPanStateChange?.(pan(), range().range); },
+    onPanEnd: contact => { if(props.source.platform==="douyin"){void finishDouyinDrag(contact.vy,!!networkPrompt());return;} if (networkPrompt()) return; if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now(); } props.onPanStateChange?.(pan(), range().range); },
     onCancel:()=>{if(props.source.platform==="douyin")void finishDouyinDrag(0,true);}
   });
   const horizontalPanGesture = createGesture({ region: { rect: () => { const r = range(); return props.active && props.source.platform !== "douyin" && r.axis === "x" && r.range > 0 && pan() < r.range - 1 ? { x: 0, y: top(), w: props.width, h: props.height } : null; } }, axis: "x", panSlop: 8,

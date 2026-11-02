@@ -73,6 +73,7 @@ interface MediaRoutesProps {
     direction: "next" | "previous",
   ) => Promise<void>;
   prepareDouyinAdjacent:(entry:RouteEntry,direction:"next"|"previous",distance?:1|2)=>Promise<DouyinPreparedSource|undefined>;
+  selectDouyinTarget:(entry:RouteEntry,direction:"next"|"previous",distance:1|2)=>void;
   promoteDouyinAdjacent:(entry:RouteEntry,prepared:DouyinPreparedSource)=>Promise<boolean>;
   openHttpExport: (mode: HttpExportMode) => void;
   onDouyinLogoutSuccess: () => void;
@@ -251,6 +252,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ? (direction,distance) => props.prepareDouyinAdjacent(props.entry,direction,distance)
               : undefined
           }
+          onSelectTarget={props.entry.queue?(direction,distance)=>props.selectDouyinTarget(props.entry,direction,distance):undefined}
           onPromoteAdjacent={
             props.entry.queue
               ? prepared => props.promoteDouyinAdjacent(props.entry,prepared)

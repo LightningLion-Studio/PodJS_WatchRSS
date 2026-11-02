@@ -335,10 +335,10 @@ test('SWIPEFEED spinner waits from settle and decoded frame event removes it wit
   initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,bufferedMs:0,networkStalled:true};heldPrepare=new Promise(()=>{});
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'managed/late',posterUrl:'cover/late',title:'late'},width:233,height:233,active:true,offset:0,round:true});});
   await flush();const spinner=()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length;
-  time+=399;frames.forEach(f=>f());expect(spinner()).toBe(0);
+  time+=999;frames.forEach(f=>f());expect(spinner()).toBe(0);
   time++;frames.forEach(f=>f());expect(spinner()).toBe(1);
   frameEvents.forEach(f=>f({...current,hasRenderedFirstFrame:true}));expect(spinner()).toBe(0);expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
-  console.log('SWIPEFEED_SPINNER',JSON.stringify({before400ms:0,at400ms:1,afterFrameEvent:0}));
+  console.log('SWIPEFEED_SPINNER',JSON.stringify({before1000ms:0,at1000ms:1,afterFrameEvent:0}));
  }finally{Date.now=realNow;}
 });
 
@@ -552,4 +552,38 @@ test('DYSWIPE3 pending publication retains a second swipe and a later cancellati
   g.onPanStart({dy:-12});g.onPanMove({dy:-10});g.onPanEnd({vy:0});await flush();
   publish();await advance(800);expect(selected).toBe(102);expect(calls).toBe(2);expect(marks.filter(v=>v.code==='gesture_release')).toHaveLength(3);expect(marks.filter(v=>v.code==='gesture_release'&&v.direction==='cancel')).toHaveLength(1);
  }finally{Date.now=realNow;(globalThis as any).pod=originalPod;}
+});
+
+
+test('DYINTENT 50 cold releases select immediately without decoder or publication backlog',async()=>{
+ initial='available';sessionsCapable=false;current=state('idle');gestures.length=0;ticks=[];prepares=[];plays=0;
+ const realNow=Date.now,originalPod=(globalThis as any).pod;let time=1000,seq=1,selected=100;Date.now=()=>time;
+ const marks:any[]=[];(globalThis as any).pod={benchmark:(line:string)=>{const value=JSON.parse(line);marks.push(value);return value.seq??++seq;}};
+ const pending:Array<(value:any)=>void>=[];
+ const source=(n:number)=>({platform:'douyin' as const,immersive:true,awemeId:String(n),url:'local/'+n,posterUrl:'cover/'+n,title:'fixture'});
+ const hold=()=>{heldPrepare=new Promise(resolve=>pending.push(resolve));};hold();
+ try{
+  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source(selected));return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},onSelectTarget:(direction,distance)=>{selected+=(direction==='next'?distance:-distance);hold();set(source(selected));}});});await flush();
+  for(let n=0;n<50;n++){
+   const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-120});g.onPanEnd({vy:-500});await flush();
+   expect(selected).toBe(101+n);expect(prepares.at(-1).awemeId).toBe(String(selected));
+   expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);time+=500;
+  }
+  expect(marks.filter(v=>v.code==='gesture_release')).toHaveLength(50);expect(marks.filter(v=>v.reason==='capacity')).toHaveLength(0);
+  expect(prepares).toHaveLength(51);
+  pending.slice(0,-1).forEach(resolve=>resolve(state('ready')));await flush();expect(plays).toBe(0);
+  current=state('ready');pending.at(-1)!(current);await flush();expect(plays).toBe(1);expect(selected).toBe(150);
+ }finally{Date.now=realNow;(globalThis as any).pod=originalPod;heldPrepare=undefined;}
+});
+
+
+test('DYINTENT a network prompt during a drag still records its cancelled release',async()=>{
+ initial='available';sessionsCapable=false;gestures.length=0;current={...state('buffering'),hasRenderedFirstFrame:false};heldPrepare=new Promise(()=>{});ticks=[];
+ const original=(globalThis as any).pod,marks:any[]=[];let seq=1;
+ (globalThis as any).pod={benchmark:(line:string)=>{const value=JSON.parse(line);marks.push(value);return value.seq??++seq;}};
+ try{
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/cold',title:'cold'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onSelectTarget:()=>{throw Error('cancelled drag cannot select');}});});await flush();
+  const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-120});network('unavailable');await flush();g.onPanEnd({vy:-500});await flush();
+  expect(marks.filter(v=>v.code==='gesture_down')).toHaveLength(1);expect(marks.filter(v=>v.code==='gesture_release')).toMatchObject([{direction:'cancel',delta:0}]);
+ }finally{(globalThis as any).pod=original;heldPrepare=undefined;}
 });

@@ -369,3 +369,19 @@ test('T1202 cold paging refreshes shared headers once when authorization changes
  authorization++;
  await f.controller.changeDouyinVideo(entry,'next');expect(reads).toBe(1);expect(f.source().headers['X-Fixture']).toBe('changed');
 });
+
+test('DYINTENT selects through delayed URL registration and rejects every stale publication',async()=>{
+ const f=fixture(),items=Array.from({length:60},(_,i)=>item(String(i)));
+ f.controller.douyinPlay({item:items[0]!,playback:items[0]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'0'});
+ const entry=f.stack().at(-1)!,pending=new Map<string,(url:string)=>void>();
+ proxyOverride=async value=>new Promise(resolve=>pending.set(value.awemeId,resolve));
+ for(let n=1;n<=50;n++){
+  f.controller.selectDouyinTarget(entry,'next',1);
+  expect(entry.queue!.snapshot().index).toBe(n);expect(f.source()).toMatchObject({awemeId:String(n),previewOnly:true,url:undefined,previewFrame:undefined});
+  for(let k=0;k<20;k++)await Promise.resolve();
+ }
+ expect(pending.size).toBe(50);
+ for(const [id,finish] of pending)if(id!=='50')finish('https://local/'+id);
+ for(let k=0;k<30;k++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'50',previewOnly:true,url:undefined});
+ pending.get('50')!('https://local/50');for(let k=0;k<30;k++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'50',previewOnly:false,url:'https://local/50'});expect(f.requests()).toBe(0);
+});

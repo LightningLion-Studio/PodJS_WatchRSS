@@ -558,6 +558,36 @@ export function createMediaRouteController(
     }};
   };
 
+  const selectDouyinTarget = (entry:RouteEntry,direction:"next"|"previous",distance:1|2=1) => {
+    if(!entry.queue||dependencies.current()!==entry)return;
+    const queue=entry.queue,result=queue.selectIntent(direction,distance);
+    if(!result.ok){
+      if(direction==='previous'&&queue.snapshot().index===0)dependencies.popPage();
+      // Feed boundaries use the existing single coalesced page request.
+      else if(direction==='next')void changeDouyinVideo(entry,direction).catch(()=>{});
+      return;
+    }
+    const item=result.data.item,old=entry.playback!;
+    // Publish metadata synchronously. A cached decoded frame can be shown;
+    // otherwise the selected page is black while its URL is registered.
+    let selected:PlaybackSource={...old,awemeId:item.awemeId,title:item.description,posterUrl:item.coverUrl,
+      previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,
+      ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
+    entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
+    const current=()=>dependencies.current()===entry&&entry.playback===selected&&queue.snapshot().item?.awemeId===item.awemeId;
+    void (async()=>{
+      const headers=await adjacentHeaders(entry);if(!current())return;
+      const local=await douyinPreload.lookup(item.awemeId);if(!current())return;
+      void (local?video.restoreFrame(`douyin:${item.awemeId}`,{url:local}):douyinPreload.restoreFrame?.(item,headers))?.then(frame=>{
+        if(!current()||!frame?.available)return;
+        selected={...selected,previewFrame:{entryId:item.awemeId,frame}};entry.playback=selected;dependencies.setPlayingSource(selected);
+      }).catch(()=>{});
+      const url=local??await douyinPlaybackUrl(item,headers,direction==='next');if(!current())return;
+      entry.playback={...selected,headers,url,previewOnly:false};dependencies.setPlayingSource(entry.playback);
+      void queue.persist().catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
+    })().catch(error=>{if(current())dependencies.setError(String(error));});
+  };
+
   const promoteDouyinAdjacent = async (
     entry:RouteEntry,
     prepared:DouyinPreparedSource,
@@ -862,6 +892,7 @@ export function createMediaRouteController(
     changeDouyinVideo,
     prepareDouyinAdjacent,
     promoteDouyinAdjacent,
+    selectDouyinTarget,
     biliOriginal,
     setBiliOriginal,
     recoverDouyinVideo,

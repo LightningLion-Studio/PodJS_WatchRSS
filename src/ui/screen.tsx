@@ -1359,6 +1359,7 @@ export default function WatchRSS(props: {
     changeDouyinVideo,
     prepareDouyinAdjacent,
     promoteDouyinAdjacent,
+    selectDouyinTarget,
     biliOriginal,
     setBiliOriginal,
     recoverDouyinVideo,
@@ -1641,6 +1642,7 @@ export default function WatchRSS(props: {
               changeDouyinVideo={changeDouyinVideo}
               prepareDouyinAdjacent={prepareDouyinAdjacent}
               promoteDouyinAdjacent={promoteDouyinAdjacent}
+              selectDouyinTarget={selectDouyinTarget}
               openHttpExport={openHttpExport}
               onDouyinLogoutSuccess={returnHomeAfterDouyinLogout}
             />

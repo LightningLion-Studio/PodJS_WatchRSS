@@ -69,3 +69,14 @@ test('T1202 a pending page cannot evict the selection after a reverse jump',asyn
  finish({ok:true,data:{items:[item('40')],nextCursor:'cursor-1',hasMore:true}});await warming;
  expect(queue.snapshot().item?.awemeId).toBe('0');expect(queue.snapshot().playlist).toHaveLength(40);expect(queue.snapshot().cursor).toBe('cursor-0');
 });
+
+
+test('DYINTENT selects 50 targets synchronously and fences an older delayed resolution',async()=>{
+ let finish!:(value:any)=>void;
+ const client={resolvePlayback:()=>new Promise(resolve=>finish=resolve)} as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:Array.from({length:100},(_,i)=>item(String(i))),selectedAwemeId:'10',hasMore:false});
+ const stale=q.next();await Promise.resolve();await Promise.resolve();
+ for(let i=0;i<50;i++){expect(q.selectIntent('next')).toMatchObject({ok:true,data:{index:11+i}});expect(q.snapshot().index).toBe(11+i);}
+ finish({ok:true,data:item('11')});expect(await stale).toMatchObject({ok:false,code:'CANCELLED'});expect(q.snapshot().index).toBe(60);
+ q.selectIntent('previous',2);expect(q.snapshot().index).toBe(58);
+});
