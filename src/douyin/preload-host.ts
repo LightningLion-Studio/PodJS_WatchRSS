@@ -32,9 +32,10 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  let migration:Promise<void>|undefined,migrating=false;
  const cleanupOldFiles=()=>migration??=(async()=>{
   const before=await managedCache.stats();const bytes=before.bucketBytes['douyin-preload'];
+  if(!(bytes>0))return;
   migrating=true;try{await managedCache.clearBucket('douyin-preload');}finally{migrating=false;}
   appLogger.i('DouyinProxy',`oldWholeFilesRemoved bytes=${bytes}`);
- })().catch(()=>{migration=undefined;throw new Error('old_media_cache_cleanup_failed');});
+ })().catch(()=>{appLogger.w('DouyinProxy','legacy cache cleanup failed; playback continues');});
  const stats=async()=>{const s=await mediaPrefixCache.stats().result;appLogger.i('DouyinProxy',`cache files=${s.files} bytes=${s.bytes} downloadedBytes=${s.downloadedBytes} cacheReadBytes=${s.cacheReadBytes} networkReadBytes=${s.networkReadBytes} maxBytes=${s.maxBytes}`);return s;};
  const allowed=async()=>douyinPreloadAllowed(await discovery.networkSnapshot(),bluetoothOwners.has(owner));
  const register=async(item:DouyinItem,headers:Record<string,string>)=>{
@@ -97,6 +98,11 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   // A proxy is not a complete local file; queue resolution must continue enforcing URL TTL.
   capabilities:()=>({coverCache:true,actualFrame:true,prefixBytes:true,completeVideo:false}),
   async restoreFrame(item:DouyinItem,headers:Record<string,string>){return video.restoreFrame(`douyin:${item.awemeId}`,{url:preserveSelectedDouyinItem(item).playUrl,headers});},
+  async readySource(item:DouyinItem,headers?:Record<string,string>){
+   const ready=await stock?.ready(item.awemeId,headers);if(!ready)return undefined;
+   const frame=ready.frame??await video.restoreFrame(`douyin:${item.awemeId}`,{url:ready.uri});
+   return frame.available?{item:ready.item??item,url:remember(ready.uri,ready.item??item),previewFrame:{entryId:item.awemeId,frame}}:undefined;
+  },
   async previewFrame(item:DouyinItem){const uri=await stock?.lookup(item.awemeId);if(!uri)return undefined;const frame=await video.restoreFrame(`douyin:${item.awemeId}`,{url:uri});return frame.available?{entryId:item.awemeId,frame}:undefined;},
   failures:()=>results.snapshot(),
   sourceFor:(uri:string)=>sources.get(uri),

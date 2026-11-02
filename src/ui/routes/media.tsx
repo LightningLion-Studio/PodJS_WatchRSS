@@ -78,7 +78,7 @@ interface MediaRoutesProps {
 
 export function MediaRoutes(props: MediaRoutesProps) {
   const batteryTelemetry=props.createBatteryTelemetry?.();
-  onCleanup(()=>{void batteryTelemetry?.stop();douyinPreload.stop(props.entry);});
+  onCleanup(()=>{void props.entry.initialVideoPool?.releaseAll().catch(()=>{});void batteryTelemetry?.stop();douyinPreload.stop(props.entry);});
   createRenderEffect(()=>{if(!props.active())douyinPreload.stop(props.entry);});
   const updateBackground = (platform: "bili" | "douyin", value: boolean) => {
     props.saveMediaSetting(platform, "background-playback", value);
@@ -177,6 +177,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
       </Show>
       <Show when={props.page() === "video" && props.entry.playback}>
         <VideoPlayerScreen
+          initialPool={props.entry.initialVideoPool}
           onAdjacentPoster={direction=>{const state=props.entry.queue?.snapshot();return state?.playlist[state.index+(direction==='next'?1:-1)]?.coverUrl;}}
           onBluetoothAllowed={value=>douyinPreload.allowBluetooth(value,props.entry)}
           onPlaybackActiveChanged={(source,active)=>{void batteryTelemetry?.update(source,active);}}

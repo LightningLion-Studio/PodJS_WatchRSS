@@ -1,3 +1,4 @@
+import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
 import {observeDouyinAuth} from './auth-state.ts';
 import * as hostServices from '@podjs/framework/services';
@@ -22,7 +23,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
   const [opening,setOpening]=createSignal(false);
   let failures=0,refreshSeq=0,presentedRefresh=0;
-  const finishRefresh=(failed=false)=>{if(refreshSeq){douyinBench.refreshDone(refreshSeq,failed);presentedRefresh=refreshSeq;refreshSeq=0;}};
+  const finishRefresh=(failed=false,failure?:unknown)=>{if(refreshSeq){douyinBench.refreshDone(refreshSeq,failed,failure);presentedRefresh=refreshSeq;refreshSeq=0;}};
   let loadTimer:{cancel():void}|undefined;
   let retryTimer:{cancel():void}|undefined;
   const cancelRetry=()=>{retryTimer?.cancel();retryTimer=undefined;};
@@ -50,15 +51,17 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     setBusy(true);setError("");
     // Cached content remains navigable while replacement runs in the background.
     // Bound the whole UI operation, including queued storage and auth probes.
-    // Expiry fences late continuations; it does not infer logout or clear auth.
+    // The UI deadline releases the busy state, not a still-current feed result.
+    // Navigation and newer loads continue to fence late continuations.
     const deadline=hostServices.delay(DOUYIN_ENTRY_TIMEOUT_MS);loadTimer=deadline;
-    void deadline.result.then(()=>{if(current()){generation++;setBusy(false);setError(formatDouyinError('REQUEST_FAILED'));finishRefresh(true);const revision=generation;scheduleRetry({code:'REQUEST_FAILED'},()=>active()&&revision===generation);}},()=>{});
+    void deadline.result.then(()=>{if(current()){setBusy(false);setError('内容加载较慢，请稍候');finishRefresh(true,{code:'timeout'});}},()=>{});
     try{
       if(!refresh){
         const stock=await props.restoreStock?.()??[];if(!current())return;
         if(stock.length){setItems(stock);anchor=stock[0].awemeId;cursor=null;hasMore=true;return;}
         let queueReady=false;
-        const restore=(kind:'feed'|'queue')=>traceServiceWork(kind==='queue'?'douyin.entry.restoreQueue':'douyin.entry.restoreFeed',()=>kind==='queue'?props.client.restorePlaybackQueue():props.client.restoreFeed()).then(value=>{
+        const restore=(kind:'feed'|'queue')=>traceServiceWork(kind==='queue'?'douyin.entry.restoreQueue':'douyin.entry.restoreFeed',()=>kind==='queue'?props.client.restorePlaybackQueue():props.client.restoreFeed()).then(snapshot=>{
+          const value=props.client.freshPlaybackSnapshot(snapshot);
           if(current()&&value.items.length&&(kind==='queue'||!queueReady)){
             if(kind==='queue')queueReady=true;
             setItems(value.items);anchor=value.anchorAwemeId;cursor=value.cursor;hasMore=value.hasMore;
@@ -67,30 +70,13 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         const [feed,queue]=await Promise.all([restore('feed'),restore('queue')]);if(!current())return;
         const cached=queue.items.length?queue:feed;
         traceServiceWork("douyin.entry.restoreResult",()=>{setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;});
-        // Native restores the title page immediately; a small/incomplete bootstrap
-        // needs a 16-item feed request. Expired detail refresh is background work.
-        if(cached.items.length>=3&&hasMore&&!!cursor?.trim()){
-          void traceServiceWork("douyin.entry.resolve",()=>props.client.resolvePlayback(anchor??cached.items[0].awemeId)).then(async result=>{
-            if(!current())return;
-            if(result.ok){failures=0;traceServiceWork("douyin.entry.resolveResult",()=>setItems(old=>old.map(item=>item.awemeId===result.data.awemeId?result.data:item)));return;}
-            // Old queues can contain only expired/unresolvable detail URLs. Keep
-            // immediate navigation, but replenish from a fresh feed in the background
-            // so the preload window does not retry the same stale identities forever.
-            if(isDouyinTemporaryFailure(result.code)){scheduleRetry(result,current);return;}
-            if(result.code==='NOT_LOGGED_IN'){await requireLogin(current);return;}
-            if(result.code==='CANCELLED')return;
-            appLogger.i('DouyinEntry','expired queue anchor failed; refreshing feed');
-            const fresh=await props.client.fetchFeedPage({count:16});
-            if(!current())return;
-            if(!fresh.ok){if(fresh.code==='NOT_LOGGED_IN')await requireLogin(current);else if(isDouyinRetryableFailure(fresh.code))scheduleRetry(fresh,current);return;}
-            failures=0;cursor=fresh.data.nextCursor;hasMore=fresh.data.hasMore;anchor=null;setItems(fresh.data.items);
-          }).catch(()=>{if(current())scheduleRetry({code:'REQUEST_FAILED'},current);});
-          return;
-        }
+        // Fresh feed URLs are sufficient for entry and both prewarm neighbours.
+        // Replenish expired queues from feed; never probe detail from the title page.
+        if(cached.items.length>=3&&hasMore&&!!cursor?.trim()){setError('');return;}
       }
       appLogger.d('DouyinEntry',`feed requested reason=${refresh?'refresh':'bootstrap'}`);
       const result=await traceServiceWork("douyin.entry.fetch",()=>props.client.fetchFeedPage({count:16}));if(!current())return;
-      if(result.ok){failures=0;traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
+      if(result.ok){cancelRetry();setError('');failures=0;traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
       else{
         setError(formatDouyinError(result.code));
         scheduleRetry(result,current);
@@ -109,15 +95,17 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     const requested=props.route.name==='entry'?props.route.resumeAwemeId:undefined;
     const index=Math.max(0,items().findIndex(item=>item.awemeId===(requested??anchor))),item=items()[index];
     if(playbackFailed){entrySeq=douyinBench.entry(props.client);playbackFailed=false;}
+    benchmark.mark('startup_stage',entrySeq,{startup_stage:'play_tap'});
     generation++;loadTimer?.cancel();loadTimer=undefined;setBusy(false);
     cancelRetry();setError("");setOpening(true);retryPlayback=true;
     const revision=generation,current=()=>active()&&revision===generation;
     props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true,entrySeq,
       isCurrent:current,
-      onFailure:failure=>{if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
+      onFailure:failure=>{if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq,failure);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
     });
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
+  benchmark.mark('startup_stage',entrySeq,{startup_stage:'entry_mounted'});
   const preloadOwner={};
   createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor);else props.onPreloadStop?.(preloadOwner);});
   onCleanup(()=>props.onPreloadStop?.(preloadOwner));

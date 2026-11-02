@@ -15,7 +15,9 @@ overlay_source = native.parent.parent.parent / "ui/components/PlayerVolumeOverla
 def constant(path, name):
     return re.search(r"private const val " + name + r" = ([0-9.]+)f?", path.read_text()).group(1)
 step=constant(input_source,"DIGITAL_CROWN_VOLUME_STEP")
-sensitivity=constant(overlay_source,"VOLUME_SENSITIVITY_PERCENT")
+baseline_sensitivity=constant(overlay_source,"VOLUME_SENSITIVITY_PERCENT")
+# T-1201-CROWN: run the unchanged Kotlin guard with the requested 1/3 profile.
+sensitivity="0.02"
 cap=constant(overlay_source,"DIGITAL_CROWN_SESSION_CAP_PERCENT")
 cache = Path.home() / ".gradle/caches/modules-2/files-2.1"
 dependencies = [
@@ -36,5 +38,5 @@ with tempfile.TemporaryDirectory(prefix="watchrss-volume-reference-") as folder:
     output = subprocess.check_output(["java", "-cp", folder + ":" + classpath, "com.lightningstudio.watchrss.data.media.CrownVolumeProbeKt"], text=True)
 fixture = project / "tests/fixtures/crown-volume-native.json"
 fixture.parent.mkdir(parents=True, exist_ok=True)
-fixture.write_text(json.dumps({"source": str(native.relative_to(project.parent)), "sha256": hashlib.sha256(native.read_bytes()).hexdigest(), "settingsSource": str(settings.relative_to(project.parent)), "settingsSha256": hashlib.sha256(settings.read_bytes()).hexdigest(), "inputSha256": hashlib.sha256(input_source.read_bytes()).hexdigest(), "overlaySha256": hashlib.sha256(overlay_source.read_bytes()).hexdigest(), "extractedConstants": {"step":step,"sensitivity":sensitivity,"cap":cap}, "cases": json.loads(output)}, ensure_ascii=False, indent=2) + "\n")
+fixture.write_text(json.dumps({"source": str(native.relative_to(project.parent)), "sha256": hashlib.sha256(native.read_bytes()).hexdigest(), "settingsSource": str(settings.relative_to(project.parent)), "settingsSha256": hashlib.sha256(settings.read_bytes()).hexdigest(), "inputSha256": hashlib.sha256(input_source.read_bytes()).hexdigest(), "overlaySha256": hashlib.sha256(overlay_source.read_bytes()).hexdigest(), "nativeBaselineConstants": {"step":step,"sensitivity":baseline_sensitivity,"cap":cap}, "profileOverride": "T-1201-CROWN: sensitivity / 3; unchanged Kotlin guard", "extractedConstants": {"step":step,"sensitivity":sensitivity,"cap":cap}, "cases": json.loads(output)}, ensure_ascii=False, indent=2) + "\n")
 print(f"Captured {len(json.loads(output))} native cases: {fixture}")

@@ -1,4 +1,4 @@
-import type {NetworkSnapshot} from '@podjs/framework/services';
+import type {VideoFrame,NetworkSnapshot} from '@podjs/framework/services';
 import type {DouyinItem} from './types.ts';
 import {douyinMediaExpiry} from './media-expiry.ts';
 
@@ -13,12 +13,13 @@ export function stockPreviewBytes(item:DouyinItem):number {
  return Math.min(STOCK_ENTRY_BYTES,Math.max(512*1024,Math.ceil((bitrate>0?bitrate*seconds/8:2*1024*1024)+512*1024)));
 }
 export interface StockEntry {item:DouyinItem;expiresAt:number;prefixBytes:number;tailBytes:number;}
+export interface StockReadySource {uri:string;frame?:VideoFrame;item?:DouyinItem}
 export interface StockPorts {
  read():unknown;write(entries:StockEntry[]):void;
  allowed():Promise<boolean>;watched():Promise<readonly string[]>;
  feed():Promise<readonly DouyinItem[]>;
  prepare(item:DouyinItem,bytes:number):Promise<{ready:boolean;prefixBytes:number;tailBytes:number}>;
- lookup(entry:StockEntry):Promise<string|undefined>;
+ lookup(entry:StockEntry,headers?:Record<string,string>):Promise<string|StockReadySource|undefined>;
  cancel():void;
  now():number;
 }
@@ -45,20 +46,29 @@ export class DouyinStock {
   const watched=new Set(await this.ports.watched());
   const original=this.entries;
   const ready:StockEntry[]=[];
-  for(const entry of original){if(!this.fresh(entry)||watched.has(entry.item.awemeId))continue;try{if(await this.ports.lookup(entry))ready.push(entry);}catch{}}
+  // Three independent bounded reads share in-flight auth work and retain feed order.
+  const restored=await Promise.all(original.map(async entry=>{if(!this.fresh(entry)||watched.has(entry.item.awemeId))return undefined;try{return await this.ports.lookup(entry)?entry:undefined;}catch{return undefined;}}));
+  ready.push(...restored.filter((entry):entry is StockEntry=>!!entry));
   // Merge with a concurrent completed refill; never overwrite newer state.
   if(original===this.entries){this.entries=ready.filter(e=>this.fresh(e));this.save();}
   return ready.filter(e=>this.fresh(e)).map(e=>e.item);
  }
- async lookup(id:string):Promise<string|undefined>{
+ async ready(id:string,headers?:Record<string,string>):Promise<StockReadySource|undefined>{
   const entry=this.entries.find(e=>e.item.awemeId===id&&this.fresh(e));
   if(!entry)return undefined;
-  try{const uri=await this.ports.lookup(entry);return this.fresh(entry)?uri:undefined;}catch{return undefined;}
+  try{const value=await this.ports.lookup(entry,headers);return this.fresh(entry)&&value?{...(typeof value==='string'?{uri:value}:value),item:entry.item}:undefined;}catch{return undefined;}
  }
+ async lookup(id:string):Promise<string|undefined>{return (await this.ready(id))?.uri;}
  consume(id:string){this.consumed.add(id);this.entries=this.entries.filter(e=>e.item.awemeId!==id);this.save();}
  clear(){this.suspend();this.entries=[];this.consumed.clear();this.save();}
  suspend(){this.enabled=false;this.epoch++;this.ports.cancel();}
- resume():Promise<void>{this.enabled=true;if(this.running)return this.running.catch(()=>{}).then(()=>this.enabled?this.resume():undefined);const own=++this.epoch;const work=this.refill(own);this.running=work;return work.finally(()=>{if(this.running===work)this.running=undefined;});}
+ async networkChanged():Promise<void>{
+  const own=this.epoch,allowed=await this.ports.allowed();
+  if(own!==this.epoch)return;
+  if(!allowed){this.suspend();return;}
+  await this.resume();
+ }
+ resume():Promise<void>{const wasEnabled=this.enabled;this.enabled=true;if(this.running)return wasEnabled?this.running:this.running.catch(()=>{}).then(()=>this.enabled?this.resume():undefined);const own=++this.epoch;const work=this.refill(own);this.running=work;return work.finally(()=>{if(this.running===work)this.running=undefined;});}
  private async refill(own:number){
   const current=()=>this.enabled&&own===this.epoch;
   if(!await this.ports.allowed()||!current())return;

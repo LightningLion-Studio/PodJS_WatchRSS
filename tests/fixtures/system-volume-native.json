@@ -1,0 +1,77 @@
+{
+  "source": "PodVideoSystemAudioTest.java / Robolectric AudioManager",
+  "sourceSha256": "2d71a929cb3fe0eb761a9050cffcb3f038727f06ae931b4c6e706f507303d724",
+  "method": "native AudioManager STREAM_MUSIC state; no physical audio proof",
+  "cases": [
+    {
+      "volume": 0,
+      "volumeIndex": 0,
+      "volumeMax": 16,
+      "muted": false,
+      "percent": 0
+    },
+    {
+      "volume": 0,
+      "volumeIndex": 0,
+      "volumeMax": 16,
+      "muted": true,
+      "percent": 0
+    },
+    {
+      "volume": 0.0625,
+      "volumeIndex": 1,
+      "volumeMax": 16,
+      "muted": false,
+      "percent": 6
+    },
+    {
+      "volume": 0.0625,
+      "volumeIndex": 1,
+      "volumeMax": 16,
+      "muted": true,
+      "percent": 6
+    },
+    {
+      "volume": 0.125,
+      "volumeIndex": 2,
+      "volumeMax": 16,
+      "muted": false,
+      "percent": 13
+    },
+    {
+      "volume": 0.125,
+      "volumeIndex": 2,
+      "volumeMax": 16,
+      "muted": true,
+      "percent": 13
+    },
+    {
+      "volume": 0.5,
+      "volumeIndex": 8,
+      "volumeMax": 16,
+      "muted": false,
+      "percent": 50
+    },
+    {
+      "volume": 0.5,
+      "volumeIndex": 8,
+      "volumeMax": 16,
+      "muted": true,
+      "percent": 50
+    },
+    {
+      "volume": 1,
+      "volumeIndex": 16,
+      "volumeMax": 16,
+      "muted": false,
+      "percent": 100
+    },
+    {
+      "volume": 1,
+      "volumeIndex": 16,
+      "volumeMax": 16,
+      "muted": true,
+      "percent": 100
+    }
+  ]
+}

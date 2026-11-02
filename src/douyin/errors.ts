@@ -4,8 +4,8 @@ export interface DouyinPlaybackFailure {code:DouyinErrorCode;retryAfterMs?:numbe
 /** Preserve closed recovery metadata across the playback promise boundary. */
 export function douyinPlaybackFailure(error:unknown):DouyinPlaybackFailure {
   const value=error as Partial<DouyinPlaybackFailure>|null;
-  const codes:DouyinErrorCode[]=['NOT_LOGGED_IN','REQUEST_FAILED','PARSE_FAILED','UNSUPPORTED','CANCELLED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'];
-  const code=codes.includes(value?.code as DouyinErrorCode)?value!.code!:'REQUEST_FAILED';
+  const codes:DouyinErrorCode[]=['PLAYBACK_FAILED','NOT_LOGGED_IN','REQUEST_FAILED','PARSE_FAILED','UNSUPPORTED','CANCELLED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'];
+  const code=codes.includes(value?.code as DouyinErrorCode)?value!.code!:'PLAYBACK_FAILED';
   return {code,...(Number.isFinite(value?.retryAfterMs)&&value!.retryAfterMs!>0?{retryAfterMs:value!.retryAfterMs}:{})};
 }
 export const isDouyinRetryableFailure=(code:DouyinErrorCode)=>isDouyinTemporaryFailure(code)||code==='REQUEST_FAILED';
@@ -19,6 +19,7 @@ export function formatDouyinError(code: DouyinErrorCode): string {
     case 'NOT_LOGGED_IN': return '需要登录';
     case 'PARSE_FAILED': return '解析失败';
     case 'REQUEST_FAILED': return '网络请求失败';
+    case 'PLAYBACK_FAILED': return '视频播放失败，请重试';
     default: return '加载失败';
   }
 }

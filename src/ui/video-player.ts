@@ -27,7 +27,7 @@ export function guardedCrownVolume(current: number, requestedDelta: number, maxS
   if (requestedDelta === 0) return { volume: clamped, state: previous };
   const fresh = !Number.isFinite(previous.lastEventMs) || nowMs - previous.lastEventMs > 600;
   let cap = fresh || requestedDelta < 0 || !enabled ? undefined : previous.sessionCap;
-  let volume = Math.max(0, Math.min(1, clamped + requestedDelta));
+  let volume = Math.max(0, Math.min(1, clamped + requestedDelta / 3));
   if (enabled && requestedDelta > 0) {
     const activation = Math.round(Math.max(1, maxSteps) * .21) / Math.max(1, maxSteps);
     const effective = cap ?? (clamped < activation ? .21 : undefined);
@@ -60,4 +60,9 @@ export function playerPanRange(mode: PlayerScaleMode, viewWidth: number, viewHei
   }
   const halfHeight = Math.min(contentHeight / 2, radius);
   return { axis, range: Math.max(0, contentWidth / 2 - Math.sqrt(Math.max(0, radius * radius - halfHeight * halfHeight))) };
+}
+
+/** Integer overlay percentage from the active STREAM_MUSIC index, never player gain. */
+export function systemVolumePercent(index:number,max:number):number {
+ return max>0?Math.round(Math.max(0,Math.min(max,index))/max*100):0;
 }

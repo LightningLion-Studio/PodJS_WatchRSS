@@ -1,3 +1,4 @@
+import {playerFailureFields} from '../media/player-errors.ts';
 import {benchmark,type BenchmarkCode} from '@podjs/framework/benchmark';
 
 export interface DouyinAuthAttempt {seq:number;attempt:number;entered:boolean;}
@@ -13,11 +14,11 @@ function present(code:BenchmarkCode,seq:number){
  benchmark.presented(code,seq);
 }
 export const douyinBench={
- homeEntry:(key:object)=>{const seq=benchmark.begin('home_entry');owner(key).home=seq;return seq;},
- entryError:(seq:number)=>benchmark.mark('error',seq),
+ homeEntry:(key:object)=>{const seq=benchmark.begin('home_entry');benchmark.mark('startup_stage',seq,{startup_stage:'home_tap'});owner(key).home=seq;return seq;},
+ entryError:(seq:number,error?:unknown)=>benchmark.mark('error',seq,playerFailureFields(error,'entry')),
  firstCard:(seq:number)=>present('first_card',seq),
  refreshStart:()=>benchmark.begin('refresh_start'),
- refreshDone:(seq:number,failed=false)=>{if(failed)benchmark.mark('error',seq);present('refresh_done',seq);},
+ refreshDone:(seq:number,failed=false,error?:unknown)=>{if(failed)benchmark.mark('error',seq,playerFailureFields(error,'entry'));present('refresh_done',seq);},
  entry:(key:object)=>{const value=owner(key);if(value.logout)(benchmark as CancelPort).cancelPresented?.('logout_feedback',value.logout);value.logout=undefined;const home=value.home;value.home=undefined;if(home){benchmark.mark('entry_start',home);return home;}return benchmark.begin('entry_start');},
  presentEntry:(key:object,seq:number,code:'needs_login'|'refreshing')=>{if(code==='needs_login'||owner(key).postLogout)present(code,seq);},
  cancelPresented:(code:BenchmarkCode,seq:number)=>(benchmark as CancelPort).cancelPresented?.(code,seq),

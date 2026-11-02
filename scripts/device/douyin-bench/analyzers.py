@@ -4,15 +4,23 @@ import csv
 import io
 import math
 import re
+import json
+from pathlib import Path
 from collections import Counter
 
 BROWSER_CODES = set('requested opened page_started page_finished qr_ready completed cancelled service_closed unavailable invalid_argument busy browser_script_error webview_renderer_gone webview_unavailable browser_auth_timeout browser_qr_timeout'.split())
 # Proposed contract, not evidence that the shipping app emits these codes.
-CODES = set('entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
-ENUMS = {'state': {'running', 'idle', 'unknown', 'present', 'absent', 'paused'}, 'direction': {'next', 'prev', 'cancel', 'fling'},
+CODES = set('startup_stage home_first_frame entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
+ENUMS = {'startup_stage':set('stock_saved process_start home_mounted home_tap entry_mounted play_tap headers_ready preview_start preview_ready source_ready persist_start persist_done backdrop_start backdrop_done player_mounted prepare_start decoder_configured decoded_first_frame'.split()), 'state': {'running', 'idle', 'unknown', 'present', 'absent', 'paused'}, 'direction': {'next', 'prev', 'cancel', 'fling'},
          'muted': {'true', 'false'}, 'prewarmed': {'true', 'false'}, 'network_stalled': {'true', 'false'}, 'kind': {'on', 'off'},
          'reason': {'stale','capacity','release','failure','bidirectional','single_neighbour','foreground_media','media_stopped','timeout','candidate_retry','exhausted','hidden','network_stalled'}, 'backend': {'mixer', 'player'}}
-NUMBERS = {'seq', 'attempt', 'delta', 'generation', 'pid', 'mono_ms', 'active_tracks', 'source_generation', 'buffered_ms', 'slots'}
+NUMBERS = {'duration_ms', 'seq', 'attempt', 'delta', 'generation', 'pid', 'mono_ms', 'active_tracks', 'source_generation', 'buffered_ms', 'slots'}
+_PLAYER_ERRORS=json.loads((Path(__file__).parent/'player-error-schema.json').read_text())
+ENUMS.update({key:set(values)for key,values in _PLAYER_ERRORS['enums'].items()})
+NUMBERS.update(_PLAYER_ERRORS['numbers'])
+_VISIBILITY={'visibility_reason':set(['ready', 'inactive', 'route_offset', 'lifecycle', 'player_error', 'network_prompt', 'native_hidden', 'native_unfocused']),'player_state':set(['idle', 'preparing', 'buffering', 'ready', 'playing', 'paused', 'ended', 'stopped', 'error', 'unknown']),'has_frame':{'true','false'},'audio_track':{'true','false'},'system_muted':{'true','false'}}
+ENUMS.update(_VISIBILITY)
+NUMBERS.update({'offset_abs_milli','audio_gain_milli','system_index','system_max'})
 EPOCH = re.compile(r'^\s*(\d{9,}(?:\.\d+)?)\s+\d+\s+\d+\s+[VDIWEF]\s+([\w.-]+)\s*:\s*(.*)$')
 
 
@@ -22,7 +30,7 @@ def parse_log(line):
     if not m:
         return None
     stamp, tag, body = m.groups()
-    fields = dict(re.findall(r'\b([a-z_]+)=([a-zA-Z0-9_.-]+)', body))
+    fields = dict(re.findall(r'\b([a-z][a-z0-9_]*)=([a-zA-Z0-9_.-]+)', body))
     code = fields.get('code')
     if tag == 'PodBrowserAuth' and (code in BROWSER_CODES or code and re.fullmatch(r'webview_(?:http_\d{3}|load_-?\d{1,3})',code)):
         return {'t_ms': float(stamp) * 1000, 'tag': tag, 'code': code}
@@ -37,6 +45,22 @@ def parse_log(line):
         return None
     if tag != 'DYBENCH' or code not in CODES:
         return None
+    if ('startup_stage'in fields or 'duration_ms'in fields) and code!='startup_stage':return None
+    if code=='startup_stage' and fields.get('startup_stage')not in ENUMS['startup_stage']:return None
+    if code=='startup_stage' and 'slots'in fields and (fields.get('startup_stage')!='stock_saved'or not fields['slots'].isdigit()or int(fields['slots'])>3):return None
+    if 'duration_ms'in fields and (not fields['duration_ms'].isdigit()or int(fields['duration_ms'])>600000):return None
+    for key,values in _VISIBILITY.items():
+        if key in fields and fields[key]not in values:return None
+    if (set(_VISIBILITY)|{'offset_abs_milli','audio_gain_milli','system_index','system_max'}).intersection(fields) and code!='player_visible':return None
+    if any(k in fields and (not fields[k].isdigit()or int(fields[k])>1024) for k in ['system_index','system_max']):return None
+    if 'audio_gain_milli'in fields and (not fields['audio_gain_milli'].isdigit()or int(fields['audio_gain_milli'])>1000):return None
+    if 'offset_abs_milli'in fields and (not fields['offset_abs_milli'].isdigit()or int(fields['offset_abs_milli'])>1000000000):return None
+    player_fields=set(_PLAYER_ERRORS['enums'])|set(_PLAYER_ERRORS['numbers'])
+    if player_fields.intersection(fields) and code not in {'error','error_page'}:return None
+    for key,values in _PLAYER_ERRORS['enums'].items():
+        if key in fields and fields[key] not in values:return None
+    for key,limit in _PLAYER_ERRORS['numbers'].items():
+        if key in fields and (not fields[key].isdigit() or int(fields[key])>limit):return None
     out = {'t_ms': float(stamp) * 1000, 'tag': tag, 'code': code}
     for key in NUMBERS:
         if fields.get(key, '').isdigit():

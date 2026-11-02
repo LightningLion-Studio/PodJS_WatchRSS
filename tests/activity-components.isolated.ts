@@ -133,7 +133,7 @@ mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:element('RemoteImage')
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(listener:any)=>{listener(internet);return ()=>{};}}));
 mock.module('../src/logs/app-logger.ts',()=>({createLogConsole:()=>({warn(){},error(){}}),appLogger:{d(){},i(){},w(){},e(){}}}));
 let inlineCalls=0;
-mock.module('@podjs/framework/services',()=>({onVideoFirstFrame:()=>()=>{},textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
+mock.module('@podjs/framework/services',()=>({onNetworkChange:()=>()=>{},onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:()=>()=>{},textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
  captureFrame:async(options:any)=>{frameCaptures.push(options);return {available:true,kind:"actual_frame",path:"video-frames/test.jpg"};},captureBackdrop:async()=>{},prepare:(options:any)=>{prepareLoops.push(options.loop);return {result:Promise.resolve(videoState()),cancel(){}};},setLoop:async(loop:boolean)=>{loopCalls.push(loop);return videoState();},
  retire:async()=>({...videoState(),state:'paused'}),play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
  setBounds:async()=>{},setTransform:async(value:any)=>{transforms.push(value);},setVolume:async(value:number)=>{volumes.push(value);return {...videoState(),volume:value};},
@@ -152,11 +152,11 @@ test('production immersive player keeps restored mode through prepare and next s
  setSource({...source(),title:'B',url:'new fixture stream'});await turn();expect(transforms.at(-1).scaleMode).toBe('expanded');expect(routeMemory(entry).saved['player-scale']).toBe('expanded');expect(volumes).toEqual([]);
  f.dispose();
  // Bili controls are native ordinary remember, so foreign saved player fields
- // cannot force an immersive mode or skip its initial volume enforcement.
+ // cannot force an immersive mode or restore a private start-volume value.
  transforms.length=0;volumes.length=0;
  const bili:ActivityRoute={page:'video',videoTarget:{kind:'bili',aid:1,cid:2},memory:{id:'r999',saved:{'player-scale':'expanded','player-controls':false,'player-start-limit-consumed':true},retained:{}}};
  const b=mount(bili,()=>createComponent(VideoPlayerScreen,{source:{title:'Bili',url:'fixture',platform:'bili',startVolumeLimit:10},width:233,height:233,active:true,offset:0,round:true}));
- await turn();expect(transforms.at(-1).scaleMode).toBe('standard');expect(volumes).toEqual([.1]);expect(nodes(b.root).filter(n=>n.kind==='Image').length).toBeGreaterThan(0);b.dispose();
+ await turn();expect(transforms.at(-1).scaleMode).toBe('standard');expect(volumes).toEqual([]);expect(nodes(b.root).filter(n=>n.kind==='Image').length).toBeGreaterThan(0);b.dispose();
 });
 
 
@@ -208,7 +208,7 @@ test('production mode change and background invalidate auto-next while adjacent 
 
 
 let resolveCurrent!:(id:string)=>Promise<any>,queueSnapshot:any;
-mock.module('../src/media-services.ts',()=>({douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},biliClient:{},biliPreviewCache:{lookup:async()=>undefined},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{consume(){},resume:async()=>{},suspend(){}},douyinPreload:{previewFrame:async()=>undefined,lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},biliClient:{},biliPreviewCache:{lookup:async()=>undefined},douyinClient:{resolvePlayback:(id:string)=>resolveCurrent(id),restorePlaybackQueue:async()=>await queueSnapshot,savePlaybackQueue:async()=>{},buildPlaybackHeaders:async()=>({Cookie:'CURRENT-CREDENTIAL'}),isLoggedIn:async()=>true}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:()=>{throw Error('unexpected login');}}));
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');

@@ -1,6 +1,7 @@
+import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
 import {douyinClient} from '../../media-services.ts';
-import { Show, createSignal, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onCleanup } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
 import { manualCloudSync, applicationCloudApproval, applicationCloudActions, applicationCloudHandoff } from "../../cloud/application.ts";
@@ -61,6 +62,9 @@ interface HomeRoutesProps {
 const manualCloud = coalescedRequest(() => manualCloudSync());
 
 export function HomeRoutes(props: HomeRoutesProps) {
+  let homeObserved=false;
+  createEffect(()=>{if(homeObserved||!props.active()||props.page()!=='home'||!props.channels().length)return;homeObserved=true;const seq=benchmark.begin('startup_stage',{startup_stage:'home_mounted'});benchmark.presented('home_first_frame',seq);});
+
   // A cloud failure must not wait for the user to reopen the cloud page. The
   // active route alone mounts this existing round-list choice surface.
   const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);

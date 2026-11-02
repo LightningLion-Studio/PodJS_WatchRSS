@@ -1367,6 +1367,7 @@ export default function WatchRSS(props: {
     recoverRssDouyinVideo,
     deleteBuiltin,
   } = createMediaRouteController({
+    initialVideoBounds:()=>hasCapability("media.video.sessions")?{x:0,y:0,width,height,visible:false}:undefined,
     onActivityStateChange:saveActivity,
     onRssSourcePublished: () => usageTelemetry.recordVideoPlayed(),
     services: props.services,

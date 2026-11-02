@@ -31,11 +31,19 @@ describe("video player helpers", () => {
     expect(playerPanRange("expanded", 233, 233, 1920, 1080, 90).axis).toBe("y");
   });
   test("caps the first continuous crown raise from low volume", () => {
-    const first = guardedCrownVolume(.1, .1, 16, true, { lastEventMs: Number.NEGATIVE_INFINITY }, 1_000);
+    const first = guardedCrownVolume(.1, .3, 16, true, { lastEventMs: Number.NEGATIVE_INFINITY }, 1_000);
     expect(first.volume).toBe(.2);
-    const capped = guardedCrownVolume(first.volume, .1, 16, true, first.state, 1_200);
+    const capped = guardedCrownVolume(first.volume, .3, 16, true, first.state, 1_200);
     expect(capped.volume).toBe(.21);
-    const afterPause = guardedCrownVolume(capped.volume, .1, 16, true, capped.state, 2_000);
+    const afterPause = guardedCrownVolume(capped.volume, .3, 16, true, capped.state, 2_000);
     expect(afterPause.volume).toBeCloseTo(.31);
   });
+});
+
+test("player crown gain is one third with fractional steps and reverse motion",()=>{
+ let volume=.5,state={lastEventMs:Number.NEGATIVE_INFINITY};
+ for(let i=0;i<3;i++){const next=guardedCrownVolume(volume,1/16,16,false,state,1000*i);volume=next.volume;state=next.state;}
+ expect(volume).toBeCloseTo(.5+1/16);
+ for(let i=0;i<3;i++){const next=guardedCrownVolume(volume,-1/16,16,false,state,4000+1000*i);volume=next.volume;state=next.state;}
+ expect(volume).toBeCloseTo(.5);
 });

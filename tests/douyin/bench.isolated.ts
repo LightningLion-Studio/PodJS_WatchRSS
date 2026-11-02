@@ -41,7 +41,7 @@ test('an old logout deletion keeps its original action metadata after a later lo
 
 test('DYERR home activation and entry share one sequence, refresh completion requests a real frame',()=>{
  const calls=fixture(),key={},seq=douyinBench.homeEntry(key);expect(douyinBench.entry(key)).toBe(seq);
- expect(calls.slice(0,2)).toMatchObject([{code:'home_entry',seq},{code:'entry_start',seq}]);
+ expect(calls.slice(0,3)).toMatchObject([{code:'home_entry',seq},{code:'startup_stage',seq,startup_stage:'home_tap'},{code:'entry_start',seq}]);
  const refresh=douyinBench.refreshStart();douyinBench.refreshDone(refresh,true);
  expect(calls.slice(-2)).toMatchObject([{code:'error',seq:refresh},{code:'refresh_done',seq:refresh,presented:true}]);
  expect(douyinBench.entry(key)).not.toBe(seq);

@@ -193,3 +193,38 @@ cache hits alone do not fabricate a network request.
 
 No URLs, content identifiers, cookies, tokens, raw errors or body text enter this
 path. Existing performance counters do not use request events as frame evidence.
+
+## Closed player failure fields (T-1201-ERR)
+
+`error` and `error_page` may include the fields defined in `player-error-schema.json`.
+Native and collector independently reject unknown enum values and out-of-range numbers.
+`failure_origin` separates guest, explicit sessions and legacy player observations.
+`failure_stage` distinguishes entry timeout, prepare, playback and control RPC failures.
+`failure_code` and `exception_kind` are fixed categories; no exception message or stack is copied.
+`media3_code=0` means no Media3 error number was available. A nonzero value is the actual
+`PlaybackException.errorCode`. `codec_kind`, dimensions, `content_kind`, `source_kind`,
+`surface_state`, `slot_limit`, `decoder_count` and `is_prewarm` describe the failing operation.
+`slot_limit` in session failures is the last evaluated memory admission limit.
+`source_kind=cache` records only the URI scheme category, never the URL or cache key.
+`content_kind=unknown` is missing header evidence, not proof of an unsupported format.
+A failed foreground session retains its original terminal error for state polling while
+releasing its decoder. It must not turn into `unknown_video_session` after removal.
+HTTP 200/206 proves a request result, not media decoding, surface readiness or playback.
+The 1500 ms entry watchdog reports slow loading; it does not prove a failed network request.
+
+`player_visible` also carries closed `visibility_reason`, `player_state`,
+`has_frame`, and bounded absolute route offset in thousandths of a pixel.
+Native changes a guest `present` to `absent` with `native_hidden` or
+`native_unfocused` when its real rendering view is hidden or lacks window focus.
+These observations do not replace native decoded-target/commit proof and do not
+relax the input guard. Unknown player states map to `unknown`.
+
+T-1201 Audio: `player_visible` may carry `audio_gain_milli` (0..1000, actual Media3 gain readback) and `audio_track` (selected audio format present). These do not prove audible PCM or speaker output. No URL, track identifier or codec description is recorded.
+
+T-1201 MUTESYNC: `player_visible` additionally accepts `system_index`, `system_max` (integers 0..1024), and `system_muted` (boolean). These are active STREAM_MUSIC readbacks. The overlay derives its rounded percentage from index/max. `audio_gain_milli` must remain 1000 for an active video. A system mute no longer produces a private zero-gain `player_audio_applied` receipt. Prewarm silencing disables its audio track and never changes system mute.
+
+`startup_stage` carries only a closed `startup_stage` enum and optional decoder `duration_ms`. Native uptime and seq correlate input, source, persistence, surface, decoder, and first frame. `home_first_frame` is a real native HWUI commit; it is distinct from guest home construction. Process start uses Android Process.getStartUptimeMillis, never host wall time.
+
+The `stock_saved` startup stage carries `slots=0..3`, the saved stock metadata count. It is readiness bookkeeping, not a decoded playback frame or a cache-hit proof. Actual first-frame cache counters remain required.
+
+`PodMediaCache cache_first_card` is a numeric counter snapshot from the same native visible frame commit as `first_card`. It carries that action's seq and uptime. The older `cache_stats` line is a decoded-frame observation and is not the visible-frame counter proof for a reserved initial decoder.

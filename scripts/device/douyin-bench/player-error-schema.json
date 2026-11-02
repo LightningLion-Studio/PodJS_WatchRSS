@@ -1,0 +1,115 @@
+{
+  "enums": {
+    "failure_code": [
+      "resource_exhausted",
+      "decode_error",
+      "decoder_init",
+      "format_error",
+      "surface_error",
+      "invalid_argument",
+      "permission_denied",
+      "cancelled",
+      "stale",
+      "not_ready",
+      "session_missing",
+      "timeout",
+      "network_error",
+      "cdn_error",
+      "restricted",
+      "source_expired",
+      "prepare_failed",
+      "video_session_error",
+      "video_error",
+      "service_closed",
+      "host_error",
+      "unsupported",
+      "recovery_exhausted",
+      "unknown",
+      "cache_error",
+      "storage_error"
+    ],
+    "failure_stage": [
+      "capabilities",
+      "prepare",
+      "play",
+      "state",
+      "bounds",
+      "transform",
+      "loop",
+      "volume",
+      "pause",
+      "seek",
+      "stop",
+      "release",
+      "retire",
+      "promote",
+      "transition",
+      "recovery",
+      "entry",
+      "playback",
+      "capture",
+      "unknown",
+      "source",
+      "persist",
+      "backdrop"
+    ],
+    "exception_kind": [
+      "media3",
+      "decoder_init",
+      "codec",
+      "surface",
+      "oom",
+      "io",
+      "illegal_state",
+      "illegal_argument",
+      "security",
+      "host_service",
+      "error",
+      "unknown"
+    ],
+    "failure_origin": [
+      "guest",
+      "sessions",
+      "legacy"
+    ],
+    "codec_kind": [
+      "avc",
+      "hevc",
+      "vp9",
+      "av1",
+      "unknown"
+    ],
+    "content_kind": [
+      "mp4",
+      "webm",
+      "hls",
+      "dash",
+      "octet",
+      "html",
+      "unknown"
+    ],
+    "source_kind": [
+      "cache",
+      "network",
+      "local",
+      "missing"
+    ],
+    "surface_state": [
+      "attached",
+      "missing",
+      "detached",
+      "unknown"
+    ],
+    "is_prewarm": [
+      "true",
+      "false"
+    ]
+  },
+  "numbers": {
+    "media3_code": 1000000,
+    "video_width": 16384,
+    "video_height": 16384,
+    "decoder_count": 3,
+    "slot_limit": 3
+  }
+}

@@ -72,6 +72,8 @@ export type RouteEntry = {
   channelId?: string;
   biliRoute?: BiliRoute;
   douyinRoute?: DouyinRoute;
+  /** Ephemeral decoder ownership; excluded from navigation snapshots. */
+  initialVideoPool?:import("../douyin/video-sessions.ts").DouyinVideoSessionPool;
   playback?: PlaybackSource;
   checkpoint?: BiliPlaybackCheckpointController;
   retryPlayback?: (positionMs: number, options?: import("../../playback.ts").BiliPlaybackRetryOptions) => Promise<void>;

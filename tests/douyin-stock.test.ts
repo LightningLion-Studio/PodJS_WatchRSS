@@ -40,3 +40,23 @@ test('content key ignores rotating signature while rendition changes invalidate 
  const b={...a,playUrl:'https://other.test/refreshed?token=2',variants:[{...a.variants[0],playUrl:'https://other.test/refreshed?token=2'}]};
  expect(stockContentKey(a)).toBe(stockContentKey(b));expect(stockContentKey({...b,variants:[{...b.variants[0],bitrate:200000}]})).not.toBe(stockContentKey(a));
 });
+
+test('unchanged admitted network publications preserve one in-flight preparation; actual loss cancels',async()=>{
+ const f=fixture();let finish!:()=>void,cancels=0,prepares=0;
+ f.ports.cancel=()=>{cancels++;};f.ports.prepare=async()=>{prepares++;await new Promise<void>(yes=>finish=yes);return {ready:true,prefixBytes:4,tailBytes:0};};
+ const stock=new DouyinStock(f.ports),running=stock.resume();while(!finish)await Promise.resolve();
+ const updates=Array.from({length:5},()=>stock.networkChanged());for(let i=0;i<20;i++)await Promise.resolve();
+ expect(cancels).toBe(0);expect(prepares).toBe(1);f.setAllowed(false);await stock.networkChanged();expect(cancels).toBe(1);
+ finish();await Promise.all([running,...updates]);expect(f.disk()).toEqual([]);
+});
+test('a network check that resolves after leaving home cannot restart stock',async()=>{
+ const f=fixture();let yes!:(v:boolean)=>void;f.ports.allowed=()=>new Promise(r=>yes=r);const stock=new DouyinStock(f.ports);
+ const pending=stock.networkChanged();stock.suspend();yes(true);await pending;expect(f.counts().network).toBe(0);
+});
+
+test('concurrent persisted readiness reads retain feed order and a consumed late result is rejected',async()=>{
+ const f=fixture();await new DouyinStock(f.ports).resume();const completions=new Map<string,(value:string)=>void>();f.ports.lookup=entry=>new Promise(yes=>completions.set(entry.item.awemeId,yes));
+ const stock=new DouyinStock(f.ports),pending=stock.restore();while(completions.size<3)await Promise.resolve();
+ completions.get('c')!('cache:c');completions.get('b')!('cache:b');completions.get('a')!('cache:a');expect((await pending).map(i=>i.awemeId)).toEqual(['a','b','c']);
+ const late=stock.ready('b');while(!completions.get('b'))await Promise.resolve();stock.consume('b');completions.get('b')!('cache:b');expect(await late).toBeUndefined();
+});

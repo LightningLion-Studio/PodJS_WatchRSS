@@ -25,32 +25,32 @@ test('gate is closed before/while init, shares promise, resolves only literal de
   expect(await run(gate)).toEqual(await run(oldGate));
  }
 });
-test('Float guard, session-gap edges and fractional motion match oracle through deterministic trajectories',()=>{
+test('Float guard preserves frozen decisions while T-1201 crown sensitivity is one third',()=>{
  let seed=0x987612;const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed;};
  for(const [min,max] of [[0,0],[2,1],[0,15],[2,31],[1,100]]){
   let a=volume.emptyCrownGuard(),b=oldVolume.emptyCrownGuard(),current=min,time=1000;
   for(let i=0;i<800;i++){
    const raw=[0,-1,1,-1000,1000,(rand()%1000-500)/7][rand()%6],delta=volume.scaledCrownVolumeDelta(raw,min,max);
-   expect(delta).toBe(oldVolume.scaledCrownVolumeDelta(raw,min,max));time+=[0,599,600,601,-20][rand()%5];const enabled=!!(rand()%2);
+   expect(delta).toBeCloseTo(oldVolume.scaledCrownVolumeDelta(raw,min,max)/3,5);time+=[0,599,600,601,-20][rand()%5];const enabled=!!(rand()%2);
    const x=volume.applyCrownVolumeGuard(current,delta,min,max,enabled,a,time),y=oldVolume.applyCrownVolumeGuard(current,delta,min,max,enabled,b,time);
    expect(x).toEqual(y);a=x.state;b=y.state;current=x.target;
   }
  }
 });
-test('crown batching, reset during state/write, external changes, fixed volume, failures and hide events preserve event order',async()=>{
+test('T-1201 system overlay and one-third input preserve frozen batching, reset, failure and timer order',async()=>{
  for(const scenario of ['normal','reset-state','reset-write','state-error','write-error','fixed','external']){
-  async function run(api:any){const c=fakeClock(),events:any[]=[],read=deferred<any>(),write=deferred<any>();let count=0;let state={min:0,max:15,current:0,fixed:scenario==='fixed'};
+  async function run(api:any,old=false){const c=fakeClock(),events:any[]=[],read=deferred<any>(),write=deferred<any>();let count=0;let state={min:0,max:15,current:0,fixed:scenario==='fixed'};
    const port={async state(){events.push(['read',++count]);if(count===1)return read.promise;return {...state};},async setIndex(index:number){events.push(['write',index]);state={...state,current:index};if(count===1)return write.promise;return {...state};}};
    // Production wrapper uses the default failed callback in the normal/fixed case.
-   const args=[port,c.clock,(v:any)=>events.push(['display',v]),()=>events.push(['notify'])];if(scenario!=='normal'&&scenario!=='fixed')args.push((e:any)=>events.push(['error',e.message]));
-   const v=new api.CrownVolumeController(...args);v.adjust(NaN,0,true);v.adjust(0,0,true);v.adjust(-30,NaN,true);v.adjust(-500,1000,true);v.adjust(-300,1100,true);
+   const args=[port,c.clock,(v:any)=>events.push(['display',old?{visible:v.visible,percent:!v.visible&&v.percent===0?0:Math.round(state.current/state.max*100)}:v]),()=>events.push(['notify'])];if(scenario!=='normal'&&scenario!=='fixed')args.push((e:any)=>events.push(['error',e.message]));
+   const v=new api.CrownVolumeController(...args);v.adjust(NaN,0,true);v.adjust(0,0,true);v.adjust(-30,NaN,true);v.adjust(old?-500/3:-500,1000,true);v.adjust(old?-300/3:-300,1100,true);
    if(scenario==='reset-state')v.reset();
    if(scenario==='state-error')read.reject(Error('read'));else read.resolve({...state});await settle();
-   if(scenario==='reset-write')v.reset();v.adjust(100,1900,false);v.adjust(-25,2501,true);
+   if(scenario==='reset-write')v.reset();v.adjust(old?100/3:100,1900,false);v.adjust(old?-25/3:-25,2501,true);
    if(scenario==='write-error')write.reject(Error('write'));else write.resolve({...state});await settle();
-   if(scenario==='external')state={...state,current:10};v.adjust(-25,3102,true);await settle();c.tick(1199);c.tick(1);v.reset();c.tick(1200);await settle();return {events,timers:c.events,left:c.jobs.size};
+   if(scenario==='external')state={...state,current:10};v.adjust(old?-25/3:-25,3102,true);await settle();c.tick(1199);c.tick(1);v.reset();c.tick(1200);await settle();return {events,timers:c.events,left:c.jobs.size};
   }
-  expect(await run(volume)).toEqual(await run(oldVolume));
+  expect(await run(volume)).toEqual(await run(oldVolume,true));
  }
 });
 test('bounded flush timer creation/cancellation and saved/failed/timed-out races match original',async()=>{
