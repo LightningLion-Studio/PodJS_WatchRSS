@@ -13,7 +13,7 @@ export class DouyinPlaybackQueue {
   private hasMore:boolean;
   private generation=0;
   private previewGeneration=0;
-  private previewRevisions={next:0,previous:0};
+  private previewRevisions={next:[0,0],previous:[0,0]};
   private quarantined=new Set<string>();
   private persistence:Promise<void>=Promise.resolve();
   private pageRequest?:Promise<DouyinResult<null>>;
@@ -61,8 +61,8 @@ export class DouyinPlaybackQueue {
   async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
   async preview(direction:"next"|"previous",distance:1|2=1):Promise<DouyinResult<DouyinPlaybackQueueState>>{
-    const epoch=this.previewGeneration,op=++this.previewRevisions[direction],nav=this.generation;
-    const current=()=>epoch===this.previewGeneration&&op===this.previewRevisions[direction]&&nav===this.generation;
+    const epoch=this.previewGeneration,op=++this.previewRevisions[direction][distance-1],nav=this.generation;
+    const current=()=>epoch===this.previewGeneration&&op===this.previewRevisions[direction][distance-1]&&nav===this.generation;
     if(distance===2){
       const anchor=this.items[this.index]?.awemeId;
       if(direction==='next'&&this.index+2>=this.items.length&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}
@@ -76,6 +76,12 @@ export class DouyinPlaybackQueue {
       return this.resolvePreviewAt(this.index-1,current);
     }
     return this.advance(current,target=>this.resolvePreviewAt(target,current));
+  }
+  /** Keep enough metadata ahead for normal paging; transport remains coalesced.
+   * This does not resolve detail, allocate a decoder or move the selection. */
+  async fillAhead(minimum=8):Promise<void>{
+    if(this.fixedSources||!this.hasMore||this.items.length-this.index-1>=Math.max(2,Math.min(16,minimum))||Date.now()<this.retryAt)return;
+    await this.loadPage();
   }
   private preservesItem(code:string){return ['NOT_LOGGED_IN','CANCELLED','REQUEST_FAILED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'].includes(code);}
   private async loadPage():Promise<DouyinResult<null>>{

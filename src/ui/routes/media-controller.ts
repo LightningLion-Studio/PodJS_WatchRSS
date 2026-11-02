@@ -360,8 +360,10 @@ export function createMediaRouteController(
       cursor: request.cursor,
       hasMore: request.hasMore,
       fixedSources: request.immersive !== true,
+      ...(request.immersive===true?{limit:80}:{}),
       localPlayback: id=>douyinPreload.lookup(id),
     });
+    void pendingDouyinQueue.fillAhead().catch(()=>{});
     pendingDouyinPlayback = (async()=>{
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'preview_start'});
         // A restored native cache capability already owns authorized upstream headers.
@@ -545,13 +547,14 @@ export function createMediaRouteController(
     if(!entry.queue||dependencies.current()!==entry)return;
     const result=await entry.queue.preview(direction,distance);
     if(dependencies.current()!==entry||!result.ok)return;
+    const stillAdjacent=()=>{const state=entry.queue!.snapshot();return dependencies.current()===entry&&state.playlist[state.index+(direction==='next'?distance:-distance)]?.awemeId===result.data.item.awemeId;};
     const authorizationVersion=douyinClient.playbackAuthorizationVersion?.()??0;
     const headers=await adjacentHeaders(entry);
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
-    if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
+    if(!stillAdjacent())return;
     const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next');
-    if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
-    return {key:result.data.item.awemeId,authorizationVersion,source:{
+    if(!stillAdjacent())return;
+    return {key:result.data.item.awemeId,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
       url,title:result.data.item.description,headers,
       ...douyinDecoderProfile(result.data.item),
@@ -568,6 +571,7 @@ export function createMediaRouteController(
       else if(direction==='next')void changeDouyinVideo(entry,direction).catch(()=>{});
       return;
     }
+    void queue.fillAhead().catch(()=>{});
     const item=result.data.item,old=entry.playback!;
     // The player supplies a decoded neighbour from this authorized route.
     // Selection still commits synchronously; no second cache/URL lookup gates it.

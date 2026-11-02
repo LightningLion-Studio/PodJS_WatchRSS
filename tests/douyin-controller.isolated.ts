@@ -415,3 +415,15 @@ test('DYSWAP changed authorization rejects the retained neighbour source',async(
  expect(entry.queue!.snapshot().index).toBe(1);expect(f.source()).not.toBe(prepared!.source);expect(f.source().previewOnly).toBe(true);
  lookupOverride=undefined;
 });
+
+test('DYHIT a refill index shift keeps the same adjacent source during a slow native lookup',async()=>{
+ const f=fixture(),a=item('a'),b=item('b'),z=item('z');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[z,a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const {DouyinPlaybackQueue}=await import('../src/douyin/playback-queue.ts');
+ const entry=f.stack().at(-1)!;entry.queue=new DouyinPlaybackQueue(client,{items:[z,a,b],selectedAwemeId:'a',hasMore:true,limit:3});
+ client.fetchFeedPage=async()=>({ok:true,data:{items:[item('c')],nextCursor:'c1',hasMore:true}});
+ let release!:(uri:string)=>void,entered!:()=>void;const started=new Promise<void>(r=>entered=r);lookupOverride=()=>new Promise(resolve=>{release=resolve;entered();});
+ const pending=f.controller.prepareDouyinAdjacent(entry,'next');await started;await entry.queue.fillAhead();
+ expect(entry.queue.snapshot().index).toBe(0);release('podjs-media-cache://fixture/b');const prepared=await pending;
+ expect(prepared?.key).toBe('b');expect(prepared?.queueIndex).toBe(1);expect(prepared?.anchorIndex).toBe(0);lookupOverride=undefined;
+});

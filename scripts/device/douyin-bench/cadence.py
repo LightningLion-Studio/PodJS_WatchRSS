@@ -48,7 +48,7 @@ def build_driver(out):
 
 
 def start(serial, count, pace_ms, direction='next', duration_ms=None, task_tag='T-DYPREP'):
-    if task_tag not in ('T-DYPREP','T-DYBYTES','T-DYSWAP'):raise ValueError('invalid task owner')
+    if task_tag not in ('T-DYPREP','T-DYBYTES','T-DYSWAP','T-DYHIT'):raise ValueError('invalid task owner')
     duration_ms = (120 if pace_ms == 200 else 260) if duration_ms is None else duration_ms
     payload = script(count, pace_ms, direction, duration_ms) # validate first
     if serial not in ('e3aca8af', 'emulator-5560'):

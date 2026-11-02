@@ -5,7 +5,7 @@ import type { DouyinItem } from "../../douyin/types.ts";
 
 export {videoPagerDelta as douyinPagerDelta,VIDEO_PAGER_SNAP_POSITIONAL_THRESHOLD as DOUYIN_PAGER_SNAP_POSITIONAL_THRESHOLD,VIDEO_PAGER_MIN_FLING_VELOCITY as DOUYIN_PAGER_MIN_FLING_VELOCITY,VIDEO_PAGER_SETTLE_DURATION_MS as DOUYIN_PAGER_SETTLE_DURATION_MS,videoPagerProgress as douyinPagerProgress,shouldSettleVideoPager as shouldSettleDouyinPager,videoPagerSettleProgress as douyinPagerSettleProgress} from '@podjs/framework/video-paging';
 export type DouyinPagerDirection = 'up'|'down';
-export interface DouyinPreparedSource {key:string;source:PlaybackSource;authorizationVersion?:number}
+export interface DouyinPreparedSource {key:string;source:PlaybackSource;authorizationVersion?:number;queueIndex?:number;anchorIndex?:number}
 
 export function douyinDecoderProfile(item:DouyinItem,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight">{
   const variant=item.variants.find(candidate=>candidate.playUrl===url||candidate.playUrls?.includes(url));

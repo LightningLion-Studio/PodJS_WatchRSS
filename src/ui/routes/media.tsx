@@ -247,6 +247,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ? () => props.changeDouyinVideo(props.entry, "previous")
               : undefined
           }
+          onAdjacentKey={props.entry.queue?(direction,distance=1)=>{const q=props.entry.queue!.snapshot();return q.playlist[q.index+(direction==='next'?distance:-distance)]?.awemeId;}:undefined}
           onPrepareAdjacent={
             props.entry.queue
               ? (direction,distance) => props.prepareDouyinAdjacent(props.entry,direction,distance)

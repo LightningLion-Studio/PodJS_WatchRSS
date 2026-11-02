@@ -80,3 +80,24 @@ test('DYINTENT selects 50 targets synchronously and fences an older delayed reso
  finish({ok:true,data:item('11')});expect(await stale).toMatchObject({ok:false,code:'CANCELLED'});expect(q.snapshot().index).toBe(60);
  q.selectIntent('previous',2);expect(q.snapshot().index).toBe(58);
 });
+
+test('DYHIT near and deep previews in the same direction do not cancel one another',async()=>{
+ const pending=new Map<string,(value:any)=>void>();
+ const client={resolvePlayback:(id:string)=>new Promise(resolve=>pending.set(id,resolve))}as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:['0','1','2','3','4'].map(item),selectedAwemeId:'2',hasMore:false});
+ const all=[q.preview('next'),q.preview('next',2),q.preview('previous'),q.preview('previous',2)];
+ await Promise.resolve();await Promise.resolve();
+ for(const [id,resolve]of pending)resolve({ok:true,data:item(id)});
+ expect((await Promise.all(all)).every(x=>x.ok)).toBe(true);expect(q.snapshot().item?.awemeId).toBe('2');
+});
+
+test('DYHIT refill starts at eight remaining items and coalesces while navigation continues',async()=>{
+ let requests=0,finish!:(value:any)=>void;
+ const client={resolvePlayback:async(id:string)=>({ok:true,data:item(id)}),fetchFeedPage:()=>{requests++;return new Promise(resolve=>finish=resolve);}}as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:Array.from({length:20},(_,i)=>item(String(i))),selectedAwemeId:'2',hasMore:true,cursor:'c0'});
+ await q.fillAhead();expect(requests).toBe(0);
+ q.commitPreview('12');const first=q.fillAhead(),second=q.fillAhead();expect(requests).toBe(1);expect(q.snapshot().item?.awemeId).toBe('12');
+ q.commitPreview('10');finish({ok:true,data:{items:Array.from({length:12},(_,i)=>item(String(20+i))),nextCursor:'c1',hasMore:true}});await Promise.all([first,second]);
+ expect(q.snapshot().item?.awemeId).toBe('10');expect(q.snapshot().playlist).toHaveLength(32);expect(q.snapshot().cursor).toBe('c1');
+ await q.fillAhead();expect(requests).toBe(1);
+});

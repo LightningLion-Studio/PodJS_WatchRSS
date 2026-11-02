@@ -636,3 +636,18 @@ test('DYSWAP release publishes the decoded neighbour in the immediate-selection 
  expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(1);
  expect(sessionCalls.filter(c=>c.method==='promote')[0].autoplay).toBe(true);
 });
+
+test('DYHIT release adopts an already decoded slot while neighbour resolution remains pending',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];
+ const {DouyinVideoSessionPool}=await import('../src/ui/douyin/video-sessions.ts');
+ const pool=new DouyinVideoSessionPool({...sessionPort,capabilities:async()=>({decoderLimit:3,maxSessions:3,surfacePromotion:true,verticalTransition:true})}as any);
+ const source=(id:string)=>({platform:'douyin' as const,immersive:true,awemeId:id,url:'managed/'+id,title:id});
+ let decodedSelection:any;
+ createRoot(stop=>{stops.push(stop);const [current,setCurrent]=createSignal(source('a'));return VideoPlayerScreen({initialPool:pool,get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{},
+  onAdjacentKey:d=>d==='next'?'b':'z',onPrepareAdjacent:()=>new Promise(()=>{}),
+  onSelectTarget:(_d,_n,decoded)=>{decodedSelection=decoded;if(decoded)setCurrent(decoded.source as ReturnType<typeof source>);},
+ });});await flush();
+ await pool.prewarm({key:'b',source:source('b')},{...source('b'),bounds:{x:0,y:0,width:233,height:233}},'next');
+ const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-116});g.onPanEnd({vy:-500});await flush();
+ expect(decodedSelection?.key).toBe('b');expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(1);
+});
