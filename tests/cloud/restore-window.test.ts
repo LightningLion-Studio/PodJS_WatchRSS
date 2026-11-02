@@ -76,8 +76,8 @@ test('interruption after every atomic part file but before its receipt preserves
 });
 
 
-test('native materialization never receives an over-64MiB projection; larger representations use bounded direct native pieces',async()=>{
+test('native materialization never receives an over-64MiB request; larger representations use bounded native groups',async()=>{
  const f=await fixture(),body=new Uint8Array(65*1024*1024).fill(41);let native=0;
- f.session.codec=new WatchCloudCodec({...crypto,openSealedParts:async(k,parts,length)=>{native++;expect(length).toBeLessThanOrEqual(262144);expect(parts).toHaveLength(1);const p=parts[0],sealed=f.blobs.get(p.path)!;return crypto.decrypt(k,new Uint8Array(Buffer.from(p.aadBase64,'base64')),sealed.subarray(0,12),sealed.subarray(12));}},{require(){}});
- const cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('current-epoch','current-generation');await cp.begin();const token=await cp.token('large-local-projection');await cp.write(token,body);expect(await cp.read(token)).toEqual(body);expect(native).toBe(260);cp.close();
+ f.session.codec=new WatchCloudCodec({...crypto,openSealedParts:async(k,parts,length)=>{native++;expect(length).toBeLessThanOrEqual(64*1024*1024);expect(length).toBe(parts.reduce((n,p)=>n+p.bytes,0));const out=new Uint8Array(length);let at=0;for(const p of parts){const sealed=f.blobs.get(p.path)!,plain=await crypto.decrypt(k,new Uint8Array(Buffer.from(p.aadBase64,'base64')),sealed.subarray(0,12),sealed.subarray(12));expect(plain.length).toBe(p.bytes);out.set(plain,at);at+=plain.length;}return out;}},{require(){}});
+ const cp=await new SnapshotRestoreCheckpoint(f.session,crypto.sha256,async()=>{},()=>0).open('current-epoch','current-generation');await cp.begin();const token=await cp.token('large-local-projection');await cp.write(token,body);expect(await cp.read(token)).toEqual(body);expect(native).toBe(2);cp.close();
 });

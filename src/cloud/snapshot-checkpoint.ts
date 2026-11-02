@@ -1,3 +1,4 @@
+import {receiptedParts} from '@podjs/framework/work-window';
 import {restoreReceiptClass} from './restore-callsite';
 import {cpuWork,cpuJsonParse,cpuJsonStringify} from '@podjs/framework/cpu-work';
 import {snapshotDeferred,SNAPSHOT_GUARD_VERSION} from './snapshot-deferral';
@@ -77,22 +78,54 @@ export class SnapshotRestoreCheckpoint {
  private async writeBlob(id:string,bytes:Uint8Array){this.indices.delete(id);await this.session.restoreCheckpoint?.assertCurrent?.();const key=await this.accountKey();if(!key)throw Error('missing_key_version');await this.cache.storeRestoreProjection(this.session.userId,id,await this.codec.sealRestoreProjection(key,this.root+':'+id,bytes));}
  /** Split the disposable decoded representation so a large old object also
   * checkpoints its assembly. Only complete AEAD-authenticated parts are reused. */
- async index(token:string):Promise<ProjectionIndex|undefined>{const cached=this.indices.get(token);if(cached)return cached;const raw=await this.readBlob(token);if(!raw)return;try{const m=cpuJsonParse(utf8Decode(raw));if(!Number.isSafeInteger(m.length)||m.length<0||m.length>256*1024*1024||!Array.isArray(m.parts)||m.parts.length>2048||m.parts.some((p:unknown)=>typeof p!=='string'||!/^[a-f0-9]{64}(?:-[A-Za-z0-9-]{1,160})?$/.test(p))||!Array.isArray(m.lengths)||m.lengths.length!==m.parts.length||m.lengths.some((n:unknown)=>!Number.isSafeInteger(n)||Number(n)<0||Number(n)>256*1024)||m.lengths.reduce((n:number,x:number)=>n+x,0)!==m.length)return;this.indices.set(token,m);return m;}catch{return;}}
+ async index(token:string):Promise<ProjectionIndex|undefined>{const cached=this.indices.get(token);if(cached)return cached;
+  // A complete secure receipt plus every canonical piece receipt authenticates
+  // the deterministic layout. Old/noncanonical linked layouts still use AEAD
+  // metadata. File contents remain authenticated by the eventual consumer.
+  const length=this.length(token),shape=length===undefined||length>256*1024*1024?undefined:receiptedParts(length,262144,offset=>this.value.projections[token+'-p'+offset]);
+  if(shape){const m={length:length!,parts:shape.offsets.map(offset=>token+'-p'+offset),lengths:shape.lengths};this.indices.set(token,m);return m;}
+  const raw=await this.readBlob(token);if(!raw)return;try{const m=cpuJsonParse(utf8Decode(raw));if(!Number.isSafeInteger(m.length)||m.length<0||m.length>256*1024*1024||!Array.isArray(m.parts)||m.parts.length>2048||m.parts.some((p:unknown)=>typeof p!=='string'||!/^[a-f0-9]{64}(?:-[A-Za-z0-9-]{1,160})?$/.test(p))||!Array.isArray(m.lengths)||m.lengths.length!==m.parts.length||m.lengths.some((n:unknown)=>!Number.isSafeInteger(n)||Number(n)<0||Number(n)>256*1024)||m.lengths.reduce((n:number,x:number)=>n+x,0)!==m.length)return;this.indices.set(token,m);return m;}catch{return;}}
  length(token:string){return this.has('decoded:'+token)?this.value.units['decoded:'+token]:undefined;}
  async read(token:string):Promise<Uint8Array|undefined>{return this.readBatch(()=>this.readProjection(token));}
  private async readProjection(token:string):Promise<Uint8Array|undefined>{
   await this.current();const at=this.now(),m=await this.index(token);if(!m){if(this.has('decoded:'+token))await this.invalidate('decoded:'+token);return;}if(m.provisional&&!this.has('decoded:'+token))return;// Partial shapes resume their suffix without decrypting the committed prefix.
   if(m.parts.length>1&&m.parts.some(id=>!Object.prototype.hasOwnProperty.call(this.value.projections,id)))return;
-  if(m.length>256*1024&&m.length<=64*1024*1024&&this.codec.batchedRestoreParts){
-   const key=await this.accountKey();if(!key)throw Error('missing_key_version');
-   try{const out=await this.codec.openRestoreParts(key,await Promise.all(m.parts.map(async(id,i)=>({path:await this.cache.restoreProjectionPath(this.session.userId,id),scope:this.root+':'+id,bytes:m.lengths[i]}))),m.length);await this.current();this.metric('checkpoint-read',out.length,at,true);return out;}
-   catch(error){await this.current();const match=/sealed_part_invalid_([0-9]+)/.exec(String(error));if(!match)throw error;const i=Number(match[1]);if(i<m.parts.length)await this.forgetProjection(m.parts[i]);return;}
+  if(m.length>256*1024&&this.codec.batchedRestoreParts){
+   try{const out=await this.openParts(m);await this.current();this.metric('checkpoint-read',out.length,at,true);return out;}
+   catch(error){if(!/sealed_part_invalid_[0-9]+/.test(String(error)))throw error;return;}
   }
   const out=new Uint8Array(m.length);let offset=0;
   for(let i=0;i<m.parts.length;i++){await this.current();const b=await this.readBlob(m.parts[i]);if(!b||b.length!==m.lengths[i]){await this.forgetProjection(m.parts[i]);return;}out.set(b,offset);offset+=b.length;}this.metric('checkpoint-read',out.length,at,true);return out;
  }
  async link(token:string,children:string[],length:number):Promise<void>{return this.readBatch(()=>this.linkParts(token,children,length));}
- private async linkParts(token:string,children:string[],length:number){const parts:string[]=[],lengths:number[]=[];for(const child of children){await this.current();const m=await this.index(child);if(!m)throw Error('cloud_snapshot_projection_missing');parts.push(...m.parts);lengths.push(...m.lengths);}if(lengths.reduce((n,x)=>n+x,0)!==length||parts.length>2048)throw Error('cloud_snapshot_checkpoint_invalid');await this.writeBlob(token,utf8Encode(cpuJsonStringify({length,parts,lengths})));await this.commit('decoded:'+token,length);}
+ private async linkedIndex(children:string[],length:number):Promise<ProjectionIndex>{
+  const parts:string[]=[],lengths:number[]=[];
+  for(const child of children){await this.current();const m=await this.index(child);if(!m||m.provisional&&!this.has('decoded:'+child))throw Error('cloud_snapshot_projection_missing');parts.push(...m.parts);lengths.push(...m.lengths);}
+  if(!Number.isSafeInteger(length)||length<0||length>256*1024*1024||lengths.reduce((n,x)=>n+x,0)!==length||parts.length>2048)throw Error('cloud_snapshot_checkpoint_invalid');return {length,parts,lengths};
+ }
+ private async linkParts(token:string,children:string[],length:number){const index=await this.linkedIndex(children,length);await this.writeBlob(token,utf8Encode(cpuJsonStringify(index)));await this.commit('decoded:'+token,length);}
+ /** Reuse source receipts before opening the completed object on the host.
+  * Verify the content hash before publishing the object's decoded receipt. */
+ async assemble(token:string,children:string[],length:number,contentHash?:string,materialize=true):Promise<Uint8Array>{return this.readBatch(async()=>{
+  const index=await this.linkedIndex(children,length);
+  const bytes=materialize||contentHash?await this.openParts(index):new Uint8Array();
+  if(contentHash&&await this.hash(bytes)!==contentHash)throw Error('cloud_snapshot_projection_integrity');
+  await this.writeBlob(token,utf8Encode(cpuJsonStringify(index)));await this.commit('decoded:'+token,length);return bytes;
+ });}
+ private async openParts(index:ProjectionIndex):Promise<Uint8Array>{
+  const key=await this.accountKey();if(!key)throw Error('missing_key_version');
+  // The host bounds one open to 64 MiB. Large objects use the same native path
+  // in bounded groups instead of one guest decrypt per small source piece.
+  let output:Uint8Array|undefined,at=0;
+  for(let first=0;first<index.parts.length;){let end=first,bytes=0;while(end<index.parts.length&&bytes+index.lengths[end]<=64*1024*1024){bytes+=index.lengths[end++];}
+   if(end===first)throw Error('cloud_snapshot_checkpoint_invalid');await this.current();
+   try{const part=await this.codec.openRestoreParts(key,await Promise.all(index.parts.slice(first,end).map(async(id,i)=>({path:await this.cache.restoreProjectionPath(this.session.userId,id),scope:this.root+':'+id,bytes:index.lengths[first+i]}))),bytes);if(part.length!==bytes)throw Error('cloud_snapshot_projection_missing');if(first===0&&end===index.parts.length)return part;(output??=new Uint8Array(index.length)).set(part,at);at+=part.length;}
+   catch(error){await this.current();const match=/sealed_part_invalid_([0-9]+)/.exec(String(error));if(match){const i=first+Number(match[1]);if(i<end)await this.forgetProjection(index.parts[i]);}throw error;}
+   first=end;
+  }
+  if(at!==index.length||!output)throw Error('cloud_snapshot_projection_missing');return output;
+ }
+
  async invalidate(unit:string){delete this.value.units[unit];const i=this.shard(unit);delete this.shards[i].units[unit];await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[i]}),i);}
  async range(token:string,offset:number,length:number,index?:ProjectionIndex):Promise<Uint8Array>{return this.readBatch(()=>this.readRange(token,offset,length,index));}
  private async readRange(token:string,offset:number,length:number,index?:ProjectionIndex){await this.current();const m=index??await this.index(token);if(!m||m.provisional&&!this.has('decoded:'+token)||!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>m.length)throw Error('cloud_snapshot_projection_missing');const out=new Uint8Array(length);let start=0,at=0;
