@@ -13,7 +13,7 @@ export class DouyinPlaybackQueue {
   private hasMore:boolean;
   private generation=0;
   private previewGeneration=0;
-  private previewRevisions={next:[0,0],previous:[0,0]};
+  private previewRevisions={next:[0,0,0,0,0],previous:[0,0,0,0,0]};
   private quarantined=new Set<string>();
   private persistence:Promise<void>=Promise.resolve();
   private pageRequest?:Promise<DouyinResult<null>>;
@@ -60,9 +60,15 @@ export class DouyinPlaybackQueue {
   }
   async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
-  async preview(direction:"next"|"previous",distance:1|2=1):Promise<DouyinResult<DouyinPlaybackQueueState>>{
+  async preview(direction:"next"|"previous",distance:1|2|3|4|5=1):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const epoch=this.previewGeneration,op=++this.previewRevisions[direction][distance-1],nav=this.generation;
     const current=()=>epoch===this.previewGeneration&&op===this.previewRevisions[direction][distance-1]&&nav===this.generation;
+    if(distance>2){
+      const target=this.index+(direction==='next'?distance:-distance);
+      if(target<0||target>=this.items.length)return {ok:false,code:'UNSUPPORTED',message:'没有邻域视频'};
+      // Far speculation never fetches another feed page or an item detail.
+      return this.resolvePreviewAt(target,current);
+    }
     if(distance===2){
       const anchor=this.items[this.index]?.awemeId;
       if(direction==='next'&&this.index+2>=this.items.length&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}

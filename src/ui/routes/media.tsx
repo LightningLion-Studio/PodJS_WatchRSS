@@ -72,7 +72,7 @@ interface MediaRoutesProps {
     entry: RouteEntry,
     direction: "next" | "previous",
   ) => Promise<void>;
-  prepareDouyinAdjacent:(entry:RouteEntry,direction:"next"|"previous",distance?:1|2)=>Promise<DouyinPreparedSource|undefined>;
+  prepareDouyinAdjacent:(entry:RouteEntry,direction:"next"|"previous",distance?:1|2|3|4|5)=>Promise<DouyinPreparedSource|undefined>;
   selectDouyinTarget:(entry:RouteEntry,direction:"next"|"previous",distance:1|2,prepared?:DouyinPreparedSource)=>void;
   promoteDouyinAdjacent:(entry:RouteEntry,prepared:DouyinPreparedSource)=>Promise<boolean>;
   openHttpExport: (mode: HttpExportMode) => void;

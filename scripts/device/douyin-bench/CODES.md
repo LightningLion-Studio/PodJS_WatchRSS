@@ -205,6 +205,7 @@ Native and collector independently reject unknown enum values and out-of-range n
 `PlaybackException.errorCode`. `codec_kind`, dimensions, `content_kind`, `source_kind`,
 `surface_state`, `slot_limit`, `decoder_count` and `is_prewarm` describe the failing operation.
 `slot_limit` in session failures is the last evaluated memory admission limit.
+`slot_limit` and `decoder_count` are bounded to 0..8 for the capability-driven neighbourhood pool.
 `source_kind=cache` records only the URI scheme category, never the URL or cache key.
 `content_kind=unknown` is missing header evidence, not proof of an unsupported format.
 A failed foreground session retains its original terminal error for state polling while

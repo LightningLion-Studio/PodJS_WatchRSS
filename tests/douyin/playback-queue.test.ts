@@ -101,3 +101,13 @@ test('DYHIT refill starts at eight remaining items and coalesces while navigatio
  expect(q.snapshot().item?.awemeId).toBe('10');expect(q.snapshot().playlist).toHaveLength(32);expect(q.snapshot().cursor).toBe('c1');
  await q.fillAhead();expect(requests).toBe(1);
 });
+
+test('DYFRAME next five and previous two previews never move the anchor or fetch detail',async()=>{
+ const calls:{id:string;allowDetail?:boolean}[]=[];let pages=0;
+ const client={resolvePlayback:async(id:string,options:any)=>{calls.push({id,allowDetail:options.allowDetail});return {ok:true,data:item(id)};},fetchFeedPage:async()=>{pages++;throw Error('far speculation must not fetch a page');}} as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:Array.from({length:8},(_,i)=>item(String(i))),selectedAwemeId:'2',hasMore:true});
+ for(const distance of [1,2,3,4,5] as const)expect(await q.preview('next',distance)).toMatchObject({ok:true,data:{item:{awemeId:String(2+distance)}}});
+ for(const distance of [1,2] as const)expect(await q.preview('previous',distance)).toMatchObject({ok:true,data:{item:{awemeId:String(2-distance)}}});
+ expect(q.snapshot().item?.awemeId).toBe('2');expect(calls).toHaveLength(7);expect(calls.every(c=>c.allowDetail===false)).toBe(true);expect(pages).toBe(0);
+ q.commitPreview('7');expect(await q.preview('next',5)).toMatchObject({ok:false,code:'UNSUPPORTED'});expect(pages).toBe(0);
+});

@@ -542,7 +542,7 @@ export function createMediaRouteController(
   const prepareDouyinAdjacent = async (
     entry:RouteEntry,
     direction:"next"|"previous",
-    distance:1|2=1,
+    distance:1|2|3|4|5=1,
   ):Promise<DouyinPreparedSource|undefined> => {
     if(!entry.queue||dependencies.current()!==entry)return;
     const result=await entry.queue.preview(direction,distance);

@@ -697,3 +697,22 @@ test('DYHIT release adopts an already decoded slot while neighbour resolution re
  const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-116});g.onPanEnd({vy:-500});await flush();
  expect(decodedSelection?.key).toBe('b');expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(1);
 });
+
+test('DYFRAME decoded-cache receipt uncovers the selected video before its live decoder is ready',async()=>{
+ initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,sourceGeneration:71};heldPrepare=new Promise(()=>{});
+ let presented=0;
+ createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/cached',title:'cached'},width:233,height:233,active:true,offset:0,round:true,onFirstFrame:()=>presented++});});
+ await flush();expect(presented).toBe(0);
+ for(const listener of frameEvents)listener({...current,hasCachedFirstFrame:true,presented:true});
+ await flush();expect(presented).toBe(1);expect(current.hasRenderedFirstFrame).toBe(false);
+});
+
+
+test('DYFRAME cached frame keeps the live decoder recovery deadline active',async()=>{
+ heldPrepare=new Promise(()=>{});
+ mount('available','https://fixture/cached',true,'douyin',Date.now()+1000);await flush();
+ for(const listener of frameEvents)listener({...current,hasCachedFirstFrame:true,presented:true});
+ await flush();const before=legacyStops;
+ for(const tick of [...ticks])tick();await flush();
+ expect(legacyStops).toBeGreaterThan(before);expect(plays).toBe(0);
+});

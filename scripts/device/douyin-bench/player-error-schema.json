@@ -109,7 +109,7 @@
     "media3_code": 1000000,
     "video_width": 16384,
     "video_height": 16384,
-    "decoder_count": 3,
-    "slot_limit": 3
+    "decoder_count": 8,
+    "slot_limit": 8
   }
 }
