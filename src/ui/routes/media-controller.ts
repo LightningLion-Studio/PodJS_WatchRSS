@@ -1,3 +1,4 @@
+import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
 import {douyinPlaybackFailure} from '../../douyin/errors.ts';
 import {douyinBench} from '../../douyin/bench.ts';
 import {playbackFailure} from '../../media/playback-failure.ts';
@@ -26,7 +27,7 @@ import { managedCache } from "../../cache/host.ts";
 import { resolveUrl } from "../../core/parser.ts";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_QR_WAIT } from "../douyin/login-state.ts";
-import { biliClient, biliPreviewCache, douyinClient, douyinPreload } from "../../media-services.ts";
+import { biliClient, biliPreviewCache, douyinClient, douyinPreload, douyinStock } from "../../media-services.ts";
 import { resolveBiliPlaybackWithPreview, createBiliPlaybackRetry } from "../../playback.ts";
 import { biliVideoTarget, douyinVideoTarget } from "../../reader/media.ts";
 import type { SettingsState } from "../../settings/index.ts";
@@ -68,6 +69,8 @@ export function createMediaRouteController(
   );
 
   if(videoOptEnabled('recovery')||videoOptEnabled('adaptive'))onCleanup(hostServices.onNetworkChange(invalidateVideoNetwork));
+
+  bindDouyinStockIdle(douyinStock,()=>dependencies.current().page==='home'&&!dependencies.busy()&&dependencies.motion.phase==='idle'&&dependencies.channels().some(c=>c.url==='builtin:douyin'));
 
   const playbackPreferences = () => ({
     digitalCrownVolume: dependencies.settings().mediaVolumeControl,
@@ -330,6 +333,7 @@ export function createMediaRouteController(
         detailPlayback: request.detailPlayback,
         awemeId: request.item.awemeId,
         posterUrl: request.item.coverUrl,
+        previewFrame: await douyinPreload.previewFrame(request.item),
         url: await douyinPreload.lookup(request.item.awemeId) ?? await douyinPlaybackUrl(request.playback,headers),
         ...douyinDecoderProfile(request.playback),
         title: request.item.description,
@@ -672,6 +676,7 @@ export function createMediaRouteController(
       await queue.settled();
     }).catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
     const state=entry.queue.snapshot();
+    if(state.item)douyinStock.consume(state.item.awemeId);
     if(entry.playback?.immersive)douyinPreload.start(entry,state.playlist,state.item?.awemeId,'active',{
       isForeground:id=>dependencies.current()===entry&&entry.queue?.snapshot().item?.awemeId===id,
       async sourceRefreshed(id,previousUri,item,uri,headers){

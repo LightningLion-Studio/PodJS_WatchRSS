@@ -1,8 +1,10 @@
+export interface RequestLifetime {isCurrent():boolean;onCancel(listener:()=>void):()=>void;}
 import {encodeUtf8} from '@podjs/framework/bytes';
 import type {CloudContentState} from './content-lifecycle';
 import {decodeUtf8} from '../core/utf8-decode.ts';
 
 export interface HttpRequest {
+  background?:RequestLifetime;
   method: string;
   url: string;
   headers: Record<string, string>;

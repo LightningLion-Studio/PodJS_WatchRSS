@@ -52,3 +52,12 @@ test('DYERR foreground resolution preserves the code and cooldown without regist
  await expect(host.playback(items[0] as any,{})).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE',retryAfterMs:45000});
  expect(registrations).toHaveLength(before);
 });
+
+test('persistent stock enters the title window and playback without detail or prefix downloads',async()=>{
+ windows=[];registrations=[];let resolutions=0;
+ const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async()=>{resolutions++;throw Error('network forbidden before first frame');}};
+ const stock={lookup:async(id:string)=>`podjs-media-cache://play/stock-${id}.mp4`};
+ const host=createHostDouyinPreload(client as any,stock as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'a','entry');await flush();
+ expect(resolutions).toBe(0);expect(registrations).toHaveLength(0);expect(windows.at(-1).items.every((i:any)=>i.prefetchBytes===0)).toBe(true);
+ expect(await host.playback(items[0] as any,{})).toBe('podjs-media-cache://play/stock-a.mp4');expect(resolutions).toBe(0);host.stop(owner);
+});

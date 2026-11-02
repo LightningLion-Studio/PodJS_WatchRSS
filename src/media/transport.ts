@@ -7,7 +7,7 @@ import {videoOptEnabled} from './video-opt.ts';
 import {videoResponseBudget} from './traffic-policy.ts';
 
 export interface MediaTransportPorts {
-  download(args:Record<string,unknown>):Promise<DownloadResult>;
+  download(args:Record<string,unknown>,background?:import('../cloud/types.ts').RequestLifetime):Promise<DownloadResult>;
   read(path:string,offset:number):Promise<Uint8Array>;
   remove(path:string):Promise<unknown>;
   base64(bytes:Uint8Array):string;
@@ -21,8 +21,9 @@ export function createMediaTransport(ports:MediaTransportPorts):HttpTransport {
     appLogger.d('Network',`${request.method} media request`);
     const path=`media-json/request-${Date.now()}-${++sequence}.json`;
     return withOwnedPrivateFile(path,path=>ports.remove(path),async path=>{
+      if(request.background&&!request.background.isCurrent())throw Error("cancelled");
       const response=await ports.download({url:request.url,path,method:request.method,bodyBase64:request.body?ports.base64(request.body):undefined,headers:request.headers,maxBytes:videoResponseBudget(request.url,videoOptEnabled('traffic')),
-        timeoutMs:request.timeoutMs??30000,...(request.readTimeoutMs===undefined?{}:{readTimeoutMs:request.readTimeoutMs}),...(request.acceptHttpErrors===undefined?{}:{acceptHttpErrors:request.acceptHttpErrors})});
+        timeoutMs:request.timeoutMs??30000,...(request.readTimeoutMs===undefined?{}:{readTimeoutMs:request.readTimeoutMs}),...(request.acceptHttpErrors===undefined?{}:{acceptHttpErrors:request.acceptHttpErrors})},request.background);
       const bytes=await readDownloadedBytes(path,response.size,(path,offset)=>ports.read(path,offset),()=>Error('服务器响应下载不完整'));
       appLogger.i('Network',`media response status=${response.status} bytes=${response.size}`);
       return {status:response.status,headers:response.headers,body:bytes};

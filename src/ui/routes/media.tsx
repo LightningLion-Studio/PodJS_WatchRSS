@@ -8,6 +8,7 @@ import {
   biliClient,
   douyinClient,
   douyinPreload,
+  douyinStock,
   loadLocalBiliDetail,
 } from "../../media-services.ts";
 import { BiliScreen, type BiliRoute } from "../bili/index.tsx";
@@ -151,6 +152,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
           height={props.height}
           route={props.entry.douyinRoute ?? { name: "entry" }}
           client={douyinClient}
+          restoreStock={()=>douyinStock.restore()}
           onPreloadWindow={(owner,items,anchor)=>douyinPreload.start(owner,items,anchor??undefined,'entry')}
           onPreloadStop={owner=>douyinPreload.stop(owner)}
           settings={{

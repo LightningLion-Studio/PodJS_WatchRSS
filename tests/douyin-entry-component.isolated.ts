@@ -39,7 +39,7 @@ async function requestReady(f:{requests:unknown[]},count=1){const end=Date.now()
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
-function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean}={}){
+function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean;stock?:boolean}={}){
   let now=1_000_000;
   const data=new Map<string,string>();if(options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
   const items=Array.from({length:options.cacheCount??0},(_,i)=>({awemeId:String(i+1),description:'cached',playUrl:`https://old.test/${i+1}`,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}));
@@ -49,7 +49,7 @@ function mount(options:{cacheCount?:number;hasMore?:boolean;cursor?:string|null;
   const client=new DouyinClient({auth403:options.auth403,secureStorage:{get:async k=>{await options.secureGate;return data.get(k)??null;},set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
   if(options.logoutBeforeMount)void client.logout();
   const [active,setActive]=createSignal(true);let dispose!:()=>void;
-  const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
+  const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,restoreStock:options.stock?async()=>items:undefined,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
   const entryGesture=gesture;
   return {data,client,requests,plays,routes,dispose,setActive,advance:(ms:number)=>{now+=ms;},
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
@@ -251,4 +251,10 @@ test('DYERR temporary failures without a cooldown hint back off from thirty to s
   const timer=[...retryTimers].reverse().find(t=>!t.cancelled&&t.ms===ms)!;expect(timer).toBeDefined();
   timer.fire();await settle();expect(f.plays).toHaveLength(index+2);
  }
+});
+
+
+test('persisted ready stock enters with zero feed or detail requests',async()=>{
+ const f=mount({cacheCount:3,stock:true});await settled(f);expect(f.requests).toHaveLength(0);f.press();await settle();
+ expect(f.plays[0].item.awemeId).toBe('1');expect(f.plays[0].playlist).toHaveLength(3);expect(f.requests).toHaveLength(0);
 });

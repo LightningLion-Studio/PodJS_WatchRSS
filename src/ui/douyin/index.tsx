@@ -80,6 +80,7 @@ export interface DouyinScreenProps {
   onNavigate: (route: DouyinRoute) => void;
   onBack: () => void;
   onPlay: (request: DouyinPlayRequest) => void;
+  restoreStock?:()=>Promise<DouyinItem[]>;
   onPreloadWindow?:(owner:unknown,items:DouyinItem[],anchor:string|null)=>void;
   onPreloadStop?:(owner:unknown)=>void;
   onPlaybackCommand?: (command: DouyinPlaybackCommand) => void;

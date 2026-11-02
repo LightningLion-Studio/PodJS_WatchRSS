@@ -20,7 +20,7 @@ export interface DouyinPrefetchHooks {
  quarantine(id:string,failure:PrefetchFailure):boolean|Promise<boolean>;
 }
 /** Business window/consent only. Range transport, storage bounds and cancellation live in PodJS. */
-export function createHostDouyinPreload(client:DouyinClient) {
+export function createHostDouyinPreload(client:DouyinClient,stock?:import('./stock.ts').DouyinStock) {
  let owner:unknown,plan:{items:readonly DouyinItem[];anchor?:string;mode:'active'|'entry';hooks?:DouyinPrefetchHooks}|undefined;
  let generation=0,lastAllowed:boolean|undefined,unsubscribe:(()=>void)|undefined,networkGeneration=0;
  let saved:PrefetchFailure[]=[];try{const value=kv.get<unknown>('watchrss.douyin.prefetch-failures');if(Array.isArray(value))saved=value;}catch{}
@@ -55,12 +55,13 @@ export function createHostDouyinPreload(client:DouyinClient) {
    if(own!==generation)return;const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
    // Backward entries register existing sources only. They never request detail.
    const backward=mode==='active'&&plan!.items.findIndex(value=>value.awemeId===item.awemeId)<center;
-   const result=backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true});if(own!==generation)return;
+   const stocked=await stock?.lookup(item.awemeId);if(own!==generation)return;
+   const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true});if(own!==generation)return;
    if(!result.ok){appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
-   const uri=await register(result.data,headers);if(own!==generation)return;if(!uri)continue;
+   const uri=stocked??await register(result.data,headers);if(own!==generation)return;if(!uri)continue;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;
    const itemToken=`p${++token}`;results.bind({id:item.awemeId,itemToken,generation:own,uri,url:result.data.playUrl});
-   prepared.push({uri,itemToken,generation:own,prefetchBytes:backward?0:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs)});
+   prepared.push({uri,itemToken,generation:own,prefetchBytes:stocked||backward?0:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs)});
    if(own!==generation)return;
    // Publish progressively; do not wait for a slow old detail request to warm current+next.
    await mediaPrefixCache.window(prepared,foregroundBitrate).result;
@@ -91,15 +92,16 @@ export function createHostDouyinPreload(client:DouyinClient) {
   void mediaPrefixCache.window([]).result.catch(()=>{});
  };
  const networkChanged=()=>{const op=++networkGeneration;void allowed().then(value=>{if(op!==networkGeneration||!plan||value===lastAllowed)return;void run(++generation).catch(()=>appLogger.w('DouyinProxy','window failed'));}).catch(()=>{});};
- managedCache.registerProducer('douyin-preload',{pins:()=>new Set<string>(),async clear(){if(migrating)return;stop();await mediaPrefixCache.clear().result;await video.clearFrames?.();kv.delete?.('watchrss.douyin.prefetch-failures');}});
+ managedCache.registerProducer('douyin-preload',{pins:()=>new Set<string>(),async clear(){if(migrating)return;stop();await mediaPrefixCache.clear().result;await video.clearFrames?.();kv.delete?.('watchrss.douyin.prefetch-failures');stock?.clear();}});
  return {
   // A proxy is not a complete local file; queue resolution must continue enforcing URL TTL.
   capabilities:()=>({coverCache:true,actualFrame:true,prefixBytes:true,completeVideo:false}),
   async restoreFrame(item:DouyinItem,headers:Record<string,string>){return video.restoreFrame(`douyin:${item.awemeId}`,{url:preserveSelectedDouyinItem(item).playUrl,headers});},
+  async previewFrame(item:DouyinItem){const uri=await stock?.lookup(item.awemeId);if(!uri)return undefined;const frame=await video.restoreFrame(`douyin:${item.awemeId}`,{url:uri});return frame.available?{entryId:item.awemeId,frame}:undefined;},
   failures:()=>results.snapshot(),
   sourceFor:(uri:string)=>sources.get(uri),
-  lookup:async(_id:string):Promise<string|undefined>=>undefined,
-  async playback(item:DouyinItem,headers:Record<string,string>){await cleanupOldFiles();const resolved=await client.resolvePlayback(item.awemeId);if(!resolved.ok){appLogger.i('DouyinProxy',`foreground resolve failed category=${resolved.code}`);throw Object.assign(new Error(resolved.message),{code:resolved.code,retryAfterMs:resolved.retryAfterMs});}traceDouyinVariants(resolved.data,'foreground',resolved.source==='feed-cache'?'feed-cache':'network');try{return await register(resolved.data,headers)??resolved.data.playUrl;}catch{appLogger.w('DouyinProxy','registration failed; using network');return remember(resolved.data.playUrl,resolved.data);}},
+  lookup:async(id:string):Promise<string|undefined>=>stock?.lookup(id),
+  async playback(item:DouyinItem,headers:Record<string,string>){const local=await stock?.lookup(item.awemeId);if(local)return remember(local,item);await cleanupOldFiles();const resolved=await client.resolvePlayback(item.awemeId);if(!resolved.ok){appLogger.i('DouyinProxy',`foreground resolve failed category=${resolved.code}`);throw Object.assign(new Error(resolved.message),{code:resolved.code,retryAfterMs:resolved.retryAfterMs});}traceDouyinVariants(resolved.data,'foreground',resolved.source==='feed-cache'?'feed-cache':'network');try{return await register(resolved.data,headers)??resolved.data.playUrl;}catch{appLogger.w('DouyinProxy','registration failed; using network');return remember(resolved.data.playUrl,resolved.data);}},
   async invalidate(_id:string){sources.clear();await mediaPrefixCache.clear().result;},stop,stats,
   allowBluetooth(value:boolean,expected:unknown){if(bluetoothOwners.has(expected)===value)return;if(value)bluetoothOwners.add(expected);else bluetoothOwners.delete(expected);if(expected===owner)networkChanged();},
   start(next:unknown,items:readonly DouyinItem[],anchor:string|undefined,mode:'active'|'entry',hooks?:DouyinPrefetchHooks){

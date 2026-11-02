@@ -137,7 +137,7 @@ export class DouyinClient {
   }
   logout(){return this.clearCookie(undefined,this.options.onLogout);}
   async buildPlaybackHeaders():Promise<Record<string,string>>{const cookie=await this.readCookie(),profile=douyinRequestProfile(await resolveDouyinRequestConfig(this.options.requestConfig));return {...profile.headers,...(cookie?{Cookie:cookie}:{})};}
-  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig):Promise<DouyinResult<string>> {
+  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime):Promise<DouyinResult<string>> {
     await this.cookieWrites.catch(()=>{});
     const generation=this.authGeneration,cookie=await this.readCookie();
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
@@ -148,6 +148,7 @@ export class DouyinClient {
     if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}}
     const policyVersion=policy.snapshotVersion(api);
     const attempt=async():Promise<DouyinResult<string>|{forbidden:true}>=>{
+      if(background&&!background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));
       const observed:Parameters<typeof douyinRequestDiagnostic>[0]={category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:0,error_code:'cancelled'};
       try {
       if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
@@ -165,7 +166,7 @@ export class DouyinClient {
       try{
         if(api==='detail')appLogger.i('DouyinDetail',JSON.stringify({event:'request',api:'detail',count:1,mode:'abogus_only'}));
         const r=await this.options.transport.request({method,url,headers:{...profile.headers,Cookie:cookie,Accept:'application/json',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}:{})},
-          timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
+          background,timeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,readTimeoutMs:DOUYIN_NETWORK_TIMEOUT_MS,acceptHttpErrors:true,...(method==='POST'?{body:new Uint8Array(0)}:{})});
         observed.http_status=r.status;observed.retry_after_ms=douyinRetryAfter(r.headers);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
@@ -201,6 +202,7 @@ export class DouyinClient {
       } finally {douyinRequestDiagnostic(observed);}
     };
     const first=await attempt();if(!('forbidden' in first))return first;
+    if(background)return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));
     if(!this.recoveryEnabled())return this.authDecision(policy,cookie,generation,api);
     const key=JSON.stringify([generation,method,path,params]),existing=this.forbiddenRequests.get(key);if(existing)return existing;
     if(this.forbiddenRequests.size>=4)return {...fail<string>('TEMPORARILY_UNAVAILABLE',formatDouyinError('TEMPORARILY_UNAVAILABLE')),retryAfterMs:1500};
@@ -230,12 +232,13 @@ export class DouyinClient {
     if(this.now()>=douyinMediaExpiry(cached.item.playUrl,cached.resolvedAtMillis)){this.feedCache.delete(awemeId);return null;}
     this.feedCache.delete(awemeId);this.feedCache.set(awemeId,cached);return cached.item;
   }
-  async fetchFeedPage(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>>{
+  async fetchFeedPage(input:{cursor?:string|null;count?:number;background?:import('../cloud/types.ts').RequestLifetime}={}):Promise<DouyinResult<DouyinFeedPage>>{
+    if(input.background)return this.fetchFeedPageInner(input);
     const key=JSON.stringify([this.authGeneration,input.cursor?.trim()||null,input.count??10]);
     let pending=this.feedRequests.get(key);if(!pending){pending=this.fetchFeedPageInner(input);this.feedRequests.set(key,pending);}
     try{return await pending;}finally{if(this.feedRequests.get(key)===pending)this.feedRequests.delete(key);}
   }
-  private async fetchFeedPageInner(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>> {
+  private async fetchFeedPageInner(input:{cursor?:string|null;count?:number;background?:import('../cloud/types.ts').RequestLifetime}={}):Promise<DouyinResult<DouyinFeedPage>> {
     const generation=this.authGeneration;
     const cookie=await this.readCookie(),config=await resolveDouyinRequestConfig(this.options.requestConfig);
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
@@ -249,12 +252,12 @@ export class DouyinClient {
       if(cursor){params.cursor=cursor;params.max_cursor=cursor;}
     }
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
-    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config);if(!r.ok)return r;
+    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config,input.background);if(input.background&&!input.background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));if(!r.ok)return r;
     try{
       const parsed=await parseDouyinFeedAsync(r.data),resolvedAtMillis=this.now();
       if(web)parsed.nextCursor=web.nextCursor(parsed);
       return await this.enqueueCookie(async():Promise<DouyinResult<DouyinFeedPage>>=>{
-        if(!cookie||!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
+        if(input.background&&!input.background.isCurrent()||!cookie||!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         const previous=await readDouyinSeenIds(storage,key);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         const filtered=filterDouyinRecommendations(parsed.items,previous);

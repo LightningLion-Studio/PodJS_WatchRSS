@@ -55,6 +55,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     void deadline.result.then(()=>{if(current()){generation++;setBusy(false);setError(formatDouyinError('REQUEST_FAILED'));finishRefresh(true);const revision=generation;scheduleRetry({code:'REQUEST_FAILED'},()=>active()&&revision===generation);}},()=>{});
     try{
       if(!refresh){
+        const stock=await props.restoreStock?.()??[];if(!current())return;
+        if(stock.length){setItems(stock);anchor=stock[0].awemeId;cursor=null;hasMore=true;return;}
         let queueReady=false;
         const restore=(kind:'feed'|'queue')=>traceServiceWork(kind==='queue'?'douyin.entry.restoreQueue':'douyin.entry.restoreFeed',()=>kind==='queue'?props.client.restorePlaybackQueue():props.client.restoreFeed()).then(value=>{
           if(current()&&value.items.length&&(kind==='queue'||!queueReady)){

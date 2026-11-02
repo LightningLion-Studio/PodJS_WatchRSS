@@ -1,7 +1,9 @@
+import {backgroundResult} from './media/background-work.ts';
 import {readDouyinRequestConfig} from './douyin/request-config.ts';
 import {createDouyinLoginProbe} from './douyin/login-probe.ts';
 import {readDouyin403Enabled} from './douyin/auth403.ts';
 import {DouyinSqlStateStorage} from './douyin/state-storage.ts';
+import {createHostDouyinStock} from './douyin/stock-host.ts';
 import {createHostDouyinPreload} from './douyin/preload-host.ts';
 import {createHostBiliPreview} from './bili/preview-host.ts';
 import {appLogger} from './logs/app-logger.ts';
@@ -18,7 +20,10 @@ import { hasCapability, kv } from "@podjs/framework/watch";
 import {readWatchConfig,WATCH_COOLDOWN_KEY} from './bili/watch-api/config.ts';
 
 export const mediaTransport=createMediaTransport({
- download:args=>hostOperation<DownloadResult>('http.download',args).result,
+ download:(args,background)=>{
+  const op=hostOperation<DownloadResult>('http.download',{...args,...(background?{background:true}:{})});
+  return backgroundResult(op,background);
+ },
  read:async(path,offset)=>base64ToBytes((await fileChunks.read(path,offset)).dataBase64),
  remove:path=>fileChunks.remove(path),
  base64:bytesToBase64,
@@ -41,7 +46,8 @@ export const douyinClient=new DouyinClient({
  historyStorage:new DouyinSqlStateStorage(async()=>(await getExternalSavedStore()).db,{get:async key=>kv.get<string>(key)??null,set:async()=>{throw Error("Legacy Douyin data is read-only");},remove:async key=>{kv.delete(key);}})
 });
 
-export const douyinPreload=createHostDouyinPreload(douyinClient);
+export const douyinStock=createHostDouyinStock(douyinClient);
+export const douyinPreload=createHostDouyinPreload(douyinClient,douyinStock);
 
 export async function loadLocalBiliDetail(target: import('./bili/detail.ts').DetailTarget) {
  return readLocalBiliDetail((await getExternalSavedStore()).db, target);

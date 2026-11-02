@@ -1,0 +1,80 @@
+import type {NetworkSnapshot} from '@podjs/framework/services';
+import type {DouyinItem} from './types.ts';
+import {douyinMediaExpiry} from './media-expiry.ts';
+
+export function stockNetworkAllowed(network:NetworkSnapshot,trafficSaving:boolean,wifiOnly=true):boolean {
+ return !trafficSaving&&network.active&&network.internet&&network.validated&&network.metered===false&&(!wifiOnly||network.wifi);
+}
+export const DOUYIN_STOCK_KEY='watchrss.douyin.stock.v1';
+export const STOCK_COUNT=3,STOCK_ENTRY_BYTES=4*1024*1024;
+export function stockPreviewBytes(item:DouyinItem):number {
+ const bitrate=item.variants.find(v=>v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl))?.bitrate??0;
+ const seconds=Math.min(30,Math.max(1,item.durationMs/1000||30));
+ return Math.min(STOCK_ENTRY_BYTES,Math.max(512*1024,Math.ceil((bitrate>0?bitrate*seconds/8:2*1024*1024)+512*1024)));
+}
+export interface StockEntry {item:DouyinItem;expiresAt:number;prefixBytes:number;tailBytes:number;}
+export interface StockPorts {
+ read():unknown;write(entries:StockEntry[]):void;
+ allowed():Promise<boolean>;watched():Promise<readonly string[]>;
+ feed():Promise<readonly DouyinItem[]>;
+ prepare(item:DouyinItem,bytes:number):Promise<{ready:boolean;prefixBytes:number;tailBytes:number}>;
+ lookup(entry:StockEntry):Promise<string|undefined>;
+ cancel():void;
+ now():number;
+}
+export function stockContentKey(item:DouyinItem):string {
+ const variant=item.variants.find(v=>v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl));
+ // Explicit rendition identity; signed URL and authorization never form the key.
+ return ['douyin-stock-v1',item.awemeId,variant?.codec??'unknown',variant?.width??0,variant?.height??0,variant?.bitrate??0,item.durationMs,...(!variant?[item.playUrl.split('?')[0]]:[])].join(':');
+}
+function validEntry(value:unknown):value is StockEntry {
+ const e=value as StockEntry;
+ return !!e&&Number.isFinite(e.expiresAt)&&Number.isSafeInteger(e.prefixBytes)&&e.prefixBytes>0&&Number.isSafeInteger(e.tailBytes)&&e.tailBytes>=0&&e.prefixBytes+e.tailBytes<=STOCK_ENTRY_BYTES&&typeof e.item?.awemeId==='string'&&!!e.item.awemeId&&typeof e.item?.playUrl==='string'&&/^https?:\/\//.test(e.item.playUrl)&&Number.isFinite(e.item.durationMs)&&Array.isArray(e.item.variants);
+}
+/** Only verified prefixes with a decoded local first frame become stock. */
+export class DouyinStock {
+ private entries:StockEntry[]=[];
+ private epoch=0;private running?:Promise<void>;private enabled=false;
+ private consumed=new Set<string>();
+ constructor(private ports:StockPorts){
+  const saved=ports.read();if(Array.isArray(saved))this.entries=saved.filter(validEntry).slice(0,STOCK_COUNT);
+ }
+ private save(){this.ports.write(this.entries);}
+ private fresh(entry:StockEntry){return !this.consumed.has(entry.item.awemeId)&&this.ports.now()<entry.expiresAt;}
+ async restore():Promise<DouyinItem[]> {
+  const watched=new Set(await this.ports.watched());
+  const original=this.entries;
+  const ready:StockEntry[]=[];
+  for(const entry of original){if(!this.fresh(entry)||watched.has(entry.item.awemeId))continue;try{if(await this.ports.lookup(entry))ready.push(entry);}catch{}}
+  // Merge with a concurrent completed refill; never overwrite newer state.
+  if(original===this.entries){this.entries=ready.filter(e=>this.fresh(e));this.save();}
+  return ready.filter(e=>this.fresh(e)).map(e=>e.item);
+ }
+ async lookup(id:string):Promise<string|undefined>{
+  const entry=this.entries.find(e=>e.item.awemeId===id&&this.fresh(e));
+  if(!entry)return undefined;
+  try{const uri=await this.ports.lookup(entry);return this.fresh(entry)?uri:undefined;}catch{return undefined;}
+ }
+ consume(id:string){this.consumed.add(id);this.entries=this.entries.filter(e=>e.item.awemeId!==id);this.save();}
+ clear(){this.suspend();this.entries=[];this.consumed.clear();this.save();}
+ suspend(){this.enabled=false;this.epoch++;this.ports.cancel();}
+ resume():Promise<void>{this.enabled=true;if(this.running)return this.running.catch(()=>{}).then(()=>this.enabled?this.resume():undefined);const own=++this.epoch;const work=this.refill(own);this.running=work;return work.finally(()=>{if(this.running===work)this.running=undefined;});}
+ private async refill(own:number){
+  const current=()=>this.enabled&&own===this.epoch;
+  if(!await this.ports.allowed()||!current())return;
+  await this.restore();if(!current()||this.entries.length>=STOCK_COUNT)return;
+  const watched=new Set(await this.ports.watched());if(!current()||!await this.ports.allowed())return;
+  // Expired sources are replaced exclusively by a feed response. No detail fallback.
+  const candidates=await this.ports.feed();if(!current())return;
+  for(const item of candidates.slice(0,12)){
+   if(!current()||!await this.ports.allowed())return;
+   if(this.entries.length>=STOCK_COUNT)return;
+   if(watched.has(item.awemeId)||this.consumed.has(item.awemeId)||this.entries.some(e=>e.item.awemeId===item.awemeId)||!item.playUrl)continue;
+   const expiresAt=douyinMediaExpiry(item.playUrl,this.ports.now());if(expiresAt<=this.ports.now())continue;
+   const result=await this.ports.prepare(item,stockPreviewBytes(item));
+   if(!current()||!await this.ports.allowed())return;
+   if(!result.ready||this.consumed.has(item.awemeId))continue;
+   this.entries.push({item,expiresAt,prefixBytes:result.prefixBytes,tailBytes:result.tailBytes});this.save();
+  }
+ }
+}
