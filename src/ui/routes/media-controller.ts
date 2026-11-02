@@ -492,7 +492,7 @@ export function createMediaRouteController(
       }
       return;
     }
-    const headers = await douyinClient.buildPlaybackHeaders();
+    const headers = await adjacentHeaders(entry);
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
     if (
       dependencies.current() !== entry ||

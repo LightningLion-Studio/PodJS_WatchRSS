@@ -80,18 +80,21 @@ export class DouyinPlaybackQueue {
   private preservesItem(code:string){return ['NOT_LOGGED_IN','CANCELLED','REQUEST_FAILED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'].includes(code);}
   private async loadPage():Promise<DouyinResult<null>>{
     if(this.pageRequest)return this.pageRequest;
-    const anchor=this.items[this.index]?.awemeId,cursor=this.cursor;
+    const cursor=this.cursor;
     const work=(async():Promise<DouyinResult<null>>=>{
       // Repeated duplicate pages retry later, then refresh the feed, never mark it exhausted.
       const page=await this.client.fetchFeedPage({cursor:this.emptyPages>=2?null:cursor,count:12});
       if(!page.ok)return page;
-      if(anchor!==this.items[this.index]?.awemeId||cursor!==this.cursor)return cancelled();
-      this.cursor=page.data.nextCursor;this.hasMore=page.data.hasMore;
+      if(cursor!==this.cursor)return cancelled();
       const before=new Set(this.items.map(item=>item.awemeId));
       let merged=this.unique([...this.items,...page.data.items]).filter(item=>!this.quarantined.has(item.awemeId));
       const added=merged.some(item=>!before.has(item.awemeId));
       this.emptyPages=added?0:this.emptyPages+1;
       const overflow=Math.max(0,merged.length-this.limit);
+      // A navigation inside this queue does not invalidate its feed cursor.
+      // A reverse jump must still keep the selected item inside the bound.
+      if(overflow>this.index)return cancelled();
+      this.cursor=page.data.nextCursor;this.hasMore=page.data.hasMore;
       if(overflow){merged=merged.slice(overflow);this.index=Math.max(-1,this.index-overflow);}
       this.items=merged;
       if(!added&&this.hasMore){

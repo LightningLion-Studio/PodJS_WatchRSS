@@ -350,3 +350,22 @@ test('DYSWIPE3 neighbours reuse playing headers and coalesce a fresh read after 
  authorization++;
  const sources=await Promise.all([f.controller.prepareDouyinAdjacent(entry,'next'),f.controller.prepareDouyinAdjacent(entry,'previous')]);expect(reads).toBe(1);expect(sources.every(v=>v?.source.headers?.['X-Fixture']==='fresh')).toBe(true);
 });
+
+test('T1202 cold paging reuses the route headers while secure storage is busy',async()=>{
+ const f=fixture(),a=item('a'),b=item('b');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let reads=0;
+ client.buildPlaybackHeaders=()=>{reads++;return new Promise(()=>{});};
+ const result=await Promise.race([f.controller.changeDouyinVideo(entry,'next').then(()=>true),new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),100))]);
+ expect(result).toBe(true);expect(reads).toBe(0);expect(f.source().awemeId).toBe('b');
+});
+test('T1202 cold paging refreshes shared headers once when authorization changes',async()=>{
+ const f=fixture(),items=[item('a'),item('b'),item('c')];
+ f.controller.douyinPlay({item:items[0]!,playback:items[0]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let reads=0,authorization=0;
+ client.playbackAuthorizationVersion=()=>authorization;
+ client.buildPlaybackHeaders=async()=>{reads++;return {'X-Fixture':'changed'};};
+ await f.controller.changeDouyinVideo(entry,'next');expect(reads).toBe(0);
+ authorization++;
+ await f.controller.changeDouyinVideo(entry,'next');expect(reads).toBe(1);expect(f.source().headers['X-Fixture']).toBe('changed');
+});

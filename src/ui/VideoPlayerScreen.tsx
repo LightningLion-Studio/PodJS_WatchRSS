@@ -127,8 +127,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const bounds = () => ({ x: 0, y: top(), width: props.width, height: props.height, translateX: props.offset, translateY: dragOffsetY(), visible: props.active && !handoff(), roundClip: props.round ? { cx: props.width / 2, cy: screenHeight() / 2 - top(), radius: Math.min(props.width, screenHeight()) / 2 } : undefined });
   const media={
     prepare:(options:VideoPrepare)=>usingSessions()?sessionPool!.prepare(sessionSource(props.source),options):video.prepare(options),
-    retire:()=>usingSessions()?sessionPool!.retire():video.retire(),
-    play:()=>usingSessions()?sessionPool!.play():video.play(),pause:(action?:VideoBenchmarkAction)=>usingSessions()?sessionPool!.pause(action):video.pause(),
+    retire:(handoff=false)=>usingSessions()?sessionPool!.retire(handoff):video.retire(handoff),
+    play:()=>usingSessions()?sessionPool!.play():video.play(),pause:(action?:VideoBenchmarkAction,handoff=false)=>usingSessions()?sessionPool!.pause(action,handoff):video.pause(handoff),
     seek:(positionMs:number)=>usingSessions()?sessionPool!.seek(positionMs):video.seek(positionMs),
     stop:()=>usingSessions()?sessionPool!.stop():video.stop(),state:()=>usingSessions()?sessionPool!.state():video.state(),
     setBounds:(value:VideoBounds)=>usingSessions()?sessionPool!.setBounds(value):video.setBounds(value),
@@ -398,7 +398,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(replayed){pendingBenchmarkSource=props.source;pendingBenchmark=replayed.action;}
     else if(benchmarkSeq){pendingBenchmarkSource=props.source;pendingBenchmark={seq:benchmarkSeq,generation:wantsSettle?++benchmarkGeneration:benchmarkGeneration,source_generation:state()?.sourceGeneration??0,delta};benchmark.mark("gesture_release",benchmarkSeq,{direction:wantsSettle?(requestedDelta===2?'fling':direction==='up'?'next':'prev'):'cancel',delta:requestedDelta,prewarmed:requestedDelta===1&&!!(usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)),generation:pendingBenchmark.generation,source_generation:pendingBenchmark.source_generation});}
 
-    if(wantsSettle){const stoppedGeneration=generation;void media.pause(pendingBenchmark).catch(value=>{if(!disposed&&revision===dragRevision&&stoppedGeneration===generation&&videoSessionOwner===sessionOwner)failed(value);});}
+    if(wantsSettle){const stoppedGeneration=generation;void media.pause(pendingBenchmark,true).catch(value=>{if(!disposed&&revision===dragRevision&&stoppedGeneration===generation&&videoSessionOwner===sessionOwner)failed(value);});}
 
     if(wantsSettle&&douyinPagerDelta(progress,velocityY,direction)===2&&props.onPrepareAdjacent){
       // Resolve the two-item target without publishing the intermediate item.
@@ -454,7 +454,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         // resolution or persistence await. Its reply never gates the new page.
         const from=preparedSource;setHandoff(true);frameWait.reset();setSpinnerDue(false);
         generation++;autoplayAllowed=false;prepareOp?.cancel();pollTimer?.cancel();
-        void media.retire().catch(value=>{if(!disposed&&revision===dragRevision)failed(value);});
+        void media.retire(true).catch(value=>{if(!disposed&&revision===dragRevision)failed(value);});
         await (target&&props.onPromoteAdjacent?props.onPromoteAdjacent(target).then(ok=>{if(!ok)throw new Error("video queue promotion was cancelled");}):Promise.resolve(move!()));if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;clearDrag();if(preparedSource===from)setHandoff(false);
       }
     }catch(value){if(disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;if(!usingSessions()){

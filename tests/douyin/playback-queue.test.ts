@@ -50,3 +50,22 @@ for(const direction of ['next','previous'] as const)test(`DYFIX ${direction} two
  expect(preview).toMatchObject({ok:true,data:{item:{awemeId:target}}});expect(q.snapshot().item?.awemeId).toBe('2');
  expect(resolved).toEqual([target]);q.commitPreview(target);expect(q.snapshot().item?.awemeId).toBe(target);
 });
+
+test('T1202 a pending feed page survives promotion within the same queue',async()=>{
+ let finish!:(value:any)=>void,requests=0;
+ const client={resolvePlayback:async(id:string)=>({ok:true,data:item(id)}),fetchFeedPage:()=>{requests++;return new Promise(resolve=>finish=resolve);}}as unknown as DouyinClient;
+ const queue=new DouyinPlaybackQueue(client,{items:[item('a'),item('b'),item('c')],selectedAwemeId:'b',cursor:'cursor-0',hasMore:true});
+ const warming=queue.preview('next',2);await Promise.resolve();queue.commitPreview('c');
+ finish({ok:true,data:{items:[item('d'),item('e')],nextCursor:'cursor-1',hasMore:true}});expect(await warming).toMatchObject({ok:false,code:'CANCELLED'});
+ expect(queue.snapshot()).toMatchObject({item:{awemeId:'c'},cursor:'cursor-1'});
+ expect(await queue.preview('next')).toMatchObject({ok:true,data:{item:{awemeId:'d'}}});expect(requests).toBe(1);
+});
+test('T1202 a pending page cannot evict the selection after a reverse jump',async()=>{
+ let finish!:(value:any)=>void;
+ const initial=Array.from({length:40},(_,i)=>item(String(i)));
+ const client={resolvePlayback:async(id:string)=>({ok:true,data:item(id)}),fetchFeedPage:()=>new Promise(resolve=>finish=resolve)}as unknown as DouyinClient;
+ const queue=new DouyinPlaybackQueue(client,{items:initial,selectedAwemeId:'39',cursor:'cursor-0',hasMore:true});
+ const warming=queue.preview('next');await Promise.resolve();queue.commitPreview('0');
+ finish({ok:true,data:{items:[item('40')],nextCursor:'cursor-1',hasMore:true}});await warming;
+ expect(queue.snapshot().item?.awemeId).toBe('0');expect(queue.snapshot().playlist).toHaveLength(40);expect(queue.snapshot().cursor).toBe('cursor-0');
+});
