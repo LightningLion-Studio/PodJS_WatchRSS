@@ -3,7 +3,7 @@ import { createRoot, createSignal } from 'solid-js';
 import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
-let client:DouyinClient;let optRecovery=false;
+let client:DouyinClient;let optRecovery=false;let captureOverride:(()=>Promise<void>)|undefined;
 let loginOptions:any,completeLogin:(value:{cookie:string;origin:string})=>void;
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any)=>{loginOptions=options;return {result:new Promise(resolve=>completeLogin=resolve),cancel(){}};}}));
 let paintRelease:(value:{committed:boolean})=>void;
@@ -15,13 +15,13 @@ mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:st
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
-mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false){
- optRecovery=opt;
+ optRecovery=opt;captureOverride=undefined;
  canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
@@ -231,4 +231,46 @@ test('PREWARM production controller resolves next and previous concurrently and 
  for(let n=0;n<20;n++)await Promise.resolve();
  pending.get('a')!({ok:true,data:a});pending.get('c')!({ok:true,data:c});
  expect((await next)?.key).toBe('c');expect((await previous)?.key).toBe('a');expect(entry.queue!.snapshot().item?.awemeId).toBe('b');expect(f.source().awemeId).toBe('b');
+});
+
+for(const code of ['TEMPORARILY_UNAVAILABLE','REQUEST_FAILED'] as const)test(`DYERR foreground ${code} returns structured failure to the entry`,async()=>{
+ const f=fixture(),selected=item('retry'),failures:any[]=[];
+ proxyOverride=async()=>{throw Object.assign(Error('private upstream text'),{code,retryAfterMs:45000});};
+ f.controller.douyinPlay({item:selected,playback:selected,immersive:true,onFailure:value=>failures.push(value)});
+ await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+ expect(failures).toEqual([{code,retryAfterMs:45000}]);expect(f.error()).toBe('');expect(f.stack().at(-1)?.page).toBe('douyin');
+ proxyOverride=async()=>selected.playUrl;f.controller.douyinPlay({item:selected,playback:selected,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});expect(f.stack().at(-1)?.page).toBe('video');
+});
+
+test('DYERR obsolete foreground failure cannot overwrite another route',async()=>{
+ const f=fixture(),selected=item('stale'),failures:any[]=[];let reject!:(reason:any)=>void;
+ proxyOverride=()=>new Promise((_resolve,no)=>reject=no);
+ f.controller.douyinPlay({item:selected,playback:selected,immersive:true,onFailure:value=>failures.push(value)});
+ const work=f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+ while(!reject)await Promise.resolve();await f.controller.douyinNavigate({name:'settings'});
+ reject(Object.assign(Error('private'),{code:'REQUEST_FAILED'}));await work;
+ expect(failures).toEqual([]);expect(f.error()).toBe('');expect(f.stack().at(-1)?.douyinRoute?.name).toBe('settings');
+});
+
+test('DYERR first card requests a native commit only after decoded frame and cancels after navigation',async()=>{
+ const before=(globalThis as any).pod,events:any[]=[];(globalThis as any).pod={benchmark:(raw:string)=>{const e=JSON.parse(raw);events.push(e);return e.seq??900;}};
+ try{
+  const f=fixture(),selected=item('card');f.controller.douyinPlay({item:selected,playback:selected,immersive:true,entrySeq:899});
+  await f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});expect(events.some(e=>e.code==='first_card')).toBe(false);
+  f.controller.douyinReady(f.stack().at(-1)!);expect(events.some(e=>e.code==='first_card'&&e.presented)).toBe(true);
+  paintRelease({committed:true});for(let i=0;i<50;i++)await Promise.resolve();
+  expect(events.filter(e=>e.code==='first_card'&&e.presented)).toEqual([{code:'first_card',seq:899,presented:true}]);
+  await f.controller.douyinNavigate({name:'entry'});expect(events.some(e=>e.code==='first_card'&&e.cancel_presented&&e.seq===899)).toBe(true);
+ }finally{(globalThis as any).pod=before;}
+});
+
+
+test('DYERR expired entry action cannot open after backdrop capture completes',async()=>{
+ const f=fixture(),selected=item('late');let complete!:()=>void,current=true;
+ captureOverride=()=>new Promise<void>(resolve=>complete=resolve);
+ f.controller.douyinPlay({item:selected,playback:selected,immersive:true,isCurrent:()=>current});
+ const pending=f.controller.douyinNavigate({name:'player',awemeId:selected.awemeId});
+ for(let i=0;i<100&&!complete;i++)await new Promise(resolve=>setTimeout(resolve,0));expect(complete).toBeFunction();current=false;complete();await pending;
+ expect(f.stack().at(-1)?.page).toBe('douyin');expect(f.source()).toBeUndefined();
 });

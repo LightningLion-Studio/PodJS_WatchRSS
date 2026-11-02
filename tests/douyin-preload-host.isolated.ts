@@ -45,3 +45,10 @@ test('DYFIX backward proxy entries register without detail resolution or prefetc
  const host=createHostDouyinPreload(localClient as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'c','active');await flush();
  expect(resolved).toEqual(['c','d']);expect(registrations.map(r=>r.key)).toEqual(['c','d','b','a']);expect(windows.at(-1).items.slice(2).map((v:any)=>v.prefetchBytes)).toEqual([0,0]);host.stop(owner);
 });
+
+test('DYERR foreground resolution preserves the code and cooldown without registering a failed source',async()=>{
+ const failures={resolvePlayback:async()=>({ok:false,code:'TEMPORARILY_UNAVAILABLE',message:'抖音暂时不可用，请稍后重试',retryAfterMs:45000}),buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinPreload(failures as any),before=registrations.length;
+ await expect(host.playback(items[0] as any,{})).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE',retryAfterMs:45000});
+ expect(registrations).toHaveLength(before);
+});

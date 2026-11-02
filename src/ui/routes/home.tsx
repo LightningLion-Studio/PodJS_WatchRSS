@@ -1,3 +1,5 @@
+import {douyinBench} from '../../douyin/bench.ts';
+import {douyinClient} from '../../media-services.ts';
 import { Show, createSignal, onCleanup } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
@@ -67,6 +69,7 @@ export function HomeRoutes(props: HomeRoutesProps) {
     if (channel.url === "builtin:bili") {
       void props.openBili({ name: "entry" });
     } else if (channel.url === "builtin:douyin") {
+      douyinBench.homeEntry(douyinClient);
       void props.openDouyin({ name: "entry" });
     } else {
       props.openFeed(channel);

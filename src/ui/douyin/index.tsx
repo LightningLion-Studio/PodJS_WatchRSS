@@ -54,7 +54,11 @@ export type DouyinRoute =
   | { name: "settings" }
   | { name: "player"; awemeId: string };
 
-export interface DouyinPlayRequest { detailPlayback?:boolean; immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
+export interface DouyinPlayRequest {
+  entrySeq?:number;
+  isCurrent?:()=>boolean;
+  onFailure?:(failure:import('../../douyin/errors.ts').DouyinPlaybackFailure)=>void;
+  detailPlayback?:boolean; immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
 export type DouyinPlaybackCommand = "toggle" | "previous" | "next" | "replay";
 export interface DouyinSettingsBindings {
   originalContentEnabled: boolean;

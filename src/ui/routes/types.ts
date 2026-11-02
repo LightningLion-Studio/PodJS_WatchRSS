@@ -75,6 +75,7 @@ export type RouteEntry = {
   playback?: PlaybackSource;
   checkpoint?: BiliPlaybackCheckpointController;
   retryPlayback?: (positionMs: number, options?: import("../../playback.ts").BiliPlaybackRetryOptions) => Promise<void>;
+  douyinEntrySeq?:number;
   queue?: DouyinPlaybackQueue;
   rssDouyinRecovery?: DouyinRssRecovery;
   douyinRecovery?: {id:string; policy:import("../../douyin/playback-recovery.ts").DouyinPlaybackRecovery};

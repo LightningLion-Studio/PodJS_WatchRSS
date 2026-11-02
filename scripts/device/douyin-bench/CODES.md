@@ -130,3 +130,32 @@ adds these codes to the production native/guest allowlists and the collector:
 All fields remain closed enums, booleans or nonnegative integers. This candidate
 does not add mixer/PCM evidence and does not turn hidden first frames into
 `incoming_first_frame` observations.
+
+## T-DYERR candidate production wiring (offline verified; device not measured)
+
+- `src/ui/routes/home.tsx`: accepted Home Douyin activation begins `home_entry`
+  before navigation. `src/douyin/bench.ts` transfers that sequence to the next
+  `ImmersiveEntry` activation and marks `entry_start` on the same action.
+- `src/ui/douyin/ImmersiveEntry.tsx`: an accepted explicit refresh begins
+  `refresh_start`. Completion or its 1500 ms UI deadline requests native
+  `refresh_done` presentation on the same sequence. Failures also mark `error`.
+  Cached content stays navigable during replacement, but cache availability
+  alone does not emit refresh completion. An interrupted action cancels the
+  pending presentation instead of manufacturing a terminal timing.
+- The entry passes its sequence with the selected playback request.
+  `src/ui/routes/media-controller.ts` requests `first_card` only after the player
+  reports a decoded first frame. The request precedes `afterPaint` to avoid
+  measuring an extra frame. The native `benchmark.presented` callback supplies the actual HWUI commit
+  timestamp. Leaving that route cancels the pending observation. The title page
+  and successful cache/API reads never substitute for a visible feed card.
+- A title-only cold/home trial must explicitly enter the video flow to collect
+  this `first_card` endpoint. Merely waiting on the title page has no card sample.
+- Source failures return closed codes and cooldown duration to the entry's retry
+  UI. A failed entry action marks `error`; a subsequent attempt allocates a new
+  entry sequence. No credential, URL or content identity enters these events.
+
+The 1500 ms deadline leaves 500 ms of the approved 2000 ms refresh p95 budget for
+presentation. This is a configured UI budget, not measured device latency or a
+claim that a new network feed succeeded within 1500 ms. Slow or failed requests
+show a retryable error while retaining cached content. Network, renderer and JS
+scheduling can still exceed the target; actual paired device samples decide it.

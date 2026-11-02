@@ -1,3 +1,4 @@
+import {douyinPlaybackFailure} from '../../douyin/errors.ts';
 import {douyinBench} from '../../douyin/bench.ts';
 import {playbackFailure} from '../../media/playback-failure.ts';
 import {douyinNetworkFailure} from '../douyin/player-network.ts';
@@ -11,7 +12,7 @@ import {applyPreferredDouyinPlayback} from '../../douyin/playback-selector.ts';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import {lifecycle} from '@podjs/framework/watch';
 import {douyinDebug} from '../../debug/douyin-host.ts';
-import { onCleanup, createSignal, type Accessor, type Setter } from "solid-js";
+import { onCleanup, createEffect, createSignal, type Accessor, type Setter } from "solid-js";
 import { kv } from "@podjs/framework/watch";
 import * as hostServices from "@podjs/framework/services";
 import { video } from "@podjs/framework/services";
@@ -77,11 +78,13 @@ export function createMediaRouteController(
   const openVideo = async (
     source: PlaybackSource,
     extra: Partial<RouteEntry> = {},
+    canOpen:()=>boolean=()=>true,
   ) => {
     const origin = dependencies.current();
     dependencies.setBusy(false);
     dependencies.setError("");
     await video.captureBackdrop();
+    if(!canOpen())return;
     if (
       dependencies.current() !== origin ||
       dependencies.motion.phase !== "idle"
@@ -308,8 +311,10 @@ export function createMediaRouteController(
   };
   let pendingDouyinPlayback: Promise<PlaybackSource> | undefined;
   let pendingDouyinQueue: DouyinPlaybackQueue | undefined;
+  let pendingDouyinRequest: DouyinPlayRequest | undefined;
   const douyinPlay = (input: DouyinPlayRequest) => {
     const request={...input,item:applyPreferredDouyinPlayback(input.item),playback:applyPreferredDouyinPlayback(input.playback)};
+    pendingDouyinRequest=request;
     pendingDouyinQueue = new DouyinPlaybackQueue(douyinClient, {
       items: (request.playlist ?? [request.item]).map(item => item.awemeId === request.item.awemeId ? request.playback : item),
       selectedAwemeId: request.item.awemeId,
@@ -343,20 +348,24 @@ export function createMediaRouteController(
       if (item?.awemeId === route.awemeId) route = { ...route, item };
     }
     if (route.name === "player" && pendingDouyinPlayback) {
-      const pending=pendingDouyinPlayback,queue=pendingDouyinQueue,origin=dependencies.current();
+      const pending=pendingDouyinPlayback,queue=pendingDouyinQueue,request=pendingDouyinRequest,origin=dependencies.current();
+      const current=()=>dependencies.current()===origin&&pendingDouyinPlayback===pending&&(request?.isCurrent?.()??true);
       try {
         const source = await pending;
-        if(dependencies.current()!==origin)return;
+        if(!current())return;
         await queue?.persist();
-        if(dependencies.current()!==origin)return;
-        await openVideo(source, { queue, memory, videoTarget: {
+        if(!current())return;
+        await openVideo(source, { queue, memory, douyinEntrySeq:request?.entrySeq, videoTarget: {
           kind: 'douyin', awemeId: route.awemeId, immersive: source.immersive,
           ...(source.detailPlayback ? {detailPlayback:true} : {}),
-        } });
+        } },current);
       } catch (error) {
-        dependencies.setError(String(error));
+        if(current()){
+          if(request?.onFailure)request.onFailure(douyinPlaybackFailure(error));
+          else dependencies.setError(error instanceof Error?error.message:String(error));
+        }
       } finally {
-        if(pendingDouyinPlayback===pending){pendingDouyinPlayback = undefined;pendingDouyinQueue = undefined;}
+        if(pendingDouyinPlayback===pending){pendingDouyinPlayback = undefined;pendingDouyinQueue = undefined;pendingDouyinRequest=undefined;}
       }
     } else {
       dependencies.setPage("douyin", { douyinRoute: route });
@@ -640,6 +649,12 @@ export function createMediaRouteController(
   };
 
   const paintCheckpoints=new WeakMap<RouteEntry,number>();
+  const [firstCardAction,setFirstCardAction]=createSignal<{entry:RouteEntry;seq:number}>();
+  createEffect(()=>{
+    const action=firstCardAction();if(!action)return;
+    if(dependencies.current()!==action.entry){douyinBench.cancelPresented('first_card',action.seq);return;}
+    onCleanup(()=>douyinBench.cancelPresented('first_card',action.seq));
+  });
   const douyinReady = (entry: RouteEntry) => {
     if (dependencies.current() !== entry || !entry.queue) return;
     entry.queue.resetAutomaticFailures();
@@ -647,6 +662,9 @@ export function createMediaRouteController(
     if(resolved&&resolved.awemeId===selected?.awemeId&&resolved.playUrl!==selected.playUrl)entry.queue.refreshPrefetchItem(resolved.awemeId,resolved);
     const queue=entry.queue,id=queue.snapshot().item?.awemeId,revision=(paintCheckpoints.get(entry)??0)+1;
     paintCheckpoints.set(entry,revision);
+    // Register at decoded-frame publication; native stamps the next actual visible
+    // commit. Waiting for afterPaint first would measure an extra frame.
+    if(entry.douyinEntrySeq){const seq=entry.douyinEntrySeq;douyinBench.firstCard(seq);setFirstCardAction({entry,seq});entry.douyinEntrySeq=undefined;}
     // The first frame must get a window commit before history JSON/KV work can occupy this completion turn.
     void afterPaint().result.then(async result=>{
       if(dependencies.current()!==entry||entry.queue!==queue||queue.snapshot().item?.awemeId!==id||paintCheckpoints.get(entry)!==revision)return;

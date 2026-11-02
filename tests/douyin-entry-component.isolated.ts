@@ -93,12 +93,12 @@ test('upward entry is immediate even if the expired cached detail refresh never 
 
 for(const options of [{cacheCount:1},{cacheCount:2},{cacheCount:4,hasMore:true,cursor:null}])test(`native bootstrap feed rule ${JSON.stringify(options)}`,async()=>{
   const f=mount(options);await requestReady(f);expect(f.requests).toHaveLength(1);expect(new URL(f.requests[0]!.request.url).pathname).toBe('/aweme/v2/web/module/feed/');
-  f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);expect(f.text()).not.toContain('刷新中...');f.swipe(-80);await settle();expect(f.plays[0]?.item.awemeId).toBe('fresh');
+  f.requests[0]!.reply.resolve(response(['fresh']));for(let i=0;i<30;i++)await settle();expect(f.text()).not.toContain('刷新中...');f.swipe(-80);await settle();expect(f.plays[0]?.item.awemeId).toBe('fresh');
 });
 
 test('cached feed refresh failure remains retryable without serial detail probes',async()=>{
   const f=mount({cacheCount:4,hasMore:true,cursor:'c'});await requestReady(f);f.swipe(80);await settle();
-  expect(f.requests).toHaveLength(2);expect(f.text()).toContain('刷新中...');
+  expect(f.requests).toHaveLength(2);expect(f.text()).not.toContain('刷新中...');
   f.requests[1]!.reply.resolve(response([],503));await settle();expect(f.text()).toContain('网络请求失败');expect(f.text()).not.toContain('刷新中...');
   f.swipe(-80);await settle();expect(f.plays).toHaveLength(1);expect(f.requests).toHaveLength(2);
 });
@@ -157,8 +157,8 @@ test('cached anchor status8 replaces cached playback with a login action',async(
 });
 
 test('DYFIX exhausted saved feed is refreshed instead of reused as a ready bootstrap',async()=>{
- const f=mount({cacheCount:4,hasMore:false,cursor:'old'});await requestReady(f);expect(new URL(f.requests[0]!.request.url).pathname).toBe('/aweme/v2/web/module/feed/');expect(f.text()).toContain('刷新中...');
- f.requests[0]!.reply.resolve(response(['new']));await settled(f);f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('new');
+ const f=mount({cacheCount:4,hasMore:false,cursor:'old'});await requestReady(f);expect(new URL(f.requests[0]!.request.url).pathname).toBe('/aweme/v2/web/module/feed/');expect(f.text()).not.toContain('刷新中...');
+ f.requests[0]!.reply.resolve(response(['new']));for(let i=0;i<30;i++)await settle();f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('new');
 });
 
  test('DYUI remembered logout renders login immediately even with secure reads blocked',async()=>{
@@ -179,7 +179,7 @@ test('DYBENCH entry requests native needs_login presentation and cancels it on d
 
 for(const cacheCount of [0,2])test(`DYFIX bounded never-settling feed preserves cached entry (${cacheCount})`,async()=>{
  const f=mount({cacheCount});await requestReady(f);
- const timeout=retryTimers.find(t=>t.ms===8000&&!t.cancelled)!;expect(timeout).toBeDefined();
+ const timeout=retryTimers.find(t=>t.ms===1500&&!t.cancelled)!;expect(timeout).toBeDefined();
  timeout.fire();await settle();expect(f.text()).not.toContain('刷新中');expect(f.data.has('douyin.cookie')).toBe(true);
  if(cacheCount){f.swipe(-80);await settle();expect(f.plays[0]?.item.awemeId).toBe('1');}
  f.requests[0]!.reply.resolve(response(['late']));for(let i=0;i<20;i++)await settle();
@@ -190,4 +190,65 @@ test('DYFIX entry never waits on unrelated history migration',async()=>{
  const f=mount();f.client.prepareHistory=()=>new Promise(()=>{});await requestReady(f);
  expect(f.requests.length).toBe(1);f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);
  expect(f.text()).not.toContain('刷新中');f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('fresh');
+});
+
+test('DYERR cached list is usable while bootstrap is still pending',async()=>{
+ const f=mount({cacheCount:2});await requestReady(f);
+ expect(f.text()).not.toContain('刷新中');f.press();expect(f.plays).toHaveLength(1);
+ expect(f.plays[0].isCurrent()).toBe(true);f.setActive(false);expect(f.plays[0].isCurrent()).toBe(false);
+ f.requests[0]!.reply.resolve(response(['late']));await settle();expect(f.plays).toHaveLength(1);
+});
+
+test('DYERR foreground failure offers retry, preserves cooldown and retries the same selection',async()=>{
+ const f=mount({cacheCount:4,hasMore:true,cursor:'c'});await requestReady(f);f.press();
+ const first=f.plays[0];expect(first.onFailure).toBeFunction();
+ first.onFailure({code:'TEMPORARILY_UNAVAILABLE',retryAfterMs:45000});
+ expect(f.text()).toContain('抖音暂时不可用');expect(f.text()).toContain('重试');expect(f.data.has('douyin.cookie')).toBe(true);
+ const retry=retryTimers.find(t=>t.ms===45000&&!t.cancelled)!;expect(retry).toBeDefined();
+ f.advance(44999);expect(f.plays).toHaveLength(1);f.advance(1);retry.fire();await settle();
+ expect(f.plays).toHaveLength(2);expect(f.plays[1].item.awemeId).toBe(first.item.awemeId);expect(first.isCurrent()).toBe(false);
+ // Navigation cancels retries and fences callbacks from earlier actions.
+ f.plays[1].onFailure({code:'REQUEST_FAILED'});const pending=[...retryTimers].reverse().find(t=>!t.cancelled)!;
+ f.setActive(false);expect(pending.cancelled).toBe(true);pending.fire();await settle();expect(f.plays).toHaveLength(2);
+});
+
+test('DYERR transport failures back off and never spin on a cached list',async()=>{
+ const f=mount({cacheCount:4,hasMore:true,cursor:'c'});await requestReady(f);f.press();
+ for(const [index,ms] of [1000,2000,4000].entries()){
+  f.plays[index].onFailure({code:'REQUEST_FAILED'});expect(f.text()).toContain('重试');
+  const timer=[...retryTimers].reverse().find(t=>!t.cancelled&&t.ms===ms)!;expect(timer).toBeDefined();
+  timer.fire();await settle();expect(f.plays).toHaveLength(index+2);
+ }
+});
+
+test('DYERR accepted refresh pairs native presentation with its own sequence and closed failure',async()=>{
+ const before=(globalThis as any).pod,events:any[]=[];let seq=700;
+ (globalThis as any).pod={benchmark:(raw:string)=>{const value=JSON.parse(raw);if(!value.seq)value.seq=++seq;events.push(value);return value.seq;}};
+ try{
+  const f=mount({cacheCount:4,hasMore:true,cursor:'c'});await requestReady(f);f.swipe(80);await requestReady(f,2);
+  expect(f.text()).not.toContain('刷新中');const start=events.find(e=>e.code==='refresh_start');expect(start).toBeDefined();
+  expect(events.some(e=>e.code==='refresh_done')).toBe(false);
+  const deadline=[...retryTimers].reverse().find(t=>t.ms===1500&&!t.cancelled)!;deadline.fire();await settle();
+  expect(f.text()).toContain('网络请求失败');expect(events.filter(e=>e.code==='refresh_done'&&e.presented)).toEqual([{code:'refresh_done',seq:start.seq,presented:true}]);
+  expect(events.some(e=>e.code==='error'&&e.seq===start.seq)).toBe(true);
+  expect(events.some(e=>e.code==='first_card')).toBe(false);
+  f.setActive(false);expect(events.some(e=>e.code==='refresh_done'&&e.cancel_presented&&e.seq===start.seq)).toBe(true);
+ }finally{(globalThis as any).pod=before;}
+});
+
+test('DYERR feed transport failure automatically retries and successful retry publishes fresh content',async()=>{
+ const f=mount();await requestReady(f);f.requests[0]!.reply.resolve(response([],503));await settled(f);
+ const timer=retryTimers.find(t=>t.ms===1000&&!t.cancelled)!;expect(timer).toBeDefined();expect(f.text()).toContain('重试');
+ timer.fire();await requestReady(f,2);f.requests[1]!.reply.resolve(response(['recovered']));await settled(f);f.press();
+ expect(f.plays[0].item.awemeId).toBe('recovered');expect(f.data.has('douyin.cookie')).toBe(true);
+});
+
+
+test('DYERR temporary failures without a cooldown hint back off from thirty to sixty seconds',async()=>{
+ const f=mount({cacheCount:4,hasMore:true,cursor:'c'});await requestReady(f);f.press();
+ for(const [index,ms] of [30000,60000].entries()){
+  f.plays[index].onFailure({code:'TEMPORARILY_UNAVAILABLE'});
+  const timer=[...retryTimers].reverse().find(t=>!t.cancelled&&t.ms===ms)!;expect(timer).toBeDefined();
+  timer.fire();await settle();expect(f.plays).toHaveLength(index+2);
+ }
 });

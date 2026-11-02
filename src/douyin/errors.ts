@@ -1,5 +1,16 @@
 import type { DouyinErrorCode } from './types.ts';
 
+export interface DouyinPlaybackFailure {code:DouyinErrorCode;retryAfterMs?:number;}
+/** Preserve closed recovery metadata across the playback promise boundary. */
+export function douyinPlaybackFailure(error:unknown):DouyinPlaybackFailure {
+  const value=error as Partial<DouyinPlaybackFailure>|null;
+  const codes:DouyinErrorCode[]=['NOT_LOGGED_IN','REQUEST_FAILED','PARSE_FAILED','UNSUPPORTED','CANCELLED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'];
+  const code=codes.includes(value?.code as DouyinErrorCode)?value!.code!:'REQUEST_FAILED';
+  return {code,...(Number.isFinite(value?.retryAfterMs)&&value!.retryAfterMs!>0?{retryAfterMs:value!.retryAfterMs}:{})};
+}
+export const isDouyinRetryableFailure=(code:DouyinErrorCode)=>isDouyinTemporaryFailure(code)||code==='REQUEST_FAILED';
+
+
 /** Native DouyinRepository.formatDouyinError; never expose transport/signing text. */
 export function formatDouyinError(code: DouyinErrorCode): string {
   switch (code) {
