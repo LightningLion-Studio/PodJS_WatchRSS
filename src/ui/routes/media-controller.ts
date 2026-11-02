@@ -545,12 +545,13 @@ export function createMediaRouteController(
     if(!entry.queue||dependencies.current()!==entry)return;
     const result=await entry.queue.preview(direction,distance);
     if(dependencies.current()!==entry||!result.ok)return;
+    const authorizationVersion=douyinClient.playbackAuthorizationVersion?.()??0;
     const headers=await adjacentHeaders(entry);
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
     if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
     const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next');
     if(dependencies.current()!==entry||entry.queue.snapshot().playlist[result.data.index]?.awemeId!==result.data.item.awemeId)return;
-    return {key:result.data.item.awemeId,source:{
+    return {key:result.data.item.awemeId,authorizationVersion,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
       url,title:result.data.item.description,headers,
       ...douyinDecoderProfile(result.data.item),
@@ -558,7 +559,7 @@ export function createMediaRouteController(
     }};
   };
 
-  const selectDouyinTarget = (entry:RouteEntry,direction:"next"|"previous",distance:1|2=1) => {
+  const selectDouyinTarget = (entry:RouteEntry,direction:"next"|"previous",distance:1|2=1,prepared?:DouyinPreparedSource) => {
     if(!entry.queue||dependencies.current()!==entry)return;
     const queue=entry.queue,result=queue.selectIntent(direction,distance);
     if(!result.ok){
@@ -568,6 +569,13 @@ export function createMediaRouteController(
       return;
     }
     const item=result.data.item,old=entry.playback!;
+    // The player supplies a decoded neighbour from this authorized route.
+    // Selection still commits synchronously; no second cache/URL lookup gates it.
+    if(prepared?.key===item.awemeId&&prepared.source.awemeId===item.awemeId&&prepared.authorizationVersion===(douyinClient.playbackAuthorizationVersion?.()??0)){
+      entry.playback=prepared.source;dependencies.setError('');dependencies.setPlayingSource(prepared.source);
+      void queue.persist().catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
+      return;
+    }
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
     let selected:PlaybackSource={...old,awemeId:item.awemeId,title:item.description,posterUrl:item.coverUrl,

@@ -394,3 +394,24 @@ test('DYLOSS reverse boundary keeps the immersive route and its selected source'
  expect(f.stack()).toHaveLength(depth);expect(f.stack().at(-1)).toBe(entry);expect(f.source()).toBe(source);expect(entry.queue!.snapshot().index).toBe(0);expect(f.requests()).toBe(0);
  await f.controller.changeDouyinVideo(entry,'previous');expect(f.stack().at(-1)).toBe(entry);
 });
+
+test('DYSWAP selecting a decoded neighbour publishes its authorized source synchronously',async()=>{
+ const f=fixture(),a=item('a'),b=item('b');
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!,prepared=await f.controller.prepareDouyinAdjacent(entry,'next');expect(prepared).toBeDefined();
+ lookupOverride=()=>new Promise(()=>{});proxyOverride=()=>new Promise(()=>{});
+ (f.controller.selectDouyinTarget as any)(entry,'next',1,prepared);
+ expect(entry.queue!.snapshot().index).toBe(1);expect(f.source()).toBe(prepared!.source);
+ expect(f.source().previewOnly).not.toBe(true);expect(f.requests()).toBe(0);
+ lookupOverride=undefined;proxyOverride=undefined;
+});
+
+test('DYSWAP changed authorization rejects the retained neighbour source',async()=>{
+ const f=fixture(),a=item('a'),b=item('b');let authorization=0;client.playbackAuthorizationVersion=()=>authorization;
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!,prepared=await f.controller.prepareDouyinAdjacent(entry,'next');authorization++;
+ lookupOverride=()=>new Promise(()=>{});
+ f.controller.selectDouyinTarget(entry,'next',1,prepared);
+ expect(entry.queue!.snapshot().index).toBe(1);expect(f.source()).not.toBe(prepared!.source);expect(f.source().previewOnly).toBe(true);
+ lookupOverride=undefined;
+});
