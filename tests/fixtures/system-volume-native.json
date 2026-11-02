@@ -1,13 +1,13 @@
 {
   "source": "PodVideoSystemAudioTest.java / Robolectric AudioManager",
-  "sourceSha256": "2d71a929cb3fe0eb761a9050cffcb3f038727f06ae931b4c6e706f507303d724",
+  "sourceSha256": "f9feccca2eca43c4e2a1740219a98837144f669cb44a1cc7b42424c6727d1250",
   "method": "native AudioManager STREAM_MUSIC state; no physical audio proof",
   "cases": [
     {
       "volume": 0,
       "volumeIndex": 0,
       "volumeMax": 16,
-      "muted": false,
+      "muted": true,
       "percent": 0
     },
     {
