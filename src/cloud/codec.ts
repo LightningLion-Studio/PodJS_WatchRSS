@@ -1,3 +1,4 @@
+import {ChunkLookahead} from './chunk-lookahead';
 import type {RestoreCallsite} from './restore-callsite';
 import type {SealedGzipStep,SealedPart} from '@podjs/framework/sealed-gzip';
 import {cpuWork,cpuJsonStringify} from '@podjs/framework/cpu-work';
@@ -12,6 +13,10 @@ import {cloudDisabled,type CloudGuard} from './guard';
 export interface RestoreCodecCheckpoint {
  /** Only for the coordinator's already authenticated, immutable read plan. */
  manifestValidated?:boolean;
+ /** Ciphertext-only fetch; cache publication requires size/hash verification.
+  * No projection/application receipts may be published by this callback. */
+ prefetch?(chunk:CloudChunk):Promise<Uint8Array>;
+ verified?(chunk:CloudChunk,bytes:Uint8Array):Promise<void>;
  check():Promise<void>;
  read(object:CloudObject,part:string):Promise<Uint8Array|undefined>;
  write(object:CloudObject,part:string,bytes:Uint8Array):Promise<void>;
@@ -197,19 +202,22 @@ export class WatchCloudCodec {
    const saved=await checkpoint?.read(o,'object');if(saved){check(saved.length===o.originalBytes);result.set(o.name,saved);checkpoint?.metric?.('object',saved.length,started,true);continue;}
    if(o.entryRef){const target=manifest.objects.find(x=>x.name===o.entryRef!.object);check(target&&!target.entryRef);let body:Uint8Array|undefined;if(checkpoint?.entry)body=await checkpoint.entry(target,o.entryRef.entryPath);else{const bytes=checkpoint?.resolve?await checkpoint.resolve(target):(await this.restore(key,manifest,read,[target],checkpoint)).get(target.name);check(bytes);body=await readWrssEntry(bytes,o.entryRef.entryPath,(b,max)=>this.crypto.gunzip(b,max),{yield:this.crypto.yieldTurn});}check(body&&body.length===o.originalBytes,'cloud_entry_ref_missing');if(o.contentSha256)check(await this.crypto.sha256(body)===o.contentSha256,'cloud_entry_ref_hash');await checkpoint?.write(o,'object',body);result.set(o.name,body);checkpoint?.metric?.('object',body.length,started,false);continue;}
    const parts:Uint8Array[]=[];let total=0;let root=key;let unwrapped=false;
+   const lookahead=checkpoint?.prefetch?new ChunkLookahead(checkpoint.prefetch,checkpoint.check):undefined;
    try{
     for(let index=0;index<o.chunks.length;index++){await checkpoint?.check();const c=o.chunks[index],began=checkpoint?.now?.()??Date.now();
      if((checkpoint?.assemble&&o.encoding!=='gzip')||(checkpoint?.materializeOnly&&o.encoding!=='gzip'&&!o.contentSha256)||o.encoding==='gzip'&&checkpoint?.inflate){const length=await checkpoint.length?.(o,'chunk:'+index);if(length!==undefined){total+=length;check(total<=(o.encoding==='gzip'?o.encodedBytes:o.originalBytes));checkpoint.metric?.('chunk',length,began,true,index);continue;}}
      const saved=await checkpoint?.read(o,'chunk:'+index);let part=saved;
      if(!part){let plain=o.encoding==='gzip-chunks-v1'&&checkpoint?.inflateChunk?await checkpoint.read(o,'chunk:'+index+'-input'):undefined;
       if(!plain){if(!unwrapped){const envelope=o.objectKeyEnvelope??o.readerKeyEnvelope;if(envelope){check(envelope.version===1);const derived=await this.crypto.hkdf(key,base64ToBytes(envelope.saltBase64),utf8Encode(o.objectKeyEnvelope?'watchrss/cloud/object-key/v1':'watchrss/cloud/reader-key/v1'));try{root=await this.crypto.decrypt(derived,utf8Encode(`${o.objectKeyEnvelope?'watchrss-object-key-v1':'watchrss-reader-key-v1'}:${envelope.scope||o.name}`),base64ToBytes(envelope.nonceBase64),base64ToBytes(envelope.ciphertextBase64));check(root.length===32);}finally{derived.fill(0);}}unwrapped=true;}
-      let blob=await read(c.ciphertextSha256);const hashAt=checkpoint?.now?.()??Date.now();if(!(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256)){check(checkpoint?.reload);blob=await checkpoint.reload(c);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);}check(bytesToBase64(blob.subarray(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.subarray(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));checkpoint?.metric?.('source-hash',blob.length,hashAt,false,index);const decryptAt=checkpoint?.now?.()??Date.now();plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);checkpoint?.metric?.('decrypt',plain.length,decryptAt,false,index);}
+      let blob=lookahead?await lookahead.take(c):await read(c.ciphertextSha256);await checkpoint?.check();
+      const next=o.chunks[index+1];if(next&&lookahead&&await checkpoint?.length?.(o,'chunk:'+(index+1))===undefined)lookahead.start(next);
+      const hashAt=checkpoint?.now?.()??Date.now();if(!(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256)){check(checkpoint?.reload);blob=await checkpoint.reload(c);check(blob.length===c.ciphertextBytes&&await this.crypto.sha256(blob)===c.ciphertextSha256);}check(bytesToBase64(blob.subarray(7,23)).replace(/=+$/,'')===c.saltBase64.replace(/=+$/,'')&&bytesToBase64(blob.subarray(23,35)).replace(/=+$/,'')===c.nonceBase64.replace(/=+$/,''));checkpoint?.metric?.('source-hash',blob.length,hashAt,false,index);const decryptAt=checkpoint?.now?.()??Date.now();plain=await this.open(root,blob,'chunk',`watchrss-cloud-chunk-v1:${c.plaintextSha256}`);check(plain.length===c.plaintextBytes&&await this.crypto.sha256(plain)===c.plaintextSha256);checkpoint?.metric?.('decrypt',plain.length,decryptAt,false,index);await checkpoint?.check();await checkpoint?.verified?.(c,blob);}
       const inflateAt=checkpoint?.now?.()??Date.now();part=o.encoding==='gzip-chunks-v1'?(checkpoint?.inflateChunk?await checkpoint.inflateChunk(o,index,plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total)):await this.crypto.gunzip(plain,Math.min(CLOUD_CHUNK_BYTES,o.originalBytes-total))):plain;if(o.encoding==='gzip-chunks-v1')checkpoint?.metric?.('inflate',part.length,inflateAt,false,index);if(!(o.encoding==='gzip-chunks-v1'&&checkpoint?.inflateChunk))await checkpoint?.write(o,'chunk:'+index,part);
      }
      total+=part.length;check(total<=(o.encoding==='gzip'?o.encodedBytes:o.originalBytes));if(!(o.encoding!=='gzip'&&checkpoint?.assemble)&&!(o.encoding==='gzip'&&checkpoint?.inflate)&&(!checkpoint?.materializeOnly||o.encoding==='gzip'||!!o.contentSha256))parts.push(part);checkpoint?.metric?.('chunk',part.length,began,!!saved,index);
     }
     await checkpoint?.check();if(o.encoding!=='gzip'&&checkpoint?.assemble){check(total===o.originalBytes);const bytes=await checkpoint.assemble(o,o.chunks.map((_,i)=>'chunk:'+i),total);if(!checkpoint.materializeOnly||o.contentSha256)check(bytes.length===total);result.set(o.name,bytes);checkpoint.metric?.('object',total,started,false);continue;}if(o.encoding==='gzip'&&checkpoint?.inflate){check(total===o.encodedBytes);const bytes=await checkpoint.inflate(o,o.chunks.map((_,i)=>'chunk:'+i));result.set(o.name,bytes);checkpoint.metric?.('object',o.originalBytes,started,false);continue;}if(checkpoint?.materializeOnly&&o.encoding!=='gzip'&&!o.contentSha256){check(total===o.originalBytes);await checkpoint.link?.(o,o.chunks.map((_,i)=>'chunk:'+i),o.originalBytes);result.set(o.name,new Uint8Array());continue;}const bytes=o.encoding==='gzip'?await this.crypto.gunzip(join(parts),o.originalBytes):join(parts);check(bytes.length===o.originalBytes);if(o.contentSha256)check(await this.crypto.sha256(bytes)===o.contentSha256);if(o.encoding==='gzip')await checkpoint?.write(o,'object',bytes);else await checkpoint?.link?.(o,o.chunks.map((_,i)=>'chunk:'+i),bytes.length);result.set(o.name,bytes);checkpoint?.metric?.('object',bytes.length,started,false);
-   }finally{if(root!==key)root.fill(0);}
+   }finally{await lookahead?.close();if(root!==key)root.fill(0);}
   }return result;
  }
 }

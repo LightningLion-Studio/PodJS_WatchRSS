@@ -1,3 +1,4 @@
+import {RestoreProgressTracker,type RestoreProgress,type RestoreProgressHead} from './restore-progress';
 import {receiptedParts} from '@podjs/framework/work-window';
 import {restoreReceiptClass} from './restore-callsite';
 import {cpuWork,cpuJsonParse,cpuJsonStringify} from '@podjs/framework/cpu-work';
@@ -19,12 +20,27 @@ export interface RestoreApplyCheckpoint {
  check():Promise<void>;
 }
 export interface ProjectionIndex {provisional?:boolean;length:number;parts:string[];lengths:number[];}
-interface Journal {version:1;scope:string;cycle:number;active:boolean;phase:'snapshots'|'inventory'|'records';units:Record<string,number>;projections:Record<string,number>;work:number;bytes:number;}
+interface Journal {restoreProgress?:{target:string;state:RestoreProgress;acknowledged:string[]};version:1;scope:string;cycle:number;active:boolean;phase:'snapshots'|'inventory'|'records';units:Record<string,number>;projections:Record<string,number>;work:number;bytes:number;}
 export interface SnapshotMetric {event:'snapshot-work';stage:'download'|'chunk'|'object'|'overlay'|'apply'|'inventory'|'checkpoint-read'|'checkpoint-write'|'manifest'|'source-hash'|'decrypt'|'inflate'|'plan'|'checkpoint-invalid'|'export'|'checkpoint-range-piece';outcome?:'complete'|'failed'|'deferred';code?:string;objectIndex?:number;chunkIndex?:number;objects?:number;chunks?:number;maxChunkBytes?:number;bytes:number;durationMillis:number;cached:boolean;completedUnits:number;}
 const validMap=(v:unknown):v is Record<string,number>=>{if(!v||typeof v!=='object'||Array.isArray(v))return false;const keys=Object.keys(v);return cpuWork('projection-rebuild','items',keys.length,()=>keys.length<=200000&&Object.entries(v).every(([k,n])=>k.length<=512&&Number.isSafeInteger(n)&&n>=0));};
 /** Secure metadata + authenticated encrypted local projections. No cloud ACK is
  * derived from a downloaded/decrypted chunk: only committed SQL units count. */
 export class SnapshotRestoreCheckpoint {
+ private progressTracker?:RestoreProgressTracker;
+ private progressListener?: (state:RestoreProgress)=>void;
+ get progress(){return this.progressTracker?.snapshot();}
+ async planProgress(target:string,heads:RestoreProgressHead[],full:boolean,listener?:(state:RestoreProgress)=>void){
+  const acknowledged=this.value.restoreProgress?.target===target?this.value.restoreProgress.acknowledged??[]:[];
+  this.progressTracker=new RestoreProgressTracker(this,heads,full,acknowledged);this.progressListener=listener;
+  this.value.restoreProgress={target,acknowledged,state:this.progressTracker.snapshot()};await this.save();this.emitProgress();
+ }
+ /** ACK metadata is not a body-work receipt and must not reset the redo guard. */
+ async acknowledgeHead(hash:string){
+  const progress=this.value.restoreProgress;if(!progress||!this.progressTracker||progress.acknowledged.includes(hash))return;
+  const previous=progress.acknowledged;progress.acknowledged=[...previous,hash];this.progressTracker.acknowledge(progress.acknowledged);progress.state=this.progressTracker.snapshot();
+  try{await this.save();}catch(error){progress.acknowledged=previous;this.progressTracker.acknowledge(previous);progress.state=this.progressTracker.snapshot();throw error;}this.emitProgress();
+ }
+ private emitProgress(){if(this.progressTracker){this.value.restoreProgress!.state=this.progressTracker.snapshot();try{this.progressListener?.(this.progressTracker.snapshot());}catch{}}}
  private shards=Array.from({length:64},()=>({units:{} as Record<string,number>,projections:{} as Record<string,number>}));
  private indices=new Map<string,ProjectionIndex>();
  private rangeParts=new Map<string,Uint8Array>();private rangeBytes=0;
@@ -60,8 +76,9 @@ export class SnapshotRestoreCheckpoint {
  has(unit:string){return Object.prototype.hasOwnProperty.call(this.value.units,unit);}
  private async record(kind:'units'|'projections',id:string,bytes:number){
   const work=this.value.work,total=this.value.bytes,previous=this.value[kind][id],shard=this.shard(id);
-  this.value[kind][id]=bytes;this.value.work++;this.value.bytes+=bytes;
-  try{await this.saveEntry(kind,id,bytes);this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}this.session.restoreCheckpoint?.stalled?.(false);}catch(error){if((error as {restoreEntryCommitted?:boolean})?.restoreEntryCommitted){this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}}this.value.work=work;this.value.bytes=total;if(previous===undefined){delete this.value[kind][id];delete this.shards[shard][kind][id];}else{this.value[kind][id]=previous;this.shards[shard][kind][id]=previous;}throw error;}
+  this.value[kind][id]=bytes;this.value.work++;this.value.bytes+=bytes;if(kind==='units')this.progressTracker?.changed(id);if(this.progressTracker)this.value.restoreProgress!.state=this.progressTracker.snapshot();
+  try{await this.saveEntry(kind,id,bytes);this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}this.session.restoreCheckpoint?.stalled?.(false);}catch(error){if((error as {restoreEntryCommitted?:boolean})?.restoreEntryCommitted){this.committedUnits++;try{this.session.restoreCheckpoint?.receipt?.(restoreReceiptClass(kind,id));}catch{/* Diagnostic only. */}}this.value.work=work;this.value.bytes=total;if(previous===undefined){delete this.value[kind][id];delete this.shards[shard][kind][id];}else{this.value[kind][id]=previous;this.shards[shard][kind][id]=previous;}if(kind==='units')this.progressTracker?.changed(id);if(this.progressTracker)this.value.restoreProgress!.state=this.progressTracker.snapshot();throw error;}
+  this.emitProgress();
  }
  async commit(unit:string,bytes=0){if(this.has(unit))return;await this.record('units',unit,bytes);}
  apply(prefix:string,progress?:(done:number,total:number)=>void):RestoreApplyCheckpoint{return {scope:()=>this.token('files:'+prefix),progress,has:unit=>this.has(prefix+':'+unit),result:unit=>this.value.units[prefix+':'+unit]??0,commit:(unit,abandoned=0)=>this.commit(prefix+':'+unit,abandoned),check:this.current};}
@@ -126,13 +143,16 @@ export class SnapshotRestoreCheckpoint {
   if(at!==index.length||!output)throw Error('cloud_snapshot_projection_missing');return output;
  }
 
- async invalidate(unit:string){delete this.value.units[unit];const i=this.shard(unit);delete this.shards[i].units[unit];await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[i]}),i);}
+ async invalidate(unit:string){delete this.value.units[unit];const i=this.shard(unit);delete this.shards[i].units[unit];await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[i]}),i);this.progressTracker?.changed(unit);this.emitProgress();}
  async range(token:string,offset:number,length:number,index?:ProjectionIndex):Promise<Uint8Array>{return this.readBatch(()=>this.readRange(token,offset,length,index));}
  private async readRange(token:string,offset:number,length:number,index?:ProjectionIndex){await this.current();const m=index??await this.index(token);if(!m||m.provisional&&!this.has('decoded:'+token)||!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>m.length)throw Error('cloud_snapshot_projection_missing');const out=new Uint8Array(length);let start=0,at=0;
   for(let i=0;i<m.parts.length&&at<length;i++){const end=start+m.lengths[i];if(end>offset&&start<offset+length){await this.current();const id=m.parts[i];let b=this.rangeParts.get(id);if(!b){const began=this.now();b=await this.readBlob(id);if(!b||b.length!==m.lengths[i]){await this.forgetProjection(id);throw Error('cloud_snapshot_projection_missing');}while(this.rangeParts.size&&this.rangeBytes+b.length>8*1024*1024){const first=this.rangeParts.keys().next().value!;this.rangeBytes-=this.rangeParts.get(first)!.length;this.rangeParts.delete(first);}this.rangeParts.set(id,b);this.rangeBytes+=b.length;this.metric('checkpoint-range-piece',b.length,began,true);}else{this.rangeParts.delete(id);this.rangeParts.set(id,b);}const from=Math.max(0,offset-start),to=Math.min(b.length,offset+length-start);out.set(b.subarray(from,to),at);at+=to-from;}start=end;}if(at!==length)throw Error('cloud_snapshot_projection_missing');return out;
  }
  private async forgetProjection(id:string){const token=id.replace(/-p[0-9]+$/,'');if(this.has('decoded:'+token))await this.invalidate('decoded:'+token);if(this.has('decoded:'+token+'-eof'))await this.invalidate('decoded:'+token+'-eof');delete this.value.projections[id];const shard=this.shard(id);delete this.shards[shard].projections[id];await this.state.storeRestoreJournal(cpuJsonStringify({scope:this.root,...this.shards[shard]}),shard);}
- async write(token:string,bytes:Uint8Array){
+ /** Reuse one account lease for a bounded source unit; large legacy outputs
+  * keep their per-piece current checks and do not acquire a whole-object lock. */
+ async write(token:string,bytes:Uint8Array){return bytes.length<=1024*1024?this.readBatch(()=>this.writeProjection(token,bytes)):this.writeProjection(token,bytes);}
+ private async writeProjection(token:string,bytes:Uint8Array){
   const began=this.now(),parts:string[]=[];for(let offset=0;offset<bytes.length||!parts.length;offset+=256*1024)parts.push(token+'-p'+offset);
   // Publish authenticated shape first. A partially written projection is never
   // readable; if the final part lands before a crash, no source AEAD repeats.
