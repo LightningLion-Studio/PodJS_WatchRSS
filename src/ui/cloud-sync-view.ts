@@ -1,5 +1,6 @@
 import type {AccountStatusSnapshot} from '../account/status.ts';
 import type {WatchCloudPhase} from '../cloud/service.ts';
+import type {RestoreProgress} from '../cloud/restore-progress.ts';
 
 export type CloudSyncTone = 'muted' | 'busy' | 'ok' | 'attention' | 'error';
 export type CloudSyncAction = 'sync' | 'phone' | 'reload' | 'approval';
@@ -10,6 +11,7 @@ export interface CloudSyncView {
   button?: {label: string; action: CloudSyncAction; enabled: boolean};
   lastSynced?: string;
   space?: {label: string; fraction: number};
+  progress?: {label: string; fraction: number};
 }
 
 const BUSY = new Set<WatchCloudPhase>(['registering', 'downloading', 'merging', 'uploading']);
@@ -33,6 +35,7 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
   const base: CloudSyncView = {
     title: '', detail: '', tone: 'ok', button: {label: '立即同步', action: 'sync', enabled: true},
     ...(cloud.lastCompletedAt ? {lastSynced: `上次同步 ${formatSyncTime(cloud.lastCompletedAt, now)}`} : {}),
+    ...(restoreProgressView(cloud.restoreProgress) ?? {}),
     ...(cloud.quotaBytes > 0 ? {space: {label: `已用 ${formatBytes(cloud.usedBytes)} / ${formatBytes(cloud.quotaBytes)}`, fraction: Math.min(1, Math.max(0, cloud.usedBytes / cloud.quotaBytes))}} : {}),
   };
   const canHandoff=phase!=='error'&&phase!=='waiting-approval'&&!cloud.message.includes('请升级')&&!cloud.message.includes('重新登记本机');
@@ -51,6 +54,18 @@ export function cloudSyncView(status: AccountStatusSnapshot | null | undefined, 
   if (cloud.message === '等待网络连接') return {...base, title: '等待网络', detail: '连上网络后再试。', tone: 'attention', button: {label: '重试', action: 'sync', enabled: true}};
   if (cloud.message.includes('云空间')) return {...base, title: '云空间不可用', detail: '云空间暂时无法读取，请稍后重试。', tone: 'attention', button: {label: '重试', action: 'sync', enabled: true}};
   return {...base, title: '尚未同步', detail: '同步后，订阅与阅读进度会保存在云空间。', tone: 'muted'};
+}
+
+/** Each restore phase counts equally; bytes when known, otherwise items. Hidden until the
+ * manifest has fixed the denominator and once every head is acknowledged. */
+export function restoreProgressView(p: RestoreProgress | undefined): {progress: {label: string; fraction: number}} | undefined {
+  if (!p?.ready || (p.headsTotal > 0 && p.headsDone >= p.headsTotal)) return undefined;
+  const parts = [p.download, p.decompress, p.apply, p.projection]
+    .map(x => x.totalBytes > 0 ? x.doneBytes / x.totalBytes : x.total > 0 ? x.done / x.total : undefined)
+    .filter((x): x is number => x !== undefined && Number.isFinite(x));
+  if (!parts.length) return undefined;
+  const fraction = Math.min(0.99, Math.max(0, parts.reduce((a, b) => a + Math.min(1, b), 0) / parts.length));
+  return {progress: {label: `恢复云端资料 ${Math.floor(fraction * 100)}%`, fraction}};
 }
 
 export function formatBytes(bytes: number): string {

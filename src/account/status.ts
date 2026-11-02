@@ -6,6 +6,7 @@ export interface AccountCloudStatus {
   ownerChoiceRequired?:boolean;
   errorCode?:SnapshotDeferralCode|'cloud_host_capability_unavailable'|'cloud_format_upgrade_required'|'library_owner_mismatch'|'cloud_snapshot_progress_stalled'|'cloud_snapshot_unit_capacity';
   formatCompatibility?:import('../cloud/compatibility').CloudCompatibilityStatus;
+  restoreProgress?:import('../cloud/restore-progress').RestoreProgress;
   message: string;
   usedBytes: number;
   reservedBytes?: number;
@@ -26,6 +27,7 @@ function ownCloudStatus(userId: string, cloud: AccountCloudStatus,backendBaseUrl
   return {
     ...(own.formatCompatibility?{formatCompatibility:{...own.formatCompatibility}}:{}),
     ...(own.ownerChoiceRequired?{ownerChoiceRequired:true}:{}),
+    ...(own.restoreProgress?{restoreProgress:own.restoreProgress}:{}),
     ...(own.errorCode?{errorCode:own.errorCode}:{}),
     message: own.message, usedBytes: own.usedBytes, quotaBytes: own.quotaBytes,
     ...(own.reservedBytes!==undefined?{reservedBytes:own.reservedBytes}:{}),

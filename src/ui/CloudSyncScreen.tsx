@@ -132,6 +132,14 @@ export function CloudSyncScreen(props: {
       </View>};
   };
 
+  const bar = (fraction: number): ScrollEntry => {
+    const fill = Math.max(0, Math.round(FACTS_WIDTH * fraction));
+    return {height: 4, bounds: centredBounds(inner(), FACTS_WIDTH, 0, 4), render: () =>
+      <View class="absolute rounded-[2]" style={{insetL: (inner() - FACTS_WIDTH) / 2, insetT: 0, width: FACTS_WIDTH, height: 4, bgColor: '#2a2a2a'}}>
+        <View class="absolute left-[0] top-[0] rounded-[2]" style={{width: fill, height: 4, bgColor: PHONE_PAGE.primary}}/>
+      </View>};
+  };
+
   const entries = createMemo<ScrollEntry[]>(() => {
     const view: CloudSyncView = loadFailed() ? {title:'状态读取失败',detail:'请重新读取云同步状态。',tone:'error',button:{label:'重新读取',action:'reload',enabled:true}} : cloudSyncView(status(), available(), pending(), Date.now(), handoff());
     const rows: ScrollEntry[] = [
@@ -177,13 +185,10 @@ export function CloudSyncScreen(props: {
     }
     if(actions&&fix.needsReregistration)rows.push(gap(12),pill(armed()==='reregister'?'再按一次确认':'重新登记本机',armed()!=='reregister',()=>arm('reregister',()=>act(actions.reregister(true))),!busy,armed()==='reregister'));
     if(actions?.message)rows.push(gap(8),centred(actions.message,1,17,'#ff7777'));
+    if (!fix.needsOwnerChoice && view.progress) rows.push(gap(14), bar(view.progress.fraction), gap(6), centred(view.progress.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
     if (!fix.needsOwnerChoice && (view.space || view.lastSynced)) rows.push(gap(14));
     if (!fix.needsOwnerChoice && view.space) {
-      const fill = Math.max(0, Math.round(FACTS_WIDTH * view.space.fraction));
-      rows.push({height: 4, bounds: centredBounds(inner(), FACTS_WIDTH, 0, 4), render: () =>
-        <View class="absolute rounded-[2]" style={{insetL: (inner() - FACTS_WIDTH) / 2, insetT: 0, width: FACTS_WIDTH, height: 4, bgColor: '#2a2a2a'}}>
-          <View class="absolute left-[0] top-[0] rounded-[2]" style={{width: fill, height: 4, bgColor: PHONE_PAGE.primary}}/>
-        </View>}, gap(6), centred(view.space.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
+      rows.push(bar(view.space.fraction), gap(6), centred(view.space.label, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
     }
     if (!fix.needsOwnerChoice && view.lastSynced) rows.push(gap(6), centred(view.lastSynced, 0, 14, PHONE_PAGE.secondary, FACTS_WIDTH));
     if(props.actions&&fix.canLogout&&!fix.needsOwnerChoice){
