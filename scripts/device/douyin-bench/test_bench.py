@@ -24,6 +24,31 @@ class Logs(unittest.TestCase):
         self.assertIsNone(parse_log(raw.replace('gesture_release','secret_text')))
         self.assertNotIn('SECRET',json.dumps(parse_log(raw)))
 
+    def test_network_stall_field_and_closed_spinner_reason(self):
+        raw='1800000000.125 12 13 I DYBENCH: code=spinner_shown seq=2 generation=3 buffered_ms=0 network_stalled=true reason=network_stalled cookie=PRIVATE'
+        parsed=parse_log(raw)
+        self.assertEqual(parsed['network_stalled'],'true')
+        self.assertEqual(parsed['reason'],'network_stalled')
+        self.assertNotIn('PRIVATE',json.dumps(parsed))
+        self.assertNotIn('network_stalled',parse_log(raw.replace('network_stalled=true','network_stalled=PRIVATE')))
+
+    def test_spinner_evaluation_requires_explicit_native_stall_and_zero_buffer(self):
+        manifest={'scenario':'next','restore':'idle','start_ms':0,'end_ms':1000}
+        for fields,status,reason in [({},'PENDING',True),({'network_stalled':'false','buffered_ms':0},'FAIL',False),
+                                    ({'network_stalled':'true','reason':'network_stalled','buffered_ms':2},'FAIL',False),
+                                    ({'network_stalled':'true','reason':'network_stalled','buffered_ms':0},'PENDING',False)]:
+            result=evaluate([event('spinner_shown',500,**fields)],manifest,CFG)
+            self.assertEqual(result['status'],status)
+            self.assertEqual(any('spinner lacks' in r for r in result['reasons']),reason)
+
+    def test_fling_requires_matching_generation_and_two_item_delta(self):
+        rows=[event('gesture_release',100,generation=2,direction='fling'),event('fling_done',130,generation=1,delta=2)]
+        self.assertEqual(paired(rows,'gesture_release','fling_done',require={'delta':2})['n'],0)
+        rows[1]['generation']=2
+        self.assertEqual(paired(rows,'gesture_release','fling_done',require={'delta':2})['max'],30)
+        rows[1]['delta']=1
+        self.assertEqual(paired(rows,'gesture_release','fling_done',require={'delta':2})['n'],0)
+
     def test_browser_diagnostic_not_terminal(self):
         for code in ['browser_script_error','service_closed','webview_renderer_gone','webview_http_503','webview_load_-2','browser_qr_timeout']:
             self.assertEqual(parse_log(f'1800000000.125 12 13 W PodBrowserAuth: code={code}')['code'],code)

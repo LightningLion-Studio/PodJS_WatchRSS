@@ -231,7 +231,7 @@ export class DouyinClient {
     try{return await pending;}finally{if(this.feedRequests.get(key)===pending)this.feedRequests.delete(key);}
   }
   private async fetchFeedPageInner(input:{cursor?:string|null;count?:number}={}):Promise<DouyinResult<DouyinFeedPage>> {
-    const generation=this.authGeneration;await this.prepareHistory();
+    const generation=this.authGeneration;
     const cookie=await this.readCookie(),config=await resolveDouyinRequestConfig(this.options.requestConfig);
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
     const count=Math.max(1,Math.min(20,boundedVideoPageSize(input.count,videoOptEnabled('traffic'),10))),cursor=input.cursor?.trim()||null;
@@ -295,7 +295,7 @@ export class DouyinClient {
   }
   resetPrefetchFailures(){this.prefetchFailures.clear();}
   async clearPlaybackWindow(){this.clearFeedCache();await this.feedStore.clear();}
-  async restoreFeed(){await this.prepareHistory();const snapshot=await this.feedStore.bootstrap();traceServiceWork("douyin.restore.result",()=>{for(const item of snapshot.items){const resolvedAtMillis=Number(snapshot.resolved[item.awemeId]);if(Number.isFinite(resolvedAtMillis)&&this.now()<douyinMediaExpiry(item.playUrl,resolvedAtMillis))this.cacheItem(item,resolvedAtMillis);}this.feedCursor=snapshot.cursor;this.feedHasMore=snapshot.hasMore;});return snapshot;}
+  async restoreFeed(){const snapshot=await this.feedStore.bootstrap();traceServiceWork("douyin.restore.result",()=>{for(const item of snapshot.items){const resolvedAtMillis=Number(snapshot.resolved[item.awemeId]);if(Number.isFinite(resolvedAtMillis)&&this.now()<douyinMediaExpiry(item.playUrl,resolvedAtMillis))this.cacheItem(item,resolvedAtMillis);}this.feedCursor=snapshot.cursor;this.feedHasMore=snapshot.hasMore;});return snapshot;}
   async saveRecentWindow(items:DouyinItem[],anchorAwemeId:string,cursor:string|null,hasMore:boolean){
     const normalized=normalizeItems(items),index=normalized.findIndex(x=>x.awemeId===anchorAwemeId);if(index<0)return;
     const bootstrap=normalized.slice(index,index+40),window=bootstrap.slice(0,4);

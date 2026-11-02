@@ -13,12 +13,15 @@ import { isDouyinTemporaryFailure,formatDouyinError } from "../../douyin/errors.
 import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
 
+export const DOUYIN_ENTRY_TIMEOUT_MS=8000;
+
 /** Title page owns no player; the single host session starts only on entering the flow. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal("");
   const auth=observeDouyinAuth(props.client),logged=()=>auth()==='logged-in';
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
+  let loadTimer:{cancel():void}|undefined;
   let retryTimer:{cancel():void}|undefined;
   const cancelRetry=()=>{retryTimer?.cancel();retryTimer=undefined;};
   const retryTemporary=(result:{code:import('../../douyin/types.ts').DouyinErrorCode;retryAfterMs?:number},current:()=>boolean)=>{
@@ -39,9 +42,20 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     const own=++generation,current=()=>active()&&own===generation;
     if(auth()!=='logged-in')return;
     setBusy(true);setError("");
+    // Bound the whole UI operation, including queued storage and auth probes.
+    // Expiry fences late continuations; it does not infer logout or clear auth.
+    const deadline=hostServices.delay(DOUYIN_ENTRY_TIMEOUT_MS);loadTimer=deadline;
+    void deadline.result.then(()=>{if(current()){generation++;setBusy(false);setError(formatDouyinError('REQUEST_FAILED'));}},()=>{});
     try{
       if(!refresh){
-        const feed=await traceServiceWork("douyin.entry.restoreFeed",()=>props.client.restoreFeed()),queue=await traceServiceWork("douyin.entry.restoreQueue",()=>props.client.restorePlaybackQueue());if(!current())return;
+        let queueReady=false;
+        const restore=(kind:'feed'|'queue')=>traceServiceWork(kind==='queue'?'douyin.entry.restoreQueue':'douyin.entry.restoreFeed',()=>kind==='queue'?props.client.restorePlaybackQueue():props.client.restoreFeed()).then(value=>{
+          if(current()&&value.items.length&&(kind==='queue'||!queueReady)){
+            if(kind==='queue')queueReady=true;
+            setItems(value.items);anchor=value.anchorAwemeId;cursor=value.cursor;hasMore=value.hasMore;
+          }return value;
+        });
+        const [feed,queue]=await Promise.all([restore('feed'),restore('queue')]);if(!current())return;
         const cached=queue.items.length?queue:feed;
         traceServiceWork("douyin.entry.restoreResult",()=>{setItems(cached.items);anchor=cached.anchorAwemeId;cursor=cached.cursor;hasMore=cached.hasMore;});
         // Native restores the title page immediately; a small/incomplete bootstrap
@@ -76,7 +90,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         }
       }
     }catch{if(current())setError(formatDouyinError('REQUEST_FAILED'));}
-    finally{if(current()){setBusy(false);appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
+    finally{deadline.cancel();if(loadTimer===deadline)loadTimer=undefined;if(current()){setBusy(false);appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
   };
   const enter=async()=>{
     if(!active()||auth()==='unknown')return;if(!logged()){douyinBench.loginTap(props.client,logged,()=>props.onNavigate({name:'login'}));return;}if(busy())return;
@@ -101,7 +115,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   });
   createEffect(()=>{const enabled=props.active??true;if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':busy()?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true);}});
-  createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;cancelRetry();setBusy(false);}});onCleanup(()=>{disposed=true;generation++;cancelRetry();gesture.dispose();});
+  createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();setBusy(false);}});onCleanup(()=>{disposed=true;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;

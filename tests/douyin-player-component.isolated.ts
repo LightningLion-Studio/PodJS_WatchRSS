@@ -18,11 +18,12 @@ mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:(props:any)=>element('
 mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
 const frameEvents=new Set<(value:any)=>void>();
 let sessionPrepareError:unknown;
+let pressureLimit:number|undefined;
 let replacementPrepareGate:Promise<void>|undefined;
 const sessionCalls:any[]=[];const sessionStates=new Map<string,any>();
 const sessionValue=(id:string)=>sessionStates.get(id)??{...state("ready"),sessionId:id};
 const sessionPort={
- prepare:(options:any)=>{sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
+ prepare:(options:any)=>{if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
  play:async(id:string)=>{const v={...sessionValue(id),state:"playing"};sessionStates.set(id,v);return v;},
  retire:async(id:string)=>{const v={...sessionValue(id),state:"prewarmed",muted:true};sessionStates.set(id,v);return v;},
  pause:async(id:string)=>{const v={...sessionValue(id),state:"paused"};sessionStates.set(id,v);return v;},
@@ -274,13 +275,14 @@ test('DYFIX first-frame callback waits for a decoded frame after prepare and aft
  }finally{video.play=originalPlay;}
 });
 
-test('DYFIX standby decode failure keeps video sessions available; capacity failure degrades them',async()=>{
- for(const code of ['decode_error','video_decoder_limit']){
+test('DYFIX standby failures retain foreground sessions while capacity one degrades them',async()=>{
+ for(const [code,limit] of [['decode_error',2],['video_decoder_limit',2],['video_decoder_limit',1],['resource_exhausted',2],['resource_exhausted',1]] as const){
+  pressureLimit=limit;
   sessionsCapable=true;decoderLimit=2;sessionPrepareError={code};prepares=[];sessionReleases=0;current=state('ready');initial='available';
   createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'active',url:'https://fixture/active',title:'active'},width:233,height:233,active:true,offset:0,round:true,onPrepareAdjacent:async()=>({key:'next',source:{platform:'douyin',immersive:true,awemeId:'next',url:'https://fixture/next',title:'next'}})});});
   for(let i=0;i<6;i++)await flush();
-  if(code==='decode_error'){expect(prepares).toHaveLength(0);expect(sessionReleases).toBe(2);}else{expect(prepares).toHaveLength(1);expect(sessionReleases).toBeGreaterThan(0);}
-  stops.splice(0).forEach(stop=>stop());await flush();
+  expect(prepares).toHaveLength(limit===1?1:0);expect(sessionReleases).toBeGreaterThan(0);
+  stops.splice(0).forEach(stop=>stop());await flush();pressureLimit=undefined;
  }
 });
 
@@ -415,4 +417,40 @@ test('PREWARM no ring for CPU wait, unknown buffer, positive buffer, or healthy 
    stops.pop()!();await flush();
   }
  }finally{Date.now=realNow;}
+});
+
+test('DYFIX one fast fling skips one item and prewarms both target neighbours',async()=>{
+ const original=(globalThis as any).pod,marks:any[]=[];let seq=100;
+ (globalThis as any).pod={benchmark:(line:string)=>{const e=JSON.parse(line);marks.push(e);return e.seq??++seq;}};
+ sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
+ const realNow=Date.now;let time=1000;Date.now=()=>time;
+ try{
+  const source=(id:number)=>({platform:'douyin' as const,immersive:true,awemeId:String(id),url:'managed/'+id,title:String(id)});
+  let selected=10;const requests:number[]=[];
+  createRoot(stop=>{stops.push(stop);const [current,setCurrent]=createSignal(source(selected));return VideoPlayerScreen({get source(){return current();},width:233,height:233,active:true,offset:0,round:true,onNext:async()=>{},onPrevious:async()=>{},
+   onPrepareAdjacent:async(direction,distance=1)=>{const id=selected+(direction==='next'?distance:-distance);requests.push(id);return {key:String(id),source:source(id)};},
+   onPromoteAdjacent:async target=>{selected=Number(target.key);setCurrent(target.source as ReturnType<typeof source>);return true;}});});await flush();await flush();
+  const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-120});g.onPanEnd({vy:-2400});await flush();
+  for(let i=0;i<20&&selected===10;i++){time+=16;ticks.splice(0).forEach(f=>f());await flush();}
+  await flush();expect(selected).toBe(12);expect(requests).toContain(11);expect(requests).toContain(13);
+  expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);
+  expect(sessionCalls.find(c=>c.method==='promote').benchmark.delta).toBe(2);
+  expect(marks.find(e=>e.code==='gesture_release')).toMatchObject({direction:'fling',delta:2});
+  expect(sessionCalls.filter(c=>c.method==='prepare').map(c=>c.url)).toContain('managed/11');
+  expect(sessionCalls.filter(c=>c.method==='prepare').map(c=>c.url)).toContain('managed/13');
+ }finally{Date.now=realNow;(globalThis as any).pod=original;}
+});
+
+test('DYFIX slow two-item resolution includes the wait in release timing and stale exit cannot promote',async()=>{
+ sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
+ const original=(globalThis as any).pod,marks:any[]=[];let seq=100;
+ (globalThis as any).pod={benchmark:(line:string)=>{const e=JSON.parse(line);marks.push(e);return e.seq??++seq;}};
+ let resolve!:(v:any)=>void;const gate=new Promise<any>(r=>resolve=r);
+ try{
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'a',url:'managed/a',title:'a'},width:233,height:233,active:true,offset:0,round:true,onNext:async()=>{},onPrepareAdjacent:async(_direction,distance=1)=>distance===2?gate:{key:'b',source:{platform:'douyin',immersive:true,awemeId:'b',url:'managed/b',title:'b'}}});});
+  await flush();const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-120});g.onPanEnd({vy:-2400});await flush();
+  expect(marks.find(e=>e.code==='gesture_release')).toMatchObject({direction:'fling',delta:2});
+  stops.pop()!();resolve({key:'c',source:{platform:'douyin',immersive:true,awemeId:'c',url:'managed/c',title:'c'}});await flush();
+  expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(0);
+ }finally{(globalThis as any).pod=original;}
 });

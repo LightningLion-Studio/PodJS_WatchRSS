@@ -89,7 +89,7 @@ describe("Douyin video sessions",()=>{
     await pool.prepare(source("1"),{...source("1").source,bounds}).result;
     await pool.releaseAll();
     expect(port.calls.filter(call=>call.method==="release")).toHaveLength(3);
-    expect(new Set(port.calls.filter(call=>call.method==="release").map(call=>call.sessionId)).size).toBe(2);
+    expect(new Set(port.calls.filter(call=>call.method==="release").map(call=>call.sessionId)).size).toBe(3);
   });
 });
 

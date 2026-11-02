@@ -2,7 +2,7 @@ import {VideoSessionPool} from '@podjs/framework/video-session-pool';
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { DouyinItem } from "../../douyin/types.ts";
 
-export {VIDEO_PAGER_SNAP_POSITIONAL_THRESHOLD as DOUYIN_PAGER_SNAP_POSITIONAL_THRESHOLD,VIDEO_PAGER_MIN_FLING_VELOCITY as DOUYIN_PAGER_MIN_FLING_VELOCITY,VIDEO_PAGER_SETTLE_DURATION_MS as DOUYIN_PAGER_SETTLE_DURATION_MS,videoPagerProgress as douyinPagerProgress,shouldSettleVideoPager as shouldSettleDouyinPager,videoPagerSettleProgress as douyinPagerSettleProgress} from '@podjs/framework/video-paging';
+export {videoPagerDelta as douyinPagerDelta,VIDEO_PAGER_SNAP_POSITIONAL_THRESHOLD as DOUYIN_PAGER_SNAP_POSITIONAL_THRESHOLD,VIDEO_PAGER_MIN_FLING_VELOCITY as DOUYIN_PAGER_MIN_FLING_VELOCITY,VIDEO_PAGER_SETTLE_DURATION_MS as DOUYIN_PAGER_SETTLE_DURATION_MS,videoPagerProgress as douyinPagerProgress,shouldSettleVideoPager as shouldSettleDouyinPager,videoPagerSettleProgress as douyinPagerSettleProgress} from '@podjs/framework/video-paging';
 export type DouyinPagerDirection = 'up'|'down';
 export interface DouyinPreparedSource {key:string;source:PlaybackSource}
 
@@ -22,7 +22,7 @@ export function shouldUseDouyinVideoSessions(source:PlaybackSource,capable:boole
 
 export function shouldFallbackFromVideoSessions(error:unknown):boolean {
   const code=String((error as {code?:unknown}|null)?.code??'');
-  return /session_limit|decoder_(?:capacity|limit|unavailable)|resource_busy|too_many_sessions|session_(?:unavailable|unsupported)|capability_missing/i.test(code+' '+String(error));
+  return /session_limit|decoder_(?:capacity|limit|unavailable)|resource_busy|resource_exhausted|too_many_sessions|session_(?:unavailable|unsupported)|capability_missing/i.test(code+' '+String(error));
 }
 
 /** Business metadata only; retained surface ownership lives in the framework. */

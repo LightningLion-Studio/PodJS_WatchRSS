@@ -42,3 +42,11 @@ test('PREWARM opposite previews resolve concurrently without cancelling each oth
  pending.get('3')!({ok:true,data:item('3')});pending.get('1')!({ok:true,data:item('1')});
  expect(await staleNext).toMatchObject({ok:false,code:'CANCELLED'});expect(await stalePrev).toMatchObject({ok:false,code:'CANCELLED'});expect(queue.snapshot().item?.awemeId).toBe('3');
 });
+
+for(const direction of ['next','previous'] as const)test(`DYFIX ${direction} two-item preview skips resolution and commits only the target`,async()=>{
+ const resolved:string[]=[];const client={async resolvePlayback(id:string){resolved.push(id);return {ok:true as const,data:item(id)};}} as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:['0','1','2','3','4'].map(item),selectedAwemeId:'2',hasMore:false});
+ const target=direction==='next'?'4':'0',preview=await q.preview(direction,2);
+ expect(preview).toMatchObject({ok:true,data:{item:{awemeId:target}}});expect(q.snapshot().item?.awemeId).toBe('2');
+ expect(resolved).toEqual([target]);q.commitPreview(target);expect(q.snapshot().item?.awemeId).toBe(target);
+});

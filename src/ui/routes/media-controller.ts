@@ -456,9 +456,10 @@ export function createMediaRouteController(
   const prepareDouyinAdjacent = async (
     entry:RouteEntry,
     direction:"next"|"previous",
+    distance:1|2=1,
   ):Promise<DouyinPreparedSource|undefined> => {
     if(!entry.queue||dependencies.current()!==entry)return;
-    const result=await entry.queue.preview(direction);
+    const result=await entry.queue.preview(direction,distance);
     if(dependencies.current()!==entry||!result.ok)return;
     const headers=await douyinClient.buildPlaybackHeaders();
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);

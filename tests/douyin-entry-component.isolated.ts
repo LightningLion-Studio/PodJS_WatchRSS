@@ -133,7 +133,7 @@ test('failed expired anchor replenishes the preload window with fresh feed witho
 for(const mode of ['authenticated','unknown'] as const)test(`temporary ${mode} 403 keeps login and retries only when the cooldown timer expires`,async()=>{
  const f=mount({auth403:{sleep:async()=>{},probe:async()=>mode}});await requestReady(f);
  f.requests[0]!.reply.resolve(response([],403));await requestReady(f,2);f.requests[1]!.reply.resolve(response([],403));await settled(f);
- expect(f.text()).toContain('抖音暂时不可用，请稍后重试');expect(f.data.has('douyin.cookie')).toBe(true);expect(f.routes).toEqual([]);expect(retryTimers.filter(t=>!t.cancelled)).toHaveLength(1);const scheduled=retryTimers.find(t=>!t.cancelled)!;expect(scheduled.ms).toBe(30000);
+ expect(f.text()).toContain('抖音暂时不可用，请稍后重试');expect(f.data.has('douyin.cookie')).toBe(true);expect(f.routes).toEqual([]);expect(retryTimers.filter(t=>!t.cancelled&&t.ms===30000)).toHaveLength(1);const scheduled=retryTimers.find(t=>!t.cancelled&&t.ms===30000)!;expect(scheduled.ms).toBe(30000);
  f.press();await settled(f);expect(f.requests).toHaveLength(2);expect(scheduled.cancelled).toBe(true);
  f.advance(30000);retryTimers.at(-1)!.fire();await requestReady(f,3);f.requests[2]!.reply.resolve(response(['after-cooldown']));await settled(f);
  f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('after-cooldown');expect(f.data.has('douyin.cookie')).toBe(true);
@@ -171,4 +171,19 @@ test('DYBENCH entry requests native needs_login presentation and cancels it on d
   expect(begin).toBeDefined();expect(present?.seq).toBe(begin.seq);expect(events.some(x=>x.code==='refreshing')).toBe(false);
   f.setActive(false);await settle();expect(events.some(x=>x.code==='needs_login'&&x.cancel_presented&&x.seq===begin.seq)).toBe(true);
  }finally{(globalThis as any).pod=before;}
+});
+
+for(const cacheCount of [0,2])test(`DYFIX bounded never-settling feed preserves cached entry (${cacheCount})`,async()=>{
+ const f=mount({cacheCount});await requestReady(f);
+ const timeout=retryTimers.find(t=>t.ms===8000&&!t.cancelled)!;expect(timeout).toBeDefined();
+ timeout.fire();await settle();expect(f.text()).not.toContain('刷新中');expect(f.data.has('douyin.cookie')).toBe(true);
+ if(cacheCount){f.swipe(-80);await settle();expect(f.plays[0]?.item.awemeId).toBe('1');}
+ f.requests[0]!.reply.resolve(response(['late']));for(let i=0;i<20;i++)await settle();
+ expect(f.text()).not.toContain('刷新中');if(cacheCount){f.swipe(-80);await settle();expect(f.plays.at(-1)?.item.awemeId).toBe('1');}
+});
+
+test('DYFIX entry never waits on unrelated history migration',async()=>{
+ const f=mount();f.client.prepareHistory=()=>new Promise(()=>{});await requestReady(f);
+ expect(f.requests.length).toBe(1);f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);
+ expect(f.text()).not.toContain('刷新中');f.press();await settle();expect(f.plays[0]?.item.awemeId).toBe('fresh');
 });

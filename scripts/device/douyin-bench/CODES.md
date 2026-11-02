@@ -123,9 +123,9 @@ adds these codes to the production native/guest allowlists and the collector:
 | `prewarm_evicted`, `reason` | Slot invalidated: `stale`, `capacity`, `release`, `failure`, or `timeout`. |
 | `background_gate`, `state`, `reason` | Native foreground-media owner pauses/resumes background admission. `paused/foreground_media` and `running/media_stopped`; running means admission reopened, not a restore ACK. |
 | `restore_state` | Native worker heartbeat each second, including media wait. `running` means an active worker, `paused` means foreground-media policy holds it. End emits `unknown`. This does not establish logical idle or provide coordinator coverage between windows. |
-| `spinner_shown`, `buffered_ms` | Ring committed only with zero buffered duration and a native outstanding network transfer without byte progress for 800ms. Unknown buffer is not treated as zero. |
+| `spinner_shown`, `buffered_ms`, `network_stalled`, `reason` | Visible ring commit includes `buffered_ms=0 network_stalled=true reason=network_stalled`. The boolean comes from native transfer progress (800ms without bytes). Missing fields remain PENDING; false stall or positive buffer is FAIL. |
 | `error_page`, `reason` | `candidate_retry` means the player suppresses a transient overlay while same-item recovery runs. `exhausted` means terminal overlay. The collector stops before another swipe on this state. `player_visible` also becomes absent for error/network overlays. |
-| `fling_done`, `delta=1` | A native retained-slot promotion survives decoded-frame presentation commits. Current paging advances one item per gesture. This does **not** satisfy the existing two-index fling requirement (`delta=2`); thresholds stay unchanged. |
+| `fling_done`, `delta=2` | A fast release (at least 1800 px/s) selects the item two positions away without committing the intermediate item. Native emits completion only after target-frame commits and guest cover removal. The release timestamp precedes target resolution/prewarm. At a queue boundary a single-item fallback has no two-item completion. |
 
 All fields remain closed enums, booleans or nonnegative integers. This candidate
 does not add mixer/PCM evidence and does not turn hidden first frames into

@@ -10,8 +10,8 @@ BROWSER_CODES = set('requested opened page_started page_finished qr_ready comple
 # Proposed contract, not evidence that the shipping app emits these codes.
 CODES = set('entry_start first_card home_entry refresh_start refresh_done gesture_down gesture_release previous_audio_stopped incoming_first_frame spinner_shown snap_back fling_done mute_changed player_audio_applied mixer_match login_entry scan_accepted auth_persisted logout_start logout_feedback needs_login refreshing login_tap auth_cleared restore_state qr_ready renderer_process auth_state player_visible prewarm_requested prewarm_ready prewarm_evicted prewarm_policy background_gate error_page error'.split())
 ENUMS = {'state': {'running', 'idle', 'unknown', 'present', 'absent', 'paused'}, 'direction': {'next', 'prev', 'cancel', 'fling'},
-         'muted': {'true', 'false'}, 'prewarmed': {'true', 'false'}, 'kind': {'on', 'off'},
-         'reason': {'stale','capacity','release','failure','bidirectional','single_neighbour','foreground_media','media_stopped','timeout','candidate_retry','exhausted','hidden'}, 'backend': {'mixer', 'player'}}
+         'muted': {'true', 'false'}, 'prewarmed': {'true', 'false'}, 'network_stalled': {'true', 'false'}, 'kind': {'on', 'off'},
+         'reason': {'stale','capacity','release','failure','bidirectional','single_neighbour','foreground_media','media_stopped','timeout','candidate_retry','exhausted','hidden','network_stalled'}, 'backend': {'mixer', 'player'}}
 NUMBERS = {'seq', 'attempt', 'delta', 'generation', 'pid', 'mono_ms', 'active_tracks', 'source_generation', 'buffered_ms', 'slots'}
 EPOCH = re.compile(r'^\s*(\d{9,}(?:\.\d+)?)\s+\d+\s+\d+\s+[VDIWEF]\s+([\w.-]+)\s*:\s*(.*)$')
 
@@ -79,7 +79,7 @@ def paired(events, start, end, *, where=None, require=None):
         if not all(b.get(k) == v for k, v in require.items()):
             missing += 1
             continue
-        if end in ('incoming_first_frame','snap_back') and (a.get('generation') is None or a.get('generation') != b.get('generation')):
+        if end in ('incoming_first_frame','snap_back','fling_done') and (a.get('generation') is None or a.get('generation') != b.get('generation')):
             missing += 1
             continue
         # Host monotonic timestamps prevent wall-clock jumps and logcat buffering bias.
@@ -216,6 +216,12 @@ def evaluate(events, manifest, thresholds, gfx='', memory=(), video=()):
     # These negative assertions need specific emitted UI/auth events, never absence alone.
     semantic_failure = (scenario in ('logout','login_tap') and
                         (counts['refreshing'] > 0 if scenario == 'logout' else counts['auth_cleared'] > 0))
+    spinners=[e for e in scoped if e.get('code')=='spinner_shown']
+    for spinner in spinners:
+        if spinner.get('network_stalled')=='false' or spinner.get('buffered_ms',0)>0:
+            semantic_failure=True
+        elif spinner.get('network_stalled')!='true' or spinner.get('reason')!='network_stalled' or spinner.get('buffered_ms')!=0:
+            reasons.append('spinner lacks explicit zero-buffer/network-stall proof')
     clocks = [e['mono_ms'] for e in scoped if e.get('tag')=='DYBENCH' and 'mono_ms' in e]
     bounds = (min(clocks)*1000000,max(clocks)*1000000) if len(clocks)>1 else None
     graphics = framestats(gfx, thresholds['frame_budget_ms'],bounds)

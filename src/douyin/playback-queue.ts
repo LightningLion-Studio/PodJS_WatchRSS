@@ -60,9 +60,17 @@ export class DouyinPlaybackQueue {
   }
   async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.items.slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true});}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
-  async preview(direction:"next"|"previous"):Promise<DouyinResult<DouyinPlaybackQueueState>>{
+  async preview(direction:"next"|"previous",distance:1|2=1):Promise<DouyinResult<DouyinPlaybackQueueState>>{
     const epoch=this.previewGeneration,op=++this.previewRevisions[direction],nav=this.generation;
     const current=()=>epoch===this.previewGeneration&&op===this.previewRevisions[direction]&&nav===this.generation;
+    if(distance===2){
+      const anchor=this.items[this.index]?.awemeId;
+      if(direction==='next'&&this.index+2>=this.items.length&&this.hasMore){const page=await this.loadPage();if(!current())return cancelled();if(!page.ok)return page;}
+      if(!current()||this.items[this.index]?.awemeId!==anchor)return cancelled();
+      const target=this.index+(direction==='next'?2:-2);
+      if(target<0||target>=this.items.length)return {ok:false,code:'UNSUPPORTED',message:'没有跨项视频'};
+      return this.resolvePreviewAt(target,current);
+    }
     if(direction==='previous'){
       if(this.index<=0)return {ok:false,code:'UNSUPPORTED',message:'已经是第一个视频'};
       return this.resolvePreviewAt(this.index-1,current);
