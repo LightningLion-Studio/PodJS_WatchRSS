@@ -1,3 +1,5 @@
+import {debugGate} from './debug/gate.ts';
+import type {HttpTransport} from './cloud/types.ts';
 import {backgroundResult} from './media/background-work.ts';
 import {readDouyinRequestConfig} from './douyin/request-config.ts';
 import {createDouyinLoginProbe} from './douyin/login-probe.ts';
@@ -36,18 +38,27 @@ export const biliClient=createBiliClient({watchApi:()=>readWatchConfig(kv),watch
 export const biliPreviewCache=createHostBiliPreview(biliClient);
 const douyinSecure={get:secure.get,set:secure.set,remove:secure.delete};
 const douyinRequestConfig=()=>readDouyinRequestConfig(kv,douyinSecure);
-export const douyinClient=new DouyinClient({
+const createDouyinClient=(transport:HttpTransport)=>new DouyinClient({
  requestConfig:douyinRequestConfig,
- auth403:{enabled:()=>readDouyin403Enabled(kv),probe:createDouyinLoginProbe({transport:mediaTransport,requestConfig:douyinRequestConfig})},
+ auth403:{enabled:()=>readDouyin403Enabled(kv),probe:createDouyinLoginProbe({transport,requestConfig:douyinRequestConfig})},
  onLogout:()=>clearDouyinLogoutData(managedCache, { ...browser, hasCapability }),
- transport:mediaTransport,
+ transport,
  savedStore:{list:async kind=>(await getDouyinSavedStore()).list(kind),state:async id=>(await getDouyinSavedStore()).state(id),set:async(item,kind,saved)=>(await getDouyinSavedStore()).set(item,kind,saved),toggle:async(item,kind)=>(await getDouyinSavedStore()).toggle(item,kind)},
  secureStorage:{get:secure.get,set:secure.set,remove:(key,observation)=>secure.delete(key,observation)},
  historyStorage:new DouyinSqlStateStorage(async()=>(await getExternalSavedStore()).db,{get:async key=>kv.get<string>(key)??null,set:async()=>{throw Error("Legacy Douyin data is read-only");},remove:async key=>{kv.delete(key);}})
 });
 
+let douyinTransport:HttpTransport=mediaTransport;
+const douyinTransportPort:HttpTransport={request:request=>douyinTransport.request(request)};
+export const douyinClient=createDouyinClient(douyinTransportPort);
 export const douyinStock=createHostDouyinStock(douyinClient);
 export const douyinPreload=createHostDouyinPreload(douyinClient,douyinStock);
+
+/** The fixture entry changes only transport. Existing production services keep their owners. */
+export function installDouyinDebugTransport(transport:HttpTransport){
+ debugGate.require();
+ douyinTransport=transport;
+}
 
 export async function loadLocalBiliDetail(target: import('./bili/detail.ts').DetailTarget) {
  return readLocalBiliDetail((await getExternalSavedStore()).db, target);

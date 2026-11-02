@@ -90,7 +90,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const usingSessions=()=>!!sessionPool&&!sessionsDisabled();
   const sessionSource=(source:PlaybackSource):DouyinPreparedSource=>({key:source.awemeId??source.url??source.videoUrl??"current",source});
   createEffect(()=>{props.onBluetoothAllowed?.(allowBluetooth());});
-  const networkPrompt = () => props.source.platform === "douyin" ? douyinPlayerNetwork(internet(), state()?.state === "playing" && !error(), allowBluetooth(), douyinSourceNeedsInternet(props.source.url ?? props.source.videoUrl), networkFailure(), props.source.immersive ? {hasRenderedFirstFrame:state()?.hasRenderedFirstFrame,buffering:state()?.state === "buffering" || state()?.isBuffering === true,hasError:!!error()} : undefined) : null;
+  const networkPrompt = () => props.source.platform === "douyin" ? douyinPlayerNetwork(internet(), state()?.state === "playing" && !error(), allowBluetooth(), douyinSourceNeedsInternet(props.source.url ?? props.source.videoUrl), networkFailure(), props.source.immersive ? {cacheBacked:/^podjs-media-cache:\/\//i.test(props.source.url??props.source.videoUrl??''),hasRenderedFirstFrame:state()?.hasRenderedFirstFrame,buffering:state()?.state === "buffering" || state()?.isBuffering === true,hasError:!!error()} : undefined) : null;
   onMount(() => { if (props.source.platform === "douyin") onCleanup(observeHostInternet(setInternet)); });
   const sessionOwner=Symbol("video-screen");
   createEffect(()=>{if(props.active&&props.source.platform==='douyin'&&props.source.immersive&&douyinDebug.allowed)
@@ -511,9 +511,10 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       <Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{ width: progressWidth(state()?.positionMs ?? 0, state()?.durationMs ?? 0, barWidth()) }} /><View class="absolute right-[0] top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text>
       <PlayerButton left={47.5} top={186} size={44} icon="rewind" iconSize={24} enabled={prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5} top={186} size={44} icon="forward" iconSize={24} enabled={prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
-    <Show when={networkPrompt()}>{prompt => <View class="absolute inset-0 bg-[#000000ee] items-center justify-center">
-      <Text class="text-sm text-white">{prompt().title}</Text><Text class="text-xs text-[#b6b6b6]">{prompt().detail}</Text>
-      <View class="w-[80] h-[36] rounded-[18] bg-[#2a2a2a] items-center justify-center" focusable onPress={() => {
+    <Show when={networkPrompt()}>{prompt => <View class="absolute inset-0 bg-[#000000ee]">
+      <View class="absolute" style={{insetL:uiLeft(),insetT:uiTop(),width:233,height:233,scale:uiScale(),originX:0,originY:0}}>
+      <Text class="absolute left-[26] right-[26] top-[68] text-sm leading-[18] text-white text-center">{prompt().title}</Text><Text class="absolute left-[26] right-[26] top-[96] text-xs leading-[16] text-[#b6b6b6] text-center">{prompt().detail}</Text>
+      <View class="absolute left-[76.5] top-[138] w-[80] h-[36] rounded-[18] bg-[#2a2a2a] items-center justify-center" focusable onPress={() => {
         if (prompt().action === "继续") {
           const resumeByNetwork = networkPaused;
           setAllowBluetooth(true);
@@ -521,6 +522,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
           else if (!resumeByNetwork) void media.play().then(setState).catch(failed);
         } else void retry();
       }}><Text class="text-sm text-white">{prompt().action}</Text></View>
+      </View>
     </View>}</Show>
     <Show when={volumeVisible()}><View class="absolute left-[72] right-[72] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-[21px] leading-[26] text-white">{systemVolumePercent(state()?.volumeIndex ?? Math.round((state()?.volume??0)*(state()?.volumeMax??1)),state()?.volumeMax??1)}%</Text></View></Show>
     <Show when={!volumeVisible() && loopHint()}>{hint => <View class="absolute left-[52] right-[52] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-base leading-[20] text-white">{hint()}</Text></View>}</Show>

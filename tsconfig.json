@@ -18,5 +18,8 @@
     "src/**/*.tsx",
     "tests/**/*.ts",
     "tests/**/*.tsx"
+  ],
+  "exclude": [
+    "src/dystock-fixture.tsx"
   ]
 }

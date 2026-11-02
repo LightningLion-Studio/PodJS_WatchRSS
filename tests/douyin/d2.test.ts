@@ -67,3 +67,12 @@ test('D2 WebView main-frame failures map native messages without raw text and re
   expect(loginError({code:'webview_load_-16'}).message).toBe('页面存在安全风险，已被拦截');
   expect(loginError({code:'webview_load_999'}).message).toBe('加载失败，请重试');
 });
+
+// Device regression: the network mask previously prevented autoplay at position 0.
+test('offline stock can prepare and autoplay its cached prefix, then show the actual gap',()=>{
+ const local={cacheBacked:true,hasRenderedFirstFrame:false,buffering:true,hasError:false};
+ expect(douyinPlayerNetwork('unavailable',false,false,true,false,local)).toBeNull();
+ expect(douyinPlayerNetwork('unavailable',false,false,true,false,{...local,hasRenderedFirstFrame:true,buffering:false})).toBeNull();
+ expect(douyinPlayerNetwork('unavailable',false,false,true,true,{...local,hasError:true})?.title).toBe('未检测到可用互联网');
+ expect(douyinPlayerNetwork('unavailable',false,false,true,false,{...local,cacheBacked:false})?.action).toBe('重试');
+});
