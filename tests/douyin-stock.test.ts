@@ -60,3 +60,30 @@ test('concurrent persisted readiness reads retain feed order and a consumed late
  completions.get('c')!('cache:c');completions.get('b')!('cache:b');completions.get('a')!('cache:a');expect((await pending).map(i=>i.awemeId)).toEqual(['a','b','c']);
  const late=stock.ready('b');while(!completions.get('b'))await Promise.resolve();stock.consume('b');completions.get('b')!('cache:b');expect(await late).toBeUndefined();
 });
+
+test('consumed inventory keeps a checked in-process playback source without returning to durable stock',async()=>{
+ const f=fixture(),stock=new DouyinStock(f.ports);await stock.resume();const before=f.counts();stock.consume('a');
+ expect(await stock.lookup('a')).toBeUndefined();expect((await stock.playbackReady('a'))?.uri).toBe('cache:a');expect(f.counts()).toEqual(before);
+ expect((await stock.restore()).map(i=>i.awemeId)).toEqual(['b','c']);expect((f.disk() as any[]).map(e=>e.item.awemeId)).toEqual(['b','c']);
+ expect(await new DouyinStock(f.ports).playbackReady('a')).toBeUndefined();
+ f.bytes.delete('a');expect(await stock.playbackReady('a')).toBeUndefined();f.bytes.set('a',new Uint8Array([1]));f.frames.delete('a');expect(await stock.playbackReady('a')).toBeUndefined();
+});
+test('playback records expire and clearing cache fences an in-flight consumed source',async()=>{
+ const f=fixture(),stock=new DouyinStock(f.ports);await stock.resume();stock.consume('a');
+ f.setNow(9999999999000);expect(await stock.playbackReady('a')).toBeUndefined();
+ f.setNow(1000);stock.consume('b');let finish!:(value:string)=>void;f.ports.lookup=()=>new Promise(yes=>finish=yes);
+ const pending=stock.playbackReady('b');while(!finish)await Promise.resolve();stock.clear();finish('cache:b');expect(await pending).toBeUndefined();expect(await stock.playbackReady('b')).toBeUndefined();
+});
+test('process-local playback history keeps at most six sources',async()=>{
+ const f=fixture();f.ports.feed=async()=>Array.from({length:12},(_,i)=>item(String(i)));const stock=new DouyinStock(f.ports);await stock.resume();
+ for(let i=0;i<8;i++){stock.consume(String(i));await stock.resume();}
+ expect(await stock.playbackReady('0')).toBeUndefined();expect(await stock.playbackReady('1')).toBeUndefined();
+ for(let i=2;i<8;i++)expect((await stock.playbackReady(String(i)))?.uri).toBe('cache:'+i);
+});
+
+test('clearing inventory rejects pending ready and restore results before they become playback sources',async()=>{
+ const f=fixture();await new DouyinStock(f.ports).resume();let finish!:(value:string)=>void;f.ports.lookup=()=>new Promise(yes=>finish=yes);
+ const stock=new DouyinStock(f.ports),ready=stock.ready('a');while(!finish)await Promise.resolve();stock.clear();finish('cache:a');expect(await ready).toBeUndefined();
+ const g=fixture();await new DouyinStock(g.ports).resume();const readers:((value:string)=>void)[]=[];g.ports.lookup=()=>new Promise(yes=>readers.push(yes));
+ const restored=new DouyinStock(g.ports),pending=restored.restore();while(readers.length<3)await Promise.resolve();restored.clear();readers.forEach(finish=>finish('cache:old'));expect(await pending).toEqual([]);
+});

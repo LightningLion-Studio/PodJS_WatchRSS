@@ -84,3 +84,22 @@ test('an empty legacy bucket does not run its producer clear or touch persistent
  const host=createHostDouyinPreload({resolvePlayback:async()=>({ok:true,data:items[0]}),buildPlaybackHeaders:async()=>({})}as any);const before=oldClears;legacyBytes=0;
  try{expect(await host.playback(items[0]as any,{})).toBe('podjs-media-cache://play/a.mp4');expect(oldClears).toBe(before);}finally{legacyBytes=484675145;host.stop();}
 });
+
+test('consuming the visible stock item preserves cached current and previous window without detail',async()=>{
+ const {DouyinStock}=await import('../src/douyin/stock.ts');
+ windows=[];registrations=[];legacyBytes=0;const resolved:string[]=[];
+ let disk:any=items.slice(0,3).map(item=>({item,expiresAt:Date.now()+60000,prefixBytes:1024,tailBytes:512}));
+ const ports={read:()=>structuredClone(disk),write:(entries:any)=>{disk=structuredClone(entries);},now:Date.now,allowed:async()=>false,watched:async()=>[],feed:async()=>[],prepare:async()=>{throw Error('unexpected prepare');},lookup:async(entry:any)=>({uri:`podjs-media-cache://play/stock-${entry.item.awemeId}.mp4`,frame:{available:true as const,kind:'actual_frame' as const,path:'video-frames/fixture.jpg',width:16,height:16,positionMs:0,capturedAt:1,capturedGeneration:0}}),cancel(){}};
+ const stock=new DouyinStock(ports),client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>{resolved.push(id);return {ok:false,code:'REQUEST_FAILED',message:'network forbidden'};}};
+ const host=createHostDouyinPreload(client as any,stock),owner={};host.allowBluetooth(true,owner);
+ try{
+  expect((await stock.restore()).map(item=>item.awemeId)).toEqual(['a','b','c']);
+  expect((await host.readySource(items[0] as any,{}))?.url).toBe('podjs-media-cache://play/stock-a.mp4');
+  stock.consume('a');host.start(owner,items.slice(0,3) as any,'a','active');await flush();
+  expect(resolved).toEqual([]);expect(windows.at(-1).items.map((value:any)=>value.uri)).toEqual(['a','b','c'].map(id=>`podjs-media-cache://play/stock-${id}.mp4`));
+  expect(windows.at(-1).items.every((value:any)=>value.prefetchBytes===0)).toBe(true);
+  stock.consume('b');host.start(owner,items.slice(0,3) as any,'b','active');await flush();
+  expect(resolved).toEqual([]);expect(windows.at(-1).items.map((value:any)=>value.uri)).toContain('podjs-media-cache://play/stock-a.mp4');
+  expect(registrations).toHaveLength(0);expect((await new DouyinStock(ports).restore()).map(item=>item.awemeId)).toEqual(['c']);
+ }finally{host.stop(owner);legacyBytes=484675145;}
+});

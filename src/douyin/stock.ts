@@ -37,6 +37,8 @@ export class DouyinStock {
  private entries:StockEntry[]=[];
  private epoch=0;private running?:Promise<void>;private enabled=false;
  private consumed=new Set<string>();
+ // Removing durable inventory must not revoke the playing/previous cache source.
+ private playbackEntries=new Map<string,StockEntry>();
  constructor(private ports:StockPorts){
   const saved=ports.read();if(Array.isArray(saved))this.entries=saved.filter(validEntry).slice(0,STOCK_COUNT);
  }
@@ -51,16 +53,27 @@ export class DouyinStock {
   ready.push(...restored.filter((entry):entry is StockEntry=>!!entry));
   // Merge with a concurrent completed refill; never overwrite newer state.
   if(original===this.entries){this.entries=ready.filter(e=>this.fresh(e));this.save();}
-  return ready.filter(e=>this.fresh(e)).map(e=>e.item);
+  return ready.filter(e=>this.entries.includes(e)&&this.fresh(e)).map(e=>e.item);
  }
  async ready(id:string,headers?:Record<string,string>):Promise<StockReadySource|undefined>{
   const entry=this.entries.find(e=>e.item.awemeId===id&&this.fresh(e));
   if(!entry)return undefined;
-  try{const value=await this.ports.lookup(entry,headers);return this.fresh(entry)&&value?{...(typeof value==='string'?{uri:value}:value),item:entry.item}:undefined;}catch{return undefined;}
+  try{const value=await this.ports.lookup(entry,headers);return this.entries.includes(entry)&&this.fresh(entry)&&value?{...(typeof value==='string'?{uri:value}:value),item:entry.item}:undefined;}catch{return undefined;}
  }
  async lookup(id:string):Promise<string|undefined>{return (await this.ready(id))?.uri;}
- consume(id:string){this.consumed.add(id);this.entries=this.entries.filter(e=>e.item.awemeId!==id);this.save();}
- clear(){this.suspend();this.entries=[];this.consumed.clear();this.save();}
+ async playbackReady(id:string,headers?:Record<string,string>):Promise<StockReadySource|undefined>{
+  const stocked=await this.ready(id,headers);if(stocked)return stocked;
+  const entry=this.playbackEntries.get(id);if(!entry)return undefined;
+  const current=()=>this.playbackEntries.get(id)===entry&&this.ports.now()<entry.expiresAt;
+  if(!current()){this.playbackEntries.delete(id);return undefined;}
+  try{const value=await this.ports.lookup(entry,headers);return current()&&value?{...(typeof value==='string'?{uri:value}:value),item:entry.item}:undefined;}catch{return undefined;}
+ }
+ consume(id:string){
+  const entry=this.entries.find(e=>e.item.awemeId===id&&this.fresh(e));
+  if(entry){this.playbackEntries.delete(id);this.playbackEntries.set(id,entry);while(this.playbackEntries.size>STOCK_COUNT*2)this.playbackEntries.delete(this.playbackEntries.keys().next().value!);}
+  this.consumed.add(id);this.entries=this.entries.filter(e=>e.item.awemeId!==id);this.save();
+ }
+ clear(){this.suspend();this.entries=[];this.playbackEntries.clear();this.consumed.clear();this.save();}
  suspend(){this.enabled=false;this.epoch++;this.ports.cancel();}
  async networkChanged():Promise<void>{
   const own=this.epoch,allowed=await this.ports.allowed();
