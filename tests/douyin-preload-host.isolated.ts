@@ -115,3 +115,16 @@ test('consuming the visible stock item preserves cached current and previous win
   expect(windows.at(-1).items.some((x:any)=>x.uri===oldD.uri)).toBe(true);
   release({ok:true,data:items[3]});await flush();host.stop(owner);
  });
+
+test('DYNEXT media registration metadata stays within the native cache window over 200 distinct sources',async()=>{
+ const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,o:any)=>({ok:true,data:o.feedItem})};
+ const host=createHostDouyinPreload(client as any);
+ for(let i=0;i<200;i++){
+  const item={...items[0],awemeId:String(i),playUrl:`https://fixture.invalid/${i}`,description:'fixture'.repeat(1000),variants:[]};
+  await host.playback(item as any,{});
+ }
+ const retained=Array.from({length:200},(_,i)=>host.sourceFor(`podjs-media-cache://play/${i}.mp4`)).filter(Boolean);
+ expect(retained).toHaveLength(16);
+ expect(host.sourceFor('podjs-media-cache://play/199.mp4')?.awemeId).toBe('199');
+ host.stop();expect(host.sourceFor('podjs-media-cache://play/199.mp4')).toBeUndefined();
+});

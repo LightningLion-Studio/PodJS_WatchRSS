@@ -12,7 +12,7 @@ import {appLogger} from '../logs/app-logger.ts';
 import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
 import {douyinPreloadAllowed} from './preload.ts';
-import {douyinProxyWindow,douyinPrefetchBytes,douyinPreviewBytes} from './proxy-policy.ts';
+import {DOUYIN_PROXY,douyinProxyWindow,douyinPrefetchBytes,douyinPreviewBytes} from './proxy-policy.ts';
 import {selectPreferredDouyinVariant,applyPreferredDouyinPlayback} from './playback-selector.ts';
 
 export interface DouyinPrefetchHooks {
@@ -30,7 +30,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const results=new DouyinPrefetchResults(Date.now,saved);let resultOff:(()=>void)|undefined,token=0;
  const foreground=(id:string)=>plan?.hooks?.isForeground(id)??(plan?.mode==='active'&&plan.anchor===id);
  const sources=new Map<string,DouyinItem>();
- const remember=(uri:string,item:DouyinItem)=>{sources.set(uri,item);while(sources.size>200)sources.delete(sources.keys().next().value!);return uri;};
+ const remember=(uri:string,item:DouyinItem)=>{sources.delete(uri);sources.set(uri,item);while(sources.size>DOUYIN_PROXY.entryLimit)sources.delete(sources.keys().next().value!);return uri;};
  const bluetoothOwners=new Set<unknown>();
  let ownerHeaders:{owner:unknown;authorization:number;value:Promise<Record<string,string>>}|undefined;
  const headersForOwner=()=>{const authorization=client.playbackAuthorizationVersion?.()??0;if(ownerHeaders&&ownerHeaders.owner===owner&&ownerHeaders.authorization===authorization)return ownerHeaders.value;
@@ -102,7 +102,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  };
  const stop=(expected?:unknown)=>{
   if(expected!==undefined){bluetoothOwners.delete(expected);if(expected!==owner)return;}else bluetoothOwners.clear();
-  published.clear();results.begin();resultOff?.();resultOff=undefined;generation++;networkGeneration++;lastAllowed=undefined;ownerHeaders=undefined;owner=undefined;plan=undefined;unsubscribe?.();unsubscribe=undefined;
+  sources.clear();published.clear();results.begin();resultOff?.();resultOff=undefined;generation++;networkGeneration++;lastAllowed=undefined;ownerHeaders=undefined;owner=undefined;plan=undefined;unsubscribe?.();unsubscribe=undefined;
   void mediaPrefixCache.window([]).result.catch(()=>{});
  };
  const networkChanged=()=>{const op=++networkGeneration;void allowed().then(value=>{if(op!==networkGeneration||!plan||value===lastAllowed)return;void run(++generation).catch(()=>appLogger.w('DouyinProxy','window failed'));}).catch(()=>{});};

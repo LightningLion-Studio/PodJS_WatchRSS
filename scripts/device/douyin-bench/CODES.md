@@ -258,3 +258,15 @@ real commit; a reason alone does not prove a decoded frame or mixer behavior.
 `previous_audio_stopped backend=audiotrack audio_ack=pause|flush audio_track_state=paused|stopped` is emitted only by the native Media3 sink after reading the outgoing AudioTrack. It carries `seq`, `generation`, `source_generation` and native `mono_ms`. Pairing requires the same process and both generations. Missing tracks, incomplete acknowledgements and player getter events never satisfy this metric. This is a track pause acknowledgement, not physical speaker silence. The next/prev/fling old-stop metric accepts this backend as well as the existing mixer backend; system-mute metrics still require mixer evidence.
 
 `decoder_admission` is native-only. `admission_reason` is closed to allowed/memory/codec/lease. Numeric capacity, decoder, keyframe, trim and headroom fields diagnose admission; they are not first-frame or audio proof. No URL, item identity or credentials belong in either event.
+
+### Native release-frame observation
+
+`release_frame` is sampled at native ACTION_UP, before guest dispatch or promotion.
+It is paired once by the outgoing session and source generation. A newer pointer
+invalidates an unpaired snapshot. `decoded_visible` requires a decoded, latched
+target (or retained decoded bitmap), an intersecting visible focused view and no
+last-frame overlay. `playback_ready` independently requires a live decoded target
+with Media3 STATE_READY. `frame_kind` is live/cached/none; `target_generation` and
+`source_ordinal` identify the incoming source without logging URLs. A two-item
+fling cannot count the one-item drag target. Missing observations are unknown.
+This is a native composition-state observation, not a panel-camera measurement.

@@ -312,6 +312,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   const warmEarly=()=>{
     if(!usingSessions()||!props.onPrepareAdjacent)return;const revision=neighborRevision;
+    // Start nearest transport/decode as soon as the selected page is published.
+    // Metadata for +2 registers its prefix before it reaches the live slot.
+    void warmForward().catch(()=>{});
     for(const direction of ['next','previous']as const)for(const distance of [1,2]as const){
       if(props.onAdjacentKey&&!props.onAdjacentKey(direction,distance))continue;
       void previewAdjacent(direction,revision,false,distance).then(target=>{if(revision!==neighborRevision||!target||distance!==1)return;if(direction==='next')forwardTarget=target;else backwardTarget=target;}).catch(()=>{});
@@ -354,10 +357,10 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   const warmForward=():Promise<DouyinPreparedSource|undefined>=>{
     if(usingSessions()&&props.onAdjacentKey){const keys=([['next',1],['previous',1],['next',2],['previous',2],['next',3],['next',4],['next',5]] as const).map(([d,n])=>props.onAdjacentKey!(d,n)).filter((key):key is string=>!!key);sessionPool!.retainNeighbours(keys);}
-    warmBackward();warmDeep();
+    void Promise.resolve().then(warmBackward);warmDeep();
     if(!props.onPrepareAdjacent)return Promise.resolve(undefined);
     if(forwardTarget&&(!usingSessions()||sessionPool!.hasStandby(forwardTarget.key)))return Promise.resolve(forwardTarget);
-    if(forwardResolved&&!forwardTarget)return Promise.resolve(undefined);
+    if(!usingSessions()&&forwardResolved&&!forwardTarget)return Promise.resolve(undefined);
     if(forwardWarm)return forwardWarm;
     const revision=neighborRevision;
     const pending=(usingSessions()?prepareAdjacent("next",revision):previewAdjacent("next",revision)).then(target=>{if(revision!==neighborRevision)return;forwardResolved=true;if(target)forwardTarget=target;return target;}).finally(()=>{if(forwardWarm===pending)forwardWarm=undefined;});
@@ -456,6 +459,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       const selectedDelta=requestedDelta===2?2:1;
       if(pendingBenchmark)pendingBenchmark.delta=selectedDelta;
       const from=props.source;
+      const selectedKey=props.onAdjacentKey?.(direction==='up'?'next':'previous',selectedDelta);
+      const authorized=selectedDelta===1?(sessionPool?.preparingSourceFor(selectedKey)??(direction==='up'?forwardTarget:backwardTarget)):undefined;
       const decoded=selectedDelta===1&&usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)?dragTarget:undefined;
       const ownGeneration=++generation;neighborRevision++;dragRevision++;
       prepareOp?.cancel();pollTimer?.cancel();recoveryDeadline.cancel();
@@ -464,8 +469,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         // Publication must retain this exact source to use its decoded surface.
         // The route rejects changed authorization and stale neighbour identity.
         if(decoded)preparedSource=decoded.source;
-        props.onSelectTarget!(direction==='up'?'next':'previous',selectedDelta,decoded);
-        sessionPool?.traceSelection(props.onAdjacentKey&&props.source===from?undefined:sessionSource(props.source).key,pendingBenchmark);
+        props.onSelectTarget!(direction==='up'?'next':'previous',selectedDelta,decoded??(authorized?.key===selectedKey?authorized:undefined));
         if(decoded&&props.source===decoded.source){
           const action=pendingBenchmark;pendingBenchmark=undefined;
           autoplayAllowed=props.active&&lifecycle()==='active';
@@ -478,7 +482,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
             if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;
             resetViewing(decoded.source);lastPlaybackState="";
             playbackTrace?.event('exit');playbackTrace=takeVideoResolution(decoded.source.url??decoded.source.videoUrl??'',decoded.source.platform??'rss');playbackTrace.event('prepare');
-            setState(next);setFirstFrame(next.hasRenderedFirstFrame===true);setReady(true);
+            setState(next);setFirstFrame(next.hasRenderedFirstFrame===true||next.hasCachedFirstFrame===true);setReady(true);
             let painted:HostOperation<unknown>;
             try{painted=afterPaint();}catch{painted=delay(100);}
             void painted.result.then(()=>{
@@ -494,6 +498,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
           sessionPool?.retainNeighbours([sessionSource(props.source).key]);setHandoff(false);
         }
       });
+      // Read reactive props after the batch publishes the new selection.
+      sessionPool?.traceSelection(props.source===from?undefined:sessionSource(props.source).key,pendingBenchmark);
       if(props.source===from)setHandoff(false);
       return;
     }
@@ -541,7 +547,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         // Install ownership BEFORE publishing the reactive source. Publication
         // must not schedule another prepare/release of the surface on screen.
         let publication:Promise<boolean>|undefined;
-        batch(()=>{preparedSource=promoted.source.source;publication=props.onPromoteAdjacent?.(promoted.source);setState(promoted.state);setReady(true);setFirstFrame(promoted.state.hasRenderedFirstFrame===true);setError("");setSpinnerDue(false);clearDrag();});
+        batch(()=>{preparedSource=promoted.source.source;publication=props.onPromoteAdjacent?.(promoted.source);setState(promoted.state);setReady(true);setFirstFrame(promoted.state.hasRenderedFirstFrame===true||promoted.state.hasCachedFirstFrame===true);setError("");setSpinnerDue(false);clearDrag();});
         forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;forwardResolved=false;
         playbackTrace?.event('exit');playbackTrace=takeVideoResolution(promoted.source.source.url??promoted.source.source.videoUrl??'',promoted.source.source.platform??'rss');playbackTrace.event('prepare');resetViewing(promoted.source.source);lastPlaybackState="";preparedSource=promoted.source.source;setState(promoted.state);setReady(true);setError("");checkpointPosition=promoted.state.positionMs;checkpointDuration=promoted.state.durationMs;virtualVolume=promoted.state.volume;observedVolume=promoted.state.volume;
         emitCheckpoint("ready",promoted.state.positionMs,promoted.state.durationMs);clearDrag();neighborRevision++;if(delta===2)sessionPool!.retainNeighbours([]);void requestTransform();void warmForward();void poll(ownGeneration);

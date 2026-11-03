@@ -556,7 +556,7 @@ export function createMediaRouteController(
     if(!stillAdjacent())return;
     return {key:result.data.item.awemeId,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
-      url,title:result.data.item.description,headers,
+      url,previewOnly:false,previewFrame:undefined,resumePositionMs:0,title:result.data.item.description,headers,
       ...douyinDecoderProfile(result.data.item),
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
     }};
@@ -571,6 +571,7 @@ export function createMediaRouteController(
       else if(direction==='next')void changeDouyinVideo(entry,direction).catch(()=>{});
       return;
     }
+    startDouyinWindow(entry);
     void queue.fillAhead().catch(()=>{});
     const item=result.data.item,old=entry.playback!;
     // The player supplies a decoded neighbour from this authorized route.
@@ -790,6 +791,13 @@ export function createMediaRouteController(
     }).catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
     const state=entry.queue.snapshot();
     if(state.item)douyinStock.consume(state.item.awemeId);
+    startDouyinWindow(entry);
+  };
+
+  // A selected page queues current/+1/+2 bytes before its own decoder is ready.
+  const startDouyinWindow=(entry:RouteEntry)=>{
+    if(!entry.queue||dependencies.current()!==entry)return;
+    const state=entry.queue.snapshot();
     if(entry.playback?.immersive)douyinPreload.start(entry,state.playlist,state.item?.awemeId,'active',{
       isForeground:id=>dependencies.current()===entry&&entry.queue?.snapshot().item?.awemeId===id,
       async sourceRefreshed(id,previousUri,item,uri,headers){
