@@ -16,6 +16,16 @@ export function normalizeItems(items: DouyinItem[]): DouyinItem[] {
   const seen = new Set<string>();
   return items.map(preferredItem).filter(item => { const id = typeof item?.awemeId === "string" ? item.awemeId.trim() : ""; if (!id || typeof item.playUrl !== "string" || !item.playUrl.trim() || seen.has(id)) return false; seen.add(id); return true; }).map(item => item.awemeId===item.awemeId.trim()&&item.playUrl===item.playUrl.trim()?item:{ ...item, awemeId: item.awemeId.trim(), playUrl: item.playUrl.trim() });
 }
+/** Persistence must yield even when every item is already durable. */
+export async function normalizeItemsInTurns(input:DouyinItem[],limit=input.length):Promise<DouyinItem[]>{
+  const items:DouyinItem[]=[],seen=new Set<string>();
+  for(let start=0;start<input.length&&items.length<limit;start+=4){
+    await yieldWorkTurn().result;
+    const batch=traceServiceWork('douyin.store.normalize',()=>normalizeItems(input.slice(start,start+4)));
+    for(const item of batch)if(!seen.has(item.awemeId)&&items.length<limit){seen.add(item.awemeId);items.push(item);}
+  }
+  return items;
+}
 export const snapshotRecordKey=(key:string)=>key.replace(/\.v1$/,'.v2');
 export const playbackItemKey=(id:string)=>`douyin.playback-item.v2.${id}`;
 export const PLAYBACK_ITEMS_KEY='douyin.playback-items.v2';
@@ -23,7 +33,15 @@ const SNAPSHOTS=[FEED_KEY,RECENT_KEY,QUEUE_KEY];
 type SnapshotRecord=Omit<RecentFeed,'items'>&{ids:string[]};
 // Capture all DTO scalars and variant scalars without traversing large strings.
 // This also detects callers editing a DTO in place between saves.
-function itemFields(item:DouyinItem):unknown[]{const fields:unknown[]=[];for(const key of Object.keys(item)){fields.push(key,(item as unknown as Record<string,unknown>)[key]);}for(const variant of item.variants??[])for(const key of Object.keys(variant)){fields.push(key,(variant as unknown as Record<string,unknown>)[key]);}return fields;}
+function itemFields(item:DouyinItem):unknown[]{
+  const fields:unknown[]=[];
+  const visit=(value:unknown)=>{
+    if(Array.isArray(value)){fields.push('array',value.length);for(const entry of value)visit(entry);}
+    else if(value!==null&&typeof value==='object'){const keys=Object.keys(value);fields.push('object',keys.length);for(const key of keys){fields.push(key);visit((value as Record<string,unknown>)[key]);}}
+    else fields.push(typeof value,value);
+  };
+  visit(item);return fields;
+}
 function sameFields(a:unknown[],b:unknown[]):boolean{return a.length===b.length&&a.every((value,i)=>value===b[i]);}
 const preferredItems=new PlaybackCache<DouyinItem,{fields:unknown[];item:DouyinItem}>(2*1024*1024,128,(value,key)=>playbackPayloadBytes([key,value]));
 function preferredItem(item:DouyinItem):DouyinItem{
@@ -34,7 +52,19 @@ function preferredItem(item:DouyinItem):DouyinItem{
 }
 export class DouyinFeedStore {
   private writes:Promise<unknown>=Promise.resolve();
-  private readonly persisted=new PlaybackCache<string,{value:string;resolvedAtMillis:number;fields?:unknown[]}>(8*1024*1024,200,(value,key)=>2*(value.value.length+key.length)+playbackPayloadBytes(value.fields));
+  // Scalar comparison records share the DTO's immutable strings. Retaining
+  // both encoded JSON and parsed variants duplicated every signed address.
+  private readonly persisted=new PlaybackCache<string,{resolvedAtMillis:number;fields:unknown[]}>(4*1024*1024,200,(value,key)=>2*key.length+playbackPayloadBytes(value.fields));
+  // Weak keys do not retain old pagers. A live unchanged DTO can outlast the
+  // byte memo without forcing every bounded-queue save to parse it again.
+  private readonly durableItems=new WeakMap<DouyinItem,{fields:unknown[];resolvedAtMillis:number;revision:object}>();
+  private readonly revisions=new Map<string,object>();
+  private revision(id:string,replace=false){
+    let value=this.revisions.get(id);if(!value||replace){value={};this.revisions.delete(id);this.revisions.set(id,value);}
+    // At most queue(200) + feed(40) + recent(4) durable item owners.
+    while(this.revisions.size>244)this.revisions.delete(this.revisions.keys().next().value!);
+    return value;
+  }
   constructor(private storage:DouyinStateStorage) {}
   memoryStats(){return {preferredEntries:preferredItems.size,preferredBytes:preferredItems.bytes,encodedEntries:0,encodedBytes:0,persistedEntries:this.persisted.size,persistedBytes:this.persisted.bytes};}
   private enqueue<T>(work:()=>Promise<T>):Promise<T>{const pending=this.writes.catch(()=>{}).then(work);this.writes=pending;return pending;}
@@ -49,7 +79,8 @@ export class DouyinFeedStore {
         for(let j=0;j<rows.length;j++){
           if(rows[j]===null)throw Error('Missing Douyin playback item');
           const stored=JSON.parse(rows[j]!),item=stored.item;if(item?.awemeId!==ids[j])throw Error('Invalid Douyin playback item');
-          const value=JSON.stringify(item);this.persisted.set(item.awemeId,{value,fields:itemFields(item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0});items.push(item);
+          const memo={fields:itemFields(item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};
+          this.persisted.set(item.awemeId,memo);this.durableItems.set(item,{...memo,revision:this.revision(item.awemeId,true)});items.push(item);
         }
         await yieldWorkTurn().result;
       }
@@ -80,24 +111,31 @@ export class DouyinFeedStore {
     const copy={...snapshot,items:[...snapshot.items]};return this.enqueue(()=>this.saveNow(key,copy));
   }
   private async saveNow(key:string,snapshot:RecentFeed):Promise<void>{
-    const items=traceServiceWork('douyin.store.normalize',()=>normalizeItems(snapshot.items)).slice(0,key===QUEUE_KEY?200:40),ids=items.map(item=>item.awemeId);
+    const items=await normalizeItemsInTurns(snapshot.items,key===QUEUE_KEY?200:40),ids=items.map(item=>item.awemeId);
+    const originals=new Map(snapshot.items.map(item=>[item.awemeId.trim(),item]));
     const knownRaw=await this.storage.get(PLAYBACK_ITEMS_KEY),known=new Set<string>(knownRaw?JSON.parse(knownRaw):[]);
     // Encode only new/changed immutable item DTOs. Bound each guest turn to one
     // item; durable SQL updates retain one item plus the small ownership index; a page turn never re-encodes a list.
+    let compared=0;
     for(const item of items){
+      if(compared++%4===0)await yieldWorkTurn().result;
       const fields=itemFields(item),resolvedAtMillis=Number(snapshot.resolved[item.awemeId])||0;
+      const original=originals.get(item.awemeId)??item,live=this.durableItems.get(original);
+      if(known.has(item.awemeId)&&live&&live.revision===this.revisions.get(item.awemeId)&&live.resolvedAtMillis===resolvedAtMillis&&sameFields(live.fields,fields))continue;
       let prior=this.persisted.get(item.awemeId);
-      if(!prior&&known.has(item.awemeId)){const raw=await this.storage.get(playbackItemKey(item.awemeId));if(raw){const stored=JSON.parse(raw);prior={value:JSON.stringify(stored.item),fields:itemFields(stored.item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};this.persisted.set(item.awemeId,prior);}}
+      if(!prior&&known.has(item.awemeId)){const raw=await this.storage.get(playbackItemKey(item.awemeId));if(raw){const stored=JSON.parse(raw);prior={fields:itemFields(stored.item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};this.persisted.set(item.awemeId,prior);}}
       // Compare unchanged DTO fields before encoding. A byte-limited JSON memo
       // must not turn every 40-item save into 40 yields and re-encodes.
-      if(prior&&known.has(item.awemeId)&&(prior.resolvedAtMillis>resolvedAtMillis||prior.resolvedAtMillis===resolvedAtMillis&&prior.fields&&sameFields(prior.fields,fields)))continue;
+      if(prior&&known.has(item.awemeId)&&(prior.resolvedAtMillis>resolvedAtMillis||prior.resolvedAtMillis===resolvedAtMillis&&sameFields(prior.fields,fields))){
+        this.durableItems.set(original,{fields,resolvedAtMillis,revision:this.revision(item.awemeId)});continue;
+      }
       await yieldWorkTurn().result;
       const value=traceServiceWork('douyin.store.itemEncode',()=>JSON.stringify(item));
-      if(prior&&prior.value===value&&prior.resolvedAtMillis===resolvedAtMillis&&known.has(item.awemeId)){this.persisted.set(item.awemeId,{value,fields,resolvedAtMillis});continue;}
       known.add(item.awemeId);
       // Reuse the item JSON: do not traverse/serialize its variants again.
       await applyDouyinState(this.storage,[{key:playbackItemKey(item.awemeId),value:'{"resolvedAtMillis":'+resolvedAtMillis+',"item":'+value+'}'},{key:PLAYBACK_ITEMS_KEY,value:JSON.stringify([...known])}]);
-      this.persisted.set(item.awemeId,{value,fields,resolvedAtMillis});
+      this.persisted.set(item.awemeId,{fields,resolvedAtMillis});
+      this.durableItems.set(original,{fields,resolvedAtMillis,revision:this.revision(item.awemeId,true)});
     }
     const {items:_,...fields}=snapshot,metadata:SnapshotRecord={...fields,ids};
     const referenced=new Set(ids);
@@ -105,11 +143,11 @@ export class DouyinFeedStore {
     const obsolete=[...known].filter(id=>!referenced.has(id));
     await applyDouyinState(this.storage,[...obsolete.map(id=>({key:playbackItemKey(id),value:null})),
       {key:snapshotRecordKey(key),value:JSON.stringify(metadata)},{key:PLAYBACK_ITEMS_KEY,value:JSON.stringify([...referenced])}]);
-    for(const id of obsolete)this.persisted.delete(id);
+    for(const id of obsolete){this.persisted.delete(id);this.revisions.delete(id);}
   }
   clear():Promise<void>{return this.enqueue(async()=>{
     const raw=await this.storage.get(PLAYBACK_ITEMS_KEY),ids:string[]=raw?JSON.parse(raw):[];
     await applyDouyinState(this.storage,[...ids.map(id=>({key:playbackItemKey(id),value:null})),...SNAPSHOTS.map(key=>({key:snapshotRecordKey(key),value:null})),{key:PLAYBACK_ITEMS_KEY,value:null}]);
-    for(const key of SNAPSHOTS)await this.storage.remove(key);this.persisted.clear();
+    for(const key of SNAPSHOTS)await this.storage.remove(key);this.persisted.clear();this.revisions.clear();
   });}
 }

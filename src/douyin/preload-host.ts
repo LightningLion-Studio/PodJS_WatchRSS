@@ -32,7 +32,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const results=new DouyinPrefetchResults(Date.now,saved);let resultOff:(()=>void)|undefined,token=0;
  const foreground=(id:string)=>plan?.hooks?.isForeground(id)??(plan?.mode==='active'&&plan.anchor===id);
  const sources=new PlaybackCache<string,DouyinItem>(2*1024*1024,DOUYIN_PROXY.entryLimit,(item,key)=>playbackPayloadBytes(item)+key.length*2);
- const registered=new PlaybackCache<string,{uri:string;item:DouyinItem;authorization:number;headersKey:string;expires:number}>(2*1024*1024,DOUYIN_PROXY.entryLimit,value=>playbackPayloadBytes(value.item)+2*(value.uri.length+value.headersKey.length));
+ const registered=new PlaybackCache<string,{uri:string;playUrl:string;authorization:number;headersKey:string;expires:number}>(2*1024*1024,DOUYIN_PROXY.entryLimit,value=>2*(value.uri.length+value.playUrl.length+value.headersKey.length));
  const remember=(uri:string,item:DouyinItem)=>{sources.delete(uri);sources.set(uri,item);while(sources.size>DOUYIN_PROXY.entryLimit)sources.delete(sources.keys().next().value!);return uri;};
  const bluetoothOwners=new Set<unknown>();
  let ownerHeaders:{owner:unknown;authorization:number;value:Promise<Record<string,string>>}|undefined;
@@ -51,9 +51,9 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
  const register=async(item:DouyinItem,headers:Record<string,string>)=>{
   const selected=preserveSelectedDouyinItem(item);if(!selected.playUrl)return undefined;
   const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort()),previous=registered.get(selected.awemeId);
-  if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&previous.item.playUrl===selected.playUrl&&Date.now()<previous.expires)return remember(previous.uri,selected);
+  if(previous&&previous.authorization===authorization&&previous.headersKey===headersKey&&previous.playUrl===selected.playUrl&&Date.now()<previous.expires)return remember(previous.uri,selected);
   const uri=(await mediaPrefixCache.register(selected.awemeId,selected.playUrl,headers,false,douyinPlaybackMirrors(selected)).result).uri;
-  registered.delete(selected.awemeId);registered.set(selected.awemeId,{uri,item:selected,authorization,headersKey,expires:douyinMediaExpiry(selected.playUrl,Date.now())});
+  registered.delete(selected.awemeId);registered.set(selected.awemeId,{uri,playUrl:selected.playUrl,authorization,headersKey,expires:douyinMediaExpiry(selected.playUrl,Date.now())});
   while(registered.size>DOUYIN_PROXY.entryLimit)registered.delete(registered.keys().next().value!);
   registerVideoResolution(uri,takeVideoResolution(selected.playUrl,'douyin'));return remember(uri,selected);
  };
@@ -71,17 +71,33 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(own===generation){published.clear();for(const x of window)published.set(x.id,x.target);}
   };
   let foregroundBitrate=mode==='active'?selectPreferredDouyinVariant(targets[0]?.variants??[])?.bitrate??0:0;
+  const targetFor=(item:DouyinItem,uri:string,stocked=false):Target=>{
+   const itemToken=`p${++token}`,bitrate=(item.variants??[]).find(v=>v.playUrl===item.playUrl)?.bitrate??0;
+   results.bind({id:item.awemeId,itemToken,generation:own,uri,url:item.playUrl});
+   return {uri,itemToken,generation:own,prefetchBytes:stocked||mode==='active'&&item.awemeId===plan?.anchor?0:douyinPrefetchBytes(undefined,item.durationMs,0,bitrate),captureBytes:douyinPreviewBytes(undefined,item.durationMs,bitrate)};
+  };
+  // A reverse gesture can return to a decoded source outside the last window.
+  // Publish known, still-authorized registrations before serial stock/resolution
+  // awaits. Native can reload its disk pixels while those unrelated reads wait.
+  // Reuse the existing 16-entry/2 MiB registration budget, not another history.
+  const authorization=client.playbackAuthorizationVersion?.()??0,headersKey=JSON.stringify(Object.entries(headers).map(([k,v])=>[k.toLowerCase(),v]).sort());
+  for(const item of targets){
+   const known=registered.get(item.awemeId),selected=preserveSelectedDouyinItem(item);
+   if(known&&known.authorization===authorization&&known.headersKey===headersKey&&known.playUrl===selected.playUrl&&Date.now()<known.expires)
+    prepared.push({id:item.awemeId,target:targetFor(selected,known.uri)});
+  }
+  if(prepared.length)await publish(foregroundBitrate);
   for(const item of targets){
    if(own!==generation)return;const center=Math.max(0,plan!.items.findIndex(value=>value.awemeId===plan!.anchor));
    // Backward entries register existing sources only. They never request detail.
    const backward=mode==='active'&&plan!.items.findIndex(value=>value.awemeId===item.awemeId)<center;
    const stocked=await playbackLookup(item.awemeId);if(own!==generation)return;
    const result=stocked||backward?{ok:true as const,data:item}:await client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});if(own!==generation)return;
-   if(!result.ok){published.delete(item.awemeId);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
+   if(!result.ok){published.delete(item.awemeId);const seeded=prepared.findIndex(value=>value.id===item.awemeId);if(seeded>=0)prepared.splice(seeded,1);appLogger.i('DouyinProxy',`resolve failed category=${result.code}`);continue;}
    const uri=stocked??await register(result.data,headers);if(own!==generation)return;if(!uri)continue;
    if(mode==='active'&&item.awemeId===plan?.anchor)foregroundBitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;
-   const itemToken=`p${++token}`;const bitrate=(result.data.variants??[]).find(v=>v.playUrl===result.data.playUrl)?.bitrate??0;results.bind({id:item.awemeId,itemToken,generation:own,uri,url:result.data.playUrl});
-   prepared.push({id:item.awemeId,target:{uri,itemToken,generation:own,prefetchBytes:stocked||mode==='active'&&item.awemeId===plan?.anchor?0:douyinPrefetchBytes(undefined,result.data.durationMs,prepared.length,bitrate),captureBytes:douyinPreviewBytes(undefined,result.data.durationMs,bitrate)}});
+   const target=targetFor(result.data,uri,!!stocked),existing=prepared.findIndex(value=>value.id===item.awemeId);
+   if(existing<0)prepared.push({id:item.awemeId,target});else prepared[existing]={id:item.awemeId,target};
    if(own!==generation)return;
    // Preserve still-wanted transfers while publishing newly resolved sources.
    await publish(foregroundBitrate);

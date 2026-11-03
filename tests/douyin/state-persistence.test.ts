@@ -3,7 +3,7 @@ import {Database} from 'bun:sqlite';
 import type {SqlDatabase} from '../../src/core/types.ts';
 import {DouyinSqlStateStorage,type DouyinStateChange} from '../../src/douyin/state-storage.ts';
 import {DouyinHistoryStore,HISTORY_INDEX_KEY,historyRowKey,compactDouyinHistory} from '../../src/douyin/history-store.ts';
-import {DouyinFeedStore,FEED_KEY,RECENT_KEY,QUEUE_KEY,PLAYBACK_ITEMS_KEY,snapshotRecordKey,normalizeItems} from '../../src/douyin/feed-store.ts';
+import {DouyinFeedStore,FEED_KEY,RECENT_KEY,QUEUE_KEY,PLAYBACK_ITEMS_KEY,snapshotRecordKey,normalizeItems,normalizeItemsInTurns} from '../../src/douyin/feed-store.ts';
 import {DouyinClient} from '../../src/douyin/client.ts';
 import type {DouyinItem} from '../../src/douyin/types.ts';
 const item=(id:string):DouyinItem=>({awemeId:id,description:'title '+id,authorName:'作者🙂',authorId:'discard',createdAtSeconds:9,likeCount:3,commentCount:4,shareCount:5,collectCount:6,playUrl:'https://video/'+id,coverUrl:'https://cover/'+id,durationMs:100,variants:[{playUrl:'https://selected/'+id,codec:'h264',width:960,height:540,bitrate:10}]});
@@ -87,8 +87,46 @@ test('memo byte eviction preserves every durable playback row and fresher source
  const f=fixture();try{
  const feed=new DouyinFeedStore(f.storage),items=Array.from({length:10},(_,i)=>({...item('budget-'+i),description:'x'.repeat(250000)}));
  const snapshot={items,cursor:'tail',hasMore:false,anchorAwemeId:items[4]!.awemeId,savedAtMillis:200,resolved:Object.fromEntries(items.map(x=>[x.awemeId,200]))};
- await feed.save(QUEUE_KEY,snapshot);const stats=feed.memoryStats();expect(stats.encodedBytes).toBeLessThanOrEqual(4*1024*1024);expect(stats.persistedBytes).toBeLessThanOrEqual(8*1024*1024);expect(stats.preferredBytes).toBeLessThanOrEqual(2*1024*1024);
+ await feed.save(QUEUE_KEY,snapshot);const stats=feed.memoryStats();expect(stats.encodedBytes).toBeLessThanOrEqual(4*1024*1024);expect(stats.persistedBytes).toBeLessThanOrEqual(4*1024*1024);expect(stats.preferredBytes).toBeLessThanOrEqual(2*1024*1024);
  expect(stats.encodedEntries).toBeLessThan(items.length);await feed.save(QUEUE_KEY,{...snapshot,anchorAwemeId:items[5]!.awemeId});
  const restored=await new DouyinFeedStore(f.storage).read(QUEUE_KEY);expect(restored.items).toEqual(items.map(x=>({...x,playUrl:x.variants[0]!.playUrl})));expect(restored.anchorAwemeId).toBe(items[5]!.awemeId);
  }finally{f.raw.close();}
+});
+
+test('scalar memo compares equivalent DTO clones and detects nested mirror changes without a JSON copy',async()=>{
+ const f=fixture();try{
+ const feed=new DouyinFeedStore(f.storage),video=item('mirrors');video.variants[0]!.playUrls=['https://mirror/old'];
+ const snapshot={items:[video],cursor:null,hasMore:false,anchorAwemeId:video.awemeId,savedAtMillis:1,resolved:{[video.awemeId]:1}};
+ await feed.save(QUEUE_KEY,snapshot);f.changes.length=0;
+ const clone=JSON.parse(JSON.stringify(video)) as DouyinItem;
+ await feed.save(QUEUE_KEY,{...snapshot,items:[clone]});
+ expect(f.changes.flat().filter(x=>x.key.startsWith('douyin.playback-item.v2.'))).toEqual([]);
+ clone.variants[0]!.playUrls![0]='https://mirror/new';
+ await feed.save(QUEUE_KEY,{...snapshot,items:[clone]});
+ expect((await new DouyinFeedStore(f.storage).read(QUEUE_KEY)).items[0]!.variants[0]!.playUrls).toEqual(['https://mirror/new']);
+ }finally{f.raw.close();}
+});
+
+test('unchanged live DTOs survive byte-memo eviction without repeated item reads; newer revisions invalidate them',async()=>{
+ const f=fixture();try{
+ const feed=new DouyinFeedStore(f.storage),items=Array.from({length:12},(_,i)=>({...item('live-'+i),description:'x'.repeat(250000)}));
+ const snapshot={items,cursor:null,hasMore:false,anchorAwemeId:items[0]!.awemeId,savedAtMillis:1,resolved:Object.fromEntries(items.map(x=>[x.awemeId,100]))};
+ await feed.save(QUEUE_KEY,snapshot);expect(feed.memoryStats().persistedEntries).toBeLessThan(items.length);
+ let reads=0;const get=f.storage.get.bind(f.storage);f.storage.get=async key=>{if(key.startsWith('douyin.playback-item.v2.'))reads++;return get(key);};
+ await feed.save(QUEUE_KEY,snapshot);expect(reads).toBe(0);
+ const newer={...items[0]!,description:'newer durable item'};
+ await feed.save(FEED_KEY,{...snapshot,items:[newer],resolved:{[newer.awemeId]:200}});
+ await feed.save(QUEUE_KEY,snapshot);
+ expect((await new DouyinFeedStore(f.storage).read(QUEUE_KEY)).items[0]!.description).toBe('newer durable item');
+ items[1]!.description='edited in place';await feed.save(QUEUE_KEY,snapshot);
+ expect((await new DouyinFeedStore(f.storage).read(QUEUE_KEY)).items[1]!.description).toBe('edited in place');
+ await feed.clear();await feed.save(QUEUE_KEY,snapshot);expect((await feed.read(QUEUE_KEY)).items).toHaveLength(12);
+ }finally{f.raw.close();}
+});
+
+test('incremental normalization preserves cross-batch deduplication and order while allowing another host turn',async()=>{
+ const items=Array.from({length:80},(_,i)=>item(String(i)));items.splice(5,0,{...items[0]!}, {...items[1]!,awemeId:' 1 '});
+ let turns=0;const timer=setInterval(()=>turns++,0);
+ try{expect(await normalizeItemsInTurns(items,40)).toEqual(normalizeItems(items).slice(0,40));expect(turns).toBeGreaterThan(1);}
+ finally{clearInterval(timer);}
 });

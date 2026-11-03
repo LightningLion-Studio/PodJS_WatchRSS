@@ -36,6 +36,18 @@ function fakePort(decoderLimit=2){
 }
 
 describe("Douyin video sessions",()=>{
+  test('a ready receipt that loses its pixels still authorizes one foreground adoption',async()=>{
+    const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);let adoptions=0;
+    (port as any).promote=async(id:string,options:{adoptPreparing?:boolean})=>{
+      expect(options.adoptPreparing).toBe(true);adoptions++;
+      return {...sessionState(id),state:'buffering',hasRenderedFirstFrame:false,hasCachedFirstFrame:false,replacedHasRenderedFirstFrame:true};
+    };
+    await pool.prepare(source('1'),{...source('1').source,bounds}).result;
+    await pool.prewarm(source('2'),{...source('2').source,bounds});await pool.transition(.5,'up',bounds);
+    const promoted=await pool.promote('up',bounds);
+    expect(promoted.source.key).toBe('2');expect(promoted.state.hasRenderedFirstFrame).toBe(false);expect(adoptions).toBe(1);
+    expect(port.calls.filter(x=>x.method==='prepare')).toHaveLength(1);
+  });
   test("keeps the complete legacy path on old or non-immersive hosts",()=>{
     expect(shouldUseDouyinVideoSessions(source("1").source,false)).toBe(false);
     expect(shouldUseDouyinVideoSessions({...source("1").source,immersive:false},true)).toBe(false);

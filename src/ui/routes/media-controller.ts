@@ -801,11 +801,13 @@ export function createMediaRouteController(
     const state=entry.queue.snapshot();
     // Promotion also consumes metadata. Refill before the six-frame ring reaches
     // the page boundary, then publish the added sources without moving selection.
-    const queue=entry.queue,anchor=state.item?.awemeId,count=state.playlist.length;
+    const queue=entry.queue,anchor=state.item?.awemeId,count=state.playlist.length,tail=state.playlist.at(-1)?.awemeId;
     void queue.fillAhead(16).then(()=>{
       if(dependencies.current()!==entry||entry.queue!==queue)return;
       const fresh=queue.snapshot();
-      if(fresh.item?.awemeId===anchor&&fresh.playlist.length!==count)startDouyinWindow(entry);
+      // A full bounded pager evicts its head on refill, so its length stays
+      // unchanged. Publish the new tail before the next gesture needs it.
+      if(fresh.item?.awemeId===anchor&&(fresh.playlist.length!==count||fresh.playlist.at(-1)?.awemeId!==tail))startDouyinWindow(entry);
     }).catch(()=>{});
     if(entry.playback?.immersive)douyinPreload.start(entry,state.playlist,state.item?.awemeId,'active',{
       isForeground:id=>dependencies.current()===entry&&entry.queue?.snapshot().item?.awemeId===id,

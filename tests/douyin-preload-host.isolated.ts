@@ -143,3 +143,52 @@ test('DYFAST reuses registration only for the same rendition and authorization',
  host.stop();await host.playback(item as any,{Cookie:'fixture-two'});expect(registrations.length-before).toBe(5);
  host.stop();
 });
+
+test('DYMEM3 returning decoded neighbours enter the window before a slow stock lookup',async()=>{
+ windows=[];registrations=[];legacyBytes=0;let blocked=false,release!:()=>void;
+ const many=Array.from({length:15},(_,i)=>({...items[0],awemeId:String(i),playUrl:`https://fixture.invalid/${i}`,description:'fixture'.repeat(30000)}));
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,o:any)=>({ok:true,data:o.feedItem})};
+ const stock={lookup:async()=>{if(blocked)await new Promise<void>(r=>release=r);return undefined;}};
+ const host=createHostDouyinPreload(local as any,stock as any),owner={};host.allowBluetooth(true,owner);
+ try{
+  host.start(owner,many as any,'4','active');await flush();
+  host.start(owner,many as any,'8','active');await flush();
+  expect(windows.at(-1).items.some((x:any)=>x.uri.endsWith('/3.mp4'))).toBe(false);
+  blocked=true;host.start(owner,many as any,'6','active');await flush();expect(release).toBeDefined();
+  expect(windows.at(-1).items.slice(0,5).map((x:any)=>x.uri)).toEqual([6,7,5,4,3].map(id=>`podjs-media-cache://play/${id}.mp4`));
+  // Cancel the waiting generation before releasing it: no late window may return.
+  host.stop(owner);const count=windows.length;blocked=false;release();await flush();expect(windows.length).toBe(count);
+ }finally{host.stop(owner);legacyBytes=484675145;}
+});
+
+test('DYMEM3 early window reuse rejects changed authorization, headers, rendition and expiry',async()=>{
+ const now=Date.now;
+ for(const reason of ['authorization','headers','rendition','expiry']){
+  windows=[];registrations=[];legacyBytes=0;let blocked=false,release!:()=>void,authorization=1;const headers={Cookie:'one'};
+  const many=Array.from({length:15},(_,i)=>({...items[0],awemeId:String(i),playUrl:`https://fixture.invalid/${i}?x-expires=${Math.floor(now()/1000)+600}`}));
+  const local={playbackAuthorizationVersion:()=>authorization,buildPlaybackHeaders:async()=>headers,resolvePlayback:async(_id:string,o:any)=>({ok:true,data:o.feedItem})};
+  const stock={lookup:async()=>{if(blocked)await new Promise<void>(r=>release=r);return undefined;}};
+  const host=createHostDouyinPreload(local as any,stock as any),owner={};host.allowBluetooth(true,owner);
+  try{
+   host.start(owner,many as any,'4','active');await flush();host.start(owner,many as any,'8','active');await flush();
+   if(reason==='authorization')authorization++;
+   if(reason==='headers')headers.Cookie='two';
+   if(reason==='rendition')many[3]={...many[3]!,playUrl:'https://fixture.invalid/changed'};
+   if(reason==='expiry')Date.now=()=>now()+700000;
+   blocked=true;host.start(owner,many as any,'6','active');await flush();expect(release).toBeDefined();
+   expect(windows.at(-1).items.some((x:any)=>x.uri.endsWith('/3.mp4'))).toBe(false);
+   host.stop(owner);blocked=false;release();await flush();
+  }finally{Date.now=now;host.stop(owner);legacyBytes=484675145;}
+ }
+});
+
+test('DYMEM3 a failed resolution removes its early seeded window target',async()=>{
+ windows=[];registrations=[];legacyBytes=0;let fail=false;
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>fail&&id==='c'?{ok:false,code:'REQUEST_FAILED'}:{ok:true,data:items.find(item=>item.awemeId===id)}};
+ const host=createHostDouyinPreload(local as any),owner={};host.allowBluetooth(true,owner);
+ try{
+  host.start(owner,items as any,'b','active');await flush();fail=true;
+  host.start(owner,items as any,'b','active');await flush();
+  expect(windows.at(-1).items.some((x:any)=>x.uri.endsWith('/c.mp4'))).toBe(false);
+ }finally{host.stop(owner);legacyBytes=484675145;}
+});

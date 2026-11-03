@@ -14,7 +14,7 @@ import {traceServiceWork} from "@podjs/framework/service-trace";
 import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './errors.ts';
-import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems, type RecentFeed } from "./feed-store.ts";
+import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems, normalizeItemsInTurns, type RecentFeed } from "./feed-store.ts";
 import {decodeMediaText} from '../media/text.ts';
 import { parseDouyinDetail, parseDouyinFeedAsync, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
@@ -330,7 +330,7 @@ export class DouyinClient {
   async clearPlaybackWindow(){this.clearFeedCache();await this.feedStore.clear();}
   async restoreFeed(){const snapshot=await this.feedStore.bootstrap();traceServiceWork("douyin.restore.result",()=>{this.freshPlaybackSnapshot(snapshot);this.feedCursor=snapshot.cursor;this.feedHasMore=snapshot.hasMore;});return snapshot;}
   async saveRecentWindow(items:DouyinItem[],anchorAwemeId:string,cursor:string|null,hasMore:boolean){
-    const normalized=normalizeItems(items),index=normalized.findIndex(x=>x.awemeId===anchorAwemeId);if(index<0)return;
+    const normalized=await normalizeItemsInTurns(items),index=normalized.findIndex(x=>x.awemeId===anchorAwemeId);if(index<0)return;
     const bootstrap=normalized.slice(index,index+40),window=bootstrap.slice(0,4);
     const snapshot={anchorAwemeId,cursor,hasMore,savedAtMillis:this.now(),resolved:Object.fromEntries(bootstrap.map(item=>[item.awemeId,this.feedCache.get(item.awemeId)?.resolvedAtMillis??0]))};
     await this.feedStore.save(RECENT_KEY,{...snapshot,items:window});

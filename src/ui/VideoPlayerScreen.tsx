@@ -379,8 +379,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return Promise.resolve(undefined);
     }
     const candidate=direction==="up"?forwardTarget:backwardTarget;
-    const existing=sessionPool?.sourceFor(props.onAdjacentKey?.(queueDirection))??(candidate&&sessionPool?.hasStandby(candidate.key)?candidate:undefined);
-    if(existing){sessionPool!.selectStandby(existing.key);dragTarget=existing;setNativeDrag(true);setDragPoster(null);return Promise.resolve(existing);}
+    const existing=sessionPool?.sourceFor(props.onAdjacentKey?.(queueDirection))??sessionPool?.preparingSourceFor(props.onAdjacentKey?.(queueDirection))??(candidate&&sessionPool?.hasStandby(candidate.key)?candidate:undefined);
+    if(existing&&sessionPool!.selectStandby(existing.key,true)){dragTarget=existing;setNativeDrag(true);setDragPoster(null);return Promise.resolve(existing);}
     const ownNeighbor=neighborRevision;
     const pending=(direction==="up"?forwardWarm:backwardWarm)??prepareAdjacent(queueDirection,ownNeighbor,true);
     return pending.then(target=>{
@@ -407,8 +407,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const direction:DouyinPagerDirection=distanceY<0?"up":"down",progress=douyinPagerProgress(distanceY,props.height),revision=dragRevision;
     setDragProgress(progress);
     if(direction!==dragDirection){setNativeDrag(false);dragDirection=direction;setDragAxis(direction);dragTarget=undefined;dragTargetPromise=ensureDragTarget(direction,revision);}
-    if(usingSessions()&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)){
-      sessionPool!.selectStandby(dragTarget.key);setNativeDrag(true);setDragPoster(null);
+    if(usingSessions()&&dragTarget&&sessionPool!.selectStandby(dragTarget.key,true)){setNativeDrag(true);setDragPoster(null);
       void sessionPool!.transition(progress,direction,bounds()).catch(value=>{if(revision===dragRevision&&!cancelledSessionError(value))void degradeSessions(value);});
     }
   };

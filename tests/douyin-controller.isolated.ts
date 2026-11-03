@@ -8,9 +8,9 @@ let loginOptions:any,completeLogin:(value:{cookie:string;origin:string})=>void;
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any)=>{loginOptions=options;return {result:new Promise(resolve=>completeLogin=resolve),cancel(){}};}}));
 let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
-let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
+let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined}}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined}}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
@@ -22,7 +22,7 @@ const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()))
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any){
  optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
- canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
+ preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
  let controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
@@ -426,4 +426,17 @@ test('DYHIT a refill index shift keeps the same adjacent source during a slow na
  const pending=f.controller.prepareDouyinAdjacent(entry,'next');await started;await entry.queue.fillAhead();
  expect(entry.queue.snapshot().index).toBe(0);release('podjs-media-cache://fixture/b');const prepared=await pending;
  expect(prepared?.key).toBe('b');expect(prepared?.queueIndex).toBe(1);expect(prepared?.anchorIndex).toBe(0);lookupOverride=undefined;
+});
+
+
+test('DYMEM2 a full 80-item pager publishes refilled neighbours without another gesture',async()=>{
+ const f=fixture(),items=Array.from({length:80},(_,i)=>item(String(i)));let release!:(value:any)=>void,requests=0;
+ client.fetchFeedPage=async()=>{requests++;return new Promise(resolve=>release=resolve);};
+ f.controller.douyinPlay({item:items[70]!,playback:items[70]!,playlist:items,immersive:true,hasMore:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:'70'});const entry=f.stack().at(-1)!;
+ f.controller.douyinReady(entry);expect(preloadWindows.at(-1)?.at(-1)).toBe('79');
+ release({ok:true,data:{items:Array.from({length:12},(_,i)=>item(String(80+i))),nextCursor:'92',hasMore:false}});
+ for(let i=0;i<30;i++)await Promise.resolve();
+ expect(entry.queue!.snapshot().playlist).toHaveLength(80);expect(entry.queue!.snapshot().item?.awemeId).toBe('70');
+ expect(preloadWindows.at(-1)).toHaveLength(80);expect(preloadWindows.at(-1)?.at(-1)).toBe('91');expect(requests).toBe(1);
 });
