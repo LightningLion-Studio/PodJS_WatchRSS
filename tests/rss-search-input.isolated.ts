@@ -28,6 +28,13 @@ mock.module('@pocketjs/framework/input',()=>({pressNode:()=>{},hitNode:()=>undef
 mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,shape:'rect',safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,__onHostEvent:()=>()=>{},getFontMetrics:()=>undefined,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
 
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(s:string)=>s.length*8})}));
+// file: installations can resolve PocketJS differently from the app. The list
+// must use these same rendering/input boundaries, not native-tree primitives.
+const frameworkImporter=Bun.resolveSync('@podjs/framework/variable-list',import.meta.dir);
+for(const name of ['renderer','components','lifecycle','gesture','kinetics','input','host']){
+ const boundary=await import('@pocketjs/framework/'+name);
+ mock.module(Bun.resolveSync('@pocketjs/framework/'+name,frameworkImporter),()=>boundary);
+}
 const {RssSearchScreen}=await import('../src/ui/RssSearchScreen.tsx');
 function all(v:any):any[]{if(typeof v==='function')return all(v());if(Array.isArray(v))return v.flatMap(all);if(!v?.props)return[];return[v,...all(v.props.children)];}
 

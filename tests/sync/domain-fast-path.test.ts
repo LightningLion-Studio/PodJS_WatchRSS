@@ -1,3 +1,4 @@
+import {externalFixture} from '../helpers/external-fixtures';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {readFile} from 'node:fs/promises';
@@ -16,8 +17,9 @@ async function setup(){const sql=new Database(':memory:');sql.exec('PRAGMA forei
 const descriptors=Object.fromEntries(SYNC_DOMAINS.map(d=>[d,{encoder:1,schema:18,definition:b}]));
 const remote=Object.fromEntries(SYNC_DOMAINS.map(d=>[d,b]));
 async function prime(f:Awaited<ReturnType<typeof setup>>){const v=await f.store().open('phone',DOMAIN_FAST_PATH_PROFILE),w=await v.summary(remote,{},descriptors);for(const d of SYNC_DOMAINS)v.completed(d);expect((await v.stage(w.windowId,remote,SYNC_DOMAINS,descriptors)).committedDomains).toHaveLength(7);await v.applied();return Object.fromEntries(Object.entries(w.roots).map(([d,r])=>[d,{localRoot:b,remoteRoot:r}])) as StateReceipts;}
-test('R47 shared version-root and receipt vectors',async()=>{
- const vectors=JSON.parse(await readFile(new URL('../../../.codex-tmp/cloud-v2/vectors/domain-fast-path.json',import.meta.url),'utf8'));
+const sharedVectors=externalFixture('PODJS_SYNC_VECTORS_DIR','domain-fast-path.json');
+(sharedVectors?test:test.skip)('R47 shared version-root and receipt vectors',async()=>{
+ const vectors=JSON.parse(await readFile(sharedVectors!,'utf8'));
  for(const v of vectors.cases){const text=versionRootText('watchrss.ble.domain-version.v1',v.domain,v.epoch,v.revision);expect(Buffer.from(text).toString('hex')).toBe(v.utf8Hex);expect(await hash(new TextEncoder().encode(text))).toBe(v.root);}
  for(const r of vectors.receiptCases){const v=new AckedStateVector(['one'],async()=>({one:r.localRoot}),async()=>(r.saved?{one:r.saved}:{}) as StateReceipts,async()=>{},()=>r.name);expect((await v.summary({one:r.remoteRoot},r.known?{one:r.known}:{})).skipDomains).toEqual(r.skip?['one']:[]);}
 });

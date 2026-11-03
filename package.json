@@ -7,7 +7,8 @@
     "test": "bun test --path-ignore-patterns='artifacts/**'",
     "typecheck": "tsc --noEmit",
     "build": "bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts build --target=android-watch --project=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS",
-    "package:android": "bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts package --target=android-watch --project=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS"
+    "package:android": "bun /home/wilf/data/PodJS/podjs-watch/packages/cli/src/cli.ts package --target=android-watch --project=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS",
+    "postinstall": "bun scripts/link-framework.ts"
   },
   "dependencies": {
     "@pocketjs/framework": "file:/home/wilf/data/PodJS/podjs-watch/vendor/pocketjs",

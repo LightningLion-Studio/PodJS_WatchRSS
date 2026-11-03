@@ -1,3 +1,4 @@
+import {externalFixture} from '../helpers/external-fixtures';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {readFile} from 'node:fs/promises';
@@ -18,9 +19,12 @@ async function fixture(){
  return {sql,db,store,now:(v:number)=>{now=v;},time:()=>now};
 }
 async function prime(f:Awaited<ReturnType<typeof fixture>>){const v=await f.store().open('phone',DOMAIN_FAST_PATH_PROFILE),s=await v.summary(remote,{},versions);for(const d of SYNC_DOMAINS)v.completed(d);await v.stage(s.windowId,remote,SYNC_DOMAINS,versions);await v.applied();return Object.fromEntries(Object.entries(s.roots).map(([d,r])=>[d,{localRoot:b,remoteRoot:r}])) as StateReceipts;}
-test('R47.1 byte-exact shared projection/root/TTL vectors and cross-platform descriptors',async()=>{
- const v=JSON.parse(await readFile(new URL('../../../.codex-tmp/cloud-v2/vectors/domain-fast-path-v2.json',import.meta.url),'utf8'));
+const sharedVectors=externalFixture('PODJS_SYNC_VECTORS_DIR','domain-fast-path-v2.json');
+(sharedVectors?test:test.skip)('R47.1 byte-exact shared projection/root/TTL vectors and cross-platform descriptors',async()=>{
+ const v=JSON.parse(await readFile(sharedVectors!,'utf8'));
  for(const c of v.cases){const p={encoder:c.encoder,schema:c.schema,definition:c.definition};expect(projectionProfileText(c.domain,p)).toBe(c.projectionText);const text=projectionVersionRootText(c.domain,p,c.epoch,c.revision);expect(Buffer.from(text).toString('hex')).toBe(c.utf8Hex);expect(await hash(new TextEncoder().encode(text))).toBe(c.root);}
+});
+test('R47.1 descriptor bounds and receipt TTL reject invalid/future values',()=>{
  for(const value of [{encoder:0,schema:1,definition:a},{encoder:1,schema:-1,definition:a},{encoder:2147483648,schema:1,definition:a},{encoder:1,schema:2147483648,definition:a}])expect(()=>checkedProjectionVersions({library:value},SYNC_DOMAINS)).toThrow();
  expect(receiptIsCurrent(100,100+STATE_RECEIPT_MAX_AGE_MS-1)).toBe(true);expect(receiptIsCurrent(100,100+STATE_RECEIPT_MAX_AGE_MS)).toBe(false);expect(receiptIsCurrent(101,100)).toBe(false);expect(receiptIsCurrent(0,100)).toBe(false);
 });

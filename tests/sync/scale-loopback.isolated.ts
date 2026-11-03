@@ -1,4 +1,4 @@
-import {SCALE_LOOPBACK_BULK_ACK_MS,SCALE_LOOPBACK_TEST_MS} from './scale-loopback-budget';
+import {SCALE_LOOPBACK_FULL,SCALE_LOOPBACK_ARTICLES,SCALE_LOOPBACK_INTERRUPT_AT,SCALE_LOOPBACK_BULK_ACK_MS,SCALE_LOOPBACK_TEST_MS} from './scale-loopback-budget';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import type {Socket} from 'node:net';
@@ -72,28 +72,31 @@ async function exchange(serverRepo:SqlLibrarySessionRepository,phone:Awaited<Ret
 }
 // Each exchange uses actual localhost TCP and production framing/coordinator/SQLite repositories.
 let server:Awaited<ReturnType<typeof pairedLoopback>>;
-test('5500 articles over TCP: legacy compatibility, durable resume, lost ACK and one-article delta',async()=>{
+test(`${SCALE_LOOPBACK_ARTICLES} articles over TCP: legacy compatibility, durable resume, lost ACK and one-article delta`,async()=>{
  const root=mkdtempSync(join(tmpdir(),'wrss-t39-'));server=await pairedLoopback();
  let watch=await fixture(join(root,'watch.sqlite'),'watch'),phone=await fixture(join(root,'phone.sqlite'),'phone');
  try{
-  const source='https://watchrss.local/import-txt-novel/'+'39'.repeat(16),body='T39 中文🙂 complete body '.repeat(65)+' END';
+  const source='https://watchrss.local/import-txt-novel/'+'39'.repeat(16),body='T39 中文🙂 complete body '.repeat(65)+(SCALE_LOOPBACK_FULL?'':Array.from({length:128},(_,i)=>new Bun.CryptoHasher('sha256').update('T-TESTSTAB body '+i).digest('hex')).join(''))+' END';
+  // Diverse deterministic bytes cross real wire batch boundaries with fewer
+  // SQLite fsyncs. Keep the 5500-article body exactly as before in scale mode.
   await watch.db.execute('INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,?,?,100,-100)',[source,'T39 SCALE']);
-  await watch.db.transaction(Array.from({length:5500},(_,i)=>{const url=source+'/chapter/'+String(i+1).padStart(4,'0')+'-'+(i+1).toString(16).padStart(16,'0');return {sql:'INSERT INTO articles(channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,?,?,?,?,?)',params:['Chapter '+i,body,url,new Bun.CryptoHasher('sha256').update(url).digest('hex'),100+i]};}));
-  const partial=await exchange(watch.repo,phone,{checkpoint:true,interruptAt:1000});expect(partial.interrupted).toBe(true);expect(phone.count()).toBeGreaterThanOrEqual(1000);expect(phone.count()).toBeLessThan(5500);expect(await phone.db.query('SELECT * FROM sync_peer_state')).toHaveLength(0);
+  await watch.db.transaction(Array.from({length:SCALE_LOOPBACK_ARTICLES},(_,i)=>{const url=source+'/chapter/'+String(i+1).padStart(4,'0')+'-'+(i+1).toString(16).padStart(16,'0');return {sql:'INSERT INTO articles(channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,?,?,?,?,?)',params:['Chapter '+i,body,url,new Bun.CryptoHasher('sha256').update(url).digest('hex'),100+i]};}));
+  const partial=await exchange(watch.repo,phone,{checkpoint:true,interruptAt:SCALE_LOOPBACK_INTERRUPT_AT});expect(partial.interrupted).toBe(true);expect(phone.count()).toBeGreaterThanOrEqual(SCALE_LOOPBACK_INTERRUPT_AT);expect(phone.count()).toBeLessThan(SCALE_LOOPBACK_ARTICLES);expect(await phone.db.query('SELECT * FROM sync_peer_state')).toHaveLength(0);
   // Recreate both repositories from disk, as after a process restart / transport change.
   watch.sql.close();phone.sql.close();watch=await fixture(join(root,'watch.sqlite'),'watch');phone=await fixture(join(root,'phone.sqlite'),'phone');
-  const resumed=await exchange(watch.repo,phone,{checkpoint:true});expect(resumed.fullBodies).toBeLessThan(4501);expect(phone.count()).toBe(5500);expect(await phone.db.query("SELECT count(*) n FROM articles WHERE content NOT LIKE '% END'" )).toEqual([{n:0}]);
+  expect(partial.frames).toBeGreaterThan(0);
+  const resumed=await exchange(watch.repo,phone,{checkpoint:true});expect(resumed.fullBodies).toBeLessThanOrEqual(SCALE_LOOPBACK_ARTICLES-partial.completed);expect(resumed.frames).toBeGreaterThan(1);expect(phone.count()).toBe(SCALE_LOOPBACK_ARTICLES);expect(await phone.db.query("SELECT count(*) n FROM articles WHERE content NOT LIKE '% END'" )).toEqual([{n:0}]);
   const noop=await exchange(watch.repo,phone,{checkpoint:true});expect(noop.fullBodies).toBe(0);expect(noop.requests).toBe(0);expect(noop.elapsedMs).toBeLessThan(5000);
   await watch.db.execute('UPDATE articles SET title=?,fetched_at=fetched_at+10000 WHERE id=1',['Edited once']);
   const delta=await exchange(watch.repo,phone,{checkpoint:true});expect(delta.requests).toBe(1);expect(delta.fullBodies).toBe(1);expect(delta.elapsedMs).toBeLessThan(5000);expect((await phone.db.query('SELECT title FROM articles WHERE title=?',['Edited once']))).toHaveLength(1);
   await phone.db.execute('UPDATE articles SET title=?,fetched_at=fetched_at+20000 WHERE id=(SELECT MIN(id) FROM articles)',['Phone edited once']);
-  await exchange(watch.repo,phone,{checkpoint:true});expect(watch.count()).toBe(5500);expect((await watch.db.query('SELECT id FROM articles WHERE title=?',['Phone edited once']))).toHaveLength(1);
-  const oldPhone=await fixture(join(root,'old-phone.sqlite'),'legacy-phone');try{const legacy=await exchange(watch.repo,oldPhone,{checkpoint:false});expect(oldPhone.count()).toBe(5500);console.log('T39 scale '+JSON.stringify({partial,resumed,noop,delta,legacy}));}finally{oldPhone.sql.close();}
+  await exchange(watch.repo,phone,{checkpoint:true});expect(watch.count()).toBe(SCALE_LOOPBACK_ARTICLES);expect((await watch.db.query('SELECT id FROM articles WHERE title=?',['Phone edited once']))).toHaveLength(1);
+  const oldPhone=await fixture(join(root,'old-phone.sqlite'),'legacy-phone');try{const legacy=await exchange(watch.repo,oldPhone,{checkpoint:false});expect(oldPhone.count()).toBe(SCALE_LOOPBACK_ARTICLES);console.log('T39 scale '+JSON.stringify({partial,resumed,noop,delta,legacy}));}finally{oldPhone.sql.close();}
   const beforeLost=await watch.repo.cursor('phone');
   await watch.db.execute('UPDATE articles SET title=?,fetched_at=fetched_at+20000 WHERE id=2',['Lost ACK edit']);
-  await exchange(watch.repo,phone,{checkpoint:true,dropFinalAck:true});expect(phone.count()).toBe(5500);
+  await exchange(watch.repo,phone,{checkpoint:true,dropFinalAck:true});expect(phone.count()).toBe(SCALE_LOOPBACK_ARTICLES);
   expect((await watch.repo.cursor('phone')).lastLocalSeqAckedByPeer).toBe(beforeLost.lastLocalSeqAckedByPeer);
-  const retry=await exchange(watch.repo,phone,{checkpoint:true});expect(retry.fullBodies).toBe(0);expect(phone.count()).toBe(5500);
+  const retry=await exchange(watch.repo,phone,{checkpoint:true});expect(retry.fullBodies).toBe(0);expect(phone.count()).toBe(SCALE_LOOPBACK_ARTICLES);
   expect((await watch.repo.cursor('phone')).lastLocalSeqAckedByPeer).toBeGreaterThan(beforeLost.lastLocalSeqAckedByPeer);
 
  }finally{watch.sql.close();phone.sql.close();await server.close();rmSync(root,{recursive:true,force:true});}

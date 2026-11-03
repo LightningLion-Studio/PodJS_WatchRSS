@@ -19,6 +19,10 @@ import {MemoRepository} from '../../src/notes/repository.ts';
 import type {MemoNote} from '../../src/notes/types.ts';
 import {syncNotes} from '../../src/sync/note-actions.ts';
 
+// Each relay case fsyncs three file-backed databases across repeated manifests,
+// cloud projections and save/cancel/re-save cycles. Loaded runs measured 5.7s;
+// 15s gives disk scheduling headroom without changing the global 5s budget.
+const SQLITE_RELAY_BUDGET_MS=15_000;
 const codec:SyncBodyCodec={sha256:async b=>new Bun.CryptoHasher('sha256').update(b).digest('hex'),encode:async b=>gzipSync(encodeBodyJson(b)),decode:async b=>gunzipSync(b).toString('utf8')};
 const text:SyncTextPort={parseUri:async value=>{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname,rawPath:u.pathname,rawQuery:u.search.slice(1)||null};},htmlText:async s=>s};
 const files={storeText:async(_k:string,v:string)=>v,hydrate:async(v:string)=>v};
@@ -80,14 +84,14 @@ for(const source of [null,'https://watchrss.local/import-txt-novel/book','https:
   for(const p of [a!,b!,c!]){await receive(p,change(true,3500),'z-old');await assertClock(p,id,type,false,4000);}
   await receive(a!,change(true,5000));await relay(a!,b!,id);await relay(b!,c!,id);await relay(b!,a!,id,false);
   for(const p of [a!,b!,c!]){await receive(p,change(false,4500),'z-old');await assertClock(p,id,type,true,5000);}
- }));
+ }),SQLITE_RELAY_BUDGET_MS);
 }
 for(const reverse of [false,true])test(`equal clocks retain native sender tie-break across relay (reverse=${reverse})`,async()=>trio(async([a,b,c])=>{
  const base=await article(),id=base.articleId,save={...base,favoriteSaved:true,favoriteChangedAt:4000,favoriteSortOrder:4000},cancel={...save,favoriteSaved:false};
  for(const p of [a!,b!])for(const [value,sender] of reverse?[[cancel,'z-winner'],[save,'a-loser']] as const:[[save,'a-loser'],[cancel,'z-winner']] as const)await receive(p,value,sender);
  await relay(a!,c!,id);await relay(c!,b!,id,false);
  for(const p of [a!,b!,c!])await assertClock(p,id,'favorite',false,4000);
-}));
+}),SQLITE_RELAY_BUDGET_MS);
 test('local cancel/re-save and file reopen export journal clocks without receiver now injection',async()=>trio(async([a,b],dir)=>{
  const base=await article(),id=base.articleId;await receive(a!,{...base,favoriteSaved:true,favoriteChangedAt:3000,favoriteSortOrder:3000});
  const item=Number((await a!.db.query('SELECT item_id FROM sync_article_ids WHERE article_id=?',[id]))[0]!.item_id);
@@ -98,24 +102,24 @@ test('local cancel/re-save and file reopen export journal clocks without receive
  }
  const at=Number((await b!.db.query("SELECT changed_at FROM sync_saved_states WHERE article_id=? AND save_type='favorite'",[id]))[0]!.changed_at);
  const reopened=await peer(join(dir,b!.id+'.sqlite'),b!.id);try{await assertClock(reopened,id,'favorite',false,at);}finally{reopened.sql.close();}
-}));
+}),SQLITE_RELAY_BUDGET_MS);
 test('clearing one list retains both independent saved clocks while the other list stays active',async()=>trio(async([a,b,c])=>{
  const base=await article(),id=base.articleId;
  await receive(a!,{...base,favoriteSaved:false,favoriteChangedAt:4000,favoriteSortOrder:4000,watchLaterSaved:true,watchLaterChangedAt:3500,watchLaterSortOrder:3500});
  await relay(a!,b!,id);await relay(b!,c!,id);
  for(const p of [a!,b!,c!]){await assertClock(p,id,'favorite',false,4000);await assertClock(p,id,'watchLater',true,3500);}
-}));
+}),SQLITE_RELAY_BUDGET_MS);
 test('note tombstones preserve updatedAt/deletedAt/modifiedBy through two default-clock repositories',async()=>trio(async([a,b,c])=>{
  const initial={noteId:'relay-note',folderId:null,title:'Deleted',markdown:'body',plainText:'body',contentHash:'body-hash',baseContentHash:'body-hash',baseMarkdown:'body',pinned:false,createdAt:100,updatedAt:4000,modifiedBy:'origin',deleted:true,deletedAt:4000};
  let notes:MemoNote[]=[initial];for(const p of [a!,b!,c!]){
   const repository=new MemoRepository(p.db,p.id);const response=await syncNotes({notes},repository,async()=>p.id);
   notes=(await repository.allIncludingDeleted());expect(notes).toEqual([initial]);expect(response.notes).toEqual([Object.fromEntries(Object.entries(initial).filter(([key])=>key!=='plainText'))]);
  }
-}));
+}),SQLITE_RELAY_BUDGET_MS);
 
 test('active article progress/read clocks survive relay and stale metadata receipt',async()=>trio(async([a,b,c])=>{
  const base=await article(),id=base.articleId;
  await receive(a!,{...base,favoriteChangedAt:4000});await relay(a!,b!,id);await relay(b!,c!,id);
  await receive(c!,{...base,readingPositionChangedAt:100,readingPositionBytes:1,readingProgress:.1,isRead:false});
  for(const p of [a!,b!,c!])expect((await exported(p,id)).article).toMatchObject({readingPositionChangedAt:900,readingPositionBytes:4,readingProgress:.25,isRead:true});
-}));
+}),SQLITE_RELAY_BUDGET_MS);

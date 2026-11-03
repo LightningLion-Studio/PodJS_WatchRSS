@@ -1,3 +1,4 @@
+import {externalFixture} from '../helpers/external-fixtures';
 import {test,expect} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {acquireIpDescriptor,IP_BLE_DISCOVERY} from '../../src/sync/ip-discovery.ts';
@@ -6,9 +7,12 @@ import type {discovery} from '@podjs/framework/services';
 const granted={available:true,enabled:true,permission:'granted' as const};
 const payload=(value:unknown,bonded=true)=>({address:'test-peer',bonded,dataBase64:Buffer.from(JSON.stringify(value)).toString('base64')});
 const operation=<T>(value:T)=>({result:Promise.resolve(value),cancel:()=>{}});
-test('BLE request matches native UUIDs, debounces, and decodes the descriptor',async()=>{
- const source=readFileSync(new URL('../../../Android_WatchRSS/app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/IpSyncProtocol.kt',import.meta.url),'utf8');
+const nativeProtocol=externalFixture('ANDROID_WATCHRSS_ROOT','app/src/main/java/com/lightningstudio/watchrss/phoneconnection/ip/IpSyncProtocol.kt');
+(nativeProtocol?test:test.skip)('BLE UUIDs match the native protocol',()=>{
+ const source=readFileSync(nativeProtocol!,'utf8');
  for(const [field,name] of [['advertisedServiceUuid','ADVERTISED_BLE_SERVICE_UUID'],['serviceUuid','BLE_DISCOVERY_SERVICE_UUID'],['characteristicUuid','BLE_ENDPOINT_CHARACTERISTIC_UUID']] as const){const match=source.match(new RegExp('val '+name+': UUID =\\s*UUID.fromString\\("([^"]+)"\\)'));expect(match).not.toBeNull();expect(String(IP_BLE_DISCOVERY[field])).toBe(match![1]!);}
+});
+test('BLE request debounces and decodes the descriptor',async()=>{
  const clock=new Clock();let checks=0,scans=0;const descriptor={v:2,id:'配对手机'};
  const radio:Pick<typeof discovery,'status'|'bleReadCharacteristic'>={status:async()=>{checks++;return granted;},bleReadCharacteristic:options=>{scans++;expect(options.bondedOnly).toBe(true);expect(options.manufacturerId).toBe(65535);expect(Buffer.from(options.manufacturerDataBase64,'base64').toString()).toBe('WRS3');return operation(payload(descriptor));}};
  const op=acquireIpDescriptor(radio,clock.delay);await clock.advance(349);expect(checks).toBe(0);await clock.advance(1);await expect(op.result).resolves.toEqual(descriptor);expect(checks).toBe(1);expect(scans).toBe(1);

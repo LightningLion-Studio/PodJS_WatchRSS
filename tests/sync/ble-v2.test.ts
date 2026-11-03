@@ -1,3 +1,4 @@
+import {externalFixture} from '../helpers/external-fixtures';
 import {test,expect} from 'bun:test';
 import {MemoRepository} from '../../src/notes/repository';
 import {noteManifest} from '../../src/sync/note-manifest';
@@ -78,7 +79,6 @@ test('R41 session keeps same-URL distinct GUID articles, projects every body ide
 test('shared phone note-state/R41 wire vectors are byte-identical and reject ambiguous aliases',async()=>{
  const {readFileSync}=await import('node:fs'),{parseArticleManifest}=await import('../../src/sync/manifest');
  const n=await import('../fixtures/ble-note-state-v2.json'),r=await import('../fixtures/ble-rss-identity-v2.json');
- for(const name of ['ble-note-state-v2.json','ble-rss-identity-v2.json'])expect(readFileSync(import.meta.dir+'/../fixtures/'+name)).toEqual(readFileSync('/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/vectors/'+name));
  for(const row of n.cases)expect(noteManifest({...row.note,plainText:''}).stateHash).toBe(row.stateHash);
  const {stableArticleId}=await import('../../src/sync/local-manifest');for(const row of r.cases)expect(await stableArticleId(row.url,parseUri,{sha256:async b=>sha(b)})).toBe(row.legacyArticleId);
  expect(()=>parseArticleManifest({articleManifest:[{articleId:'a',legacyArticleIds:['old']},{articleId:'b',legacyArticleIds:['old']}]})).toThrow('Ambiguous');
@@ -138,3 +138,11 @@ test('one-time dedup refuses ambiguous URL aliases and unproven hash-shaped genu
  await f.db.execute('DELETE FROM sync_article_ids');await f.db.execute('DELETE FROM articles WHERE id=2');await f.db.execute('PRAGMA user_version=3');await initializeSchema(f.db);expect(await f.db.query('SELECT id FROM articles ORDER BY id')).toEqual([{id:1},{id:3}]);
  }finally{f.sql.close();}
 });
+
+for(const name of ['ble-note-state-v2.json','ble-rss-identity-v2.json']){
+ const shared=externalFixture('PODJS_SYNC_VECTORS_DIR',name);
+ (shared?test:test.skip)(`shared phone vector bytes match ${name}`,async()=>{
+  const {readFileSync}=await import('node:fs');
+  expect(readFileSync(import.meta.dir+'/../fixtures/'+name)).toEqual(readFileSync(shared!));
+ });
+}
