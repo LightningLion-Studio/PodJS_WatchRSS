@@ -23,7 +23,7 @@ let replacementPrepareGate:Promise<void>|undefined;
 const sessionCalls:any[]=[];const sessionStates=new Map<string,any>();
 const sessionValue=(id:string)=>sessionStates.get(id)??{...state("ready"),sessionId:id};
 const sessionPort={
- prepare:(options:any)=>{if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":options.autoplay?"playing":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
+ prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);if(options.prewarm&&pressureLimit)decoderLimit=pressureLimit;sessionCalls.push({method:"prepare",...options});const value={...state(options.prewarm?"prewarmed":options.autoplay?"playing":"ready"),sessionId:options.sessionId,hasRenderedFirstFrame:true,presented:!options.prewarm};sessionStates.set(options.sessionId,value);return {result:options.prewarm&&sessionPrepareError?Promise.reject(sessionPrepareError):(!options.prewarm&&sessionCalls.filter(c=>c.method==="prepare"&&!c.prewarm).length>1&&replacementPrepareGate?replacementPrepareGate.then(()=>value):Promise.resolve(value)),cancel(){}};},
  play:async(id:string)=>{const v={...sessionValue(id),state:"playing"};sessionStates.set(id,v);return v;},
  retire:async(id:string)=>{const v={...sessionValue(id),state:"prewarmed",muted:true};sessionStates.set(id,v);return v;},
  pause:async(id:string)=>{const v={...sessionValue(id),state:"paused"};sessionStates.set(id,v);return v;},
@@ -43,7 +43,7 @@ let heldPrepare:Promise<any>|undefined;
 let retires=0;let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any[]=[];
 let ticks:(()=>void)[]=[];
 const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
-const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
+const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
 mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
@@ -693,7 +693,7 @@ test('DYHIT release adopts an already decoded slot while neighbour resolution re
   onAdjacentKey:d=>d==='next'?'b':'z',onPrepareAdjacent:()=>new Promise(()=>{}),
   onSelectTarget:(_d,_n,decoded)=>{decodedSelection=decoded;if(decoded)setCurrent(decoded.source as ReturnType<typeof source>);},
  });});await flush();
- await pool.prewarm({key:'b',source:source('b')},{...source('b'),bounds:{x:0,y:0,width:233,height:233}},'next');
+ await pool.prewarm({key:'b',source:source('b')},{...source('b'),respectSilentMode:true,bounds:{x:0,y:0,width:233,height:233}},'next');
  const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-116});g.onPanEnd({vy:-500});await flush();
  expect(decodedSelection?.key).toBe('b');expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(1);expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(1);
 });
@@ -779,4 +779,17 @@ test('DYWAIT foreground preparation failure stays on the player with a working r
  const root=createRoot(stop=>{stops.push(stop);const [source,setSource]=createSignal<any>({...actual,url:undefined,previewOnly:true,preparationError:{code:'decode_error'}});return VideoPlayerScreen({get source(){return source();},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retried++;setSource(actual);}});});
  await flush();expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join(' ')).toContain('播放失败');expect(prepares).toHaveLength(0);
  const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(button).toBeDefined();button!.props.onPress();await flush();expect(retried).toBe(1);expect(prepares).toHaveLength(1);expect(current.state).toBe('playing');
+});
+
+test('DYSILENT all platforms opt in and crown carries explicit up/down intent',async()=>{
+ for(const platform of ['douyin','bili'] as const){
+  initial='available';current=state('idle');const calls:any[]=[];let handle:any;
+  const previous=video.setVolume;video.setVolume=async(...args:any[])=>{calls.push(args);return current;};
+  try{
+   createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform,url:'local-complete.mp4',title:'local',digitalCrownVolume:true,resumePositionMs:100},width:233,height:233,active:true,offset:0,round:true,ref:v=>handle=v});});
+   await flush();expect(prepares.at(-1).respectSilentMode).toBe(true);
+   expect(handle.onCrown(1)).toBe(true);await flush();expect(calls.at(-1)[1]).toBe(1);
+   expect(handle.onCrown(-1)).toBe(true);await flush();expect(calls.at(-1)[1]).toBe(-1);
+  }finally{stops.pop()!();video.setVolume=previous;}
+ }
 });

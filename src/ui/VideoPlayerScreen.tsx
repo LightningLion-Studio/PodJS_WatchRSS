@@ -127,15 +127,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   // Without prewarmed sessions the one surface follows the drag like a native pager page, then hides until the next item's first frame.
   const dragOffsetY = () => { if (usingSessions()&&nativeDrag()) return 0; const axis = dragAxis(); return axis === "up" ? -dragProgress() * props.height : axis === "down" ? dragProgress() * props.height : 0; };
   const bounds = () => ({ x: 0, y: top(), width: props.width, height: props.height, translateX: props.offset, translateY: dragOffsetY(), visible: props.active && !handoff(), roundClip: props.round ? { cx: props.width / 2, cy: screenHeight() / 2 - top(), radius: Math.min(props.width, screenHeight()) / 2 } : undefined });
+  let crownDirection: -1|1 = 1;
   const media={
-    prepare:(options:VideoPrepare)=>usingSessions()?sessionPool!.prepare(sessionSource(props.source),{...options,transform:{scaleMode:mode(),rotationDeg:displayRotation(),panX:0,panY:0}}):video.prepare(options),
+    prepare:(options:VideoPrepare)=>{options={...options,respectSilentMode:true};return usingSessions()?sessionPool!.prepare(sessionSource(props.source),{...options,transform:{scaleMode:mode(),rotationDeg:displayRotation(),panX:0,panY:0}}):video.prepare(options);},
     retire:(handoff=false)=>usingSessions()?sessionPool!.retire(handoff):video.retire(handoff),
     play:()=>usingSessions()?sessionPool!.play():video.play(),pause:(action?:VideoBenchmarkAction,handoff=false)=>usingSessions()?sessionPool!.pause(action,handoff):video.pause(handoff),
     seek:(positionMs:number)=>usingSessions()?sessionPool!.seek(positionMs):video.seek(positionMs),
     stop:()=>usingSessions()?sessionPool!.stop():video.stop(),state:()=>usingSessions()?sessionPool!.state():video.state(),
     setBounds:(value:VideoBounds)=>usingSessions()?sessionPool!.setBounds(value):video.setBounds(value),
     setTransform:(value:{rotationDeg?:number;scaleMode?:"standard"|"expanded"|"shrunk";panX?:number;panY?:number})=>usingSessions()?sessionPool!.setTransform(value):video.setTransform(value),
-    setVolume:(value:number)=>usingSessions()?sessionPool!.setVolume(value):video.setVolume(value),
+    setVolume:(value:number)=>usingSessions()?sessionPool!.setVolume(value,crownDirection):video.setVolume(value,crownDirection),
     setMuted:(muted:boolean)=>usingSessions()?sessionPool!.setMuted(muted):video.setMuted(muted),
     setLoop:(value:boolean)=>usingSessions()?sessionPool!.setLoop(value):video.setLoop(value),
   };
@@ -326,7 +327,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(!target||!usingSessions())return;
     try{
       if(target.queueIndex!==undefined&&target.anchorIndex!==undefined)sessionPool!.traceNeighbour(target.key,target.queueIndex,target.anchorIndex);
-      await sessionPool!.prewarm(target,{...target.source,bounds:bounds(),loop:loopMode()==="single",autoplay:false,muted:true} as VideoPrepare,direction==="next"?"next":"prev");
+      await sessionPool!.prewarm(target,{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false,muted:true} as VideoPrepare,direction==="next"?"next":"prev");
       return revision===neighborRevision&&usingSessions()&&sessionPool!.hasStandby(target.key)?target:undefined;
     }catch(value){if(revision===neighborRevision&&!cancelledSessionError(value)&&shouldFallbackFromVideoSessions(value)){if(await sessionPool!.supportsPrewarm())return;await degradeSessions(value);return revision===neighborRevision&&!disposed?target:undefined;}return;}
   };
@@ -345,7 +346,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(revision!==neighborRevision||disposed||!props.active||lifecycle()!=="active")return;
       const target=await previewAdjacent(direction,revision,false,distance);
       if(!target||revision!==neighborRevision||disposed)return;
-      return {source:target,options:{...target.source,bounds:bounds(),loop:loopMode()==="single",autoplay:false},direction:direction==="next"?"next" as const:"prev" as const};
+      return {source:target,options:{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false},direction:direction==="next"?"next" as const:"prev" as const};
     }));
   };
   let deepWarmRevision=-1;
@@ -472,7 +473,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         if(decoded&&props.source===decoded.source){
           const action=pendingBenchmark;pendingBenchmark=undefined;
           autoplayAllowed=props.active&&lifecycle()==='active';
-          const op=sessionPool!.prepare(decoded,{...decoded.source,loop:loopMode()==='single',bounds:{...bounds(),translateY:0,visible:props.active},autoplay:autoplayAllowed,...(action?{benchmark:action}:{})} as VideoPrepare);
+          const op=sessionPool!.prepare(decoded,{...decoded.source,respectSilentMode:true,loop:loopMode()==='single',bounds:{...bounds(),translateY:0,visible:props.active},autoplay:autoplayAllowed,...(action?{benchmark:action}:{})} as VideoPrepare);
           prepareOp=op;setHandoff(false);setFirstFrame(true);setReady(true);setError('');setSpinnerDue(false);clearDrag();
           // The cover stays absent. Native independently requires the decoded,
           // latched target and a real commit; this acknowledgement is not proof.
@@ -522,7 +523,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
           delta=2;if(pendingBenchmark)pendingBenchmark.delta=2;dragTarget=candidate;setNativeDrag(false);neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;forwardWarm=undefined;backwardWarm=undefined;forwardResolved=false;
           if(usingSessions()){
             sessionPool!.retainNeighbours([]);
-            await Promise.race([sessionPool!.prewarm(candidate,{...candidate.source,bounds:bounds(),autoplay:false,muted:true},direction==='up'?'next':'prev'),deadline.result]);
+            await Promise.race([sessionPool!.prewarm(candidate,{...candidate.source,respectSilentMode:true,bounds:bounds(),autoplay:false,muted:true},direction==='up'?'next':'prev'),deadline.result]);
           }
           if(revision!==dragRevision||disposed)return;
           dragTarget=candidate;
@@ -541,7 +542,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       void props.onPrepareAdjacent(direction==='up'?'next':'previous',2).then(async following=>{
         if(!following||!usingSessions()||disposed||revision!==dragRevision||videoSessionOwner!==sessionOwner)return;
         followingKeys.push(following.key);
-        await sessionPool!.prewarm(following,{...following.source,bounds:bounds(),loop:loopMode()==='single',autoplay:false,muted:true},direction==='up'?'next':'prev');
+        await sessionPool!.prewarm(following,{...following.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==='single',autoplay:false,muted:true},direction==='up'?'next':'prev');
       }).catch(()=>{});
     }
     try{
@@ -621,13 +622,13 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const horizontalPanGesture = createGesture({ region: { rect: () => { const r = range(); return props.active && props.source.platform !== "douyin" && r.axis === "x" && r.range > 0 && pan() < r.range - 1 ? { x: 0, y: top(), w: props.width, h: props.height } : null; } }, axis: "x", panSlop: 8,
     onDown: () => { panVelocity = 0; }, onPanStart: () => { panningStart = pan(); }, onPanMove: contact => { const r = range(); setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dx))); void requestTransform(); }, onPanEnd: contact => { panVelocity = contact.vx; panFrameAt = Date.now(); props.onPanStateChange?.(pan(), range().range); }
   });
-  onFrame(() => { const now = Date.now(); if(props.source.platform==='douyin'&&props.source.immersive&&props.active&&now-lastBenchmarkHeartbeat>=1000){lastBenchmarkHeartbeat=now;benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:props.active&&props.offset===0&&lifecycle()==='active'&&!error()&&!networkPrompt()?'present':'absent',visibility_reason:!props.active?'inactive':props.offset!==0?'route_offset':lifecycle()!=='active'?'lifecycle':error()?'player_error':networkPrompt()?'network_prompt':'ready',player_state:closedPlayerState(state()?.state),has_frame:state()?.hasRenderedFirstFrame===true,offset_abs_milli:Math.min(1000000000,Math.round(Math.abs(props.offset)*1000))});} frameWait.observe(firstFrame()&&!handoff());setSpinnerDue(frameWait.visible()&&state()?.bufferedMs===0&&state()?.networkStalled===true); if (panVelocity !== 0) { const elapsed = Math.min(50, Math.max(0, now - panFrameAt)), r = range(), next = Math.max(-r.range, Math.min(r.range, pan() + panVelocity * elapsed / 1000)); setPan(next); panVelocity *= Math.exp(-5 * elapsed / 1000); if (Math.abs(panVelocity) < 5 || next === -r.range || next === r.range) panVelocity = 0; panFrameAt = now; void requestTransform(); } if (!state() || buffering()) setLoadingRotation(value => (value + 6) % 360); if (!rotationStarted) return; const elapsed = now - rotationStarted, t = Math.min(1, elapsed / 300), eased = 1 - Math.pow(1 - t, 3); setDisplayRotation(rotationFrom + (rotationTo - rotationFrom) * eased); void requestTransform(); if (t >= 1) rotationStarted = 0; });
+  onFrame(() => { const now = Date.now(); if(props.source.platform==='douyin'&&props.source.immersive&&props.active&&now-lastBenchmarkHeartbeat>=1000){lastBenchmarkHeartbeat=now;benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true,ringer_mode:state()!.ringerMode??'unknown',silenced:state()!.silenced===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:props.active&&props.offset===0&&lifecycle()==='active'&&!error()&&!networkPrompt()?'present':'absent',visibility_reason:!props.active?'inactive':props.offset!==0?'route_offset':lifecycle()!=='active'?'lifecycle':error()?'player_error':networkPrompt()?'network_prompt':'ready',player_state:closedPlayerState(state()?.state),has_frame:state()?.hasRenderedFirstFrame===true,offset_abs_milli:Math.min(1000000000,Math.round(Math.abs(props.offset)*1000))});} frameWait.observe(firstFrame()&&!handoff());setSpinnerDue(frameWait.visible()&&state()?.bufferedMs===0&&state()?.networkStalled===true); if (panVelocity !== 0) { const elapsed = Math.min(50, Math.max(0, now - panFrameAt)), r = range(), next = Math.max(-r.range, Math.min(r.range, pan() + panVelocity * elapsed / 1000)); setPan(next); panVelocity *= Math.exp(-5 * elapsed / 1000); if (Math.abs(panVelocity) < 5 || next === -r.range || next === r.range) panVelocity = 0; panFrameAt = now; void requestTransform(); } if (!state() || buffering()) setLoadingRotation(value => (value + 6) % 360); if (!rotationStarted) return; const elapsed = now - rotationStarted, t = Math.min(1, elapsed / 300), eased = 1 - Math.pow(1 - t, 3); setDisplayRotation(rotationFrom + (rotationTo - rotationFrom) * eased); void requestTransform(); if (t >= 1) rotationStarted = 0; });
   const showVolumeOverlay = () => {
     setVolumeVisible(true);volumeTimer?.cancel();volumeTimer=delay(900);
     void volumeTimer.result.then(()=>setVolumeVisible(false)).catch(()=>{});
   };
   const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await media.setVolume(target); observedVolume = next.volume; if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
-  const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; showVolumeOverlay(); void submitVolume(); return true; };
+  const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; crownDirection=direction>0?1:-1; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; showVolumeOverlay(); void submitVolume(); return true; };
   props.ref?.({ invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,onCrown: adjustVolume, canSwipeBack: () => { const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; } });
   onCleanup(() => { recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233) / 2, uiTop = () => (props.height - 233) / 2;
@@ -644,8 +645,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(!visible&&benchmarkSpinner&&spinnerBenchmark){benchmark.cancelPresented('spinner_shown',spinnerBenchmark.seq);spinnerBenchmark=undefined;}
     benchmarkSpinner=!!visible;
   });
-  createEffect(()=>{if(props.source.platform==='douyin'&&props.source.immersive&&!props.active)benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:'absent'});});
-  onCleanup(()=>{if(props.source.platform==='douyin'&&props.source.immersive)benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:'absent'});});
+  createEffect(()=>{if(props.source.platform==='douyin'&&props.source.immersive&&!props.active)benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true,ringer_mode:state()!.ringerMode??'unknown',silenced:state()!.silenced===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:'absent'});});
+  onCleanup(()=>{if(props.source.platform==='douyin'&&props.source.immersive)benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true,ringer_mode:state()!.ringerMode??'unknown',silenced:state()!.silenced===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:'absent'});});
   let coverWasVisible=false,coverGeneration=0;
   createEffect(()=>{
     const visible=!!(props.source.platform==='douyin'&&props.source.immersive&&((!firstFrame()&&(previewPath()||props.source.posterUrl))||dragPoster()));

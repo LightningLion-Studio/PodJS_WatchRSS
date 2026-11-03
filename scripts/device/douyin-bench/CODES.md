@@ -222,7 +222,7 @@ relax the input guard. Unknown player states map to `unknown`.
 
 T-1201 Audio: `player_visible` may carry `audio_gain_milli` (0..1000, actual Media3 gain readback) and `audio_track` (selected audio format present). These do not prove audible PCM or speaker output. No URL, track identifier or codec description is recorded.
 
-T-1201 MUTESYNC: `player_visible` additionally accepts `system_index`, `system_max` (integers 0..1024), and `system_muted` (boolean). These are active STREAM_MUSIC readbacks. The overlay derives its rounded percentage from index/max. `audio_gain_milli` must remain 1000 for an active video. A system mute no longer produces a private zero-gain `player_audio_applied` receipt. Prewarm silencing disables its audio track and never changes system mute.
+T-1201 MUTESYNC: `player_visible` additionally accepts `system_index`, `system_max` (integers 0..1024), and `system_muted` (boolean). These are active STREAM_MUSIC readbacks. The overlay derives its rounded percentage from index/max. For clients that do not opt in to system-silent policy, `audio_gain_milli` remains 1000 for an active video. A system mute no longer produces a private zero-gain `player_audio_applied` receipt. Prewarm silencing disables its audio track and never changes system mute.
 
 `startup_stage` carries only a closed `startup_stage` enum and optional decoder `duration_ms`. Native uptime and seq correlate input, source, persistence, surface, decoder, and first frame. `home_first_frame` is a real native HWUI commit; it is distinct from guest home construction. Process start uses Android Process.getStartUptimeMillis, never host wall time.
 
@@ -292,3 +292,12 @@ identifier, URL, header or arbitrary text is accepted. Event time remains native
 uptime; durations use guest elapsed wall time. Zero also denotes an unfinished
 phase. Transport includes download, private-file reads and cleanup; it is not
 wire-only timing. Feed item projection after the request diagnostic is excluded.
+
+T-DYSILENT: opted-in video carries `ringer_mode=normal|vibrate|silent|unknown`
+and `silenced=true|false` only on `player_visible`. Both native emitter and
+collector reject other values. `silenced` describes the effective player-gain
+policy; `system_muted` continues to describe STREAM_MUSIC. SILENT/VIBRATE or
+DND suppressing media applies `audio_gain_milli=0` without writing system volume.
+A crown-up at an audible index overrides policy silence for this app process;
+crown-down to zero revokes it. Speculative audio-track holds remain separate.
+These player readbacks do not establish mixer/PCM or physical speaker output.

@@ -18,7 +18,7 @@ NUMBERS = {'decoder_in_use','system_headroom_bytes','trim_level','keyframe_bytes
 _PLAYER_ERRORS=json.loads((Path(__file__).parent/'player-error-schema.json').read_text())
 ENUMS.update({key:set(values)for key,values in _PLAYER_ERRORS['enums'].items()})
 NUMBERS.update(_PLAYER_ERRORS['numbers'])
-_VISIBILITY={'visibility_reason':set(['ready', 'inactive', 'route_offset', 'lifecycle', 'player_error', 'network_prompt', 'native_hidden', 'native_unfocused']),'player_state':set(['idle', 'preparing', 'buffering', 'ready', 'playing', 'paused', 'ended', 'stopped', 'error', 'unknown']),'has_frame':{'true','false'},'audio_track':{'true','false'},'system_muted':{'true','false'}}
+_VISIBILITY={'visibility_reason':set(['ready', 'inactive', 'route_offset', 'lifecycle', 'player_error', 'network_prompt', 'native_hidden', 'native_unfocused']),'player_state':set(['idle', 'preparing', 'buffering', 'ready', 'playing', 'paused', 'ended', 'stopped', 'error', 'unknown']),'has_frame':{'true','false'},'audio_track':{'true','false'},'system_muted':{'true','false'},'ringer_mode':{'normal','vibrate','silent','unknown'},'silenced':{'true','false'}}
 ENUMS.update(_VISIBILITY)
 ENUMS.update({'decoded_visible':{'true','false'},'playback_ready':{'true','false'},'frame_kind':{'live','cached','none'}})
 NUMBERS.add('target_generation')
