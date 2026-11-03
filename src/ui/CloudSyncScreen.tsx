@@ -159,7 +159,26 @@ export function CloudSyncScreen(props: {
         <Text class="absolute left-[16] top-[0]" style={{fontSlot: 22, lineHeight: 21, textColor: PHONE_PAGE.foreground}}>{view.title}</Text>
       </View>});
     if (view.detail) rows.push(gap(4), centred(view.detail, 1, 17, PHONE_PAGE.secondary, Math.min(inner(), DETAIL_WIDTH)));
-    const button = ['requesting','pending','code','committing'].includes(approval().phase)?undefined:view.button;
+    // A request from another device replaces the sync action so it lands near the top of the round screen.
+    const grant=approver(),grantActive=!!props.approver&&!!grant&&approval().phase==='idle'&&!['idle','unsupported'].includes(grant.phase);
+    if(grantActive&&grant){
+      // Another device asks this watch for the account key; it is sent only after both sides show the same digits.
+      const target=grant.requests.find(r=>r.requestId===grant.requestId)??grant.requests[0],full=grant.requesterLabel||target?.requesterLabel||'新设备',label=Array.from(full).length>16?Array.from(full).slice(0,15).join('')+'…':full;
+      rows.push(gap(14));
+      if(grant.phase==='requested'&&target){
+        rows.push(centred(`${label} 请求云同步授权`,1,17,PHONE_PAGE.foreground),gap(10),pill('核对授权码',true,()=>void props.approver!.accept(target.requestId)));
+      }else if(grant.phase==='code'&&grant.code){
+        const code=grant.code.length===8?`${grant.code.slice(0,4)} ${grant.code.slice(4)}`:grant.code;
+        rows.push(centred('与另一台设备上的数字一致吗？',1,17,PHONE_PAGE.secondary),gap(6),
+          {height:30,render:()=><Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${grant.code}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{code}</Text>},
+          gap(12),pill('一致',true,()=>void props.approver!.confirm(true)),gap(4),link('不一致',()=>void props.approver!.confirm(false)));
+      }else{
+        const failed=['error','expired','cancelled'].includes(grant.phase);
+        rows.push(centred(grant.message,1,17,failed?'#ff7777':grant.phase==='complete'?PHONE_PAGE.primary:PHONE_PAGE.secondary));
+        if(['accepting','waiting'].includes(grant.phase))rows.push(gap(4),link('取消',()=>void props.approver!.cancel()));
+      }
+    }
+    const button = (grantActive&&['requested','accepting','waiting','code','delivering'].includes(grant!.phase))||['requesting','pending','code','committing'].includes(approval().phase)?undefined:view.button;
     if (button) {
       const width = Math.min(ACTION_WIDTH, inner());
       rows.push(gap(14), {height: PHONE_PAGE.touchHeight, bounds: centredBounds(inner(), width, 0, PHONE_PAGE.touchHeight), render: () =>
@@ -183,24 +202,6 @@ export function CloudSyncScreen(props: {
     } else if(props.approval&&codeState.phase!=='idle'){
       rows.push(gap(14),centred(codeState.message,1,17,codeState.phase==='error'?'#ff7777':PHONE_PAGE.secondary));
       if(fix.canCancel)rows.push(gap(4),link('取消',()=>void props.approval!.cancel()));
-    }
-    const grant=approver();
-    if(props.approver&&grant&&codeState.phase==='idle'&&!['idle','unsupported'].includes(grant.phase)){
-      // Another device asks this watch for the account key; it is sent only after both sides show the same digits.
-      const target=grant.requests.find(r=>r.requestId===grant.requestId)??grant.requests[0],label=grant.requesterLabel||target?.requesterLabel||'新设备';
-      rows.push(gap(16));
-      if(grant.phase==='requested'&&target){
-        rows.push(centred(`${label} 请求云同步授权`,1,17,PHONE_PAGE.foreground),gap(10),pill('核对授权码',true,()=>void props.approver!.accept(target.requestId)));
-      }else if(grant.phase==='code'&&grant.code){
-        const code=grant.code.length===8?`${grant.code.slice(0,4)} ${grant.code.slice(4)}`:grant.code;
-        rows.push(centred(`与${label}上的数字一致吗？`,1,17,PHONE_PAGE.secondary),gap(6),
-          {height:30,render:()=><Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${grant.code}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{code}</Text>},
-          gap(12),pill('一致',true,()=>void props.approver!.confirm(true)),gap(4),link('不一致',()=>void props.approver!.confirm(false)));
-      }else{
-        const failed=['error','expired','cancelled'].includes(grant.phase);
-        rows.push(centred(grant.message,1,17,failed?'#ff7777':grant.phase==='complete'?PHONE_PAGE.primary:PHONE_PAGE.secondary));
-        if(['accepting','waiting'].includes(grant.phase))rows.push(gap(4),link('取消',()=>void props.approver!.cancel()));
-      }
     }
     if(actions&&fix.needsOwnerChoice){
       rows.push(gap(12),pill(armed()==='clear'?'再按一次确认清空':'清空本机资料',armed()!=='clear',()=>arm('clear',()=>act(actions.resolveOwner('clear',true,props.clearLocal))),!busy&&!!props.clearLocal,armed()==='clear'),
