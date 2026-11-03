@@ -155,7 +155,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   const captureFrame=()=>{
     const source=preparedSource,current=state();
-    if(source?.platform!=='douyin'||!source.awemeId||videoSessionOwner!==sessionOwner||!(current?.hasRenderedFirstFrame||firstFrame())||current?.sourceGeneration===undefined)return;
+    if(source?.platform!=='douyin'||!source.awemeId||videoSessionOwner!==sessionOwner||!current?.hasRenderedFirstFrame||current?.sourceGeneration===undefined)return;
     const options={key:`douyin:${source.awemeId}`,source:frameSource(source),sourceGeneration:current.sourceGeneration};
     try{void (usingSessions()?sessionPool!.captureFrame(options):video.captureFrame(options)).catch(()=>{});}catch{}
   };
@@ -474,10 +474,18 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
           const action=pendingBenchmark;pendingBenchmark=undefined;
           autoplayAllowed=props.active&&lifecycle()==='active';
           const op=sessionPool!.prepare(decoded,{...decoded.source,loop:loopMode()==='single',bounds:{...bounds(),translateY:0,visible:props.active},autoplay:autoplayAllowed,...(action?{benchmark:action}:{})} as VideoPrepare);
-          prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation)warmEarly();});setHandoff(false);setFirstFrame(true);setReady(true);setError('');setSpinnerDue(false);clearDrag();
+          prepareOp=op;setHandoff(false);setFirstFrame(true);setReady(true);setError('');setSpinnerDue(false);clearDrag();
           // The cover stays absent. Native independently requires the decoded,
           // latched target and a real commit; this acknowledgement is not proof.
           if(action)benchmark.confirmVideoFrame(action.seq,action.generation);
+          // Give the incoming pixels their first commit, then prepare neighbours
+          // while native admits the foreground player. Waiting for that player
+          // and a second commit leaves too little lead at a one-second cadence.
+          let neighbourPaint:HostOperation<unknown>;
+          try{neighbourPaint=afterPaint();}catch{neighbourPaint=delay(100);}
+          void neighbourPaint.result.then(()=>{
+            if(!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner)void warmForward();
+          }).catch(()=>{});
           void op.result.then(next=>{
             if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;
             resetViewing(decoded.source);lastPlaybackState="";
@@ -526,6 +534,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     }
     if(revision!==dragRevision||disposed)return;
     const followingKeys:string[]=[];
+    const followingKey=props.onAdjacentKey?.(direction==='up'?'next':'previous',2);
+    if(followingKey)followingKeys.push(followingKey);
     if(wantsSettle&&delta===1&&requestedDelta===1&&usingSessions()&&sessionPool!.neighbourCapacity>=2&&dragTarget&&sessionPool!.hasStandby(dragTarget.key)&&props.onPrepareAdjacent){
       // The decoded outgoing item becomes the opposite neighbour. Reuse its
       // other slot now, overlapping following-item decode with the settle.

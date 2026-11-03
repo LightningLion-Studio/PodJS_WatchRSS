@@ -3,11 +3,12 @@ import {douyinPreloadAllowed} from '../../src/douyin/preload.ts';
 import {douyinProxyWindow,douyinPreviewBytes,douyinPrefetchBytes,douyinPrefetchBandwidth,DOUYIN_PROXY} from '../../src/douyin/proxy-policy.ts';
 import type {DouyinItem} from '../../src/douyin/types.ts';
 const item=(id:string)=>({awemeId:id,playUrl:'https://example.test/'+id}) as DouyinItem;
-test('watch proxy window retains current, three forward, five backward without wrapping at end',()=>{
+test('watch proxy window retains current, six forward, three backward without wrapping at end',()=>{
  const items=['a','b','c','d','e','f','g','h','i'].map(item);
- expect(douyinProxyWindow(items,'f','active').map(x=>x.awemeId)).toEqual(['f','g','e','h','i','d','c','b','a']);
- expect(douyinProxyWindow(items,'i','active').map(x=>x.awemeId)).toEqual(['i','h','g','f','e','d']);
- expect(douyinProxyWindow(items,'b','entry').map(x=>x.awemeId)).toEqual(['b','c','d','e']);
+ expect(douyinProxyWindow(items,'f','active').map(x=>x.awemeId)).toEqual(['f','g','e','d','c','h','i']);
+ expect(douyinProxyWindow(items,'i','active').map(x=>x.awemeId)).toEqual(['i','h','g','f']);
+ expect(douyinProxyWindow(items,'b','entry').map(x=>x.awemeId)).toEqual(['b','c','d','e','f','g','h']);
+ expect(douyinProxyWindow(Array.from({length:20},(_,i)=>item(String(i))),'10','active').map(x=>x.awemeId)).toEqual(['10','11','9','8','7','12','13','14','15','16']);
  expect(douyinProxyWindow([item('a'),item('a'),item('b')],'a','entry').map(x=>x.awemeId)).toEqual(['a','b']);
 });
 test('watch 1.5s sample budgets and foreground bandwidth reserve',()=>{

@@ -1,3 +1,4 @@
+import {benchmark} from '@podjs/framework/benchmark';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
 import type { DouyinClient } from "./client.ts";
 import type { DouyinItem, DouyinResult } from "./types.ts";
@@ -16,6 +17,12 @@ export class DouyinPlaybackQueue {
   private previewRevisions={next:[0,0,0,0,0],previous:[0,0,0,0,0]};
   private quarantined=new Set<string>();
   private persistence:Promise<void>=Promise.resolve();
+  private pendingWrites=0;
+  private write(work:()=>Promise<void>):Promise<void>{
+    this.pendingWrites++;
+    const pending=this.persistence.catch(()=>{}).then(work).finally(()=>{this.pendingWrites--;});
+    this.persistence=pending;return pending;
+  }
   private pageRequest?:Promise<DouyinResult<null>>;
   // One coalesced page can exceed a small window. Keep its tail off-window
   // until a resolved selection makes room, without losing the retry anchor.
@@ -60,15 +67,15 @@ export class DouyinPlaybackQueue {
   /** Save the current pager before playback succeeds, as native buildResumeIntent does. */
   async persist():Promise<void>{
     const state=this.snapshot();if(!state.item)return;
-    const write=this.persistence.catch(()=>{}).then(()=>this.client.savePlaybackQueue(state.playlist,state.item!.awemeId,state.cursor,state.hasMore));
-    this.persistence=write;await write;
+    const write=this.write(()=>this.client.savePlaybackQueue(state.playlist,state.item!.awemeId,state.cursor,state.hasMore));
+    await write;
   }
   resetAutomaticFailures(){this.autoFailures=0;}
   claimAutomaticFailure(){return ++this.autoFailures<3;}
   async settled():Promise<void>{
     const state=this.snapshot();if(!state.item)return;const item=state.item;
-    const write=this.persistence.catch(()=>{}).then(async()=>{await this.client.recordPresented?.(item);await this.client.recordHistory(item);await this.client.saveRecentWindow(state.playlist,item.awemeId,state.cursor,state.hasMore);await this.client.savePlaybackQueue(state.playlist,item.awemeId,state.cursor,state.hasMore);});
-    this.persistence=write;await write;
+    const write=this.write(async()=>{await this.client.recordPresented?.(item);await this.client.recordHistory(item);await this.client.saveRecentWindow(state.playlist,item.awemeId,state.cursor,state.hasMore);await this.client.savePlaybackQueue(state.playlist,item.awemeId,state.cursor,state.hasMore);});
+    await write;
   }
   async prefetch():Promise<void>{if(this.fixedSources)return;const op=this.generation;for(const item of this.queued().slice(this.index+1,this.index+3)){if(op!==this.generation)return;await this.client.resolvePlayback(item.awemeId,{prefetch:true,feedItem:item,allowDetail:false});}}
   /** Resolve one adjacent pager item without moving the persisted playback anchor. */
@@ -108,7 +115,9 @@ export class DouyinPlaybackQueue {
     const cursor=this.cursor,anchor=this.items[this.index]?.awemeId;
     const work=(async():Promise<DouyinResult<null>>=>{
       // Repeated duplicate pages retry later, then refresh the feed, never mark it exhausted.
-      const page=await this.client.fetchFeedPage({cursor:this.emptyPages>=2?null:cursor,count:12});
+      const trace=benchmark.begin('pool_stage',{pool_stage:'refill_start',queue_index:this.queued().length,anchor_index:this.index});
+      const page=await this.client.fetchFeedPage({cursor:this.emptyPages>=2?null:cursor,count:12,deferPersistence:true});
+      benchmark.mark('pool_stage',trace,{pool_stage:'refill_end',queue_index:page.ok?page.data.items.length:0,anchor_index:this.index});
       if(!page.ok)return page;
       if(cursor!==this.cursor)return cancelled();
       const before=new Set(this.items.map(item=>item.awemeId));

@@ -45,6 +45,10 @@ export async function decodableDouyinItem<T extends DouyinItem>(item:T):Promise<
     const sizes=new Set<string>();
     for(const v of candidates){
       const key=`${v.width}x${v.height}`;if(sizes.has(key))continue;sizes.add(key);
+      // A confirmed size is process-local. Native admission still checks its
+      // current runtime decoder limit for every prepare. Repeated neighbour
+      // resolution must not enqueue the same capability scan on the UI thread.
+      if(douyinCodecRuntimePolicy.canDecodeHevc(v))continue;
       let probe=hevcProbes.get(key);
       if(!probe){probe=Promise.resolve().then(()=>hostServices.videoSessions.capabilities({videoMime:'video/hevc',videoWidth:v.width,videoHeight:v.height})).then(result=>result.decoderSizeSupported===true&&result.decoderRuntimeDowngraded!==true).catch(()=>false).finally(()=>hevcProbes.delete(key));hevcProbes.set(key,probe);}
       douyinCodecRuntimePolicy.confirmHevcSize(v,await probe);

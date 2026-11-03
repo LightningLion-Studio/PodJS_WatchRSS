@@ -82,3 +82,13 @@ test('preferred playback memo retains unchanged DTO identity, but scalar or in-p
  video.variants.push({codec:'h264',playUrl:'https://better',width:960,height:540,bitrate:5});expect(normalizeItems([video])[0]!.playUrl).toBe('https://better');
  video.awemeId='  trim  ';expect(normalizeItems([video])[0]!.awemeId).toBe('trim');
 });
+
+test('memo byte eviction preserves every durable playback row and fresher source across restart',async()=>{
+ const f=fixture();try{
+ const feed=new DouyinFeedStore(f.storage),items=Array.from({length:10},(_,i)=>({...item('budget-'+i),description:'x'.repeat(250000)}));
+ const snapshot={items,cursor:'tail',hasMore:false,anchorAwemeId:items[4]!.awemeId,savedAtMillis:200,resolved:Object.fromEntries(items.map(x=>[x.awemeId,200]))};
+ await feed.save(QUEUE_KEY,snapshot);const stats=feed.memoryStats();expect(stats.encodedBytes).toBeLessThanOrEqual(4*1024*1024);expect(stats.persistedBytes).toBeLessThanOrEqual(8*1024*1024);expect(stats.preferredBytes).toBeLessThanOrEqual(2*1024*1024);
+ expect(stats.encodedEntries).toBeLessThan(items.length);await feed.save(QUEUE_KEY,{...snapshot,anchorAwemeId:items[5]!.awemeId});
+ const restored=await new DouyinFeedStore(f.storage).read(QUEUE_KEY);expect(restored.items).toEqual(items.map(x=>({...x,playUrl:x.variants[0]!.playUrl})));expect(restored.anchorAwemeId).toBe(items[5]!.awemeId);
+ }finally{f.raw.close();}
+});

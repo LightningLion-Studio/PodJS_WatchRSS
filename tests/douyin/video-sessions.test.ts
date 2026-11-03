@@ -129,9 +129,16 @@ test('session diagnostics follow real slot roles, host states, promotion and own
 
  test("a loop toggle during standby setLoop acknowledgment cannot publish a slot with stale repeat mode",async()=>{
   const port=fakePort(),pool=new DouyinVideoSessionPool(port as any);await pool.prepare(source("1"),{bounds,loop:false}).result;
-  let finish!:()=>void;const nativeSetLoop=port.setLoop;let deferred=true;
-  port.setLoop=async(id,loop)=>{const value=await nativeSetLoop(id,loop);if(deferred&&id.endsWith("b")){deferred=false;await new Promise<void>(r=>finish=r);}return value;};
-  const pending=pool.prewarm(source("2"),{bounds,loop:false});for(let i=0;i<5;i++)await Promise.resolve();
-  await pool.setLoop(true);finish();await pending;
-  expect(port.calls.at(-1)).toMatchObject({method:"setLoop",loop:true});expect(pool.hasStandby("2")).toBe(true);
+  let finish!:()=>void,prepared!:(value:VideoSessionState)=>void,entered!:()=>void,id="";
+  const nativeSetLoop=port.setLoop,nativePrepare=port.prepare;let deferred=true;
+  const acknowledging=new Promise<void>(resolve=>entered=resolve);
+  port.prepare=options=>options.prewarm?{cancel(){},result:new Promise<VideoSessionState>(resolve=>{id=options.sessionId;prepared=resolve;})}:nativePrepare(options);
+  port.setLoop=async(sessionId,loop)=>{const value=await nativeSetLoop(sessionId,loop);if(deferred&&sessionId===id){deferred=false;entered();await new Promise<void>(r=>finish=r);}return value;};
+  const pending=pool.prewarm(source("2"),{bounds,loop:false});
+  // A real mode change requires synchronization; unchanged prepare values no longer send setLoop.
+  await pool.setLoop(true);prepared(sessionState(id,true));await acknowledging;
+  expect(pool.hasStandby("2")).toBe(false);
+  await pool.setLoop(false);finish();await pending;
+  expect(port.calls.filter(c=>c.method==="setLoop"&&c.sessionId===id).map(c=>c.loop)).toEqual([true,false]);
+  expect(pool.hasStandby("2")).toBe(true);
  });

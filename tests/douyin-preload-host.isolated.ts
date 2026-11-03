@@ -128,3 +128,18 @@ test('DYNEXT media registration metadata stays within the native cache window ov
  expect(host.sourceFor('podjs-media-cache://play/199.mp4')?.awemeId).toBe('199');
  host.stop();expect(host.sourceFor('podjs-media-cache://play/199.mp4')).toBeUndefined();
 });
+
+
+test('DYFAST reuses registration only for the same rendition and authorization',async()=>{
+ let authorization=1,item={...items[0]};
+ const local={playbackAuthorizationVersion:()=>authorization,resolvePlayback:async()=>({ok:true,data:item}),buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinPreload(local as any),before=registrations.length;
+ await host.playback(item as any,{Cookie:'fixture-one'});
+ await host.playback(item as any,{Cookie:'fixture-one'});
+ expect(registrations.length-before).toBe(1);
+ await host.playback(item as any,{Cookie:'fixture-two'});expect(registrations.length-before).toBe(2);
+ authorization++;await host.playback(item as any,{Cookie:'fixture-two'});expect(registrations.length-before).toBe(3);
+ item={...item,playUrl:'https://fixture/changed'};await host.playback(item as any,{Cookie:'fixture-two'});expect(registrations.length-before).toBe(4);
+ host.stop();await host.playback(item as any,{Cookie:'fixture-two'});expect(registrations.length-before).toBe(5);
+ host.stop();
+});

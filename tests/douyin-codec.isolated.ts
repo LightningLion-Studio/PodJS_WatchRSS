@@ -11,6 +11,8 @@ test('DYFIX absent/unknown/false codec capability never enables HEVC',async()=>{
 });
 test('DYFIX explicit HEVC size support enables fallback without the adaptive feature flag',async()=>{
  capable=true;supported=true;calls=[];const result=await decodableDouyinItem(item());expect(result.playUrl).toBe('https://fixture/hevc');expect(calls).toEqual([{videoMime:'video/hevc',videoWidth:540,videoHeight:960}]);expect(preserveSelectedDouyinItem(result).playUrl).toBe(result.playUrl);
+ for(let i=0;i<20;i++)expect((await decodableDouyinItem(item())).playUrl).toBe(result.playUrl);
+ expect(calls).toHaveLength(1);
  expect(applyPreferredDouyinPlayback({...item(720),playUrl:'https://fixture/hevc'}).playUrl).toBe('');
  douyinCodecRuntimePolicy.confirmHevcSize({width:540,height:960},false);
 });

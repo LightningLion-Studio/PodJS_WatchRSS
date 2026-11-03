@@ -363,7 +363,7 @@ export function createMediaRouteController(
       ...(request.immersive===true?{limit:80}:{}),
       localPlayback: id=>douyinPreload.lookup(id),
     });
-    void pendingDouyinQueue.fillAhead().catch(()=>{});
+    void pendingDouyinQueue.fillAhead(16).catch(()=>{});
     pendingDouyinPlayback = (async()=>{
         benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'preview_start'});
         // A restored native cache capability already owns authorized upstream headers.
@@ -572,7 +572,7 @@ export function createMediaRouteController(
       return;
     }
     startDouyinWindow(entry);
-    void queue.fillAhead().catch(()=>{});
+    void queue.fillAhead(16).catch(()=>{});
     const item=result.data.item,old=entry.playback!;
     // The player supplies a decoded neighbour from this authorized route.
     // Selection still commits synchronously; no second cache/URL lookup gates it.
@@ -609,6 +609,7 @@ export function createMediaRouteController(
     const result=entry.queue.commitPreview(prepared.key);
     if(!result.ok||dependencies.current()!==entry)return false;
     entry.playback=prepared.source;dependencies.setError("");dependencies.setPlayingSource(prepared.source);
+    startDouyinWindow(entry);
     // Publication commits playback. Persistence must not hold the paging strip.
     void entry.queue.persist().then(()=>{if(dependencies.current()===entry)dependencies.onActivityStateChange?.();}).catch(error=>{if(dependencies.current()===entry)dependencies.setError(error instanceof Error?error.message:"视频进度保存失败");});
     return true;
@@ -798,6 +799,14 @@ export function createMediaRouteController(
   const startDouyinWindow=(entry:RouteEntry)=>{
     if(!entry.queue||dependencies.current()!==entry)return;
     const state=entry.queue.snapshot();
+    // Promotion also consumes metadata. Refill before the six-frame ring reaches
+    // the page boundary, then publish the added sources without moving selection.
+    const queue=entry.queue,anchor=state.item?.awemeId,count=state.playlist.length;
+    void queue.fillAhead(16).then(()=>{
+      if(dependencies.current()!==entry||entry.queue!==queue)return;
+      const fresh=queue.snapshot();
+      if(fresh.item?.awemeId===anchor&&fresh.playlist.length!==count)startDouyinWindow(entry);
+    }).catch(()=>{});
     if(entry.playback?.immersive)douyinPreload.start(entry,state.playlist,state.item?.awemeId,'active',{
       isForeground:id=>dependencies.current()===entry&&entry.queue?.snapshot().item?.awemeId===id,
       async sourceRefreshed(id,previousUri,item,uri,headers){

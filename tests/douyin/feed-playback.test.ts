@@ -84,3 +84,18 @@ test('DYSWIPE3 variant-only feed metadata and expired/rejected URLs use feed ins
  }
  expect(detailCount(f)).toBe(0);expect(f.requests).toHaveLength(3);
 });
+
+test('pager publishes authorized feed metadata while its queued durable write is pending; logout clears after that write',async()=>{
+ const f=fixture();let release!:()=>void,writing=false;
+ const gate=new Promise<void>(resolve=>release=resolve),original=f.options.secureStorage.set;
+ f.options.secureStorage.set=async(key,value)=>{if(key.startsWith('douyin.playback-item.v2.')){writing=true;await gate;}await original(key,value);};
+ f.replies.push(response({aweme_list:[wire('early')]}));
+ const page=await f.client.fetchFeedPage({deferPersistence:true});expect(page.ok).toBe(true);
+ while(!writing)await new Promise(resolve=>setTimeout(resolve,1));
+ expect(await f.client.resolvePlayback('early',{feedItem:page.ok?page.data.items[0]:undefined,allowDetail:false})).toMatchObject({ok:true,source:'feed-cache'});
+ let cleared=false;const logout=f.client.clearCookie().then(()=>cleared=true);
+ await new Promise(resolve=>setTimeout(resolve,1));expect(cleared).toBe(false);
+ release();await logout;
+ expect(f.values.has('douyin.cookie')).toBe(false);expect([...f.values.keys()].filter(key=>key.startsWith('douyin.playback-item.v2.'))).toEqual([]);
+ expect(detailCount(f)).toBe(0);
+});

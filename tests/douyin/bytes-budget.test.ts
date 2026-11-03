@@ -12,7 +12,7 @@ test('watch uses the least expensive rendition that covers 466 px',()=>{
 });
 test('both directions and three ahead get complete equal-time prefix budgets',()=>{
  const items='abcdefg'.split('').map(awemeId=>({awemeId,playUrl:'https://fixture/'+awemeId,variants:[variant(480,400000)],durationMs:60000})) as DouyinItem[];
- expect(douyinProxyWindow(items,'c','active').slice(0,5).map(x=>x.awemeId)).toEqual(['c','d','b','e','f']);
+ expect(douyinProxyWindow(items,'c','active').slice(0,5).map(x=>x.awemeId)).toEqual(['c','d','b','a','e']);
  const expected=128*1024+75000;
  expect([0,1,2,3].map(i=>douyinPrefetchBytes(undefined,60000,i,400000))).toEqual(Array(4).fill(expected));
  const item={...items[0]!,playUrl:items[0]!.variants[0]!.playUrl};expect(stockPreviewBytes(item)).toBe(expected);

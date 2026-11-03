@@ -1,3 +1,4 @@
+import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
 import {projectJsonAsync} from "@podjs/framework/json";
 import {yieldWorkTurn} from "@podjs/framework/text-layout";
@@ -24,7 +25,7 @@ type SnapshotRecord=Omit<RecentFeed,'items'>&{ids:string[]};
 // This also detects callers editing a DTO in place between saves.
 function itemFields(item:DouyinItem):unknown[]{const fields:unknown[]=[];for(const key of Object.keys(item)){fields.push(key,(item as unknown as Record<string,unknown>)[key]);}for(const variant of item.variants??[])for(const key of Object.keys(variant)){fields.push(key,(variant as unknown as Record<string,unknown>)[key]);}return fields;}
 function sameFields(a:unknown[],b:unknown[]):boolean{return a.length===b.length&&a.every((value,i)=>value===b[i]);}
-const preferredItems=new WeakMap<DouyinItem,{fields:unknown[];item:DouyinItem}>();
+const preferredItems=new PlaybackCache<DouyinItem,{fields:unknown[];item:DouyinItem}>(2*1024*1024,128,(value,key)=>playbackPayloadBytes([key,value]));
 function preferredItem(item:DouyinItem):DouyinItem{
   if(!item||typeof item!=='object')return item;
   const fields=itemFields(item),prior=preferredItems.get(item);
@@ -33,9 +34,9 @@ function preferredItem(item:DouyinItem):DouyinItem{
 }
 export class DouyinFeedStore {
   private writes:Promise<unknown>=Promise.resolve();
-  private readonly encoded=new WeakMap<DouyinItem,{value:string;fields:unknown[]}>();
-  private readonly persisted=new Map<string,{value:string;resolvedAtMillis:number}>();
+  private readonly persisted=new PlaybackCache<string,{value:string;resolvedAtMillis:number;fields?:unknown[]}>(8*1024*1024,200,(value,key)=>2*(value.value.length+key.length)+playbackPayloadBytes(value.fields));
   constructor(private storage:DouyinStateStorage) {}
+  memoryStats(){return {preferredEntries:preferredItems.size,preferredBytes:preferredItems.bytes,encodedEntries:0,encodedBytes:0,persistedEntries:this.persisted.size,persistedBytes:this.persisted.bytes};}
   private enqueue<T>(work:()=>Promise<T>):Promise<T>{const pending=this.writes.catch(()=>{}).then(work);this.writes=pending;return pending;}
   private async metadata(key:string):Promise<SnapshotRecord|null>{const raw=await this.storage.get(snapshotRecordKey(key));if(raw===null)return null;const value=JSON.parse(raw);if(!Array.isArray(value?.ids)||value.ids.length>(key===QUEUE_KEY?200:40)||value.ids.some((id:unknown)=>typeof id!=='string'))throw Error('Invalid Douyin snapshot');return value;}
   read(key:string):Promise<RecentFeed>{return this.enqueue(async()=>{
@@ -48,7 +49,7 @@ export class DouyinFeedStore {
         for(let j=0;j<rows.length;j++){
           if(rows[j]===null)throw Error('Missing Douyin playback item');
           const stored=JSON.parse(rows[j]!),item=stored.item;if(item?.awemeId!==ids[j])throw Error('Invalid Douyin playback item');
-          const value=JSON.stringify(item);this.encoded.set(item,{value,fields:itemFields(item)});this.persisted.set(item.awemeId,{value,resolvedAtMillis:Number(stored.resolvedAtMillis)||0});items.push(item);
+          const value=JSON.stringify(item);this.persisted.set(item.awemeId,{value,fields:itemFields(item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0});items.push(item);
         }
         await yieldWorkTurn().result;
       }
@@ -84,16 +85,19 @@ export class DouyinFeedStore {
     // Encode only new/changed immutable item DTOs. Bound each guest turn to one
     // item; durable SQL updates retain one item plus the small ownership index; a page turn never re-encodes a list.
     for(const item of items){
-      const fields=itemFields(item),cached=this.encoded.get(item);let value=cached&&sameFields(cached.fields,fields)?cached.value:undefined;
-      if(value===undefined){await yieldWorkTurn().result;value=traceServiceWork('douyin.store.itemEncode',()=>JSON.stringify(item));this.encoded.set(item,{value,fields:itemFields(item)});}
+      const fields=itemFields(item),resolvedAtMillis=Number(snapshot.resolved[item.awemeId])||0;
       let prior=this.persisted.get(item.awemeId);
-      if(!prior&&known.has(item.awemeId)){const raw=await this.storage.get(playbackItemKey(item.awemeId));if(raw){const stored=JSON.parse(raw);prior={value:JSON.stringify(stored.item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};this.persisted.set(item.awemeId,prior);}}
-      const resolvedAtMillis=Number(snapshot.resolved[item.awemeId])||0;
-      if(prior&&(prior.resolvedAtMillis>resolvedAtMillis||prior.value===value&&prior.resolvedAtMillis===resolvedAtMillis)&&known.has(item.awemeId))continue;
+      if(!prior&&known.has(item.awemeId)){const raw=await this.storage.get(playbackItemKey(item.awemeId));if(raw){const stored=JSON.parse(raw);prior={value:JSON.stringify(stored.item),fields:itemFields(stored.item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};this.persisted.set(item.awemeId,prior);}}
+      // Compare unchanged DTO fields before encoding. A byte-limited JSON memo
+      // must not turn every 40-item save into 40 yields and re-encodes.
+      if(prior&&known.has(item.awemeId)&&(prior.resolvedAtMillis>resolvedAtMillis||prior.resolvedAtMillis===resolvedAtMillis&&prior.fields&&sameFields(prior.fields,fields)))continue;
+      await yieldWorkTurn().result;
+      const value=traceServiceWork('douyin.store.itemEncode',()=>JSON.stringify(item));
+      if(prior&&prior.value===value&&prior.resolvedAtMillis===resolvedAtMillis&&known.has(item.awemeId)){this.persisted.set(item.awemeId,{value,fields,resolvedAtMillis});continue;}
       known.add(item.awemeId);
       // Reuse the item JSON: do not traverse/serialize its variants again.
       await applyDouyinState(this.storage,[{key:playbackItemKey(item.awemeId),value:'{"resolvedAtMillis":'+resolvedAtMillis+',"item":'+value+'}'},{key:PLAYBACK_ITEMS_KEY,value:JSON.stringify([...known])}]);
-      this.persisted.set(item.awemeId,{value,resolvedAtMillis});
+      this.persisted.set(item.awemeId,{value,fields,resolvedAtMillis});
     }
     const {items:_,...fields}=snapshot,metadata:SnapshotRecord={...fields,ids};
     const referenced=new Set(ids);

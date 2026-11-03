@@ -1,7 +1,7 @@
 import {test,expect,afterEach} from 'bun:test';
 import {DouyinClient} from '../../src/douyin/client.ts';
 import {createDouyinLoginProbe} from '../../src/douyin/login-probe.ts';
-import {douyinRetryAfter} from '../../src/douyin/request-diagnostics.ts';
+import {douyinRequestDiagnostic,douyinRetryAfter} from '../../src/douyin/request-diagnostics.ts';
 const rows:any[]=[];const original=(globalThis as any).pod;
 function capture(){rows.length=0;(globalThis as any).pod={benchmark:(line:string)=>{rows.push(JSON.parse(line));return 1;}};}
 afterEach(()=>{(globalThis as any).pod=original;});
@@ -20,3 +20,9 @@ for(const [status,body,error] of [[200,'{"status_code":0}','success'],[200,'{"st
  capture();const probe=createDouyinLoginProbe({signer:{sign:()=> 'PRIVATE'},transport:{request:async()=>({status,headers:{},body:new TextEncoder().encode(body)})}});await (probe({cookie:'PRIVATE_COOKIE',timeoutMs:5000}) as any).result;expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({category:'auth_probe',http_status:status,error_code:error,cookie_present:true,signing_ok:true});expect(JSON.stringify(rows)).not.toContain('PRIVATE');
 });
 test('retry-after parses seconds and HTTP date without text output',()=>{expect(douyinRetryAfter({'Retry-After':'12'},0)).toBe(12000);expect(douyinRetryAfter({'retry-after':'Thu, 01 Jan 1970 00:00:30 GMT'},0)).toBe(30000);expect(douyinRetryAfter({'Retry-After':'PRIVATE'},0)).toBe(0);});
+
+test('request phases copy bounded numbers only',()=>{
+ capture();const base={category:'feed',http_status:200,douyin_status_code:0,challenge:false,signing_ok:true,cookie_present:true,retry_after_ms:0,error_code:'success'} as const;
+ douyinRequestDiagnostic({...base,request_queue_ms:12,request_text_ms:600000,response_bytes:67108864});expect(rows[0]).toMatchObject({request_queue_ms:12,request_text_ms:600000,response_bytes:67108864});
+ douyinRequestDiagnostic({...base,request_queue_ms:-1,request_text_ms:600001,response_bytes:67108865,request_status_ms:'PRIVATE' as any});for(const key of ['request_queue_ms','request_text_ms','response_bytes','request_status_ms'])expect(rows[1][key]).toBeUndefined();expect(JSON.stringify(rows)).not.toContain('PRIVATE');
+});

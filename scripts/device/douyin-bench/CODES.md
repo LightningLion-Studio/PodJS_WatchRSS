@@ -270,3 +270,25 @@ with Media3 STATE_READY. `frame_kind` is live/cached/none; `target_generation` a
 `source_ordinal` identify the incoming source without logging URLs. A two-item
 fling cannot count the one-item drag target. Missing observations are unknown.
 This is a native composition-state observation, not a panel-camera measurement.
+
+T-DYFAST adds `previous_audio_absent backend=audiotrack state=absent` with the
+release `seq`, `generation`, and old `source_generation`. Only the native
+AudioTrack owner may emit it. It means no current AudioTrack exists for that
+source when retirement is requested. It is a pairing receipt, not an observed
+stop latency or a speaker-silence measurement. Report its count separately from
+`previous_audio_stopped`; never insert a zero latency for this event.
+
+Numeric `PodMediaCache frame_fill` diagnostics: `entry` is a process-local cache
+ordinal; `stage` 1=start, 2=decoded, 3=unavailable, 4=decode exception, 5=cancelled.
+`request_ms`, `start_ms`, `end_ms`, `mono_ms` use native uptime. `prefix_bytes`
+includes retained prefix and suffix bytes. No item IDs, URLs, or headers are logged.
+
+### DYFAST3 request timing
+
+`douyin_request` optionally carries closed integer fields `request_queue_ms`,
+`request_sign_ms`, `request_transport_ms`, `request_text_ms`, `request_status_ms`
+(0..600000) and `response_bytes` (0..67108864). All names are fixed. No source
+identifier, URL, header or arbitrary text is accepted. Event time remains native
+uptime; durations use guest elapsed wall time. Zero also denotes an unfinished
+phase. Transport includes download, private-file reads and cleanup; it is not
+wire-only timing. Feed item projection after the request diagnostic is excluded.
