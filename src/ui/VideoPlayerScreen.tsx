@@ -35,7 +35,7 @@ const recoveredSources=new WeakSet<object>();
 
 type ExtendedVideoState = VideoState & { volume?: number; buffered?: boolean; isBuffering?: boolean };
 
-export interface PlaybackSource { startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
+export interface PlaybackSource { releaseStartupPreview?:()=>void; startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
 export interface VideoPlayerHandle { invalidatePrefetch(id:string):void; previewKind():"actual_frame"|"cover"|undefined; loopMode():VideoLoopMode; availableLoopModes():readonly VideoLoopMode[]; setLoopMode(mode:VideoLoopMode):void; cycleLoopMode():void; onCrown(delta: number): boolean; canSwipeBack(): boolean }
 
 const LOOP_LABELS: Record<VideoLoopMode, string> = { off: "不循环", single: "单视频循环", next: "自动下一个" };
@@ -155,10 +155,12 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     try{void (usingSessions()?sessionPool!.captureFrame(options):video.captureFrame(options)).catch(()=>{});}catch{}
   };
   createEffect(()=>{const loop=loopMode()==="single";if(ready()&&videoSessionOwner===sessionOwner)void media.setLoop(loop).catch(value=>{if(usingSessions())void degradeSessions(value);else failed(value);});});
+  createEffect(()=>{const release=props.source.releaseStartupPreview;onCleanup(()=>release?.());});
   const failed = (value: unknown,terminal=false,stage:FailureStage='unknown') => {
     if(disposed||!props.active||lifecycle()!=='active'||videoSessionOwner!==sessionOwner)return;
     const detail=playerFailureFields(value,stage),fault=playerFailureCode(value);
     if(fault==='cancelled'||fault==='stale')return;
+    props.source.releaseStartupPreview?.();
     if(!terminal&&props.source.platform==='douyin'&&props.source.immersive&&props.onPlaybackFailure&&['network','expired'].includes(playbackFailure(value))){benchmark.begin('error_page',{reason:'candidate_retry',...detail});return;}
     benchmark.begin('error_page',{reason:'exhausted',...detail}); if(benchmarkSeq)benchmark.mark("error",benchmarkSeq,{generation:pendingBenchmark?.generation??benchmarkGeneration,...detail}); appLogger.e('VideoPlayer','Playback failed'); setHandoff(false); if (!disposed) { const message = formatPlayerFailure(fault); setNetworkFailure(douyinNetworkFailure(value)); setError(message); emitCheckpoint("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
   const recoverPlaybackFailure = (value: unknown) => {

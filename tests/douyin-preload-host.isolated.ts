@@ -2,7 +2,7 @@ import {test,expect,mock} from 'bun:test';
 let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 const result=(value:any)=>({result:Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[])=>{registrations.push({key,url,headers,persistent,alternates});return result({uri:'podjs-media-cache://play/'+key+'.mp4'});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string)=>{registrations.push({key,url,headers,persistent,alternates,...(audioUrl?{audioUrl}: {})});return result({uri:'podjs-media-cache://play/'+key+'.mp4'});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
@@ -30,14 +30,12 @@ test('route exit empties proxy window and late resolution cannot restart prefetc
  expect(windows).toHaveLength(stopped);expect(registrations).toHaveLength(0);
 });
 
-test('production prefetch event consumer forces one refresh, isolates only neighbours and ignores retired bindings',async()=>{
- windows=[];registrations=[];const forces:string[]=[],removed:string[]=[],refreshed:string[]=[];
- const client={buildPlaybackHeaders:async()=>({Cookie:'fixture'}),resolvePlayback:async(id:string,options?:{forceRefresh?:boolean})=>{if(options?.forceRefresh)forces.push(id);return {ok:true,data:items.find(item=>item.awemeId===id)};}};
- const host=createHostDouyinPreload(client as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'a','active',{isForeground:id=>id==='a',sourceRefreshed:id=>{refreshed.push(id);},quarantine:async id=>{removed.push(id);return id!=='a';}});await flush();
- const old=windows.at(-1).items[1];resultListener({...old,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(forces).toEqual(['b']);expect(refreshed).toEqual(['b']);
- const fresh=windows.at(-1).items[1];resultListener({...old,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(removed).toEqual([]);
- resultListener({...fresh,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(forces).toEqual(['b']);expect(removed).toEqual(['b']);expect(host.failures()[0]).toMatchObject({id:'b',count:2,reason:'http_403'});
- const current=windows.at(-1).items[0];for(let i=0;i<3;i++){resultListener({...current,result:'failure',httpStatus:0,category:'transport'});await flush();}expect(removed).toEqual(['b']);host.stop(owner);
+test('403 stops prefetch traffic without bootstrap refresh or retries',async()=>{
+ windows=[];registrations=[];let forced=0,stops=0;
+ const client={stopMediaTraffic:()=>{stops++;},buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string,options?:{forceRefresh?:boolean})=>{if(options?.forceRefresh)forced++;return {ok:true,data:items.find(i=>i.awemeId===id)};}};
+ const host=createHostDouyinPreload(client as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'a','active');await flush();
+ const old=windows.at(-1).items[1];resultListener({...old,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(forced).toBe(0);expect(stops).toBe(1);expect(windows.at(-1).items).toEqual([]);
+ const before=registrations.length;host.start(owner,items as any,'a','active');await flush();expect(registrations.length).toBe(before);host.stop(owner);
 });
 
 test('backward entries fetch bounded prefixes without detail resolution',async()=>{
@@ -191,4 +189,11 @@ test('DYMEM3 a failed resolution removes its early seeded window target',async()
   host.start(owner,items as any,'b','active');await flush();
   expect(windows.at(-1).items.some((x:any)=>x.uri.endsWith('/c.mp4'))).toBe(false);
  }finally{host.stop(owner);legacyBytes=484675145;}
+});
+
+test('DASH registration carries its companion into the native pixel identity',async()=>{
+ const before=registrations.length;const item={...items[0],awemeId:'dash-binding',playUrl:'https://fixture.invalid/dash',variants:[{playUrl:'https://fixture.invalid/dash',format:'dash',audioUrl:'https://fixture.invalid/audio',codec:'h264',width:480,height:480,bitrate:100}]} as any;
+ const client={resolvePlayback:async()=>({ok:true,data:item}),playbackAuthorizationVersion:()=>0} as any;
+ const host=createHostDouyinPreload(client);await host.playback(item,{});expect(registrations[before]?.audioUrl).toBe('https://fixture.invalid/audio');
+ item.variants[0].audioUrl='https://fixture.invalid/changed-audio';await host.playback(item,{});expect(registrations).toHaveLength(before+2);expect(registrations[before+1].audioUrl).toBe('https://fixture.invalid/changed-audio');
 });

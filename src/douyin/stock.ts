@@ -26,7 +26,7 @@ export interface StockPorts {
 export function stockContentKey(item:DouyinItem):string {
  const variant=item.variants.find(v=>v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl));
  // Explicit rendition identity; signed URL and authorization never form the key.
- return ['douyin-stock-v1',item.awemeId,variant?.codec??'unknown',variant?.width??0,variant?.height??0,variant?.bitrate??0,item.durationMs,...(!variant?[item.playUrl.split('?')[0]]:[])].join(':');
+ return ['douyin-stock-v1',item.awemeId,variant?.codec??'unknown',variant?.width??0,variant?.height??0,variant?.bitrate??0,item.durationMs,...(!variant?['unidentified']:[])].join(':');
 }
 function validEntry(value:unknown):value is StockEntry {
  const e=value as StockEntry;
@@ -101,3 +101,8 @@ export class DouyinStock {
   }
  }
 }
+
+export type DouyinStockService=Pick<DouyinStock,'restore'|'ready'|'lookup'|'playbackReady'|'consume'|'clear'|'suspend'|'networkChanged'|'resume'>&{offer?(items:readonly DouyinItem[],anchor?:string):void;
+ present?:typeof import('@podjs/framework/media-prefix-cache').localMediaStore.present;
+ hide?:typeof import('@podjs/framework/media-prefix-cache').localMediaStore.hide;
+};

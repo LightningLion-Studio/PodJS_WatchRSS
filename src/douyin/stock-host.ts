@@ -1,44 +1,59 @@
-import {douyinPlaybackMirrors} from './playback-mirrors.ts';
-import {benchmark} from '@podjs/framework/benchmark';
-import {backgroundMediaWork} from '../media/background-work.ts';
 import {kv} from '@podjs/framework/watch';
-import {mediaPrefixCache} from '@podjs/framework/media-prefix-cache';
-import {discovery,video} from '@podjs/framework/services';
-import {videoOptEnabled,preserveSelectedDouyinItem,decodableDouyinItem} from '../media/video-opt.ts';
+import {mediaPrefixCache,localMediaStore,type LocalMediaItem} from '@podjs/framework/media-prefix-cache';
+import {discovery} from '@podjs/framework/services';
+import {videoOptEnabled} from '../media/video-opt.ts';
 import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
-import {DouyinStock,DOUYIN_STOCK_KEY,stockContentKey,stockNetworkAllowed,STOCK_COUNT} from './stock.ts';
+import {stockContentKey,stockNetworkAllowed,type DouyinStockService} from './stock.ts';
+import {douyinMediaExpiry} from './media-expiry.ts';
+import {completeDouyinRendition,douyinPrestoreConfig,storedDouyinMetadata,restoredDouyinItem} from './prestore-policy.ts';
 
-export function createHostDouyinStock(client:DouyinClient){
- let feedWork:ReturnType<typeof backgroundMediaWork>|undefined;
- const registrations=new Map<string,{uri:string;remote:string;authorization:number}>();
- const authorization=()=>client.playbackAuthorizationVersion?.()??0;
- const register=async(item:DouyinItem,headers?:Record<string,string>,force=false)=>{
-  const key=stockContentKey(item),version=authorization(),known=registrations.get(key);
-  if(!force&&!headers&&known?.remote===item.playUrl&&known.authorization===version)return known.uri;
-  const currentHeaders=headers??await client.buildPlaybackHeaders();if(version!==authorization())throw Error('authorization_changed');
-  const {uri}=await mediaPrefixCache.register(key,item.playUrl,currentHeaders,true,douyinPlaybackMirrors(item)).result;
-  if(version!==authorization())throw Error('authorization_changed');
-  registrations.set(key,{uri,remote:item.playUrl,authorization:version});while(registrations.size>16)registrations.delete(registrations.keys().next().value!);
-  return uri;
+/** Inventory comes from the native verified complete store. Browsing supplies
+ * candidates; no stock-owned feed, detail, cookie refresh or URL retry exists. */
+export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
+ client.usePrestoreTrafficPolicy?.();
+ let candidates:DouyinItem[]=[],epoch=0,offeredRevision=0,enabled=false,running:Promise<void>|undefined,stopped=false;
+ const keys=new Map<string,string>(),consumed=new Set<string>();
+ const config=()=>douyinPrestoreConfig(kv.get('watchrss.douyin.prestore.v1'));
+ const allowed=async()=>!stopped&&config().enabled&&kv.get<boolean>('watchrss.douyin.stock.enabled')!==false&&await client.isLoggedIn()&&stockNetworkAllowed(await discovery.networkSnapshot(),videoOptEnabled('traffic'),kv.get<boolean>('watchrss.douyin.stock.wifi-only')!==false);
+ const source=(value:LocalMediaItem|undefined)=>{
+  if(!value?.frame?.available||!(value.audioTracks>0)||!(value.videoTracks>0))return;
+  const item=restoredDouyinItem(value.metadata,value.uri);if(!item)return;
+  keys.set(item.awemeId,value.key);while(keys.size>16)keys.delete(keys.keys().next().value!);
+  return {uri:value.uri,frame:value.frame,item};
  };
- return new DouyinStock({
-  read:()=>kv.get(DOUYIN_STOCK_KEY),write:entries=>{kv.set(DOUYIN_STOCK_KEY,entries);benchmark.begin('startup_stage',{startup_stage:'stock_saved',slots:entries.length});},now:Date.now,
-  allowed:async()=>kv.get<boolean>('watchrss.douyin.stock.enabled')!==false&&await client.isLoggedIn()&&stockNetworkAllowed(await discovery.networkSnapshot(),videoOptEnabled('traffic'),kv.get<boolean>('watchrss.douyin.stock.wifi-only')!==false),
-  watched:()=>client.listWatchedIds(),
-  feed:async()=>{const work=backgroundMediaWork();feedWork=work;let result;try{result=await client.fetchFeedPage({count:12,background:work});}finally{if(feedWork===work)feedWork=undefined;}return result.ok?await Promise.all(result.data.items.map(async item=>preserveSelectedDouyinItem(await decodableDouyinItem(item)))):[];},
-  prepare:async(item,bytes)=>{
-   const stats=await mediaPrefixCache.stats().result;
-   const budget=Math.max(128*1024,Math.min(bytes,Math.floor(stats.maxBytes/STOCK_COUNT)));
-   return mediaPrefixCache.prepare(await register(item),budget,`douyin:${item.awemeId}`).result;
+ const inventory=async()=>{const values=(await localMediaStore.list().result).items;return values.filter(v=>source(v));};
+ const lookup=async(id:string)=>{
+  let key=keys.get(id);if(!key){await inventory();key=keys.get(id);}if(!key)return;
+  return source((await localMediaStore.lookup(key).result).item);
+ };
+ const service:DouyinStockService={
+  present:localMediaStore.present,hide:localMediaStore.hide,
+  async restore(){if(!config().enabled)return [];const [ids,values]=await Promise.all([client.listWatchedIds(),inventory()]);const watched=new Set(ids);return values.filter(v=>!v.watched&&!watched.has(String(v.metadata.awemeId))&&!consumed.has(String(v.metadata.awemeId))).map(v=>source(v)!.item);},
+  ready:lookup,playbackReady:lookup,lookup:async id=>(await lookup(id))?.uri,
+  consume(id){consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);const key=keys.get(id);if(key)void localMediaStore.watched(key).result.catch(()=>{});},
+  clear(){service.suspend();keys.clear();consumed.clear();void localMediaStore.clear().result.catch(()=>{});},
+  suspend(){enabled=false;epoch++;void localMediaStore.cancel().result.catch(()=>{});},
+  async networkChanged(){if(await allowed())await service.resume();else service.suspend();},
+  offer(items,anchor){offeredRevision++;const center=Math.max(0,items.findIndex(i=>i.awemeId===anchor));candidates=items.slice(center+(anchor?1:0),center+21).filter(i=>/^https?:/.test(i.playUrl));void service.resume().catch(()=>{});},
+  resume(){const wasEnabled=enabled;enabled=true;if(running)return wasEnabled?running:running.catch(()=>{}).then(()=>enabled?service.resume():undefined);const own=++epoch,offerRevision=offeredRevision,current=()=>enabled&&own===epoch;
+   const work=(async()=>{
+    const cfg=config();await localMediaStore.configure(cfg).result;if(!current()||!await allowed())return;
+    let slots=(await inventory()).filter(v=>!v.watched).length;const watched=new Set(await client.listWatchedIds());
+    for(const candidate of candidates){
+     if(!current()||offerRevision!==offeredRevision||slots>=cfg.count||!await allowed())return;
+     if(watched.has(candidate.awemeId)||consumed.has(candidate.awemeId))continue;
+     const item=completeDouyinRendition(candidate);if(!item)continue;const key=stockContentKey(item);
+     if((await localMediaStore.lookup(key).result).item)continue;
+     const expiry=douyinMediaExpiry(item.playUrl,Date.now());if(expiry<=Date.now())continue;
+     const headers=await client.buildPlaybackHeaders();if(!current()||expiry<=Date.now())continue;
+     // A single selected rendition. No mirror race is needed for idle storage.
+     const {uri}=await mediaPrefixCache.register(key,item.playUrl,headers,true,[],expiry).result;
+     try{const result=await localMediaStore.prepare(key,uri,storedDouyinMetadata(item),true).result;if(result.ready){source(result.item);if(consumed.has(item.awemeId)){await localMediaStore.watched(key).result;continue;}slots++;}}
+     catch(error){if((error as {code?:string}).code==='media_traffic_stopped'){stopped=true;client.stopMediaTraffic?.();service.suspend();return;}if(!current())return;}
+    }
+   })();running=work;return work.finally(()=>{if(running===work){running=undefined;if(enabled&&offerRevision!==offeredRevision)void service.resume().catch(()=>{});}});
   },
-  lookup:async(entry,headers)=>{
-   const version=authorization();let uri=await register(entry.item,headers),state;
-   try{state=await mediaPrefixCache.inspect(uri).result;}catch{uri=await register(entry.item,headers,true);state=await mediaPrefixCache.inspect(uri).result;}
-   if(state.prefixBytes<entry.prefixBytes||state.tailBytes<entry.tailBytes)return undefined;
-   const frame=await video.restoreFrame(`douyin:${entry.item.awemeId}`,{url:uri});
-   return version===authorization()&&frame.available?{uri,frame}:undefined;
-  },
-  cancel:()=>{feedWork?.cancel();feedWork=undefined;void mediaPrefixCache.window([]).result.catch(()=>{});},
- });
+ };
+ return service;
 }

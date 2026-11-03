@@ -1,24 +1,29 @@
 import {test,expect,mock} from 'bun:test';
-let saved:unknown;let online=true,network=0,prepares=0,registered:any[]=[],frameReads=0,headerReads=0,version=0,missingRegistration=false,missingBytes=false,changeDuringFrame=false;
+let online=true,feed=0,prepares=0,registered:any[]=[],stored:any[]=[],config:any,prepareGate:(()=>Promise<void>)|undefined;
 const value=(v:any)=>({result:Promise.resolve(v),cancel(){}});
-mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.douyin.stock.v1'?saved:undefined,set:(key:string,v:unknown)=>{if(key==='watchrss.douyin.stock.v1')saved=structuredClone(v);}}}));
-mock.module('@podjs/framework/services',()=>({video:{restoreFrame:async()=>{frameReads++;if(changeDuringFrame){changeDuringFrame=false;version++;}return ({available:true,path:'video-frames/frame.jpg'});}},discovery:{networkSnapshot:async()=>({active:online,internet:online,validated:online,wifi:true,metered:false})}}));
-mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,preserveSelectedDouyinItem:(v:any)=>v,decodableDouyinItem:async(v:any)=>v}));
-mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{register:(...args:any[])=>{registered.push(args);return value({uri:'podjs-media-cache://play/'+args[0]});},prepare:()=>{prepares++;return value({ready:true,prefixBytes:512*1024,tailBytes:512*1024});},inspect:()=>{if(missingRegistration){missingRegistration=false;throw Error('media_cache_registration_missing');}return value({prefixBytes:missingBytes?0:512*1024,tailBytes:512*1024});},window:()=>value({}),stats:()=>value({maxBytes:6*1024*1024})}}));
+mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}}}));
+mock.module('@podjs/framework/services',()=>({discovery:{networkSnapshot:async()=>({active:online,internet:online,validated:online,wifi:true,metered:false})}}));
+mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,preserveSelectedDouyinItem:(v:any)=>v}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{register:(...args:any[])=>{registered.push(args);return value({uri:'podjs-media-cache://play/'+args[0]});}},localMediaStore:{configure:(c:any)=>{config=c;return value(undefined);},list:()=>value({items:stored}),lookup:(key:string)=>value({item:stored.find(v=>v.key===key)}),prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
 const {createHostDouyinStock}=await import('../src/douyin/stock-host.ts');
-test('real host adapter persists only metadata, restores stock without feed or media transfer',async()=>{
- const client={playbackAuthorizationVersion:()=>version,isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>{headerReads++;return {Cookie:'private-cookie'};},fetchFeedPage:async()=>{network++;return {ok:true,data:{items:['a','b','c'].map(awemeId=>({awemeId,playUrl:`https://example.test/${awemeId}?x-expires=9999999999`,variants:[{playUrl:`https://example.test/${awemeId}?x-expires=9999999999`,playUrls:[`https://mirror.test/${awemeId}`],codec:"h264",width:480,height:480,bitrate:100000}],durationMs:30000}))}};}};
- await createHostDouyinStock(client as any).resume();expect(prepares).toBe(3);expect(network).toBe(1);expect(registered.every(r=>r[3]===true)).toBe(true);expect(registered[0][4]).toEqual(['https://mirror.test/a']);
- expect(JSON.stringify(saved)).not.toContain('private-cookie');expect(JSON.stringify(saved)).not.toContain('podjs-media-cache:');
- online=false;const restart=createHostDouyinStock(client as any);expect((await restart.restore()).map(i=>i.awemeId)).toEqual(['a','b','c']);expect(await restart.lookup('a')).toStartWith('podjs-media-cache:');expect(prepares).toBe(3);expect(network).toBe(1);
- const before={headerReads,frameReads,registered:registered.length};const ready=await restart.ready('a',{Cookie:'current-cookie'});
- expect(ready?.uri).toStartWith('podjs-media-cache:');expect(ready?.frame?.path).toBe('video-frames/frame.jpg');
- expect(headerReads).toBe(before.headerReads);expect(frameReads-before.frameReads).toBe(1);expect(registered.length-before.registered).toBe(1);
- expect(JSON.stringify(saved)).not.toContain('current-cookie');expect(JSON.stringify(saved)).not.toContain('video-frames');
- const current={headerReads,registered:registered.length};await restart.ready('a');expect(headerReads).toBe(current.headerReads);expect(registered.length).toBe(current.registered);
- version++;await restart.ready('a');expect(headerReads).toBe(current.headerReads+1);expect(registered.length).toBe(current.registered+1);
- missingRegistration=true;await restart.ready('a');expect(headerReads).toBe(current.headerReads+2);expect(registered.length).toBe(current.registered+2);
- missingBytes=true;const reads=frameReads;expect(await restart.ready('a')).toBeUndefined();expect(frameReads).toBe(reads);missingBytes=false;
- changeDuringFrame=true;expect(await restart.ready('a')).toBeUndefined();
+test('complete stock uses browsing candidates, survives restart offline, and never reads expired URLs',async()=>{
+ const client={isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({Cookie:'private-cookie'}),fetchFeedPage:async()=>{feed++;throw Error('extra feed forbidden');}};
+ const items=['expired','a','b','c','d'].map(awemeId=>({awemeId,description:'title',authorName:'author',playUrl:`https://fixture.invalid/${awemeId}?x-expires=${awemeId==='expired'?1000000000:9999999999}`,variants:[],durationMs:30000}));
+ const host=createHostDouyinStock(client as any);await host.resume();expect(prepares).toBe(0);host.offer!(items as any);await host.resume();expect(prepares).toBe(3);expect(feed).toBe(0);expect(config.count).toBe(3);expect(config.entryBytes).toBe(8*1024*1024);expect(registered.every(v=>v[0].includes('expired')===false)).toBe(true);
+ expect(JSON.stringify(stored)).not.toContain('private-cookie');expect(JSON.stringify(stored)).not.toContain('https:');
+ online=false;const restart=createHostDouyinStock(client as any);expect((await restart.restore()).map(i=>i.awemeId)).toEqual(['a','b','c']);expect((await restart.ready('a'))?.uri).toBe('file:///complete/a.mp4');restart.consume('a');expect((await restart.restore()).map(i=>i.awemeId)).toEqual(['b','c']);expect((await restart.playbackReady('a'))?.frame?.available).toBe(true);await restart.resume();expect(prepares).toBe(3);expect(feed).toBe(0);
+});
 
+test('a consumed in-flight completion is watched and the latest browsing window refills',async()=>{
+ online=true;stored=[];registered=[];prepares=0;
+ let release!:()=>void,started=false;
+ prepareGate=()=>{prepareGate=undefined;started=true;return new Promise<void>(resolve=>release=resolve);};
+ const client={isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+ const item=(awemeId:string)=>({awemeId,description:'title',authorName:'author',playUrl:`https://fixture.invalid/${awemeId}?x-expires=9999999999`,variants:[],durationMs:30000});
+ const host=createHostDouyinStock(client as any);host.offer!([item('old')] as any);
+ for(let n=0;!started&&n<50;n++)await new Promise(r=>setTimeout(r,1));expect(started).toBe(true);
+ host.consume('old');host.offer!(['new1','new2','new3'].map(item) as any);release();
+ for(let n=0;stored.filter(v=>!v.watched).length<3&&n<100;n++)await new Promise(r=>setTimeout(r,1));
+ expect(stored.find(v=>v.metadata.awemeId==='old')?.watched).toBe(true);
+ expect((await host.restore()).map(v=>v.awemeId)).toEqual(['new1','new2','new3']);host.suspend();
 });

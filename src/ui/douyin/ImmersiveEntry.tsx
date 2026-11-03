@@ -18,6 +18,13 @@ export const DOUYIN_ENTRY_SLOW_MS=1500;
 
 /** Verified stock may prepare one hidden first-frame session; only entering starts playback. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
+  const guestEntryMs=Date.now();
+  traceServiceWork('douyin.entry.guest',()=>{},guestEntryMs);
+  const [stockPending,setStockPending]=createSignal(!!props.presentStock);
+  let stockEntryClaimed=false,previewToken=0,previewHandedOff=false;
+  let preview:ReturnType<NonNullable<DouyinScreenProps['presentStock']>>|undefined;
+  const hidePreview=()=>{preview?.cancel();preview=undefined;if(previewToken)props.hideStock?.(previewToken);previewToken=0;};
+  const claimStockEntry=()=>{if(stockEntryClaimed)return false;stockEntryClaimed=true;return props.claimStockEntry?.()??true;};
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[slow,setSlow]=createSignal(false);
   const auth=observeDouyinAuth(props.client),logged=()=>auth()==='logged-in';
@@ -60,7 +67,19 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     try{
       if(!refresh){
         const stock=await props.restoreStock?.()??[];if(!current())return;
-        if(stock.length){setItems(stock);anchor=stock[0].awemeId;cursor=null;hasMore=true;return;}
+        if(stock.length){
+          const automatic=stock[0].playUrl.startsWith('file:')&&claimStockEntry();
+          if(automatic&&props.presentStock){
+            preview=props.presentStock(stock[0],guestEntryMs);
+            try{const shown=await preview.result;previewToken=shown.token;if(!current()){hidePreview();return;}}
+            catch{if(!current())return;}
+          }
+          // Publishing items starts prewarm. Do it only after the disk frame has
+          // reached the window, before entering or starting any feed work.
+          setStockPending(false);setItems(stock);anchor=stock[0].awemeId;cursor=null;hasMore=true;
+          if(automatic){previewHandedOff=true;void enter();}return;
+        }
+        setStockPending(false);
         let queueReady=false;
         const restore=(kind:'feed'|'queue')=>traceServiceWork(kind==='queue'?'douyin.entry.restoreQueue':'douyin.entry.restoreFeed',()=>kind==='queue'?props.client.restorePlaybackQueue():props.client.restoreFeed()).then(snapshot=>{
           const value=props.client.freshPlaybackSnapshot(snapshot);
@@ -87,11 +106,12 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         }
       }
     }catch{if(current()){setError(formatDouyinError('REQUEST_FAILED'));scheduleRetry({code:'REQUEST_FAILED'},current);}}
-    finally{timer.cancel();if(loadTimer===timer)loadTimer=undefined;if(current()){setBusy(false);setSlow(false);finishRefresh(!!error());appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
+    finally{if(current())setStockPending(false);timer.cancel();if(loadTimer===timer)loadTimer=undefined;if(current()){setBusy(false);setSlow(false);finishRefresh(!!error());appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
   };
   const enter=async()=>{
     if(!active()||auth()==='unknown')return;if(!logged()){douyinBench.loginTap(props.client,logged,()=>props.onNavigate({name:'login'}));return;}if(opening())return;
     if(!items().length){await load(true);return;}
+    claimStockEntry();
     // Keep failures on this entry until a source opens. Cached navigation never
     // waits for the feed refresh; the controller returns closed retry metadata.
     const requested=props.route.name==='entry'?props.route.resumeAwemeId:undefined;
@@ -101,9 +121,9 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     generation++;loadTimer?.cancel();loadTimer=undefined;setBusy(false);
     cancelRetry();setError("");setOpening(true);retryPlayback=true;
     const revision=generation,current=()=>active()&&revision===generation;
-    props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true,entrySeq,
+    props.onPlay({...(previewToken?{releaseStartupPreview:hidePreview}:{}),item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true,entrySeq,
       isCurrent:current,
-      onFailure:failure=>{if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq,failure);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
+      onFailure:failure=>{hidePreview();if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq,failure);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
     });
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
@@ -111,16 +131,17 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const preloadOwner={};
   createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor,entrySeq);else props.onPreloadStop?.(preloadOwner);});
   onCleanup(()=>props.onPreloadStop?.(preloadOwner));
-  // External entry intents may select an anchor, but only a tap/swipe enters
+  // Verified complete stock may enter immediately; other external intents only select an anchor. A tap/swipe enters
   // the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
-  createEffect(()=>{const enabled=props.active??true;if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':busy()&&!items().length?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
+  createEffect(()=>{const enabled=props.active??true;if(auth()==='logged-out')setStockPending(false);if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':busy()&&!items().length?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true,true);}});
-  createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);}});onCleanup(()=>{disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
+  createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);}});onCleanup(()=>{if(!previewHandedOff)hidePreview();disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
   const hint=()=>auth()==='unknown'?"正在读取登录状态…":!logged()?"需要登录，请重新登录":(busy()&&!items().length)?(slow()?"内容加载较慢，请稍候":"刷新中..."):items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
-  return <View class="absolute inset-0 bg-black">
+  // Submit no guest scene while restoring: frame zero is the first page content.
+  return <Show when={!stockPending()}><View class="absolute inset-0 bg-black">
    <View class="absolute inset-0">
     <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
       <Text class="absolute top-[0] text-[21px] leading-[26] text-[#f5f5f5]" style={{insetL:groupLeft-18}}>抖音</Text>
@@ -132,7 +153,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       <View class="absolute left-[65] right-[65] top-[92] h-[36] rounded-[18] items-center justify-center bg-[#2a2a2a]" onPress={()=>void (retryPlayback?enter():load(true,true))} focusable accessibilityRole="button" accessibilityLabel="重试"><Text class="text-sm text-[#f5f5f5]">重试</Text></View>
     </Show>
     <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={auth()==='unknown'?undefined:()=>void enter()} focusable={auth()!=='unknown'} accessibilityRole="button" accessibilityLabel={auth()==='unknown'?"正在读取登录状态…":logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
-  </View></View>;
+  </View></View></Show>;
 }
 
 export function ImmersiveEntry(props:Parameters<typeof ImmersiveEntryImpl>[0]) {return traceServiceWork("navigation.ImmersiveEntry",()=>ImmersiveEntryImpl(props));}

@@ -310,3 +310,27 @@ test('DYLOSS only the full 10 second refresh deadline emits entry timeout once',
   f.requests[0]!.reply.resolve(response(['late']));await settle();await settle();expect(events.filter(e=>e.code==='error')).toHaveLength(1);
  }finally{(globalThis as any).pod=original;}
 });
+
+test('verified complete inventory enters immediately without a feed request',async()=>{
+ const f=mount({cacheCount:3,freshCache:true,hasMore:true,cursor:'c',stock:true});
+ // This fixture intentionally uses remote items for old prefix stock above;
+ // exercise the complete-only branch with a separate local stock adapter.
+ f.dispose();
+ const item={awemeId:'local',description:'offline',authorName:'fixture',playUrl:'file:///complete/local.mp4',durationMs:12000,variants:[]} as any;
+ const data=new Map([['douyin.cookie','fixture']]);let requests=0,plays:any[]=[];
+ const client=new DouyinClient({secureStorage:{get:async k=>data.get(k)??null,set:async()=>{},remove:async()=>{}},signer:{sign:()=> 'fixture'},transport:{request:async()=>{requests++;throw Error('offline');}}});
+ let dispose!:()=>void;createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:'entry'},width:233,height:233,active:true,client,restoreStock:async()=>[item],onPlay:(value:any)=>plays.push(value),onNavigate(){}} as any);});
+ await settle();expect(requests).toBe(0);expect(plays).toHaveLength(1);expect(plays[0].playback.playUrl).toBe(item.playUrl);dispose();
+});
+
+test('stored image commits before prewarm and playback; cover reactivation does not auto-enter',async()=>{
+ const gate=deferred<{presented:boolean;token:number}>(),events:string[]=[],item={awemeId:'disk',playUrl:'file:///complete.mp4',variants:[],description:'stored',authorName:'author',durationMs:1000} as any;
+ const client=new DouyinClient({secureStorage:{get:async()=> 'sessionid=fixture',set:async()=>{},remove:async()=>{}},signer:{sign:()=>''},transport:{request:async()=>{throw Error('feed forbidden before stored frame');}}});
+ let claimed=false;const [active,setActive]=createSignal(true);
+ const props={route:{name:'entry'},client,width:240,height:240,get active(){return active();},restoreStock:async()=>[item],claimStockEntry:()=>{if(claimed)return false;claimed=true;return true;},presentStock:()=>{events.push('image');return {result:gate.promise,cancel(){}};},hideStock(){},onPreloadWindow:()=>events.push('prewarm'),onPreloadStop(){},onPlay:()=>events.push('play'),onNavigate(){},onBack(){},onRequestQrLogin(){},input:async()=>null,onUnsupported(){},settings:{originalContentEnabled:false,onOriginalContentChange(){},continuePlaybackInBackgroundEnabled:false,onContinuePlaybackInBackgroundChange(){},onDeleteChannel(){}}} as DouyinScreenProps;
+ let dispose!:()=>void;const view=createRoot(stop=>{dispose=stop;return ImmersiveEntry(props);});
+ await settle();await settle();expect(events).toEqual(['image']);expect(nodes(view).filter(n=>n.kind==='Text')).toHaveLength(0);
+ gate.resolve({presented:true,token:1});await settle();expect(events).toEqual(['image','prewarm','play']);
+ setActive(false);await settle();setActive(true);await settle();await settle();expect(events.filter(v=>v==='play')).toHaveLength(1);
+ dispose();createRoot(stop=>{stops.push(stop);return ImmersiveEntry(props);});await settle();await settle();expect(events.filter(v=>v==='play')).toHaveLength(1);
+});

@@ -99,11 +99,11 @@ test('initial decoder starts while navigation persistence is pending, and the ro
  expect(primed).toBe(1);expect(f.stack().at(-1)?.page).toBe('douyin');finish();await opened;expect(f.stack().at(-1)?.initialVideoPool).toBe(pool as any);expect(released).toBe(0);
 });
 test('leaving an entry releases a pending decoder reservation without reopening its player',async()=>{
- let released=0,finish!:()=>void;const pool={prime:()=>({result:Promise.resolve({}),cancel(){}}),releaseAll:async()=>{released++;}};
+ let previewReleased=0,released=0,finish!:()=>void;const pool={prime:()=>({result:Promise.resolve({}),cancel(){}}),releaseAll:async()=>{released++;}};
  const f=fixture(false,pool),a=item('leave-prime');const save=client.savePlaybackQueue.bind(client);client.savePlaybackQueue=async(...args:any[])=>{await new Promise<void>(yes=>finish=yes);return save(...args as Parameters<typeof save>);};
  readyOverride=async()=>({url:'podjs-media-cache://play/prime.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/prime.jpg'}}});
- f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});const opened=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});while(!finish)await Promise.resolve();
- await f.controller.douyinNavigate({name:'history'});expect(released).toBeGreaterThan(0);finish();await opened;expect(f.stack().at(-1)?.douyinRoute?.name).toBe('history');
+ f.controller.douyinPlay({releaseStartupPreview:()=>{previewReleased++;},item:a,playback:a,playlist:[a],hasMore:false,immersive:true});const opened=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});while(!finish)await Promise.resolve();
+ await f.controller.douyinNavigate({name:'history'});expect(released).toBeGreaterThan(0);finish();await opened;expect(f.stack().at(-1)?.douyinRoute?.name).toBe('history');expect(previewReleased).toBe(1);
 });
 test('D2 controller persists before opening and restores exact source and current page without detail request',async()=>{
  const f=fixture(),items=[item('a'),item('b'),item('c')];

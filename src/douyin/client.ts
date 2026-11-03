@@ -92,6 +92,9 @@ export class DouyinClient {
   private readonly detailRequests=new Map<string,Promise<DouyinResult<DouyinContent>>>();
   private readonly feedRequests=new Map<string,Promise<DouyinResult<DouyinFeedPage>>>();
   private detailTimes:number[]=[];
+  private mediaTrafficStopped=false;private strictMediaTraffic=false;
+  usePrestoreTrafficPolicy(){this.strictMediaTraffic=true;}
+  stopMediaTraffic(){this.mediaTrafficStopped=true;}
   private readonly prefetchFailures=new Map<string,{result:Extract<DouyinResult<DouyinItem>,{ok:false}>;until:number}>();
   private readonly playbackResolutions=new Map<string,Promise<DouyinResult<DouyinItem>>>();
   private readonly feedCache=new PlaybackCache<string,{item:DouyinItem;resolvedAtMillis:number}>(4*1024*1024,FEED_CACHE_LIMIT,value=>playbackPayloadBytes(value.item));
@@ -149,6 +152,7 @@ export class DouyinClient {
     if(!cookie)return fail('NOT_LOGGED_IN','未登录');
     const profile=douyinRequestProfile(config??await resolveDouyinRequestConfig(this.options.requestConfig));params={...profile.params,...params};
     const api:DouyinApiCategory=path==='/aweme/v2/web/module/feed/'?'feed':path==='/aweme/v1/web/aweme/detail/'?'detail':'other';
+    if(this.mediaTrafficStopped||this.strictMediaTraffic&&api==='detail'){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
     const policy=this.recoveryPolicy(cookie,generation);
     if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}}
     const policyVersion=policy.snapshotVersion(api);
@@ -209,6 +213,7 @@ export class DouyinClient {
       } finally {douyinRequestDiagnostic(observed);}
     };
     const first=await attempt();if(!('forbidden' in first))return first;
+    if(this.strictMediaTraffic){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
     if(background)return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));
     if(!this.recoveryEnabled())return this.authDecision(policy,cookie,generation,api);
     const key=JSON.stringify([generation,method,path,params]),existing=this.forbiddenRequests.get(key);if(existing)return existing;
@@ -241,6 +246,7 @@ export class DouyinClient {
     this.feedCache.delete(awemeId);this.feedCache.set(awemeId,cached);return cached.item;
   }
   async fetchFeedPage(input:{cursor?:string|null;count?:number;deferPersistence?:boolean;background?:import('../cloud/types.ts').RequestLifetime}={}):Promise<DouyinResult<DouyinFeedPage>>{
+    if(this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');
     if(input.background)return this.fetchFeedPageInner(input);
     const key=JSON.stringify([this.authGeneration,input.cursor?.trim()||null,input.count??10]);
     let pending=this.feedRequests.get(key);if(!pending){pending=this.fetchFeedPageInner(input);this.feedRequests.set(key,pending);}
@@ -302,6 +308,7 @@ export class DouyinClient {
     try{return await work;}finally{if(this.detailRequests.get(id)===work)this.detailRequests.delete(id);}
   }
   private async resolvePlaybackInner(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
+    if(this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');
     const id=awemeId.trim();
     const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh)return {ok:true,data:cached,source:'feed-cache'};
     if(options.allowDetail===false){

@@ -72,6 +72,8 @@ export type RouteEntry = {
   channelId?: string;
   biliRoute?: BiliRoute;
   douyinRoute?: DouyinRoute;
+  /** Route lifetime only; never persisted in navigation snapshots. */
+  douyinStockEntered?:boolean;
   /** Ephemeral decoder ownership; excluded from navigation snapshots. */
   initialVideoPool?:import("../douyin/video-sessions.ts").DouyinVideoSessionPool;
   playback?: PlaybackSource;

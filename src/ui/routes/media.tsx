@@ -156,6 +156,9 @@ export function MediaRoutes(props: MediaRoutesProps) {
           route={props.entry.douyinRoute ?? { name: "entry" }}
           client={douyinClient}
           restoreStock={()=>douyinStock.restore()}
+          claimStockEntry={()=>{if(props.entry.douyinStockEntered)return false;props.entry.douyinStockEntered=true;return true;}}
+          presentStock={(item,guestEntryMs)=>douyinStock.present!(item.playUrl,{x:0,y:0,width:props.width,height:props.height},guestEntryMs)}
+          hideStock={token=>{void douyinStock.hide!(token).result.catch(()=>{});}}
           onPreloadWindow={(owner,items,anchor,seq)=>{douyinPreload.start(owner,items,anchor??undefined,'entry');void props.primeDouyinEntry?.(props.entry,owner,items,anchor,seq);}}
           onPreloadStop={owner=>{douyinPreload.stop(owner);props.stopDouyinEntry?.(owner);}}
           settings={{
