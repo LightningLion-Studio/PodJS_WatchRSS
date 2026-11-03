@@ -1,5 +1,6 @@
 import {videoOptEnabled} from '../media/video-opt.ts';
 import {DouyinPlaybackRecovery} from './playback-recovery.ts';
+import {douyinPlaybackAudio} from './playback-selector.ts';
 import type {DouyinItem} from './types.ts';
 import type { DouyinClient } from "./client.ts";
 import type { PlaybackSource } from "../ui/VideoPlayerScreen.tsx";
@@ -23,7 +24,7 @@ export class DouyinRssRecovery {
       if(!result.ok)throw new Error(result.message);
       const headers=await this.client.buildPlaybackHeaders();
       if(!isCurrent())return;
-      return {...source,url:result.data.playUrl,headers};
+      return {...source,url:result.data.playUrl,audioUrl:douyinPlaybackAudio(result.data),headers};
     } finally {this.running=false;}
   }
 }

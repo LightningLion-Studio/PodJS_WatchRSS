@@ -691,7 +691,7 @@ export function createMediaRouteController(
         if(!remote.ok){dependencies.setError(remote.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders();
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
-        const source={...entry.playback,url:remote.data.playUrl,headers};
+        const source={...entry.playback,url:remote.data.playUrl,...douyinDecoderProfile(remote.data),headers};
         entry.queue.updateCurrentUrl(remote.data.playUrl);await entry.queue.persist();
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
         entry.playback=source;dependencies.setPlayingSource(source);dependencies.setError('');
@@ -701,7 +701,7 @@ export function createMediaRouteController(
         const fresh=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});if(!fresh.ok){dependencies.setError(fresh.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders(),url=await douyinPlaybackUrl(fresh.data,headers);
         if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
-        entry.queue.refreshPrefetchItem(id,fresh.data);entry.playback={...entry.playback,url,headers,previewOnly:false};await entry.queue.persist();
+        entry.queue.refreshPrefetchItem(id,fresh.data);entry.playback={...entry.playback,url,...douyinDecoderProfile(fresh.data),headers,previewOnly:false};await entry.queue.persist();
         if(dependencies.current()===entry){dependencies.setPlayingSource(entry.playback);dependencies.setError('');}return;
       }
       if(entry.playback?.url?.startsWith('podjs-media-cache:'))await douyinPreload.invalidate(id);
@@ -815,7 +815,7 @@ export function createMediaRouteController(
       async sourceRefreshed(id,previousUri,item,uri,headers){
         if(dependencies.current()!==entry||!entry.queue)return;
         entry.queue.refreshPrefetchItem(id,item);entry.player?.invalidatePrefetch?.(id);
-        if(entry.queue.snapshot().item?.awemeId===id&&entry.playback?.url===previousUri){entry.playback={...entry.playback,url:uri,headers,previewOnly:false};dependencies.setPlayingSource(entry.playback);}
+        if(entry.queue.snapshot().item?.awemeId===id&&entry.playback?.url===previousUri){entry.playback={...entry.playback,url:uri,...douyinDecoderProfile(item),headers,previewOnly:false};dependencies.setPlayingSource(entry.playback);}
         await entry.queue.persist();
       },
       async quarantine(id){if(dependencies.current()!==entry||!entry.queue?.quarantinePrefetch(id))return false;entry.player?.invalidatePrefetch?.(id);await entry.queue.persist();return true;},

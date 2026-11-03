@@ -1,4 +1,5 @@
 import {VideoSessionPool} from '@podjs/framework/video-session-pool';
+import {douyinPlaybackAudio} from '../../douyin/playback-selector.ts';
 export {videoPagerSettleDuration as douyinPagerSettleDuration} from '@podjs/framework/video-paging';
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { DouyinItem } from "../../douyin/types.ts";
@@ -7,10 +8,11 @@ export {videoPagerDelta as douyinPagerDelta,VIDEO_PAGER_SNAP_POSITIONAL_THRESHOL
 export type DouyinPagerDirection = 'up'|'down';
 export interface DouyinPreparedSource {key:string;source:PlaybackSource;authorizationVersion?:number;queueIndex?:number;anchorIndex?:number}
 
-export function douyinDecoderProfile(item:DouyinItem,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight">{
+export function douyinDecoderProfile(item:DouyinItem,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight"|"audioUrl">{
   const variant=item.variants.find(candidate=>candidate.playUrl===url||candidate.playUrls?.includes(url));
-  if(!variant)return {};
+  if(!variant)return {audioUrl:undefined};
   return {
+    audioUrl:douyinPlaybackAudio(item,url),
     ...(variant.codec==="h264"?{videoMime:"video/avc"}:variant.codec==="h265"?{videoMime:"video/hevc"}:{}),
     ...(variant.width>0?{videoWidth:variant.width}:{}),
     ...(variant.height>0?{videoHeight:variant.height}:{}),

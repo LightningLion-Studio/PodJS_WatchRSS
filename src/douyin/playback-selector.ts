@@ -1,6 +1,10 @@
 import type {DouyinItem,DouyinVideoVariant} from './types.ts';
 
 export const DOUYIN_TARGET_RESOLUTION=480;
+export function douyinPlaybackAudio(item:Pick<DouyinItem,'playUrl'|'variants'>,url=item.playUrl):string|undefined {
+  const variant=item.variants?.find(v=>v.playUrl===url||v.playUrls?.includes(url));
+  return variant?.format==='dash'?variant.audioUrl:undefined;
+}
 /** Prefer a rendition covering the 466 px watch without paying for redundant pixels. */
 export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefined {
   const label=[v.definition,v.quality,v.gearName].filter(x=>x!=null).join(' ').toLowerCase();
@@ -12,7 +16,7 @@ export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefine
   return short;
 }
 export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVariant[]):DouyinVideoVariant|undefined {
-  const playable=variants.filter(v=>v.playUrl.trim()&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
+  const playable=variants.filter(v=>v.playUrl.trim()&&(v.format!=='dash'||!!v.audioUrl)&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
   const known=playable.filter(v=>v.codec!=='unknown'),pool=known.length?known:playable;
   const distance=(v:DouyinVideoVariant)=>{const r=normalizedDouyinResolution(v);return r===undefined?536870911:r>=466?r-466:100000+466-r;};
   return pool.reduce<DouyinVideoVariant|undefined>((best,v)=>{
@@ -23,7 +27,7 @@ export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVarian
 }
 export function selectPreferredDouyinUrl(variants:readonly DouyinVideoVariant[],fallback?:string|null):string|undefined {
   const selected=selectPreferredDouyinVariant(variants);if(selected)return selected.playUrl;
-  const url=fallback?.trim();return url&&!variants.some(v=>v.codec==='h265'&&v.playUrl.trim()===url&&!douyinCodecRuntimePolicy.canDecodeHevc(v))?url:undefined;
+  const url=fallback?.trim();return url&&!variants.some(v=>v.playUrl.trim()===url&&(v.format==='dash'&&!v.audioUrl||v.codec==='h265'&&!douyinCodecRuntimePolicy.canDecodeHevc(v)))?url:undefined;
 }
 /** Also reapplied at persisted/history/saved and queue boundaries: old snapshots used play_addr. */
 export function applyPreferredDouyinPlayback<T extends DouyinItem>(item:T):T {

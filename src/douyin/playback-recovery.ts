@@ -5,7 +5,7 @@ import {PlaybackRecoveryBudget} from '@podjs/framework/media-policy';
 import * as services from '@podjs/framework/services';
 import type {DouyinItem} from './types.ts';
 import type {PlaybackSource} from '../ui/VideoPlayerScreen.tsx';
-import {selectPreferredDouyinVariant} from './playback-selector.ts';
+import {selectPreferredDouyinVariant,douyinPlaybackAudio} from './playback-selector.ts';
 
 type PlaybackItem=Pick<DouyinItem,'awemeId'|'playUrl'|'variants'>;
 /** Same track only: changing CDN must never silently change codec or quality. */
@@ -42,7 +42,7 @@ export class DouyinPlaybackRecovery {
       this.budget.check();
       if(!current())return;
       if(!next)throw new Error('playback_recovery_exhausted');
-      return {...source,url:next,previewOnly:false,recoveryDeadlineMs:this.now()+this.budget.remaining()};
+      return {...source,url:next,audioUrl:douyinPlaybackAudio(this.item,next),previewOnly:false,recoveryDeadlineMs:this.now()+this.budget.remaining()};
     } finally {this.running=false;}
   }
 }
