@@ -88,6 +88,9 @@ export class WatchCloudClient {
   async revokeOwnOwnership(deviceId:string){const j=requireOk(await this.request('POST',`/functions/v1/cloud/devices/${encodeURIComponent(deviceId)}/revoke`,{}));if(j.deviceId!==deviceId||j.revoked!==true||j.ownershipReleased!==true)throw Error('pairing_release_unverified');}
   async revokeDevice(deviceId:string){requireOk(await this.request('POST',`/functions/v1/cloud/devices/${encodeURIComponent(deviceId)}/revoke`,{}));}
   async approvalCreate(deviceId:string,commitment:string){return requireOk(await this.request('POST','/functions/v1/cloud/approvals/v2',{deviceId,commitment})) as {requestId:string;expiresAt:number};}
+  async approvalPending():Promise<{requests:import('./approver').PendingApproval[]}>{return requireOk(await this.request('GET','/functions/v1/cloud/approvals/v2/pending'));}
+  async approvalAccept(id:string,approverDeviceId:string,approverSpki:string,approverNonce:string){requireOk(await this.request('POST',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}/accept`,{approverDeviceId,approverSpki,approverNonce}));}
+  async approvalDeliver(id:string,payload:string,signature:string){requireOk(await this.request('POST',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}/deliver`,{payload,signature}));}
   async approvalGet(id:string){return requireOk(await this.request('GET',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}`));}
   async approvalReveal(id:string,requesterNonce:string){requireOk(await this.request('POST',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}/reveal`,{requesterNonce}));}
   async approvalCancel(id:string){requireOk(await this.request('POST',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}/cancel`,{}));}

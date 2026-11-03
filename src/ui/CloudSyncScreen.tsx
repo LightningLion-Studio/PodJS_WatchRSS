@@ -1,4 +1,5 @@
 import type {CloudApprovalState as WatchApprovalState} from '../cloud/approval-controller.ts';
+import type {CloudApproverState} from '../cloud/approver-controller.ts';
 import {Text, View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
 import {delay,type HostOperation} from '@podjs/framework/services';
@@ -27,6 +28,8 @@ export function CloudSyncScreen(props: {
   available: () => boolean;
   sync: {readonly pending: boolean; start(): Promise<void>};
   approval?: import('./cloud-sync-view').CloudApprovalControl;
+  /** This watch approving another device of the same account (approval v2 approver). */
+  approver?: {readonly state: CloudApproverState; subscribe(fn: () => void): () => void; accept(requestId: string): Promise<boolean>; confirm(match: boolean): Promise<boolean>; cancel(): Promise<boolean>};
   handoff?: {readonly state: {phase: import('./cloud-sync-view').CloudHandoffPhase}; subscribe(fn: () => void): () => void};
   /** Logout, owner choice and re-registration; every destructive action is armed by a first tap. */
   actions?: CloudRemediationControl;
@@ -46,6 +49,8 @@ export function CloudSyncScreen(props: {
   createEffect(()=>props.approval?.setForeground(props.active()));
   if(props.approval)onCleanup(props.approval.subscribe(()=>{setApproval(props.approval!.state);}));
   onCleanup(()=>props.approval?.setForeground(false));
+  const [approver,setApprover]=createSignal<CloudApproverState|undefined>(props.approver?.state);
+  if(props.approver)onCleanup(props.approver.subscribe(()=>setApprover(props.approver!.state)));
   const [actionRevision,setActionRevision]=createSignal(0);
   if(props.actions)onCleanup(props.actions.subscribe(()=>setActionRevision(value=>value+1)));
   // A destructive pill turns into its confirmation for four seconds after the first tap.
@@ -178,6 +183,24 @@ export function CloudSyncScreen(props: {
     } else if(props.approval&&codeState.phase!=='idle'){
       rows.push(gap(14),centred(codeState.message,1,17,codeState.phase==='error'?'#ff7777':PHONE_PAGE.secondary));
       if(fix.canCancel)rows.push(gap(4),link('取消',()=>void props.approval!.cancel()));
+    }
+    const grant=approver();
+    if(props.approver&&grant&&codeState.phase==='idle'&&!['idle','unsupported'].includes(grant.phase)){
+      // Another device asks this watch for the account key; it is sent only after both sides show the same digits.
+      const target=grant.requests.find(r=>r.requestId===grant.requestId)??grant.requests[0],label=grant.requesterLabel||target?.requesterLabel||'新设备';
+      rows.push(gap(16));
+      if(grant.phase==='requested'&&target){
+        rows.push(centred(`${label} 请求云同步授权`,1,17,PHONE_PAGE.foreground),gap(10),pill('核对授权码',true,()=>void props.approver!.accept(target.requestId)));
+      }else if(grant.phase==='code'&&grant.code){
+        const code=grant.code.length===8?`${grant.code.slice(0,4)} ${grant.code.slice(4)}`:grant.code;
+        rows.push(centred(`与${label}上的数字一致吗？`,1,17,PHONE_PAGE.secondary),gap(6),
+          {height:30,render:()=><Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${grant.code}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{code}</Text>},
+          gap(12),pill('一致',true,()=>void props.approver!.confirm(true)),gap(4),link('不一致',()=>void props.approver!.confirm(false)));
+      }else{
+        const failed=['error','expired','cancelled'].includes(grant.phase);
+        rows.push(centred(grant.message,1,17,failed?'#ff7777':grant.phase==='complete'?PHONE_PAGE.primary:PHONE_PAGE.secondary));
+        if(['accepting','waiting'].includes(grant.phase))rows.push(gap(4),link('取消',()=>void props.approver!.cancel()));
+      }
     }
     if(actions&&fix.needsOwnerChoice){
       rows.push(gap(12),pill(armed()==='clear'?'再按一次确认清空':'清空本机资料',armed()!=='clear',()=>arm('clear',()=>act(actions.resolveOwner('clear',true,props.clearLocal))),!busy&&!!props.clearLocal,armed()==='clear'),
