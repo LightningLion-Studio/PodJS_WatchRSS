@@ -1,3 +1,4 @@
+import {secureCallsite} from './secure-callsite';
 import {restoreRequestMetadata,type RestoreCallsite} from './restore-callsite';
 import {sha256Stream} from '@podjs/framework/sha256-stream';
 import {sealedGzip} from '@podjs/framework/sealed-gzip';
@@ -15,7 +16,7 @@ import type {CloudClientOptions,HttpTransport,CloudUploadObject} from './types';
 export type CloudHostRequest=<T>(method:string,args:Record<string,unknown>)=>Promise<T>;
 export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuard,site:RestoreCallsite='runtime'){
  const metadata=restoreRequestMetadata(site);
- const invoke=async<T>(method:string,args:Record<string,unknown>,op?:number):Promise<T>=>{try{const value=await rawRequest<T>(method,metadata.args(method,args,op));metadata.completed(method,args,value);return value;}catch(error){throw cloudHostFailure(error,method);}};
+ const invoke=async<T>(method:string,args:Record<string,unknown>,op?:number):Promise<T>=>{try{const value=await rawRequest<T>(method,secureCallsite(method,metadata.args(method,args,op)));metadata.completed(method,args,value);return value;}catch(error){throw cloudHostFailure(error,method);}};
  const request:CloudHostRequest=invoke;
  const hostOperation=<T>(method:string,args:Record<string,unknown>)=>({result:request<T>(method,args)});
  const fileChunks={

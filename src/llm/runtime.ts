@@ -1,6 +1,7 @@
 import {withAccountLease} from '../account/lease';
 import {clearAccountCloud,revokeAccountCloud} from '../account/cloud-cleanup';
 import {hostOperation,secureStorage,fileChunks,bytesToBase64,base64ToBytes,type DownloadResult,type HostOperation} from "@podjs/framework/services";
+import {secureCallsite} from '../cloud/secure-callsite';
 import {WatchAccountStore} from "../account/store.ts";
 import {WatchTokenManager} from "../account/token.ts";
 import type {HttpTransport} from "../cloud/types.ts";
@@ -10,7 +11,7 @@ import {SummarySession,type SummaryState} from "./summary.ts";
 import {loadSummarySource} from "./source.ts";
 import {appendUsage} from "./usage.ts";
 
-export const summaryAccountStore=new WatchAccountStore({exclusive:action=>withAccountLease(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,action),revokeCloudScope:state=>revokeAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,state),clearCloudScope:state=>clearAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,state),get:async key=>(await secureStorage.get(key))??null,set:secureStorage.set,remove:secureStorage.delete});
+export const summaryAccountStore=new WatchAccountStore({exclusive:action=>withAccountLease(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result,action),revokeCloudScope:state=>revokeAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result,state),clearCloudScope:state=>clearAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result,state),get:async key=>(await secureStorage.get(key,1))??null,set:(key,value)=>secureStorage.set(key,value,1),remove:key=>secureStorage.delete(key,undefined,1)});
 let sequence=0;
 export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,original:()=>Promise<unknown>,changed:(state:SummaryState)=>void):SummarySession {
  const requests=new Set<HostOperation<DownloadResult>>();let disposed=false;

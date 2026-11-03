@@ -1,3 +1,4 @@
+import {secureCallsite} from './secure-callsite';
 import {restoreCallsiteTrace} from './restore-callsite';
 import {observeCpuWork,pulseCpuWork} from '@podjs/framework/cpu-work';
 import {WorkWindow,windowedHost} from '@podjs/framework/work-window';
@@ -32,7 +33,7 @@ export default defineBackgroundHandler(async context=>{
  const yieldBudget=new SnapshotYieldBudget();
  const callsites=restoreCallsiteTrace();
  let rejected:unknown;let buildIdentity='unknown';
- const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);callsites.observe(args);const value=await context.request!('cloud.host',{method,args});yieldBudget.completed(method,args);if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);callsites.observe(args);const value=await context.request!('cloud.host',{method,args:secureCallsite(method,args)});yieldBudget.completed(method,args);if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
  const diagnostic=backgroundDiagnostics(request);
  const stopCpu=observeCpuWork(diagnostic.cpu);
  const window=new WorkWindow({deadlineMs:context.deadlineMs,reserveMillis:10000,expired:()=>new CloudSyncDeadlineError(),report:metric=>diagnostic.report(JSON.stringify(metric))});

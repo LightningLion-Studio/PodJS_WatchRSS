@@ -30,7 +30,7 @@ export const mediaTransport=createMediaTransport({
  remove:path=>fileChunks.remove(path),
  base64:bytesToBase64,
 });
-const secure={get:async(key:string)=>(await secureStorage.get(key))??null,set:secureStorage.set,delete:secureStorage.delete};
+const secure={get:async(key:string)=>(await secureStorage.get(key,7))??null,set:(key:string,value:string)=>secureStorage.set(key,value,7),delete:(key:string,benchmark?:{seq:number;attempt?:number})=>secureStorage.delete(key,benchmark,7)};
 export const biliClient=createBiliClient({watchApi:()=>readWatchConfig(kv),watchCooldown:{get:()=>kv.get<number>(WATCH_COOLDOWN_KEY)??0,set:until=>kv.set(WATCH_COOLDOWN_KEY,until)},onLogout:()=>clearBiliLogoutData(kv,managedCache),transport:mediaTransport,secureStore:secure,onSaved:async(item,type,saved)=>{await (await getExternalSavedStore()).sync(biliExternalItem(item),type,saved);
  // Cache failures never turn a successful remote/local save into a failed save.
  if(saved)void biliPreviewCache.enqueue(item).result.catch(()=>appLogger.w('BiliPreview','preview download failed'));
