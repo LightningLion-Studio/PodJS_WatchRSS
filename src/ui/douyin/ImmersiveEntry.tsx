@@ -134,7 +134,9 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   // Verified complete stock may enter immediately; other external intents only select an anchor. A tap/swipe enters
   // the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
   createEffect(()=>{const enabled=props.active??true;if(auth()==='logged-out')setStockPending(false);if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':busy()&&!items().length?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
-  const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy < -50)void enter();else if(c.dy>50)void load(true,true);}});
+  const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy< -30||c.dy< -12&&(c.vy??0)< -400)void enter();else if(c.dy>50)void load(true,true);}});
+  // Back on the cover after the stream: a stale opening flag must never swallow the next enter.
+  createEffect(()=>{if(props.route.name==='entry'&&(props.active??true))untrack(()=>setOpening(false));});
   createEffect(()=>{if((props.active??true)&&auth()==='logged-in')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);}});onCleanup(()=>{if(!previewHandedOff)hidePreview();disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
   // Native DouyinTitlePage: 18dp safe padding; centred column "抖音 ⓘ" (titleMedium 21/26), 2dp gap,
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
@@ -152,7 +154,10 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text>
       <View class="absolute left-[65] right-[65] top-[92] h-[36] rounded-[18] items-center justify-center bg-[#2a2a2a]" onPress={()=>void (retryPlayback?enter():load(true,true))} focusable accessibilityRole="button" accessibilityLabel="重试"><Text class="text-sm text-[#f5f5f5]">重试</Text></View>
     </Show>
-    <View class="absolute bottom-[30] w-[44] h-[44] rounded-full items-center justify-center" style={{insetL:(props.width-44)/2,bgColor:"#2a2a2aeb"}} onPress={auth()==='unknown'?undefined:()=>void enter()} focusable={auth()!=='unknown'} accessibilityRole="button" accessibilityLabel={auth()==='unknown'?"正在读取登录状态…":logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
+    {/* 44dp visual circle inside a 120×80 transparent hit area. */}
+    <View class="absolute bottom-[12] w-[120] h-[80] rounded-full items-center justify-center" style={{insetL:(props.width-120)/2}} onPress={auth()==='unknown'?undefined:()=>void enter()} focusable={auth()!=='unknown'} accessibilityRole="button" accessibilityLabel={auth()==='unknown'?"正在读取登录状态…":logged()?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}>
+      <View class="w-[44] h-[44] rounded-full items-center justify-center" style={{bgColor:"#2a2a2aeb"}}><Show when={logged()} fallback={<Text class="text-base text-[#f5f5f5]">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
+    </View>
   </View></View></Show>;
 }
 

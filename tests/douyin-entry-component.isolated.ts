@@ -54,9 +54,21 @@ function mount(options:{cacheCount?:number;freshCache?:boolean;hasMore?:boolean;
   const entryGesture=gesture;
   return {data,client,requests,plays,routes,dispose,setActive,advance:(ms:number)=>{now+=ms;},
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
-    swipe:(dy:number)=>entryGesture.onPanEnd({dy}),
+    swipe:(dy:number,vy=0)=>entryGesture.onPanEnd({dy,vy}),
+    button:()=>nodes(root).find(n=>n.kind==='View'&&n.props.accessibilityRole==='button'&&n.props.class?.includes('rounded-full')),
     press:()=>nodes(root).find(n=>n.kind==='View'&&n.props.accessibilityRole==='button'&&n.props.class?.includes('rounded-full'))!.props.onPress()};
 }
+
+for(const [label,dy,vy] of [['short swipe',-35,0],['quick flick',-15,-600]] as const)test(`cover enters the stream on a ${label}`,async()=>{
+  const f=mount();await requestReady(f);f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);
+  f.swipe(dy,vy);await settle();expect(f.plays).toMatchObject([{item:{awemeId:'fresh'},immersive:true}]);
+});
+test('cover ignores a tiny drag and keeps a large hit area around the 44dp arrow',async()=>{
+  const f=mount();await requestReady(f);f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);
+  f.swipe(-10,0);await settle();expect(f.plays).toHaveLength(0);
+  expect(f.button()!.props.class).toContain('w-[120]');expect(f.button()!.props.class).toContain('h-[80]');
+  f.press();await settle();expect(f.plays).toHaveLength(1);
+});
 
 for(const outcome of ['success','timeout','http','empty','expired','status8','parse'] as const)test(`fresh feed ${outcome} leaves 刷新中 and supports the native next action`,async()=>{
   const f=mount();await requestReady(f);
