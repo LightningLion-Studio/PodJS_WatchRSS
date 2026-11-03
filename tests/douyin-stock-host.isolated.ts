@@ -9,7 +9,7 @@ const {createHostDouyinStock}=await import('../src/douyin/stock-host.ts');
 test('complete stock uses browsing candidates, survives restart offline, and never reads expired URLs',async()=>{
  const client={isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({Cookie:'private-cookie'}),fetchFeedPage:async()=>{feed++;throw Error('extra feed forbidden');}};
  const items=['expired','a','b','c','d'].map(awemeId=>({awemeId,description:'title',authorName:'author',playUrl:`https://fixture.invalid/${awemeId}?x-expires=${awemeId==='expired'?1000000000:9999999999}`,variants:[],durationMs:30000}));
- const host=createHostDouyinStock(client as any);await host.resume();expect(prepares).toBe(0);host.offer!(items as any);await host.resume();expect(prepares).toBe(3);expect(feed).toBe(0);expect(config.count).toBe(3);expect(config.entryBytes).toBe(8*1024*1024);expect(registered.every(v=>v[0].includes('expired')===false)).toBe(true);
+ const host=createHostDouyinStock(client as any);await host.resume();expect(prepares).toBe(0);host.offer!(items as any);await host.resume();expect(prepares).toBe(3);expect(feed).toBe(0);expect(config.count).toBe(3);expect(config.entryBytes).toBe(32*1024*1024);expect(registered.every(v=>v[0].includes('expired')===false)).toBe(true);
  expect(JSON.stringify(stored)).not.toContain('private-cookie');expect(JSON.stringify(stored)).not.toContain('https:');
  online=false;const restart=createHostDouyinStock(client as any);expect((await restart.restore()).map(i=>i.awemeId)).toEqual(['a','b','c']);expect((await restart.ready('a'))?.uri).toBe('file:///complete/a.mp4');restart.consume('a');expect((await restart.restore()).map(i=>i.awemeId)).toEqual(['b','c']);expect((await restart.playbackReady('a'))?.frame?.available).toBe(true);await restart.resume();expect(prepares).toBe(3);expect(feed).toBe(0);
 });
@@ -26,4 +26,12 @@ test('a consumed in-flight completion is watched and the latest browsing window 
  for(let n=0;stored.filter(v=>!v.watched).length<3&&n<100;n++)await new Promise(r=>setTimeout(r,1));
  expect(stored.find(v=>v.metadata.awemeId==='old')?.watched).toBe(true);
  expect((await host.restore()).map(v=>v.awemeId)).toEqual(['new1','new2','new3']);host.suspend();
+});
+
+test('DYWAIT-C passes only the selected DASH companion and skips expired audio',async()=>{
+ online=true;stored=[];registered=[];prepares=0;
+ const client={isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+ const item=(id:string,audioExpires:number)=>({awemeId:id,description:'title',authorName:'author',playUrl:`https://fixture.invalid/${id}?x-expires=9999999999`,variants:[{playUrl:`https://fixture.invalid/${id}?x-expires=9999999999`,audioUrl:`https://fixture.invalid/audio?x-expires=${audioExpires}`,format:'dash',width:540,height:960,bitrate:200000,codec:'h264'}],durationMs:60000});
+ const host=createHostDouyinStock(client as any);host.offer!([item('expired-audio',1000000000),item('valid',9999999999)] as any);await host.resume();
+ expect(registered).toHaveLength(1);expect(registered[0][6]).toBe('https://fixture.invalid/audio?x-expires=9999999999');expect(prepares).toBe(1);expect(config.minFreeBytes).toBe(512*1024*1024);expect(config.totalBytes).toBe(128*1024*1024);host.suspend();
 });

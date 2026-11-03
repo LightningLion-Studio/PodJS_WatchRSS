@@ -1,10 +1,10 @@
-import {selectPreferredDouyinVariant} from './playback-selector.ts';
+import {normalizedDouyinResolution,selectPreferredDouyinVariant} from './playback-selector.ts';
 import type {DouyinItem} from './types.ts';
 /** Product policy only; the framework enforces storage and transport ceilings. */
 export function douyinPrestoreConfig(value:unknown){
  const v=value&&typeof value==='object'?value as Record<string,unknown>:{};
  const n=(key:string,fallback:number,min:number,max:number)=>typeof v[key]==='number'&&Number.isFinite(v[key])?Math.max(min,Math.min(max,Math.floor(v[key] as number))):fallback;
- return {enabled:v.enabled!==false,ahead:n('ahead',20,1,20),count:n('count',3,1,5),entryBytes:n('entryBytes',8*1024*1024,128*1024,8*1024*1024),totalBytes:n('totalBytes',40*1024*1024,128*1024,40*1024*1024),frameBytes:n('frameBytes',10*1024*1024,128*1024,10*1024*1024),headBytes:n('headBytes',16*1024*1024,128*1024,16*1024*1024),bytesPerSecond:n('bytesPerSecond',256*1024,16*1024,1024*1024),minBattery:n('minBattery',20,0,100),minFreeBytes:n('minFreeBytes',96*1024*1024,0,512*1024*1024)};
+ return {enabled:v.enabled!==false,ahead:n('ahead',20,1,20),count:n('count',3,1,5),entryBytes:n('entryBytes',32*1024*1024,128*1024,32*1024*1024),totalBytes:n('totalBytes',128*1024*1024,128*1024,128*1024*1024),frameBytes:n('frameBytes',10*1024*1024,128*1024,10*1024*1024),headBytes:n('headBytes',16*1024*1024,128*1024,16*1024*1024),bytesPerSecond:n('bytesPerSecond',256*1024,16*1024,1024*1024),minBattery:n('minBattery',20,0,100),minFreeBytes:n('minFreeBytes',512*1024*1024,0,512*1024*1024)};
 }
 export function storedDouyinMetadata(item:DouyinItem):Record<string,unknown>{
  const variant=item.variants.find(v=>v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl));
@@ -19,11 +19,17 @@ export function restoredDouyinItem(metadata:Record<string,unknown>,uri:string):D
   variants:[{playUrl:uri,codec:metadata.codec==='h264'||metadata.codec==='h265'?metadata.codec:'unknown',width:number('width'),height:number('height'),bitrate:number('bitrate')}]};
 }
 
-/** Complete storage needs a self-contained rendition. DASH companions remain
- * available to normal playback, but never leak into an offline stored item. */
+/** Prefer watch-sized 540p at its lowest bitrate. The native store downloads
+ * and remuxes DASH companions; their combined input and output share the cap. */
 export function completeDouyinRendition(item:DouyinItem):DouyinItem|undefined {
- const muxed=item.variants.filter(v=>v.format!=='dash'&&!v.audioUrl);
- const chosen=selectPreferredDouyinVariant(muxed);
+ const eligible=item.variants.filter(v=>selectPreferredDouyinVariant([v])===v&&/^https?:/.test(v.playUrl));
+ const rank=(v:typeof eligible[number])=>{const r=normalizedDouyinResolution(v);return r===540?0:r===undefined?1e9:r>=466?1000+r:100000+466-r;};
+ const bitrate=(v:typeof eligible[number])=>v.bitrate>0?v.bitrate:Infinity;
+ const chosen=eligible.reduce<typeof eligible[number]|undefined>((best,v)=>{
+  if(!best)return v;
+  const resolution=rank(v)-rank(best);
+  return resolution<0||resolution===0&&(bitrate(v)<bitrate(best)||bitrate(v)===bitrate(best)&&v.codec==='h264'&&best.codec!=='h264')?v:best;
+ },undefined);
  if(chosen)return {...item,playUrl:chosen.playUrl,variants:[chosen]};
  // Legacy feeds expose only a play URL; the native track probe is authoritative.
  if(!item.variants.length&&/^https?:/.test(item.playUrl))return item;

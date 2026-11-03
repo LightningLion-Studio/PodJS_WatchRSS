@@ -64,8 +64,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     void notice.result.then(()=>{if(current())setSlow(true);},()=>{});
     const deadline=hostServices.delay(DOUYIN_NETWORK_TIMEOUT_MS);
     const timer={cancel(){notice.cancel();deadline.cancel();}};loadTimer=timer;
-    void deadline.result.then(()=>{if(current()){setBusy(false);setSlow(false);setError('内容加载较慢，请稍候');finishRefresh(true,{code:'timeout'});}},()=>{});
-    let sealLocal=()=>{};
+    void deadline.result.then(()=>{if(current()&&!choseStock){setBusy(false);setSlow(false);setError('内容加载较慢，请稍候');finishRefresh(true,{code:'timeout'});}},()=>{});
+    let sealLocal=()=>{},choseStock=false;
     try{
       if(!refresh){
         // Inventory and SQL snapshots do not depend on a cookie/secure-store
@@ -84,7 +84,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         const stockWork=Promise.resolve().then(()=>props.restoreStock?.()??[]).catch(()=>[]).then(value=>{stockSettled=true;return value;});
         const showStock=async(stock:DouyinItem[])=>{
           if(!current())return;
-          stockChosen=true;
+          stockChosen=true;choseStock=true;
           const automatic=stock[0].playUrl.startsWith('file:')&&claimStockEntry();
           if(automatic&&props.presentStock){
             preview=props.presentStock(stock[0],guestEntryMs);
@@ -99,7 +99,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         stockDecided=true;if(!current()){localDeadline.cancel();return;}
         appLogger.i('DouyinEntry',`local_restore stock=${stockSettled?'settled':'timeout'} count=${stock.length}`);
         if(stock.length){localDeadline.cancel();await showStock(stock);return;}
-        if(!stockSettled)void stockWork.then(late=>{if(current()&&!items().length&&!networkPublished&&late.length)return showStock(late);}).catch(()=>{});
+        if(!stockSettled)void stockWork.then(late=>{if(current()&&!opening()&&late.length)return showStock(late);}).catch(()=>{});
         setStockPending(false);
         publishCached();
         await Promise.race([Promise.all([feed,queue]),localDeadline.result]);localDeadline.cancel();if(!current())return;
@@ -110,7 +110,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       }
       if(!logged())return;
       appLogger.d('DouyinEntry',`feed requested reason=${refresh?'refresh':'bootstrap'}`);
-      const result=await traceServiceWork("douyin.entry.fetch",()=>props.client.fetchFeedPage({count:16}));if(!current())return;
+      const result=await traceServiceWork("douyin.entry.fetch",()=>props.client.fetchFeedPage({count:16}));if(!current()||choseStock)return;
       if(result.ok){sealLocal();cancelRetry();setError('');failures=0;traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
       else{
         setError(formatDouyinError(result.code));
@@ -119,7 +119,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
           await requireLogin(current);
         }
       }
-    }catch{if(current()){setError(formatDouyinError('REQUEST_FAILED'));scheduleRetry({code:'REQUEST_FAILED'},current);}}
+    }catch{if(current()&&!choseStock){setError(formatDouyinError('REQUEST_FAILED'));scheduleRetry({code:'REQUEST_FAILED'},current);}}
     finally{if(current())setStockPending(false);timer.cancel();if(loadTimer===timer)loadTimer=undefined;if(current()){setBusy(false);setSlow(false);finishRefresh(!!error());appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
   };
   const enter=async()=>{

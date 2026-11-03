@@ -381,3 +381,10 @@ test('DYWAIT cached offline entry still shows Login after an explicit logout',as
  const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);await f.client.logout();await settle();
  expect(f.text().split('\n')).toContain('登录');f.press();await settle();expect(f.routes.at(-1)).toEqual({name:'login'});expect(f.plays).toHaveLength(0);
 });
+
+test('DYWAIT-C late large verified stock takes priority while its cached cover is still active',async()=>{
+ const stock=deferred<any[]>();const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c',stockGate:stock.promise});
+ await f.client.restorePlaybackQueue();await f.client.restoreFeed();retryTimers.find(t=>t.ms===200&&!t.cancelled)!.fire();await cachedReady(f);expect(f.plays).toHaveLength(0);
+ stock.resolve([{awemeId:'large-local',playUrl:'file:///verified/large.mp4',variants:[],description:'offline',authorName:'fixture',durationMs:60000}]);
+ await settle();await settle();expect(f.plays[0]?.item.playUrl).toBe('file:///verified/large.mp4');expect(f.requests).toHaveLength(0);
+});

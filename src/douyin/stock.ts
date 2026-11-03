@@ -26,7 +26,7 @@ export interface StockPorts {
 export function stockContentKey(item:DouyinItem):string {
  const variant=item.variants.find(v=>v.playUrl===item.playUrl||v.playUrls?.includes(item.playUrl));
  // Explicit rendition identity; signed URL and authorization never form the key.
- return ['douyin-stock-v1',item.awemeId,variant?.codec??'unknown',variant?.width??0,variant?.height??0,variant?.bitrate??0,item.durationMs,...(!variant?['unidentified']:[])].join(':');
+ return ['douyin-stock-v1',item.awemeId,variant?.codec??'unknown',variant?.width??0,variant?.height??0,variant?.bitrate??0,item.durationMs,variant?.format??'mp4',...(!variant?['unidentified']:[])].join(':');
 }
 function validEntry(value:unknown):value is StockEntry {
  const e=value as StockEntry;

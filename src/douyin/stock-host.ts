@@ -7,6 +7,7 @@ import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
 import {stockContentKey,stockNetworkAllowed,type DouyinStockService} from './stock.ts';
 import {douyinMediaExpiry} from './media-expiry.ts';
+import {douyinPlaybackAudio} from './playback-selector.ts';
 import {completeDouyinRendition,douyinPrestoreConfig,storedDouyinMetadata,restoredDouyinItem} from './prestore-policy.ts';
 
 /** Inventory comes from the native verified complete store. Browsing supplies
@@ -59,10 +60,10 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
      if(watched.has(candidate.awemeId)||consumed.has(candidate.awemeId))continue;
      const item=completeDouyinRendition(candidate);if(!item)continue;const key=stockContentKey(item);
      if((await localMediaStore.lookup(key).result).item)continue;
-     const expiry=douyinMediaExpiry(item.playUrl,Date.now());if(expiry<=Date.now())continue;
+     const audio=douyinPlaybackAudio(item),now=Date.now(),expiry=Math.min(douyinMediaExpiry(item.playUrl,now),audio?douyinMediaExpiry(audio,now):Infinity);if(expiry<=Date.now())continue;
      const headers=await client.buildPlaybackHeaders();if(!current()||expiry<=Date.now())continue;
      // A single selected rendition. No mirror race is needed for idle storage.
-     const {uri}=await mediaPrefixCache.register(key,item.playUrl,headers,true,[],expiry).result;
+     const {uri}=await mediaPrefixCache.register(key,item.playUrl,headers,true,[],expiry,audio).result;
      try{const result=await localMediaStore.prepare(key,uri,storedDouyinMetadata(item),true).result;if(result.ready){source(result.item);if(consumed.has(item.awemeId)){await localMediaStore.watched(key).result;continue;}slots++;}}
      catch(error){if((error as {code?:string}).code==='media_traffic_stopped'){stopped=true;client.stopMediaTraffic?.();service.suspend();return;}if(!current())return;}
     }
