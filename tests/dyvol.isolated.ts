@@ -43,7 +43,7 @@ test('external changes push the overlay without a poll or swipe and ignore stale
  actual=.25;audioChanged(value());await flush();
  expect(walk(tree).some(n=>n.kind==='Text'&&text(n.props.children)==='25%')).toBe(true);
  muted=true;audioChanged(value());await flush();
- expect(walk(tree).some(n=>n.props?.accessibilityLabel==='取消系统静音')).toBe(true);
+ expect(walk(tree).some(n=>n.kind==='Text'&&text(n.props.children)==='0%')).toBe(true);
  actual=.75;audioChanged({...value(),sourceGeneration:prepared-1});await flush();
  expect(walk(tree).some(n=>n.kind==='Text'&&text(n.props.children)==='0%')).toBe(true);
 });
@@ -58,23 +58,7 @@ test('20 separated crown detents preserve fractions and each changes at most one
  expect(actual).toBe(4/16);
 });
 
-test('20 UI mute pairs act on the current system stream and restart reads system state',async()=>{
- let tree:any;const mount=()=>createRoot(stop=>{dispose=stop;tree=VideoPlayerScreen({source:{url:'https://fixture.invalid/video',title:'fixture',platform:'douyin',digitalCrownVolume:true},width:233,height:233,offset:0,round:true,active:true});});
- mount();await flush();
- for(let pair=0;pair<20;pair++)for(const expected of [true,false]){
-  const button=walk(tree).find(n=>n.props?.accessibilityLabel===(muted?'取消系统静音':'系统静音'));
-  expect(button).toBeDefined();button.props.onPress();await flush();expect(muted).toBe(expected);expect(actual).toBe(.5);expect(walk(tree).some(n=>n.kind==='Text'&&text(n.props.children)===(expected?'0%':'50%'))).toBe(true);
- }
- muted=true;dispose!();mount();await flush();expect(walk(tree).some(n=>n.props?.accessibilityLabel==='取消系统静音')).toBe(true);expect(muted).toBe(true);
-});
-
-
-test('DYENTRY in-app mute toggles the current system snapshot before a queued external push',async()=>{
+test('Douyin player shows no on-screen mute button',async()=>{
  let tree:any;createRoot(stop=>{dispose=stop;tree=VideoPlayerScreen({source:{url:'https://fixture.invalid/video',title:'fixture',platform:'douyin'},width:233,height:233,offset:0,round:true,active:true});});
- await flush();muted=true; // External change; its JS observer has not run yet.
- walk(tree).find(n=>n.props?.accessibilityLabel==='系统静音').props.onPress();await flush();
- expect(muted).toBe(false);expect(walk(tree).some(n=>n.props?.accessibilityLabel==='系统静音')).toBe(true);
- muted=false;audioChanged(value());await flush();muted=true;audioChanged(value());await flush();
- muted=false; // The inverse race must also use fresh readback.
- walk(tree).find(n=>n.props?.accessibilityLabel==='取消系统静音').props.onPress();await flush();expect(muted).toBe(true);
+ await flush();for(const next of [false,true]){muted=next;audioChanged(value());await flush();expect(walk(tree).some(n=>/静音/.test(String(n.props?.accessibilityLabel??''))||n.kind==='Text'&&/静音/.test(text(n.props.children)))).toBe(false);}
 });

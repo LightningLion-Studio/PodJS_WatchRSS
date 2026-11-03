@@ -148,11 +148,6 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     setState(previous=>({...previous,...value}));
     if(value.volume!==observedVolume){if(!volumeRunning){virtualVolume=value.volume;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};}observedVolume=value.volume;}
   }));
-  const toggleSystemMute=async()=>{
-    const own=generation;
-    try{const current=await media.state();if(disposed||own!==generation||videoSessionOwner!==sessionOwner||!props.active)return;const next=await media.setMuted(current.muted!==true);if(disposed||own!==generation||videoSessionOwner!==sessionOwner)return;setState(next);virtualVolume=next.volume;observedVolume=next.volume;showVolumeOverlay();}
-    catch(error){failed(error,false,'volume');}
-  };
   const captureFrame=()=>{
     const source=preparedSource,current=state();
     if(source?.platform!=='douyin'||!source.awemeId||videoSessionOwner!==sessionOwner||!current?.hasRenderedFirstFrame||current?.sourceGeneration===undefined)return;
@@ -660,7 +655,6 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         {/* Three across: icon corners stay inside the 233 circle at this height. */}
         <PlayerButton left={47.5} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
       </Show>
-      <Show when={props.source.platform==='douyin'}><View class="absolute left-[84.5] top-[64] w-[64] h-[32] rounded-[16] bg-[#111111dd] items-center justify-center" onPress={()=>void toggleSystemMute()} accessibilityLabel={state()?.muted?'取消系统静音':'系统静音'} focusable><Text class="text-xs text-white">{state()?.muted?'取消静音':'静音'}</Text></View></Show>
       <Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{ width: progressWidth(state()?.positionMs ?? 0, state()?.durationMs ?? 0, barWidth()) }} /><View class="absolute right-[0] top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text>
       <PlayerButton left={47.5} top={186} size={44} icon="rewind" iconSize={24} enabled={prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5} top={186} size={44} icon="forward" iconSize={24} enabled={prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
