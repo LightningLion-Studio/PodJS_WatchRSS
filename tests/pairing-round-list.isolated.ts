@@ -1,3 +1,4 @@
+import {bindPocketModules} from '@podjs/framework/testing/bun-runtime';
 import {test,expect,mock,spyOn} from 'bun:test';
 import {plugin} from 'bun';
 import * as solid from 'solid-js';
@@ -36,6 +37,12 @@ mock.module('@pocketjs/framework/input',()=>({pressNode:()=>{},hitNode:()=>undef
 const frameworkBase=fw+'/packages/framework/src';
 mock.module(Bun.resolveSync('solid-js',frameworkBase),()=>solid);
 mock.module(Bun.resolveSync('solid-js',Bun.resolveSync('@pocketjs/framework/kinetics',frameworkBase)),()=>solid);
+// Match the compiler's single PocketJS runtime through file-linked source paths.
+await bindPocketModules(import.meta.dir,Bun.resolveSync('@podjs/framework/variable-list',import.meta.dir),[
+ '@pocketjs/framework/renderer','@pocketjs/framework/components','@pocketjs/framework/lifecycle',
+ '@pocketjs/framework/gesture','@pocketjs/framework/kinetics','@pocketjs/framework/input',
+ '@pocketjs/framework/host'
+]);
 let listProps:any;
 const {VariableList:ProductionVariableList}=await import('@podjs/framework/variable-list');
 mock.module('@podjs/framework/variable-list',()=>({VariableList:(p:any)=>{listProps=p;return ProductionVariableList(p);}}));

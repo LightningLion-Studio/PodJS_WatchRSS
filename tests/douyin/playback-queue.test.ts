@@ -111,3 +111,40 @@ test('DYFRAME next five and previous two previews never move the anchor or fetch
  expect(q.snapshot().item?.awemeId).toBe('2');expect(calls).toHaveLength(7);expect(calls.every(c=>c.allowDetail===false)).toBe(true);expect(pages).toBe(0);
  q.commitPreview('7');expect(await q.preview('next',5)).toMatchObject({ok:false,code:'UNSUPPORTED'});expect(pages).toBe(0);
 });
+
+for(const limit of [1,2])test(`APPTESTS overflow keeps a bounded retry anchor until resolution succeeds (limit=${limit})`,async()=>{
+ const initial=Array.from({length:limit},(_,i)=>item(String(i))),anchor=String(limit-1);
+ let pages=0,finish!:(value:any)=>void;
+ const calls:string[]=[];
+ const client={
+  fetchFeedPage:async()=>{pages++;return {ok:true,data:{items:[item('next'),item('tail'),item('last')],nextCursor:'done',hasMore:false}};},
+  resolvePlayback:(id:string,options:any)=>{calls.push(id);expect(options.allowDetail).toBe(false);return new Promise(resolve=>finish=resolve);},
+ } as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:initial,selectedAwemeId:anchor,cursor:'start',hasMore:true,limit});
+ const first=q.next();for(let i=0;i<10;i++)await Promise.resolve();
+ expect(calls).toEqual(['next']);expect(pages).toBe(1);
+ expect(q.snapshot()).toMatchObject({item:{awemeId:anchor},cursor:'done',hasMore:false});expect(q.snapshot().playlist).toHaveLength(limit);
+ finish({ok:false,code:'REQUEST_FAILED',message:'offline'});expect(await first).toMatchObject({code:'REQUEST_FAILED'});
+ expect(q.snapshot().item?.awemeId).toBe(anchor);expect(q.snapshot().playlist).toHaveLength(limit);
+ expect(q.diagnostics().quarantinedAwemeIds).toEqual([]);
+ for(const id of ['next','tail','last']){
+  const pending=q.next();for(let i=0;i<10;i++)await Promise.resolve();
+  expect(q.snapshot().playlist.length).toBeLessThanOrEqual(limit);finish({ok:true,data:item(id)});
+  expect(await pending).toMatchObject({ok:true,data:{item:{awemeId:id}}});expect(q.snapshot().item?.awemeId).toBe(id);
+  expect(q.snapshot().playlist.length).toBeLessThanOrEqual(limit);
+ }
+ expect(await q.next()).toMatchObject({code:'UNSUPPORTED'});expect(pages).toBe(1);
+ expect(calls).toEqual(['next','next','tail','last']);
+});
+
+test('APPTESTS an overflow preview keeps selection and can commit after a reverse jump',async()=>{
+ let pages=0;
+ const client={fetchFeedPage:async()=>{pages++;return {ok:true,data:{items:[item('c'),item('d')],nextCursor:'done',hasMore:false}};},resolvePlayback:async(id:string)=>({ok:true,data:item(id)})} as unknown as DouyinClient;
+ const q=new DouyinPlaybackQueue(client,{items:[item('a'),item('b')],selectedAwemeId:'b',cursor:'start',hasMore:true,limit:2});
+ expect(await q.preview('next')).toMatchObject({ok:true,data:{item:{awemeId:'c'},index:0}});
+ expect(q.snapshot().item?.awemeId).toBe('b');expect(q.snapshot().playlist.map(i=>i.awemeId)).toEqual(['a','b']);
+ q.commitPreview('a');expect(q.snapshot().item?.awemeId).toBe('a');
+ expect(await q.preview('next',2)).toMatchObject({ok:true,data:{item:{awemeId:'c'}}});
+ expect(q.snapshot().item?.awemeId).toBe('a');
+ q.commitPreview('c');expect(q.snapshot().playlist.map(i=>i.awemeId)).toEqual(['c','d']);expect(q.snapshot().item?.awemeId).toBe('c');expect(pages).toBe(1);
+});

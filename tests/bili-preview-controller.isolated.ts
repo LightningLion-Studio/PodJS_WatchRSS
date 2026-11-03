@@ -20,7 +20,7 @@ mock.module('../src/ui/douyin/index.tsx', () => ({ DouyinScreen: () => null }));
 mock.module('../src/ui/PlatformNotice.tsx', () => ({ PendingDisclosure: () => null }));
 const values = new Map<string, any>();
 mock.module('@podjs/framework/watch', () => ({ kv: { get: (key: string) => values.get(key), set: (key: string, value: any) => values.set(key, value), delete: (key: string) => values.delete(key) }, lifecycle: () => 'active' }));
-mock.module('@podjs/framework/services', () => ({ video: { captureBackdrop: async () => {}, stop: async () => {} }, videoSessions: {}, browserAuth: {}, hostOperation() {}, secureStorage: {} }));
+mock.module('@podjs/framework/services', () => ({ video: { captureBackdrop: async () => {}, stop: async () => {} }, videoSessions: {}, browserAuth: {}, hostOperation() {}, secureStorage: {}, delay() { throw Error('unexpected Bili fixture timer'); }, onNetworkChange() { throw Error('unexpected Bili fixture network subscription'); } }));
 mock.module('@pocketjs/framework/lifecycle', () => ({ onFrame() {} }));
 mock.module('../src/cache/host.ts', () => ({ managedCache: {} }));
 mock.module('../src/debug/douyin-host.ts', () => ({ douyinDebug: {} }));
@@ -28,7 +28,7 @@ let resolveRemote: () => Promise<any>, lookup: () => Promise<any>, reports = 0;
 mock.module('../src/media-services.ts', () => ({
   douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},
   biliClient: { detail:async()=>{throw Error('offline_detail');}, getSession: async () => ({ cookies: { SESSDATA: 'fixture' } }), resolvePlayback: () => resolveRemote(), reportHistory: async () => { reports++; } },
-  biliPreviewCache: { lookup: () => lookup() }, douyinClient: {}, loadLocalBiliDetail: async () => undefined,
+  biliPreviewCache: { lookup: () => lookup() }, douyinClient: {}, douyinStock: {}, loadLocalBiliDetail: async () => undefined,
 }));
 const { createMediaRouteController } = await import('../src/ui/routes/media-controller.ts');
 const { MediaRoutes } = await import('../src/ui/routes/media.tsx');

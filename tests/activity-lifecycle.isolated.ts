@@ -1,3 +1,4 @@
+import {bindPocketModules} from '@podjs/framework/testing/bun-runtime';
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
@@ -23,6 +24,11 @@ mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(cb:()=>void)=>{frames
 mock.module('@pocketjs/framework/gesture',()=>({createGesture:(opts:any)=>{gestures.add(opts);onCleanup(()=>gestures.delete(opts));return {dispose(){}};},cancelActiveTouches(){}}));
 mock.module('@pocketjs/framework/kinetics',()=>({createScroller:(opts:any)=>createScrollerWith(createSignal,opts),bindDpadScroll:()=>{}}));
 mock.module('@pocketjs/framework/input',()=>({pressNode:()=>{},hitNode:()=>undefined,dispatchAccessibilityAction(){}}));
+// Match the compiler's single PocketJS runtime through file-linked source paths.
+await bindPocketModules(import.meta.dir,Bun.resolveSync('@podjs/framework/variable-list',import.meta.dir),[
+ '@pocketjs/framework/renderer','@pocketjs/framework/components','@pocketjs/framework/lifecycle',
+ '@pocketjs/framework/gesture','@pocketjs/framework/kinetics','@pocketjs/framework/input'
+]);
 const {RouteActivityProvider}=await import('../src/ui/route-activity.tsx');
 const {ScrollEntries}=await import('../src/ui/ScrollEntries.tsx');
 const disposers:Array<()=>void>=[];

@@ -1,3 +1,4 @@
-preload = ["/home/wilf/data/PodJS/podjs-watch.wt-cloud-v2/packages/framework/testing/solid-preload.ts", "./tests/solid-preload.ts"]
+preload = ["@podjs/framework/testing/solid-preload", "./tests/solid-preload.ts"]
 [test]
-preload = ["/home/wilf/data/PodJS/podjs-watch.wt-cloud-v2/packages/framework/testing/solid-preload.ts", "./tests/solid-preload.ts"]
+root = "./tests"
+preload = ["@podjs/framework/testing/solid-preload", "./tests/solid-preload.ts"]

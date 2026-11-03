@@ -1,3 +1,4 @@
+import {bindPocketModules} from '@podjs/framework/testing/bun-runtime';
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
@@ -26,6 +27,11 @@ mock.module('@pocketjs/framework/input',()=>({pressNode:()=>{},hitNode:()=>undef
 // Restoration fixtures below use rectangular display geometry. Round fitting
 // is covered separately with a full display/viewport contract in U11.
 mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({logicalWidth:233,logicalHeight:233,shape:'rect',safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,__onHostEvent:()=>()=>{},getFontMetrics:()=>undefined,lifecycle:()=> 'active',onLifecycleChange:()=>()=>{},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:()=>undefined,set(){},delete(){}}}));
+// Match the compiler's single PocketJS runtime through file-linked source paths.
+await bindPocketModules(import.meta.dir,Bun.resolveSync('@podjs/framework/variable-list',import.meta.dir),[
+ '@pocketjs/framework/renderer','@pocketjs/framework/components','@pocketjs/framework/lifecycle',
+ '@pocketjs/framework/gesture','@pocketjs/framework/kinetics','@pocketjs/framework/input'
+]);
 const {RouteActivityProvider,restoredSignal,booleanState,stringState}=await import('../src/ui/route-activity.tsx');
 const {ScrollEntries}=await import('../src/ui/ScrollEntries.tsx');
 const {AddRssScreen}=await import('../src/ui/AddRssScreen.tsx');

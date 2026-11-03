@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { DouyinClient } from "../../src/douyin/client.ts";
 import { DouyinPlaybackQueue } from "../../src/douyin/playback-queue.ts";
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY } from "../../src/douyin/feed-store.ts";
@@ -40,8 +40,17 @@ test("expired persisted URLs are re-resolved, forced recovery never falls back t
 test("prefetch resolves adjacent URLs without changing selection or history",async()=>{
   const f=fixture(),client=f.make();await client.fetchFeedPage();f.advance();
   const queue=new DouyinPlaybackQueue(client,{items:[item("1"),item("2"),item("3")],selectedAwemeId:"1"});
-  await queue.prefetch();expect(f.calls()).toBe(3);expect(queue.snapshot().item?.awemeId).toBe("1");expect(await client.listHistory()).toEqual([]);
-  await queue.next();expect(f.calls()).toBe(3);await queue.settled();expect(await client.listHistory()).toHaveLength(1);
+  // 3c118b87 deliberately uses feed metadata and forbids implicit detail requests.
+  const resolutions=spyOn(client,'resolvePlayback');
+  await queue.prefetch();
+  expect(resolutions.mock.calls).toEqual(["2","3"].map(id=>[id,{prefetch:true,feedItem:item(id),allowDetail:false}]));
+  expect(await Promise.all(resolutions.mock.results.map(result=>result.value))).toMatchObject([
+    {ok:true,data:{awemeId:"2",playUrl:"https://video/2"}},
+    {ok:true,data:{awemeId:"3",playUrl:"https://video/3"}},
+  ]);
+  expect(f.calls()).toBe(1);expect(queue.snapshot().item?.awemeId).toBe("1");expect(await client.listHistory()).toEqual([]);
+  await queue.next();expect(queue.snapshot().item?.awemeId).toBe("2");expect(f.calls()).toBe(1);
+  await queue.settled();expect(await client.listHistory()).toHaveLength(1);resolutions.mockRestore();
 });
 
 test("failed source refresh quarantines that item and skips unresolvable successors",async()=>{

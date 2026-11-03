@@ -1,5 +1,5 @@
 import {plugin} from 'bun';
-import {bindPocketServicePump} from '@podjs/framework/testing/bun-runtime';
+import {bindPocketModules,bindPocketServicePump} from '@podjs/framework/testing/bun-runtime';
 import {mock} from 'bun:test';
 import * as solidRuntime from 'solid-js';
 for(const base of [Bun.resolveSync('@podjs/framework/watch',import.meta.dir),Bun.resolveSync('@pocketjs/framework',import.meta.dir)])mock.module(Bun.resolveSync('solid-js',base),()=>solidRuntime);
@@ -27,6 +27,10 @@ ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:nu
  events.push({t:'service.result',id,ok:true,value});
  }};
 await bindPocketServicePump(import.meta.dir,Bun.resolveSync('@podjs/framework/watch',import.meta.dir));
+await bindPocketModules(import.meta.dir,Bun.resolveSync('@podjs/framework/watch',import.meta.dir),[
+ 'solid-js','@pocketjs/framework/renderer','@pocketjs/framework/components','@pocketjs/framework/host',
+ '@pocketjs/framework/lifecycle','@pocketjs/framework/gesture','@pocketjs/framework/kinetics','@pocketjs/framework/input'
+]);
 const {render}=await import('@pocketjs/framework');
 const {setStyleResolver,rootMirror}=await import('@pocketjs/framework/renderer');
 const {activityStateHub}=await import('../src/navigation/activity-host.ts');
