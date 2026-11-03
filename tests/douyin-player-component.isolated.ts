@@ -740,3 +740,19 @@ for(const cancel of [true,false])test(`DYBACK ${cancel?'cancelled':'below-thresh
   expect(exits).toBe(0);expect(pauses).toBe(0);expect(legacyStops).toBe(stopped);expect(retires).toBe(0);expect(current.state).toBe('playing');
  }finally{Date.now=realNow;}
 });
+
+test('DYFIT sends the current mode to cached neighbours without preparing them again',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';sessionCalls.length=0;sessionStates.clear();gestures.length=0;ticks=[];
+ const saved=sessionPort.setTransform;const transforms:any[]=[];
+ sessionPort.setTransform=async(id:string,...rest:any[])=>{transforms.push({id,...rest[0]});return sessionValue(id);};
+ try{
+  const source={platform:'douyin' as const,immersive:true,title:'a',awemeId:'a',url:'https://video/a'};
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true,onNext(){},onPrevious(){},onPrepareAdjacent:async direction=>({key:direction,source:{...source,url:'https://video/'+direction,awemeId:direction}})});});
+  await flush();await flush();const before=sessionCalls.filter(c=>c.method==='prepare').length;expect(before).toBe(3);
+  for(const [icon,mode] of [['fullscreen','expanded'],['panorama','shrunk'],['fullscreen-exit','standard']]){
+   const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src===`../assets/icons/player-${icon}.svg`));expect(button).toBeDefined();button!.props.onPress();await flush();
+   const ids=sessionCalls.filter(c=>c.method==='prepare').map(c=>c.sessionId);for(const id of ids)expect(transforms.filter(t=>t.id===id).at(-1)?.scaleMode).toBe(mode);
+   expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(before);
+  }
+ }finally{sessionPort.setTransform=saved;}
+});

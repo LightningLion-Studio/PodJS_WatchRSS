@@ -1,0 +1,102 @@
+{
+  "entry": "src/main.tsx",
+  "appId": "com.lightningstudio.watchrss.podjs",
+  "versionName": "0.1.0",
+  "versionCode": 1201,
+  "name": "DYFIT local geometry fixture",
+  "bytecode": {
+    "stripSource": true
+  },
+  "android": {
+    "resources": "../../android/res",
+    "theme": "@style/Theme.WatchRSS.PodJS",
+    "cleartextTraffic": true,
+    "splash": {
+      "background": "#000000",
+      "icon": "@drawable/watchrss_splash_icon",
+      "iconBackground": "#000000",
+      "exit": {
+        "fade": true,
+        "scale": 1.12,
+        "durationMs": 80
+      }
+    },
+    "bleProvisioning": false
+  },
+  "capabilities": [
+    "input.touch",
+    "input.rotary",
+    "input.text",
+    "text.layout",
+    "text.environment",
+    "data.sqlite",
+    "data.uri",
+    "data.kv",
+    "net.http",
+    "net.download",
+    "data.files.chunks",
+    "data.secure",
+    "media.video",
+    "media.tts",
+    "media.audio",
+    "data.images",
+    "runtime.timer",
+    "crypto.basic",
+    "system.toast",
+    "input.time",
+    "device.location",
+    "text.raster",
+    "net.rfcomm",
+    "net.tcp",
+    "net.stream",
+    "net.websocket",
+    "net.discovery",
+    "display.power",
+    "system.share",
+    "host.lifecycle"
+  ],
+  "resources": {
+    "preloadFontSlots": [
+      2,
+      1,
+      19,
+      22
+    ],
+    "fontRegular": "../../assets/fonts/watch_sans.ttf",
+    "fontBold": "../../assets/fonts/reader_default_bold.ttf",
+    "fontSlots": [
+      {
+        "slot": 33,
+        "px": 12,
+        "path": "../../assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 34,
+        "px": 14,
+        "path": "../../assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 35,
+        "px": 16,
+        "path": "../../assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 36,
+        "px": 18,
+        "path": "../../assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 37,
+        "px": 21.7,
+        "path": "../../assets/fonts/reader_default_bold.ttf",
+        "bold": true,
+        "rasterAdvances": true
+      }
+    ],
+    "assets": {}
+  }
+}
