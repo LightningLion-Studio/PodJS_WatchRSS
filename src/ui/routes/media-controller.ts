@@ -479,7 +479,8 @@ export function createMediaRouteController(
       entry.playback?.immersive &&
       entry.queue.snapshot().index === 0
     ) {
-      // Reverse paging at the history boundary rebounds on the current page.
+      // At the session history boundary, use the normal route exit and player cleanup.
+      dependencies.popPage();
       return;
     }
     const previousSource=entry.playback;
@@ -566,7 +567,7 @@ export function createMediaRouteController(
     if(!entry.queue||dependencies.current()!==entry)return;
     const queue=entry.queue,result=queue.selectIntent(direction,distance);
     if(!result.ok){
-      if(direction==='previous'&&queue.snapshot().index===0)return;
+      if(direction==='previous'&&entry.playback?.immersive&&queue.snapshot().index===0){dependencies.popPage();return;}
       // Feed boundaries use the existing single coalesced page request.
       else if(direction==='next')void changeDouyinVideo(entry,direction).catch(()=>{});
       return;

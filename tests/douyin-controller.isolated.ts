@@ -1,5 +1,15 @@
 import { afterEach, expect, mock, test } from 'bun:test';
-import { createRoot, createSignal } from 'solid-js';
+import { plugin } from 'bun';
+import { createRequire } from 'node:module';
+import { createRoot, createSignal, createComponent, createMemo, createRenderEffect, mergeProps } from 'solid-js';
+const require=createRequire(import.meta.url);
+plugin({name:'dyback-media-routes',setup(builder){builder.onLoad({filter:/\/ui\/routes\/media\.tsx$/},async args=>({contents:require('@babel/core').transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
+mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
+let playerProps:any;
+mock.module('../src/ui/VideoPlayerScreen.tsx',()=>({VideoPlayerScreen:(props:any)=>{playerProps=props;return null;}}));
+mock.module('../src/ui/bili/index.tsx',()=>({BiliScreen:()=>null}));
+mock.module('../src/ui/douyin/index.tsx',()=>({DouyinScreen:()=>null}));
+mock.module('../src/ui/PlatformNotice.tsx',()=>({PendingDisclosure:()=>null}));
 import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
@@ -10,7 +20,7 @@ let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined}}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
@@ -18,6 +28,7 @@ mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss
 mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
+const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any){
@@ -32,7 +43,9 @@ function fixture(opt=false,initial?:any){
  playingSource:playing,setPlayingSource:((v:any)=>{source=typeof v==='function'?v(playing()):v;return setPlaying(v);}) as any,
  channels:()=>[],setChannels:(()=>[]) as any,setOriginalModes:(()=>({})) as any,setStack,setPage:(page,data)=>setStack(rows=>[...rows,{page,...data}]),popPage:()=>{setStack(rows=>rows.slice(0,-1));return true;},services:{} as any});
  });
- return {controller,stack,source:()=>source,error,requests:()=>requests};
+ return {controller,stack,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
+ createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget} as any);});return playerProps;
+ }};
 }
 test('stock selection uses one validated URI/frame bundle and does not repeat slow native lookups',async()=>{
  const f=fixture(),a=item('a');let readyReads=0;
@@ -386,13 +399,48 @@ test('DYINTENT selects through delayed URL registration and rejects every stale 
  pending.get('50')!('https://local/50');for(let k=0;k<30;k++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'50',previewOnly:false,url:'https://local/50'});expect(f.requests()).toBe(0);
 });
 
-test('DYLOSS reverse boundary keeps the immersive route and its selected source',async()=>{
- const f=fixture(),a=item('a'),b=item('b');
+for(const path of ['intent','legacy'] as const)test(`DYBACK ${path} reverse boundary exits once to the cover`,async()=>{
+ const f=fixture(),a=item('a'),b=item('b');await f.controller.douyinNavigate({name:'entry'});
+ const cover=f.stack().at(-1)!;
  f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
- const entry=f.stack().at(-1)!,source=f.source(),depth=f.stack().length;
- for(let n=0;n<50;n++)f.controller.selectDouyinTarget(entry,'previous',1);
- expect(f.stack()).toHaveLength(depth);expect(f.stack().at(-1)).toBe(entry);expect(f.source()).toBe(source);expect(entry.queue!.snapshot().index).toBe(0);expect(f.requests()).toBe(0);
- await f.controller.changeDouyinVideo(entry,'previous');expect(f.stack().at(-1)).toBe(entry);
+ const entry=f.stack().at(-1)!,depth=f.stack().length;
+ for(let n=0;n<50;n++){
+  if(path==='intent')f.controller.selectDouyinTarget(entry,'previous',1);
+  else await f.controller.changeDouyinVideo(entry,'previous');
+ }
+ expect(f.stack()).toHaveLength(depth-1);expect(f.stack().at(-1)).toBe(cover);expect(cover.douyinRoute?.name).toBe('entry');expect(f.requests()).toBe(0);
+});
+
+for(const path of ['intent','legacy'] as const)test(`DYBACK ${path} restored queue traverses earlier history before exiting`,async()=>{
+ const f=fixture(),items=[item('older'),item('anchor'),item('later')];await f.controller.douyinNavigate({name:'entry'});
+ const cover=f.stack().at(-1)!;
+ await client.savePlaybackQueue(items,'anchor','0',false);
+ expect(await f.controller.restoreDouyinVideo('anchor',true)).toBe(true);
+ const entry=f.stack().at(-1)!;expect(entry.queue!.snapshot().index).toBe(1);
+ const previous=async()=>{if(path==='intent'){f.controller.selectDouyinTarget(entry,'previous',1);for(let n=0;n<50;n++)await Promise.resolve();}else await f.controller.changeDouyinVideo(entry,'previous');};
+ await previous();expect(f.stack().at(-1)).toBe(entry);expect(entry.queue!.snapshot().item?.awemeId).toBe('older');expect(f.source().awemeId).toBe('older');
+ await previous();expect(f.stack().at(-1)).toBe(cover);expect(f.requests()).toBe(0);
+});
+
+test('DYBACK index zero of a restored truncated queue exits without inventing older history',async()=>{
+ const f=fixture(),a=item('restored-first');await f.controller.douyinNavigate({name:'entry'});const cover=f.stack().at(-1)!;
+ await client.savePlaybackQueue([a,item('later')],a.awemeId,'12',false);
+ expect(await f.controller.restoreDouyinVideo(a.awemeId,true)).toBe(true);
+ const entry=f.stack().at(-1)!;f.controller.selectDouyinTarget(entry,'previous',2);
+ expect(f.stack().at(-1)).toBe(cover);expect(f.requests()).toBe(0);
+});
+
+test('DYBACK two-item reverse fling clamps to the earliest item before the next gesture exits',async()=>{
+ const f=fixture(),items=[item('a'),item('b'),item('c')];await f.controller.douyinNavigate({name:'entry'});const cover=f.stack().at(-1)!;
+ f.controller.douyinPlay({item:items[1]!,playback:items[1]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'b'});
+ const entry=f.stack().at(-1)!;f.controller.selectDouyinTarget(entry,'previous',2);
+ expect(f.stack().at(-1)).toBe(entry);expect(entry.queue!.snapshot().item?.awemeId).toBe('a');
+ f.controller.selectDouyinTarget(entry,'previous',1);expect(f.stack().at(-1)).toBe(cover);
+});
+
+test('DYBACK nonimmersive single detail keeps its route at the previous boundary',async()=>{
+ const f=fixture(),a=item('detail');f.controller.douyinPlay({item:a,playback:a,playlist:[a],immersive:false,hasMore:false,detailPlayback:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;f.controller.selectDouyinTarget(entry,'previous',1);expect(f.stack().at(-1)).toBe(entry);
 });
 
 test('DYSWAP selecting a decoded neighbour publishes its authorized source synchronously',async()=>{
@@ -439,4 +487,14 @@ test('DYMEM2 a full 80-item pager publishes refilled neighbours without another 
  for(let i=0;i<30;i++)await Promise.resolve();
  expect(entry.queue!.snapshot().playlist).toHaveLength(80);expect(entry.queue!.snapshot().item?.awemeId).toBe('70');
  expect(preloadWindows.at(-1)).toHaveLength(80);expect(preloadWindows.at(-1)?.at(-1)).toBe('91');expect(requests).toBe(1);
+});
+
+
+test('DYBACK production MediaRoutes admits a cover exit only for an immersive boundary',async()=>{
+ const f=fixture(),a=item('route');await f.controller.douyinNavigate({name:'entry'});const cover=f.stack().at(-1)!;
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,item('next')],immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!,props=f.render();expect(props.canSelectTarget('previous')).toBe(true);
+ expect(props.onAdjacentKey('previous')).toBeUndefined();expect(props.onAdjacentKey('next')).toBe('next');
+ entry.playback={...entry.playback!,immersive:false};expect(props.canSelectTarget('previous')).toBe(false);
+ entry.playback={...entry.playback!,immersive:true};props.onSelectTarget('previous',1);expect(f.stack().at(-1)).toBe(cover);
 });

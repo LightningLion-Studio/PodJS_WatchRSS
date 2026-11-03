@@ -716,3 +716,27 @@ test('DYFRAME cached frame keeps the live decoder recovery deadline active',asyn
  for(const tick of [...ticks])tick();await flush();
  expect(legacyStops).toBeGreaterThan(before);expect(plays).toBe(0);
 });
+
+
+for(const sessions of [false,true])test(`DYBACK committed downward boundary exits once and stops ${sessions?'session':'legacy'} playback`,async()=>{
+ sessionsCapable=sessions;decoderLimit=3;initial='available';gestures.length=0;sessionCalls.length=0;sessionStates.clear();ticks=[];legacyStops=0;sessionReleases=0;pauses=0;plays=0;
+ let exits=0;let isActive!:()=>boolean;
+ createRoot(stop=>{stops.push(stop);const [active,setActive]=createSignal(true);isActive=active;return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/first',awemeId:'first',title:'first'},width:233,height:233,get active(){return active();},offset:0,round:true,
+  canSelectTarget:()=>true,onPrevious:()=>{},onNext:()=>{},onAdjacentKey:()=>undefined,onSelectTarget:(direction)=>{expect(direction).toBe('previous');exits++;setActive(false);},
+ });});await flush();const g=gestures[0],playing=plays;
+ for(let n=0;n<50;n++){g.onPanStart({dy:12});g.onPanMove({dy:116});g.onPanEnd({vy:500});await flush();}
+ expect(exits).toBe(1);expect(isActive()).toBe(false);
+ if(sessions)expect(sessionReleases).toBeGreaterThan(0);else expect(legacyStops).toBeGreaterThan(0);
+ ticks.splice(0).forEach(t=>t());await flush();expect(plays).toBe(playing);
+});
+
+for(const cancel of [true,false])test(`DYBACK ${cancel?'cancelled':'below-threshold'} downward drag keeps the first item playing`,async()=>{
+ sessionsCapable=false;initial='available';gestures.length=0;ticks=[];legacyStops=0;pauses=0;retires=0;let exits=0;
+ const realNow=Date.now;let now=1000;Date.now=()=>now;
+ try{
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/first',title:'first'},width:233,height:233,active:true,offset:0,round:true,canSelectTarget:()=>true,onPrevious:()=>{},onSelectTarget:()=>{exits++;}});});await flush();
+  const g=gestures[0],stopped=legacyStops;g.onPanStart({dy:12});g.onPanMove({dy:cancel?116:30});if(cancel)g.onCancel();else g.onPanEnd({vy:0});
+  for(let n=0;n<300;n+=16){now+=16;ticks.splice(0).forEach(t=>t());await flush();}
+  expect(exits).toBe(0);expect(pauses).toBe(0);expect(legacyStops).toBe(stopped);expect(retires).toBe(0);expect(current.state).toBe('playing');
+ }finally{Date.now=realNow;}
+});

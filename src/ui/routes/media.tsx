@@ -253,7 +253,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ? (direction,distance) => props.prepareDouyinAdjacent(props.entry,direction,distance)
               : undefined
           }
-          canSelectTarget={props.entry.queue?direction=>direction==='next'||props.entry.queue!.snapshot().index>0:undefined}
+          canSelectTarget={props.entry.queue?direction=>direction==='next'||props.entry.queue!.snapshot().index>0||props.entry.playback?.immersive===true:undefined}
           onSelectTarget={props.entry.queue?(direction,distance,prepared)=>props.selectDouyinTarget(props.entry,direction,distance,prepared):undefined}
           onPromoteAdjacent={
             props.entry.queue
