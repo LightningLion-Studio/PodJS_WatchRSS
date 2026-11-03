@@ -1,6 +1,7 @@
 import {kv} from '@podjs/framework/watch';
 import {mediaPrefixCache,localMediaStore,type LocalMediaItem} from '@podjs/framework/media-prefix-cache';
-import {discovery} from '@podjs/framework/services';
+import {discovery,delay} from '@podjs/framework/services';
+import {appLogger} from '../logs/app-logger.ts';
 import {videoOptEnabled} from '../media/video-opt.ts';
 import type {DouyinClient} from './client.ts';
 import type {DouyinItem} from './types.ts';
@@ -29,7 +30,20 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
  };
  const service:DouyinStockService={
   present:localMediaStore.present,hide:localMediaStore.hide,
-  async restore(){if(!config().enabled)return [];const [ids,values]=await Promise.all([client.listWatchedIds(),inventory()]);const watched=new Set(ids);return values.filter(v=>!v.watched&&!watched.has(String(v.metadata.awemeId))&&!consumed.has(String(v.metadata.awemeId))).map(v=>source(v)!.item);},
+  async restore(){
+   const report=(count:number,bytes:number,reason:'ready'|'disabled'|'native_empty'|'no_eligible'|'history_timeout'|'history_failed'|'native_failed')=>appLogger.i('DouyinStock',`entry_stock count=${count} bytes=${bytes} reason=${reason}`);
+   if(!config().enabled){report(0,0,'disabled');return [];}
+   // The manifest's watched flag is durable. The supplementary SQL/legacy
+   // history filter must not hold verified offline playback behind secure IO.
+   let reason:'ready'|'history_timeout'|'history_failed'='ready';
+   const history=client.listWatchedIds().catch(()=>{reason='history_failed';return [] as string[];});
+   let values:LocalMediaItem[];try{values=await inventory();}catch{report(0,0,'native_failed');return [];}
+   if(!values.length){report(0,0,'native_empty');return [];}
+   const timer=delay(50);
+   const ids=await Promise.race([history,timer.result.then(()=>{reason='history_timeout';return [] as string[];})]);timer.cancel();
+   const watched=new Set(ids),eligible=values.filter(v=>!v.watched&&!watched.has(String(v.metadata.awemeId))&&!consumed.has(String(v.metadata.awemeId)));
+   report(eligible.length,eligible.reduce((bytes,v)=>bytes+v.bytes,0),eligible.length?reason:'no_eligible');return eligible.map(v=>source(v)!.item);
+  },
   ready:lookup,playbackReady:lookup,lookup:async id=>(await lookup(id))?.uri,
   consume(id){consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);const key=keys.get(id);if(key)void localMediaStore.watched(key).result.catch(()=>{});},
   clear(){service.suspend();keys.clear();consumed.clear();void localMediaStore.clear().result.catch(()=>{});},

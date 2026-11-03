@@ -23,7 +23,7 @@ mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{ge
 const realServices=await import('@podjs/framework/services');
 const retryTimers:Array<{ms:number;cancelled:boolean;fire:()=>void}>=[];
 mock.module('@podjs/framework/services',()=>({...realServices,delay:(ms:number)=>{
- if(ms<1000)return {result:Promise.resolve(),cancel(){}};
+ if(ms<1000&&ms!==200)return {result:Promise.resolve(),cancel(){}};
  let fire!:()=>void;const result=new Promise<void>(r=>fire=r),entry={ms,cancelled:false,fire};retryTimers.push(entry);
  return {result,cancel(){entry.cancelled=true;}};
 }}));
@@ -40,17 +40,19 @@ async function requestReady(f:{requests:unknown[]},count=1){const end=Date.now()
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
-function mount(options:{cacheCount?:number;freshCache?:boolean;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean;stock?:boolean}={}){
+function mount(options:{cacheCount?:number;freshCache?:boolean;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean;stock?:boolean;stockGate?:Promise<any[]>;feedGate?:Promise<any>;historySeparate?:boolean}={}){
   let now=1_000_000;
   const data=new Map<string,string>();if(options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
   const items=Array.from({length:options.cacheCount??0},(_,i)=>({awemeId:String(i+1),description:'cached',playUrl:`https://old.test/${i+1}`,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}));
   const cached={items,anchorAwemeId:items[0]?.awemeId??null,cursor:options.cursor??null,hasMore:options.hasMore??false,savedAtMillis:1,resolved:options.freshCache?Object.fromEntries(items.map(item=>[item.awemeId,now])):{}};
   data.set(FEED_KEY,JSON.stringify(cached));data.set(QUEUE_KEY,JSON.stringify(cached));
   const requests:{request:HttpRequest;reply:ReturnType<typeof deferred<HttpResponse>>}[]=[],plays:any[]=[],routes:any[]=[];
-  const client=new DouyinClient({auth403:options.auth403,secureStorage:{get:async k=>{await options.secureGate;return data.get(k)??null;},set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
+  const historyStorage=options.historySeparate?{get:async(k:string)=>data.get(k)??null,set:async(k:string,v:string)=>{data.set(k,v);},remove:async(k:string)=>{data.delete(k);}}:undefined;
+  const client=new DouyinClient({historyStorage,auth403:options.auth403,secureStorage:{get:async k=>{await options.secureGate;return data.get(k)??null;},set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
+  if(options.feedGate)client.restoreFeed=()=>options.feedGate!;
   if(options.logoutBeforeMount)void client.logout();
   const [active,setActive]=createSignal(true);let dispose!:()=>void;
-  const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,restoreStock:options.stock?async()=>items:undefined,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
+  const root=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:"entry",debugAutoEnterFlow:options.autoEnter,resumeAwemeId:options.resume},width:233,height:233,client,restoreStock:options.stockGate?()=>options.stockGate!:options.stock?async()=>items:undefined,get active(){return active();},onPlay:(value:any)=>plays.push(value),onNavigate:(value:any)=>routes.push(value)} as unknown as DouyinScreenProps);});
   const entryGesture=gesture;
   return {data,client,requests,plays,routes,dispose,setActive,advance:(ms:number)=>{now+=ms;},
     text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),
@@ -345,4 +347,37 @@ test('stored image commits before prewarm and playback; cover reactivation does 
  gate.resolve({presented:true,token:1});await settle();expect(events).toEqual(['image','prewarm','play']);
  setActive(false);await settle();setActive(true);await settle();await settle();expect(events.filter(v=>v==='play')).toHaveLength(1);
  dispose();createRoot(stop=>{stops.push(stop);return ImmersiveEntry(props);});await settle();await settle();expect(events.filter(v=>v==='play')).toHaveLength(1);
+});
+
+for(const label of ['cloud worker secure lock','slow cookie read'])test(`DYWAIT ${label} cannot block an independent cached queue`,async()=>{
+ const gate=deferred<void>();const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c',historySeparate:true,secureGate:gate.promise});
+ await cachedReady(f);f.press();expect(f.plays[0]?.item.awemeId).toBe('1');expect(f.requests).toHaveLength(0);
+ gate.resolve();await settle();
+});
+test('DYWAIT stuck stock does not hide a ready cached queue',async()=>{
+ const stock=deferred<any[]>();const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c',stockGate:stock.promise});
+ await settle();retryTimers.find(t=>t.ms===200&&!t.cancelled)!.fire();await cachedReady(f);f.press();expect(f.plays[0]?.item.awemeId).toBe('1');
+ stock.resolve([]);await settle();
+});
+test('DYWAIT empty stock with a ready queue stays usable while feed restore hangs',async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c',stockGate:Promise.resolve([]),feedGate:new Promise(()=>{})});
+ await cachedReady(f);f.press();expect(f.plays[0]?.item.awemeId).toBe('1');
+});
+test('DYWAIT-B inactive cover renders no error or interactive overlay',async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.press();f.plays[0].onFailure({code:'REQUEST_FAILED'});
+ expect(f.text()).toContain('重试');f.setActive(false);await settle();expect(f.text()).toBe('');
+ f.plays[0].onFailure({code:'REQUEST_FAILED'});await settle();expect(f.text()).toBe('');
+});
+
+test('DYWAIT late verified stock remains available after the short local deadline',async()=>{
+ const stock=deferred<any[]>(),secure=deferred<void>();const f=mount({stockGate:stock.promise,secureGate:secure.promise,historySeparate:true});
+ await settle();retryTimers.find(t=>t.ms===200&&!t.cancelled)!.fire();await settle();
+ stock.resolve([{awemeId:'offline',playUrl:'file:///verified/offline.mp4',variants:[],description:'offline',authorName:'fixture',durationMs:1000}]);
+ await settle();expect(f.plays).toHaveLength(1);expect(f.plays[0].item.playUrl).toBe('file:///verified/offline.mp4');expect(f.requests).toHaveLength(0);secure.resolve();await settle();
+});
+
+
+test('DYWAIT cached offline entry still shows Login after an explicit logout',async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);await f.client.logout();await settle();
+ expect(f.text().split('\n')).toContain('登录');f.press();await settle();expect(f.routes.at(-1)).toEqual({name:'login'});expect(f.plays).toHaveLength(0);
 });

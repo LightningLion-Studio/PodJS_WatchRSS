@@ -756,3 +756,27 @@ test('DYFIT sends the current mode to cached neighbours without preparing them a
   }
  }finally{sessionPort.setTransform=saved;}
 });
+
+test('DYWAIT-B a failed hidden transform stays silent while the active video plays',async()=>{
+ sessionsCapable=true;decoderLimit=3;initial='available';sessionCalls.length=0;sessionStates.clear();
+ const saved=sessionPort.setTransform;let hiddenFailures=0;
+ sessionPort.setTransform=async(id:string)=>{const value=sessionValue(id);if(value.prewarming||value.state==='prewarmed'){hiddenFailures++;throw {code:'transport'};}return value;};
+ try{
+  let handle:any;const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'active',url:'https://fixture/active',title:'active'},width:233,height:233,active:true,offset:0,round:true,ref:h=>handle=h,onPrepareAdjacent:async()=>({key:'next',source:{platform:'douyin',immersive:true,awemeId:'next',url:'https://fixture/next',title:'next'}})});});
+  for(let i=0;i<6;i++)await flush();const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-fullscreen.svg'));expect(button).toBeDefined();button!.props.onPress();await flush();
+  expect(hiddenFailures).toBeGreaterThan(0);expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join(' ')).not.toContain('播放失败');
+  expect([...sessionStates.values()].some(v=>v.state==='playing')).toBe(true);
+ }finally{sessionPort.setTransform=saved;}
+});
+test('DYWAIT-B foreground retry recreates an unchanged source when its route callback resolves',async()=>{
+ nextError={code:'decode_error'};const f=mount('available','https://fixture/foreground',true);await flush();expect(f.text()).toContain('播放失败');
+ const before=prepares.length;f.press('重试');await flush();expect(retries).toBe(1);expect(prepares.length).toBe(before+1);expect(current.state).toBe('playing');expect(f.text()).not.toContain('播放失败');
+});
+
+test('DYWAIT foreground preparation failure stays on the player with a working retry',async()=>{
+ initial='available';prepares=[];current=state('idle');let retried=0;
+ const actual={platform:'douyin' as const,immersive:true,title:'ready',url:'https://fixture/ready'};
+ const root=createRoot(stop=>{stops.push(stop);const [source,setSource]=createSignal<any>({...actual,url:undefined,previewOnly:true,preparationError:{code:'decode_error'}});return VideoPlayerScreen({get source(){return source();},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retried++;setSource(actual);}});});
+ await flush();expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join(' ')).toContain('播放失败');expect(prepares).toHaveLength(0);
+ const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(button).toBeDefined();button!.props.onPress();await flush();expect(retried).toBe(1);expect(prepares).toHaveLength(1);expect(current.state).toBe('playing');
+});

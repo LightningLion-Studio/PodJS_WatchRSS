@@ -25,14 +25,15 @@ mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:st
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
 mock.module('@podjs/framework/watch',()=>({kv:{get:(key:string)=>key==='watchrss.video-opt.v1'&&optRecovery?{recovery:true,percent:100}:key==='watchrss.video-opt.bucket'?0:undefined,set(){}},lifecycle:()=> 'active'}));
-mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({DOUYIN_AUTH_STATUS_SCRIPT:'test-status-script',video:{captureBackdrop:async()=>{await captureOverride?.();},stop:async()=>{}},videoSessions:{},browserAuth:{},hostOperation(){},secureStorage:{},onNetworkChange:()=>()=>{},delay:(ms:number)=>{let fire!:()=>void;const result=new Promise<void>(resolve=>fire=resolve);entryTimers.push({ms,fire});return {result,cancel(){}};}}));
+const entryTimers:Array<{ms:number;fire:()=>void}>=[];
 const {captureActivityNavigation,restoreActivityNavigation}=await import('../src/navigation/activity-navigation.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
 const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
 function fixture(opt=false,initial?:any){
- optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
+ entryTimers.length=0;optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
  preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
  client=new DouyinClient({secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
@@ -497,4 +498,38 @@ test('DYBACK production MediaRoutes admits a cover exit only for an immersive bo
  expect(props.onAdjacentKey('previous')).toBeUndefined();expect(props.onAdjacentKey('next')).toBe('next');
  entry.playback={...entry.playback!,immersive:false};expect(props.canSelectTarget('previous')).toBe(false);
  entry.playback={...entry.playback!,immersive:true};props.onSelectTarget('previous',1);expect(f.stack().at(-1)).toBe(cover);
+});
+
+test('DYWAIT verified offline entry opens while playback persistence is held by storage',async()=>{
+ const f=fixture(),a=item('offline-entry'),original=client.savePlaybackQueue.bind(client);let release!:()=>void;
+ const gate=new Promise<void>(resolve=>release=resolve);client.savePlaybackQueue=async(...args)=>{await gate;return original(...args);};
+ readyOverride=async()=>({item:{...a,playUrl:'file:///verified/offline.mp4'},url:'file:///verified/offline.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true,kind:'actual_frame',path:'video-frames/offline.jpg'}}});
+ try{
+  f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});const opening=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+  for(let i=0;i<40;i++)await new Promise(r=>setTimeout(r,0));
+  expect(f.stack().at(-1)?.page).toBe('video');expect(f.source().url).toBe('file:///verified/offline.mp4');
+  release();await opening;
+ }finally{release();client.savePlaybackQueue=original;}
+});
+
+
+for(const leave of [false,true])test(`DYWAIT cached queue enters while cookie headers are blocked; leave=${leave}`,async()=>{
+ const f=fixture(),a=item('cached-cookie');let finish!:(v:Record<string,string>)=>void;
+ client.buildPlaybackHeaders=()=>new Promise(resolve=>finish=resolve);
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});const opening=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ for(let i=0;i<10;i++)await Promise.resolve();const timer=entryTimers.find(t=>t.ms===200);expect(timer).toBeDefined();timer!.fire();await opening;
+ const entry=f.stack().at(-1)!;expect(entry.page).toBe('video');expect(f.source()).toMatchObject({previewOnly:true,awemeId:a.awemeId});expect(f.source().url).toBeUndefined();
+ if(leave)await f.controller.douyinNavigate({name:'history'});finish({});for(let i=0;i<30;i++)await Promise.resolve();
+ if(leave)expect(f.stack().at(-1)?.douyinRoute?.name).toBe('history');else {expect(f.stack().at(-1)).toBe(entry);expect(f.source()).toMatchObject({awemeId:a.awemeId,previewOnly:false,url:a.playUrl});}
+});
+
+for(const leave of [false,true])test(`DYWAIT-B late cookie failure belongs only to its selected player; leave=${leave}`,async()=>{
+ const f=fixture(),a=item('late-cookie');let reject!:(error:unknown)=>void,covers=0;
+ client.buildPlaybackHeaders=()=>new Promise((_resolve,no)=>reject=no);
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true,onFailure:()=>{covers++;}});const opening=f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ for(let i=0;i<10;i++)await Promise.resolve();entryTimers.find(t=>t.ms===200)!.fire();await opening;const entry=f.stack().at(-1)!;
+ if(leave)await f.controller.douyinNavigate({name:'history'});reject({code:'network_error'});for(let i=0;i<30;i++)await Promise.resolve();
+ expect(covers).toBe(0);expect(f.error()).toBe('');
+ if(leave){expect(f.stack().at(-1)?.douyinRoute?.name).toBe('history');expect(entry.playback?.preparationError).toBeUndefined();}
+ else {expect(f.stack().at(-1)).toBe(entry);expect(f.source().preparationError).toMatchObject({code:'network_error'});}
 });

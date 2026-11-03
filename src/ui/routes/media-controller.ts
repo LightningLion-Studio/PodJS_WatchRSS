@@ -346,7 +346,7 @@ export function createMediaRouteController(
     await own.pending;
   };
   let pendingInitialPool:{origin:RouteEntry;pool:DouyinVideoSessionPool}|undefined;
-  createEffect(()=>{const entry=dependencies.current();if(pendingInitialPool&&pendingInitialPool.origin!==entry){void pendingInitialPool.pool.releaseAll().catch(()=>{});pendingInitialPool=undefined;}});
+  createEffect(()=>{const entry=dependencies.current();if(pendingInitialPool&&pendingInitialPool.origin!==entry){if(entry.initialVideoPool!==pendingInitialPool.pool)void pendingInitialPool.pool.releaseAll().catch(()=>{});pendingInitialPool=undefined;}});
   onCleanup(()=>{void pendingInitialPool?.pool.releaseAll().catch(()=>{});});
   let pendingDouyinPlayback: Promise<PlaybackSource> | undefined;
   let pendingDouyinQueue: DouyinPlaybackQueue | undefined;
@@ -401,8 +401,29 @@ export function createMediaRouteController(
       const current=()=>dependencies.current()===origin&&pendingDouyinPlayback===pending&&(request?.isCurrent?.()??true);
       let opened=false;let stage:FailureStage='source',initialPool:DouyinVideoSessionPool|undefined;
       try {
-        const source = await pending;
+        const deadline=request?.immersive?hostServices.delay(200):undefined;
+        let source:PlaybackSource|undefined;
+        try{source=await (deadline?Promise.race([pending,deadline.result.then(()=>undefined)]):pending);}finally{deadline?.cancel();}
         if(!current())return;
+        if(!source&&request){
+          // Local queue metadata can enter even while cookie IO is blocked.
+          // A preview-only source cannot open a network connection or decoder.
+          stopDouyinEntry();
+          const waiting:PlaybackSource={platform:'douyin',immersive:true,previewOnly:true,startupSeq:request.entrySeq,awemeId:request.item.awemeId,title:request.item.description,
+            releaseStartupPreview:request.releaseStartupPreview,posterUrl:request.item.coverUrl,...playbackPreferences(),backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${request.item.awemeId}`};
+          void queue?.persist().catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
+          stage='backdrop';await openVideo(waiting,{queue,memory,douyinEntrySeq:request.entrySeq,videoTarget:{kind:'douyin',awemeId:route.awemeId,immersive:true}},current);
+          const entry=dependencies.current(),selected=()=>dependencies.current()===entry&&entry.playback===waiting&&entry.queue===queue;
+          if(entry.playback===waiting){
+            opened=true;
+            void pending.then(ready=>{if(!selected())return;benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'source_ready'});entry.playback={...ready,previewOnly:false};dependencies.setPlayingSource(entry.playback);},error=>{
+              if(!selected()||douyinPlaybackFailure(error).code==='CANCELLED')return;
+              entry.playback={...waiting,preparationError:error};dependencies.setPlayingSource(entry.playback);
+            });
+          }
+          return;
+        }
+        if(!source)return;
         benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'source_ready'});
         const warm=entryInitial;
         if(warm&&warm.entry===origin&&warm.id===source.awemeId){await warm.pending;if(!current())return;}
@@ -415,10 +436,14 @@ export function createMediaRouteController(
           void initialPool.prime({key:source.awemeId??source.url,source},{...source,bounds,autoplay:false}).result.catch(()=>{});
         }
 
-        stage='persist';benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'persist_start'});await queue?.persist();benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'persist_done'});
+        stage='persist';benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'persist_start'});
+        const persisted=queue?.persist().then(()=>{benchmark.mark('startup_stage',request?.entrySeq??0,{startup_stage:'persist_done'});});
+        // Enqueue the durable write before publication, but immersive entry
+        // cannot wait behind legacy migration or another storage operation.
+        if(source.immersive)void persisted?.catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
+        else await persisted;
         if(!current())return;
         if(pendingInitialPool?.pool!==initialPool&&initialPool){initialPool=undefined;}
-        pendingInitialPool=undefined;
         stage='backdrop';await openVideo(source, { queue, memory, initialVideoPool:initialPool, douyinEntrySeq:request?.entrySeq, videoTarget: {
           kind: 'douyin', awemeId: route.awemeId, immersive: source.immersive,
           ...(source.detailPlayback ? {detailPlayback:true} : {}),
