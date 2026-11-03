@@ -4,7 +4,7 @@ import {douyinClient} from '../../media-services.ts';
 import { Show, createSignal, createEffect, onCleanup } from "solid-js";
 import type { SpeechPlaybackState } from "../../reader/speech-playback.ts";
 import { AccountStatusScreen } from "../AccountStatusScreen.tsx";
-import { manualCloudSync, applicationCloudApproval, applicationCloudActions, applicationCloudHandoff } from "../../cloud/application.ts";
+import { manualCloudSync, applicationCloudApproval, applicationCloudApprover, applicationCloudActions, applicationCloudHandoff } from "../../cloud/application.ts";
 import { cloudRemediationActions } from "../cloud-sync-view.ts";
 import { clearLocalPrivateLibrary } from "../../services.ts";
 import { readCloudAccountStatus, subscribeCloudAccountStatus } from "../../cloud/status.ts";
@@ -160,6 +160,7 @@ export function HomeRoutes(props: HomeRoutesProps) {
           available={() => readCloudAccountStatus() !== undefined}
           sync={manualCloud}
           approval={applicationCloudApproval}
+          approver={applicationCloudApprover}
           handoff={applicationCloudHandoff}
           actions={cloudActions}
           clearLocal={clearLocalPrivateLibrary}

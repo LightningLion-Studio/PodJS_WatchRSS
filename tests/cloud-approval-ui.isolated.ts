@@ -25,7 +25,7 @@ function mount(withActions=false,ownerChoice=false){
  let state:WatchApprovalState={phase:'idle',message:''},creates=0;const codes:string[]=[],listeners=new Set<()=>void>();
  const [active,setActive]=createSignal(true);
  const update=(next:WatchApprovalState)=>{state=next;for(const fn of listeners)fn();};
- const root=createRoot(stop=>{stops.push(stop);dispose=stop;return CloudSyncScreen({width:233,height:233,active,clearLocal:async()=>{},actions:withActions?{busy:false,message:'',subscribe:()=>()=>{},logout:async()=>{logoutCalls++;return true;},resolveOwner:async choice=>{actionCalls.push(choice);return true;},reregister:async()=>true}:undefined,load:async()=>({phoneLabel:'user',plan:'member',active:true,diagnosticsEnabled:false,accessTokenExpired:false,refreshTokenStatus:'valid',cloud:{phase:'waiting-approval',message:ownerChoice?'本机资料属于其他账号':'waiting',usedBytes:0,quotaBytes:1e9}}),available:()=>true,sync:{pending:false,start:async()=>{}},onPhone:()=>{},onError:()=>{},ref:()=>{},approval:{get state(){return state;},subscribe:fn=>{listeners.add(fn);return ()=>{listeners.delete(fn);};},request:async()=>{creates++;update({phase:'requesting',message:'正在请求旧设备批准…'});return true;},confirmMatches:async()=>true,cancel:async()=>true,setForeground:()=>{}}});});
+ const root=createRoot(stop=>{stops.push(stop);dispose=stop;return CloudSyncScreen({width:233,height:233,active,clearLocal:async()=>{},actions:withActions?{busy:false,message:'',subscribe:()=>()=>{},logout:async()=>{logoutCalls++;return true;},resolveOwner:async choice=>{actionCalls.push(choice);return true;},reregister:async()=>true}:undefined,load:async()=>({phoneLabel:'user',plan:'member',active:true,diagnosticsEnabled:false,accessTokenExpired:false,refreshTokenStatus:'valid',cloud:{phase:'waiting-approval',message:ownerChoice?'本机资料属于其他账号':'waiting',usedBytes:0,quotaBytes:1e9}}),available:()=>true,sync:{pending:false,start:async()=>{}},onPhone:()=>{},onError:()=>{},ref:()=>{},approval:{get state(){return state;},subscribe:(fn:()=>void)=>{listeners.add(fn);return ()=>{listeners.delete(fn);};},request:async()=>{creates++;update({phase:'requesting',message:'正在请求旧设备批准…'});return true;},confirmMatches:async()=>true,cancel:async()=>true,setForeground:()=>{}}});});
  return {root,update,setActive,codes,dispose,actionCalls,get logoutCalls(){return logoutCalls;},get creates(){return creates;}};
 }
 test('v2 approval tap starts only on explicit action and never opens a legacy code input',async()=>{
@@ -50,3 +50,19 @@ test('superseded host timer cannot disarm a different action; host failure disar
 test('disposing an armed cloud page cancels its host timer; even closing host and late completion cannot break cleanup',async()=>withoutBrowserTimers(async()=>{
  const f=mount(true);await settle();press(f,'退出账号');timers[0].throwOnCancel=true;expect(()=>f.dispose()).not.toThrow();expect(timers[0].cancelled).toBe(true);timers[0].resolve();await settle();expect(f.logoutCalls).toBe(0);const next=mount(true);await settle();expect(labels(next)).toContain('退出账号');next.dispose();
 }));
+
+test('approver: a pending request is accepted only by tap; digits show with match/mismatch; key goes out only on 一致',async()=>{
+ type S=import('../src/cloud/approver-controller').CloudApproverState;
+ let state:S={phase:'idle',requests:[],message:''};const listeners=new Set<()=>void>(),calls:string[]=[];
+ const update=(next:S)=>{state=next;for(const fn of listeners)fn();};
+ const root=createRoot(stop=>{stops.push(stop);return CloudSyncScreen({width:233,height:233,active:()=>true,load:async()=>({phoneLabel:'user',plan:'member',active:true,diagnosticsEnabled:false,accessTokenExpired:false,refreshTokenStatus:'valid',cloud:{phase:'idle',message:'',usedBytes:0,quotaBytes:1e9}}),available:()=>true,sync:{pending:false,start:async()=>{}},onPhone:()=>{},onError:()=>{},ref:()=>{},
+  approver:{get state(){return state;},subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn);};},accept:async (id:string)=>{calls.push('accept:'+id);return true;},confirm:async (match:boolean)=>{calls.push('confirm:'+match);return true;},cancel:async()=>{calls.push('cancel');return true;}}} as any);});
+ const all=()=>nodes(root).map(n=>n.props.accessibilityLabel).filter(Boolean),tap=(label:string)=>nodes(root).find(n=>n.props.accessibilityLabel===label)!.props.onPress();
+ await settle();expect(all()).not.toContain('核对授权码');
+ update({phase:'requested',message:'有新设备请求授权',requests:[{requestId:'r1',requesterLabel:'小程序 · 本机',expiresAt:Date.now()+60000}]});await settle();
+ expect(calls).toEqual([]);tap('核对授权码');expect(calls).toEqual(['accept:r1']);
+ update({...state,phase:'waiting',requestId:'r1',requesterLabel:'小程序 · 本机'});await settle();expect(all()).not.toContain('一致');tap('取消');expect(calls.at(-1)).toBe('cancel');
+ update({...state,phase:'code',code:'84279621'});await settle();expect(all()).toContain('核对码 84279621');
+ tap('不一致');expect(calls.at(-1)).toBe('confirm:false');tap('一致');expect(calls.at(-1)).toBe('confirm:true');
+ update({...state,phase:'unsupported',code:undefined,message:'服务端暂不支持手表批准授权'});await settle();expect(all()).not.toContain('核对授权码');expect(all()).not.toContain('一致');
+});

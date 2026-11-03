@@ -11,6 +11,8 @@ import {WatchAccountStore,isLibraryOwnerMismatch} from '../account/store';
 import {WatchTokenManager} from '../account/token';
 import {WatchCloudLibraryAdapter,type CloudLibraryRepository} from './library';
 import {CloudApprovalController} from './approval-controller';
+import type {CloudApproverController} from './approver-controller';
+import type {ApproverSession} from './approver';
 import {createCloudAuthorization} from './authorization';
 import {WatchCloudSyncService} from './service';
 import {createCloudHostPorts,type CloudHostRequest} from './host-ports';
@@ -19,7 +21,7 @@ import {cloudDisabled,type CloudGuard} from './guard';
 import {legacyWebArticleId} from './rss-identity';
 import {watchAppVersion} from '../core/app-version';
 /** Same coordinator and writer lease in foreground and verified background guest. */
-export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void,execution?:{begin():()=>void;remainingMillis?():number;finishRequest?:CloudHostRequest},formats:{restoreReceipt?:(id:number)=>void;restoreGuardVersion?:string;restoreStalled?:(value:boolean)=>void;writeV1?:boolean;formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
+export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void,execution?:{begin():()=>void;remainingMillis?():number;finishRequest?:CloudHostRequest},formats:{approver?:(open:(check:()=>void)=>Promise<ApproverSession|undefined>,crypto:ReturnType<typeof createCloudHostPorts>['crypto'])=>CloudApproverController;restoreReceipt?:(id:number)=>void;restoreGuardVersion?:string;restoreStalled?:(value:boolean)=>void;writeV1?:boolean;formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
  const ports=createCloudHostPorts(host,guard),transport=createCloudTransport(host,guard);
  const accounts=accountStore??new WatchAccountStore({exclusive:action=>withAccountLease(host,action),revokeCloudScope:state=>revokeAccountCloud(host,state),clearCloudScope:state=>clearAccountCloud(host,state),get:async key=>(await ports.store.get(key))??null,set:ports.store.set,remove:async key=>{await host('secure.delete',{key});}});
  const ensureOwner=async(account:import('../account/types').WatchAccountState,current:()=>Promise<void>)=>{
@@ -95,5 +97,10 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
  },guard);
  const authorization=async()=>{const session=await openSession();return session&&createCloudAuthorization({...session,crypto:session.v2Crypto});};
  const approvals=new CloudApprovalController({open:authorization,sync:()=>service.syncNow(true)});
- return {service,accounts,approvals,inspectOwner,async reregister(confirmed:boolean){if(!confirmed)throw Error('device_reregistration_requires_confirmation');const auth=await authorization();if(!auth)throw Error('account_missing');return auth.reregister(confirmed);},async resolveOwner(choice:'clear'|'merge',clearLocal?:()=>Promise<void>){const account=await accounts.read();if(!account)throw Error('account_missing');return accounts.resolveLibraryOwner(account,choice,clearLocal);}};
+ const approver=formats.approver?.(async check=>{
+  const session=await openSession(check);if(!session)return undefined;
+  const account=await accounts.read();await session.assertCurrent();if(!account)return undefined;
+  return createCloudAuthorization({...session,crypto:session.v2Crypto}).approverSession(JSON.stringify([account.backendBaseUrl.replace(/\/+$/,''),session.userId]));
+ },ports.crypto);
+ return {service,accounts,approvals,approver,inspectOwner,async reregister(confirmed:boolean){if(!confirmed)throw Error('device_reregistration_requires_confirmation');const auth=await authorization();if(!auth)throw Error('account_missing');return auth.reregister(confirmed);},async resolveOwner(choice:'clear'|'merge',clearLocal?:()=>Promise<void>){const account=await accounts.read();if(!account)throw Error('account_missing');return accounts.resolveLibraryOwner(account,choice,clearLocal);}};
 }
