@@ -4,7 +4,7 @@ import {CloudManualHandoff,manualEpochKey} from './manual-handoff';
 import {localTransferActivity} from '../sync/local-transfer';
 import {cloudAccountIdentity} from './identity';
 import {CloudForegroundExecution} from './execution';
-import {hostOperation,delay,onNetworkChange,displayPower} from '@podjs/framework/services';
+import {hostOperation,delay,onNetworkChange,displayPower,onSqlChanged} from '@podjs/framework/services';
 import {lifecycle,onLifecycleChange} from '@podjs/framework/watch';
 import {subscribeLibraryMutations} from '../core/library-mutations';
 import {initializeCloudHost} from './host';
@@ -26,7 +26,7 @@ function start(){
  const execution=new CloudForegroundExecution(lifecycle()==='active'&&!localTransferActivity.active);
  let disposed=false,initialized=false,scheduler:WatchCloudScheduler|undefined,runtime:ReturnType<typeof createCloudRuntime>|undefined,approvals:CloudApprovalController|undefined,pageActive=approvalPageActive,polling=false,cancelPoll=()=>{};
  let approver:CloudApproverController|undefined,cancelApproverPoll=()=>{};
- const cleanups:(()=>void)[]=[];
+ const cleanups:(()=>void)[]=[onSqlChanged('watchrss-library',()=>notifyLibraryChanged('remote'))];
  function armApprover(){cancelApproverPoll();cancelApproverPoll=()=>{};if(disposed||!pageActive||!approver?.active)return;const timer=delay(5000);cancelApproverPoll=()=>timer.cancel();void timer.result.then(async()=>{if(disposed||!pageActive||!approver?.active)return;await approver.poll();armApprover();}).catch(()=>{});}
  const updateExecution=()=>execution.foreground(visibility.active&&!localTransferActivity.active);
  const updateVisibility=()=>{updateExecution();approver?.setForeground(visibility.active&&!localTransferActivity.active);armApprover();scheduler?.foreground(initialized&&visibility.active);handoff?.foregroundChanged(visibility.active);};
@@ -37,7 +37,7 @@ function start(){
   if(!await initializeCloudHost()||disposed)return;
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
   const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
-  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,notifyLibraryChanged,execution,{approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value)});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
+  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>notifyLibraryChanged('remote'),execution,{approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value)});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   scheduler=new WatchCloudScheduler({sync:async(requestedManual,requestedMode)=>{const grant=await handoff?.authorized();if(requestedManual&&!grant)return false;const manual=!!grant,mode=grant?.mode??requestedMode;const complete=manual?handoff?.captureCompletion():undefined;const result=await runtime!.service.syncNow(manual,mode);await complete?.(result);if(result&&approver?.active)void approver.poll();if(grant&&runtime!.service.status.continuationReady)await handoff?.progress(grant);if(runtime!.service.status.retryable===false)await scheduler?.setUpgradeRequired(true);else if(result||runtime!.service.status.continuationReady)await scheduler?.setUpgradeRequired(false);const retry=runtime!.service.status.retryAtMillis;if(retry)scheduler?.deferUntil(retry,manual?mode:undefined);return result;},now:Date.now,delay:(ms,fn)=>{const timer=delay(ms);void timer.result.then(fn).catch(()=>{});return()=>timer.cancel();},scheduleWorker:()=>host<void>('cloud.schedule',{}),cancelWorker:()=>host<void>('cloud.cancel',{})},guard);
   handoff=new CloudManualHandoff(host,async()=>{const account=await summaryAccountStore.read();return account?cloudAccountIdentity(account):undefined;},mode=>scheduler!.manual(mode),Date.now,async()=>{const account=await summaryAccountStore.read();if(!account)return;const result=await host<{exists:boolean;value?:string}>('secure.get',{key:manualEpochKey(account)});return result.exists?result.value:undefined;});
   cleanups.push(handoff.subscribe(()=>{for(const fn of handoffListeners)try{fn();}catch{}}));
@@ -46,7 +46,7 @@ function start(){
   let identity='',accountId='',accountScope='';
   cleanups.push(connectCloudAccountStatus(()=>cloudGate.allowed&&!disposed?{...runtime!.service.status,accountId,accountScope}:undefined),runtime.service.subscribe(notifyCloudAccountStatus));
   const account=async()=>{const state=await summaryAccountStore.read(),next=cloudAccountIdentity(state);if(disposed||next===identity)return;handoff?.accountChanged();identity=next;accountId=state?.userId??'';accountScope=JSON.stringify([state?.backendBaseUrl.replace(/\/+$/,''),state?.userId]);runtime!.service.reset();approvals?.reset();approver?.reset();await runtime!.inspectOwner();if(disposed||identity!==next)return;await handoff?.restore(false);if(disposed||identity!==next)return;scheduler?.accountChanged();if(visibility.active)void handoff?.restore().catch(()=>{});};
-  cleanups.push(summaryAccountStore.subscribe(()=>{void account().catch(()=>{});}),subscribeLibraryMutations(()=>scheduler?.trigger()),services.subscribeChannel(e=>{if(e.kind!=='notes')scheduler?.trigger();}),onNetworkChange(()=>scheduler?.trigger()),onLifecycleChange(state=>{foreground();}));
+  cleanups.push(summaryAccountStore.subscribe(()=>{void account().catch(()=>{});}),subscribeLibraryMutations(()=>scheduler?.trigger()),services.subscribeChannel(e=>{if(e.kind!=='notes'&&e.origin!=='remote')scheduler?.trigger();}),onNetworkChange(()=>scheduler?.trigger()),onLifecycleChange(state=>{foreground();if(state==='active')notifyLibraryChanged('remote');}));
   let displayRevision=0;cleanups.push(displayPower.onChange(state=>{displayRevision++;visibility.display(state);updateVisibility();}));
   const revision=displayRevision,display=await displayPower.state();if(disposed)return;if(revision===displayRevision){visibility.display(display);updateVisibility();}
   await account();if(disposed)return;initialized=true;scheduler.foreground(visibility.active);if(pageActive&&approver?.active)void approver.poll();await scheduler.start(true);

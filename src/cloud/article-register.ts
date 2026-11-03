@@ -1,5 +1,6 @@
+import {createRegisterMerge,type RegisterMergePlan} from '@podjs/framework/register-merge';
 import {canonicalIntegerJson,jsonUtf8Bytes,type RawJsonNode} from '@podjs/framework/json-raw';
-import {bindCloudRaw,markCloudReadOnly,cloudCompatibility,cloudRaw,cloudHasUnknownData,featurePolicy,parseRawJson,rawJsonValue,rawJsonProperty,rawJsonText,patchRawJsonObject,schemaFields,type CloudFeatures} from './compatibility';
+import {bindVerifiedCloudRaw,cloudRawSource,bindCloudRaw,markCloudReadOnly,cloudCompatibility,cloudRaw,cloudHasUnknownData,featurePolicy,parseRawJson,rawJsonValue,rawJsonProperty,rawJsonText,patchRawJsonObject,schemaFields,type CloudFeatures} from './compatibility';
 import type {RecordDocument} from './records';
 export const ARTICLE_REGISTER_FEATURE='article-register-provenance.v1';
 export const ARTICLE_REGISTERS=['metadata','reading','independent','favorite','watchLater','deletion'] as const;
@@ -74,7 +75,7 @@ export function articleKnownCanonical(doc:RecordDocument):string {
 }
 /** All six groups are atomic. Unknowns follow the winning metadata raw frame;
  * tied known metadata with different unknown spans is a retained conflict. */
-export function mergeArticleRegisters(left:RecordDocument,right:RecordDocument):{doc:RecordDocument;conflict:boolean}{
+export function mergeArticleRegistersPortable(left:RecordDocument,right:RecordDocument):{doc:RecordDocument;conflict:boolean}{
  const a=normalizeArticleRegisters(left).value,b=normalizeArticleRegisters(right).value;if(a.articleId!==b.articleId)return fail('identity_mismatch');
  const value:Record<string,any>={articleId:a.articleId,registerSources:{}};
  for(const r of ARTICLE_REGISTERS){const w=order(a,b,r)<0?b:a;for(const k of fields(r))value[k]=w[k];value.registerSources[r]=w.registerSources[r];}value.sourceDeviceId=value.registerSources.metadata;
@@ -86,3 +87,31 @@ export function mergeArticleRegisters(left:RecordDocument,right:RecordDocument):
  return {doc:readArticleRegisters(text),conflict};
 }
 export function articlePositionStatus(v:Record<string,any>){return !v.readingPositionContentHash?'unresolved':v.readingPositionContentHash===v.contentHash?'applicable':'requires_relocation';}
+
+// The schema remains in the app; the host owns only generic validation,
+// projection and lexicographic selection. Unsupported documents use the reader.
+const mergeFields:RegisterMergePlan['fields']=[
+ {key:'articleId',kind:'string',required:true,nonblank:true},{key:'sourceDeviceId',kind:'string',required:true},{key:'registerSources',kind:'sources',required:true},
+ ...['url','title','siteName','excerpt','contentHash','readingPositionContentHash'].map(key=>({key,kind:'string' as const,required:['url','contentHash'].includes(key),nonblank:key==='url'})),
+ ...['imageUrl','rssSourceUrl','rssSourceTitle'].map(key=>({key,kind:'nullableString' as const})),
+ ...integerFields.map(key=>({key,kind:'uint' as const,required:key==='updatedAt'})),
+ ...saves.map(p=>({key:p+'SortOrder',kind:'int' as const})),
+ ...['isRead','deleted',...saves.map(p=>p+'Saved')].map(key=>({key,kind:'boolean' as const})),
+ {key:'readingProgress',kind:'unit'}
+];
+const fieldIndex=(key:string)=>mergeFields.findIndex(f=>f.key===key);
+const nativeMerge=createRegisterMerge({root:{format:'watchrss-rss-record',version:1,kind:'article',features:{incompat:[],roCompat:[ARTICLE_REGISTER_FEATURE]}},fields:mergeFields,
+ registers:ARTICLE_REGISTERS.map(name=>({name,fields:fields(name).map(fieldIndex),tuple:(name==='metadata'?['updatedAt','$source',...metadata]:name==='reading'?['readingPositionChangedAt','$source','!isRead','readingPositionBytes','readingProgress','readingPositionContentHash']:name==='deletion'?['deletedAt','$source','deleted']:[name+'ChangedAt','$source','!'+name+'Saved',name+'SortOrder']).map(key=>key==='$source'?{source:true}:{field:fieldIndex(key.replace(/^!/,'')),invert:key.startsWith('!')})})),
+ forbidden:['contentText','contentHtml','contentTextGzip','contentHtmlGzip','body','chapters'],sourceField:1,sourcesField:2,identity:0,metadata:0,nonzero:[[fieldIndex('deleted'),fieldIndex('deletedAt')]],maxBytes:65520,outputOrder:['articleId','registerSources',...ARTICLE_REGISTERS.flatMap(fields),'sourceDeviceId'].map(fieldIndex)});
+const wrapped=(doc:RecordDocument)=>JSON.stringify({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:doc.value});
+export function mergeArticleRegisters(left:RecordDocument,right:RecordDocument):{doc:RecordDocument;conflict:boolean}{
+ const merged=nativeMerge(wrapped(left),wrapped(right),cloudRawSource(left),cloudRawSource(right));
+ if(!merged)return mergeArticleRegistersPortable(left,right);
+ const v=merged.value;
+ const tie=merged.orders[0]===0,basis=merged.orders[0]<0?right:left;
+ const extensions=(doc:RecordDocument)=>{if(!cloudHasUnknownData(doc))return '';const n=cloudRaw(doc);if(!n)return '';const future=(doc.features?.roCompat??[]).filter(f=>f!==ARTICLE_REGISTER_FEATURE);if(!cloudHasUnknownData(doc))return future.length?JSON.stringify(future):'';const rawValue=rawJsonProperty(n,'value')!;return JSON.stringify(future)+patchRawJsonObject(n,{format:undefined,version:undefined,kind:undefined,features:undefined,value:patchRawJsonObject(rawValue,Object.fromEntries(Object.keys(v).map(k=>[k,undefined])))});};
+ const conflict=tie&&extensions(left)!==extensions(right),features=JSON.parse(JSON.stringify(basis.features)) as CloudFeatures;
+ const doc:RecordDocument={kind:'article',value:v,features};
+ bindVerifiedCloudRaw(doc,merged.source,merged.unknownBytes,16384,[ARTICLE_REGISTER_FEATURE]);if(!cloudCompatibility(doc).readOnly)markCloudReadOnly(doc,'article_provenance_write_disabled');
+ return {doc,conflict};
+}

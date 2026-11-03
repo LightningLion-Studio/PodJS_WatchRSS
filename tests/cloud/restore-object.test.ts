@@ -112,6 +112,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    case 'crypto.largeAesGcmDecrypt':{const aad=utf8Decode(unb64(a.aadBase64));if(aad.startsWith('watchrss-cloud-chunk-v1:'))sourceDecryptions.set(aad,(sourceDecryptions.get(aad)??0)+1);else{checkpointDecryptions++;guestNow+=1500;}return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));}
    case 'sql.query':return sql.query(a.sql).all(...a.params);
    case 'sql.execute':sql.query(a.sql).run(...a.params);return null;
+   case 'sql.notify':return {};
    case 'sql.transaction':return sql.transaction(()=>{const changes=a.statements.map((s:any)=>{sql.query(s.sql).run(...(s.params??[]));return (sql.query('SELECT changes() AS n').get() as any).n;});return a.reportChanges?changes:null;})();
    case 'http.download':{
     const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};if(a.url.startsWith('https://objects.invalid/')){const hash=a.url.split('/').at(-1),body=hash===remoteHash?remote!.encryptedManifest:remote!.newChunks.get(hash)!;expect(body).toBeDefined();files.set(a.path,body.slice());return {path:a.path,size:body.length,status:200,headers:{}};}expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');

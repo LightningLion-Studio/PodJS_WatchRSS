@@ -21,7 +21,7 @@ import {cloudDisabled,type CloudGuard} from './guard';
 import {legacyWebArticleId} from './rss-identity';
 import {watchAppVersion} from '../core/app-version';
 /** Same coordinator and writer lease in foreground and verified background guest. */
-export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void,execution?:{begin():()=>void;remainingMillis?():number;finishRequest?:CloudHostRequest},formats:{approver?:(open:(check:()=>void)=>Promise<ApproverSession|undefined>,crypto:ReturnType<typeof createCloudHostPorts>['crypto'])=>CloudApproverController;restoreReceipt?:(id:number)=>void;restoreGuardVersion?:string;restoreStalled?:(value:boolean)=>void;writeV1?:boolean;formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
+export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void|Promise<void>,execution?:{begin():()=>void;remainingMillis?():number;finishRequest?:CloudHostRequest},formats:{approver?:(open:(check:()=>void)=>Promise<ApproverSession|undefined>,crypto:ReturnType<typeof createCloudHostPorts>['crypto'])=>CloudApproverController;restoreReceipt?:(id:number)=>void;restoreGuardVersion?:string;restoreStalled?:(value:boolean)=>void;writeV1?:boolean;formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
  const ports=createCloudHostPorts(host,guard),transport=createCloudTransport(host,guard);
  const accounts=accountStore??new WatchAccountStore({exclusive:action=>withAccountLease(host,action),revokeCloudScope:state=>revokeAccountCloud(host,state),clearCloudScope:state=>clearAccountCloud(host,state),get:async key=>(await ports.store.get(key))??null,set:ports.store.set,remove:async key=>{await host('secure.delete',{key});}});
  const ensureOwner=async(account:import('../account/types').WatchAccountState,current:()=>Promise<void>)=>{
@@ -73,6 +73,7 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
     mergeCloudReading:repo.mergeCloudReading?(articles,check)=>invoke(()=>repo.mergeCloudReading!(articles,current(check))):undefined,
     mergeCloudPublicMetadata:repo.mergeCloudPublicMetadata?(articles,check,work)=>invoke(()=>repo.mergeCloudPublicMetadata!(articles,current(check),work)):undefined,
     cloudBooks:repo.cloudBooks?check=>invoke(()=>repo.cloudBooks!(current(check))):undefined,
+    cloudBookPreview:repo.cloudBookPreview?id=>invoke(()=>repo.cloudBookPreview!(id)):undefined,
     cloudBookBody:repo.cloudBookBody?id=>invoke(()=>repo.cloudBookBody!(id)):undefined,
     receiveCloudBook:repo.receiveCloudBook?(id,bytes,checkpoint)=>invoke(()=>repo.receiveCloudBook!(id,bytes,checkpoint)):undefined,
     mergeCloudBooks:repo.mergeCloudBooks?(books,reading,check)=>invoke(()=>repo.mergeCloudBooks!(books,reading,current(check))):undefined,

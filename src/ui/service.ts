@@ -76,7 +76,7 @@ export interface AppServices {
   listChannels(): Promise<Channel[]>;
   setOriginalUpdatesPaused(channelId:string,paused:boolean):void;
   requestOriginalContents(channelId:string,articleIds:string[]):Promise<void>;
-  subscribeChannel(listener:(event:{id:string;kind:"refresh"|"original"|"error"|"library"|"notes";message?:string})=>void):()=>void;
+  subscribeChannel(listener:(event:{id:string;kind:"refresh"|"original"|"error"|"library"|"notes";message?:string;origin?:"local"|"remote"})=>void):()=>void;
   getChannelPlaybackSettings(id:string):Promise<{hasPlayableMedia:boolean;continuePlaybackInBackground:boolean}>;
   setChannelBackgroundPlayback(id:string,enabled:boolean):Promise<void>;
   getChannelOriginalMode(id: string): Promise<boolean>;

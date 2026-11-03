@@ -5,7 +5,7 @@ const modes:[boolean,string|undefined][]=[];const account={userId:'account',back
 mock.module('@podjs/framework/watch',()=>({lifecycle:()=>life,onLifecycleChange:(fn:any)=>{lifecycleListeners.add(fn);return()=>lifecycleListeners.delete(fn);}}));
 mock.module('@podjs/framework/services',()=>({
  displayPower:{state:async()=>display,onChange:(fn:any)=>{displayListeners.add(fn);return()=>displayListeners.delete(fn);}},
- onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}}),
+ onSqlChanged:()=>()=>{},onNetworkChange:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}}),
  hostOperation:(method:string,args:any)=>({result:(async()=>{calls.push({method,args});if(method==='crypto.random')return {bytesBase64:'opaque_'+calls.length};if(method==='secure.get')return {exists:secure.has(args.key),value:secure.get(args.key)};if(method==='secure.set')secure.set(args.key,args.value);if(method==='secure.delete')secure.delete(args.key);if(method==='secure.compareAndSet'){if((secure.get(args.key)??null)!==args.expected)return {updated:false};if(args.value===null)secure.delete(args.key);else secure.set(args.key,args.value);return {updated:true};}if(method==='secure.update'){for(const [k,v]of Object.entries(args.expected??{}))if((secure.get(k)??null)!==v)return {updated:false};for(const [k,v]of Object.entries(args.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};}return {};})(),cancel(){}}),
 }));
 mock.module('../src/cloud/host.ts',()=>({initializeCloudHost:async()=>true}));

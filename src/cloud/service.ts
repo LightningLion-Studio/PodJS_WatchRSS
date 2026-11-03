@@ -45,7 +45,7 @@ export interface CloudSyncPorts {
  hash(bytes:Uint8Array):Promise<string>;uuid():Promise<string>;
  /** Host lease shared by foreground and background guests; release on close. */
  exclusive<T>(action:()=>Promise<T>):Promise<T>;
- now?:()=>number;onChanged?:()=>void;report?:(value:{event:'snapshot-created';writeV1:boolean;newChunks:number;reusedChunks:number;uploadBytes:number;constructMillis:number})=>void;
+ now?:()=>number;onChanged?:()=>void|Promise<void>;report?:(value:{event:'snapshot-created';writeV1:boolean;newChunks:number;reusedChunks:number;uploadBytes:number;constructMillis:number})=>void;
 }
 function headValid(h:CloudSnapshotHead){if(!/^[A-Za-z0-9-]{1,128}$/.test(h.id)||!h.sourceDeviceId||!Number.isSafeInteger(h.deviceSequence)||h.deviceSequence<1||!Number.isSafeInteger(h.keyVersion)||h.keyVersion<1||!Number.isSafeInteger(h.manifestSizeBytes)||h.manifestSizeBytes<51||h.manifestSizeBytes>8*1024*1024||!/^[0-9a-f]{64}$/.test(h.manifestSha256))throw Error('无效云端 head');}
 const sameRecord=(a:Record<string,unknown>,b:Record<string,unknown>)=>Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>a[k]===b[k]);
@@ -126,7 +126,7 @@ export class WatchCloudSyncService {
   const openRecords=async()=>{const value=await s.records(bootstrap,current);value.trackProgress?.(unit=>restore.commit('records:'+restore.cycle+':'+unit));return value;};
   // Account checks are done; say what the long part actually is.
   this.set('downloading','正在恢复收藏和阅读进度',member);
-  if(!resumed)try{records=await recordStep('open',openRecords);if(await recordStep('pull',()=>records!.pull()))this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
+  if(!resumed)try{records=await recordStep('open',openRecords);if(await recordStep('pull',()=>records!.pull()))await this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
 
   if(!restore.active)await restore.begin();
   await current();const heads=await s.client.snapshotHeads();heads.forEach(headValid);
@@ -150,7 +150,7 @@ export class WatchCloudSyncService {
    // Measured warm records cost ~120s on the watch. Do not start that lane in a
    // nearly exhausted snapshot window; never reset/extend the 300s budget.
    if((this.budget?.remainingMillis()??0)<150000){this.continuationExpected=true;this.value={...this.value,retryAtMillis:(this.ports.now??Date.now)()+1};this.set('idle','云快照检查点已保存，继续恢复阅读状态',member);return false;}
-   try{records=await recordStep('open',openRecords);if(await recordStep('pull',()=>records!.pull()))this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
+   try{records=await recordStep('open',openRecords);if(await recordStep('pull',()=>records!.pull()))await this.ports.onChanged?.();await recordStep('interactions',async()=>records!.flushInteractions?.());}catch(e){recordError(e);}
   }
   const recordScope='heads:'+await restore.token(JSON.stringify(heads.map(h=>[h.id,h.manifestSha256]).sort((a,b)=>a[0].localeCompare(b[0]))));
   if(records&&!recordFailure)try{if(await recordStep('reapply',()=>records!.reapply(recordScope,unit=>restore.commit('records-replay:'+recordScope+':'+unit))))changed=true;}catch(e){recordError(e);}
@@ -158,11 +158,11 @@ export class WatchCloudSyncService {
    if(bytes)inventory={...JSON.parse(utf8Decode(bytes)),url:plan.url};else{inventory={...await s.client.resolveRssSource(plan.url,plan.mode),url:plan.url};await restore.write(plan.payloadKey,utf8Encode(JSON.stringify(inventory)));const repair=unit+':metadata:'+await restore.token(JSON.stringify(inventory));changed=(await s.library.mergeInventory(inventory,{checkpoint:restore.apply(repair),skipReading:true})>0)||changed;await restore.commit(repair);}
    changed=(await records.reapplyInventory?.(inventory)>0)||changed;await restore.commit(unit);
   }}catch(e){recordError(e);}
-  if(changed)this.ports.onChanged?.();await current();
+  if(changed)await this.ports.onChanged?.();await current();
   await s.assertUpload?.();
   // Flush after all public refreshes and merges. Failures stay in the records lane.
   if(records&&!recordFailure)try{try{await recordStep('flush',()=>records!.flush());}catch(e){if(!String(e).includes('cloud_record_conflict'))throw e;await recordStep('pull',()=>records!.pull());await recordStep('flush',()=>records!.flush());}}catch(e){recordError(e);}
-  const version=await s.keys.currentKeyVersion(s.userId),payload=await restore.timed('export',0,()=>s.library.exportPayloads(full));await current();
+  const version=await s.keys.currentKeyVersion(s.userId),payload=await restore.timed('export',0,()=>s.library.exportPayloads(full,true));await current();
   const contentHash=await this.ports.hash(utf8Encode(`v3:${bootstrap.libraryEpoch}:${content.contentGeneration}:${version}:${payload.fingerprint}`));
   const fresh=await s.client.snapshotHeads();fresh.forEach(headValid);
   // Do not claim to have observed a head that arrived while we were merging.
@@ -199,6 +199,7 @@ export class WatchCloudSyncService {
    const key=await s.keys.accountKey(s.userId,version);if(!key)throw Error('当前账号主密钥不存在');
    let attemptedId:string|undefined;
    try{
+    await payload.materialize?.();await current();
     const saved=await s.cache.pending(s.userId);let pending:CloudManifest|undefined;
     if(saved)try{const m=await s.codec.decryptManifest(key,saved.id,saved.bytes);if(m.sourceDeviceId===s.deviceId&&m.keyVersion===version&&m.settings.libraryEpoch===bootstrap.libraryEpoch&&m.settings.snapshotContentLayout===3&&m.settings.contentGeneration===content.contentGeneration)pending=m;}catch{/* Authentication failure never licenses ciphertext reuse. */}
     if(pending)previous=pending;

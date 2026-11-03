@@ -1,0 +1,20 @@
+import {ARTICLE_REGISTER_FEATURE,ARTICLE_REGISTERS,mergeArticleRegisters,normalizeArticleRegisters,readArticleRegisters} from '../../src/cloud/article-register';
+import {parseRawJson,rawJsonProperty,canonicalIntegerJson} from '@podjs/framework/json-raw';
+const root=globalThis as any;
+root.backgroundHandler=async(ctx:any)=>{
+ const phase=async(stage:string,bytes:number,items:number,fn:()=>any)=>{await ctx.request('perf',{event:'start',stage,bytes,items});fn();await ctx.request('perf',{event:'end',stage,bytes,items});};
+ const sources=Object.fromEntries(ARTICLE_REGISTERS.map(r=>[r,'synthetic']));
+ const records=Array.from({length:512},(_,i)=>({kind:'article',features:{incompat:[],roCompat:[ARTICLE_REGISTER_FEATURE]},value:{articleId:'article-'+i,url:'https://example.invalid/'+i,contentHash:'',updatedAt:1,sourceDeviceId:'synthetic',registerSources:sources,title:'title '+i,excerpt:'x'.repeat(512)}}));
+ const next=records.map(r=>({...r,value:{...r.value,updatedAt:2,title:'updated'}})),bytes=JSON.stringify(records).length;
+ const wrap=(d:any)=>JSON.stringify({format:'watchrss-rss-record',version:1,kind:d.kind,features:d.features,value:d.value});
+ const texts=records.map(wrap),nodes=texts.map(text=>rawJsonProperty(parseRawJson(text),'value')!);
+ await phase('serialize-two',bytes,512,()=>{for(let i=0;i<512;i++){wrap(records[i]);wrap(next[i]);}});
+ await phase('raw-parse-two',bytes,512,()=>{for(const text of texts){parseRawJson(text);parseRawJson(text);}});
+ await phase('json-parse-two',bytes,512,()=>{for(const text of texts){JSON.parse(text);JSON.parse(text);}});
+ await phase('field-lookup',bytes,512,()=>{for(const n of nodes)for(let i=0;i<20;i++)rawJsonProperty(n,'updatedAt');});
+ await phase('integer-parse',bytes,512,()=>{for(let i=0;i<512*20;i++)canonicalIntegerJson(String(i));});
+ await phase('normalize-two',bytes,512,()=>{for(let i=0;i<512;i++){normalizeArticleRegisters(records[i]);normalizeArticleRegisters(next[i]);}});
+ await phase('read-one',bytes,512,()=>{for(const text of texts)readArticleRegisters(text);});
+ await phase('merge',bytes,512,()=>{for(let i=0;i<512;i++){if(mergeArticleRegisters(records[i],next[i]).doc.value.title!=='updated')throw Error('merge');}});
+ return 'success';
+};

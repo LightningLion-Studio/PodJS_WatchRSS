@@ -377,7 +377,7 @@ export const services: AppServices = {
 };
 
 
-type ChannelEvent={id:string;kind:"refresh"|"original"|"error"|"library"|"notes";message?:string};
+type ChannelEvent={id:string;kind:"refresh"|"original"|"error"|"library"|"notes";message?:string;origin?:"local"|"remote"};
 const channelListeners=new Set<(event:ChannelEvent)=>void>();
 function emitChannel(event:ChannelEvent){for(const listener of channelListeners)try{listener(event);}catch{}}
 type RefreshJob=OriginalDownload&{promise:Promise<void>};
@@ -470,7 +470,7 @@ async function cleanupRemovedContent(content:RemovedLibraryContent):Promise<void
 }
 
 /** Notify visible collections after a completed phone-library action. */
-export function notifyLibraryChanged(){emitChannel({id:"*",kind:"library"});}
+export function notifyLibraryChanged(origin:"local"|"remote"="local"){emitChannel({id:"*",kind:"library",origin});}
 
 export function notifyNotesChanged(){emitChannel({id:"*",kind:"notes"});}
 

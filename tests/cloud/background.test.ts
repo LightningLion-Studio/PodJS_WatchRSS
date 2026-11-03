@@ -114,6 +114,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'crypto.largeAesGcmDecrypt':return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));
    case 'sql.query':return sql.query(a.sql).all(...a.params);
    case 'sql.execute':sql.query(a.sql).run(...a.params);return null;
+   case 'sql.notify':return {};
    case 'sql.transaction':return sql.transaction(()=>{const changes=a.statements.map((s:any)=>{sql.query(s.sql).run(...(s.params??[]));return (sql.query('SELECT changes() AS n').get() as any).n;});return a.reportChanges?changes:null;})();
    case 'http.download':{
     const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};if(a.url.startsWith('https://objects.invalid/')){const hash=a.url.split('/').at(-1),body=hash===remoteHash?remote!.encryptedManifest:remote!.newChunks.get(hash)!;expect(body).toBeDefined();files.set(a.path,body.slice());return {path:a.path,size:body.length,status:200,headers:{}};}expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');

@@ -185,13 +185,18 @@ export class SqlBookStore {
   const usedItems=new Set(prior.filter(r=>r.existing_item!=null).map(r=>num(r.existing_item))),usedUrls=new Set(prior.map(r=>str(r.url)));
   if(index){const unit='book-stage:'+verified.binding+':'+revision+':'+index;if(!checkpoint?.has(unit))await checkpoint?.commit(unit);}
   const flushStage=async()=>{if(!staged.length)return;await checkpoint?.check();await this.db.transaction([revisionGuard(revision),...staged,{sql:'UPDATE sync_book_install SET stage_index=?,stage_offset=? WHERE binding=?',params:[index,stageOffset,verified.binding]}]);staged=[];stageBytes=0;const unit='book-stage:'+verified.binding+':'+revision+':'+index;if(!checkpoint?.has(unit))await checkpoint?.commit(unit);await checkpoint?.check();};
+  // Small immutable chapter files are covered by the next durable SQL staging
+  // page. A crash before that commit rehashes/adopts their deterministic targets;
+  // no temporary file or uncommitted row becomes progress. Large files retain
+  // piece receipts so a single chapter cannot exhaust a work window.
+  const stagedFiles=checkpoint?.scope?{scope:()=>checkpoint.scope!(),has:checkpoint.has,check:checkpoint.check,commit:async()=>{await checkpoint.check();}}:checkpoint;
   for await(const line of rangedLines((at,max)=>this.ports.files.read(info.path,at,max),info.size,stageOffset)){
    await checkpoint?.check();stageOffset=line.end;
    const c=parseBookChapter(line.text,++index),mapped=mappings.get(c.chapterIndex),candidate=present.get(c.url);const found=mapped?.item_id!=null?byItem.get(num(mapped.item_id)):undefined,old=found&&!usedItems.has(num(found.id))?found:undefined;if(old)usedItems.add(num(old.id));
    const collision=!!candidate&&!old||usedUrls.has(c.url),bookArticle=mapped?str(mapped.article_id):await bookArticleId(id,c.chapterIndex,this.ports.sha256),url=old?str(old.link):collision?`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}/chapter/${c.chapterIndex}`:c.url,wireId=old?.article_id?str(old.article_id):await this.ports.stableId(url),single=header.sourceUrl.startsWith('https://watchrss.local/import-content/txt/'),channel=old?str(old.channel_url):candidate&&!old?`https://watchrss.local/import-${header.kind==='epub'?'epub':'txt-novel'}/${id}`:single?'https://watchrss.local/import-content':header.sourceUrl;
    usedUrls.add(url);const clock=legacyDeletes.get(c.url)??0;if(clock>state.updatedAt){deletionSet.add(c.chapterIndex);maxDelete=Math.max(maxDelete,clock);}
-   const store=async(text:string|null,key:string)=>text===null||text.length<=50000?text:this.ports.text.storeText(key,text,checkpoint),chosen=c.contentHtml?.trim()?c.contentHtml:c.contentText;
-   const content=await store(chosen,`${id}-${c.chapterIndex}-content`),html=await store(c.contentHtml,`${id}-${c.chapterIndex}-html`),text=await store(c.contentText,`${id}-${c.chapterIndex}-text`);
+   const store=async(text:string|null,key:string)=>text===null||text.length<=50000?text:this.ports.text.storeText(key,text,text.length<=65536?stagedFiles:checkpoint),chosen=c.contentHtml?.trim()?c.contentHtml:c.contentText;
+   const content=await store(chosen,`${id}-${c.chapterIndex}-content`),html=c.contentHtml===chosen?content:await store(c.contentHtml,`${id}-${c.chapterIndex}-html`),text=c.contentText===chosen?content:await store(c.contentText,`${id}-${c.chapterIndex}-text`);
    staged.push({sql:'INSERT INTO sync_book_stage(book_id,package_sha256,chapter_index,book_article_id,wire_id,url,channel_url,channel_title,title,content,html,text,deleted,existing_item,chapter_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',params:[id,info.sha256,c.chapterIndex,bookArticle,wireId,url,channel,single?'导入内容':state.title,c.title,content,html,text,state.deleted||deletionSet.has(c.chapterIndex)?1:0,old?num(old.id):null,verified.chapterHashes[c.chapterIndex-1]!]});
    stageBytes+=encodeUtf8(line.text).length;if(staged.length>=32||stageBytes>=262144)await flushStage();
   }

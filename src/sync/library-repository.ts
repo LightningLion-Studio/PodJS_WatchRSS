@@ -244,6 +244,16 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
 
  cloudBooks(check?:()=>void){return this.run(async()=>{await this.migrate();await this.books?.registerLocal([],check);return {books:await this.books?.states()??[],reading:await this.books?.readingStates()??[],mappings:await this.books?.mappings()??[]};});}
  mergeCloudBooks(books:readonly BookState[],reading:readonly BookReading[],check?:()=>void){return this.run(async()=>{await this.migrate();if(!this.books)throw Error('book_storage_unavailable');await this.books.prepareCloudMerge(books,reading,check);let applied=0;for(const b of books){check?.();applied+=await this.books.merge(b);}for(let at=0;at<reading.length;at+=100){check?.();applied+=await this.books.mergeReadingBatch(reading.slice(at,at+100));}return applied;});}
+ cloudBookPreview(id:string){return this.run(async()=>{
+  await this.migrate();const file=await this.books?.package(id);if(!file)return;
+  if(file.size>256*1024*1024)throw Error('cloud_book_capacity_pending');
+  const files=this.ports.bookFiles!,actual=await files.hash(file.path);
+  if(actual.sha256!==file.sha256||actual.size!==file.size)throw Error('cloud_book_package_changed');
+  const part=await files.read(file.path,0,65536);
+  if(part.size!==file.size||!part.bytes.length)throw Error('cloud_book_package_changed');
+  const end=part.bytes.indexOf(10);if(end<0)return; // Oversized header keeps the existing full reader.
+  return {prefix:part.bytes.subarray(0,end+1),size:file.size,sha256:file.sha256};
+ });}
  cloudBookBody(id:string){return this.run(async()=>{await this.migrate();const file=await this.books?.package(id);if(!file)return;const files=this.ports.bookFiles!;if(file.size>256*1024*1024)throw Error('cloud_book_capacity_pending');const actual=await files.hash(file.path);if(actual.sha256!==file.sha256||actual.size!==file.size)throw Error('cloud_book_package_changed');const bytes=new Uint8Array(file.size);for(let at=0;at<file.size;){const part=await files.read(file.path,at,65536);if(part.size!==file.size||!part.bytes.length||at+part.bytes.length>file.size)throw Error('cloud_book_package_changed');bytes.set(part.bytes,at);at+=part.bytes.length;}return bytes;});}
  receiveCloudBook(id:string,bytes:Uint8Array,checkpoint?:FileCheckpoint){return this.run(async()=>{await this.migrate();if(!this.books||!this.ports.bookFiles)throw Error('book_storage_unavailable');const file=await this.ports.bookFiles.writeBytes(bytes,checkpoint,id);try{return await this.books.installPackage(file,id,checkpoint);}finally{if(!checkpoint?.scope)await this.ports.bookFiles.remove(file.path);}});}
  // Reading needs verified saved metadata, not a fresh legacy body manifest.

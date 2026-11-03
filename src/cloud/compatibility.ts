@@ -5,7 +5,7 @@ export interface CloudFeatures {incompat:string[];roCompat:string[]}
 export interface CloudCompatibility {opaque:boolean;readOnly:boolean;upgradeRequired:boolean;reason?:string}
 export interface CloudCompatibilityStatus {requiredFeatures?:string[];opaque:number;readOnly:number;editPending:number;upgradeRequired:boolean}
 export const cloudFormatCapabilities=Object.freeze({cloudFormatR48ReadV1:true,cloudFormatR48WriteV1:false,cloudFormatMigrationR48V1:false,cloudArticleProvenanceReadV1:true,cloudArticleProvenanceWriteV1:false});
-const frames=new WeakMap<object,{node:RawJsonNode;policy:CloudCompatibility;unknownBytes:number}>();
+const frames=new WeakMap<object,{node?:RawJsonNode;source?:string;policy:CloudCompatibility;unknownBytes:number}>();
 const NAME=/^[a-z0-9][a-z0-9.-]{0,47}$/;
 export function featurePolicy(value:unknown,known:readonly string[]=[]):CloudCompatibility {
  if(value===undefined)return {opaque:false,readOnly:false,upgradeRequired:false};
@@ -23,7 +23,15 @@ export function isolateCloudRaw(value:object,reason:string){const frame=frames.g
 /** Known-only records need no plaintext/token cache after validation. */
 export function releaseKnownCloudRaw(value:object){const frame=frames.get(value);if(frame&&frame.unknownBytes===0&&!frame.policy.readOnly)frames.delete(value);}
 export function cloudHasUnknownData(value:object){return (frames.get(value)?.unknownBytes??0)>0;}
-export function cloudRaw(value:object){return frames.get(value)?.node;}
+export function cloudRaw(value:object){const frame=frames.get(value);if(frame&&!frame.node&&frame.source!==undefined)frame.node=parseRawJson(frame.source);return frame?.node;}
+export function cloudRawSource(value:object){const frame=frames.get(value);return frame?.source??(frame?.node?rawJsonText(frame.node):undefined);}
+/** Only a codec that validates the complete output with this schema can certify
+ * a lazy frame. The immutable source still materializes exact spans on demand. */
+export function bindVerifiedCloudRaw<T extends object>(value:T,source:string,unknownBytes:number,limit:number,known:readonly string[]):T {
+ let policy=featurePolicy((value as {features?:unknown}).features,known);
+ if(unknownBytes>limit)policy={opaque:true,readOnly:true,upgradeRequired:true,reason:'unknown_size_limit'};
+ frames.set(value,{source,unknownBytes,policy});return value;
+}
 export function cloudCompatibility(value:object):CloudCompatibility{return frames.get(value)?.policy??featurePolicy((value as {features?:unknown}).features);}
 export function requireCloudWritable(value:object){if(cloudCompatibility(value).readOnly)throw Error('cloud_format_read_only');}
 export const schemaFields=(names:readonly string[]):Record<string,true>=>Object.fromEntries(names.map(k=>[k,true]));

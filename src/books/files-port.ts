@@ -1,7 +1,7 @@
 import {checkpointedFile} from '@podjs/framework/work-window';
 import {sha256Hex,hex} from '@podjs/framework/crypto';
 import {sha256Stream} from '@podjs/framework/sha256-stream';
-import {base64ToBytes,bytesToBase64,writeByteStream,writeUtf8Stream} from '@podjs/framework/bytes';
+import {decodeBase64 as base64ToBytes,encodeBase64 as bytesToBase64,writeByteStream,writeUtf8Stream} from '@podjs/framework/bytes';
 import {splitBookLines} from './package';
 import {BOOK_MAX_PACKAGE_BYTES} from './protocol';
 import type {BookFileInfo,BookFiles} from './files';
