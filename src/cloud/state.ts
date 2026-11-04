@@ -15,7 +15,7 @@ export class WatchCloudStateStore {
  private change<T>(fn:(state:State)=>T):Promise<T>{this.guard.require();const task=this.tail.then(async()=>{this.guard.require();const s=await this.read(),value=fn(s);await this.store.set(this.key,JSON.stringify(s));return value;});this.tail=task.catch(()=>{});return task;}
  async restoreJournal(shard?:number){this.guard.require();if(shard!==undefined&&(!Number.isInteger(shard)||shard<0||shard>=64))throw Error('cloud_snapshot_checkpoint_invalid');return (await this.store.get(this.key+'.restore-v1'+(shard===undefined?'':'.'+shard)))||undefined;}
  async storeRestoreJournal(value:string,shard?:number){this.guard.require();if(shard!==undefined&&(!Number.isInteger(shard)||shard<0||shard>=64))throw Error('cloud_snapshot_checkpoint_invalid');await this.store.set(this.key+'.restore-v1'+(shard===undefined?'':'.'+shard),value);}
- /** Publish a receipt and its monotonic header in one secure-store commit.
+ /** Publish a receipt and its monotonic header in one storage transaction.
   * Legacy test/storage ports retain the ordered fallback. */
  async storeRestoreJournalEntry(header:string,shard:number,value:string){
   this.guard.require();if(!Number.isInteger(shard)||shard<0||shard>=64)throw Error('cloud_snapshot_checkpoint_invalid');

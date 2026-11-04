@@ -54,6 +54,8 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
    const account=stored.watchRefreshToken?await cloudStage('token',()=>tokens.freshAccount()):stored;await assertCurrent();if(account.tokenExpiresAtMillis>0&&account.tokenExpiresAtMillis<=Date.now())throw Error('cloud_account_expired');
    const repo=await cloudStage('repository',repository);repo.setCloudDiagnostic?.(fields=>formats.recordDiagnostic?.(JSON.stringify(fields)));const deviceId=await cloudStage('repository',()=>repo.deviceId());
    const foundation=runPorts.foundation(account.userId,deviceId,runTransport,{r48WriteV1:formats.writeV1===true,formatDiagnostic:formats.formatDiagnostic??(value=>console.info('CloudFormat',value)),baseUrl:account.backendBaseUrl,accessToken:account.watchDeviceToken,appVersion:watchAppVersion,assertCurrent,refreshToken:async (force,rejectedAccessToken)=>{await assertCurrent();const next=account.watchRefreshToken?await tokens.freshAccount(force,rejectedAccessToken):await accounts.read();if(!next)throw Error('cloud_account_changed');await assertCurrent();return next.watchDeviceToken;}});
+   // Move the legacy journal before any restored work or secret-key updates.
+   await foundation.state.restoreJournal();
    const fence=async()=>{await assertCurrent();await accounts.assertLibraryOwner(account);runGuard.require();};
    const invoke=async<T>(action:()=>Promise<T>):Promise<T>=>{await fence();const value=await action();await fence();return value;};
    const current=(check?:()=>void)=>()=>{runGuard.require();check?.();};

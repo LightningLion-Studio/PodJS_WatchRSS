@@ -34,6 +34,7 @@ test('RESTOREBOOK production bundle: 27/3495 installed fixture, 739 reads stall 
    if(now>=deadline)throw Error('NATIVE_HARD_STOP');
    let result:any;switch(method){
     case 'runtime.delay':break;
+    case 'secure.keys':result={keys:[...secure.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};break;
     case 'secure.get':result={exists:secure.has(a.key),value:secure.get(a.key)};break;
     case 'secure.set':secure.set(a.key,a.value);result={};break;
     case 'secure.update':for(const[k,v]of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}result={updated:true};break;

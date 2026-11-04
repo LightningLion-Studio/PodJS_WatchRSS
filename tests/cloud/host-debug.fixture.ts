@@ -1,9 +1,11 @@
+import {stateSqlFixture} from './state-sql-fixture';
 // Isolated fake bridge: no Android/device and no network. Exercise the actual host adapter.
 import {expect} from 'bun:test';
 import {createHash,createCipheriv,createDecipheriv,hkdfSync,randomBytes} from 'node:crypto';
 import {gzipSync,gunzipSync} from 'node:zlib';
 import {__pumpPodEvents} from '@podjs/framework/watch';
 import {createHostCloudFoundation} from '../../src/cloud/host';
+const stateSql=stateSqlFixture();
 const files=new Map<string,Uint8Array>();const stored=new Map<string,string>();
 const commands:string[]=[],events:string[]=[];let next=0;
 const hash=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex');
@@ -11,7 +13,9 @@ const decode=(s:string)=>new Uint8Array(Buffer.from(s,'base64'));
 const encode=(b:Uint8Array)=>Buffer.from(b).toString('base64');
 function resultFile(bytes:Uint8Array){const path=`cloud-crypto/.pod-write-${++next}.part`;files.set(path,bytes);return {path,size:bytes.length,sha256:hash(bytes)};}
 async function execute(method:string,a:any):Promise<any>{
+
  switch(method){
+  case 'sql.query':case 'sql.execute':case 'sql.transaction':return stateSql.host(method,a);
   case 'app.buildInfo':return {debugBuild:process.env.CLOUD_RELEASE!=='1'};
   case 'file.createTemp':{const path=`${a.directory}/.pod-write-${++next}.part`;files.set(path,new Uint8Array());return {path};}
   case 'file.write':{const old=a.append?files.get(a.path)!:new Uint8Array(),part=decode(a.dataBase64);expect(part.length).toBeLessThanOrEqual(262144);expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
@@ -31,13 +35,14 @@ async function execute(method:string,a:any):Promise<any>{
   case 'crypto.aesGcmDecrypt':{const input=decode(a.ciphertextBase64),cipher=createDecipheriv('aes-256-gcm',decode(a.keyBase64),decode(a.nonceBase64));cipher.setAAD(decode(a.aadBase64));cipher.setAuthTag(input.slice(-16));return {dataBase64:encode(Buffer.concat([cipher.update(input.slice(0,-16)),cipher.final()]))};}
   case 'crypto.largeAesGcmEncrypt':{const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',decode(a.keyBase64),nonce);cipher.setAAD(decode(a.aadBase64));return {...resultFile(new Uint8Array(Buffer.concat([cipher.update(files.get(a.inputPath)!),cipher.final(),cipher.getAuthTag()]))),nonceBase64:encode(nonce)};}
   case 'crypto.largeAesGcmDecrypt':{const input=files.get(a.inputPath)!,cipher=createDecipheriv('aes-256-gcm',decode(a.keyBase64),decode(a.nonceBase64));cipher.setAAD(decode(a.aadBase64));cipher.setAuthTag(input.slice(-16));return resultFile(new Uint8Array(Buffer.concat([cipher.update(input.slice(0,-16)),cipher.final()])));}
+  case 'secure.keys':return {keys:[...stored.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};
   case 'secure.get':return {exists:stored.has(a.key),value:stored.get(a.key)};
   case 'secure.set':stored.set(a.key,a.value);return {};
   default:throw Error(`unexpected fixture method: ${method}`);
  }
 }
 (globalThis as any).pod={
- capabilities:()=> '["host.lifecycle","crypto.basic","data.secure","data.files.chunks"]',
+ capabilities:()=> '["host.lifecycle","crypto.basic","data.secure","data.files.chunks","data.sqlite"]',
  takeEvents:()=>events.shift(),
  emit:(line:string)=>{expect(line.length).toBeLessThan(1024*1024);const command=JSON.parse(line);commands.push(command.method);queueMicrotask(async()=>{
   let reply;try{reply={t:'service.result',id:command.id,ok:true,value:await execute(command.method,command.args)};}catch(error){reply={t:'service.result',id:command.id,ok:false,code:'fixture',message:String(error)};}
@@ -69,3 +74,5 @@ for(const size of [0,1,32768,32769,131072,131073]){
  const wrong=aad.slice();wrong[0]^=1;await expect(foundation!.crypto.decrypt(key,wrong,encrypted.nonce,encrypted.ciphertext)).rejects.toThrow();
  expect([...files.keys()].every(path=>!path.includes('.pod-write-'))).toBe(true);
 }
+
+stateSql.db.close();

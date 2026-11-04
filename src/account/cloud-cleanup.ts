@@ -1,3 +1,4 @@
+import {clearCloudSqlState} from '../cloud/state-sql';
 import {refreshWatchAccount} from './token';
 import {createCloudTransport} from '../cloud/transport';
 import {WatchCloudClient} from '../cloud/client';
@@ -11,7 +12,8 @@ export async function clearAccountCloud(host:CloudHostRequest,account:Pick<Watch
  const base=account.backendBaseUrl.replace(/\/+$/,''),scope=JSON.stringify([base,account.userId]);
  const hash=async(value:string)=>Array.from(base64ToBytes((await host<{digestBase64:string}>('crypto.hash',{dataBase64:bytesToBase64(utf8Encode(value))})).digestBase64),v=>v.toString(16).padStart(2,'0')).join('');
  const scoped=await hash(scope),legacy=await hash(account.userId);
- await host('secure.update',{values:{},removePrefixes:[`watchrss.cloud.epoch.${scope}`,`watchrss.cloud.keys.${scoped}.`,`watchrss.cloud.keys.${legacy}`,`watchrss.cloud.state.${scope.slice(0,-1)},`,`watchrss.cloud.state.${JSON.stringify([account.userId]).slice(0,-1)},`]});
+ await clearCloudSqlState(host,[`watchrss.cloud.epoch.${scope}`,`watchrss.cloud.content-generation.${scope}`,`watchrss.cloud.state.${scope.slice(0,-1)},`,`watchrss.cloud.state.${JSON.stringify([account.userId]).slice(0,-1)},`]);
+ await host('secure.update',{values:{},removePrefixes:[`watchrss.cloud.epoch.${scope}`,`watchrss.cloud.content-generation.${scope}`,`watchrss.cloud.keys.${scoped}.`,`watchrss.cloud.keys.${legacy}`,`watchrss.cloud.state.${scope.slice(0,-1)},`,`watchrss.cloud.state.${JSON.stringify([account.userId]).slice(0,-1)},`]});
  const clear=async(path:string)=>{const {entries}=await host<{entries:{path:string;directory:boolean}[]}>('file.list',{path});for(const e of entries){if(!e.path.startsWith(path+'/'))throw Error('invalid_cleanup_path');if(e.directory)await clear(e.path);else await host('file.delete',{path:e.path});}};
  await clear(`watch-cloud-cache/${scoped.slice(0,32)}`);await clear(`watch-cloud-cache/${legacy.slice(0,32)}`);
 }

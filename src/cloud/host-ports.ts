@@ -1,3 +1,4 @@
+import {createCloudStateStore} from './state-sql';
 import {secureCallsite} from './secure-callsite';
 import {restoreRequestMetadata,type RestoreCallsite} from './restore-callsite';
 import {sha256Stream} from '@podjs/framework/sha256-stream';
@@ -29,7 +30,17 @@ export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuar
   commit:(temporaryPath:string,path:string,expectedSize:number,expectedSha256:string)=>request('file.commit',{path:temporaryPath,target:path,expectedSize,expectedSha256}),
  };
  const rawWrite=(path:string,dataBase64:string,offset:number,op?:number)=>invoke<{size:number}>('file.write',{path,dataBase64,append:true,expectedOffset:offset},op);
- const secureStorage={get:async(key:string)=>{const r=await request<{exists:boolean;value?:string}>('secure.get',{key});return r.exists?r.value:undefined;},set:(key:string,value:string)=>request('secure.set',{key,value})};
+ const secureStorage={get:async(key:string)=>{
+  // The runtime rejects individual events above 1 MiB. Legacy journals must be
+  // read in bounded UTF-16 pages, fenced by the immutable host snapshot version.
+  for(let retry=0;retry<3;retry++){let offset=0,total:number|undefined,version:number|undefined;const parts:string[]=[];for(;;){
+   const r=await request<{exists:boolean;value?:string;totalChars?:number;offset?:number;version?:number}>('secure.get',{key,offset,maxChars:16384});
+   if(!r.exists){if(!offset)return undefined;break;}if(r.totalChars===undefined)return r.value;
+   if(!Number.isSafeInteger(r.totalChars)||r.totalChars<0||r.totalChars>2*1024*1024||r.offset!==offset||typeof r.value!=='string')throw Error('secure_store_corrupt');
+   if(total!==undefined&&(total!==r.totalChars||version!==r.version))break;total=r.totalChars;version=r.version;
+   parts.push(r.value);offset+=r.value.length;if(offset===total)return parts.join('');if(!r.value.length||offset>total)throw Error('secure_store_corrupt');
+  }}throw Error('secure_read_failed');
+ },set:(key:string,value:string)=>request('secure.set',{key,value})};
  const b64=bytesToBase64,bytes=base64ToBytes;
 async function operation<T>(method:string,args:Record<string,unknown>):Promise<T>{guard.require();return hostOperation<T>(method,args).result;}
 const data=async(method:string,args:Record<string,unknown>)=>bytes((await operation<{dataBase64:string}>(method,args)).dataBase64);
@@ -61,10 +72,11 @@ async function transcode(input:Uint8Array,method:string,maximum:number){
  },method==='file.gunzip'?7:6);
 }
 const crypto:SnapshotCrypto={
+ localPlaintext:true,
  atCallsite:next=>createCloudHostPorts(rawRequest,guard,next).crypto,
- gunzipSealedParts:(key,parts,length,outputPrefix,aadPrefix,maxOutputBytes,offset,receipt,allowShortOutput)=>sealedGzip(<T>(method:string,args:Record<string,unknown>)=>method==='crypto.closeSealedGzip'?request<T>(method,args):operation<T>(method,args),{keyBase64:b64(key),parts,length,outputPrefix,aadPrefix,maxOutputBytes,...(allowShortOutput?{allowShortOutput:true}:{})},offset,receipt),
+ gunzipSealedParts:(key,parts,length,outputPrefix,aadPrefix,maxOutputBytes,offset,receipt,allowShortOutput)=>sealedGzip(<T>(method:string,args:Record<string,unknown>)=>method==='crypto.closeSealedGzip'?request<T>(method,args):operation<T>(method,args),{plaintext:true,keyBase64:b64(key),parts,length,outputPrefix,aadPrefix,maxOutputBytes,...(allowShortOutput?{allowShortOutput:true}:{})},offset,receipt),
  openSealedParts:async(key,parts,length)=>{
-  const result=await operation<{path:string;size:number;sha256:string}>('crypto.openSealedParts',{keyBase64:b64(key),parts,length});
+  const result=await operation<{path:string;size:number;sha256:string}>('crypto.openSealedParts',{plaintext:true,keyBase64:b64(key),parts,length});
   if(!/^cloud-crypto\/\.pod-write-[A-Za-z0-9_-]+\.part$/.test(result.path))throw Error('cloud_snapshot_projection_missing');
   try{const output=await files.read(result.path);if(!output||output.length!==length||result.size!==length||await outputDigest(output,result.path)!==result.sha256)throw Error('cloud_snapshot_projection_missing');return output;}
   finally{await fileChunks.remove(result.path).catch(()=>{});}
@@ -90,7 +102,8 @@ async function cleanupCrypto(){const {entries}=await operation<{entries:{path:st
 const genericCrypto=createCrypto(operation);
 const v2Crypto={sha256:crypto.sha256,random:crypto.random,hmac:async(k:Uint8Array,b:Uint8Array)=>{guard.require();return hex(hmacSha256Bytes(k,b));},verify:genericCrypto.verifyP256};
 files.removeTree=removeTree;
-const store:CloudStringStore={async compareAndSet(key,expected,value){guard.require();const r=await request<{updated:boolean}>('secure.compareAndSet',{key,expected:expected??null,value:value??null});if(typeof r.updated!=='boolean')throw Error('cloud_manual_compare_unavailable');return r.updated;},async get(key){guard.require();return secureStorage.get(key);},async set(key,value){guard.require();await secureStorage.set(key,value);},async update(values,removePrefixes){guard.require();await request('secure.update',{values,removePrefixes});}};
+const secureStore:CloudStringStore={async keys(prefixes){guard.require();const keys:string[]=[];let after='';for(;;){const page=await request<{keys:string[];hasMore:boolean}>('secure.keys',{prefixes,after});if(!Array.isArray(page.keys)||page.keys.some(k=>typeof k!=='string'||k<=after))throw Error('cloud_snapshot_checkpoint_invalid');keys.push(...page.keys);if(!page.hasMore)return keys;if(!page.keys.length)throw Error('cloud_snapshot_checkpoint_invalid');after=page.keys.at(-1)!;}},async compareAndSet(key,expected,value){guard.require();const r=await request<{updated:boolean}>('secure.compareAndSet',{key,expected:expected??null,value:value??null});if(typeof r.updated!=='boolean')throw Error('cloud_manual_compare_unavailable');return r.updated;},async get(key){guard.require();return secureStorage.get(key);},async set(key,value){guard.require();await secureStorage.set(key,value);},async update(values,removePrefixes){guard.require();await request('secure.update',{values,removePrefixes});}};
+const store=createCloudStateStore(request,secureStore);
 /** No registration, timer, worker or network starts during module import/factory creation.
  * The coordinator supplies the bounded HTTP transport and owns registration.
  * Callers supply a gate initialized from app.buildInfo; no import-time I/O. */

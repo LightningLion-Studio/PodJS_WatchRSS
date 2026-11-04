@@ -207,3 +207,11 @@ test('failed hash cannot certify a projection using an old ACK; repair must auth
  await f.records().pull();expect(JSON.parse(stored).projections).toEqual([]);expect(f.applied).toHaveLength(0);expect(JSON.parse(stored).rows[row.recordId]).toEqual(row);
  f.ports.crypto=original;await f.records().pull();expect(f.applied).toHaveLength(1);expect(JSON.parse(stored).projections).toHaveLength(1);expect(JSON.parse(stored).records[row.recordId].hash).not.toBe('f'.repeat(64));
 });
+
+test('production plaintext projections migrate verified legacy entries once and perform no local AES on subsequent replay',async()=>{
+ const f=env();await f.put(cachedRss(1));await f.records().pull();expect(f.state().projections[0].plaintext).toBeUndefined();let originals=0,local=0,encryption=0;const previous=f.ports.crypto;
+ f.ports.crypto={...previous,localPlaintext:true,encrypt:async(...args)=>{encryption++;return previous.encrypt(...args);},decrypt:async(k,a,n,b)=>{if(new TextDecoder().decode(a).startsWith('watchrss-cloud-record-v1:'))originals++;else local++;return previous.decrypt(k,a,n,b);}};
+ f.ports.hydrate=async()=>{};expect(await f.records().pull()).toBe(0);expect(originals).toBe(0);expect(local).toBe(1);expect(f.state().projections[0].plaintext).toContain('cache-fixture');expect(f.state().projections[0].ciphertextBase64).toBe('');
+ local=0;expect(await f.records().pull()).toBe(0);expect(local).toBe(0);expect(originals).toBe(0);expect(encryption).toBe(0);
+ await f.put(cachedRss(2));await f.records().pull();expect(f.state().projections.every((g:any)=>typeof g.plaintext==='string')).toBe(true);expect(encryption).toBe(0);
+});

@@ -4,8 +4,8 @@ import {JsonDeltaJournal} from '@podjs/framework/json-delta-journal';
 import {utf8Encode,utf8Decode} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
 export interface CloudBlobStore {read(path:string):Promise<Uint8Array|undefined>;writeAtomic(path:string,bytes:Uint8Array):Promise<void>;removeTree?(path:string):Promise<void>;append?(path:string,bytes:Uint8Array,offset:number):Promise<void>;hash?(path:string):Promise<string>;}
-/** Encrypted bytes only. Chunk reads verify hashes; the coordinator must verify
- * cached manifests against their remote head before passing them to the AEAD codec. */
+/** Transport blobs retain the cloud wire format in ordinary private files.
+ * Local bookkeeping uses plaintext; consumers verify transport descriptors. */
 export class WatchCloudCache {
  constructor(private files:CloudBlobStore,private hash:(b:Uint8Array)=>Promise<string>,private guard:CloudGuard=cloudDisabled,private backendBaseUrl='',private diagnostic?:RepositoryDiagnostic){}
  private journals=new Map<string,JsonDeltaJournal>();

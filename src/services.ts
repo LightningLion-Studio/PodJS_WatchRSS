@@ -1,3 +1,4 @@
+import {clearCloudSqlState} from './cloud/state-sql';
 import {createNoteAssetWriter} from './notes/cloud-assets';
 import {readReaderBody} from './reader/body-state.ts';
 import {querySyncPages} from './sync/sql-pages.ts';
@@ -515,7 +516,7 @@ function runLibraryClear(privateData:boolean,options:LibraryClearOptions):Promis
 async function finishLibraryClear(privateData:boolean,check:()=>void){
  for(const bucket of ['images','bili-preview','douyin-preload'] as const){check();await managedCache.clearBucket(bucket);}
  check();
- if(privateData)await hostOperation('secure.update',{values:{},removePrefixes:['watchrss.cloud.state.']}).result;
+ if(privateData){await clearCloudSqlState(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,['watchrss.cloud.state.']);check();await hostOperation('secure.update',{values:{},removePrefixes:['watchrss.cloud.state.']}).result;}
  const prefixes=['watchrss.reader.progress.','douyin.feed.','douyin.recent-window.','douyin.playback-','douyin.history.','douyin.watched.',...(privateData?['douyin.saved.','bili.history.']:[])];
  check();kv.batch(()=>{for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))kv.delete(key);});
  for(const key of kv.keys())if(prefixes.some(prefix=>key.startsWith(prefix)))throw Error('private_library_kv_remains');

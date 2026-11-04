@@ -15,6 +15,7 @@ import {startupDestination} from '../onboarding/state';
 import {createCloudRuntime} from './runtime';
 import {createBackgroundLibrary} from './background-library';
 import type {CloudHostRequest} from './host-ports';
+import {cloudStatePort} from './state-sql';
 import {SnapshotYieldBudget,SNAPSHOT_GUARD_VERSION} from './snapshot-deferral';
 const yieldHosts=new WeakMap<BackgroundContext,CloudHostRequest>();
 /** Retry metadata is emitted only after the coordinator certified a new durable
@@ -52,7 +53,7 @@ export default defineBackgroundHandler(async context=>{
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  // The host deadline is absolute Unix ms. Leave time for the normal
  // checkpoint/release path before the native guest's hard interrupt.
- const execution={finishRequest:(async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{if(!['secure.get','secure.compareAndSet'].includes(method))throw Error('invalid_window_finalizer');return window.cleanup(()=>request<T>(method,args));}) as CloudHostRequest,remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
+ const execution={finishRequest:(async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{if(!['secure.get','secure.compareAndSet','sql.query','sql.execute','sql.transaction'].includes(method))throw Error('invalid_window_finalizer');return window.cleanup(()=>request<T>(method,args));}) as CloudHostRequest,remainingMillis:()=>window.remainingMillis(),begin(){const check=()=>{if(window.remainingMillis()<=0||Date.now()>=context.deadlineMs-10000)throw new CloudSyncDeadlineError();};check();return check;}};
  const runtime=createCloudRuntime(host,()=>library??=createBackgroundLibrary(host,async key=>{const r=await context.request!('kv.get',{key}) as {exists:boolean;value?:unknown};return r.exists?r.value:undefined;},guard),guard,undefined,async()=>{try{await host('sql.notify',{topic:'watchrss-library'});}catch{/* Data is committed. Foreground resume refreshes if the worker deadline prevents notification. */}},execution,{restoreReceipt:id=>callsites.receipt(id),restoreGuardVersion:SNAPSHOT_GUARD_VERSION+':'+buildIdentity,restoreStalled:value=>yieldBudget.stalled(value),recordDiagnostic:diagnostic.report,formatDiagnostic:diagnostic.report});
  const account=await runtime.accounts.read();if(!account)return 'success';
  const payload=context.payload as {manual?:boolean;token?:string}|null;
@@ -62,7 +63,8 @@ export default defineBackgroundHandler(async context=>{
  {const stored=await host<{exists:boolean;value?:string}>('secure.get',{key:MANUAL_INTENT_KEY});intent=readManualIntent(stored.value);
   if(payload?.manual&&(!intent||intent.token!==payload.token))return 'success';
   if(intent){
-  const epoch=await host<{exists:boolean;value?:string}>('secure.get',{key:manualEpochKey(account)});
+  if(intent.scope!==cloudAccountIdentity(account)){await completeManualIntent(host,intent);return 'success';}
+  const epoch={value:await cloudStatePort(host).get(manualEpochKey(account))};
   if(intent.scope!==cloudAccountIdentity(account)||intent.version===2&&intent.epoch!==null&&intent.epoch!==epoch.value||intent.version===1&&!epoch.value){await completeManualIntent(host,intent);return 'success';}
   if(intent.version===1||intent.epoch===null&&epoch.value){intent={...intent,version:2,epoch:epoch.value??null};if(!await compareManualIntent(host,stored.value,JSON.stringify(intent)))return 'success';}
   }

@@ -36,6 +36,7 @@ export interface RestoreCodecCheckpoint {
  now?():number;
 }
 export interface SnapshotCrypto {
+ localPlaintext?:boolean;
  /** Host limit for operations that must return one contiguous decoded buffer. */
  contiguousOutputLimit?:number;
  atCallsite?(site:RestoreCallsite):SnapshotCrypto;
@@ -194,10 +195,11 @@ export class WatchCloudCodec {
  private projectionKeys=new WeakMap<Uint8Array,Uint8Array>();
  private async projectionKey(key:Uint8Array){let derived=this.projectionKeys.get(key);if(!derived){derived=await this.crypto.hkdf(key,utf8Encode('watchrss-local-restore-v1'),utf8Encode('watchrss/cloud/local-restore-projection/v1'));this.projectionKeys.set(key,derived);}return derived;}
  clearRestoreProjectionKey(key:Uint8Array){this.projectionKeys.get(key)?.fill(0);this.projectionKeys.delete(key);}
- /** Local-only projection. One dedicated key per restore session; every file's
-  * AAD binds account/backend/epoch/generation/head/object/position/semantics. */
- async sealRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){const sealed=await this.crypto.encrypt(await this.projectionKey(key),utf8Encode(scope),bytes);return join([sealed.nonce,sealed.ciphertext]);}
- async openRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){check(bytes.length>=28);return this.crypto.decrypt(await this.projectionKey(key),utf8Encode(scope),bytes.subarray(0,12),bytes.subarray(12));}
+ /** Production local projections are plaintext with a scope-bound checksum.
+  * The legacy AEAD reader preserves old projections during migration. */
+ async sealRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){if(this.crypto.localPlaintext){const digest=await this.crypto.sha256(join([utf8Encode(scope),new Uint8Array([0]),bytes]));return join([utf8Encode('PLN4'),new Uint8Array(digest.slice(0,48).match(/../g)!.map(v=>parseInt(v,16))),bytes]);}const sealed=await this.crypto.encrypt(await this.projectionKey(key),utf8Encode(scope),bytes);return join([sealed.nonce,sealed.ciphertext]);}
+ async openRestoreProjection(key:Uint8Array,scope:string,bytes:Uint8Array){check(bytes.length>=28);if(this.crypto.localPlaintext&&utf8Decode(bytes.subarray(0,4))==='PLN4'){const value=bytes.subarray(28),expected=await this.sealRestoreProjection(key,scope,value);check(await equalBytesAsync(expected,bytes,{yield:this.crypto.yieldTurn}));return value;}return this.crypto.decrypt(await this.projectionKey(key),utf8Encode(scope),bytes.subarray(0,12),bytes.subarray(12));}
+ get plaintextRestore(){return this.crypto.localPlaintext===true;}
  get batchedRestoreParts(){return !!this.crypto.openSealedParts;}
  async openRestoreParts(key:Uint8Array,parts:{path:string;scope:string;bytes:number}[],length:number){if(!this.crypto.openSealedParts)throw Error('cloud_snapshot_projection_missing');return this.crypto.openSealedParts(await this.projectionKey(key),parts.map(p=>({path:p.path,aadBase64:bytesToBase64(utf8Encode(p.scope)),bytes:p.bytes})),length);}
  async restore(key:Uint8Array,manifest:CloudManifest,read:(hash:string)=>Promise<Uint8Array>,selected:readonly CloudObject[]=manifest.objects,checkpoint?:RestoreCodecCheckpoint):Promise<Map<string,Uint8Array>>{

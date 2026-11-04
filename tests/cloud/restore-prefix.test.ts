@@ -1,3 +1,5 @@
+import {plainPart,openLocalPart} from './plain-parts-fixture';
+import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {test,expect} from 'bun:test';
 import {mkdtempSync,readFileSync,rmSync,realpathSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -14,6 +16,7 @@ const {buildBackground}=await import(fw+'/packages/cli/src/background-build.ts')
 const b64=(b:Uint8Array)=>Buffer.from(b).toString('base64'),unb64=(s:string)=>new Uint8Array(Buffer.from(s,'base64'));
 for(const encoding of ['identity','gzip-chunks-v1'] as const)test('RESTORE1197 '+encoding+': completed small-chunk prefix is reused across fresh production guests',async()=>{
  const baseline=process.env.RESTORE1197_BASELINE==='1',output=mkdtempSync(join(tmpdir(),'restore-prefix-'));
+ const stateSql=stateSqlFixture();
  try{
   const appRoot=process.env.RESTORE1197_APP_ROOT??resolve(import.meta.dir,'../..'),artifact=(await buildBackground({path:resolve(appRoot,'tests/cloud/fixtures/restore-prefix-entry.ts')},output)).path!,source=readFileSync(join(output,artifact.file),'utf8');
   const files=new Map<string,Uint8Array>(),secure=new Map<string,string>(),writes=new Map<string,number>(),proof:any[]=[];
@@ -30,8 +33,10 @@ for(const encoding of ['identity','gzip-chunks-v1'] as const)test('RESTORE1197 '
    if(!seeding){trace.observe(a);methods[method]=(methods[method]??0)+1;now+=method==='crypto.aesGcmDecrypt'?500:method==='file.read'?80:method==='file.stat'?10:method==='file.write'?800:method==='file.commit'?1000:method==='crypto.openSealedParts'?1000:5;}
    if(now>=deadline)throw Error('NATIVE_HARD_STOP');
    const execute=async():Promise<any>=>{switch(method){
+   case 'sql.query':case 'sql.execute':case 'sql.transaction':return stateSql.host(method,a);
     case 'runtime.delay':return null;
-    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
+    case 'secure.keys':return {keys:[...secure.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};
+   case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
     case 'secure.set':secure.set(a.key,a.value);return {};
     case 'secure.compareAndSet':if((secure.get(a.key)??null)!==a.expected)return {updated:false};secure.set(a.key,a.value);return {updated:true};
     case 'secure.update':for(const[k,v]of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};
@@ -48,8 +53,8 @@ for(const encoding of ['identity','gzip-chunks-v1'] as const)test('RESTORE1197 '
     case 'crypto.aesGcmDecrypt':if(Buffer.from(a.aadBase64,'base64').toString().startsWith('watchrss-cloud-chunk-v1:')){sourceDecrypts++;now+=9000;}return {dataBase64:b64(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),unb64(a.ciphertextBase64)))};
     case 'crypto.largeAesGcmDecrypt':{if(Buffer.from(a.aadBase64,'base64').toString().startsWith('watchrss-cloud-chunk-v1:')){sourceDecrypts++;now+=9000;}return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));}
     case 'crypto.closeSealedGzip':return {};
-    case 'crypto.gunzipSealedParts':{const packed:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;packed.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}const out=new Uint8Array(gunzipSync(Buffer.concat(packed)));expect(out.length).toBeLessThanOrEqual(a.maxOutputBytes);const part=out.subarray(a.offset,a.offset+262144),sealed=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),part);files.set(a.outputPrefix+a.offset+'.bin',new Uint8Array(Buffer.concat([sealed.nonce,sealed.ciphertext])));const done=a.offset+part.length===out.length;return {offset:a.offset,bytes:part.length,done,...(done?{sha256:await crypto.sha256(out)}:{})};}
-    case 'crypto.openSealedParts':{const parts:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const p=a.parts[i],b=files.get(p.path);if(!b||b.length!==p.bytes+28)throw Error('sealed_part_invalid_'+i);try{parts.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}catch{throw Error('sealed_part_invalid_'+i);}}return resultFile(new Uint8Array(Buffer.concat(parts)));}
+    case 'crypto.gunzipSealedParts':{const packed:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;packed.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}const out=new Uint8Array(gunzipSync(Buffer.concat(packed)));expect(out.length).toBeLessThanOrEqual(a.maxOutputBytes);const part=out.subarray(a.offset,a.offset+262144),sealed=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),part);files.set(a.outputPrefix+a.offset+'.bin',a.plaintext?plainPart(utf8Encode(a.aadPrefix+a.offset),part):new Uint8Array(Buffer.concat([sealed.nonce,sealed.ciphertext])));const done=a.offset+part.length===out.length;return {offset:a.offset,bytes:part.length,done,...(done?{sha256:await crypto.sha256(out)}:{})};}
+    case 'crypto.openSealedParts':{const parts:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const p=a.parts[i],b=files.get(p.path);if(!b||b.length!==p.bytes+28)throw Error('sealed_part_invalid_'+i);try{parts.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}catch{throw Error('sealed_part_invalid_'+i);}}return resultFile(new Uint8Array(Buffer.concat(parts)));}
     default:throw Error('unsupported fixture method '+method);
    }};return await execute() as T;
   };
@@ -69,5 +74,5 @@ for(const encoding of ['identity','gzip-chunks-v1'] as const)test('RESTORE1197 '
   if(baseline){expect(done).toBe(false);expect(proof.every(p=>p.receipts===0&&p.sourceDecrypts===0&&(p.methods['file.commit']??0)===0)).toBe(true);expect(new Set(proof.map(p=>p.newWork))).toEqual(new Set([0]));for(const p of proof){const n=p.counts.find(([id]:number[])=>id===67)?.[1];expect(n).toBeGreaterThanOrEqual(470);expect(n).toBeLessThanOrEqual(500);}expect(proof.at(-1).code).toContain('cloud_snapshot_progress_stalled');}
   else{expect(done).toBe(true);expect(proof.length).toBeGreaterThan(1);expect(proof.every(p=>p.receipts>0||p.done)).toBe(true);expect(sourceDecrypts).toBe(totalParts-seedParts);expect([...writes].filter(([path])=>/-p\d+\.bin$/.test(path)).every(([,count])=>count===1)).toBe(true);}
   const summary={baseline,appRoot,framework:fw,sourceShape:{encoding,seedParts,totalParts,partBytes,bytes:body.length},proof};console.info('RESTORE1197_SUMMARY',JSON.stringify(summary));if(process.env.RESTORE1197_PROOF)writeFileSync(process.env.RESTORE1197_PROOF.replace(/\.json$/,encoding==='identity'?'.json':'-gzip-chunks.json'),JSON.stringify(summary,null,2)+'\n');
- }finally{rmSync(output,{recursive:true,force:true});}
+ }finally{stateSql.db.close();rmSync(output,{recursive:true,force:true});}
 },120000);

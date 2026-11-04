@@ -1,3 +1,5 @@
+import {plainPart,openLocalPart} from './plain-parts-fixture';
+import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {test,expect} from 'bun:test';
 import {mkdtempSync,readFileSync,rmSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -15,6 +17,7 @@ const b64=(b:Uint8Array)=>Buffer.from(b).toString('base64'),unb64=(s:string)=>ne
 function registerRestoreTest(stallguard:boolean,oldGuard:boolean,identicalRedo=false){
  test(identicalRedo?'STALLGUARD identical completed source redo stays below the full window':stallguard?'STALLGUARD persisted history: '+(oldGuard?'baseline never reaches a receipt':'candidate reaches streamed gzip and converges'):'RESTOREREDO frozen headless previous-object unit: 51 source parts, 50s inflate, durable convergence',async()=>{
  const baseline=process.env.RESTOREREDO_BASELINE==='1',output=mkdtempSync(join(tmpdir(),'restore-redo-'));
+ const stateSql=stateSqlFixture();
  try{
  const artifact=(await buildBackground({redo:resolve(import.meta.dir,'fixtures/restore-redo-entry.ts')},output)).redo!;
  const source=readFileSync(join(output,artifact.file),'utf8');
@@ -39,7 +42,9 @@ function registerRestoreTest(stallguard:boolean,oldGuard:boolean,identicalRedo=f
  const request=async<T>(method:string,a:any):Promise<T>=>{
   calls.push(method);now+=method==='file.write'?(inflated?500:300):method.startsWith('secure.')?100:method==='file.read'?20:5;if(now>=deadline)throw Error('NATIVE_HARD_STOP');
   const execute=async():Promise<any>=>{switch(method){
+   case 'sql.query':case 'sql.execute':case 'sql.transaction':return stateSql.host(method,a);
    case 'runtime.delay':return null;
+   case 'secure.keys':return {keys:[...secure.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
    case 'secure.set':secure.set(a.key,a.value);return {};
    case 'secure.update':for(const [k,v]of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};
@@ -61,10 +66,10 @@ function registerRestoreTest(stallguard:boolean,oldGuard:boolean,identicalRedo=f
    case 'file.gunzip':now+=50000;gzipCalls++;inflated=true;return resultFile(new Uint8Array(gunzipSync(files.get(a.path)!)));
    case 'crypto.closeSealedGzip':streams.delete(a.outputPrefix);return {};
    case 'crypto.gunzipSealedParts':{
-    let body=streams.get(a.outputPrefix);if(!body){const parts:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;parts.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}body=new Uint8Array(gunzipSync(Buffer.concat(parts)));streams.set(a.outputPrefix,body);now+=50000;gzipCalls++;}now+=500;
-    const part=body.subarray(a.offset,a.offset+262144),r=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),part),path=a.outputPrefix+a.offset+'.bin';files.set(path,new Uint8Array(Buffer.concat([r.nonce,r.ciphertext])));written.set(path,(written.get(path)??0)+1);const done=a.offset+part.length===body.length;return {offset:a.offset,bytes:part.length,done,...(done?{sha256:await crypto.sha256(body)}:{})};
+    let body=streams.get(a.outputPrefix);if(!body){const parts:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;parts.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}body=new Uint8Array(gunzipSync(Buffer.concat(parts)));streams.set(a.outputPrefix,body);now+=50000;gzipCalls++;}now+=500;
+    const part=body.subarray(a.offset,a.offset+262144),r=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),part),path=a.outputPrefix+a.offset+'.bin';files.set(path,a.plaintext?plainPart(utf8Encode(a.aadPrefix+a.offset),part):new Uint8Array(Buffer.concat([r.nonce,r.ciphertext])));written.set(path,(written.get(path)??0)+1);const done=a.offset+part.length===body.length;return {offset:a.offset,bytes:part.length,done,...(done?{sha256:await crypto.sha256(body)}:{})};
    }
-   case 'crypto.openSealedParts':{const out:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;out.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}return resultFile(new Uint8Array(Buffer.concat(out)));}
+   case 'crypto.openSealedParts':{const out:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;out.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}return resultFile(new Uint8Array(Buffer.concat(out)));}
    default:throw Error('unsupported fixture method '+method);
   }};return await execute() as T;
  };
@@ -85,7 +90,7 @@ function registerRestoreTest(stallguard:boolean,oldGuard:boolean,identicalRedo=f
  else if(oldGuard){expect(done).toBe(false);expect(proof.every(p=>p.guardTimeout)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);expect(proof.every(p=>p.commits===0)).toBe(true);}
  else if(baseline){expect(done).toBe(false);expect(proof.every(p=>p.commits===0)).toBe(true);expect(proof.every(p=>p.sourceDecryptions===51)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);}
  else{expect(done).toBe(true);expect(proof.length).toBeGreaterThan(1);expect(sourceDecrypts).toBeLessThanOrEqual(51+proof.length);expect([...written].filter(([p])=>/-p\d+\.bin$/.test(p)).every(([,n])=>n===1)).toBe(true);expect(proof.some(p=>p.newWork>1)).toBe(true);}
- }finally{rmSync(output,{recursive:true,force:true});}
+ }finally{stateSql.db.close();rmSync(output,{recursive:true,force:true});}
 },240000);
 }
 if(process.env.STALLGUARD==='1')registerRestoreTest(true,process.env.STALLGUARD_BASELINE==='1');

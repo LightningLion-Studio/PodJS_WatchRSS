@@ -23,7 +23,7 @@ export interface ProjectionIndex {provisional?:boolean;length:number;parts:strin
 interface Journal {restoreProgress?:{target:string;state:RestoreProgress;acknowledged:string[]};version:1;scope:string;cycle:number;active:boolean;phase:'snapshots'|'inventory'|'records';units:Record<string,number>;projections:Record<string,number>;work:number;bytes:number;}
 export interface SnapshotMetric {event:'snapshot-work';stage:'download'|'chunk'|'object'|'overlay'|'apply'|'inventory'|'checkpoint-read'|'checkpoint-write'|'manifest'|'source-hash'|'decrypt'|'inflate'|'plan'|'checkpoint-invalid'|'export'|'checkpoint-range-piece';outcome?:'complete'|'failed'|'deferred';code?:string;objectIndex?:number;chunkIndex?:number;objects?:number;chunks?:number;maxChunkBytes?:number;bytes:number;durationMillis:number;cached:boolean;completedUnits:number;}
 const validMap=(v:unknown):v is Record<string,number>=>{if(!v||typeof v!=='object'||Array.isArray(v))return false;const keys=Object.keys(v);return cpuWork('projection-rebuild','items',keys.length,()=>keys.length<=200000&&Object.entries(v).every(([k,n])=>k.length<=512&&Number.isSafeInteger(n)&&n>=0));};
-/** Secure metadata + authenticated encrypted local projections. No cloud ACK is
+/** Plaintext SQL metadata and checksummed local projections. No cloud ACK is
  * derived from a downloaded/decrypted chunk: only committed SQL units count. */
 export class SnapshotRestoreCheckpoint {
  private progressTracker?:RestoreProgressTracker;
@@ -87,18 +87,18 @@ export class SnapshotRestoreCheckpoint {
  async token(value:string){return this.hash(utf8Encode(this.root+':'+value));}
  private async accountKey(){return this.key??=await this.session.keys.accountKey(this.session.userId,await this.session.keys.currentKeyVersion(this.session.userId));}
  private async readBlob(id:string){await this.session.restoreCheckpoint?.assertCurrent?.();const key=await this.accountKey();if(!key)throw Error('missing_key_version');
-  // Receipted body parts already live in authenticated immutable files. Open
-  // them directly on the host instead of copying ciphertext through withInput.
+  // Receipted body parts already live in verified immutable files. Open
+  // them directly on the host instead of copying them through withInput.
   const length=this.value.projections[id];
   if(length>131072&&this.codec.batchedRestoreParts){try{return await this.codec.openRestoreParts(key,[{path:await this.cache.restoreProjectionPath(this.session.userId,id),scope:this.root+':'+id,bytes:length}],length);}catch(error){await this.current();if(!String(error).includes('sealed_part_invalid_'))throw error;this.metric('checkpoint-invalid',length,this.now(),true,{outcome:'failed'});return;}}
-  const bytes=await this.cache.restoreProjection(this.session.userId,id);if(!bytes)return;try{return await this.codec.openRestoreProjection(key,this.root+':'+id,bytes);}catch(error){await this.current();if(String(error).includes(CLOUD_SYNC_SUSPENDED))throw error;this.metric('checkpoint-invalid',bytes.length,this.now(),true,{outcome:'failed'});return;}}
+  const bytes=await this.cache.restoreProjection(this.session.userId,id);if(!bytes)return;try{const value=await this.codec.openRestoreProjection(key,this.root+':'+id,bytes);if(this.codec.plaintextRestore&&utf8Decode(bytes.subarray(0,4))!=='PLN4')await this.cache.storeRestoreProjection(this.session.userId,id,await this.codec.sealRestoreProjection(key,this.root+':'+id,value));return value;}catch(error){await this.current();if(String(error).includes(CLOUD_SYNC_SUSPENDED))throw error;this.metric('checkpoint-invalid',bytes.length,this.now(),true,{outcome:'failed'});return;}}
  private async writeBlob(id:string,bytes:Uint8Array){this.indices.delete(id);await this.session.restoreCheckpoint?.assertCurrent?.();const key=await this.accountKey();if(!key)throw Error('missing_key_version');await this.cache.storeRestoreProjection(this.session.userId,id,await this.codec.sealRestoreProjection(key,this.root+':'+id,bytes));}
  /** Split the disposable decoded representation so a large old object also
-  * checkpoints its assembly. Only complete AEAD-authenticated parts are reused. */
+  * checkpoints its assembly. Only complete verified parts are reused. */
  async index(token:string):Promise<ProjectionIndex|undefined>{const cached=this.indices.get(token);if(cached)return cached;
-  // A complete secure receipt plus every canonical piece receipt authenticates
-  // the deterministic layout. Old/noncanonical linked layouts still use AEAD
-  // metadata. File contents remain authenticated by the eventual consumer.
+  // A complete SQL receipt plus every canonical piece receipt defines
+  // the deterministic layout. Plaintext parts carry scope-bound checksums;
+  // legacy parts are authenticated before conversion.
   const length=this.length(token),shape=length===undefined||length>256*1024*1024?undefined:receiptedParts(length,262144,offset=>this.value.projections[token+'-p'+offset]);
   if(shape){const m={length:length!,parts:shape.offsets.map(offset=>token+'-p'+offset),lengths:shape.lengths};this.indices.set(token,m);return m;}
   const raw=await this.readBlob(token);if(!raw)return;try{const m=cpuJsonParse(utf8Decode(raw));if(!Number.isSafeInteger(m.length)||m.length<0||m.length>256*1024*1024||!Array.isArray(m.parts)||m.parts.length>2048||m.parts.some((p:unknown)=>typeof p!=='string'||!/^[a-f0-9]{64}(?:-[A-Za-z0-9-]{1,160})?$/.test(p))||!Array.isArray(m.lengths)||m.lengths.length!==m.parts.length||m.lengths.some((n:unknown)=>!Number.isSafeInteger(n)||Number(n)<0||Number(n)>256*1024)||m.lengths.reduce((n:number,x:number)=>n+x,0)!==m.length)return;this.indices.set(token,m);return m;}catch{return;}}
@@ -157,7 +157,7 @@ export class SnapshotRestoreCheckpoint {
   // Publish authenticated shape first. A partially written projection is never
   // readable; if the final part lands before a crash, no source AEAD repeats.
   await this.writeBlob(token,utf8Encode(cpuJsonStringify({length:bytes.length,parts,lengths:parts.map((_,i)=>Math.min(256*1024,bytes.length-i*256*1024))})));
-  // Each authenticated file + secure receipt is resumable. Never reread the
+  // Each verified file and committed receipt is resumable. Never reread the
   // already committed prefix while assembling the next suffix.
   for(let offset=0,index=0;index<parts.length;offset+=256*1024,index++){if(index)await this.current();const part=bytes.subarray(offset,offset+256*1024),id=parts[index];
    if(!Object.prototype.hasOwnProperty.call(this.value.projections,id)){await this.writeBlob(id,part);await this.record('projections',id,part.length);}

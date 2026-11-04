@@ -1,3 +1,5 @@
+import {plainPart,openLocalPart} from './plain-parts-fixture';
+import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {CloudRecordCodec} from '../../src/cloud/records';
 import {rssArticleId,rssSourceKey} from '../../src/cloud/rss-identity';
 import {bookId,bookArticleId} from '../../src/books/protocol';
@@ -64,6 +66,8 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
  const nativeStreams=new Map<string,Uint8Array>();
  const remoteHash=remote?await crypto.sha256(remote.encryptedManifest):'';const remoteHead=remote?{id:remote.manifest.snapshotId,sourceDeviceId:'phone',deviceSequence:1,keyVersion:1,manifestSha256:remoteHash,manifestSizeBytes:remote.encryptedManifest.length,parentHeads:{},observedHeads:{}}:undefined;
  const request=async(method:string,a:any):Promise<any>=>{
+
+  if(entry==='manual-rss-fast-epoch'&&method.startsWith('sql.'))expect((a.statements??[{sql:a.sql}]).every((s:any)=>s.sql.includes('cloud_state_'))).toBe(true);
   if(largeWindow&&armed){guestNow+=method.startsWith('secure.')?200:method==='file.write'||method==='file.commit'?250:20;if(guestNow>=guestDeadline)throw Error('RESTOREWIN_NATIVE_HARD_DEADLINE');}
   calls.push(method);expect(methods.has(method)).toBe(true);expect(JSON.stringify(a).length).toBeLessThan(1024*1024);
   if(denyYield&&method==='runtime.delay'||denyRecords&&method==='http.download'&&a.url.includes('/records?'))throw Error('permission_denied');
@@ -76,6 +80,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'secure.acquire':expect(a.key).toBe('watchrss.account.session.v1');return {acquired:true};
    case 'secure.release':expect(a.key).toBe('watchrss.account.session.v1');return {};
    case 'discovery.networkSnapshot':return {active:true,validated:true,wifi:true,metered:false};
+   case 'secure.keys':return {keys:[...secure.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
    case 'secure.set':secure.set(a.key,a.value);if((entry==='manual-manifest-window'||fastMode)&&!windowStop&&a.key.includes('.restore-v1')){const saved=JSON.parse(a.value);if(windowArmed&&a.key.endsWith('.restore-v1')){windowStop=true;guestNow=guestDeadline-10000;}else if(Object.keys(saved.units??{}).some(k=>fastMode?/^records:\d+:(pull:|projection:)/.test(k):k.includes('archive:')&&k.includes(':row:')))windowArmed=true;}return {};
    case 'secure.compareAndSet':if((secure.get(a.key)??null)!==a.expected)return {updated:false};if(a.value===null)secure.delete(a.key);else secure.set(a.key,a.value);return {updated:true};
@@ -85,7 +90,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'file.list':return {entries:[]};
    case 'secure.delete':secure.delete(a.key);return {};
    case 'file.createTemp':return resultFile(new Uint8Array(),a.directory);
-   case 'file.write':{const old=a.append?files.get(a.path)!:new Uint8Array(),part=unb64(a.dataBase64);if(a.append)expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
+   case 'file.write':{if(largeWindow){try{const data=unb64(a.dataBase64);if(Buffer.from(data.subarray(0,4)).toString()==='PLN4'){const shape=JSON.parse(utf8Decode(data.subarray(28)));if(shape.length>7*1024*1024&&Array.isArray(shape.parts))armProjection=true;}}catch{}}const old=a.append?files.get(a.path)!:new Uint8Array(),part=unb64(a.dataBase64);if(a.append)expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
    case 'file.read':{const b=files.get(a.path)!;return {size:b.length,offset:a.offset,dataBase64:b64(b.slice(a.offset,a.offset+a.maxBytes))};}
    case 'file.delete':files.delete(a.path);return {};
    case 'file.stat':return {exists:files.has(a.path),file:files.has(a.path),size:files.get(a.path)?.length??0};
@@ -100,7 +105,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'file.htmlText':return resultFile(utf8Encode(utf8Decode(files.get(a.path)!).replace(/<[^>]*>/g,'')));
    case 'file.gzip':return resultFile(await crypto.gzip(files.get(a.path)!));
    case 'crypto.closeSealedGzip':nativeStreams.delete(a.outputPrefix);return {};
-   case 'crypto.gunzipSealedParts':{let output=nativeStreams.get(a.outputPrefix);if(!output){const chunks:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const part=a.parts[i],sealed=files.get(part.path);if(!sealed)throw Error('sealed_part_invalid_'+i);chunks.push(await crypto.decrypt(unb64(a.keyBase64),unb64(part.aadBase64),sealed.subarray(0,12),sealed.subarray(12)));}output=await crypto.gunzip(Buffer.concat(chunks),a.maxOutputBytes);nativeStreams.set(a.outputPrefix,output);}const piece=output.subarray(a.offset,a.offset+262144),sealed=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),piece);files.set(a.outputPrefix+a.offset+'.bin',new Uint8Array(Buffer.concat([sealed.nonce,sealed.ciphertext])));partWrites++;const done=a.offset+piece.length===output.length;return {offset:a.offset,bytes:piece.length,done,...(done?{sha256:await crypto.sha256(output)}:{})};}
+   case 'crypto.gunzipSealedParts':{let output=nativeStreams.get(a.outputPrefix);if(!output){const chunks:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const part=a.parts[i],sealed=files.get(part.path);if(!sealed)throw Error('sealed_part_invalid_'+i);chunks.push(await openLocalPart(unb64(a.keyBase64),unb64(part.aadBase64),sealed,crypto.decrypt));}output=await crypto.gunzip(Buffer.concat(chunks),a.maxOutputBytes);nativeStreams.set(a.outputPrefix,output);}const piece=output.subarray(a.offset,a.offset+262144),sealed=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),piece);files.set(a.outputPrefix+a.offset+'.bin',a.plaintext?plainPart(utf8Encode(a.aadPrefix+a.offset),piece):new Uint8Array(Buffer.concat([sealed.nonce,sealed.ciphertext])));partWrites++;const done=a.offset+piece.length===output.length;return {offset:a.offset,bytes:piece.length,done,...(done?{sha256:await crypto.sha256(output)}:{})};}
    case 'file.gunzip':return resultFile(await crypto.gunzip(files.get(a.path)!,a.maxOutputBytes));
    case 'crypto.random':return {bytesBase64:b64(await crypto.random(a.bytes))};
    case 'crypto.hmacSha256':return {digestBase64:createHmac('sha256',unb64(a.keyBase64)).update(unb64(a.dataBase64)).digest('base64')};
@@ -110,12 +115,14 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    case 'crypto.aesGcmEncrypt':{if(largeWindow){try{const shape=JSON.parse(utf8Decode(unb64(a.dataBase64)));if(shape.length>7*1024*1024&&Array.isArray(shape.parts))armProjection=true;}catch{}}const sealed=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.dataBase64));return {nonceBase64:b64(sealed.nonce),ciphertextBase64:b64(sealed.ciphertext)};}
    case 'crypto.aesGcmDecrypt':return {dataBase64:b64(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),unb64(a.ciphertextBase64)))};
    case 'crypto.largeAesGcmEncrypt':{const sealed=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),files.get(a.inputPath)!);return {...await resultFile(sealed.ciphertext),nonceBase64:b64(sealed.nonce)};}
-   case 'crypto.openSealedParts':{const parts:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const part=a.parts[i],sealed=files.get(part.path);if(!sealed||sealed.length!==part.bytes+28)throw Error('sealed_part_invalid_'+i);try{parts.push(await crypto.decrypt(unb64(a.keyBase64),unb64(part.aadBase64),sealed.subarray(0,12),sealed.subarray(12)));}catch{throw Error('sealed_part_invalid_'+i);}}const body=new Uint8Array(a.length);let at=0;for(const part of parts){body.set(part,at);at+=part.length;}expect(at).toBe(a.length);return resultFile(body);}
+   case 'crypto.openSealedParts':{const parts:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const part=a.parts[i],sealed=files.get(part.path);if(!sealed||sealed.length!==part.bytes+28)throw Error('sealed_part_invalid_'+i);try{parts.push(await openLocalPart(unb64(a.keyBase64),unb64(part.aadBase64),sealed,crypto.decrypt));}catch{throw Error('sealed_part_invalid_'+i);}}const body=new Uint8Array(a.length);let at=0;for(const part of parts){body.set(part,at);at+=part.length;}expect(at).toBe(a.length);return resultFile(body);}
    case 'crypto.largeAesGcmDecrypt':return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));
    case 'sql.query':return sql.query(a.sql).all(...a.params);
    case 'sql.execute':sql.query(a.sql).run(...a.params);return null;
    case 'sql.notify':return {};
-   case 'sql.transaction':return sql.transaction(()=>{const changes=a.statements.map((s:any)=>{sql.query(s.sql).run(...(s.params??[]));return (sql.query('SELECT changes() AS n').get() as any).n;});return a.reportChanges?changes:null;})();
+   case 'sql.transaction':{const result=sql.transaction(()=>{const changes=a.statements.map((s:any)=>{sql.query(s.sql).run(...(s.params??[]));return (sql.query('SELECT changes() AS n').get() as any).n;});return a.reportChanges?changes:null;})();
+    if((entry==='manual-manifest-window'||fastMode)&&!windowStop&&a.statements.some((s:any)=>s.sql.includes('cloud_state_chunks')&&s.sql.startsWith('INSERT OR REPLACE'))){const journal=cloudStateValues(sql);for(const [k,v]of journal){if(!k.includes('.restore-v1'))continue;const saved=JSON.parse(v);if(Object.keys(saved.units??{}).some(k=>fastMode?/^records:\d+:(pull:|projection:)/.test(k):k.includes('archive:')&&k.includes(':row:')))windowArmed=true;}if(windowArmed&&[...journal.keys()].some(k=>k.endsWith('.restore-v1'))){windowStop=true;guestNow=guestDeadline-10000;}}
+    return result;}
    case 'http.download':{
     const j=a.bodyPath?JSON.parse(utf8Decode(files.get(a.bodyPath)!)):{};let response:any={};if(a.url.startsWith('https://objects.invalid/')){const hash=a.url.split('/').at(-1),body=hash===remoteHash?remote!.encryptedManifest:remote!.newChunks.get(hash)!;expect(body).toBeDefined();files.set(a.path,body.slice());return {path:a.path,size:body.length,status:200,headers:{}};}expect(a.url.startsWith('https://backend.invalid/')).toBe(true);expect(a.headers.authorization).toBe('Bearer fixture-token');
     if(a.url.endsWith('/bootstrap'))response={...contentFixture,member:{plan:'member',active:true,readable:true,writable:true,quotaBytes:1e9},libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[{keyVersion:1,commitment:await commit(v2,key,'user',epoch,1),rotationProof:null}],devices:[{deviceId:(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,publicKeySpki:fixtureSpki,attestationKeyVersion:1,attestation:await attest(v2,key,'user',epoch,(sql.query('SELECT device_id FROM sync_local_identity').get() as any).device_id,fixtureSpki)}],keyEnvelopes:[]};
@@ -152,11 +159,11 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    for(let n=0;n<docs.length;n++){const recordId=await codec.id(key,'user',docs[n]);recordRows.push({recordId,revision:String(n+1),envelope:await codec.encode(key,'user',recordId,1,docs[n]),tombstone:false});}
   }
   const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
-  if(entry==='manual-rss-fast-epoch'){const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);secure.set(MANUAL_INTENT_KEY,JSON.stringify({...grant,version:2,epoch:'revoked-epoch'}));expect(await headless(context)).toBe('success');expect(calls).not.toContain('cloud.acquire');expect(calls.some(m=>m.startsWith('sql.')||m==='http.download')).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);continue;}
+  if(entry==='manual-rss-fast-epoch'){const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);secure.set(MANUAL_INTENT_KEY,JSON.stringify({...grant,version:2,epoch:'revoked-epoch'}));expect(await headless(context)).toBe('success');expect(calls).not.toContain('cloud.acquire');expect(calls.some(m=>m==='http.download')).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);continue;}
   if(largeWindow){
    let done=false,lastWork=0;for(;windowCount<12&&!done;windowCount++){
     const result=await headless({...context,deadlineMs:guestDeadline},()=>guestNow);
-    const journals=[...secure.entries()].filter(([k])=>k.endsWith('.restore-v1')).map(([,v])=>JSON.parse(v));const work=journals[0]?.work??0;
+    const journals=[...cloudStateValues(sql).entries()].filter(([k])=>k.endsWith('.restore-v1')).map(([,v])=>JSON.parse(v));const work=journals[0]?.work??0;
     expect(work).toBeGreaterThanOrEqual(lastWork);lastWork=work;
     windowProof.push({window:windowCount+1,elapsed:300000-(guestDeadline-guestNow),work,partWrites,result});console.info('RESTOREWIN_BUNDLE_WINDOW',JSON.stringify(windowProof.at(-1)));expect(guestNow).toBeLessThan(guestDeadline);expect(leased).toBe(false);
     done=result==='success';if(!done){expect(result,logs.join('')).toEqual({status:'retry',progress:true});expect(secure.has(MANUAL_INTENT_KEY)).toBe(true);guestNow=Date.now();guestDeadline=guestNow+300000;}
@@ -185,7 +192,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
   expect(await headless(context),entry+' '+logs.join('')).toBe('success');
   if(withManifest){expect(calls).toContain('crypto.largeAesGcmDecrypt');expect(logs.join('')).toContain('\"stage\":\"byte-compare\"');expect(calls).toContain('runtime.delay');expect(logs.join('')).toContain('\"stage\":\"json-scan\"');expect(acknowledgements).toBe(1);}
   if(entry==='manual-manifest-metadata'){const diagnostics=logs.join('');expect(diagnostics).toContain('\"stage\":\"cloudMetadata\"');expect(diagnostics).toContain('\"stage\":\"cloudSources\"');}
-  expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...secure.values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
+  expect((sql.query('SELECT progress FROM article_reading_state WHERE article_id=1').get() as any).progress).toBe(.5);expect(leased).toBe(false);expect(reserved.deviceSequence).toBe(1);expect(reserved.chunks).toHaveLength(1);expect(sql.query('SELECT device_id FROM sync_local_identity').get()).toBeTruthy();expect([...cloudStateValues(sql).values()].some(v=>v.includes('content_hash_full'))).toBe(true);expect([...files.keys()].some(p=>p.includes('.pod-write-'))).toBe(false);expect(calls).toContain('crypto.aesGcmEncrypt');
  expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);
  }finally{sql.close();}
  }}finally{Error.stackTraceLimit=stackLimit;rmSync(output,{recursive:true,force:true});}
@@ -193,12 +200,12 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
 
 test('manual headless grant is bound to durable token and backend/account scope before any library, writer or network work',async()=>{
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true}};
- for(const mismatch of ['token','scope','epoch']){const methods:string[]=[];const intent={version:2,token:'opaque_1',scope:mismatch==='scope'?'other':cloudAccountIdentity(account),mode:'recent128',createdAt:1,epoch:'old-epoch'};
+ for(const mismatch of ['token','scope','epoch']){const stateSql=stateSqlFixture();const methods:string[]=[];const intent={version:2,token:'opaque_1',scope:mismatch==='scope'?'other':cloudAccountIdentity(account),mode:'recent128',createdAt:1,epoch:'old-epoch'};
  const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:{manual:true,token:mismatch==='token'?'stale':'opaque_1'},isCancelled:()=>false,request:async(method,args:any)=>{
   if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
-  methods.push(args.method);if(args.method==='app.buildInfo')return {debugBuild:false};
+  methods.push(args.method);if(args.method.startsWith('sql.'))return stateSql.host(args.method,args.args);if(args.method==='secure.update')return {};if(args.method==='app.buildInfo')return {debugBuild:false};
   if(args.method==='secure.compareAndSet'){expect(args.args.key).toBe(MANUAL_INTENT_KEY);expect(args.args.value).toBeNull();return {updated:true};}if(args.method==='secure.get')return {exists:true,value:args.args.key===manualEpochKey(account)?'new-epoch':JSON.stringify(args.args.key===MANUAL_INTENT_KEY?intent:account)};throw Error('unauthorized side effect: '+args.method);
- }});expect(result).toBe('success');expect(methods.slice(0,3)).toEqual(['app.buildInfo','secure.get','secure.get']);expect(methods.every(m=>['app.buildInfo','secure.get','secure.compareAndSet'].includes(m))).toBe(true);
+ }});expect(result).toBe('success');expect(methods.slice(0,3)).toEqual(['app.buildInfo','secure.get','secure.get']);expect(methods.every(m=>['app.buildInfo','secure.get','secure.compareAndSet','secure.update','sql.query','sql.transaction','sql.execute'].includes(m))).toBe(true);stateSql.db.close();
  }
 });
 

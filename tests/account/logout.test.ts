@@ -1,3 +1,4 @@
+import {stateSqlFixture} from '../cloud/state-sql-fixture';
 import {test,expect} from 'bun:test';
 import {createHash} from 'node:crypto';
 import {WatchAccountStore} from '../../src/account/store';
@@ -18,7 +19,9 @@ async function fixture(mode:'ok'|'401'|'503'|'malformed'|'network'|'revoke-fails
   if(r.url.endsWith('/bootstrap')){events.push('bootstrap');return response({...contentFixture,libraryEpoch:epoch,keyVersionFloor:0,keyCommitments:[],member:{},devices:[],keyEnvelopes:[]});}
   expect(r.url).toEndWith('/cloud/devices/watch/revoke');events.push('revoke');expect(r.headers['x-watchrss-library-epoch']).toBe(epoch);return response({},mode==='revoke-fails'?503:200);
  }};
+ const stateSql=stateSqlFixture();
  const host=async<T>(method:string,args:any):Promise<T>=>{
+  if(method==='sql.transaction'||method==='sql.execute')return stateSql.host<T>(method,args);
   if(method==='sql.query')return[{device_id:'watch'}] as T;
   if(method==='crypto.hash')return{digestBase64:createHash('sha256').update(Buffer.from(args.dataBase64,'base64')).digest('base64')} as T;
   if(method==='secure.update'){events.push('cloud-clear');for(const k of values.keys())if(args.removePrefixes.some((p:string)=>k.startsWith(p)))values.delete(k);return{} as T;}

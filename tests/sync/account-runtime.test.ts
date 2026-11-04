@@ -4,12 +4,14 @@ test('syncAccount writes through the actual LLM singleton secureStorage adapter 
  const result=Bun.spawnSync(['bun','--eval',`
   import {mock} from 'bun:test';
   import {strict as assert} from 'node:assert';
+  import {stateSqlFixture} from './tests/cloud/state-sql-fixture.ts';
+  const stateSql=stateSqlFixture();
   const values=new Map();let writes=0,release;
   const committed=new Promise(resolve=>release=resolve);
   mock.module('@podjs/framework/services',()=>({
    secureStorage:{get:async key=>values.get(key),set:async(key,value)=>{writes++;await committed;values.set(key,value);},delete:async key=>values.delete(key)},
    uri:{parse:async value=>{const u=new URL(value);return {valid:true,scheme:u.protocol.slice(0,-1),host:u.hostname};}},
-   hostOperation(method,args){return {result:(async()=>{if(method==='crypto.hash')return{digestBase64:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='};if(method==='file.list')return{entries:[]};if(method==='secure.update'||method==='secure.release')return {};if(method==='secure.acquire')return{acquired:true};throw Error('unexpected network');})()};},fileChunks:{},
+   hostOperation(method,args){return {result:(async()=>{if(method.startsWith('sql.'))return stateSql.host(method,args);if(method==='crypto.hash')return{digestBase64:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='};if(method==='file.list')return{entries:[]};if(method==='secure.update'||method==='secure.release')return {};if(method==='secure.acquire')return{acquired:true};throw Error('unexpected network');})()};},fileChunks:{},
    bytesToBase64:b=>Buffer.from(b).toString('base64'),base64ToBytes:s=>new Uint8Array(Buffer.from(s,'base64'))
   }));
   const {summaryAccountStore}=await import('./src/llm/runtime.ts');

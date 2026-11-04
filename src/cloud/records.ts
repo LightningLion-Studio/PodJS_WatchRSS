@@ -83,9 +83,9 @@ export class CloudRecordCodec {
   }catch(error){if(error instanceof Error&&[CLOUD_HOST_CAPABILITY_UNAVAILABLE,CLOUD_SYNC_SUSPENDED,'cloud_sync_deadline_exceeded','cloud_operation_superseded'].includes(error.message))throw error;throw Error(error instanceof Error&&error.message==='raw_json_depth'?'cloud_record_format_depth':'cloud_record_invalid');}finally{derived.fill(0);plain?.fill(0);}
  }
 }
-interface RecordProjection {ids:string[];keyVersion:number;binding:string;nonceBase64:string;ciphertextBase64:string}
+interface RecordProjection {plaintext?:string;checksum?:string;ids:string[];keyVersion:number;binding:string;nonceBase64:string;ciphertextBase64:string}
 interface RecordState {replayScope?:string;replayDone?:Record<string,{end:number;proof:string}>;prepared?:{scope:string;entries:[string,{id:string;hash:string;proof:string}][]};projections?:RecordProjection[];protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
-/** Disposable encrypted projection, account/epoch scoped by the cache; no plaintext library in it. */
+/** Local projection, account/epoch scoped by the cache. Production stores plaintext; legacy encrypted projections remain readable during migration. */
 export class WatchCloudRecords {
  private state!:RecordState;private codec:CloudRecordCodec;private decoded=new Map<string,{row:RecordRow;doc:RecordDocument;legacy:boolean}>();
  private progressCommit?:((unit:string)=>Promise<void>);private savedCursor='0';private savedProjection='';
@@ -98,6 +98,14 @@ export class WatchCloudRecords {
  private async key(version:number){let key=this.runKeys.get(version);if(!this.runKeys.has(version)){key=await this.p.key(version);this.runKeys.set(version,key);}return key?.slice();}
  private async projectionBinding(ids:string[]){return this.p.crypto.sha256(utf8Encode(cpuJsonStringify(ids.map(id=>[this.state.rows[id],this.state.records[id]]))));}
  private projectionAad(group:Pick<RecordProjection,'keyVersion'|'binding'>){return utf8Encode(cpuJsonStringify(['watchrss/local-record-projection/v1',this.p.userId,this.p.epoch,group.keyVersion,group.binding]));}
+ private async projectionChecksum(group:Pick<RecordProjection,'keyVersion'|'binding'>,text:string){return this.p.crypto.sha256(utf8Encode(utf8Decode(this.projectionAad(group))+'\0'+text));}
+ private async openProjection(group:RecordProjection){
+  if(group.plaintext!==undefined){check(typeof group.plaintext==='string'&&group.plaintext.length<=8*1024*1024&&group.checksum===await this.projectionChecksum(group,group.plaintext));return utf8Encode(group.plaintext);}
+  const key=await this.key(group.keyVersion);if(!key)throw Error('missing_key_version');let derived:Uint8Array|undefined;
+  try{derived=await this.projectionKey(key);this.projectionDecryptions++;const bytes=await this.p.crypto.decrypt(derived,this.projectionAad(group),base64ToBytes(group.nonceBase64),base64ToBytes(group.ciphertextBase64));check(bytes.length<=8*1024*1024);
+   if(this.p.crypto.localPlaintext){const text=utf8Decode(bytes);group.checksum=await this.projectionChecksum(group,text);group.plaintext=text;group.nonceBase64='';group.ciphertextBase64='';}return bytes;
+  }finally{key.fill(0);derived?.fill(0);}
+ }
  private async projectionKey(key:Uint8Array){return this.derive(key,utf8Encode(this.p.userId),utf8Encode('watchrss/local-record-projection/v1'));}
  private async derive(key:Uint8Array,salt:Uint8Array,info:Uint8Array){
   const id=bytesToBase64(key)+':'+bytesToBase64(salt)+':'+bytesToBase64(info);let derived=this.derivedKeys.get(id);
@@ -115,8 +123,7 @@ export class WatchCloudRecords {
   for(const group of this.state.projections??[]){if(!group.ids.some(id=>needed.has(id)))continue;await this.p.current();
    await this.measured('projection-load',group.ids.length,async()=>{let key:Uint8Array|undefined,derived:Uint8Array|undefined,bytes:Uint8Array|undefined;try{
     if(group.ids.some(id=>!this.state.rows[id]||this.state.quarantinedRows?.[id])||await this.projectionBinding(group.ids)!==group.binding)return;
-    key=await this.key(group.keyVersion);if(!key)return;derived=await this.projectionKey(key);this.projectionDecryptions++;
-    bytes=await this.p.crypto.decrypt(derived,this.projectionAad(group),base64ToBytes(group.nonceBase64),base64ToBytes(group.ciphertextBase64));check(bytes.length<=8*1024*1024);
+    bytes=await this.openProjection(group);
     const data=cpuJsonParse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
     const items=cpuWork('projection-rebuild','items',data.entries.length,()=>data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};}));
     for(const item of items){this.decoded.set(item.row.recordId,item);needed.delete(item.row.recordId);}
@@ -137,7 +144,7 @@ export class WatchCloudRecords {
    for(const [id,v]of Object.entries(s.records) as [string,{revision:string;hash:string}][]){check(ID.test(id)&&v&&ID.test(v.hash));revision(v.revision);}
    for(const [id,v]of Object.entries(s.rows) as [string,RecordRow][]){check(ID.test(id)&&v&&v.recordId===id&&v.envelope&&typeof v.tombstone==='boolean');revision(v.revision);}
    // Projection corruption is not loss of the underlying encrypted row cache.
-   if(s.projections!==undefined){let count=0;s.projections=Array.isArray(s.projections)?s.projections.filter((g:RecordProjection)=>{const valid=g&&Array.isArray(g.ids)&&g.ids.length>0&&g.ids.length<=50&&g.ids.every(id=>ID.test(id))&&Number.isSafeInteger(g.keyVersion)&&g.keyVersion>0&&ID.test(g.binding)&&typeof g.nonceBase64==='string'&&g.nonceBase64.length===16&&typeof g.ciphertextBase64==='string'&&g.ciphertextBase64.length<=12*1024*1024;count+=valid?g.ids.length:0;return valid&&count<=50000;}):[];}
+   if(s.projections!==undefined){let count=0;s.projections=Array.isArray(s.projections)?s.projections.filter((g:RecordProjection)=>{const valid=g&&Array.isArray(g.ids)&&g.ids.length>0&&g.ids.length<=50&&g.ids.every(id=>ID.test(id))&&Number.isSafeInteger(g.keyVersion)&&g.keyVersion>0&&ID.test(g.binding)&&(typeof g.plaintext==='string'&&g.plaintext.length<=8*1024*1024&&typeof g.checksum==='string'&&ID.test(g.checksum)||typeof g.nonceBase64==='string'&&g.nonceBase64.length===16&&typeof g.ciphertextBase64==='string'&&g.ciphertextBase64.length<=12*1024*1024);count+=valid?g.ids.length:0;return valid&&count<=50000;}):[];}
    if(s.replayDone!==undefined&&(!s.replayDone||typeof s.replayDone!=='object'||Array.isArray(s.replayDone)||Object.keys(s.replayDone).length>50000))s.replayDone={};if(s.replayScope!==undefined&&(typeof s.replayScope!=='string'||s.replayScope.length>256)){delete s.replayScope;s.replayDone={};}if(s.epoch===p.epoch)this.state=s;});
   }catch{/* Cache loss requires cursor zero, never a library reset. */}
   try{p.work?.({event:'records-work',lane:'pull',stage:'state-validate',units:Object.keys(this.state.rows).length,durationMillis:Math.max(0,this.now()-validatedAt),outcome:'complete'});}catch{}
@@ -148,13 +155,13 @@ export class WatchCloudRecords {
   const storeProjection=async(rows:RecordRow[])=>{
    const entries=rows.flatMap(row=>{const entry=projectionEntries.get(row.recordId);return entry&&this.state.rows[row.recordId]&&this.state.records[row.recordId]?.revision===row.revision?[entry]:[];});if(!entries.length)return;
    const ids=entries.map(e=>e.id),version=p.version,key=await this.key(version);if(!key)throw Error('missing_key_version');let derived:Uint8Array|undefined,bytes:Uint8Array|undefined;
-   try{const group={ids,keyVersion:version,binding:await this.projectionBinding(ids)};derived=await this.projectionKey(key);bytes=utf8Encode(cpuJsonStringify({version:1,entries}));check(bytes.length<=8*1024*1024);const encrypted=await p.crypto.encrypt(derived,this.projectionAad(group),bytes);(this.state.projections??=[]).push({...group,nonceBase64:bytesToBase64(encrypted.nonce),ciphertextBase64:bytesToBase64(encrypted.ciphertext)});}finally{key.fill(0);derived?.fill(0);bytes?.fill(0);}
+   try{const group={ids,keyVersion:version,binding:await this.projectionBinding(ids)};bytes=utf8Encode(cpuJsonStringify({version:1,entries}));check(bytes.length<=8*1024*1024);if(p.crypto.localPlaintext){const plaintext=utf8Decode(bytes);(this.state.projections??=[]).push({...group,plaintext,checksum:await this.projectionChecksum(group,plaintext),nonceBase64:'',ciphertextBase64:''});return;}derived=await this.projectionKey(key);const encrypted=await p.crypto.encrypt(derived,this.projectionAad(group),bytes);(this.state.projections??=[]).push({...group,nonceBase64:bytesToBase64(encrypted.nonce),ciphertextBase64:bytesToBase64(encrypted.ciphertext)});}finally{key.fill(0);derived?.fill(0);bytes?.fill(0);}
   };
   const hydrateProjections=async()=>{
    const covered=new Set<string>(),valid:RecordProjection[]=[];
    for(const group of this.state.projections??[]){await p.current();let key:Uint8Array|undefined,derived:Uint8Array|undefined,bytes:Uint8Array|undefined;
     try{if(group.ids.some(id=>covered.has(id)||!this.state.rows[id]||this.state.quarantinedRows?.[id])||await this.projectionBinding(group.ids)!==group.binding)continue;
-     key=await this.key(group.keyVersion);if(!key)continue;derived=await this.projectionKey(key);this.projectionDecryptions++;bytes=await p.crypto.decrypt(derived,this.projectionAad(group),base64ToBytes(group.nonceBase64),base64ToBytes(group.ciphertextBase64));check(bytes.length<=8*1024*1024);
+     bytes=await this.openProjection(group);
      const data=cpuJsonParse(utf8Decode(bytes));check(data.version===1&&Array.isArray(data.entries)&&data.entries.length===group.ids.length);
      const items=cpuWork('projection-rebuild','items',data.entries.length,()=>data.entries.map((entry:any,i:number)=>{check(entry.id===group.ids[i]&&typeof entry.text==='string'&&typeof entry.legacy==='boolean');const doc=this.codec.readPlaintext(entry.text);releaseKnownCloudRaw(doc);return {row:this.state.rows[entry.id]!,doc,legacy:entry.legacy};}));
      const docs=items.filter((item:any)=>!cloudCompatibility(item.doc).opaque&&item.doc.value.bookIndexRetired!==true&&!(item.row.tombstone&&!item.doc.value.deleted)&&['article','source','rss-state','book','book-reading'].includes(item.doc.kind)).map((item:any)=>item.doc);

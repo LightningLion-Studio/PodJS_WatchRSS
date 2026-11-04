@@ -72,7 +72,7 @@ test('H6: 401 cleanup retains library owner, blocks silent re-pair and explicit 
 });
 test('logout removes scoped and legacy keys/state/cache via host atomic prefix cleanup',async()=>{
  const calls:any[]=[];await clearAccountCloud(async<T>(m:string,args:any)=>{calls.push({m,args});if(m==='crypto.hash')return{digestBase64:Buffer.from(await crypto.sha256(Buffer.from(args.dataBase64,'base64')),'hex').toString('base64')} as T;if(m==='file.list')return{entries:[{path:args.path+'/cipher.bin',directory:false}]} as T;return{} as T;},account('A'));
- expect(calls.find(c=>c.m==='secure.update').args.removePrefixes).toHaveLength(5);expect(calls.filter(c=>c.m==='file.delete')).toHaveLength(2);
+ expect(calls.find(c=>c.m==='secure.update').args.removePrefixes).toHaveLength(6);expect(calls.filter(c=>c.m==='file.delete')).toHaveLength(2);
 });
 
 test('approval N accepts a valid signed full delivery once and rejects replay after terminal state',async()=>{
@@ -223,4 +223,10 @@ test('recheck 12: agreement followed by disagreement before commit prevents real
 });
 test('recheck 12: committing is an explicit irreversible submission boundary, never a false cancelled state',async()=>{
  const f=await cancellationFixture('storage'),running=f.machine.poll();await f.gate.reached;expect(f.machine.status.phase).toBe('committing');expect(f.store.values.size).toBe(0);await expect(f.machine.confirmCode(false)).rejects.toThrow('approval_commit_started');await expect(f.machine.cancel()).rejects.toThrow('approval_commit_started');f.machine.dispose();expect(f.machine.status.phase).toBe('committing');f.gate.release();await running;expect(f.machine.status.phase).toBe('complete');expect(f.keyBatches).toBe(1);expect(await f.manager.keyVersions(u)).toEqual([1,2,3]);
+});
+
+test('unchanged authenticated bootstrap validates trust and attestation without secure.update',async()=>{
+ const f=manager();await f.manager.acceptDelivery(u,t.deviceId,envelopes,trust,attestation);const update=f.store.update.bind(f.store);let writes=0;
+ f.store.update=async(values,prefixes)=>{writes++;await update(values,prefixes);};
+ expect(await f.manager.acceptBootstrap(u,t.deviceId,[],trust,attestation)).toBe('ready');expect(writes).toBe(0);expect(await manager(f.store).manager.acceptBootstrap(u,t.deviceId,[],trust,attestation)).toBe('ready');expect(writes).toBe(0);expect(await f.manager.accountKey(u,3)).toEqual(keys[2]);
 });

@@ -56,6 +56,8 @@ mock.module("@podjs/framework/services", () => ({
   bytesToBase64:(value:Uint8Array)=>Buffer.from(value).toString("base64"),
   stringToUtf8:(value:string)=>new TextEncoder().encode(value),
   hostOperation: (method:string,args:Record<string,unknown>)=>{
+
+    if(method==='sql.transaction')return {result:sqlite.transaction(args.statements as any)};
     if(method==='cloud.acquire'){cloudOps.push(method);return {result:Promise.resolve({acquired:!cloudBusy&&(!localTransferHeld||args.localTransferOwner===true)})};}
     if(method==='cloud.release'){cloudOps.push(method);return {result:Promise.resolve()};}
     if(method==='secure.update'){cloudOps.push(method);expect(args).toEqual({values:{},removePrefixes:['watchrss.cloud.state.']});return {result:Promise.resolve()};}

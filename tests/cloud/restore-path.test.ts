@@ -1,3 +1,5 @@
+import {plainPart,openLocalPart} from './plain-parts-fixture';
+import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {test,expect} from 'bun:test';
 import {mkdtempSync,readFileSync,rmSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -23,6 +25,7 @@ function zipEntry(entries:{name:string;bytes:Uint8Array;deflate?:boolean}[]){
 }
 for(const mode of ['entry-ref','pending'])test('RESTOREPATH production bundle '+mode+': baseline signature or durable convergence',async()=>{
  const baseline=process.env.RESTOREPATH_BASELINE==='1',output=mkdtempSync(join(tmpdir(),'restore-path-'));
+ const stateSql=stateSqlFixture();
  try{
  const entry=resolve(process.env.RESTOREPATH_APP_ROOT??resolve(import.meta.dir,'../..'),'tests/cloud/fixtures/restore-path-entry.ts');
  const artifact=(await buildBackground({path:entry},output)).path!;
@@ -52,7 +55,9 @@ for(const mode of ['entry-ref','pending'])test('RESTOREPATH production bundle '+
   if(!baseline&&(method==='file.write'||method==='file.gzip'||method==='file.gunzip'||method.startsWith('crypto.'))){expect(Number.isInteger(a.callsiteId)).toBe(true);expect(a.callsiteId).toBeGreaterThanOrEqual(0);expect(a.callsiteId).toBeLessThan(112);expect(a.sizeBand).toBeGreaterThanOrEqual(0);expect(a.sizeBand).toBeLessThanOrEqual(5);}
   calls.push(method);now+=method==='file.write'?(inflated?550:300):method.startsWith('secure.')?100:method==='file.read'?20:5;if(now>=deadline)throw Error('NATIVE_HARD_STOP');
   const execute=async():Promise<any>=>{switch(method){
+   case 'sql.query':case 'sql.execute':case 'sql.transaction':return stateSql.host(method,a);
    case 'runtime.delay':return null;
+   case 'secure.keys':return {keys:[...secure.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};
    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
    case 'secure.set':secure.set(a.key,a.value);return {};
    case 'secure.update':for(const [k,v]of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};
@@ -74,10 +79,10 @@ for(const mode of ['entry-ref','pending'])test('RESTOREPATH production bundle '+
    case 'file.gunzip':now+=50000;gzipCalls++;inflated=true;return resultFile(new Uint8Array(gunzipSync(files.get(a.path)!)));
    case 'crypto.closeSealedGzip':streams.delete(a.outputPrefix);return {};
    case 'crypto.gunzipSealedParts':{
-    let body=streams.get(a.outputPrefix);if(!body){const parts:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;parts.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}body=new Uint8Array(gunzipSync(Buffer.concat(parts)));if(body.length>a.maxOutputBytes||!a.allowShortOutput&&body.length!==a.maxOutputBytes)throw Error('invalid_gzip_length');streams.set(a.outputPrefix,body);now+=50000;gzipCalls++;inflated=true;}now+=500;
-    const part=body.subarray(a.offset,a.offset+262144),r=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),part),path=a.outputPrefix+a.offset+'.bin';files.set(path,new Uint8Array(Buffer.concat([r.nonce,r.ciphertext])));written.set(path,(written.get(path)??0)+1);const done=a.offset+part.length===body.length;return {offset:a.offset,bytes:part.length,done,...(done?{sha256:await crypto.sha256(body)}:{})};
+    let body=streams.get(a.outputPrefix);if(!body){const parts:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;parts.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}body=new Uint8Array(gunzipSync(Buffer.concat(parts)));if(body.length>a.maxOutputBytes||!a.allowShortOutput&&body.length!==a.maxOutputBytes)throw Error('invalid_gzip_length');streams.set(a.outputPrefix,body);now+=50000;gzipCalls++;inflated=true;}now+=500;
+    const part=body.subarray(a.offset,a.offset+262144),r=await crypto.encrypt(unb64(a.keyBase64),utf8Encode(a.aadPrefix+a.offset),part),path=a.outputPrefix+a.offset+'.bin';files.set(path,a.plaintext?plainPart(utf8Encode(a.aadPrefix+a.offset),part):new Uint8Array(Buffer.concat([r.nonce,r.ciphertext])));written.set(path,(written.get(path)??0)+1);const done=a.offset+part.length===body.length;return {offset:a.offset,bytes:part.length,done,...(done?{sha256:await crypto.sha256(body)}:{})};
    }
-   case 'crypto.openSealedParts':{const out:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;out.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}return resultFile(new Uint8Array(Buffer.concat(out)));}
+   case 'crypto.openSealedParts':{const out:Uint8Array[]=[];for(const p of a.parts){const b=files.get(p.path)!;out.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}return resultFile(new Uint8Array(Buffer.concat(out)));}
    default:throw Error('unsupported fixture method '+method);
   }};return await execute() as T;
  };
@@ -95,5 +100,5 @@ for(const mode of ['entry-ref','pending'])test('RESTOREPATH production bundle '+
  console.info('RESTOREPATH_SUMMARY',JSON.stringify({baseline,mode,capabilities:'bounded-native-sha256Bytes; no sha256Create in both baseline and candidate',sourceParts:51,archiveBytes:archive.length,entryBytes:body.length,proof}));
  if(baseline){expect(done).toBe(false);expect(proof.every(p=>p.commits===0&&p.sourceDecryptions===51&&p.streamedCalls===0)).toBe(true);expect(new Set(proof.map(p=>p.work)).size).toBe(1);expect(proof.every(p=>p.gunzipCalls===2&&p.hashes===1&&p.writes>=309&&p.writes<=326)).toBe(true);}
  else{expect(done).toBe(true);expect(proof.length).toBeGreaterThan(1);expect(sourceDecrypts).toBe(51);expect(proof.some(p=>p.streamedCalls>0)).toBe(true);expect(proof.every(p=>p.receipts>0||p.done)).toBe(true);expect([...written].filter(([p])=>/-p\d+\.bin$/.test(p)).every(([,n])=>n===1)).toBe(true);}
- }finally{rmSync(output,{recursive:true,force:true});}
+ }finally{stateSql.db.close();rmSync(output,{recursive:true,force:true});}
 },240000);

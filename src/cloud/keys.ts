@@ -2,7 +2,7 @@ import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {utf8Encode,type CloudKeyEnvelope,type StoredCloudKeyEnvelope,type CloudTrust} from './types';
 import {commit,rotation,attest,validateTrust,type V2Crypto} from './v2';
 import {cloudDisabled,type CloudGuard} from './guard';
-export interface CloudStringStore {compareAndSet?(key:string,expected:string|undefined,value:string|undefined):Promise<boolean>;get(key:string):Promise<string|undefined>;set(key:string,value:string):Promise<void>;update?(values:Record<string,string|null>,removePrefixes?:string[]):Promise<void>;}
+export interface CloudStringStore {keys?(prefixes:string[]):Promise<string[]>;compareAndSet?(key:string,expected:string|undefined,value:string|undefined):Promise<boolean>;get(key:string):Promise<string|undefined>;set(key:string,value:string):Promise<void>;update?(values:Record<string,string|null>,removePrefixes?:string[]):Promise<void>;}
 export interface DeviceKeyHost {
  publicKey(keyId:string):Promise<string>;
  unwrap(args:{keyId:string;publicKeySpki:string;saltBase64:string;infoBase64:string;nonceBase64:string;ciphertextBase64:string;aadBase64:string}):Promise<Uint8Array>;
@@ -53,7 +53,7 @@ export class WatchCloudKeyManager {
    try{
     if(!this.secure.update)throw Error('client_upgrade_required');
     // Remove the former write-only marker. Failed candidates stay on the server for the next bootstrap.
-    await this.secure.update({[prefix+'quarantine']:null});
+    if(await this.secure.get(prefix+'quarantine')!==undefined)await this.secure.update({[prefix+'quarantine']:null});
     const legacy=await this.legacy(userId);
     for(const c of commitments){const saved=await this.secure.get(`${prefix}${t.libraryEpoch}.${c.keyVersion}`);if(saved) savedVersions.add(c.keyVersion);if(saved??legacy[c.keyVersion])pending.set(c.keyVersion,base64ToBytes(saved??legacy[c.keyVersion]));}
     // Scoped slots were published only after authenticated validation. Recheck their prefix even after restart.
@@ -70,10 +70,11 @@ export class WatchCloudKeyManager {
     if(!pending.size)return 'waiting-approval' as const;
     const highest=Math.max(...pending.keys()),attested=attestation&&pending.get(attestation.keyVersion);if(!attestation||!attested||(requireAll&&attestation.keyVersion!==highest)||await attest(this.crypto(),attested,userId,t.libraryEpoch,deviceId,await this.publicKeySpki(userId,deviceId))!==attestation.mac)throw Error('device_attestation_invalid');
     if(!this.secure.update)throw Error('client_upgrade_required');
-    const values={...Object.fromEntries([...pending].map(([v,k])=>[`${prefix}${t.libraryEpoch}.${v}`,bytesToBase64(k)])),[await this.legacyName(userId)]:null};
+    const legacyName=await this.legacyName(userId),legacyPresent=await this.secure.get(legacyName)!==undefined;
+    const values={...Object.fromEntries([...pending].filter(([v])=>!savedVersions.has(v)).map(([v,k])=>[`${prefix}${t.libraryEpoch}.${v}`,bytesToBase64(k)])),...(legacyPresent?{[legacyName]:null}:{})};
     // Last synchronous authorization check. No await between this boundary and submitting the atomic batch.
     beforeCommit?.();
-    await this.secure.update(values);
+    if(Object.keys(values).length)await this.secure.update(values);
     this.verifiedUser=userId;for(const c of commitments)if(pending.has(c.keyVersion))this.verified.set(c.keyVersion,c.commitment);
     return 'ready' as const;
    }catch(error){if(!invalidated){this.verified=retained;this.verifiedUser=retained.size?userId:'';}throw error;}finally{for(const key of pending.values())key.fill(0);}

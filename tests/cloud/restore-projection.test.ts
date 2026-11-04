@@ -1,3 +1,5 @@
+import {plainPart,openLocalPart} from './plain-parts-fixture';
+import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {test,expect} from 'bun:test';
 import {mkdtempSync,readFileSync,rmSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -11,6 +13,7 @@ const {buildBackground}=await import(fw+'/packages/cli/src/background-build.ts')
 const b64=(b:Uint8Array)=>Buffer.from(b).toString('base64'),unb64=(s:string)=>new Uint8Array(Buffer.from(s,'base64'));
 test('RESTOREPROJ frozen production adapters: count-shaped baseline stall or resumable candidate convergence',async()=>{
  const baseline=process.env.RESTOREPROJ_BASELINE==='1',output=mkdtempSync(join(tmpdir(),'restore-projection-'));
+ const stateSql=stateSqlFixture();
  try{
   const appRoot=process.env.RESTOREPROJ_APP_ROOT??resolve(import.meta.dir,'../..'),artifact=(await buildBackground({path:resolve(appRoot,'tests/cloud/fixtures/restore-projection-entry.ts')},output)).path!,source=readFileSync(join(output,artifact.file),'utf8');
   const files=new Map<string,Uint8Array>(),secure=new Map<string,string>(),writes=new Map<string,number>(),proof:any[]=[];
@@ -21,8 +24,10 @@ test('RESTOREPROJ frozen production adapters: count-shaped baseline stall or res
    if(!seeding){trace.observe(a);methods[method]=(methods[method]??0)+1;now+=method==='file.write'?940:method==='file.commit'?6000:method==='file.compose'?6000:method==='crypto.largeAesGcmDecrypt'?500:method==='crypto.openSealedParts'?500:method==='crypto.aesGcmDecrypt'?100:method.startsWith('secure.')?20:method==='file.read'?20:5;}
    if(now>=deadline)throw Error('NATIVE_HARD_STOP');
    const execute=async():Promise<any>=>{switch(method){
+   case 'sql.query':case 'sql.execute':case 'sql.transaction':return stateSql.host(method,a);
     case 'runtime.delay':return null;
-    case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
+    case 'secure.keys':return {keys:[...secure.keys()].filter(k=>a.prefixes.some((p:string)=>k.startsWith(p))&&k>(a.after??'')).sort(),hasMore:false};
+   case 'secure.get':return {exists:secure.has(a.key),value:secure.get(a.key)};
     case 'secure.set':secure.set(a.key,a.value);return {};
     case 'secure.update':for(const[k,v]of Object.entries(a.values)){if(v===null)secure.delete(k);else secure.set(k,String(v));}return {updated:true};
     case 'secure.compareAndSet':if((secure.get(a.key)??null)!==a.expected)return {updated:false};secure.set(a.key,a.value);return {updated:true};
@@ -40,7 +45,7 @@ test('RESTOREPROJ frozen production adapters: count-shaped baseline stall or res
     case 'crypto.aesGcmDecrypt':return {dataBase64:b64(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),unb64(a.ciphertextBase64)))};
     case 'crypto.largeAesGcmEncrypt':{const s=await crypto.encrypt(unb64(a.keyBase64),unb64(a.aadBase64),files.get(a.inputPath)!);return {...await resultFile(s.ciphertext),nonceBase64:b64(s.nonce)};}
     case 'crypto.largeAesGcmDecrypt':return resultFile(await crypto.decrypt(unb64(a.keyBase64),unb64(a.aadBase64),unb64(a.nonceBase64),files.get(a.inputPath)!));
-    case 'crypto.openSealedParts':{const parts:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const p=a.parts[i],b=files.get(p.path);if(!b||b.length!==p.bytes+28)throw Error('sealed_part_invalid_'+i);try{parts.push(await crypto.decrypt(unb64(a.keyBase64),unb64(p.aadBase64),b.subarray(0,12),b.subarray(12)));}catch{throw Error('sealed_part_invalid_'+i);}}return resultFile(new Uint8Array(Buffer.concat(parts)));}
+    case 'crypto.openSealedParts':{const parts:Uint8Array[]=[];for(let i=0;i<a.parts.length;i++){const p=a.parts[i],b=files.get(p.path);if(!b||b.length!==p.bytes+28)throw Error('sealed_part_invalid_'+i);try{parts.push(await openLocalPart(unb64(a.keyBase64),unb64(p.aadBase64),b,crypto.decrypt));}catch{throw Error('sealed_part_invalid_'+i);}}return resultFile(new Uint8Array(Buffer.concat(parts)));}
     default:throw Error('unsupported fixture method '+method);
    }};return await execute() as T;
   };
@@ -62,5 +67,5 @@ test('RESTOREPROJ frozen production adapters: count-shaped baseline stall or res
   if(baseline){expect(done).toBe(false);for(const p of proof){expect(p.counts.find(([id]:number[])=>id===69)?.[1]).toBe(134);expect(p.counts.find(([id]:number[])=>id===67)?.[1]).toBe(33);expect(p.counts.find(([id]:number[])=>id===74)?.[1]).toBe(2);expect(p.largeDecrypt).toBe(51);expect(p.receipts).toBe(0);expect(p.commits).toBe(0);expect(p.writes).toBeGreaterThanOrEqual(260);expect(p.writes).toBeLessThanOrEqual(280);}expect(proof.at(-1).code).toContain('cloud_snapshot_progress_stalled');}
   else{expect(done).toBe(true);expect(proof.length).toBeGreaterThan(1);expect(proof.filter(p=>!p.done).every(p=>p.receipts>0)).toBe(true);expect(proof.every(p=>!p.counts.some(([id]:number[])=>id===69))).toBe(true);expect([...writes].filter(([path])=>path.startsWith('books/')).every(([,count])=>count===1)).toBe(true);expect(proof.reduce((n,p)=>n+p.compose,0)).toBe(1);}
   console.info('RESTOREPROJ_SUMMARY',JSON.stringify({baseline,sourceShape:{fullParts:34,shortParts:16,smallMetadata:33,largeCallsiteRequests:134,legacyBookWrites:184},proof}));
- }finally{rmSync(output,{recursive:true,force:true});}
+ }finally{stateSql.db.close();rmSync(output,{recursive:true,force:true});}
 },90000);
