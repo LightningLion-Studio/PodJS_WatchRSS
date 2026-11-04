@@ -1,0 +1,1125 @@
+{
+  "apply": [
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "missing",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": null
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "equal",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": true,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "新标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 101
+        },
+        "conflicts": []
+      },
+      "name": "same-content metadata newer",
+      "remote": {
+        "createdAt": 1,
+        "pinned": true,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "新标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 101
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "z",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie modifiedBy",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "z",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": true,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie deleted",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": true,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie title",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": "work",
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie folder",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": "work",
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": true,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie pinned",
+      "remote": {
+        "createdAt": 1,
+        "pinned": true,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 2,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie createdAt",
+      "remote": {
+        "createdAt": 2,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "zzz",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "same-content tie base",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "zzz",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 101
+        },
+        "conflicts": []
+      },
+      "name": "same-content older ignored",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 101
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "local"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "local",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 300
+        },
+        "conflicts": []
+      },
+      "name": "older deletion ignored",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 200,
+        "folder": null,
+        "deleted": true,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "local",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 300
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "one\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 300,
+          "folder": null,
+          "deleted": true,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 300
+        },
+        "conflicts": []
+      },
+      "name": "old edit cannot resurrect tombstone",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "old",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 300,
+        "folder": null,
+        "deleted": true,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 300
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "different remote"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 200,
+          "folder": null,
+          "deleted": true,
+          "markdown": "different remote",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "80711e03214c07bc0b7f0158bebf93b8d2c47a6727f21d0478654c42da5f7747",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 200
+        },
+        "conflicts": []
+      },
+      "name": "newer delete clean",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 200,
+        "folder": null,
+        "deleted": true,
+        "markdown": "different remote",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "80711e03214c07bc0b7f0158bebf93b8d2c47a6727f21d0478654c42da5f7747",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "restored"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "restored",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "eb00bf0aba491c620ddf47bf68068be4cc52c39bf3b8b554e2c51ff74e5e915e",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 200
+        },
+        "conflicts": []
+      },
+      "name": "local deleted remote newer imported",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "restored",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "eb00bf0aba491c620ddf47bf68068be4cc52c39bf3b8b554e2c51ff74e5e915e",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 100,
+        "folder": null,
+        "deleted": true,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "remote"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "remote",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "b71199ebd070b36beab7317920c2c2f1d777df8d05e5527d8458fda57cb17a7a",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 200
+        },
+        "conflicts": []
+      },
+      "name": "clean local remote newer",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "remote",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "b71199ebd070b36beab7317920c2c2f1d777df8d05e5527d8458fda57cb17a7a",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "ONE\ntwo\nthree"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "ONE\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "name": "remote base keeps dirty local",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "ONE\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "ONE\ntwo\nTHREE"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "ONE\ntwo\nTHREE",
+          "modifiedBy": "mini",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "013c88e05d1b8a63b5f1b55f53a7c994c8720882c8cdd7df57aa79b08a45e899",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 999
+        },
+        "conflicts": []
+      },
+      "name": "independent",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nTHREE",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "71927e19bbb96e81051523b65b492cf8d9be669bd4da9266ef68cbd477df85e3",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "ONE\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"conflict": true},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "ONE\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": [{
+          "createdAt": 999,
+          "remoteDeviceId": "phone",
+          "baseMarkdown": "one\ntwo\nthree",
+          "localMarkdown": "ONE\ntwo\nthree",
+          "noteId": "n-1",
+          "conflictId": "6c2655aa7f4832ef5dbc43e0f1b845fe16f774b66fe3be32554b7360ed449213",
+          "remoteMarkdown": "REMOTE\ntwo\nthree"
+        }]
+      },
+      "name": "overlap conflict",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "REMOTE\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "07983b5f59345399fb014c550d5b038c34c5b4aee7ea4edc0d6c7174a489ddf3",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "ONE\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    },
+    {
+      "expected": {
+        "result": {"markdown": "ONE\ntwo\nTHREE"},
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "ONE\ntwo\nTHREE",
+          "modifiedBy": "mini",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "013c88e05d1b8a63b5f1b55f53a7c994c8720882c8cdd7df57aa79b08a45e899",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 999
+        },
+        "conflicts": []
+      },
+      "name": "newer deletion vs dirty phone diff3",
+      "remote": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 200,
+        "folder": null,
+        "deleted": true,
+        "markdown": "one\ntwo\nTHREE",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "71927e19bbb96e81051523b65b492cf8d9be669bd4da9266ef68cbd477df85e3",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      "local": {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "ONE\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    }
+  ],
+  "plain": [
+    {
+      "input": "# 标题\n![猫](assets/cat.jpg)\n[链接](https://example.com)",
+      "expected": "标题\n[图片：猫]\n链接"
+    },
+    {
+      "input": "<p><span style=\"color: red;\">红色正文<\/span><\/p>\n<ol><li><b>第一项<\/b><\/li><li>第二项<\/li><\/ol>",
+      "expected": "红色正文\n第一项\n第二项"
+    },
+    {
+      "input": "# 标题\n\n正文",
+      "expected": "标题\n\n正文"
+    },
+    {
+      "input": "<p>&nbsp;&copy;&euro;&NotEqualTilde; &#x1F600; &amp; &lt; &notit;<\/p>",
+      "expected": "©\u20ac≂̸ 😀 & < &notit;"
+    },
+    {
+      "input": "<p>x<\/p><img src=\"assets/x\" alt=\"猫\"><br><img src=\"assets/y\">",
+      "expected": "x\n[图片：猫]\n[图片]"
+    },
+    {
+      "input": "<script>x<\/script> **bold**",
+      "expected": "<script>x<\/script> bold"
+    },
+    {
+      "input": "> q\n1. one\n- two\n`code` ~~del~~",
+      "expected": "q\none\ntwo\ncode del"
+    },
+    {
+      "input": "<div>  a  <\/div><p>\n \n<\/p><li> one <\/li>",
+      "expected": "a\n one"
+    }
+  ],
+  "merge": [
+    {
+      "expected": {"markdown": "b"},
+      "remote": "b",
+      "local": "b",
+      "base": "a"
+    },
+    {
+      "expected": {"markdown": "b"},
+      "remote": "b",
+      "local": "a",
+      "base": "a"
+    },
+    {
+      "expected": {"markdown": "b"},
+      "remote": "a",
+      "local": "b",
+      "base": "a"
+    },
+    {
+      "expected": {"markdown": "ONE\ntwo\nTHREE"},
+      "remote": "one\ntwo\nTHREE",
+      "local": "ONE\ntwo\nthree",
+      "base": "one\ntwo\nthree"
+    },
+    {
+      "expected": {"conflict": true},
+      "remote": "y\nb",
+      "local": "x\nb",
+      "base": "a\nb"
+    },
+    {
+      "expected": {"markdown": "y\nx\na\nb"},
+      "remote": "y\na\nb",
+      "local": "x\na\nb",
+      "base": "a\nb"
+    },
+    {
+      "expected": {"markdown": "a\nc"},
+      "remote": "a\nb\nc",
+      "local": "a",
+      "base": "a\nb"
+    },
+    {
+      "expected": {"markdown": "A\nb\nC"},
+      "remote": "a\r\nb\r\nC",
+      "local": "A\r\nb\r\nc",
+      "base": "a\r\nb\r\nc"
+    },
+    {
+      "expected": {"conflict": true},
+      "remote": "a\nB\nc",
+      "local": "A\nb\nC",
+      "base": "a\nb\nc"
+    },
+    {
+      "expected": {"conflict": true},
+      "remote": "b",
+      "local": "a",
+      "base": ""
+    },
+    {
+      "expected": {"markdown": "A\nx"},
+      "remote": "A\n",
+      "local": "a\nx",
+      "base": "a\n"
+    }
+  ],
+  "phoneState": {
+    "notes": [
+      {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 200,
+        "folder": "work",
+        "deleted": true,
+        "markdown": "删除",
+        "modifiedBy": "phone",
+        "id": "n-0",
+        "title": "标题",
+        "hash": "2f9daa828907b93ff8a00d41a16828e0c6388bf3a95dadf816c8ee9c3bdac37d",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 200
+      },
+      {
+        "createdAt": 1,
+        "pinned": false,
+        "deletedAt": 0,
+        "folder": null,
+        "deleted": false,
+        "markdown": "one\ntwo\nthree",
+        "modifiedBy": "phone",
+        "id": "n-1",
+        "title": "标题",
+        "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+        "base": "one\ntwo\nthree",
+        "updatedAt": 100
+      }
+    ],
+    "format": "watchrss-notes",
+    "version": 1
+  },
+  "export": [
+    {
+      "expected": "---\nwatchrss-note: 1\nid: n-1\ncreated-at: 1\nupdated-at: 100\n---\none\ntwo\nthree\n",
+      "id": "n-1"
+    },
+    {
+      "expected": "---\nwatchrss-note: 1\nid: n-0\nfolder: work\ncreated-at: 1\nupdated-at: 200\n---\n删除\n",
+      "id": "n-0"
+    }
+  ]
+}

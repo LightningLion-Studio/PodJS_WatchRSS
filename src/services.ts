@@ -1,3 +1,4 @@
+import {createNoteAssetWriter} from './notes/cloud-assets';
 import {readReaderBody} from './reader/body-state.ts';
 import {querySyncPages} from './sync/sql-pages.ts';
 import {readNovelDirectory} from "./reader/novel.ts";
@@ -433,6 +434,7 @@ export async function getLibrarySyncRepository():Promise<SqlLibrarySessionReposi
  return libraryRepository();
 }
 function libraryRepository(){return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
+  noteAssetWriter:createNoteAssetWriter(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
   bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),
   reencodeStoredBodies:reencodeStoredArticleBodies,codec:hostArticleBodyCodec,text:hostSyncText,uri:{parseUri:hostSyncText.parseUri,parseAndroid:value=>uri.parse(value,"android")},
   files:{storeText:(key,text)=>importedTextWriter.storeText(key,text),hydrate:hydrateStoredContent},

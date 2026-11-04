@@ -1,3 +1,6 @@
+import {phoneNotePlainText} from './phone-text';
+import {trimNoteText} from './text';
+import {mergeNoteMarkdown} from './merge';
 import {onlyChangedSql} from '@podjs/framework/sql-changes';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {memoPlainText,memoTitle} from './text.ts';
@@ -34,7 +37,10 @@ function folder(row: Record<string,unknown>): MemoFolder { return {folderId:Stri
 // Kept local so notes also work in the Android QuickJS host, where Web Crypto is optional.
 const sha256=(value:string)=>sha256Hex(utf8Encode(value));
 
+const NOTE_COLUMNS='note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at';
+const noteValues=(n:MemoNote)=>[n.noteId,n.folderId,n.title,n.markdown,n.plainText,n.contentHash,n.baseContentHash,n.baseMarkdown,n.pinned?1:0,n.createdAt,n.updatedAt,n.modifiedBy,n.deleted?1:0,n.deletedAt];
 export class MemoRepository {
+  private cloudSchema?:Promise<void>;
   constructor(private readonly db: SqlDatabase, private readonly deviceId: string, private readonly idFactory: () => string = defaultId, private readonly clock: () => number = Date.now) {}
   async initialize(): Promise<void> { await initializeMemoSchema(this.db); }
   async list(): Promise<MemoNote[]> { return (await this.db.query(`SELECT * FROM memo_notes WHERE deleted=0 ORDER BY pinned DESC,updated_at DESC`)).map(note); }
@@ -59,6 +65,49 @@ export class MemoRepository {
       if(this.db.transactionChanges){const counts=await this.db.transactionChanges([statement]);applied+=counts[0]!>0?1:0;}else{await this.db.execute(statement.sql,statement.params);applied++;}
     }
     return applied;
+  }
+  /** Cloud import follows Phone NoteRepository.applyRemote, including durable conflicts.
+   * Each transaction checks the exact read basis; a concurrent editor/link mutation
+   * aborts the import so its restore receipt cannot advance. */
+  async applyRemote(remote:MemoNote):Promise<number> {
+    await (this.cloudSchema??=this.db.transaction([
+      {sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},
+      {sql:'CREATE TABLE IF NOT EXISTS note_merge_guard(id INTEGER PRIMARY KEY CHECK(id=1))'},
+      {sql:'CREATE TABLE IF NOT EXISTS note_cloud_receipts(remote_hash TEXT PRIMARY KEY,note_id TEXT NOT NULL)'},
+    ]).catch(error=>{this.cloudSchema=undefined;throw error;}));
+    const remoteHash=sha256(JSON.stringify(remote));
+    if((await this.db.query('SELECT 1 FROM note_cloud_receipts WHERE remote_hash=?',[remoteHash])).length)return 0;
+    const row=(await this.db.query('SELECT * FROM memo_notes WHERE note_id=?',[remote.noteId]))[0],local=row?note(row):null;
+    const finish=async(statements:{sql:string;params?:SqlParams}[],changed:number)=>{
+      if(local)statements.unshift({sql:'INSERT INTO note_merge_guard(id) SELECT CASE WHEN EXISTS(SELECT 1 FROM memo_notes WHERE '+NOTE_COLUMNS.split(',').map(c=>c+' IS ?').join(' AND ')+') THEN 1 ELSE 0 END',params:noteValues(local)});
+      statements.push({sql:'INSERT INTO note_cloud_receipts VALUES(?,?)',params:[remoteHash,remote.noteId]});
+      if(local)statements.push({sql:'DELETE FROM note_merge_guard WHERE id=1'});
+      await this.db.transaction(statements);return changed;
+    };
+    let value=remote,conflict=false;
+    if(local){
+      if(JSON.stringify(local)===JSON.stringify(remote))return finish([],0);
+      if(local.markdown===remote.markdown&&local.contentHash===remote.contentHash){
+        const keys=(n:MemoNote):Array<number|string|boolean>=>[Math.max(n.updatedAt,n.deletedAt),n.modifiedBy,n.deleted,n.title,n.folderId!==null,n.folderId??'',n.pinned,n.createdAt,n.baseContentHash,n.baseMarkdown];
+        const a=keys(remote),b=keys(local);let order=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]){order=a[i]!>b[i]!?1:-1;break;}if(order<=0)return finish([],0);
+      }else{
+        if(Math.max(remote.updatedAt,remote.deletedAt)<Math.max(local.updatedAt,local.deletedAt)&&(local.deleted||remote.deleted))return finish([],0);
+        if(!(local.deleted||remote.updatedAt>local.updatedAt&&local.contentHash===local.baseContentHash)){
+          const markdown=mergeNoteMarkdown(local.baseMarkdown,local.markdown,remote.markdown);
+          if(markdown===local.markdown)return finish([],0);
+          if(markdown!==null&&!trimNoteText(local.title)&&!trimNoteText(phoneNotePlainText(markdown)))throw Error('笔记不能为空');
+          if(markdown===null)conflict=true;
+          else value={...local,title:trimNoteText(local.title)||phoneNotePlainText(markdown).split(/\r\n|\r|\n/)[0].slice(0,80),markdown,plainText:phoneNotePlainText(markdown),contentHash:sha256(markdown),updatedAt:this.clock(),modifiedBy:this.deviceId,deleted:false,deletedAt:0};
+        }
+      }
+    }
+    const statements:{sql:string;params?:SqlParams}[]=[];
+    if(conflict){
+      const id=sha256([local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy].join('\0'));
+      if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE conflict_id=?',[id])).length)return finish([],0);
+      statements.push({sql:'INSERT OR IGNORE INTO note_merge_conflicts VALUES(?,?,?,?,?,?,?)',params:[id,local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy,this.clock()]});
+    }else statements.push({sql:(local?'INSERT OR REPLACE':'INSERT')+' INTO memo_notes('+NOTE_COLUMNS+') VALUES('+noteValues(value).map(()=>'?').join(',')+')',params:noteValues(value)});
+    return finish(statements,1);
   }
   async get(noteId: string): Promise<MemoNote | null> { const row=(await this.db.query(`SELECT * FROM memo_notes WHERE note_id=? AND deleted=0 LIMIT 1`,[noteId]))[0]; return row?note(row):null; }
   async listFolders(): Promise<MemoFolder[]> { return (await this.db.query(`SELECT * FROM memo_folders WHERE deleted=0 ORDER BY sort_order,name`)).map(folder); }

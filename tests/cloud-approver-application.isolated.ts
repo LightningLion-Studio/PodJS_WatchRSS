@@ -12,7 +12,7 @@ mock.module('../src/cloud/gate.ts',()=>({cloudGate:{allowed:true,require(){}}}))
 let account={userId:'account',backendBaseUrl:'https://backend.invalid'};
 mock.module('../src/llm/runtime.ts',()=>({summaryAccountStore:{read:async()=>account,subscribe:(fn:any)=>{accountListeners.add(fn);return()=>accountListeners.delete(fn);}}}));
 mock.module('../src/core/library-mutations.ts',()=>({subscribeLibraryMutations:()=>()=>{}}));
-mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyLibraryChanged(origin:string){for(const fn of channelListeners)fn({kind:"library",origin});},services:{subscribeChannel:(fn:(e:any)=>void)=>{channelListeners.add(fn);return()=>channelListeners.delete(fn);}}}));
+mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyNotesChanged(){},notifyLibraryChanged(origin:string){for(const fn of channelListeners)fn({kind:"library",origin});},services:{subscribeChannel:(fn:(e:any)=>void)=>{channelListeners.add(fn);return()=>channelListeners.delete(fn);}}}));
 mock.module('../src/cloud/status.ts',()=>({connectCloudAccountStatus:()=>()=>{},notifyCloudAccountStatus(){}}));
 let doSync!:()=>Promise<unknown>;
 mock.module('../src/cloud/scheduler.ts',()=>({WatchCloudScheduler:class {constructor(p:any){doSync=()=>p.sync(false);}foreground(){}hold(){}accountChanged(){}async start(){}dispose(){}trigger(){triggers++;}async setUpgradeRequired(){}deferUntil(){}}}));

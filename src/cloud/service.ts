@@ -131,7 +131,7 @@ export class WatchCloudSyncService {
   if(!restore.active)await restore.begin();
   await current();const heads=await s.client.snapshotHeads();heads.forEach(headValid);
   if(new Set(heads.map(h=>h.sourceDeviceId)).size!==heads.length)throw Error('重复云设备 head');
-  const supported=(o:import('./codec').CloudObject)=>o.name===PRIVATE_OVERLAY_NAME||o.name.startsWith('private/articles/')||o.name==='rss-state.json'||o.name==='library-sync.json'||o.name==='private-library.wrss'||o.name.startsWith('reader/')||!!o.privateBook;
+  const supported=(o:import('./codec').CloudObject)=>o.name==='notes-state.json'||o.name==='notes-assets.zip'||o.name===PRIVATE_OVERLAY_NAME||o.name.startsWith('private/articles/')||o.name==='rss-state.json'||o.name==='library-sync.json'||o.name==='private-library.wrss'||o.name.startsWith('reader/')||!!o.privateBook;
   const restored=await restoreSnapshots({session:s,heads,full,journal:restore,current,progress:value=>{this.value={...this.value,restoreProgress:value};this.emit();},manifest:(h,b)=>this.manifest(s,h,b),hash:this.ports.hash,supported,now:this.ports.now??Date.now,status:(percent,phase)=>this.set(phase==='apply'?'merging':'downloading',phase==='apply'?`正在落盘私有资料 ${percent}%`:`正在恢复云快照 ${percent}%`,member),changed:()=>this.ports.onChanged?.()});
   const {snapshots,compatibility}=restored;let {changed,pendingItems,abandonedItems,formatBlocked}=restored;
   // A different library owner needs an explicit choice before rebuilding the
@@ -172,7 +172,7 @@ export class WatchCloudSyncService {
   if(own&&full){let cached=await s.cache.manifest(s.userId,own.id);if(cached&&(cached.length!==own.manifestSizeBytes||await this.ports.hash(cached)!==own.manifestSha256))cached=undefined;
    if(!cached){const remote=await s.client.snapshot(own.id);cached=await s.client.download(remote.manifestUrl,own.manifestSizeBytes,own.manifestSha256);}
    previous=snapshots.find(v=>v.h.id===own.id)?.manifest??await this.manifest(s,own,cached);await s.cache.storeManifest(s.userId,own.id,cached);
-   if(own.keyVersion!==version&&(cloudHasUnknownData(previous)||previous.objects.some(o=>cloudCompatibility(o).readOnly||cloudHasUnknownData(o)||!supported(o)))){formatBlocked=true;compatibility.opaque++;}
+   if(own.keyVersion!==version&&(cloudHasUnknownData(previous)||previous.objects.some(o=>cloudCompatibility(o).readOnly||cloudHasUnknownData(o)||o.name==='notes-state.json'||o.name==='notes-assets.zip'||!supported(o)))){formatBlocked=true;compatibility.opaque++;}
   }
   const verifiedSequences=new Map(await Promise.all(snapshots.map(async v=>[v.h.sourceDeviceId,await s.state.applied(v.h.sourceDeviceId,true)] as const)));
   const verifiedParents=snapshots.filter(v=>v.h.deviceSequence<=(verifiedSequences.get(v.h.sourceDeviceId)??0));

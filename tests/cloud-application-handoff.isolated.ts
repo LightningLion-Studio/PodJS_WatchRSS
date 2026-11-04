@@ -12,7 +12,7 @@ mock.module('../src/cloud/host.ts',()=>({initializeCloudHost:async()=>true}));
 mock.module('../src/cloud/gate.ts',()=>({cloudGate:{allowed:true,require(){}}}));
 mock.module('../src/llm/runtime.ts',()=>({summaryAccountStore:{read:async()=>account,subscribe:()=>()=>{}}}));
 mock.module('../src/core/library-mutations.ts',()=>({subscribeLibraryMutations:()=>()=>{}}));
-mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyLibraryChanged(){},services:{subscribeChannel:()=>()=>{}}}));
+mock.module('../src/services.ts',()=>({getLibrarySyncRepository:async()=>({}),notifyNotesChanged(){},notifyLibraryChanged(){},services:{subscribeChannel:()=>()=>{}}}));
 mock.module('../src/cloud/status.ts',()=>({connectCloudAccountStatus:()=>()=>{},notifyCloudAccountStatus(){}}));
 mock.module('../src/cloud/runtime.ts',()=>({createCloudRuntime:(...args:any[])=>({
  inspectOwner:async()=>true,

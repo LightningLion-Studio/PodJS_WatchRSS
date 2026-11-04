@@ -1,0 +1,115 @@
+{
+  "entry": "tests/runtime-notesimport/main.tsx",
+  "appId": "dev.watchrss.notesimport",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "name": "NOTESIMPORT fixture",
+  "bytecode": {
+    "stripSource": true
+  },
+  "android": {
+    "resources": "android/res",
+    "theme": "@style/Theme.WatchRSS.PodJS",
+    "cleartextTraffic": true,
+    "splash": {
+      "background": "#000000",
+      "icon": "@drawable/watchrss_splash_icon",
+      "iconBackground": "#000000",
+      "exit": {
+        "fade": true,
+        "scale": 1.12,
+        "durationMs": 80
+      }
+    },
+    "bleProvisioning": false
+  },
+  "capabilities": [
+    "input.touch",
+    "input.rotary",
+    "input.text",
+    "text.layout",
+    "text.environment",
+    "data.sqlite",
+    "data.uri",
+    "data.kv",
+    "net.http",
+    "net.download",
+    "data.files.chunks",
+    "system.browser",
+    "system.browser.inApp",
+    "system.browser.inApp.theme",
+    "data.secure",
+    "media.video",
+    "media.tts",
+    "media.audio",
+    "data.images",
+    "system.browser.auth",
+    "runtime.timer",
+    "crypto.basic",
+    "system.toast",
+    "input.time",
+    "device.location",
+    "text.raster",
+    "net.rfcomm",
+    "net.tcp",
+    "net.stream",
+    "net.websocket",
+    "net.discovery",
+    "net.ble.provision",
+    "display.power",
+    "system.share",
+    "host.lifecycle"
+  ],
+  "resources": {
+    "preloadFontSlots": [
+      2,
+      1,
+      19,
+      22
+    ],
+    "glyphCache": {
+      "preseedScanned": true,
+      "warmCharsFile": "assets/fonts/glyph_warm_chars.txt",
+      "warmChars": "◆◇戤搏栉桀氧洮炸猝盏裰郝镧陶顿麟腕上RSS备忘录纯文本编辑手机同步还没有频道点击下方添加你的第一个订阅源推荐一键加入官方支持频道个人中心关注收藏未读正在刷新全部设置阅读关于帮助网络连接加载失败返回确定取消删除标记已读置顶移动到顶部"
+    },
+    "fontRegular": "assets/fonts/watch_sans.ttf",
+    "fontBold": "assets/fonts/reader_default_bold.ttf",
+    "extraCharsFile": "assets/fonts/charset.txt",
+    "fontSlots": [
+      {
+        "slot": 33,
+        "px": 12,
+        "path": "assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 34,
+        "px": 14,
+        "path": "assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 35,
+        "px": 16,
+        "path": "assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 36,
+        "px": 18,
+        "path": "assets/fonts/reader_default_regular.ttf",
+        "rasterAdvances": true
+      },
+      {
+        "slot": 37,
+        "px": 21.7,
+        "path": "assets/fonts/reader_default_bold.ttf",
+        "bold": true,
+        "rasterAdvances": true
+      }
+    ],
+    "assets": {
+      "fonts/watch-sans.ttf": "assets/fonts/watch_sans.ttf"
+    }
+  }
+}

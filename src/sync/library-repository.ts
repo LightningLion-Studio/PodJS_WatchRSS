@@ -1,3 +1,5 @@
+import {MemoRepository} from '../notes/repository';
+import type {MemoNote} from '../notes/types';
 import type {FileCheckpoint} from '@podjs/framework/work-window';
 import {mergeLegacyBookReading,legacyBookReadingArticle} from '../books/legacy-cloud-reading';
 import {CloudReadingStore} from './cloud-reading-store';
@@ -38,6 +40,7 @@ import type {ReceivedArticle,RequestedArticleBody} from './article-batches.ts';
 import type {SyncedSource} from './library-wire.ts';
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
+ noteAssetWriter?:(key:string,bytes:Uint8Array)=>Promise<number>;
  reencodeStoredBodies?:(ids:readonly number[])=>Promise<readonly ReencodedBody[]>;
  clearContentFiles?:(privateData:boolean,control?:LibraryClearControl)=>Promise<void>;
  finishLibraryClear?:(privateData:boolean,check:()=>void)=>Promise<void>;
@@ -63,6 +66,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private peerCanonical=new Map<string,boolean>();private peerBooks=new Map<string,boolean>();
  readonly books:SqlBookStore|undefined;private bookActions:BookSyncActions|undefined;
  private readonly projection:LibraryProjectionCache;
+ private cloudMemo?:Promise<MemoRepository>;
  private cloudProgress?:((unit:string)=>Promise<void>);
  setCloudProgress(sink?:(unit:string)=>Promise<void>){this.cloudProgress=sink;this.local.setCloudProgress(sink);}
  private cloudDiagnostic?:RepositoryDiagnostic;
@@ -78,6 +82,11 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   this.receiver=new SyncArticleReceiver(db,ports.codec,ports.files,ports.migrateReading,this.now,(a,target)=>this.local.resolveIncomingBody(a,target),()=>this.projectionGeneration,(stage,ms)=>this.perf.add(stage,ms));
   this.deletion=new SyncArticleDeletionStore(db,ports.codec,(a,target)=>this.local.resolveIncomingBody(a,target),itemIds=>ports.cleanupRemovedContent({itemIds,channels:[]}));this.sources=new SqlSourceSyncStore(db,ports.uri,this.now,removed=>ports.cleanupRemovedContent({itemIds:removed.itemIds,channels:[removed.channel]}));this.sequence=new SqlLibrarySequenceStore(db,this.now);
  }
+ async mergeCloudNotes(notes:readonly MemoNote[],check:()=>void=()=>{}){
+  const repository=await (this.cloudMemo??=(async()=>{const value=new MemoRepository(this.db,await this.deviceId(),undefined,this.now);await value.initialize();return value;})().catch(error=>{this.cloudMemo=undefined;throw error;}));let changed=0;
+  for(const note of notes){check();changed+=await repository.applyRemote(note);check();}return changed;
+ }
+ async mergeCloudNoteAsset(key:string,bytes:Uint8Array){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes);}
  private report(fields:Record<string,string|number>){try{this.ports.diagnostic?.(fields);if(fields.event==='library-work')this.cloudDiagnostic?.(fields);}catch{/* Diagnostics never change the exchange. */}}
  private async snapshotRetry(attempt:number,canonical:boolean,revision:number,sequence:number,reason:string){
   this.report({event:'library-work',stage:'snapshot-retry',outcome:'deferred',attempt,reason,durationMillis:0});
@@ -402,7 +411,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   control?.check();
   const revision=await libraryRevision(db);
   const caches=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sync_projection_light','sync_projection_rows','sync_projection_header','sync_projection_events','sync_fast_encoded_cache','sync_fast_library_baseline','sync_fast_roots','sync_fast_receipts','sync_stable_article_ids')")).map(row=>String(row.name));
-  const privateTables=privateData?(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('douyin_local_state','external_saved_migrations','sync_snapshot_retained')")).map(row=>String(row.name)):[];
+  const privateTables=privateData?(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('douyin_local_state','external_saved_migrations','sync_snapshot_retained','note_merge_conflicts','note_merge_guard','note_cloud_receipts')")).map(row=>String(row.name)):[];
   const channels=[...(retained?.channels??[]),...(await querySyncPages(db,'SELECT id,url FROM channels ORDER BY id')).map(r=>({id:Number(r.id),url:String(r.url)}))];
   const itemIds=[...new Set([...(retained?.itemIds??[]),...(await querySyncPages(db,'SELECT id FROM articles ORDER BY id')).map(r=>Number(r.id))])];
   const bookPaths=[...(retained?.bookPaths??[]),...await querySyncPages(db,'SELECT package_path AS path FROM sync_books WHERE package_path IS NOT NULL UNION SELECT path FROM sync_book_parts')];
