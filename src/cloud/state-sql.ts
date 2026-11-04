@@ -1,3 +1,4 @@
+import {readCloudSecure} from './secure-read';
 import type {CloudStringStore} from './keys';
 import type {CloudHostRequest} from './host-ports';
 
@@ -21,6 +22,7 @@ const revision=()=>`${Date.now()}:${Math.random()}:${++serial}`;let serial=0;
 export async function clearCloudSqlState(host:CloudHostRequest,prefixes:string[]){
  await schema(host);
  await host('sql.transaction',{statements:prefixes.flatMap(prefix=>[
+  {sql:'DELETE FROM cloud_state_migration_chunks WHERE substr(key,1,?)=?',params:[prefix.length,prefix]},
   {sql:'DELETE FROM cloud_state_chunks WHERE substr(key,1,?)=?',params:[prefix.length,prefix]},
   {sql:'DELETE FROM cloud_state_values WHERE substr(key,1,?)=?',params:[prefix.length,prefix]},
  ])});
@@ -30,6 +32,7 @@ async function schema(host:CloudHostRequest){await host('sql.transaction',{state
  {sql:'CREATE TABLE IF NOT EXISTS cloud_state_values (key TEXT PRIMARY KEY,revision TEXT NOT NULL,parts INTEGER NOT NULL)',params:[]},
  {sql:'CREATE TABLE IF NOT EXISTS cloud_state_chunks (key TEXT NOT NULL,part INTEGER NOT NULL,value TEXT NOT NULL,PRIMARY KEY(key,part))',params:[]},
  {sql:'CREATE TABLE IF NOT EXISTS cloud_state_migrations (key TEXT PRIMARY KEY,cleaned INTEGER NOT NULL)',params:[]},
+ {sql:'CREATE TABLE IF NOT EXISTS cloud_state_migration_chunks (batch TEXT NOT NULL,key TEXT NOT NULL,part INTEGER NOT NULL,value TEXT NOT NULL,PRIMARY KEY(batch,key,part))',params:[]},
 ]});}
 /** Closed routing list: authorization grants, cookies, tokens and cloud keys
  * always use the secure port. Only non-secret sync bookkeeping reaches SQL. */
@@ -45,13 +48,33 @@ export function createCloudStateStore(host:CloudHostRequest,secure:CloudStringSt
    let marker=(await query('SELECT cleaned FROM cloud_state_migrations WHERE key=?',[plan.group]))[0];
    if(!marker){
     const values:Record<string,string>={};for(const k of plan.keys){const value=await secure.get(k);if(value!==undefined)values[k]=value;}
-    const statements:Statement[]=[];
+    // Stage bounded data requests without publishing a header. The worker's
+    // request limit is 1 MiB, even when the foreground accepts a larger SQL
+    // transaction. A crash leaves the secure original and no visible partial.
+    const batch=revision(),staged:{key:string;revision:string;parts:number}[]=[];
+    const data:Statement[]=[];
     for(const [k,value]of Object.entries(values)){
-     const parts=split(value),rev=revision();
-     statements.push({sql:'INSERT OR IGNORE INTO cloud_state_values(key,revision,parts) VALUES(?,?,?)',params:[k,rev,parts.length]});
-     parts.forEach((part,i)=>statements.push({sql:'INSERT OR IGNORE INTO cloud_state_chunks(key,part,value) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM cloud_state_values WHERE key=? AND revision=?)',params:[k,i,part,k,rev]}));
+     const parts=split(value);staged.push({key:k,revision:revision(),parts:parts.length});
+     for(let i=0;i<parts.length;i++)data.push({sql:'INSERT OR REPLACE INTO cloud_state_migration_chunks(batch,key,part,value) VALUES(?,?,?,?)',params:[batch,k,i,parts[i]]});
+    }
+    // Eight 8192-code-unit pages remain below 512 KiB even with JSON escaping.
+    for(let at=0;at<data.length;at+=8)await host('sql.transaction',{statements:data.slice(at,at+8)});
+    const statements:Statement[]=[
+     {sql:'CREATE TEMP TABLE IF NOT EXISTS cloud_state_migration_guard (ok INTEGER NOT NULL)',params:[]},
+     {sql:'DELETE FROM cloud_state_migration_guard',params:[]},
+    ];
+    for(const item of staged){const k=item.key,rev=item.revision,count=item.parts;
+     // Another guest may have published this key, then advanced its receipts.
+     // Reuse that value. Only a complete staging set can publish a new header.
+     statements.push({sql:'INSERT INTO cloud_state_migration_guard(ok) SELECT CASE WHEN EXISTS(SELECT 1 FROM cloud_state_values WHERE key=?) OR (SELECT count(*) FROM cloud_state_migration_chunks WHERE batch=? AND key=?)=? THEN 1 ELSE NULL END',params:[k,batch,k,count]});
+     statements.push({sql:'INSERT OR IGNORE INTO cloud_state_values(key,revision,parts) VALUES(?,?,?)',params:[k,rev,count]});
+     statements.push({sql:'INSERT OR IGNORE INTO cloud_state_chunks(key,part,value) SELECT key,part,value FROM cloud_state_migration_chunks WHERE batch=? AND key=? AND EXISTS(SELECT 1 FROM cloud_state_values WHERE key=? AND revision=?)',params:[batch,k,k,rev]});
     }
     statements.push({sql:'INSERT OR IGNORE INTO cloud_state_migrations(key,cleaned) VALUES(?,?)',params:[plan.group,Object.keys(values).length?0:1]});
+    // The winning publication makes every older staging run redundant. This
+    // cleanup never deletes a published receipt or a secure original.
+    for(const k of plan.keys)statements.push({sql:'DELETE FROM cloud_state_migration_chunks WHERE key=?',params:[k]});
+    statements.push({sql:'DELETE FROM cloud_state_migration_guard',params:[]});
     await host('sql.transaction',{statements});
     marker=(await query('SELECT cleaned FROM cloud_state_migrations WHERE key=?',[plan.group]))[0];
    }
@@ -132,7 +155,7 @@ export function createCloudStateStore(host:CloudHostRequest,secure:CloudStringSt
  * it does not load the codec, key manager, or account/runtime modules. */
 export function cloudStatePort(host:CloudHostRequest):CloudStringStore {
  return createCloudStateStore(host,{
-  get:async key=>{const result=await host<{exists:boolean;value?:string}>('secure.get',{key});return result.exists?result.value:undefined;},
+  get:key=>readCloudSecure(host,key),
   set:async(key,value)=>{await host('secure.set',{key,value});},
   update:async(values,removePrefixes=[])=>{await host('secure.update',{values,removePrefixes});},
  });

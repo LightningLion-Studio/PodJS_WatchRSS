@@ -100,3 +100,22 @@ test('production port migrates a 1 MiB legacy value through bounded service repl
  };
  try{const ports=createCloudHostPorts(host,guard);expect(await ports.store.get(shard)).toBe(large);expect(maxReply).toBeLessThan(32768);expect(f.values.size).toBe(0);}finally{f.db.close();}
 });
+
+test('worker-sized requests migrate 1 MiB atomically; an interrupted stage keeps the secure original',async()=>{
+ const large='x'.repeat(1024*1024)+'😀',f=stateSqlFixture(':memory:',new Map([[head,'header'],[shard,large]]));let staged=0,maxBytes=0,interrupt=true;
+ const host=async<T>(method:string,args:Record<string,unknown>):Promise<T>=>{
+  const bytes=Buffer.byteLength(JSON.stringify({method,args}));maxBytes=Math.max(maxBytes,bytes);if(bytes>1024*1024)throw Error('request_too_large');
+  if(method==='sql.transaction'&&(args.statements as any[]).some(s=>s.sql.startsWith('INSERT OR REPLACE INTO cloud_state_migration_chunks'))){if(interrupt&&++staged===2)throw Error('fixture_interrupted');}
+  return f.host<T>(method,args);
+ };
+ try{
+  await expect(createCloudStateStore(host,f.secure).get(shard)).rejects.toThrow('fixture_interrupted');
+  expect(f.values.get(shard)).toBe(large);expect(f.db.query('SELECT count(*) n FROM cloud_state_values').get()).toEqual({n:0});expect(f.db.query('SELECT count(*) n FROM cloud_state_migrations').get()).toEqual({n:0});
+  interrupt=false;expect(await createCloudStateStore(host,f.secure).get(shard)).toBe(large);expect(f.values.size).toBe(0);expect(f.db.query('SELECT count(*) n FROM cloud_state_migration_chunks').get()).toEqual({n:0});expect(maxBytes).toBeLessThan(512*1024);
+ }finally{f.db.close();}
+});
+
+test('concurrent large migrations publish one complete value and clean redundant staging',async()=>{
+ const large='z'.repeat(1024*1024),f=stateSqlFixture(':memory:',new Map([[shard,large]]));
+ try{const a=createCloudStateStore(f.host,f.secure),b=createCloudStateStore(f.host,f.secure);expect(await Promise.all([a.get(shard),b.get(shard)])).toEqual([large,large]);expect(f.db.query('SELECT count(*) n FROM cloud_state_migration_chunks').get()).toEqual({n:0});expect(f.values.size).toBe(0);}finally{f.db.close();}
+});

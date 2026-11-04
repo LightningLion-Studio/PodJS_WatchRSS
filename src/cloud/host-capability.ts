@@ -15,5 +15,6 @@ export class CloudHostCapabilityError extends Error {
  constructor(method:string){super(CLOUD_HOST_CAPABILITY_UNAVAILABLE);this.method=cloudDiagnosticHostMethod(method);}
 }
 export function cloudHostFailure(error:unknown,method:string):unknown {
+ if(String(error)==='request_too_large')return Object.assign(new Error('request_too_large'),{code:'request_too_large',method:cloudDiagnosticHostMethod(method)});
  return String(error).includes('permission_denied')?new CloudHostCapabilityError(method):error;
 }

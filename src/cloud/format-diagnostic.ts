@@ -10,6 +10,7 @@ export function cloudFormatFailure(error:unknown,status=0):CloudFormatFailure {
  if(['cloud_writer_busy','cloud_account_busy'].includes(code)||['cloud_writer_busy','cloud_account_busy'].includes(message)||/^account_busy(?::|$)/.test(message)||message==='Cloud lease already owned')return 'busy';
  if(code.startsWith('cloud_account_')||message==='cloud_account_expired'||message==='cloud_account_changed')return 'authorization';
  if(code==='cloud_snapshot_work_timeout'||code==='cloud_snapshot_object_timeout'||code==='cloud_sync_deadline_exceeded'||/cloud_sync_deadline_exceeded|\b(?:timed? ?out|deadline|SocketTimeoutException)\b/i.test(message))return 'timeout';
+ if(code==='request_too_large'||message==='request_too_large')return 'capacity';
  if(code==='cloud_snapshot_progress_stalled'||message==='cloud_snapshot_progress_stalled')return 'runtime';
  if(code==='cloud_host_capability_unavailable'||message==='cloud_host_capability_unavailable')return 'runtime';
  if(code==='library_busy'||/Local library changed/.test(message))return 'concurrent-library-change';

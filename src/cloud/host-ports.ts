@@ -1,3 +1,4 @@
+import {readCloudSecure} from './secure-read';
 import {createCloudStateStore} from './state-sql';
 import {secureCallsite} from './secure-callsite';
 import {restoreRequestMetadata,type RestoreCallsite} from './restore-callsite';
@@ -30,17 +31,7 @@ export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuar
   commit:(temporaryPath:string,path:string,expectedSize:number,expectedSha256:string)=>request('file.commit',{path:temporaryPath,target:path,expectedSize,expectedSha256}),
  };
  const rawWrite=(path:string,dataBase64:string,offset:number,op?:number)=>invoke<{size:number}>('file.write',{path,dataBase64,append:true,expectedOffset:offset},op);
- const secureStorage={get:async(key:string)=>{
-  // The runtime rejects individual events above 1 MiB. Legacy journals must be
-  // read in bounded UTF-16 pages, fenced by the immutable host snapshot version.
-  for(let retry=0;retry<3;retry++){let offset=0,total:number|undefined,version:number|undefined;const parts:string[]=[];for(;;){
-   const r=await request<{exists:boolean;value?:string;totalChars?:number;offset?:number;version?:number}>('secure.get',{key,offset,maxChars:16384});
-   if(!r.exists){if(!offset)return undefined;break;}if(r.totalChars===undefined)return r.value;
-   if(!Number.isSafeInteger(r.totalChars)||r.totalChars<0||r.totalChars>2*1024*1024||r.offset!==offset||typeof r.value!=='string')throw Error('secure_store_corrupt');
-   if(total!==undefined&&(total!==r.totalChars||version!==r.version))break;total=r.totalChars;version=r.version;
-   parts.push(r.value);offset+=r.value.length;if(offset===total)return parts.join('');if(!r.value.length||offset>total)throw Error('secure_store_corrupt');
-  }}throw Error('secure_read_failed');
- },set:(key:string,value:string)=>request('secure.set',{key,value})};
+ const secureStorage={get:(key:string)=>readCloudSecure(request,key),set:(key:string,value:string)=>request('secure.set',{key,value})};
  const b64=bytesToBase64,bytes=base64ToBytes;
 async function operation<T>(method:string,args:Record<string,unknown>):Promise<T>{guard.require();return hostOperation<T>(method,args).result;}
 const data=async(method:string,args:Record<string,unknown>)=>bytes((await operation<{dataBase64:string}>(method,args)).dataBase64);
