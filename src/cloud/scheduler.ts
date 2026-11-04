@@ -23,7 +23,13 @@ export class WatchCloudScheduler {
   const resume=()=>{if(!state.held||state.accountRevision!==this.accountRevision)return;this.dirty=true;this.last=-Infinity;if(manual)this.pendingManual=this.pendingManual==='all'||mode==='all'?'all':'recent128';};
   void task.then(success=>{idleHit(success?85:86);if(!success)resume();},()=>{idleHit(87);resume();}).finally(()=>{if(this.running===task){this.running=undefined;this.runState=undefined;}this.pump();}).catch(()=>{});return task;
  }
- async manual(mode:'all'|'recent128'='recent128'){this.guard.require();if(this.disposed)return false;this.cancelTimer?.();this.cancelTimer=undefined;await this.running;if(this.held){this.pendingManual=this.pendingManual==='all'||mode==='all'?'all':'recent128';return false;}const next=this.pendingManual==='all'||mode==='all'?'all':'recent128';this.pendingManual=undefined;return this.run(true,next);}
+ async manual(mode:'all'|'recent128'='recent128',restored=false){this.guard.require();if(this.disposed)return false;
+  // Every application run reads the same durable grant before sync. Restoring
+  // that grant while a run is active must share its result, not queue another
+  // full export. Only a new button press bypasses an upgrade stop.
+  if(restored&&this.running)return this.running;
+  if(restored&&this.upgradeRequired)return false;
+  this.cancelTimer?.();this.cancelTimer=undefined;await this.running;if(this.held){this.pendingManual=this.pendingManual==='all'||mode==='all'?'all':'recent128';return false;}const next=this.pendingManual==='all'||mode==='all'?'all':'recent128';this.pendingManual=undefined;return this.run(true,next);}
  accountChanged(){this.guard.require();this.accountRevision++;this.pendingManual=undefined;void this.setUpgradeRequired(false).catch(()=>{});this.cancelTimer?.();this.cancelTimer=undefined;this.last=-Infinity;this.retryAt=0;this.trigger("account");}
  dispose(){this.disposed=true;this.cancelTimer?.();this.cancelTimer=undefined;}
 }

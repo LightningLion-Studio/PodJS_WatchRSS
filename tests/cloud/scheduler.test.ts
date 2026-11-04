@@ -67,3 +67,12 @@ test('an old held run cannot restore its manual authorization after an account r
  const scheduler=new WatchCloudScheduler({now:()=>0,sync:async(manual,mode)=>{calls.push([manual,mode]);return calls.length===1?new Promise<boolean>(r=>finish=r):true;},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
  const run=scheduler.manual('all');await settle();scheduler.hold(true);scheduler.foreground(true);scheduler.accountChanged();finish(false);await run;await settle();scheduler.hold(false);await settle();expect(calls).toEqual([[true,'all'],[false,'recent128']]);scheduler.dispose();
 });
+
+
+test('restored durable manual grant shares the active run and respects its upgrade stop',async()=>{
+ let finish!:(value:boolean)=>void,count=0;const s=new WatchCloudScheduler({now:()=>0,sync:()=>{count++;return new Promise<boolean>(resolve=>{finish=resolve;});},delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{}},enabled);
+ s.foreground(true);const restore=s.manual('all',true);expect(count).toBe(1);
+ await s.setUpgradeRequired(true);finish(false);expect(await restore).toBe(false);await settle();expect(count).toBe(1);
+ expect(await s.manual('all',true)).toBe(false);expect(count).toBe(1);
+ const explicit=s.manual('all');await settle();expect(count).toBe(2);finish(true);expect(await explicit).toBe(true);s.dispose();
+});

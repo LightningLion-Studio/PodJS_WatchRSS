@@ -319,8 +319,14 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   const identities=await this.local.cloudRssIdentities(undefined,check),byCanonical=new Map(identities.map(r=>[r.articleId,r])),byNative=new Map(identities.flatMap(r=>[[r.localArticleId,r],[r.nativeArticleId,r]] as const)),byUrl=new Map(identities.map(r=>[r.sourceUrl+'\0'+r.url,r]));
   const cloudIdentity=(a:ExportedArticle)=>{if(a.cloudRssArticleId)return a;if(!a.rssSourceUrl||isImportedContentUrl(a.rssSourceUrl)||isImportedContentUrl(a.url)||isLocalOnlyRssSource(a.rssSourceUrl))return a;const row=byNative.get(a.articleId)??byUrl.get(a.rssSourceUrl+'\0'+a.url);return row?{...a,articleId:row.articleId,cloudRssArticleId:row.articleId,cloudLegacyArticleIds:[row.localArticleId,row.nativeArticleId].filter(id=>id!==row.articleId),url:row.url}:undefined;};
   const exported:ExportedArticle[]=[];
-  for(const item of articles){const a=item.article,privateBody=isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim()||a.favoriteSaved||a.watchLaterSaved;
-   exported.push(full&&privateBody?(await this.local.materializeRequested(item)).article:{...a,contentHtml:null,contentText:''});}
+  // Cloud export uses the same bounded, verified batches as phone sync.
+  // Prefetching body rows also keeps small cached text inline, instead of two
+  // SQL text reads and a separate row SELECT for every article.
+  const privateBody=(a:ExportedArticle)=>isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim()||a.favoriteSaved||a.watchLaterSaved;
+  for(let at=0;at<articles.length;at+=32){check?.();const page=articles.slice(at,at+32),requested=page.filter(item=>full&&privateBody(item.article));
+   const bodies=await this.local.materializeRequestedBatch(requested);let next=0;
+   for(const item of page)exported.push(full&&privateBody(item.article)?bodies[next++]!.article:{...item.article,contentHtml:null,contentText:''});
+  }
   const states=new Map(exported.map(a=>[a.articleId,a]));
   const bookIds=await this.books?.chapterIds();for(const a of await this.local.cloudReadingStates(false,check)){if(bookIds?.has(a.articleId))continue;const old=states.get(a.articleId);if(!old)states.set(a.articleId,a);else if(!old.independentSaved&&!old.rssSourceUrl)states.set(a.articleId,{...old,rssSourceUrl:a.rssSourceUrl,rssSourceTitle:a.rssSourceTitle,readingProgress:a.readingProgress,readingPositionBytes:a.readingPositionBytes,readingPositionContentHash:a.readingPositionContentHash,readingPositionChangedAt:a.readingPositionChangedAt,isRead:a.isRead});}
   // Saved-state tombstones in the phone protocol omit their RSS origin. Restore
@@ -341,7 +347,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   };
   const bodyHashes=new Map(articles.map(p=>[p.article.articleId,p.manifest.bodyHash]));
   const metadata=new Map((await querySyncPages(this.db,'SELECT * FROM cloud_article_state ORDER BY article_id')).map(r=>[String(r.article_id),r]));
-  const normalize=(a:ExportedArticle)=>{const m=metadata.get(a.articleId)??metadata.get((byNative.get(a.articleId)??byCanonical.get(a.articleId))?.localArticleId??'');return m?{...a,...((bodyHashes.get(a.articleId)===m.body_hash||a.contentHash===m.body_hash)?{contentHash:String(m.content_hash)}:{}),...(a.readingPositionChangedAt===Number(m.reading_clock)?{sourceDeviceId:String(m.reading_source)}:{})}:a;};
+  const normalize=(a:ExportedArticle)=>{const m=metadata.get(a.articleId)??metadata.get((byNative.get(a.articleId)??byCanonical.get(a.articleId))?.localArticleId??'');return m?{...a,...((bodyHashes.get(a.articleId)===m.body_hash||a.contentHash===m.body_hash)?{contentHash:String(m.content_hash)}:{}),...(m.reading_source&&a.readingPositionChangedAt===Number(m.reading_clock)?{sourceDeviceId:String(m.reading_source)}:{})}:a;};
   const pendingPrivateArticleIds=exported.filter(a=>{const m=metadata.get(a.articleId)??metadata.get((byNative.get(a.articleId)??byCanonical.get(a.articleId))?.localArticleId??'');return !a.deleted&&(a.independentSaved||a.favoriteSaved||a.watchLaterSaved||isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl))&&m&&(bodyHashes.get(a.articleId)===m.body_hash||a.contentHash===m.body_hash)&&!Number(m.body_ready);}).map(a=>a.articleId);
   const project=(rows:ExportedArticle[])=>rows.map(cloudIdentity).filter((a):a is ExportedArticle=>!!a);
   return {articles:project(exported.map(origin).map(savedState).map(normalize)),sources:await this.cloudSourcesForExport(sources,device),stateArticles:project([...states.values()].map(savedState).map(normalize)),pendingPrivateBodies:pendingPrivateArticleIds.length>0,pendingPrivateArticleIds:pendingPrivateArticleIds.map(id=>byNative.get(id)?.articleId??id)};

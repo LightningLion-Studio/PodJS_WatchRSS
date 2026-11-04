@@ -14,7 +14,7 @@ export class CloudManualHandoff {
  private pending:ManualIntent|undefined;private foreground=true;private held=false;private serial=Promise.resolve();private revision=0;private disposed=false;
  private armed=new Set<string>();private running:Promise<boolean>|undefined;private runningIntent:ManualIntent|undefined;
  private phase:'idle'|'foreground'|'queued'|'held'|'waiting'='idle';private listeners=new Set<()=>void>();
- constructor(private readonly host:CloudHostRequest,private readonly scope:()=>Promise<string|undefined>,private readonly run:(mode:ManualMode)=>Promise<boolean>,private readonly now=Date.now,private readonly epoch:()=>Promise<string|undefined>=async()=>undefined){}
+ constructor(private readonly host:CloudHostRequest,private readonly scope:()=>Promise<string|undefined>,private readonly run:(mode:ManualMode,restored?:boolean)=>Promise<boolean>,private readonly now=Date.now,private readonly epoch:()=>Promise<string|undefined>=async()=>undefined){}
  get state(){return {phase:this.phase,mode:this.pending?.mode,createdAt:this.pending?.createdAt};}
  subscribe(fn:()=>void){this.listeners.add(fn);return()=>{this.listeners.delete(fn);};}
  private publish(phase:typeof this.phase){this.phase=phase;for(const fn of this.listeners)try{fn();}catch{}}
@@ -33,9 +33,9 @@ export class CloudManualHandoff {
   this.pending=intent;return intent;
  });}
  async restore(resume=true){const intent=await this.authorized();if(!intent)return false;await this.arm(intent);if(resume&&this.foreground&&!this.held)return this.continue(intent);return false;}
- private continue(intent:ManualIntent):Promise<boolean>{
-  if(this.running)return this.runningIntent===intent?this.running:this.running.catch(()=>false).then(()=>this.continue(intent));if(this.disposed||!this.foreground||this.held||this.pending!==intent)return Promise.resolve(false);
-  this.publish('foreground');this.runningIntent=intent;let task!:Promise<boolean>;task=(async()=>{try{const current=await this.authorized();if(current?.token!==intent.token||current.scope!==intent.scope||current.mode!==intent.mode||!this.foreground||this.held)return false;const success=await this.run(intent.mode);if(success)await this.complete(intent,true);else if(this.pending===intent){this.publish(this.held?'held':'waiting');await this.arm(intent);}return success;}finally{if(this.running===task){this.running=undefined;this.runningIntent=undefined;}}})();this.running=task;return task;
+ private continue(intent:ManualIntent,restored=true):Promise<boolean>{
+  if(this.running)return this.runningIntent===intent?this.running:this.running.catch(()=>false).then(()=>this.continue(intent,restored));if(this.disposed||!this.foreground||this.held||this.pending!==intent)return Promise.resolve(false);
+  this.publish('foreground');this.runningIntent=intent;let task!:Promise<boolean>;task=(async()=>{try{const current=await this.authorized();if(current?.token!==intent.token||current.scope!==intent.scope||current.mode!==intent.mode||!this.foreground||this.held)return false;const success=await this.run(intent.mode,restored);if(success)await this.complete(intent,true);else if(this.pending===intent){this.publish(this.held?'held':'waiting');await this.arm(intent);}return success;}finally{if(this.running===task){this.running=undefined;this.runningIntent=undefined;}}})();this.running=task;return task;
  }
  async manual(mode:ManualMode='recent128'){
   const revision=++this.revision,scope=await this.scope(),epoch=await this.epoch();if(!scope||revision!==this.revision||this.disposed)return false;
@@ -45,7 +45,7 @@ export class CloudManualHandoff {
   if(!saved||this.pending!==intent)return false;
   // Arm durable OS work before awaiting a foreground run. A lost HOME callback
   // or a killed guest can no longer erase the continuation opportunity.
-  await this.arm(intent);return this.continue(intent);
+  await this.arm(intent);return this.continue(intent,false);
  }
  async progress(intent:ManualIntent){const current=await this.authorized();if(!current||current.token!==intent.token||current.scope!==intent.scope||current.mode!==intent.mode||current.epoch!==intent.epoch)return false;try{await this.host('cloud.enqueue',{token:intent.token,progress:true});return true;}catch{this.publish('waiting');return false;}}
  captureCompletion(){const intent=this.pending;return(success:boolean)=>intent?this.complete(intent,success):Promise.resolve();}

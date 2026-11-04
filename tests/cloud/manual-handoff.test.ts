@@ -31,3 +31,16 @@ test('recreating the cloud controller preserves monotonic native local-transfer 
  const first=fixture();first.handoff.localTransferChanged(true);first.handoff.localTransferChanged(false);await flush();const last=first.calls.filter(c=>c.method==='cloud.localTransfer').at(-1)!.args.generation;
  const next=fixture();next.handoff.localTransferChanged(true);await flush();expect(next.calls.find(c=>c.method==='cloud.localTransfer')!.args.generation).toBeGreaterThan(last);
 });
+
+
+test('new manual authorization and restored authorization have distinct scheduling intent',async()=>{
+ const store=new Map<string,string>(),flags:boolean[]=[];
+ const host:any=async(method:string,args:any)=>{
+  if(method==='secure.get')return {exists:store.has(args.key),value:store.get(args.key)};
+  if(method==='crypto.random')return {bytesBase64:'manual_token'};
+  if(method==='secure.compareAndSet'){if((store.get(args.key)??null)!==args.expected)return {updated:false};if(args.value===null)store.delete(args.key);else store.set(args.key,args.value);return {updated:true};}
+  return {};
+ };
+ const h=new CloudManualHandoff(host,async()=>'scope',async(_mode,restored)=>{flags.push(!!restored);return false;});
+ expect(await h.manual('all')).toBe(false);expect(await h.restore()).toBe(false);expect(flags).toEqual([false,true]);expect(readManualIntent(store.get(MANUAL_INTENT_KEY))?.mode).toBe('all');h.dispose();
+});

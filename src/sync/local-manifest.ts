@@ -26,8 +26,8 @@ export interface SyncTextPort {
  yieldTurn?:()=>Promise<unknown>;
 }
 export {kotlinTrim as nativeTrim} from '@podjs/framework/text-compat';
-import {kotlinTrim as nativeTrim} from '@podjs/framework/text-compat';
-const blank=(s:string|null|undefined)=>!s||!nativeTrim(s);
+import {kotlinTrim as nativeTrim,kotlinIsBlank} from '@podjs/framework/text-compat';
+const blank=(s:string|null|undefined)=>!s||kotlinIsBlank(s);
 // These phone-generated chapter URLs are already in Android Uri's stable-ID
 // form: lowercase scheme/host, literal path and no query. Restrict the fast
 // path to the exact generated shape; all other links still use host Uri.
@@ -72,10 +72,12 @@ const ROW_SELECT=`SELECT a.id,a.channel_id,a.title,a.link,a.guid,a.pub_date,a.im
  EXISTS(SELECT 1 FROM article_original_chunks o WHERE o.article_id=a.id) AS has_original_chunks
  FROM articles a JOIN channels ch ON ch.id=a.channel_id LEFT JOIN article_previews p ON p.article_id=a.id
  LEFT JOIN article_sync_content c ON c.item_id=a.id LEFT JOIN article_sync_encoding_cache e ON e.item_id=a.id AND e.body_hash=c.body_hash LEFT JOIN article_native_sync_hash n ON n.item_id=a.id LEFT JOIN article_reading_state r ON r.article_id=a.id`;
-const LOCAL_CHANNEL=`ch.url LIKE '%watchrss://phone-imports%' OR
+// The uncorrelated channel set evaluates LIKE once per channel/page rather
+// than once per article, retaining the historical substring and case rules.
+const LOCAL_CHANNEL=`a.channel_id IN (SELECT ch.id FROM channels ch WHERE ch.url LIKE '%watchrss://phone-imports%' OR
  ch.url LIKE '%https://watchrss.local/import-content%' OR
  ch.url LIKE '%https://watchrss.local/import-epub%' OR
- ch.url LIKE '%https://watchrss.local/import-txt-novel%'`;
+ ch.url LIKE '%https://watchrss.local/import-txt-novel%')`;
 const ROW_CONDITION=`EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=a.id)
  OR EXISTS(SELECT 1 FROM sync_saved_states s WHERE s.item_id=a.id)
  OR ${LOCAL_CHANNEL}`;
@@ -137,10 +139,7 @@ export class LocalArticleManifestStore {
   const readingCandidates=await querySyncPages(this.db,`SELECT a.id,c.url AS channel_url,
    EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=a.id) AS has_saved_state
    FROM articles a JOIN channels c ON c.id=a.channel_id
-   WHERE (c.url LIKE '%watchrss://phone-imports%' OR
-    c.url LIKE '%https://watchrss.local/import-content%' OR
-    c.url LIKE '%https://watchrss.local/import-epub%' OR
-    c.url LIKE '%https://watchrss.local/import-txt-novel%' OR
+   WHERE (${LOCAL_CHANNEL} OR
     EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=a.id))${urls?' AND COALESCE(a.link,a.dedup_key) IN ('+urls.map(()=>'?').join(',')+')':''}
    ORDER BY a.id`,urls??[]);
   const migrationIds=readingCandidates.filter(row=>num(row.has_saved_state)||isImportedContentUrl(str(row.channel_url))).map(row=>num(row.id));
@@ -223,7 +222,7 @@ export class LocalArticleManifestStore {
   const device=str((await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0]?.device_id),articles:ExportedArticle[]=[];
   for(const r of rows){check?.();const publicRow=/^https?:\/\//i.test(str(r.channel_url))&&!isImportedContentUrl(str(r.channel_url));const identity=publicRow?(r.cached_public_id?{articleId:str(r.cached_public_id),localArticleId:str(r.bound_id)||str(r.cached_public_id),nativeArticleId:str(r.bound_id)||str(r.cached_public_id)}:await this.cloudIdentity(r,true)):undefined;
    if(publicRow&&!identity)continue;const url=str(r.link)||str(r.guid)||str(r.dedup_key),id=identity?.articleId||str(r.bound_id)||await this.stableId(url),m=meta.get(id)??meta.get(str(r.bound_id)),hash=str(r.cached_body_hash),favorite=states.get(r.id+':favorite'),later=states.get(r.id+':watchLater'),clock=num(r.position_changed_at);
-   articles.push({cloudReadingItemId:num(r.id),articleId:id,...(identity?{cloudRssArticleId:id,cloudLegacyArticleIds:[identity.localArticleId,identity.nativeArticleId].filter(x=>x!==id)}:{}),sourceDeviceId:str(r.native_reading_source)||(m&&clock===num(m.reading_clock)?str(m.reading_source):device),url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:m&&hash&&hash===str(m.body_hash)?str(m.content_hash):hash||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_url),rssSourceTitle:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_title),independentSaved:str(r.channel_url)==='watchrss://phone-imports',independentChangedAt:str(r.channel_url)==='watchrss://phone-imports'?num(r.fetched_at):0,independentSortOrder:0,favoriteSaved:!!num(favorite?.saved),favoriteChangedAt:num(favorite?.changed_at),favoriteSortOrder:num(favorite?.sort_order),watchLaterSaved:!!num(later?.saved),watchLaterChangedAt:num(later?.changed_at),watchLaterSortOrder:num(later?.sort_order),deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:clock,isRead:!!num(r.is_read)});
+   articles.push({cloudReadingItemId:num(r.id),articleId:id,...(identity?{cloudRssArticleId:id,cloudLegacyArticleIds:[identity.localArticleId,identity.nativeArticleId].filter(x=>x!==id)}:{}),sourceDeviceId:str(r.native_reading_source)||(m&&str(m.reading_source)&&clock===num(m.reading_clock)?str(m.reading_source):device),url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:m&&hash&&hash===str(m.body_hash)?str(m.content_hash):hash||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_url),rssSourceTitle:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_title),independentSaved:str(r.channel_url)==='watchrss://phone-imports',independentChangedAt:str(r.channel_url)==='watchrss://phone-imports'?num(r.fetched_at):0,independentSortOrder:0,favoriteSaved:!!num(favorite?.saved),favoriteChangedAt:num(favorite?.changed_at),favoriteSortOrder:num(favorite?.sort_order),watchLaterSaved:!!num(later?.saved),watchLaterChangedAt:num(later?.changed_at),watchLaterSortOrder:num(later?.sort_order),deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:clock,isRead:!!num(r.is_read)});
   }return {articles,next:rows.length===limit?num(rows.at(-1)!.id):undefined};
  }
  async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls));}
