@@ -9,7 +9,11 @@ const require=createRequire(import.meta.url),{transformSync}=require('@babel/cor
 plugin({name:'note-production-solid',setup(builder){builder.onLoad({filter:/\.tsx$/},async({path})=>({loader:'js',contents:transformSync(await Bun.file(path).text(),{filename:path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code}));}});
 type Node={kind:string;props:any};let nextNode=1;
 const element=(kind:string)=>(props:any)=>{props.ref?.({id:nextNode++});const children='children' in props?createMemo(()=>props.children):undefined;return {kind,props:children?mergeProps(props,{get children(){return children();}}):props};};
-mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
+mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect,// Preserve the imperative text scene at the same native renderer boundary.
+createElement:(tag:string)=>{const children:any[]=[];return {id:nextNode++,kind:tag==='text'?'Text':tag==='image'?'Image':'View',nativeChildren:children,props:{get children(){return children.map(child=>child.read?child.read():child);}}};},
+insertNode:(parent:any,child:any)=>parent.nativeChildren.push(child),
+insert:(parent:any,read:()=>unknown)=>{const child=createMemo(read);parent.nativeChildren.push({read:child});},
+setProp:(node:any,key:string,value:unknown)=>{node.props[key]=value;}}));
 mock.module('@pocketjs/framework/components',()=>({View:element('View'),Text:element('Text'),Image:element('Image')}));
 const frames=new Set<()=>void>(),gestures=new Set<unknown>();
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(cb:()=>void)=>{frames.add(cb);onCleanup(()=>frames.delete(cb));}}));

@@ -7,8 +7,9 @@ import {AutoScrollAwakeLease} from "../reader/keep-awake.ts";
 import {displayPower} from "@podjs/framework/services";
 import {lifecycle} from "@podjs/framework/watch";
 import {traceServiceWork} from "@podjs/framework/service-trace";
-import {prepareTextLayout} from "@podjs/framework/text";
 import {createWindowValue} from "@podjs/framework/windowed-list";
+import {createSystemTextCache} from "@podjs/framework/text";
+import {prepareTextLayout} from "@podjs/framework/text";
 import {readerRowKey} from "../reader/content-layout.ts";
 import {updateSystemCarets} from "../reader/system-carets.ts";
 import {appLogger} from '../logs/app-logger.ts';
@@ -75,6 +76,7 @@ function ReaderBodyImpl(props:{
   onSpeechControls?:(anchor?:SpeechAnchor)=>void;
   ref:(handle:ReaderBodyHandle)=>void;
 }) {
+  const textCache=createSystemTextCache();
   const textEnvironment=createMemo(()=>{
     // Re-read host facts when the reader configuration changes.
     props.width;props.fontSize;props.preset;
@@ -86,6 +88,8 @@ function ReaderBodyImpl(props:{
   const layoutContent=createContentLayouter((text,slot)=>getOps().measureText(text,slot),(text,slot,width)=>getOps().wrapText?.(text,slot,width),getFontMetrics);
   const [nativeLayouts,setNativeLayouts]=createSignal<NativeBlockLayouts>(new Map());
   const [nativeReady,setNativeReady]=createSignal(false);
+  const [progressLoaded,setProgressLoaded]=createSignal(false);
+  let latestNativeLayouts:NativeBlockLayouts=new Map(),prefixPreparing=false,preparationRevision=0;
   const [importedRevision,setImportedRevision]=createSignal(0);
   const importedTasks=new Set<{cancel():void}>();
   let importedReadFailed=false;
@@ -116,12 +120,13 @@ function ReaderBodyImpl(props:{
   createEffect(()=>{
     if(imported)return;
     const blocks=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset;
+    latestNativeLayouts=new Map();
     batch(()=>{setNativeReady(false);setNativeLayouts(new Map());});
     if(!hasCapability("text.layout")){setNativeReady(true);return;}
     const metrics=getDisplayMetrics(),pixelScale=metrics.physicalWidth/metrics.logicalWidth;
     let cancelled=false,first=true,complete:NativeBlockLayouts=new Map();
     const task=requestReaderLayoutBatched(blocks,width,size,pixelScale,preset,args=>textLayout.layoutBatch(args),value=>{
-      complete=value;
+      complete=value;latestNativeLayouts=value;
       if(first){first=false;setNativeLayouts(value);}
     },error=>logConsole.warn("Reader paragraph layout",String(error)),fonts());
     void task.done.then(()=>{if(!cancelled)batch(()=>{setNativeLayouts(complete);setNativeReady(true);});});
@@ -130,6 +135,7 @@ function ReaderBodyImpl(props:{
   const [prepared,setPrepared]=createSignal<{layout:ReturnType<typeof layoutContent>;entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>;complete:boolean;scope:ContentBlock[]}|undefined>();
   createEffect(()=>{
     if(imported)return;
+    if(!progressLoaded())return;
     const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios(),complete=nativeReady(),viewportHeight=props.height;
     // Native-capable hosts can show their first shaped paragraphs without
     // wrapping the unseen tail in the atlas first. Saved anchors wait for the
@@ -141,14 +147,19 @@ function ReaderBodyImpl(props:{
       input=end<0?source:source.slice(0,end);
       if(!input.length)return;
     }
-    const first=!untrack(prepared);
+    const publishPrefix=(snapshot:{entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>;layout?:ReturnType<typeof layoutContent>})=>{
+      if(pendingProgress&&(pendingProgress.textAnchor||pendingProgress.progress>0))return;
+      const rows=snapshot.entries.map(entry=>entry.data as ReaderRow),last=rows.at(-1);
+      const geometry=snapshot.layout??{rows,height:last?last.top+last.height:0,textLength:0};
+      // A replacement preparation can start at row zero while the reader is
+      // already farther down. Never shrink the published window to that prefix.
+      if(geometry.height<(untrack(prepared)?.layout.height??0))return;
+      setPrepared({...snapshot,layout:geometry,complete:false,scope:source});
+    };
+    const first=!untrack(prepared),revision=++preparationRevision;prefixPreparing=true;
     const task=prepareTextLayout(layoutContent.steps(input,width,size,ratio,preset,native,viewportHeight),{key:readerRowKey,entry:makeEntry,
-      preview:first?{rows:16,publish:snapshot=>{
-        // A saved position must not mount an unrelated start window first.
-        if(pendingProgress&&(pendingProgress.textAnchor||pendingProgress.progress>0))return;
-        const rows=snapshot.entries.map(entry=>entry.data as ReaderRow),last=rows.at(-1);
-        setPrepared({...snapshot,layout:{rows,height:last?last.top+last.height:0,textLength:0},complete:false,scope:source});
-      }}:undefined,
+      preview:first?{rows:16,publish:publishPrefix}:undefined,
+      progress:!props.pageMode?{rows:64,publish:publishPrefix}:undefined,
       publish:snapshot=>{
         const progress=pendingProgress;
         if(complete&&progress&&(progress.textAnchor||progress.progress>0)){
@@ -160,9 +171,9 @@ function ReaderBodyImpl(props:{
           // only the saved viewport. Later native/image reflows retain its keys.
           batch(()=>{setPrepared({...snapshot,complete,scope:source});scroller.scrollTo(offset,{immediate:true});});
           lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);
-        }else setPrepared({...snapshot,complete,scope:source});
+        }else if(complete)setPrepared({...snapshot,complete,scope:source});else publishPrefix(snapshot);
       }});
-    void task.done.catch(error=>logConsole.warn("Reader layout preparation",String(error)));
+    void task.done.then(()=>{if(revision===preparationRevision)prefixPreparing=false;},error=>{if(revision===preparationRevision)prefixPreparing=false;logConsole.warn("Reader layout preparation",String(error));});
     onCleanup(()=>task.cancel());
   });
   const layout=createMemo(()=>{importedRevision();return imported?.layout()??prepared()?.layout??{rows:[],height:0,textLength:0};});
@@ -176,9 +187,15 @@ function ReaderBodyImpl(props:{
   let lastBookAnchor:PageAnchor|undefined;
   createEffect(()=>{if(props.pageMode&&bookPage())lastBookAnchor=bookPage()!.anchor;});
   const [systemCarets,setSystemCarets]=createSignal<ReadonlyMap<ReaderRow,readonly number[]>>(new Map());
-  const highlightRects=createMemo(()=>contentHighlightRects(layout(),imported&&props.highlight?.importedChunkIndex!==undefined?{...props.highlight,contentBlockIndex:props.highlight.importedChunkIndex}:props.highlight,props.width-28,(text,slot)=>getOps().measureText(text,slot),systemCarets()));
+  const highlightRects=createMemo(()=>{
+    const highlight=props.highlight;
+    // Caret delivery must not invalidate every mounted row when speech is absent.
+    if(!highlight)return new Map<ReaderRow,{left:number;top:number;width:number;height:number}>();
+    return contentHighlightRects(layout(),imported&&highlight.importedChunkIndex!==undefined?{...highlight,contentBlockIndex:highlight.importedChunkIndex}:highlight,props.width-28,(text,slot)=>getOps().measureText(text,slot),systemCarets());
+  });
   const headerHeight=()=>props.header?.reduce((sum,row)=>sum+row.height,0)??0;
-  const footerHeight=()=>props.footer?.reduce((sum,row)=>sum+row.height,0)??0;
+  const footerReady=()=>!!imported||!!props.pageMode||prepared()?.complete===true;
+  const footerHeight=()=>footerReady()?(props.footer?.reduce((sum,row)=>sum+row.height,0)??0):0;
   const max=()=>Math.max(0,headerHeight()+layout().height+footerHeight()-props.height);
   const scroller=createScroller({max});
   const controller=new AutoScrollController(0,offset=>scroller.scrollTo(offset,{immediate:true}));
@@ -187,6 +204,7 @@ function ReaderBodyImpl(props:{
   const writes=new ReadingProgressWriteQueue();
   let initialBookProgress:Awaited<ReturnType<typeof store.load>>|undefined;
   const [lastManualScroll,setLastManualScroll]=createSignal(-Infinity);
+  const [scrolling,setScrolling]=createSignal(false);
   let followingSpeech=false;
   const manualScroll=()=>{followingSpeech=false;setLastManualScroll(Date.now());handle.pause();};
   let disposed=false,foreground=lifecycle()==="active",lastFrame=0,lastSave=0,lastOffset=-1,pageTurnAt=0;
@@ -247,7 +265,7 @@ function ReaderBodyImpl(props:{
       feedbackTimer=schedule(1500,()=>setFeedback(""));
     }
   };
-  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&(props.pageMode?bookPageIndex()===bookPages().length-1:readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset())),flushProgress:save};
+  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&(props.pageMode?bookPageIndex()===bookPages().length-1:!!(imported||prepared()?.complete)&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset())),flushProgress:save};
   props.ref(handle);
   let tapOrigin:PageAnchor|undefined;
   const tap=(direction=0)=>{
@@ -338,21 +356,30 @@ function ReaderBodyImpl(props:{
     untrack(()=>{lastFrame=0;autoPages.reset();controller.setBackground(!active||!foreground);if(!active){save();if(tapTimer){tapTimer();tapTimer=undefined;}}});
   });
   createEffect(()=>{
-    const ready=restored(),source=blocks(),width=props.width,height=props.height,size=props.fontSize,preset=props.preset;
-    if(!ready||props.pageMode||source.reduce((sum,block)=>sum+(block.type==='text'?block.text.length:0),0)>128*1024)return;
-    const task=delay(80);void task.result.then(()=>{if(!disposed)paginateCached(source,{width,height,round:round(),fontSize:size,preset,unloaded:imported?index=>imported.text(index)===undefined:undefined});},()=>{});
-    onCleanup(()=>task.cancel());
+    const ready=restored(),active=props.active,moving=scrolling(),automatic=playing(),source=blocks(),width=props.width,height=props.height,size=props.fontSize,preset=props.preset;
+    lastManualScroll(); // A new input cancels speculative preparation.
+    if(!ready||!active||moving||automatic||props.pageMode||source.reduce((sum,block)=>sum+(block.type==='text'?block.text.length:0),0)>128*1024)return;
+    const task=delay(1500);let preparation:ReturnType<typeof paginateCached.prepare>|undefined;
+    void task.result.then(()=>{if(!disposed){
+      preparation=paginateCached.prepare(source,{width,height,round:round(),fontSize:size,preset,unloaded:imported?index=>imported.text(index)===undefined:undefined});
+      void preparation.done.catch(error=>logConsole.warn("Reader page preparation",String(error)));
+    }},()=>{});
+    onCleanup(()=>{task.cancel();preparation?.cancel();});
   });
   let pendingProgress:Awaited<ReturnType<typeof store.load>>|undefined;
   let restoreTimer:ReturnType<typeof delay>|undefined;
+  const canRestore=()=>!!prepared()&&(!(pendingProgress?.textAnchor||pendingProgress&&pendingProgress.progress>0)||prepared()!.complete);
   const restoreProgress=()=>{
-    if(!pendingProgress||disposed||imported||!prepared()?.complete||restoreTimer)return;
-    // Publishing the first window and mounting the saved window are separate
-    // host turns. The source anchor stays pending until complete geometry exists.
+    if(!pendingProgress||disposed||imported||!canRestore()||restoreTimer)return;
+    if(!pendingProgress.textAnchor&&pendingProgress.progress<=0){
+      pendingProgress=undefined;lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);return;
+    }
+    // A fresh document accepts touch with its first prefix. Saved source anchors
+    // still wait for complete geometry before mounting their window.
     restoreTimer=delay(1);
     void restoreTimer.result.then(()=>{
       restoreTimer=undefined;
-      if(!pendingProgress||disposed||!prepared()?.complete)return;
+      if(!pendingProgress||disposed||!canRestore())return;
       const progress=pendingProgress;pendingProgress=undefined;
       const anchor=progress.textAnchor??{character:progress.progress*normalizedTextLength(),fraction:0};
       scroller.scrollTo(!progress.textAnchor&&progress.progress<=0?0:offsetForDocumentAnchor(layout(),anchor,headerHeight(),max()),{immediate:true});
@@ -372,12 +399,15 @@ function ReaderBodyImpl(props:{
         scroller.scrollTo(!saved&&progress.progress<=0?0:imported.offset(anchor,headerHeight(),max()),{immediate:true});
         lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);return;
       }
-      pendingProgress=progress;restoreProgress();
-    }).catch(error=>{if(!disposed){if(!importedReadFailed)setRestored(true);reportImportedError(error);}});
+      pendingProgress=progress;setProgressLoaded(true);restoreProgress();
+    }).catch(error=>{if(!disposed){if(!importedReadFailed){setProgressLoaded(true);setRestored(true);}reportImportedError(error);}});
   });
   onFrame(()=>{
     const now=Date.now();
     if(!restored()||!props.active||!foreground){lastFrame=0;autoPages.reset();return;}
+    // Publish another shaped prefix before the drag reaches its current end.
+    // Only one prefix preparation runs; later native replies remain available.
+    if(!imported&&!props.pageMode&&!nativeReady()&&!prefixPreparing&&latestNativeLayouts.size>nativeLayouts().size&&scroller.offset()+props.height+80>=headerHeight()+layout().height)setNativeLayouts(latestNativeLayouts);
     if(props.pageMode){
       if(autoPages.tick(now,playing()&&bookPage()?.loading===undefined,props.pageSeconds??5)){if(!turnBookPage(1,false)||bookPageIndex()===bookPages().length-1)setPlaying(false);}
       if(!tapTimer&&now-pageTurnAt>=100&&now-lastSave>=1000)void save();
@@ -406,10 +436,10 @@ function ReaderBodyImpl(props:{
     void syncAwake();
     if(!foreground)void save();
   });
-  onCleanup(()=>{void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
-  function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createWindowValue(raw);return row.kind==="text"?<View onPress={tap} class="absolute inset-0">{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<View class="absolute left-[0] right-[0]" style={{insetT:row.gap,height:row.lineHeight}}><ReaderTextRow environment={textEnvironment()} row={row} style={blocks()[row.blockIndex]?.type==="text"?(blocks()[row.blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={positions=>setSystemCarets(previous=>updateSystemCarets(previous,raw(),positions))}/></View></View>:<View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
+  onCleanup(()=>{textCache.close();void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",onPress:initial.kind==="text"?tap:undefined,render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createMemo(raw);const textRow=()=>row() as Extract<ReaderRow,{kind:"text"}>;return initial.kind==="text"?<>{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<ReaderTextRow cache={textCache} top={textRow().gap} environment={textEnvironment()} row={textRow()} style={blocks()[textRow().blockIndex]?.type==="text"?(blocks()[textRow().blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={(positions,owner)=>setSystemCarets(previous=>updateSystemCarets(previous,owner,positions))}/></>:(()=>{const row=createWindowValue(()=>raw() as Exclude<ReaderRow,{kind:"text"}>);return <View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
-    </View>;}};}
+    </View>;})();}};}
   const indexedEntries=createMemo<IndexedScrollEntries>(()=>{
     const snapshot=prepared();
     if(snapshot&&!imported)return snapshot;
@@ -420,7 +450,7 @@ function ReaderBodyImpl(props:{
   return <View debugName="ReaderViewport" class="absolute left-[0] right-[0]" style={{insetT:props.top??40,height:props.height,bgColor:props.preset?readerColor(props.preset.background.colorArgb):"#000000"}}>
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
     <Show when={props.pageMode} fallback={<>
-    <ScrollEntries retainRows={24} onManualScroll={manualScroll} onScrollStateChange={scrolling=>{props.onMoving?.(scrolling);if(scrolling&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX-(props.touchOrigin?.left??0),contact.startY-(props.touchOrigin?.top??0)-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={props.footer??[]} indexedEntries={indexedEntries()}/>
+    <ScrollEntries retainRows={0} minRows={Math.ceil((props.height+160)/Math.max(1,props.fontSize*(props.preset?.body.lineHeightEm??1.35)))+4} recycleKey={entry=>(entry.data as ReaderRow|undefined)?.kind==="text"?"reader-text":undefined} entryEquals={(a,b)=>!!a.data&&!!b.data&&a.key===b.key&&a.top===b.top&&a.height===b.height&&a.data===b.data&&a.onPress===b.onPress} onManualScroll={manualScroll} onScrollStateChange={moving=>{setScrolling(moving);props.onMoving?.(moving);if(moving&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX-(props.touchOrigin?.left??0),contact.startY-(props.touchOrigin?.top??0)-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={footerReady()?props.footer??[]:[]} indexedEntries={indexedEntries()}/>
     </>}><Show when={restored()?bookPage():undefined}>{page=><ReaderBookPage page={page()} width={props.width} height={props.height} round={round()} active={props.active&&restored()} touchOrigin={props.touchOrigin} header={props.header??[]} footer={props.footer??[]} blocks={blocks()} preset={props.preset} fontSize={props.fontSize} fonts={fonts()} environment={textEnvironment()} offlineMedia={props.offlineMedia} baseUrl={props.baseUrl} onImageSize={(index,width,height)=>untrack(()=>{const block=blocks()[index];if(!block||block.type==="text")return;const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(block,ratios()[index])!==ratio)setRatios({...ratios(),[index]:ratio});})} onTap={direction=>tap(direction)} onMedia={props.onMedia} onLongPress={props.onSpeechControls?line=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const start=line?{blockIndex:line.row.blockIndex,sourceStart:line.row.sourceStart??0}:bookPage()!.anchor;props.onSpeechControls?.(imported?{importedChunkIndex:start.blockIndex,importedCharOffset:start.sourceStart}:{contentBlockIndex:start.blockIndex,contentCharOffset:start.sourceStart});}:undefined}/>}</Show></Show>
 
     <View class="absolute h-[18] items-center justify-center" style={{insetL:(props.width-Math.min(160,props.width-24))/2,width:Math.min(160,props.width-24),...(props.pageMode?{insetT:props.height/2-9}:{insetB:0}),opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>

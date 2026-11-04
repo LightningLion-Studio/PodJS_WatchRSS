@@ -1,3 +1,4 @@
+import {prepareTextLayout,type TextLayoutSliceOptions} from '@podjs/framework/text-layout';
 import {readerMediaRatio} from './media-geometry.ts';
 import type {ContentBlock} from './content.ts';
 import {contentFont,presetContentFont,type ReaderRow} from './content-layout.ts';
@@ -18,6 +19,7 @@ export function circleLineBounds(width:number,height:number,top:number,lineHeigh
 const anchor=(section:PageAnchor['section'],character=0,blockIndex=0,sourceStart=0,sectionOffset=0):PageAnchor=>({section,character,blockIndex,sourceStart,sectionOffset});
 const MARK=/[\p{M}\uFE0F\u200D\u{1F3FB}-\u{1F3FF}]/u,FLAG=/[\u{1F1E6}-\u{1F1FF}]/u;
 function graphemes(text:string){
+ if(!MARK.test(text)&&!FLAG.test(text))return Array.from(text);
  const out:string[]=[];let regional=false;
  for(const cp of text){const last=out.at(-1),mark=MARK.test(cp),flag=FLAG.test(cp);
   if(last&&(mark||last.endsWith('\u200D')||flag&&regional))out[out.length-1]+=cp;else out.push(cp);
@@ -26,7 +28,7 @@ function graphemes(text:string){
  return out;
 }
 /** Build discrete pages from source text. No continuous-scroll offsets or viewport cropping. */
-export function paginateBook(blocks:readonly ContentBlock[],options:PaginationOptions):BookPage[]{
+export function* paginateBookSteps(blocks:readonly ContentBlock[],options:PaginationOptions):Generator<void,BookPage[]>{
  const {width,height,round}=options,pages:BookPage[]=[];
  const controls=(section:'header'|'footer',heights:readonly number[])=>{
   const safe=round?Math.floor((Math.min(width,height)-16)/Math.SQRT2):height-28;
@@ -62,7 +64,7 @@ export function paginateBook(blocks:readonly ContentBlock[],options:PaginationOp
   const units=text.split(/(\n)/).flatMap(part=>part==='\n'?['\n']:breakUnits(part));
   let unit=0,position=0,paragraphEnd=units.indexOf("\n"),lastCount=8;
   if(paragraphEnd<0)paragraphEnd=units.length;
-  const measure=(value:string)=>options.measure(value,font.fontSlot)*font.scale+Math.max(0,graphemes(value).length-1)*font.tracking;
+  const measure=(value:string)=>options.measure(value,font.fontSlot)*font.scale+(font.tracking?Math.max(0,graphemes(value).length-1)*font.tracking:0);
   if(page?.lines.length)y+=6;
   while(unit<units.length){
    if(!page||y+lineHeight>height-34)newPage(anchor('body',character+position,blockIndex,raw[position]??position));
@@ -91,12 +93,16 @@ export function paginateBook(blocks:readonly ContentBlock[],options:PaginationOp
    }
    if(unit>paragraphEnd){paragraphEnd=units.indexOf('\n',unit);if(paragraphEnd<0)paragraphEnd=units.length;}
    const row:ReaderRow={kind:'text',text:line,blockIndex,sourceStart:raw[position]??position,character:character+position,top:y,height:lineHeight,gap:0,...font,lineHeight};
-   page!.lines.push({row,left:bounds.left,top:y,width:bounds.width});position+=consumed;y+=lineHeight;
+   page!.lines.push({row,left:bounds.left,top:y,width:bounds.width});position+=consumed;y+=lineHeight;yield;
   }
   character+=text.length+1;
  }
  controls('footer',options.footer??[]);
  return pages.length?pages:[{anchor:anchor('body'),lines:[]}];
+}
+/** Synchronous page mode and sliced speculative preparation consume identical steps. */
+export function paginateBook(blocks:readonly ContentBlock[],options:PaginationOptions):BookPage[]{
+ const steps=paginateBookSteps(blocks,options);for(;;){const next=steps.next();if(next.done)return next.value;}
 }
 export function bookPageForAnchor(pages:readonly BookPage[],target:PageAnchor):number{
  const rank=(section:PageAnchor['section'])=>section==='header'?0:section==='body'?1:2;
@@ -114,8 +120,9 @@ export function createBookPaginator(measure:PaginationOptions['measure']){
   const key=slot+':'+text,cached=widths.get(key);if(cached!==undefined)return cached;
   const value=measure(text,slot);if(widths.size>=4096)widths.delete(widths.keys().next().value!);widths.set(key,value);return value;
  };
- return (blocks:readonly ContentBlock[],options:Omit<PaginationOptions,'measure'>)=>{
-  const key=JSON.stringify([options.width,options.height,options.round,options.fontSize,options.preset,!!options.unloaded]);
+ const configurationKey=(options:Omit<PaginationOptions,'measure'>)=>JSON.stringify([options.width,options.height,options.round,options.fontSize,options.preset,!!options.unloaded]);
+ const paginate=(blocks:readonly ContentBlock[],options:Omit<PaginationOptions,'measure'>)=>{
+  const key=configurationKey(options);
   let configurations=bodies.get(blocks);if(!configurations){configurations=new Map();bodies.set(blocks,configurations);}
   let body=configurations.get(key);
   if(!body){body=paginateBook(blocks,{...options,ratios:undefined,measure:measured,header:undefined,footer:undefined});if(configurations.size>=2)configurations.delete(configurations.keys().next().value!);configurations.set(key,body);}
@@ -140,4 +147,18 @@ export function createBookPaginator(measure:PaginationOptions['measure']){
   const result=[...chrome.filter(page=>page.anchor.section==='header'),...body,...chrome.filter(page=>page.anchor.section==='footer')];
   if(combined.size>=2)combined.delete(combined.keys().next().value!);combined.set(chromeKey,result);return result;
  };
+ /** Keep speculative pagination out of one indivisible service callback. */
+ paginate.prepare=(blocks:readonly ContentBlock[],options:Omit<PaginationOptions,'measure'>,slices:TextLayoutSliceOptions={})=>{
+  const key=configurationKey(options);let configurations=bodies.get(blocks);
+  if(!configurations){configurations=new Map();bodies.set(blocks,configurations);}
+  if(configurations.has(key))return {done:Promise.resolve(),cancel(){}};
+  let index=0;
+  return prepareTextLayout(paginateBookSteps(blocks,{...options,ratios:undefined,measure:measured,header:undefined,footer:undefined}),{
+   key:()=>index++,entry:()=>undefined,publish:snapshot=>{
+    if(configurations!.size>=2)configurations!.delete(configurations!.keys().next().value!);
+    configurations!.set(key,snapshot.layout);
+   }
+  },{rowLimit:1,...slices});
+ };
+ return paginate;
 }

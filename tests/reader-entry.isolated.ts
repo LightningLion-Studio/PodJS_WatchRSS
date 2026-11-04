@@ -9,7 +9,7 @@ const require=createRequire(import.meta.url),{transformSync}=require('@babel/cor
 plugin({name:'note-production-solid',setup(builder){builder.onLoad({filter:/\.tsx$/},async({path})=>({loader:'js',contents:transformSync(await Bun.file(path).text(),{filename:path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code}));}});
 type Node={kind:string;props:any};let nextNode=1;
 const element=(kind:string)=>(props:any)=>{props.ref?.({id:nextNode++});const children='children' in props?createMemo(()=>props.children):undefined;return {kind,props:children?mergeProps(props,{get children(){return children();}}):props};};
-mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
+mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect,...Object.fromEntries(['createElement','insertNode','insert','setProp'].map(name=>[name,()=>{throw Error('unexpected component renderer call: '+name);}]))}));
 mock.module('@pocketjs/framework/components',()=>({View:element('View'),Text:element('Text'),Image:element('Image')}));
 const frames=new Set<()=>void>(),gestures=new Set<unknown>();
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame:(cb:()=>void)=>{frames.add(cb);onCleanup(()=>frames.delete(cb));}}));
@@ -68,9 +68,14 @@ async function until(check:()=>boolean){const end=Date.now()+4000;while(!check()
 test(`default ReaderBody slices entry, preserves saved geometry and cancels late work: ${mode}`,async()=>{
  let dispose!:()=>void,handle:any;
  // No progressStore, clock, scheduler or yield injection. KV is the IO boundary.
- const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>{handle=v;}});});
+ const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,footer:mode==='prefix'?[{height:40,render:()=>createComponent(element('Text') as any,{children:'END-OF-DOCUMENT'})}]:undefined,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>{handle=v;}});});
  expect(measureCalls).toBe(0);expect(visible(root)).not.toContain('Paragraph-0');
  const storedBefore=storage.get('watchrss.reader.progress.12569');
+ if(mode==='prefix'){
+  const gesture=Array.from(gestures).find((g:any)=>g.onPanMove) as any;
+  gesture.onDown();gesture.onPanStart();gesture.onPanMove({fdy:-35});
+  expect(handle.scroller.offset()).toBe(0);
+ }
  if(mode==='cancel'){
   await pump();dispose();for(let i=0;i<12;i++)await pump();
   expect(visible(root)).not.toContain('Paragraph-0');expect(storage.get('watchrss.reader.progress.12569')).toBe(storedBefore);
@@ -80,6 +85,21 @@ test(`default ReaderBody slices entry, preserves saved geometry and cancels late
   await until(()=>visible(root).includes('Paragraph-0'));
   // The first native batch is visible while the tail is still in flight.
   expect(calls.filter(c=>c.method==='text.layoutBatch').length).toBeLessThan(4);
+  // Touch can use the prefix while the native tail is outstanding.
+  await until(()=>handle.ready());
+  expect(visible(root)).not.toContain('END-OF-DOCUMENT');
+  handle.scroller.scrollTo(1e6,{immediate:true});expect(handle.reachedBottom()).toBe(false);
+  await handle.flushProgress();const prefixProgress=JSON.parse(JSON.parse(storage.get('watchrss.reader.progress.12569')!));expect(prefixProgress.progress).toBeLessThan(1);
+  handle.scroller.scrollTo(0,{immediate:true});
+  expect(calls.filter(c=>c.method==='text.layoutBatch').length).toBeLessThan(4);
+  const gesture=Array.from(gestures).find((g:any)=>g.onPanMove) as any;
+  gesture.onDown();gesture.onPanStart();gesture.onPanMove({fdy:-35});
+  expect(handle.scroller.offset()).toBe(35);
+  gesture.onPanEnd({vy:0});handle.scroller.stop();
+  await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+  // Completing the tail must not restore the fresh progress over a manual drag.
+  expect(handle.scroller.offset()).toBe(35);
+  handle.scroller.scrollTo(0,{immediate:true});
  }
  await until(()=>pending.size===0&&requests.length===0&&calls.some(c=>c.method==='runtime.delay'));
  const expected=createContentLayouter(hostOps.measureText,undefined,()=>({cellHeight:26,baseline:20}))(blocks,205,16,{},preset,mode==='portable'?undefined:native);
@@ -92,11 +112,13 @@ test(`default ReaderBody slices entry, preserves saved geometry and cancels late
 });
 
 
+// This case crosses two cold entries and the production 1500ms quiet warm-up.
+// The budget bounds the integration test; first-input timing has separate assertions.
 test('production default ReaderBody checkpoints the latest anchor before any async save and cold restores it',async()=>{
  const props={articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v)};
  let dispose!:()=>void,handle:any;
  const mount=()=>createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{...props,ref:v=>handle=v});});
- mount();await until(()=>pending.size===0&&requests.length===0);
+ mount();await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
  const periodicBefore=storage.get('watchrss.reader.progress.12569');
  handle.scroller.scrollTo(419,{immediate:true});
  events.push({t:'lifecycle',state:'background'});__pumpPodEvents();
@@ -115,7 +137,7 @@ test('production default ReaderBody checkpoints the latest anchor before any asy
  events.push({t:'checkpoint',reason:'screen-off'});__pumpPodEvents();
  expect(JSON.parse(storage.get('watchrss.reader.checkpoint.12569')!).value.offset).toBe(511);
  dispose();await pump();expect(errors).toEqual([]);expect(frames.size).toBe(0);
-});
+},10000);
 
 if(mode==='saved')test('book pages replace their lines, reverse exactly, preserve anchors and keep double tap',async()=>{
  let dispose!:()=>void,handle:any,opened=0;
@@ -222,7 +244,7 @@ if(mode==='saved')test('switching modes without scrolling returns to the same bo
  const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12573',text,blocks,preset,width:233,height:233,top:0,get pageMode(){return pageMode();},fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>handle=v});});
  await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
  const gesture=[...gestures].find((g:any)=>g.onTap) as any;gesture.onTap({x:215,y:110});await pump();
- await until(()=>pending.size===0&&requests.length===0);
+ await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
  const expected=visible(root);setPageMode(false);await pump();setPageMode(true);await pump();
  expect(visible(root)).toBe(expected);
  dispose();await pump();

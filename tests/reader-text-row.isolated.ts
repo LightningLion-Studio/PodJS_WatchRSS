@@ -28,3 +28,13 @@ test("reader environment shares immutable queries across lines without sharing r
  for(const [i,line] of lines.entries()){expect(line.props.options.text).toBe(`第${i}行`);expect(line.props.options.widthPx).toBe(410);expect(line.props.options).toBe(line.props.options);}
  expect(displayReads).toBe(1);expect(capReads).toBe(1);expect(fontReads).toBe(1);dispose();});
 });
+
+
+test('caret callbacks retain the source row that owned their raster request',()=>{
+ createRoot(dispose=>{
+  const [value,setValue]=createSignal(row),events:{owner:any;positions:any}[]=[];
+  const tree=ReaderTextRow({get row(){return value();},style:'body',fontSize:16,width:205,onCarets:(positions,owner)=>events.push({positions,owner})});
+  const line=raster(tree),old=line.props.onCarets;const replacement={...row,text:'另一行😀'};setValue(replacement);const next=line.props.onCarets;
+  old(undefined);next([0,1]);expect(events[0].owner).toBe(row);expect(events[1].owner).toBe(replacement);dispose();
+ });
+});

@@ -59,3 +59,21 @@ test('mode and header changes reuse body geometry without extra native measureme
  expect(first.filter(page=>page.anchor.section==='body')[0]).toBe(second.filter(page=>page.anchor.section==='body')[0]);
  const changed=paginate(blocks,{...options,width:200});expect(changed[0]).not.toBe(first[0]);expect(measurements).toBeGreaterThan(cold);
 });
+
+
+test('speculative page preparation yields before work, keeps exact anchors and cancels without publishing',async()=>{
+ const {createBookPaginator,paginateBookSteps}=await import('../../src/reader/pagination.ts');
+ const blocks:ContentBlock[]=[{type:'text',style:'body',text:'圆屏 English 👩‍👩‍👧‍👦 é 🇨🇳\r\n'.repeat(30)}];
+ const expected=paginateBook(blocks,options),steps=paginateBookSteps(blocks,options);let rows=0;
+ for(;;){const next=steps.next();if(next.done){expect(next.value).toEqual(expected);break;}rows++;}
+ expect(rows).toBe(expected.reduce((sum,p)=>sum+p.lines.length,0));
+ let measures=0;const pending:{resolve:()=>void;reject:(error:Error)=>void}[]=[];
+ const yieldTurn=()=>{let current:any;const result=new Promise<void>((resolve,reject)=>{current={resolve,reject};pending.push(current);});return {result,cancel:()=>current.reject(Error('cancelled'))};};
+ const cached=createBookPaginator(text=>{measures++;return options.measure(text);});
+ const task=cached.prepare(blocks,options,{yieldTurn});expect(measures).toBe(0);
+ let ended=false;void task.done.then(()=>{ended=true;});
+ while(!ended){pending.shift()?.resolve();for(let i=0;i<8;i++)await Promise.resolve();}
+ expect(cached(blocks,options)).toEqual(expected);const before=measures;cached(blocks,options);expect(measures).toBe(before);
+ const cancelledBlocks:ContentBlock[]=[{type:'text',style:'body',text:'尚未分页的内容'.repeat(100)}];
+ const cancelled=cached.prepare(cancelledBlocks,options,{yieldTurn});cancelled.cancel();await cancelled.done;expect(measures).toBe(before);
+});

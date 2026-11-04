@@ -2,7 +2,7 @@ import {createMemo} from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { getOps } from "@pocketjs/framework/host";
 import {createTextEnvironment,type TextEnvironment} from "@podjs/framework/text-environment";
-import { SystemTextLine } from "@podjs/framework/text";
+import { SystemTextLine,type SystemTextCache } from "@podjs/framework/text";
 import type { ContentStyle } from "../reader/content.ts";
 import { readerTextClass, type ReaderRow } from "../reader/content-layout.ts";
 import type { ReaderFontResolver } from "../reader/font-assets.ts";
@@ -17,6 +17,9 @@ export const createReaderTextEnvironment=createTextEnvironment;
 /** The shared reader text primitive used by article, full-preview and selector rows. */
 export function ReaderTextRow(props: {
   row: TextRow;
+  /** Position the line directly inside a window row. */
+  top?: number;
+  cache?:SystemTextCache;
   environment?: ReaderTextEnvironment;
   style: ContentStyle;
   fontSize: number;
@@ -26,15 +29,16 @@ export function ReaderTextRow(props: {
   profile?: "compose" | "preview";
   textAlign?: number;
   rasterHeightExtraPx?: number;
-  onCarets?: (positions: readonly number[] | undefined) => void;
+  onCarets?: (positions: readonly number[] | undefined,row:TextRow) => void;
 }) {
-  const row = createMemo(() => ({ ...props.row, textAlign: props.textAlign ?? props.row.textAlign }));
+  const row = createMemo(() => props.textAlign === undefined ? props.row : ({ ...props.row, textAlign: props.textAlign }));
   const environment = createMemo(() => props.environment ?? createReaderTextEnvironment());
   const pixelScale = () => environment().pixelScale;
   const style = createMemo(() => props.preset
     ? (props.style === "body" ? props.preset.body : resolvedReaderStyle(props.preset, props.style))
     : { ...DEFAULT_READER_TEXT, fontSizeSp: props.fontSize });
-  const fallback = () => <Text class={readerTextClass(props.row.fontSlot)} style={{
+  const fallback = (visible?:()=>boolean) => <Text {...(visible?{accessibilityHidden:true}:{})} class={readerTextClass(props.row.fontSlot)} style={{
+    ...(visible?{opacity:visible()?1:0}:{}),
     insetT: props.row.textOffsetY ?? 0,
     width: props.width / props.row.scale,
     fontSlot: props.row.fontSlot,
@@ -58,12 +62,13 @@ export function ReaderTextRow(props: {
     {raster()
       ? <SystemTextLine
           pixelScale={pixelScale()}
+          {...(props.top===undefined?{}:{get top(){return props.top;},get cache(){return props.cache;},renderFallback:(visible:()=>boolean)=>fallback(visible)})}
           options={options()!}
-          onCarets={props.onCarets}
+          onCarets={((owner:TextRow)=>positions=>props.onCarets?.(positions,owner))(props.row)}
           fallback={fallback()}
         />
-      : fallback()}
-    {!raster() && style().underline && <View class="absolute" style={{ insetL: left(), insetT: baseline() + 2, width: textWidth(), height: 1, bgColor: props.row.color }}/>} 
-    {!raster() && style().strikethrough && <View class="absolute" style={{ insetL: left(), insetT: baseline() - style().fontSizeSp * .3, width: textWidth(), height: 1, bgColor: props.row.color }}/>} 
+      : props.top===undefined?fallback():<View class="absolute left-[0] right-[0]" style={{insetT:props.top,height:props.row.lineHeight}}>{fallback()}</View>}
+    {!raster() && style().underline && <View class="absolute" style={{ insetL: left(), insetT: (props.top??0) + baseline() + 2, width: textWidth(), height: 1, bgColor: props.row.color }}/>}
+    {!raster() && style().strikethrough && <View class="absolute" style={{ insetL: left(), insetT: (props.top??0) + baseline() - style().fontSizeSp * .3, width: textWidth(), height: 1, bgColor: props.row.color }}/>}
   </>;
 }
