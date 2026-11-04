@@ -6,6 +6,9 @@ export interface CloudCompatibility {opaque:boolean;readOnly:boolean;upgradeRequ
 export interface CloudCompatibilityStatus {requiredFeatures?:string[];opaque:number;readOnly:number;editPending:number;upgradeRequired:boolean}
 export const cloudFormatCapabilities=Object.freeze({cloudFormatR48ReadV1:true,cloudFormatR48WriteV1:false,cloudFormatMigrationR48V1:false,cloudArticleProvenanceReadV1:true,cloudArticleProvenanceWriteV1:false});
 const frames=new WeakMap<object,{node?:RawJsonNode;source?:string;policy:CloudCompatibility;unknownBytes:number}>();
+export const BOOK_LIFECYCLE_FEATURE='book-lifecycle.v1';
+export const bookFeatures=(value:{instanceId?:unknown;lifecycle?:unknown})=>value.instanceId!==undefined||value.lifecycle!==undefined?{incompat:[BOOK_LIFECYCLE_FEATURE],roCompat:[]}:undefined;
+export const bookRecordFeatures=(value:{kind?:unknown})=>value.kind==='book'?[BOOK_LIFECYCLE_FEATURE]:[];
 const NAME=/^[a-z0-9][a-z0-9.-]{0,47}$/;
 export function featurePolicy(value:unknown,known:readonly string[]=[]):CloudCompatibility {
  if(value===undefined)return {opaque:false,readOnly:false,upgradeRequired:false};
@@ -32,7 +35,7 @@ export function bindVerifiedCloudRaw<T extends object>(value:T,source:string,unk
  if(unknownBytes>limit)policy={opaque:true,readOnly:true,upgradeRequired:true,reason:'unknown_size_limit'};
  frames.set(value,{source,unknownBytes,policy});return value;
 }
-export function cloudCompatibility(value:object):CloudCompatibility{return frames.get(value)?.policy??featurePolicy((value as {features?:unknown}).features);}
+export function cloudCompatibility(value:object):CloudCompatibility{return frames.get(value)?.policy??featurePolicy((value as {features?:unknown}).features,bookRecordFeatures(value));}
 export function requireCloudWritable(value:object){if(cloudCompatibility(value).readOnly)throw Error('cloud_format_read_only');}
 export const schemaFields=(names:readonly string[]):Record<string,true>=>Object.fromEntries(names.map(k=>[k,true]));
 const reading=['isRead','readingProgress','readingPositionBytes','readingPositionContentHash','readingPositionChangedAt','sourceDeviceId','favoriteSaved','favoriteChangedAt','favoriteSortOrder','watchLaterSaved','watchLaterChangedAt','watchLaterSortOrder','deleted','deletedAt'];
@@ -40,7 +43,7 @@ export const recordFields:Record<string,readonly string[]>=Object.assign(Object.
  article:['registerSources','articleId','url','title','siteName','excerpt','imageUrl','rssSourceUrl','rssSourceTitle','contentHash','importedAt','updatedAt','independentSaved','independentChangedAt','independentSortOrder','guid','bookIndexRetired','rssIndexRetired',...reading],
  source:['url','sourceId','title','description','siteUrl','imageUrl','createdAt','updatedAt','sourceDeviceId','sortOrder','isPinned','deleted','deletedAt','useOriginalContent','continuePlaybackInBackground'],
  'rss-state':['sourceId','articleIdHash',...reading],
- book:['bookId','fingerprint','title','chapterCount','deletedChapters','deletionClock','deleted','deletedAt','updatedAt','sourceDeviceId','sourceUrl','kind'],
+ book:['bookId','fingerprint','title','chapterCount','deletedChapters','deletionClock','deleted','deletedAt','updatedAt','sourceDeviceId','sourceUrl','kind','instanceId','lifecycle'],
  'book-reading':['bookId','chapterIndex',...reading.filter(k=>!['deleted','deletedAt'].includes(k)),'favoriteSourceDeviceId','watchLaterSourceDeviceId']
 });
 export function knownRecordValue(kind:string,value:Record<string,any>){const fields=recordFields[kind];return fields?Object.fromEntries(Object.entries(value).filter(([k])=>fields.includes(k))):value;}
@@ -59,6 +62,6 @@ export function patchCloudObject(value:Record<string,any>,fields:readonly string
 export function rawRecordText(doc:{kind:string;value:Record<string,any>;features?:CloudFeatures},basis=doc):string {
  requireCloudWritable(basis);const raw=cloudRaw(basis),node=raw&&rawJsonProperty(raw,'value'),known=knownRecordValue(doc.kind,doc.value);
  const body=node?patchRawJsonObject(node,Object.fromEntries((recordFields[doc.kind]??Object.keys(known)).map(k=>[k,Object.prototype.hasOwnProperty.call(known,k)?cpuJsonStringify(known[k]):undefined]))):cpuJsonStringify(known);
- return raw?patchRawJsonObject(raw,{kind:cpuJsonStringify(doc.kind),value:body}):cpuJsonStringify({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:known});
+ return raw?patchRawJsonObject(raw,{kind:cpuJsonStringify(doc.kind),value:body,...(doc.features?{features:cpuJsonStringify(doc.features)}:{})}):cpuJsonStringify({format:'watchrss-rss-record',version:1,kind:doc.kind,features:doc.features,value:known});
 }
 export const emptyCompatibilityStatus=():CloudCompatibilityStatus=>({opaque:0,readOnly:0,editPending:0,upgradeRequired:false});

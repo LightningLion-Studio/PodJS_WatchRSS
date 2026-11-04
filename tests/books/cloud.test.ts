@@ -56,3 +56,10 @@ test('restore adapter forwards the immutable checkpoint through repository book 
   expect((await a.restorePayloads(new Map([[name,bytes]]),'cli',[descriptor],{checkpoint})).pending).toBe(0);expect(received).toBe(checkpoint);expect(bookId).toBe(book.bookId);expect(await f.db.query('SELECT content FROM articles')).toEqual([{content:cliSingle.chapter.contentText}]);
  }finally{f.sql.close();}
 });
+
+test('lifecycle-only restore updates the snapshot fingerprint while retaining exact package bytes',async()=>{
+ const f=await bookFixture();try{await seedChapters(f,source,v.chapters);const r=repo(f),a=adapter(r);await a.exportRecords();const before=await a.exportPayloads(true),original=before.objects[0]!.bytes,book=(await r.cloudBooks()).books[0]!;
+ const next={...book,lifecycle:{generation:1,operationId:'a'.repeat(32),startedAt:200},updatedAt:200};await r.mergeCloudBooks([next],[]);await r.receiveCloudBook(book.bookId,original);const first=await a.exportPayloads(true);expect(first.fingerprint).not.toBe(before.fingerprint);expect(first.objects[0]!.bytes).toEqual(original);expect(first.objects[0]!.privateBook?.lifecycle).toEqual(next.lifecycle);
+ const restored={...next,lifecycle:{generation:2,operationId:'b'.repeat(32),startedAt:300},updatedAt:300};await r.mergeCloudBooks([restored],[]);await r.receiveCloudBook(book.bookId,original);const second=await a.exportPayloads(true);expect(second.fingerprint).not.toBe(first.fingerprint);expect(second.objects[0]!.bytes).toEqual(original);
+ }finally{f.sql.close();}
+});

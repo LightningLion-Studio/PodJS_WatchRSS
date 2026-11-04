@@ -1,7 +1,7 @@
 import {encodeUtf8} from '@podjs/framework/bytes';
 import {htmlToText} from '../core/html';
 /** Local evidence only. Never changes a cross-device record or infers completeness from length. */
-export function fileImportUrl(url:string):boolean{return /^(?:https:\/\/watchrss\.local\/import-(?:content\/(?:txt|epub)\/|txt-novel\/|epub\/)|watchrss:\/\/import\/online-v1\/|watchrss-(?:txt|epub):\/\/)/i.test(url);}
+export function fileImportUrl(url:string):boolean{return /^(?:https:\/\/watchrss\.local\/import-(?:content\/(?:txt|epub)\/|txt-novel\/|epub\/)|watchrss:\/\/import\/(?:online-v1|instance-v1)\/|watchrss-(?:txt|epub):\/\/)/i.test(url);}
 export function previewEquivalent(text:string,excerpt:string):boolean {
  // Match the phone importer ASCII \s contract on all runtimes.
  const compact=(s:string)=>s.replace(/[ \t\n\r\f\v]+/g,' ').replace(/^ +| +$/g,'');

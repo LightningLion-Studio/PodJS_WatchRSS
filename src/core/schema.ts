@@ -2,7 +2,7 @@ import {ARTICLE_REGISTER_SCHEMA} from '../sync/article-register-store';
 import {ArticleKeepStore,ARTICLE_KEEP_SCHEMA} from '../sync/article-keep';
 import {LOCAL_RSS_SCHEMA} from '../rss/acquisition';
 import {OFFLINE_QUEUE_SCHEMA} from '../reader/offline-queue-schema';
-import {BOOK_INSTALL_SCHEMA,BOOK_SCHEMA} from '../books/schema';
+import {BOOK_INSTALL_SCHEMA,BOOK_SCHEMA,BOOK_LIFECYCLE_SCHEMA} from '../books/schema';
 import {BOOK_READING_SCHEMA} from '../books/reading-schema';
 import {TOKEN_USAGE_CURSOR_SCHEMA} from '../sync/token-usage';
 import {BUILTIN_CHANNELS} from './builtin-channels.ts';
@@ -117,10 +117,11 @@ interface SchemaDatabase {
 export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinChannels?:boolean;now?:()=>number}={}) {
   const current=pragmaVersion((await db.query('PRAGMA user_version'))[0]);
   if(current>SCHEMA_VERSION)throw new Error(`Database schema ${current} is newer than supported ${SCHEMA_VERSION}`);
+  const lifecycleSchema=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_books'")).length?BOOK_LIFECYCLE_SCHEMA:[];
   if(current===SCHEMA_VERSION){
     // A single transaction also makes interrupted auxiliary installation safe
     // to retry. Reject future schemas above before any CREATE or version write.
-    await db.transaction(AUXILIARY_SCHEMA.map(sql=>({sql})));
+    await db.transaction([...lifecycleSchema,...AUXILIARY_SCHEMA].map(sql=>({sql})));
     return;
   }
   const existingCacheColumns=current>=1?new Set((await db.query('PRAGMA table_info(article_sync_encoding_cache)')).map(r=>String(r.name))):new Set<string>();
@@ -139,7 +140,7 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
   }
   // Existing v1..v8 installations also need new helper tables before a data
   // migration can reference them (notably the RSS mapping in dedup migration).
-  statements.push(...AUXILIARY_SCHEMA.map(sql=>({sql})));
+  statements.push(...lifecycleSchema.map(sql=>({sql})),...AUXILIARY_SCHEMA.map(sql=>({sql})));
   // Older BLE migrations install revision triggers from the current column map.
   // Create the new business tables before those triggers reference them.
   if(current<8)statements.push(...ARTICLE_KEEP_SCHEMA.map(sql=>({sql})));

@@ -34,7 +34,7 @@ test('real installed pre-clear v9 opens without replaying backfills or altering 
   // Exact startup lookup in services.ts must succeed on an existing installation.
   expect(await f.db.query('SELECT id FROM library_clear_journal WHERE id=1')).toEqual([]);
   expect(f.transactions).toBe(count+1);
-  const after=f.dump();delete after.library_clear_journal;for(const table of ['sync_book_install','sync_book_validation']){expect(after[table]).toEqual([]);delete after[table];}expect(after).toEqual(before);
+  const after=f.dump();delete after.library_clear_journal;for(const table of ['sync_book_install','sync_book_validation','sync_book_lifecycle_clock']){expect(after[table]).toEqual([]);delete after[table];}expect(after).toEqual(before);
   // Guard future additions to base DDL: every additive declaration must reach
   // an installed v9 too, not only fresh databases used by most fixtures.
   for(const sql of SCHEMA){const object=/^CREATE (TABLE|INDEX|TRIGGER) IF NOT EXISTS (\w+)/.exec(sql);if(object)expect(f.raw.query('SELECT name FROM sqlite_master WHERE type=? AND name=?').get(object[1]!.toLowerCase(),object[2]!)).not.toBeNull();}
@@ -42,7 +42,7 @@ test('real installed pre-clear v9 opens without replaying backfills or altering 
   const schema=f.raw.query('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all(),changes=f.raw.query('SELECT total_changes() AS n').get();
   await initializeSchema(f.db);expect(f.raw.query('SELECT total_changes() AS n').get()).toEqual(changes);
   expect(f.raw.query('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all()).toEqual(schema);
-  f.reopen();await initializeSchema(f.db);expect(f.dump()).toEqual({...before,library_clear_journal:[],sync_book_install:[],sync_book_validation:[]});
+  f.reopen();await initializeSchema(f.db);expect(f.dump()).toEqual({...before,library_clear_journal:[],sync_book_install:[],sync_book_validation:[],sync_book_lifecycle_clock:[]});
   expect(await f.db.query('PRAGMA integrity_check')).toEqual([{integrity_check:'ok'}]);expect(await f.db.query('PRAGMA foreign_key_check')).toEqual([]);
  }finally{await f.close();}
 });
@@ -79,4 +79,10 @@ for(const schema of [v2,v8])test(`historical v${schema.version} installs all new
   const changes=f.raw.query('SELECT total_changes() AS n').get();await initializeSchema(f.db);expect(f.raw.query('SELECT total_changes() AS n').get()).toEqual(changes);
   expect(await f.db.query('PRAGMA integrity_check')).toEqual([{integrity_check:'ok'}]);expect(await f.db.query('PRAGMA foreign_key_check')).toEqual([]);
  }finally{await f.close();}
+});
+
+test('startup upgrades lifecycle deletion triggers before a v1 dedup migration',async()=>{
+ const raw=new Database(':memory:');const db={query:async(q:string,p:readonly (string|number|null)[]=[])=>raw.query(q).all(...p) as Record<string,unknown>[],transaction:async(ss:SchemaStatement[])=>{raw.transaction(()=>{for(const s of ss)raw.query(s.sql).run(...s.params??[]);})();}};
+ try{raw.exec(SCHEMA.join(';'));raw.exec('PRAGMA user_version=1;DROP TRIGGER sync_book_local_chapter_delete;CREATE TRIGGER sync_book_local_chapter_delete BEFORE DELETE ON articles BEGIN SELECT unavailable_json_function(OLD.id);END;');await initializeSchema(db,{seedBuiltinChannels:false});expect(await db.query('PRAGMA user_version')).toEqual([{user_version:9}]);expect(await db.query('PRAGMA integrity_check')).toEqual([{integrity_check:'ok'}]);expect(String((await db.query("SELECT sql FROM sqlite_master WHERE name='sync_book_local_chapter_delete'"))[0]!.sql)).toContain('sync_book_lifecycle_clock');
+ }finally{raw.close();}
 });

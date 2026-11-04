@@ -10,7 +10,7 @@ import type {BookFiles,BookFileInfo} from './files';
 /** SQL commits retain validated chapter hashes and exact newline offsets. Secure
  * receipts follow SQL, so lost replies adopt SQL without rehashing the prefix.
  * Source SHA/size is authenticated by the caller on every invocation. */
-export async function validateInstall(db:SqlDatabase,files:BookFiles,info:BookFileInfo,id:string,sha:BookHash,expected:{fingerprint:string;chapterCount:number}|undefined,cp?:FileCheckpoint){
+export async function validateInstall(db:SqlDatabase,files:BookFiles,info:BookFileInfo,id:string,sha:BookHash,expected:{fingerprint:string;chapterCount:number;instanceId?:string}|undefined,cp?:FileCheckpoint){
  const binding=await sha(encodeUtf8(canonical(['book-install-v1',await cp?.scope?.()??'local',id,info.sha256,info.size])));
  let row=(await db.query('SELECT * FROM sync_book_install WHERE binding=?',[binding]))[0];
  const lines=(offset:number)=>rangedLines((at,max)=>files.read(info.path,at,max),info.size,offset);
@@ -34,8 +34,8 @@ export async function validateInstall(db:SqlDatabase,files:BookFiles,info:BookFi
  if(index!==header.chapterCount||offset!==info.size)throw Error('book_package_invalid');
  const hashes=await querySyncKeysetPages(db,'SELECT chapter_index,chapter_hash FROM sync_book_validation WHERE binding=? AND chapter_index>? ORDER BY chapter_index',[binding],{key:'chapter_index'});
  if(hashes.length!==index||hashes.some((r,i)=>Number(r.chapter_index)!==i+1))throw Error('book_package_invalid');
- const fingerprint=Number(row.complete)?String(row.fingerprint):await bookFingerprint(hashes.map(r=>String(r.chapter_hash)),sha),actual=await bookId(fingerprint,sha);
- if(actual!==id||expected&&(expected.fingerprint!==fingerprint||expected.chapterCount!==index))throw Error('book_package_invalid');
+ const fingerprint=Number(row.complete)?String(row.fingerprint):await bookFingerprint(hashes.map(r=>String(r.chapter_hash)),sha),actual=await bookId(fingerprint,sha,header.instanceId);
+ if(actual!==id||expected&&(expected.instanceId!==header.instanceId||expected.fingerprint!==fingerprint||expected.chapterCount!==index))throw Error('book_package_invalid');
  if(!Number(row.complete))await db.transaction([{sql:'UPDATE sync_book_install SET complete=1,fingerprint=? WHERE binding=?',params:[fingerprint,binding]}]);
  return {binding,header,fingerprint,bookId:actual,chapterHashes:hashes.map(r=>String(r.chapter_hash)),row,lines};
 }

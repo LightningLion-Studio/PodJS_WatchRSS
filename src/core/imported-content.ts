@@ -7,7 +7,7 @@ export function isImportedContentUrl(url: string | null | undefined): boolean {
   return normalized.startsWith("https://watchrss.local/import-content") ||
     normalized.startsWith("https://watchrss.local/import-epub") ||
     normalized.startsWith("https://watchrss.local/import-txt-novel") ||
-    normalized === "watchrss://phone-imports" || isCliSingleTextUrl(normalized);
+    normalized === "watchrss://phone-imports" || isCliSingleTextUrl(normalized) || /^watchrss:\/\/import\/instance-v1\/[a-f0-9]{32}(?:\/|$)/.test(normalized);
 }
 
 /** Native channel deletion uses the same set of local source identifiers. */
@@ -15,5 +15,5 @@ export const isDeletableLocalContentChannel = isImportedContentUrl;
 
 export function isImportedTextItemUrl(url: string | null | undefined): boolean {
   const normalized = kotlinTrim(url ?? "").toLowerCase();
-  return normalized.startsWith("https://watchrss.local/import-content/txt/") || isCliSingleTextUrl(normalized);
+  return normalized.startsWith("https://watchrss.local/import-content/txt/") || isCliSingleTextUrl(normalized) || /^watchrss:\/\/import\/instance-v1\/[a-f0-9]{32}(?:\/|$)/.test(normalized);
 }

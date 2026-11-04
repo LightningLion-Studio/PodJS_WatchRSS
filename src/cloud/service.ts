@@ -1,3 +1,4 @@
+import {isBookCompanion} from './book-companion';
 import {idleHit} from '../diagnostics/idle-counters';
 import {cloudChangeUnchanged,cloudRemoteUnchanged,cloudLocalUnchanged,type CloudChangeDetection,type CloudChangeRead,type CloudChangeStamp} from './change-detection';
 import {emptyRestoreProgress,restoreProgressDiagnostic,type RestoreProgress} from './restore-progress';
@@ -153,7 +154,7 @@ export class WatchCloudSyncService {
   if(!restore.active)await restore.begin();
   await current();const heads=checkedHeads??await s.client.snapshotHeads();heads.forEach(headValid);
   if(new Set(heads.map(h=>h.sourceDeviceId)).size!==heads.length)throw Error('重复云设备 head');
-  const supported=(o:import('./codec').CloudObject)=>o.name==='notes-state.json'||o.name==='notes-assets.zip'||o.name===PRIVATE_OVERLAY_NAME||o.name.startsWith('private/articles/')||o.name==='rss-state.json'||o.name==='library-sync.json'||o.name==='private-library.wrss'||o.name.startsWith('reader/')||!!o.privateBook;
+  const supported=(o:import('./codec').CloudObject)=>isBookCompanion(o)||o.name==='notes-state.json'||o.name==='notes-assets.zip'||o.name===PRIVATE_OVERLAY_NAME||o.name.startsWith('private/articles/')||o.name==='rss-state.json'||o.name==='library-sync.json'||o.name==='private-library.wrss'||o.name.startsWith('reader/')||!!o.privateBook;
   const restored=await (remoteSame?openAppliedSnapshotInputs:restoreSnapshots)({session:s,heads,full,journal:restore,current,progress:value=>{this.value={...this.value,restoreProgress:value};this.emit();},manifest:(h,b)=>this.manifest(s,h,b),hash:this.ports.hash,supported,now:this.ports.now??Date.now,status:(percent,phase)=>this.set(phase==='apply'?'merging':'downloading',phase==='apply'?`正在落盘私有资料 ${percent}%`:`正在恢复云快照 ${percent}%`,member),changed:()=>this.ports.onChanged?.()});
   const {snapshots,compatibility}=restored;let {changed,pendingItems,abandonedItems,formatBlocked}=restored;
   // A different library owner needs an explicit choice before rebuilding the
@@ -202,7 +203,7 @@ export class WatchCloudSyncService {
   if(records&&!recordFailure)try{try{await recordStep('flush',()=>records!.flush());}catch(e){if(!String(e).includes('cloud_record_conflict'))throw e;await recordStep('pull',()=>records!.pull());await recordStep('flush',()=>records!.flush());}}catch(e){recordError(e);}
   let exportStamp:CloudChangeStamp|undefined;if(s.changes&&changeRead)try{exportStamp=(await s.changes.read(changeContext)).stamp;}catch{}
   let publishedHead:CloudSnapshotHead|undefined;
-  const version=await s.keys.currentKeyVersion(s.userId),payload=await restore.timed('export',0,()=>s.library.exportPayloads(full,true));await current();
+  const version=await s.keys.currentKeyVersion(s.userId);if(snapshots.some(v=>v.manifest.keyVersion!==version&&v.manifest.objects.some(isBookCompanion)))formatBlocked=true;const payload=await restore.timed('export',0,()=>s.library.exportPayloads(full,true));await current();
   const contentHash=await this.ports.hash(utf8Encode(`v3:${bootstrap.libraryEpoch}:${content.contentGeneration}:${version}:${payload.fingerprint}`));
   const fresh=await s.client.snapshotHeads();fresh.forEach(headValid);
   // Do not claim to have observed a head that arrived while we were merging.
