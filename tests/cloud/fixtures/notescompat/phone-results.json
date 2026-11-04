@@ -1,0 +1,300 @@
+{
+  "sequence": [
+    {
+      "label": "mini-text",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Text",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000002
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-pin",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": true,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Text",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000035
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-delete",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": true,
+          "deletedAt": 1900000000071,
+          "folder": null,
+          "deleted": true,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Text",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000071
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-restore",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Restored",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000225
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    }
+  ],
+  "cases": [
+    {
+      "label": "mini-text",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Text",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000002
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-pin",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": true,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Text",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000035
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-delete",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": true,
+          "deletedAt": 1900000000071,
+          "folder": null,
+          "deleted": true,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Text",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000071
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-restore",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000002,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d",
+          "id": "cfeab39a-95b8-478e-93c2-629b3f938fac",
+          "title": "Restored",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000225
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-image",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000214,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "<img src=\"assets/d918e24ca192a7b685bc2f583a10209b60eba513b9c3db118e6a7688caebcc8c.png\">",
+          "modifiedBy": "beff13bd3e57ac735983b19dce873c97925cf9b91db208f9d227a0eab3540ee7",
+          "id": "1552db21-7968-4fb5-b909-b4a8fa9f3965",
+          "title": "Image",
+          "hash": "e1dd7024ccb0b90cfb0130379419e63457b147d2be3536b7fd32e6ee3e68e6a4",
+          "base": "<img src=\"assets/d918e24ca192a7b685bc2f583a10209b60eba513b9c3db118e6a7688caebcc8c.png\">",
+          "updatedAt": 1900000000214
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-image-delete",
+      "state": {
+        "notes": [{
+          "createdAt": 1900000000214,
+          "pinned": false,
+          "deletedAt": 1900000000264,
+          "folder": null,
+          "deleted": true,
+          "markdown": "<img src=\"assets/d918e24ca192a7b685bc2f583a10209b60eba513b9c3db118e6a7688caebcc8c.png\">",
+          "modifiedBy": "beff13bd3e57ac735983b19dce873c97925cf9b91db208f9d227a0eab3540ee7",
+          "id": "1552db21-7968-4fb5-b909-b4a8fa9f3965",
+          "title": "Image",
+          "hash": "e1dd7024ccb0b90cfb0130379419e63457b147d2be3536b7fd32e6ee3e68e6a4",
+          "base": "<img src=\"assets/d918e24ca192a7b685bc2f583a10209b60eba513b9c3db118e6a7688caebcc8c.png\">",
+          "updatedAt": 1900000000264
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-retired-settings",
+      "state": {
+        "notes": [{
+          "createdAt": 1,
+          "pinned": true,
+          "deletedAt": 0,
+          "folder": "work",
+          "deleted": false,
+          "markdown": "own",
+          "modifiedBy": "a007fa10b9e7f4f7d6ba988bc8665aaeebdb1a2b079f292f2c80efc69379439a",
+          "id": "note-1",
+          "title": "Phone",
+          "hash": "5b3975651c3cab92d044c096dc30a1c2d9525497457472de48c51ecb363d1f4a",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000340
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-multidevice",
+      "state": {
+        "notes": [
+          {
+            "createdAt": 1900000000411,
+            "pinned": false,
+            "deletedAt": 0,
+            "folder": null,
+            "deleted": false,
+            "markdown": "local",
+            "modifiedBy": "a13a70120c2564b4ce0ab098797c8a4e8dd7aaf986711f663a18c737cb2e2825",
+            "id": "9fbc886b-bcb5-435b-ba26-6fa0ed89f967",
+            "title": "Local",
+            "hash": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
+            "base": "local",
+            "updatedAt": 1900000000411
+          },
+          {
+            "createdAt": 1,
+            "pinned": false,
+            "deletedAt": 0,
+            "folder": "work",
+            "deleted": false,
+            "markdown": "foreign",
+            "modifiedBy": "phone",
+            "id": "phone-note",
+            "title": "Phone",
+            "hash": "656771905e1ef731f65cd0a0d9fb061238380a1a012e6abdf846ecc7d2ea36fd",
+            "base": "one\ntwo\nthree",
+            "updatedAt": 100
+          }
+        ],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    },
+    {
+      "label": "mini-own-library",
+      "state": {
+        "notes": [{
+          "createdAt": 1,
+          "pinned": true,
+          "deletedAt": 0,
+          "folder": "work",
+          "deleted": false,
+          "markdown": "own library",
+          "modifiedBy": "9ac7bae979b2449f4e93db3a868ffc825bcee68c86936223298416c1c10f81fd",
+          "id": "note-1",
+          "title": "Phone",
+          "hash": "2394651d336885ca333f4a6309bcf8e04b4b66d5cf52ddb5fda923f51c28081c",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 1900000000521
+        }],
+        "format": "watchrss-notes",
+        "version": 1
+      }
+    }
+  ],
+  "retirement": {
+    "objects": ["notes-state.json"],
+    "source": "2f12179bc9ddd7a47d8c4d106fb9fb64e22083f2",
+    "archiveRetired": true
+  }
+}

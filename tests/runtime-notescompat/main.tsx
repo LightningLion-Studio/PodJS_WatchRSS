@@ -1,0 +1,21 @@
+import {mount} from '@pocketjs/framework/solid';
+import {View,Text} from '@pocketjs/framework/components';
+import {onMount,createSignal} from 'solid-js';
+import {bytesToBase64} from '@podjs/framework/bytes';
+import {utf8Encode} from '../../src/cloud/types';
+import {hostOperation} from '@podjs/framework/services';
+import {createBackgroundLibrary} from '../../src/cloud/background-library';
+import {createCloudHostPorts} from '../../src/cloud/host-ports';
+import {createCloudTransport} from '../../src/cloud/transport';
+import {WatchCloudLibraryAdapter} from '../../src/cloud/library';
+import {SqlCloudChangeDetection} from '../../src/cloud/change-detection';
+import {WatchCloudSyncService,type CloudSession} from '../../src/cloud/service';
+const guard={require(){}},host=<T,>(m:string,a:Record<string,unknown>)=>hostOperation<T>(m,a).result;
+mount(()=>{const [label,setLabel]=createSignal('NOTESCOMPAT');onMount(()=>{void(async()=>{
+ const ports=createCloudHostPorts(host,guard),repo=await createBackgroundLibrary(host,async()=>undefined,guard);const transport=createCloudTransport(<T,>(method:string,args:Record<string,unknown>)=>{if(method==='http.download'){const url=String(args.url),prefix=url.startsWith('https://objects.invalid/')?'/objects/':url.startsWith('https://backend.invalid/')?'/':null;if(prefix===null)throw Error('external network rejected');return host<T>(method,{...args,url:'http://127.0.0.1:18789'+prefix+url.split('/').slice(3).join('/')});}return host<T>(method,args);},guard);
+ const foundation=ports.foundation('user','watch',transport,{baseUrl:'https://backend.invalid',accessToken:'fixture-token'}),library=new WatchCloudLibraryAdapter(repo,'watch',{...ports.crypto,stableId:ports.crypto.sha256 as any},guard);
+ const session:CloudSession={...foundation,userId:'user',deviceId:'watch',displayName:'NOTESCOMPAT synthetic',library,changes:new SqlCloudChangeDetection(host,'synthetic-notescompat','063e1726'),keys:{publicKeySpki:async()=>'fixture-spki',currentKeyVersion:async()=>1,acceptBootstrap:async()=>'ready',accountKey:async()=>new Uint8Array(32).fill(41)},records:async()=>({pull:async()=>0,reapply:async()=>0,flush:async()=>0,fullyAppliedRevision:'0',openForPublish:async(r:string)=>r==='0'}) as any,assertCurrent:async()=>{}};
+ let serial=0;const service=new WatchCloudSyncService({open:async()=>session,network:async()=>({active:true,validated:true,wifi:true,metered:false}),hash:ports.crypto.sha256,uuid:async()=> 'synthetic-watch-'+(++serial),exclusive:fn=>fn()},guard);
+ const results:any[]=[];const run=async(step:string)=>{const success=await service.syncNow(false,'all');const notes=await host<any[]>('sql.query',{sql:'SELECT note_id,title,pinned,deleted FROM memo_notes ORDER BY note_id'}),files=await host('file.list',{path:'notes/assets'});const r={step,success,status:service.status,notes,files};results.push(r);console.info('NotesCompatProof',JSON.stringify(r));if(!success)throw Error(service.status.message);};
+ await run('restore');await run('idle');await transport.request({url:'https://backend.invalid/advance?name=mini-image-delete',method:'GET',headers:{}});await run('image-delete');await transport.request({url:'https://backend.invalid/advance?name=mini-restore',method:'GET',headers:{}});await run('text-restore');await run('idle-final');await host('file.write',{path:'notescompat-proof.json',dataBase64:bytesToBase64(utf8Encode(JSON.stringify(results))),atomicReplace:true});setLabel('VERIFIED '+results.length);console.info('NotesCompatDone',JSON.stringify({steps:results.length}));
+ })().catch(e=>{setLabel(String(e));console.error('NotesCompatError',String(e));});});return <View class="absolute inset-0 bg-black items-center justify-center"><Text class="text-white text-[16px]">{label()}</Text></View>;});

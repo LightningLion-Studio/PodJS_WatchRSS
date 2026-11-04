@@ -91,6 +91,9 @@ async function snapshotInputs(p:SnapshotInputs,applyRemote:boolean){
    await warn();
    pendingItems+=headPending;await p.current();if(p.full&&!headPending){await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,true);await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);await s.client.acknowledge(h.id,s.deviceId);await cp.acknowledgeHead(h.manifestSha256);}else if(!headPending&&selected.some(o=>o.name==='rss-state.json'))await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);
   }
+  // A later device can restore a deleted note. Collect only after all current
+  // heads have merged, and never while unread/unknown state can hold references.
+  if(p.full&&!pendingItems&&!abandonedItems&&!formatBlocked&&snapshots.some(v=>!cloudCompatibility(v.manifest).opaque&&v.manifest.objects.some(o=>o.name==='notes-state.json'||o.name==='notes-assets.zip'))){await p.current();await s.library.collectNoteAssets?.();await p.current();}
   }
   return {snapshots,changed,pendingItems,abandonedItems,formatBlocked,compatibility,inflateArchive,readObject:async(manifest:CloudManifest,object:CloudObject,site:RestoreCallsite='previous')=>{
    if(!manifest.objects.includes(object))throw Error('cloud_snapshot_checkpoint_invalid');

@@ -28,6 +28,7 @@ export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sourc
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
  mergeCloudNotes?(notes:readonly MemoNote[],check?:()=>void):Promise<number>;
  mergeCloudNoteAsset?(key:string,bytes:Uint8Array):Promise<number>;
+ collectCloudNoteAssets?(check:()=>void):Promise<number>;
  setCloudProgress?(sink?:(unit:string)=>Promise<void>):void;
  setCloudDiagnostic?(sink?:(fields:Record<string,string|number>)=>void):void;
  /** Includes pending/tombstone/private note state; never reads article bodies. */
@@ -50,6 +51,7 @@ export interface CloudLibraryCrypto {yieldTurn?():Promise<void>;gzip(bytes:Uint8
 export const privateCloudBody=(a:Pick<ExportedArticle,'url'|'rssSourceUrl'>)=>isImportedContentUrl(a.url)||isImportedContentUrl(a.rssSourceUrl)||!a.rssSourceUrl?.trim();
 const stateJson=(a:ExportedArticle)=>{const {contentHtml,contentText,cloudReadingItemId,cloudRssArticleId,cloudLegacyArticleIds,bodySourceDeviceId,...state}=a;return state;};
 export class WatchCloudLibraryAdapter {
+ async collectNoteAssets(){this.guard.require();return await this.repository.collectCloudNoteAssets?.(()=>this.guard.require())??0;}
  trackProgress(sink?:(unit:string)=>Promise<void>){this.repository.setCloudProgress?.(sink);}
  private readingRevision?:number;
  private async checkReadingRevision(){const revision=await this.repository.cloudReadingRevision?.();if(revision!==undefined&&revision!==this.readingRevision){this.matchedReading.clear();this.readingRevision=revision;}}

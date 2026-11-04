@@ -33,6 +33,7 @@ import {SqlSourceSyncStore,normalizeSourceUrl,type SourceUriPort} from './source
 import {SqlLibrarySequenceStore} from './sequence-store.ts';
 import {migrateLocalDeletionJournal} from './deletion-journal.ts';
 import {reconcileSnapshotLog} from './snapshot-log.ts';
+import {noteAssetKeys} from '../notes/cloud-assets';
 import {libraryRevision,revisionGuard} from './revision.ts';
 import {prepareArticle,bodyForRequest,type PreparedArticle,type ExportedArticle} from './article-export.ts';
 import {isImportedContentUrl} from '../core/imported-content.ts';
@@ -42,6 +43,7 @@ import type {SyncedSource} from './library-wire.ts';
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
  noteAssetWriter?:(key:string,bytes:Uint8Array)=>Promise<number>;
+ noteAssetCollector?:(references:()=>Promise<ReadonlySet<string>>,check:()=>void)=>Promise<number>;
  reencodeStoredBodies?:(ids:readonly number[])=>Promise<readonly ReencodedBody[]>;
  clearContentFiles?:(privateData:boolean,control?:LibraryClearControl)=>Promise<void>;
  finishLibraryClear?:(privateData:boolean,check:()=>void)=>Promise<void>;
@@ -88,6 +90,15 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   for(const note of notes){check();changed+=await repository.applyRemote(note);check();}return changed;
  }
  async mergeCloudNoteAsset(key:string,bytes:Uint8Array){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes);}
+ async collectCloudNoteAssets(check:()=>void){
+  if(!this.ports.noteAssetCollector)return 0;
+  await this.mergeCloudNotes([],check);
+  const references=async()=>{check();const rows=await this.db.query("SELECT markdown,base_markdown FROM memo_notes WHERE deleted=0"),conflicts=await this.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='note_merge_conflicts'");
+   const texts=rows.flatMap(r=>[String(r.markdown),String(r.base_markdown)]);
+   if(conflicts.length)for(const r of await this.db.query('SELECT base_markdown,local_markdown,remote_markdown FROM note_merge_conflicts'))texts.push(String(r.base_markdown),String(r.local_markdown),String(r.remote_markdown));
+   return new Set(texts.flatMap(text=>[...noteAssetKeys(text)]));
+  };return this.ports.noteAssetCollector(references,check);
+ }
  private report(fields:Record<string,string|number>){try{this.ports.diagnostic?.(fields);if(fields.event==='library-work')this.cloudDiagnostic?.(fields);}catch{/* Diagnostics never change the exchange. */}}
  private async snapshotRetry(attempt:number,canonical:boolean,revision:number,sequence:number,reason:string){
   this.report({event:'library-work',stage:'snapshot-retry',outcome:'deferred',attempt,reason,durationMillis:0});

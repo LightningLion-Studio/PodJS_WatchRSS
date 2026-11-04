@@ -1,0 +1,123 @@
+{
+  "source": "9030f187ba0e9e6584cd832b191f40c720103938",
+  "method": "Unmodified notes-sync.publish and snapshot.create, isolated wx filesystem and synthetic transport",
+  "cases": [
+    {
+      "label": "mini-text",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d"
+    },
+    {
+      "label": "mini-pin",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d"
+    },
+    {
+      "label": "mini-delete",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d"
+    },
+    {
+      "label": "mini-restore",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "d3393ebda002bb8f32253eeec6621d88e32233675ff44f31803a3f2fa4b1089d"
+    },
+    {
+      "label": "mini-image",
+      "objects": [
+        "notes-state.json",
+        "notes-assets.zip"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": [],
+        "miniNotesImages": {
+          "fingerprint": "ba6fc91d009b1e6b81f9e7b7cc7100780ec063740c0ec04efeb8327cb62888df",
+          "localFingerprint": "ba6fc91d009b1e6b81f9e7b7cc7100780ec063740c0ec04efeb8327cb62888df",
+          "keys": [
+            "d918e24ca192a7b685bc2f583a10209b60eba513b9c3db118e6a7688caebcc8c.png"
+          ]
+        }
+      },
+      "deviceId": "beff13bd3e57ac735983b19dce873c97925cf9b91db208f9d227a0eab3540ee7"
+    },
+    {
+      "label": "mini-image-delete",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "beff13bd3e57ac735983b19dce873c97925cf9b91db208f9d227a0eab3540ee7"
+    },
+    {
+      "label": "mini-retired-settings",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "a007fa10b9e7f4f7d6ba988bc8665aaeebdb1a2b079f292f2c80efc69379439a"
+    },
+    {
+      "label": "mini-multidevice",
+      "objects": [
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "a13a70120c2564b4ce0ab098797c8a4e8dd7aaf986711f663a18c737cb2e2825"
+    },
+    {
+      "label": "mini-own-library",
+      "objects": [
+        "private-library.wrss",
+        "notes-state.json"
+      ],
+      "settings": {
+        "snapshotContentLayout": 3,
+        "libraryEpoch": "9b2e7c41-0d3f-4a8b-b6c5-aabbccddeeff",
+        "miniSavedArticleIds": []
+      },
+      "deviceId": "9ac7bae979b2449f4e93db3a868ffc825bcee68c86936223298416c1c10f81fd"
+    }
+  ]
+}

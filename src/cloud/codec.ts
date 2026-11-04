@@ -6,7 +6,7 @@ import {PRIVATE_OVERLAY_FEATURE,PRIVATE_OVERLAY_NAME,planPrivateOverlay} from '.
 import {mergeCloudArchive,retireCloudArchive} from './archive-compat';
 import {rawJsonUnknownBytes,parseRawJsonAsync,type RawJsonNode} from '@podjs/framework/json-raw';
 import {readWrss,readWrssEntry} from './wrss';
-import {bindCloudRaw,cloudRaw,cloudCompatibility,requireCloudWritable,parseRawJson,rawJsonValue,rawJsonProperty,rawJsonText,patchCloudObject,patchRawJsonObject,schemaFields,chunkFields,objectFields,manifestFields,settingFields,recordFields,type CloudFeatures} from './compatibility';
+import {bindCloudRaw,cloudRaw,cloudCompatibility,cloudHasUnknownData,requireCloudWritable,parseRawJson,rawJsonValue,rawJsonProperty,rawJsonText,patchCloudObject,patchRawJsonObject,schemaFields,chunkFields,objectFields,manifestFields,settingFields,recordFields,type CloudFeatures} from './compatibility';
 import {base64ToBytes,bytesToBase64,equalBytesAsync} from '@podjs/framework/bytes';
 import {utf8Encode,utf8Decode,type EncryptedCloudSnapshot} from './types';
 import {cloudDisabled,type CloudGuard} from './guard';
@@ -142,11 +142,14 @@ export class WatchCloudCodec {
   if(overlayWrite&&input.previous?.objects.some(o=>o.name==='private-library.wrss'||o.name===PRIVATE_OVERLAY_NAME)&&(input.objects.some(o=>o.name==='private-library.wrss')||input.removedPrivateArticleIds?.length||input.removedObjectNames?.length))check(input.readPreviousChunk,'cloud_format_previous_missing');
   if(overlayWrite&&input.previous&&input.readPreviousChunk)input=await planPrivateOverlay(input,restoreCrypto,readPrevious);
   if(input.features?.incompat.includes(PRIVATE_OVERLAY_FEATURE))this.requireWriteV1();
+  // Foreign notes stay under their writer's active head. A legacy library
+  // publication base must not freeze them into this watch's independent head.
   // This watch imports notes; it cannot rewrite, retire or re-key a carried
   // phone/mini note object until the notes publication protocol owns that work.
-  const carriedNotes=input.previous?.objects.filter(o=>o.name==='notes-state.json'||o.name==='notes-assets.zip')??[];
+  const foreignNotes=new Set(input.previous?.sourceDeviceId!==input.sourceDeviceId?input.previous?.objects.filter(o=>(o.name==='notes-state.json'||o.name==='notes-assets.zip')&&!cloudCompatibility(o).readOnly&&!cloudHasUnknownData(o)):[]);
+  const carriedNotes=input.previous?.objects.filter(o=>(o.name==='notes-state.json'||o.name==='notes-assets.zip')&&!foreignNotes.has(o))??[];
   if(carriedNotes.length&&(input.previous!.keyVersion!==input.keyVersion||carriedNotes.some(o=>input.objects.some(v=>v.name===o.name)||input.removedObjectNames?.includes(o.name)||input.carried?.some(v=>v.name===o.name&&v!==o))))throw Error('cloud_format_notes_preservation_pending');
-  const requested=new Set(input.objects.map(o=>o.name)),explicit=input.carried??[];const retained=(input.previous?.keyVersion===input.keyVersion?input.previous.objects:[]).filter(o=>!requested.has(o.name)&&!explicit.some(c=>c.name===o.name)&&!['rss-state.json','library-sync.json'].includes(o.name)&&!input.removedObjectNames?.includes(o.name));
+  const requested=new Set(input.objects.map(o=>o.name)),explicit=input.carried??[];const retained=(input.previous?.keyVersion===input.keyVersion?input.previous.objects:[]).filter(o=>!foreignNotes.has(o)&&!requested.has(o.name)&&!explicit.some(c=>c.name===o.name)&&!['rss-state.json','library-sync.json'].includes(o.name)&&!input.removedObjectNames?.includes(o.name));
   const logicalObjects=[...input.objects];const oldArchive=retained.find(o=>o.name==='private-library.wrss');if(oldArchive&&input.readPreviousChunk&&input.removedPrivateArticleIds?.length){requireCloudWritable(oldArchive);const bytes=await readPrevious(oldArchive);const remaining=await retireCloudArchive(bytes,input.removedPrivateArticleIds,(b,max)=>restoreCrypto.gunzip(b,max));retained.splice(retained.indexOf(oldArchive),1);if(remaining)logicalObjects.push({name:oldArchive.name,bytes:remaining,compress:false});}
   for(const o of explicit)if((o.entryRef||o.objectKeyEnvelope)&&!input.previous?.objects.includes(o)){this.requireWriteV1();if(o.objectKeyEnvelope)check(this.writeGates?.migrationV1?.()===true,'cloud_format_migration_disabled');}
   const carried=[...explicit,...retained];

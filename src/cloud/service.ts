@@ -31,7 +31,7 @@ export interface CloudSession {
  client:Partial<Pick<WatchCloudClient,'recordsHead'|'refreshR48WriteGate'|'r48WriteEnabled'|'requiredFeatures'>>&Pick<WatchCloudClient,'setEpoch'|'setContentGeneration'|'registerDevice'|'bootstrap'|'snapshotHeads'|'snapshot'|'download'|'acknowledge'|'resolveRssSource'|'reserveSnapshot'|'completeSnapshot'>;
  keys:Pick<WatchCloudKeyManager,'publicKeySpki'|'currentKeyVersion'|'acceptBootstrap'|'accountKey'>&Partial<Pick<WatchCloudKeyManager,'prepareLegacyUpgrade'>>;
  codec:WatchCloudCodec;cache:WatchCloudCache;state:WatchCloudStateStore;uploader:{upload(target:CloudUploadObject,bytes:Uint8Array):Promise<void>};
- library:Partial<Pick<WatchCloudLibraryAdapter,'observePrivateOverlay'|'readingInventoryMode'|'trackProgress'>>&Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
+ library:Partial<Pick<WatchCloudLibraryAdapter,'collectNoteAssets'|'observePrivateOverlay'|'readingInventoryMode'|'trackProgress'>>&Pick<WatchCloudLibraryAdapter,'publicSources'|'mergeInventory'|'exportPayloads'|'restorePayloads'>;
  /** Account identity/revocation must be rechecked after asynchronous IO. */
  assertCurrent():Promise<void>;
  assertUpload?():Promise<void>;
