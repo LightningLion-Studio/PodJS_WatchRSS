@@ -186,7 +186,7 @@ export class WatchCloudCodec {
   return {manifest:Object.assign(manifest,{allChunks:manifest.objects.flatMap(o=>o.chunks??[])}),encryptedManifest:blob,newChunks};
  }
  async decryptManifest(key:Uint8Array,id:string,encrypted:Uint8Array):Promise<CloudManifest>{
-  this.guard.require();const plain=await this.open(key,encrypted,'manifest',`watchrss-cloud-manifest-v2:${id}`,id);try{const text=utf8Decode(plain),round=utf8Encode(text);check(await equalBytesAsync(round,plain,{yield:this.crypto.yieldTurn}));const manifest=parseManifestText(text,await parseRawJsonAsync(text,{maxBytes:8*1024*1024,yield:this.crypto.yieldTurn}));check(manifest.snapshotId===id);authenticatedRoots.set(manifest,await this.crypto.sha256(key));return manifest;}catch(error){if(error instanceof Error&&error.message==='raw_json_depth')throw Error('cloud_format_depth');throw error;}finally{plain.fill(0);}
+  this.guard.require();const plain=await this.open(key,encrypted,'manifest',`watchrss-cloud-manifest-v2:${id}`,id);try{const text=utf8Decode(plain),round=utf8Encode(text);check(await equalBytesAsync(round,plain,{yield:this.crypto.yieldTurn}));const manifest=parseManifestText(text,await parseRawJsonAsync(text,{owner:"cloud-manifest",maxBytes:8*1024*1024,yield:this.crypto.yieldTurn}));check(manifest.snapshotId===id);authenticatedRoots.set(manifest,await this.crypto.sha256(key));return manifest;}catch(error){if(error instanceof Error&&error.message==='raw_json_depth')throw Error('cloud_format_depth');throw error;}finally{plain.fill(0);}
  }
  async yieldRestoreTurn(){await this.crypto.yieldTurn?.();}
  async inflateRestoreEntry(bytes:Uint8Array,max:number){return this.crypto.gunzip(bytes,max);}

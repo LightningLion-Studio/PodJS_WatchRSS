@@ -1,3 +1,5 @@
+import {idleHash} from '../diagnostics/idle-counters';
+import {idlePhase} from '../diagnostics/idle-counters';
 import {cpuWork,cpuWorkAsync,cpuJsonParse,cpuJsonStringify,cpuSort} from '@podjs/framework/cpu-work';
 import {ARTICLE_REGISTER_FEATURE,hasArticleRegisters,readArticleRegisters,normalizeArticleRegisters,mergeArticleRegisters,articleKnownCanonical} from './article-register';
 import {bindCloudRaw,markCloudReadOnly,isolateCloudRaw,releaseKnownCloudRaw,cloudRaw,cloudCompatibility,recordRawSchema,recordFields,knownRecordValue,rawRecordText,parseRawJson,rawJsonValue,emptyCompatibilityStatus,type CloudFeatures} from './compatibility';
@@ -37,6 +39,8 @@ export interface RecordPorts {
  pageProgress?(done:number,total:number):void;
  get(after:string):Promise<RecordPage>;push(items:RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>;
  readPreparation?():Promise<string|undefined>;writePreparation?(value:string):Promise<void>;
+ /** Object journals retain immutable receipt identity and avoid a full JSON round trip. */
+ readPreparationObject?():Promise<unknown>;writePreparationObject?(value:Record<string,any>):Promise<unknown>;
  refreshKeys?():Promise<void>;check?():void;current():Promise<void>;assertUpload():Promise<void>;
  bookReplacement?(legacy:RecordDocument):Promise<{book:RecordDocument;reading?:RecordDocument}|undefined>;
  project?(local:RecordDocument,basis:RecordDocument):Promise<RecordDocument>|RecordDocument;
@@ -84,9 +88,11 @@ export class CloudRecordCodec {
  }
 }
 interface RecordProjection {plaintext?:string;checksum?:string;ids:string[];keyVersion:number;binding:string;nonceBase64:string;ciphertextBase64:string}
-interface RecordState {replayScope?:string;replayDone?:Record<string,{end:number;proof:string}>;prepared?:{scope:string;entries:[string,{id:string;hash:string;proof:string}][]};projections?:RecordProjection[];protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
+interface RecordState {appliedHead?:string;replayScope?:string;replayDone?:Record<string,{end:number;proof:string}>;prepared?:{scope:string;entries:[string,{id:string;hash:string;proof:string}][]};projections?:RecordProjection[];protectedVersions?:Record<string,RecordRow[]>;quarantinedRows?:Record<string,boolean>;protectedRows?:Record<string,boolean>;pendingEdits?:Record<string,boolean>;epoch:string;cursor:string;records:Record<string,{revision:string;hash:string}>;rows:Record<string,RecordRow>}
 /** Local projection, account/epoch scoped by the cache. Production stores plaintext; legacy encrypted projections remain readable during migration. */
 export class WatchCloudRecords {
+ private acknowledgedHead:string|undefined;
+ get fullyAppliedRevision(){return this.acknowledgedHead??this.state?.appliedHead??this.state?.cursor;}
  private state!:RecordState;private codec:CloudRecordCodec;private decoded=new Map<string,{row:RecordRow;doc:RecordDocument;legacy:boolean}>();
  private progressCommit?:((unit:string)=>Promise<void>);private savedCursor='0';private savedProjection='';
  trackProgress(commit:(unit:string)=>Promise<void>){this.progressCommit=commit;}
@@ -116,7 +122,7 @@ export class WatchCloudRecords {
  get compatibility(){const out=emptyCompatibilityStatus();for(const item of this.decoded.values()){const p=cloudCompatibility(item.doc);if(p.opaque)out.opaque++;else if(p.readOnly)out.readOnly++;}for(const id of Object.keys(this.state?.protectedRows??{}))if(!this.decoded.has(id))out.readOnly++;out.opaque+=Object.keys(this.state?.quarantinedRows??{}).length;out.editPending=Object.keys(this.state?.pendingEdits??{}).length;out.upgradeRequired=!!(out.opaque||out.readOnly||out.editPending);return out;}
  constructor(private p:RecordPorts){this.codec=new CloudRecordCodec({...p.crypto,hkdf:(...args)=>this.derive(...args),decrypt:async(...args)=>{this.decryptions++;return p.crypto.decrypt(...args);}});}
  private empty():RecordState{return {epoch:this.p.epoch,cursor:'0',records:{},rows:{}};}
- private async measured<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>):Promise<T>{const at=this.now(),originals=this.decryptions,projections=this.projectionDecryptions;try{this.p.work?.({event:'records-work',lane:'pull',stage,units,durationMillis:0,outcome:'started'});}catch{}let ok=false;try{const v=await run();ok=true;return v;}finally{try{this.p.work?.({event:'records-work',lane:'pull',stage,units,durationMillis:Math.max(0,this.now()-at),outcome:ok?'complete':'failed',...(['projection-load','original-load'].includes(stage)?{decryptions:this.decryptions-originals,projectionDecryptions:this.projectionDecryptions-projections}:{})});}catch{}}}
+ private async measured<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>):Promise<T>{idlePhase(stage);const at=this.now(),originals=this.decryptions,projections=this.projectionDecryptions;try{this.p.work?.({event:'records-work',lane:'pull',stage,units,durationMillis:0,outcome:'started'});}catch{}let ok=false;try{const v=await run();ok=true;return v;}finally{try{this.p.work?.({event:'records-work',lane:'pull',stage,units,durationMillis:Math.max(0,this.now()-at),outcome:ok?'complete':'failed',...(['projection-load','original-load'].includes(stage)?{decryptions:this.decryptions-originals,projectionDecryptions:this.projectionDecryptions-projections}:{})});}catch{}}}
  private async save(){return this.measured('checkpoint',1,async()=>{if(this.p.writeStateObject)await this.p.writeStateObject(this.state);else{await this.p.current();await this.p.writeState(cpuJsonStringify(this.state));}const projection=this.state.projections?.at(-1)?.binding??'';if(this.state.cursor!==this.savedCursor){await this.progressCommit?.('pull:'+this.state.cursor);this.savedCursor=this.state.cursor;}if(projection&&projection!==this.savedProjection){await this.progressCommit?.('projection:'+projection);this.savedProjection=projection;}});}
  private async ensureDecoded(ids:readonly string[]){
   const needed=new Set(ids.filter(id=>!this.decoded.has(id)&&this.state.rows[id]&&!this.state.quarantinedRows?.[id]));
@@ -137,8 +143,15 @@ export class WatchCloudRecords {
   try{return await this.pullRecords();}catch(error){outcome=String(error).includes('cloud_sync_suspended')?'paused':'failed';throw error;}
   finally{this.clearRunKeys();try{this.p.report?.({...(this.projectionDecryptions?{projectionDecryptions:this.projectionDecryptions}:{}),decryptions:this.decryptions,retired:this.retired,elapsedMillis:Math.max(0,this.now()-began),outcome});}catch{/* Diagnostics cannot change sync behavior. */}}
  }
- private async pullRecords(){
-  const p=this.p;this.replayReady=false;await p.current();this.state=this.empty();const raw=await this.measured('state-read',1,()=>p.readStateObject?p.readStateObject():p.readState());const validatedAt=this.now();if(raw)try{const s=typeof raw==='string'?cpuJsonParse(raw):raw as RecordState;cpuWork('records-validate','items',Object.keys(s.rows??{}).length,()=>{revision(s.cursor);check(s.records&&s.rows&&typeof s.records==='object'&&typeof s.rows==='object'&&!Array.isArray(s.records)&&!Array.isArray(s.rows)&&Object.keys(s.records).length<=50000&&Object.keys(s.rows).length<=50000);
+ /** Load only the local encrypted CAS cache. A persisted SQL applied fence
+  * authorizes this path; a missing/stale cache still requires a real pull. */
+ async openForPublish(expectedRevision:string){
+  this.acknowledgedHead=undefined;await this.loadState();this.decoded.clear();
+  if(this.fullyAppliedRevision!==expectedRevision)return false;
+  this.replayReady=true;return true;
+ }
+ private async loadState(){
+  const p=this.p;this.replayReady=false;await p.current();this.state=this.empty();const raw=await this.measured('state-read',1,()=>p.readStateObject?p.readStateObject():p.readState());const validatedAt=this.now();if(raw)try{const s=typeof raw==='string'?cpuJsonParse(raw):raw as RecordState;cpuWork('records-validate','items',Object.keys(s.rows??{}).length,()=>{revision(s.cursor);if(s.appliedHead!==undefined){revision(s.appliedHead);check(cmp(s.appliedHead,s.cursor)>=0);}check(s.records&&s.rows&&typeof s.records==='object'&&typeof s.rows==='object'&&!Array.isArray(s.records)&&!Array.isArray(s.rows)&&Object.keys(s.records).length<=50000&&Object.keys(s.rows).length<=50000);
    for(const name of ['protectedRows','pendingEdits','quarantinedRows'])if(s[name]!==undefined)check(s[name]&&typeof s[name]==='object'&&!Array.isArray(s[name])&&Object.keys(s[name]).length<=50000&&Object.entries(s[name]).every(([id,v])=>ID.test(id)&&v===true));
    if(s.protectedVersions!==undefined){check(s.protectedVersions&&typeof s.protectedVersions==='object'&&!Array.isArray(s.protectedVersions));let count=Object.keys(s.rows).length;for(const [id,versions]of Object.entries(s.protectedVersions) as [string,RecordRow[]][]){check(ID.test(id)&&Array.isArray(versions));for(const row of versions){check(row.recordId===id&&row.envelope&&typeof row.tombstone==='boolean');revision(row.revision);}count+=versions.length;}check(count<=50000);}
    for(const [id,v]of Object.entries(s.records) as [string,{revision:string;hash:string}][]){check(ID.test(id)&&v&&ID.test(v.hash));revision(v.revision);}
@@ -148,7 +161,11 @@ export class WatchCloudRecords {
    if(s.replayDone!==undefined&&(!s.replayDone||typeof s.replayDone!=='object'||Array.isArray(s.replayDone)||Object.keys(s.replayDone).length>50000))s.replayDone={};if(s.replayScope!==undefined&&(typeof s.replayScope!=='string'||s.replayScope.length>256)){delete s.replayScope;s.replayDone={};}if(s.epoch===p.epoch)this.state=s;});
   }catch{/* Cache loss requires cursor zero, never a library reset. */}
   try{p.work?.({event:'records-work',lane:'pull',stage:'state-validate',units:Object.keys(this.state.rows).length,durationMillis:Math.max(0,this.now()-validatedAt),outcome:'complete'});}catch{}
-  this.savedCursor=this.state.cursor;this.savedProjection=this.state.projections?.at(-1)?.binding??'';let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await this.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
+  this.savedCursor=this.state.cursor;this.savedProjection=this.state.projections?.at(-1)?.binding??'';
+ }
+ private async pullRecords(){
+  this.acknowledgedHead=undefined;await this.loadState();delete this.state.appliedHead;const p=this.p;
+  let cursor=this.state.cursor,restarted=false,changed=0;const refreshed=new Set<number>();const anchor=await this.key(p.anchorVersion);if(!anchor)throw Error('missing_key_version');
   this.decoded.clear();
   const projectionEntries=new Map<string,{id:string;text:string;legacy:boolean}>();
   const cachedInteractions:RecordDocument[]=[];
@@ -235,7 +252,7 @@ export class WatchCloudRecords {
  private async apply(documents:RecordDocument[]){
   this.applyWarmupMillis=0;
   const metrics=new Map<string,RecordWorkProgress>();
-  const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T):Promise<T>=>{const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const old=metrics.get(stage);metrics.set(stage,{event:'records-work',lane:'pull',stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
+  const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T):Promise<T>=>{idlePhase(stage);const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const old=metrics.get(stage);metrics.set(stage,{event:'records-work',lane:'pull',stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
   try{return await this.p.apply(documents,measure);}finally{this.applyWarmupMillis=metrics.get('reading-index')?.durationMillis??0;for(const m of metrics.values())try{this.p.work?.(m);}catch{}}
  }
  async reapply(scope='standalone',committed?:(unit:string)=>Promise<void>){return cpuWorkAsync('record-merge','items',Object.keys(this.state.rows).length,async ()=>{await this.p.current();if(this.p.lazyProjections){let changed=0;
@@ -271,22 +288,30 @@ export class WatchCloudRecords {
   const lane=interactionsOnly?'interactions':'flush';
   const metrics=new Map<string,RecordWorkProgress>();
   const reportWork=()=>{for(const m of metrics.values())try{p.work?.(m);}catch{}metrics.clear();};
-  const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T,cached=false):Promise<T>=>{const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const k=stage+':'+cached,old=metrics.get(k);metrics.set(k,{event:'records-work',lane,stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),cached,outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
-  let saved=this.state.prepared;if(p.readPreparation){try{saved=cpuJsonParse(await p.readPreparation()??'null')??undefined;}catch(error){await p.current();saved=undefined;}}
+  const measure=async<T>(stage:RecordWorkProgress['stage'],units:number,run:()=>Promise<T>|T,cached=false):Promise<T>=>{idlePhase(stage);const at=this.now();let success=false;try{const result=await run();success=true;return result;}finally{const k=stage+':'+cached,old=metrics.get(k);metrics.set(k,{event:'records-work',lane,stage,units:(old?.units??0)+units,durationMillis:(old?.durationMillis??0)+Math.max(0,this.now()-at),cached,outcome:success&&old?.outcome!=='failed'?'complete':'failed'});}};
+  let saved=this.state.prepared;if(p.readPreparationObject||p.readPreparation){try{saved=(p.readPreparationObject?await p.readPreparationObject():cpuJsonParse(await p.readPreparation!()??'null')) as typeof saved;}catch(error){await p.current();saved=undefined;}}
+  const writePreparation=p.writePreparationObject?((value:Record<string,any>)=>p.writePreparationObject!(value)):p.writePreparation?((value:Record<string,any>)=>p.writePreparation!(cpuJsonStringify(value))):undefined;
   const scope=sha256Hex(utf8Encode(cpuJsonStringify(['record-preparation-v1',p.userId,p.epoch,p.anchorVersion,p.version])));
   const receipts=new WorkReceipts<{id:string;hash:string;proof:string}>(saved?.scope===scope&&Array.isArray(saved.entries)?saved.entries.filter(e=>Array.isArray(e)&&ID.test(e[0])&&e[1]&&ID.test(e[1].id)&&ID.test(e[1].hash)&&ID.test(e[1].proof)):[],100000);
   const receiptProof=(fingerprint:string,r:{id:string;hash:string})=>hex(hmacSha256Bytes(anchor,utf8Encode('watchrss/local-record-preparation/v1:'+scope+':'+fingerprint+':'+r.id+':'+r.hash)));
   let savedPreparation=saved?.scope===scope&&Array.isArray(saved.entries)?saved.entries.at(-1)?.[0]:undefined;
-  const persistPreparation=async()=>{const value={scope,entries:receipts.snapshot()};if(p.writePreparation)await p.writePreparation(cpuJsonStringify(value));else this.state.prepared=value;const last=value.entries.at(-1)?.[0];if(last&&last!==savedPreparation){await this.progressCommit?.('prepared:'+scope+':'+last);savedPreparation=last;}};
+  let preparationDirty=saved?.scope!==scope;
+  const persistPreparation=async()=>{if(!preparationDirty)return;const value={scope,entries:receipts.snapshot()};if(writePreparation)await writePreparation(value);else this.state.prepared=value;preparationDirty=false;const last=value.entries.at(-1)?.[0];if(last&&last!==savedPreparation){await this.progressCommit?.('prepared:'+scope+':'+last);savedPreparation=last;}};
   const persist=async(cleanup=false,preparationOnly=false)=>measure('checkpoint',1,async()=>{
-   if(!p.writePreparation)this.state.prepared={scope,entries:receipts.snapshot()};
-   if(!preparationOnly||!p.writePreparation){if(p.writeStateObject){if(!cleanup)await p.writeStateObject(this.state);}else {const value=cpuJsonStringify(this.state);if((cleanup||accepted)&&p.checkpoint)await p.checkpoint(value);else {await p.current();await p.writeState(value);}}}
-   if(p.writePreparation)await persistPreparation();if(accepted)await this.progressCommit?.('ack:'+sha256Hex(utf8Encode(cpuJsonStringify(batch.map(r=>[r.recordId,this.state.records[r.recordId]])))));
+   if(!writePreparation)this.state.prepared={scope,entries:receipts.snapshot()};
+   if(!preparationOnly||!writePreparation){if(p.writeStateObject){if(!cleanup)await p.writeStateObject(this.state);}else {const value=cpuJsonStringify(this.state);if((cleanup||accepted)&&p.checkpoint)await p.checkpoint(value);else {await p.current();await p.writeState(value);}}}
+   if(writePreparation)await persistPreparation();if(accepted)await this.progressCommit?.('ack:'+sha256Hex(utf8Encode(cpuJsonStringify(batch.map(r=>[r.recordId,this.state.records[r.recordId]])))));
   });
   let accepted=false,prepared=0;
   let written=0;const hashById=new Map<string,string>();let batch:RecordWrite[]=[];
   const flush=async()=>{if(!batch.length)return;await p.current();await p.assertUpload();const response=await measure('push',batch.length,()=>p.push(batch));check(response.formatVersion===1&&response.items?.length===batch.length);const expected=new Map(batch.map(r=>[r.recordId,r])),seen=new Set<string>();
-   for(const row of response.items){revision(row.revision);const item=expected.get(row.recordId);check(item&&!seen.has(row.recordId)&&cmp(row.revision,item!.expectedRevision)>0);seen.add(row.recordId);}for(const row of response.items){const item=expected.get(row.recordId)!;this.state.records[row.recordId]={revision:row.revision,hash:hashById.get(row.recordId)!};if(item!.tombstone)delete this.state.rows[row.recordId];else this.state.rows[row.recordId]={recordId:row.recordId,revision:row.revision,envelope:item!.envelope,tombstone:item!.tombstone};}accepted=true;written+=batch.length;await persist();accepted=false;await p.current();for(const item of batch)if(!item.tombstone){const row=this.state.rows[item.recordId];if(row)this.decoded.set(item.recordId,{row,...await this.codec.decode(key,anchor,p.userId,row)});}batch=[];};
+   for(const row of response.items){revision(row.revision);const item=expected.get(row.recordId);check(item&&!seen.has(row.recordId)&&cmp(row.revision,item!.expectedRevision)>0);seen.add(row.recordId);}
+   // Own ACKs extend the applied fence only over a contiguous suffix. A gap
+   // can contain another device's write, so it must force a future pull.
+   let head=this.fullyAppliedRevision;
+   if(head!==undefined)for(const row of [...response.items].sort((a,b)=>cmp(a.revision,b.revision))){if(cmp(row.revision,head)<=0)continue;if(BigInt(row.revision)!==BigInt(head)+1n)break;head=row.revision;}
+   this.acknowledgedHead=head;if(head!==undefined)this.state.appliedHead=head;
+   for(const row of response.items){const item=expected.get(row.recordId)!;this.state.records[row.recordId]={revision:row.revision,hash:hashById.get(row.recordId)!};if(item!.tombstone)delete this.state.rows[row.recordId];else this.state.rows[row.recordId]={recordId:row.recordId,revision:row.revision,envelope:item!.envelope,tombstone:item!.tombstone};}accepted=true;written+=batch.length;await persist();accepted=false;await p.current();for(const item of batch)if(!item.tombstone){const row=this.state.rows[item.recordId];if(row)this.decoded.set(item.recordId,{row,...await this.codec.decode(key,anchor,p.userId,row)});}batch=[];};
   const add=async(id:string,doc:RecordDocument,tombstone=!!doc.value.deleted,original?:RecordRow,preparedHash?:string)=>{let hash=preparedHash??await measure('hash',1,()=>this.codec.hash(doc));const old=this.state.records[id];let same=await measure('ack-diff',1,()=>old?.hash===hash&&!original);if(p.lazyProjections&&(!same||this.state.protectedRows?.[id]))await this.ensureDecoded([id]);const basis=this.decoded.get(id)?.doc;if(hasArticleRegisters(doc)||(basis&&cloudCompatibility(basis).readOnly)||(!same&&!basis&&this.state.rows[id])){if(hasArticleRegisters(doc))(this.state.protectedRows??={})[id]=true;if(doc.pendingEdit||old?.hash!==hash)(this.state.pendingEdits??={})[id]=true;return;}if(!same&&basis&&p.project){const projected=await p.project(doc,basis),mergedHash=await measure('hash',1,()=>this.codec.hash(projected));if(mergedHash!==hash&&!tombstone){const changed=await this.apply([projected]);if(changed)await this.progressCommit?.('repair:'+id+':'+mergedHash);}doc=projected;hash=mergedHash;same=old?.hash===hash&&!original;}if(same){delete this.state.pendingEdits?.[id];return;}const envelope=original?.envelope??await measure('encode',1,()=>this.codec.encode(key,p.userId,id,p.version,doc,basis??doc));delete this.state.pendingEdits?.[id];const item={recordId:id,expectedRevision:original?.revision??old?.revision??'0',envelope,tombstone};
    if(batch.length&&(batch.length>=50||utf8Encode(cpuJsonStringify({formatVersion:1,items:[...batch,item]})).length>1048576))await flush();hashById.set(id,hash);batch.push(item);};
   try{
@@ -295,10 +320,10 @@ export class WatchCloudRecords {
     if(p.check){p.check();if(prepared%50===0)await p.current();}else await p.current();validateRecord(doc);
     // Hash every exact input locally, including ignored provenance/unknown fields.
     // These disposable receipts cannot acknowledge a write or bypass CAS/eligibility.
-    const fingerprint=await measure('canonicalJSON',1,()=>sha256Hex(utf8Encode(canonical({kind:doc.kind,value:doc.value,features:doc.features}))));
+    const fingerprint=await measure('canonicalJSON',1,()=>{const bytes=utf8Encode(canonical({kind:doc.kind,value:doc.value,features:doc.features}));idleHash(bytes.length,127);return p.crypto.sha256(bytes);});
     const proof=(r:{id:string;hash:string})=>receiptProof(fingerprint,r);
     let receipt=receipts.get(fingerprint);if(receipt&&receipt.proof!==proof(receipt))receipt=undefined;
-    if(!receipt){const id=await measure('identity',1,()=>this.codec.id(anchor,p.userId,doc)),text=await measure('canonicalJSON',1,()=>this.codec.hashText(doc)),hash=await measure('hash',1,()=>p.crypto.sha256(utf8Encode(text)));receipt={id,hash,proof:proof({id,hash})};receipts.set(fingerprint,receipt);}
+    if(!receipt){const id=await measure('identity',1,()=>this.codec.id(anchor,p.userId,doc)),text=await measure('canonicalJSON',1,()=>this.codec.hashText(doc)),hash=await measure('hash',1,()=>p.crypto.sha256(utf8Encode(text)));receipt={id,hash,proof:proof({id,hash})};receipts.set(fingerprint,receipt);preparationDirty=true;}
     else await measure('identity',1,()=>{},true);
     await add(receipt.id,doc,!!doc.value.deleted,undefined,receipt.hash);
     // Commit bounded preparation prefixes without storing plaintext documents.
@@ -311,12 +336,24 @@ export class WatchCloudRecords {
    // R3/S8: obsolete public indexes become entity tombstones only AFTER new states commit.
    const completed=new Set(completedPrivateArticleIds);
    const interactions=new Map(documents.filter(d=>d.kind==='rss-state').map(d=>[d.value.sourceId+':'+d.value.articleIdHash,d]));
-   const retireScope=await measure('canonicalJSON',1,()=>sha256Hex(utf8Encode(cpuJsonStringify([completedPrivateArticleIds,completedBookIds,this.state.records]))));let retiredWork=0;
+   let retireScope:string|undefined;let retiredWork=0;
+   const noopScope=sha256Hex(utf8Encode('retire-known-nonarticle-v1'));
+   const saveNoop=async()=>{if(++retiredWork%500===0){await flush();await persist(false,true);reportWork();}};
    for(const id of p.lazyProjections?Object.keys(this.state.rows):this.decoded.keys()){
     if(p.check){p.check();if(retiredWork%50===0)await p.current();}else await p.current();
-    const fingerprint=sha256Hex(utf8Encode('retire:'+retireScope+':'+id+':'+(this.state.rows[id]?.revision??this.decoded.get(id)?.row.revision))),old=receipts.get(fingerprint);
+    const rowRevision=this.state.rows[id]?.revision??this.decoded.get(id)?.row.revision;
+    // A verified non-legacy source/reading/book record has no retirement action.
+    // Other records' ACKs cannot change that fact. Bind this proof to its exact
+    // revision; account, epoch and key versions are bound by receiptProof.
+    const noopFingerprint=sha256Hex(utf8Encode(noopScope+':'+id+':'+rowRevision+':'+(this.state.records[id]?.hash??''))),noop=receipts.get(noopFingerprint);
+    if(noop?.hash===noopScope&&noop.proof===receiptProof(noopFingerprint,noop)){retiredWork++;continue;}
+    retireScope??=await measure('canonicalJSON',1,()=>{const bytes=utf8Encode(cpuJsonStringify([completedPrivateArticleIds,completedBookIds,this.state.records]));idleHash(bytes.length,126);return p.crypto.sha256(bytes);});
+    const fingerprint=sha256Hex(utf8Encode('retire:'+retireScope+':'+id+':'+rowRevision)),old=receipts.get(fingerprint);
     if(old&&old.proof===receiptProof(fingerprint,old)){retiredWork++;continue;}
     if(p.lazyProjections)await this.ensureDecoded([id]);const item=this.decoded.get(id);if(!item)continue;
+    if(!item.legacy&&['source','rss-state','book','book-reading'].includes(item.doc.kind)){
+     const receipt={id,hash:noopScope};receipts.set(noopFingerprint,{...receipt,proof:receiptProof(noopFingerprint,receipt)});preparationDirty=true;await saveNoop();continue;
+    }
     await measure('retire',1,async()=>{
      if(item.row.tombstone)return;const d=item.doc;if(cloudCompatibility(d).readOnly)return;
     const replacement=d.kind==='article'?await p.bookReplacement?.(d):undefined;
@@ -331,7 +368,7 @@ export class WatchCloudRecords {
      await add(id,{kind:d.kind,value:{articleId:d.value.articleId,url:d.value.url,rssSourceUrl:d.value.rssSourceUrl,sourceDeviceId:d.value.sourceDeviceId??'',deleted:true,deletedAt:Math.max(1,...Object.entries(d.value).filter(([k,v])=>k.endsWith('At')&&typeof v==='number').map(([,v])=>Number(v)))+1}},true);
     }else if(item.legacy){const newId=await this.codec.id(anchor,p.userId,d);if(this.state.records[newId]){await add(id,d,true,item.row);}}
 
-    });if(!batch.some(r=>r.recordId===id)){const receipt={id,hash:retireScope};receipts.set(fingerprint,{...receipt,proof:receiptProof(fingerprint,receipt)});}
+    });if(!batch.some(r=>r.recordId===id)){const receipt={id,hash:retireScope};receipts.set(fingerprint,{...receipt,proof:receiptProof(fingerprint,receipt)});preparationDirty=true;}
     if(++retiredWork%500===0){await flush();await persist(false,true);reportWork();}
    }await flush();await persist();return written;
   }catch(error){if(p.writeStateObject&&/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error)))await this.measured('checkpoint-skip',0,async()=>{});if(/cloud_sync_suspended|cloud_sync_deadline_exceeded/.test(String(error))&&!p.writeStateObject&&p.checkpoint)await persist(true);if((error as {status?:number})?.status===426||(error as {code?:string})?.code==='cloud_format_upgrade_required'){for(const item of batch)(this.state.pendingEdits??={})[item.recordId]=true;await this.save();}throw error;}finally{reportWork();}

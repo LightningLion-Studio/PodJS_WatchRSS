@@ -36,7 +36,7 @@ export function encodePrivateOverlay(entries:Iterable<PrivateOverlayEntry>):Uint
 type OverlayCrypto=Pick<SnapshotCrypto,'sha256'|'gunzip'|'yieldTurn'>;
 interface Archive {zip:Map<string,Uint8Array>;root:any;rows:ReturnType<typeof parseRawJson>['items'];byId:Map<string,ReturnType<typeof parseRawJson>>}
 async function archive(bytes:Uint8Array,crypto:OverlayCrypto,writable=false):Promise<Archive>{
- const zip=await readWrss(bytes,crypto.gunzip,{yield:crypto.yieldTurn}),root=rawJsonValue<any>(parseRawJson(utf8Decode(zip.get('manifest.json')??new Uint8Array()))),rows=await parseRawJsonAsync(utf8Decode(zip.get('articles.json')??new Uint8Array()),{yield:crypto.yieldTurn});
+ const zip=await readWrss(bytes,crypto.gunzip,{yield:crypto.yieldTurn}),root=rawJsonValue<any>(parseRawJson(utf8Decode(zip.get('manifest.json')??new Uint8Array()))),rows=await parseRawJsonAsync(utf8Decode(zip.get('articles.json')??new Uint8Array()),{owner:'cloud-private-overlay',yield:crypto.yieldTurn});
  if(root.format!=='watchrss-library-backup'||![1,2,3].includes(root.version)||rows.kind!=='array'||featurePolicy(root.features).opaque||writable&&featurePolicy(root.features).readOnly)fail();
  const byId=new Map<string,ReturnType<typeof parseRawJson>>();for(const node of rows.items??[]){const row=rawJsonValue<any>(node);if(typeof row.articleId!=='string'||!row.articleId||byId.has(row.articleId))fail();byId.set(row.articleId,node);}
  return {zip,root,rows:rows.items,byId};

@@ -94,6 +94,8 @@ export class WatchCloudClient {
   async approvalGet(id:string){return requireOk(await this.request('GET',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}`));}
   async approvalReveal(id:string,requesterNonce:string){requireOk(await this.request('POST',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}/reveal`,{requesterNonce}));}
   async approvalCancel(id:string){requireOk(await this.request('POST',`/functions/v1/cloud/approvals/v2/${encodeURIComponent(id)}/cancel`,{}));}
+  /** Bounded revision probe. An unchanged cursor returns no encrypted rows. */
+  async recordsHead(after:string,deviceId:string):Promise<import('./records').RecordPage>{const j=requireOk(await this.request('GET',`/functions/v1/cloud/records?after=${encodeURIComponent(after)}&limit=1&deviceId=${encodeURIComponent(deviceId)}`));this.contentResponse(j);return j;}
   async records(after:string,deviceId:string):Promise<import('./records').RecordPage>{const j=requireOk(await this.request('GET',`/functions/v1/cloud/records?after=${encodeURIComponent(after)}&limit=50&deviceId=${encodeURIComponent(deviceId)}`));this.contentResponse(j);return j;}
   async pushRecords(items:import('./records').RecordWrite[]):Promise<{formatVersion:1;items:{recordId:string;revision:string}[]}>{const r48=this.options.r48WriteV1===true;if(r48&&!await this.refreshR48WriteGate())throw Error('cloud_format_write_disabled');return requireOk(await this.request('POST','/functions/v1/cloud/records',{formatVersion:1,items},undefined,r48));}
   async snapshotHeads(): Promise<CloudSnapshotHead[]> { const j = requireOk(await this.request("GET", "/functions/v1/cloud/snapshots/heads")); this.contentResponse(j);return (j.heads || []).map(head); }

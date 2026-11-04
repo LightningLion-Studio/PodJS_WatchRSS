@@ -13,7 +13,13 @@ import {cloudCompatibility,emptyCompatibilityStatus} from './compatibility';
 import {SnapshotRestoreCheckpoint} from './snapshot-checkpoint';
 import {snapshotDeferred} from './snapshot-deferral';
 export interface RestoringSnapshot {h:CloudSnapshotHead;remote:Awaited<ReturnType<CloudSession['client']['snapshot']>>;manifest:CloudManifest;overlayPayload:Map<string,Uint8Array>;}
-export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapshotHead[];full:boolean;journal:SnapshotRestoreCheckpoint;current:()=>Promise<void>;manifest:(h:CloudSnapshotHead,bytes:Uint8Array)=>Promise<CloudManifest>;hash:(b:Uint8Array)=>Promise<string>;supported:(o:CloudObject)=>boolean;now:()=>number;status:(percent:number,phase?:'apply')=>void;changed:()=>void|Promise<void>;progress?:(value:RestoreProgress)=>void}){
+type SnapshotInputs = {session:CloudSession;heads:CloudSnapshotHead[];full:boolean;journal:SnapshotRestoreCheckpoint;current:()=>Promise<void>;manifest:(h:CloudSnapshotHead,bytes:Uint8Array)=>Promise<CloudManifest>;hash:(b:Uint8Array)=>Promise<string>;supported:(o:CloudObject)=>boolean;now:()=>number;status:(percent:number,phase?:'apply')=>void;changed:()=>void|Promise<void>;progress?:(value:RestoreProgress)=>void};
+export function restoreSnapshots(p:SnapshotInputs){return snapshotInputs(p,true);}
+/** The SQL fence proves these exact heads were applied. Publication still
+ * authenticates manifests to preserve unknown objects; no overlay or body
+ * application, reading plan, ACK or restore-progress scan occurs here. */
+export function openAppliedSnapshotInputs(p:SnapshotInputs){return snapshotInputs(p,false);}
+async function snapshotInputs(p:SnapshotInputs,applyRemote:boolean){
  const fatal=(error:unknown)=>snapshotDeferred(error)||cloudFormatFailure(error)==='storage'||/cloud_sync_deadline_exceeded|cloud_sync_suspended|cloud_operation_superseded|cloud_host_capability_unavailable/.test(String(error))||String(error).includes('cloud_snapshot_unit_capacity')||String(error).includes('cloud_snapshot_checkpoint_invalid');
  const {session:s,journal:cp}=p,snapshots:RestoringSnapshot[]=[],compatibility=emptyCompatibilityStatus();let pendingItems=0,abandonedItems=0,formatBlocked=!!s.client.requiredFeatures?.length,changed=false,overlayPending=0;
  const indices=new Map<CloudObject,number>(),partTokens=new Map<CloudObject,Map<string,string>>(),objectTokens=new Map<CloudObject,string>(),keys=new Map<number,Uint8Array>(),memo=new Map<CloudObject,Uint8Array>();let memoBytes=0;
@@ -56,6 +62,7 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
    if(!bytes){bytes=await cp.timed('download',h.manifestSizeBytes,()=>s.client.download(remote.manifestUrl,h.manifestSizeBytes,h.manifestSha256));await (s.restoreCheckpoint?.cache??s.cache).storeManifest(s.userId,h.id,bytes);await cp.commit('manifest:'+h.manifestSha256,bytes.length);}
    const manifest=await cp.timed('manifest',bytes.length,()=>p.manifest(h,bytes!));if(!cloudCompatibility(manifest).opaque)for(let i=0;i<manifest.objects.length;i++)indices.set(manifest.objects[i],i);snapshots.push({h,remote,manifest,overlayPayload:new Map()});
   }
+  if(applyRemote){
   const plan=cpuWork('manifest-plan','items',snapshots.reduce((n,v)=>n+(v.manifest.objects?.length??0),0),()=>{const objects=snapshots.filter(v=>!cloudCompatibility(v.manifest).opaque).flatMap(v=>v.manifest.objects),chunks=objects.flatMap(o=>o.chunks??[]);return {bytes:objects.reduce((n,o)=>n+o.originalBytes,0),objects:objects.length,chunks:chunks.length,maxChunkBytes:chunks.reduce((n,c)=>Math.max(n,c.ciphertextBytes),0)};});cp.metric('plan',plan.bytes,p.now(),false,plan);
   const progressHeads=await Promise.all(snapshots.map(async v=>({manifest:v.manifest,opaque:cloudCompatibility(v.manifest).opaque,manifestHash:v.h.manifestSha256,alreadyApplied:v.h.deviceSequence<=await s.state.applied(v.h.sourceDeviceId,p.full),objects:cloudCompatibility(v.manifest).opaque?[]:v.manifest.objects.filter(o=>!cloudCompatibility(o).opaque&&p.supported(o)&&(p.full||o.name==='rss-state.json'))})));
   await cp.planProgress(await p.hash(utf8Encode(cpuJsonStringify([p.full,...p.heads.map(h=>h.manifestSha256).sort()]))),progressHeads,p.full,p.progress);
@@ -83,6 +90,7 @@ export async function restoreSnapshots(p:{session:CloudSession;heads:CloudSnapsh
    }}catch(error){if(snapshotDeferred(error)){await warn();Object.assign(error as object,{snapshotAbandonedItems:abandonedItems});}throw error;}
    await warn();
    pendingItems+=headPending;await p.current();if(p.full&&!headPending){await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,true);await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);await s.client.acknowledge(h.id,s.deviceId);await cp.acknowledgeHead(h.manifestSha256);}else if(!headPending&&selected.some(o=>o.name==='rss-state.json'))await s.state.markApplied(h.sourceDeviceId,h.deviceSequence,false);
+  }
   }
   return {snapshots,changed,pendingItems,abandonedItems,formatBlocked,compatibility,inflateArchive,readObject:async(manifest:CloudManifest,object:CloudObject,site:RestoreCallsite='previous')=>{
    if(!manifest.objects.includes(object))throw Error('cloud_snapshot_checkpoint_invalid');

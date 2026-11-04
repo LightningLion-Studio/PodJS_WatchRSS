@@ -21,14 +21,24 @@ function env(){
 }
 test('3928 unchanged ACKs resume prepared identity/hash work across a process deadline without repeating completed HMACs',async()=>{
  const f=env(),count=3928,records:any={};for(let n=1;n<=count;n++){const d=document(n);f.docs.push(d);records[await codec.id(key,'user',d)]={revision:'1',hash:await codec.hash(d)};}f.seed({epoch,cursor:'0',records,rows:{}});
- let elapsed=0,hmacs=0,hashes=0,budget=new CloudSyncBudget(()=>elapsed);
- f.ports.crypto={...c,hmac:async(...args)=>{elapsed+=110;hmacs++;return c.hmac(...args);},sha256:async b=>{hashes++;return c.sha256(b);}};f.ports.check=()=>budget.check();f.ports.current=async()=>budget.check();
+ // With no provenance/features in this fixture, each exact-input fingerprint
+ // has the same bytes as its semantic hash. Count raw calls per document too,
+ // so a completed receipt may revalidate its input but cannot redo both hashes.
+ const hashInputs=f.docs.map(d=>codec.hashText(d)),shaCalls=new Map<string,number>();
+ let elapsed=0,hmacs=0,portHashes=0,budget=new CloudSyncBudget(()=>elapsed);
+ f.ports.crypto={...c,hmac:async(...args)=>{elapsed+=110;hmacs++;return c.hmac(...args);},sha256:async b=>{portHashes++;const input=new TextDecoder().decode(b);shaCalls.set(input,(shaCalls.get(input)??0)+1);return c.sha256(b);}};f.ports.check=()=>budget.check();f.ports.current=async()=>budget.check();
  let r=f.records();await r.pull();await expect(r.flush()).rejects.toThrow('cloud_sync_deadline_exceeded');
- const prefix=f.preparation().entries.length,firstHmacs=hmacs,firstHashes=hashes;expect(prefix).toBeGreaterThan(2500);expect(prefix).toBeLessThan(count);expect(f.pushed()).toBe(0);
- elapsed=0;budget=new CloudSyncBudget(()=>elapsed);r=f.records();await r.pull();expect(await r.flush()).toBe(0);
- expect(hmacs-firstHmacs).toBe(count-prefix);expect(hashes-firstHashes).toBe(count-prefix);expect(f.preparation().entries).toHaveLength(count);expect(f.pushed()).toBe(0);
+ const prefix=f.preparation().entries.length,firstHmacs=hmacs,firstPortHashes=portHashes,metricsStart=f.metrics.length;expect(prefix).toBeGreaterThan(2500);expect(prefix).toBeLessThan(count);expect(f.pushed()).toBe(0);
+ shaCalls.clear();elapsed=0;budget=new CloudSyncBudget(()=>elapsed);r=f.records();await r.pull();expect(await r.flush()).toBe(0);
+ const semanticHashes=f.metrics.slice(metricsStart).filter(m=>m.stage==='hash').reduce((n,m)=>n+m.units,0);
+ expect(hmacs-firstHmacs).toBe(count-prefix);expect(semanticHashes).toBe(count-prefix);
+ // Fingerprints used to run via pure JS sha256Hex outside this port counter.
+ // Native SHA now includes all input checks, plus only the unprepared hashes.
+ expect(portHashes-firstPortHashes).toBe(count+(count-prefix));expect(shaCalls.size).toBe(count);
+ for(let i=0;i<count;i++)expect(shaCalls.get(hashInputs[i]!)).toBe(i<prefix?1:2);
+ expect(f.preparation().entries).toHaveLength(count);expect(f.pushed()).toBe(0);
  expect(JSON.stringify(f.preparation())).not.toContain('readingProgress');expect(f.metrics.length).toBeLessThan(150);expect(f.metrics.some(m=>m.stage==='identity'&&m.cached&&m.units>=500)).toBe(true);
- console.info('restorefix-resume',JSON.stringify({count,prefix,firstHmacs,secondHmacs:hmacs-firstHmacs,modeledFirstMillis:firstHmacs*110,modeledSecondMillis:(hmacs-firstHmacs)*110}));
+ console.info('restorefix-resume',JSON.stringify({count,prefix,firstHmacs,secondHmacs:hmacs-firstHmacs,secondSemanticHashes:semanticHashes,secondFingerprintHashes:count,secondPortHashes:portHashes-firstPortHashes,modeledFirstMillis:firstHmacs*110,modeledSecondMillis:(hmacs-firstHmacs)*110}));
 },30000);
 test('an accepted push checkpoints ACK before the deadline fence, and restart uploads only the remaining tail',async()=>{
  const f=env();for(let n=1;n<=61;n++)f.docs.push(document(n));let expired=false;const push=f.ports.push;

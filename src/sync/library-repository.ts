@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import {MemoRepository} from '../notes/repository';
 import type {MemoNote} from '../notes/types';
 import type {FileCheckpoint} from '@podjs/framework/work-window';
@@ -98,9 +99,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  }
  private run<T>(action:()=>Promise<T>):Promise<T>{const result=this.tail.then(action);this.tail=result.catch(()=>{});return result;}
  private async identity():Promise<string>{const row=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!row||!String(row.device_id).trim())throw new Error('Initialize sync identity first');return String(row.device_id);}
- private async migrate(){const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
+ private async migrate(){idleHit(30);const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
  private async legacySnapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
-  return this.work('legacySnapshot',async()=>{
+  idleHit(49);return this.work('legacySnapshot',async()=>{
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   this.local.restoreReusableBodies([]);check?.();
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
@@ -141,7 +142,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   });
  }
  private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
-  if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
+  idleHit(48);if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
   const id=await this.migrate();trace('repository.migrate');
@@ -191,7 +192,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   throw new LibrarySnapshotBusyError();
  }
  private async needsProjectionSeed(){return !Number((await this.db.query("SELECT seeded FROM sync_fast_definitions WHERE domain='library'"))[0]?.seeded);}
- async prepareFastProjection(){return this.work('prepareFastProjection',async()=>{
+ async prepareFastProjection(){idleHit(33);return this.work('prepareFastProjection',async()=>{
   await this.projection.initialize();await this.definitions.ensure();await this.projection.initialize();
   const generation=await this.definitions.libraryGeneration();
   if(this.projectionGeneration!==generation){this.projectionGeneration=generation;this.snapshotCache=undefined;this.local.setEncodingGeneration(generation);}
@@ -279,7 +280,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  cloudReadingRevision(){return this.run(()=>libraryRevision(this.db));}
  private readingStore?:CloudReadingStore;
  private readingIndex?:{revision:number;hashes:Map<string,number[]>};
- private async readingCandidates(check?:()=>void,hashes?:readonly string[],work?:<T>(stage:import('../cloud/records').RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){
+ private async readingCandidates(check?:()=>void,hashes?:readonly string[],work?:<T>(stage:import('../cloud/records').RecordWorkProgress['stage'],units:number,run:()=>Promise<T>)=>Promise<T>){idleHit(32);
   check?.();await this.cloudState();let revision=await libraryRevision(this.db);
   if(!this.readingIndex||this.readingIndex.revision!==revision){
    const values=await (work?work('reading-index',1,()=>this.local.cloudReadingIndex(check)):this.local.cloudReadingIndex(check)),index=new Map<string,number[]>();for(const r of values)for(const key of ['article_hash','url_hash','legacy_hash','bound_hash']){const hash=String(r[key]??'');if(hash){const ids=index.get(hash)??[];if(!ids.includes(Number(r.item_id)))ids.push(Number(r.item_id));index.set(hash,ids);}}

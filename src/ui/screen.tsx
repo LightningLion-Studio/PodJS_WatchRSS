@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import {douyinBench} from '../douyin/bench.ts';
 import {startExternalDebug} from '../debug/external-host.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
@@ -303,7 +304,7 @@ export default function WatchRSS(props: {
     const result = motion.tick(Date.now());
     if (result === "commit") popPage();
     else setBackOffset(motion.offset);
-  });
+  },()=>motion.phase==="settling");
   const contentHeight = height - 36;
   let currentQuery: ArticleQuery = {};
   const [channelPlayback, setChannelPlayback] = createSignal<
@@ -456,7 +457,7 @@ export default function WatchRSS(props: {
     props.onSyncMediaKeepAliveChange?.(settings().syncMediaKeepAlive),
   );
   createEffect(() => {
-    void managedCache
+    idleHit(8);void managedCache
       .configure(settings().cacheLimitMb * 1024 * 1024)
       .catch((error) => logConsole.warn("Cache maintenance failed"));
   });
@@ -469,7 +470,7 @@ export default function WatchRSS(props: {
   const telemetryReaders = new WeakSet<Entry>();
   const telemetryPlayers = new WeakSet<Entry>();
   createEffect(() => {
-    const entries = stack();
+    idleHit(9);const entries = stack();
     const owner = telemetryScreenOwner(entries);
     activityLog.update(entries,foreground());
     telemetrySession.update(owner, owner && telemetryScreen(owner), foreground());
@@ -483,8 +484,8 @@ export default function WatchRSS(props: {
     }
   });
   onCleanup(() => telemetrySession.pause());
-  createEffect(() => spectrum.update(foreground() && page() === "home", speechState()));
-  onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()));
+  createEffect(() => {idleHit(12);spectrum.update(foreground() && page() === "home", speechState());});
+  onFrame(() => spectrum.frame(globalThis.performance?.now?.() ?? Date.now()),()=>foreground()&&page()==="home"&&!!speechState()?.playing);
   onCleanup(() => spectrum.dispose());
   const [pendingAnnouncement, setPendingAnnouncement] = createSignal<Announcement | null>(null);
   const [pendingPushMessages, setPendingPushMessages] = createSignal<PushMessage[]>([]);
@@ -514,7 +515,7 @@ export default function WatchRSS(props: {
   let homeNoticesChecked = false;
   let homeNoticesAlive = true;
   createEffect(() => {
-    const services = props.announcements;
+    idleHit(10);const services = props.announcements;
     if (!services || homeNoticesChecked || !foreground()) return;
     homeNoticesChecked = true;
     void loadHomeNotices(services.repository).then(result => {
@@ -545,7 +546,7 @@ export default function WatchRSS(props: {
     }),
   );
   let platformLoginRefresh = 0;
-  const refreshPlatformLoginState = async () => {
+  const refreshPlatformLoginState = async () => {idleHit(6);
     const revision = ++platformLoginRefresh;
     const [bili, douyin] = await Promise.all([
       biliClient
@@ -558,13 +559,13 @@ export default function WatchRSS(props: {
       setPlatformLoginState({ bili, douyin });
   };
   createEffect(() => {
-    if (page() === "home" && foreground()) void refreshPlatformLoginState();
+    idleHit(7);if (page() === "home" && foreground()) void refreshPlatformLoginState();
   });
   onCleanup(() => {
     platformLoginRefresh++;
   });
   createEffect(() => {
-    const entries = stack();
+    idleHit(11);const entries = stack();
     if (resumeReady()) {
       informationActivity.prune(entries);saveActivity();
     }
@@ -624,18 +625,13 @@ export default function WatchRSS(props: {
     );
     if (existing >= 0) setStack((entries) => entries.slice(0, existing + 1));
     else setPage("reader-preview");
-  });
+  },()=>previewOpenPending&&motion.phase==="idle"&&!!previewState());
   createEffect(() => setReaderPreviewVisible(page() === "reader-preview"));
   onCleanup(() => setReaderPreviewVisible(false));
   const [presetClock, setPresetClock] = createSignal(new Date());
-  onFrame(() => {
-    if (
-      presetState()?.selection.mode === "SYSTEM" &&
-      Math.floor(Date.now() / 60000) !==
-        Math.floor(presetClock().getTime() / 60000)
-    )
-      setPresetClock(new Date());
-  });
+  let presetClockTimer:ReturnType<typeof delay>|undefined,presetClockDisposed=false;
+  const tickPresetClock=()=>{if(presetClockDisposed)return;presetClockTimer=delay(60000-Date.now()%60000);void presetClockTimer.result.then(()=>{if(presetClockDisposed)return;if(presetState()?.selection.mode==="SYSTEM")setPresetClock(new Date());tickPresetClock();},()=>{});};
+  tickPresetClock();onCleanup(()=>{presetClockDisposed=true;presetClockTimer?.cancel();});
   const readerPreset = createMemo(() =>
     presetState()
       ? activeReaderPreset(presetState()!, presetClock())
@@ -660,7 +656,7 @@ export default function WatchRSS(props: {
   };
   const [notesRefreshKey, setNotesRefreshKey] = createSignal(0);
 
-  async function loadChannels() {
+  async function loadChannels() {idleHit(5);
     // Keep showing the current list (e.g. the startup snapshot) while refreshing it.
     if (!channels().length) setLoading(true);
     setError("");
@@ -1207,11 +1203,12 @@ export default function WatchRSS(props: {
         updatingFeed = false;
       });
   }
-  onFrame(updateFeedWhenSettled);
+  onFrame(updateFeedWhenSettled,()=>false);
+  onFrame(()=>{if(page()==="home")idleHit(2);},()=>false);
   let debugDisposed=false,debugStop:(()=>void)|undefined;
   onCleanup(()=>{debugDisposed=true;debugStop?.();});
   onMount(() => {
-    const unsubscribe = props.services.subscribeChannel((event) => {
+    const unsubscribe = props.services.subscribeChannel((event) => {idleHit(47);
       if (event.kind === "error") {
         if (current().channelId === event.id)
           setError(event.message ?? "刷新失败");
@@ -1234,7 +1231,7 @@ export default function WatchRSS(props: {
     if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
     void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));});
   });
-  createEffect(() => setNavigationState({ canGoBack: stack().length > 1 }));
+  createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1 });});
   const removeHostEvent = __onHostEvent((event) => {
     if (event.t === "touchCancel" && motion.phase === "dragging")
       motion.release(0, Date.now(), true);
@@ -1324,7 +1321,7 @@ export default function WatchRSS(props: {
       .finally(() => {
         remotePromptActive = false;
       });
-  });
+  },()=>false);
   const settingsNavigate = (route: SettingsRoute) => {
     if (route === "debug-tools") {if(debugGate.allowed)setPage("debug-tools");}
     else if (route === "reader-presets") {

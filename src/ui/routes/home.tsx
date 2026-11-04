@@ -1,3 +1,4 @@
+import {idleHit} from '../../diagnostics/idle-counters';
 import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
 import {douyinClient} from '../../media-services.ts';
@@ -61,7 +62,7 @@ interface HomeRoutesProps {
 /** App-wide so leaving and reopening 云同步 joins the running manual sync instead of queueing another. */
 const manualCloud = coalescedRequest(() => manualCloudSync());
 
-export function HomeRoutes(props: HomeRoutesProps) {
+export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
   let homeObserved=false;
   createEffect(()=>{if(homeObserved||!props.active()||props.page()!=='home'||!props.channels().length)return;homeObserved=true;const seq=benchmark.begin('startup_stage',{startup_stage:'home_mounted'});benchmark.presented('home_first_frame',seq);});
 

@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import {readCloudSecure} from './secure-read';
 import type {CloudStringStore} from './keys';
 import type {CloudHostRequest} from './host-ports';
@@ -43,7 +44,7 @@ export function createCloudStateStore(host:CloudHostRequest,secure:CloudStringSt
  const forget=()=>{cache.clear();cachedChars=0;};
  const remember=(key:string,snapshot:Snapshot)=>{const chars=snapshot.parts.reduce((n,v)=>n+v.length,0);if(chars>2*1024*1024)return;if(cachedChars+chars>4*1024*1024)forget();const previous=cache.get(key);if(previous)cachedChars-=previous.parts.reduce((n,v)=>n+v.length,0);cache.set(key,snapshot);cachedChars+=chars;};
  const query=<T=Record<string,unknown>>(sql:string,params:unknown[]=[])=>host<T[]>('sql.query',{sql,params});
- async function migrate(key:string){
+ async function migrate(key:string){idleHit(24);
   const plan=migration(key);if(!plan)return;await ensure();let task=migrated.get(plan.group);if(!task){task=(async()=>{
    let marker=(await query('SELECT cleaned FROM cloud_state_migrations WHERE key=?',[plan.group]))[0];
    if(!marker){
@@ -88,7 +89,7 @@ export function createCloudStateStore(host:CloudHostRequest,secure:CloudStringSt
   })().catch(error=>{migrated.delete(plan.group);throw error;});migrated.set(plan.group,task);}await task;
  }
  let globalMigration:Promise<void>|undefined;
- async function prepare(){
+ async function prepare(){idleHit(25);
   if(!secure.keys)return;
   if(!globalMigration)globalMigration=(async()=>{
    await ensure();const marker='__cloud_plaintext_v1__';if((await query('SELECT cleaned FROM cloud_state_migrations WHERE key=?',[marker]))[0])return;
@@ -99,9 +100,9 @@ export function createCloudStateStore(host:CloudHostRequest,secure:CloudStringSt
   })().catch(error=>{globalMigration=undefined;throw error;});
   await globalMigration;
  }
- async function read(key:string):Promise<Snapshot|undefined>{
+ async function read(key:string):Promise<Snapshot|undefined>{idleHit(22);
   await migrate(key);
-  for(let retry=0;retry<8;retry++){
+  for(let retry=0;retry<8;retry++){idleHit(26);
    const meta=(await query('SELECT revision,parts FROM cloud_state_values WHERE key=?',[key]))[0];
    if(!meta)return;const rev=String(meta.revision),count=Number(meta.parts),hit=cache.get(key);if(hit?.revision===rev)return hit;
    if(!Number.isSafeInteger(count)||count<0)throw Error('cloud_snapshot_checkpoint_invalid');
@@ -111,8 +112,8 @@ export function createCloudStateStore(host:CloudHostRequest,secure:CloudStringSt
   }throw Error('cloud_state_busy');
  }
  async function write(values:Record<string,string|null>,prefixes:string[]=[],expected?:{key:string;value:string|undefined}):Promise<boolean>{
-  await prepare();for(const key of Object.keys(values))await migrate(key);await ensure();
-  for(let retry=0;retry<8;retry++){
+  idleHit(23);await prepare();for(const key of Object.keys(values))await migrate(key);await ensure();
+  for(let retry=0;retry<8;retry++){idleHit(27);
    const before=new Map<string,Snapshot|undefined>();for(const key of Object.keys(values))before.set(key,await read(key));
    if(expected&&before.get(expected.key)?.parts.join('')!==expected.value)return false;
    // A transaction-wide fence prevents partially applying a multi-key update

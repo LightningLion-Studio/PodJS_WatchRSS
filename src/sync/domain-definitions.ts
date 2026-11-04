@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import {repositoryWork,type RepositoryDiagnostic} from './repository-work';
 import {querySyncPages} from './sql-pages';
 import {querySqlTableInfo} from '@podjs/framework/sql';
@@ -37,8 +38,8 @@ export class SqlDomainDefinitions {
   {sql:'CREATE INDEX IF NOT EXISTS sync_fast_import_article_url ON articles(channel_id,COALESCE(link,dedup_key))'},
   {sql:'CREATE INDEX IF NOT EXISTS sync_fast_import_channel_url ON sync_book_aliases(channel_url)'},
  ]).then(async()=>{if(!(await this.db.query('PRAGMA table_info(sync_fast_receipts)')).some(r=>r.name==='verified_at'))await this.db.execute('ALTER TABLE sync_fast_receipts ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0');}).catch(e=>{this.ready=undefined;throw e;});}
- async ensure(){await this.init();if(this.pending)await this.pending;this.pending=repositoryWork(this.diagnostic,'definitions',()=>this.inspect());try{await this.pending;}finally{this.pending=undefined;}return this.values as Record<SyncDomain,DomainDefinition>;}
- private async inspect(){
+ async ensure(){idleHit(36);await this.init();if(this.pending)await this.pending;this.pending=repositoryWork(this.diagnostic,'definitions',()=>this.inspect());try{await this.pending;}finally{this.pending=undefined;}return this.values as Record<SyncDomain,DomainDefinition>;}
+ private async inspect(){idleHit(37);
   const cookie=Number(Object.values((await this.db.query('PRAGMA schema_version'))[0]!)[0]);
   const schema=Number(Object.values((await this.db.query('PRAGMA user_version'))[0]!)[0]);
   if(cookie===this.cookie&&schema===this.userVersion){

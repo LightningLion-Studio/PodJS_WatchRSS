@@ -1,3 +1,5 @@
+import {idleHost,idleHit,takeIdleCounts,timerSite} from '../diagnostics/idle-counters';
+import {sqlRequestSite} from '../diagnostics/sql-sites';
 import {secureCallsite} from './secure-callsite';
 import {restoreCallsiteTrace} from './restore-callsite';
 import {observeCpuWork,pulseCpuWork} from '@podjs/framework/cpu-work';
@@ -34,7 +36,11 @@ export default defineBackgroundHandler(async context=>{
  const yieldBudget=new SnapshotYieldBudget();
  const callsites=restoreCallsiteTrace();
  let rejected:unknown;let buildIdentity='unknown';
- const request:CloudHostRequest=async(method,args)=>{try{if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);callsites.observe(args);const value=await context.request!('cloud.host',{method,args:secureCallsite(method,args)});yieldBudget.completed(method,args);if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
+ let idleLast=Date.now();
+ const request:CloudHostRequest=async(method,args)=>{try{
+  idleHost(method);const now=Date.now();if(now-idleLast>=30000){const elapsedMs=Math.min(300000,now-idleLast);idleLast=now;const counts=takeIdleCounts();try{await context.request!('cloud.host',{method:'log.append',args:{path:'app_log.txt',text:JSON.stringify({event:'idle-counters',version:2,elapsedMs,counts})+'\n',maxBytes:5*1024*1024}});}catch{}}
+  if(method.startsWith('sql.'))args={...args,diagnosticSite:sqlRequestSite(args)};
+  if(method==='runtime.delay'){pulseCpuWork();await diagnostic.flushCpu();}yieldBudget.before(method,args);callsites.observe(args);const value=await context.request!('cloud.host',{method,args:secureCallsite(method,args)});yieldBudget.completed(method,args);idleHit(105);if(method==='runtime.delay')idleHit(70+timerSite(args.milliseconds));if(method==='app.buildInfo'&&value&&typeof (value as {buildIdentity?:unknown}).buildIdentity==='string')buildIdentity=(value as {buildIdentity:string}).buildIdentity;return value as any;}catch(error){const failure=cloudHostFailure(error,method);if((failure as {code?:unknown})?.code===CLOUD_HOST_CAPABILITY_UNAVAILABLE)rejected=failure;throw failure;}};
  const diagnostic=backgroundDiagnostics(request);
  const stopCpu=observeCpuWork(diagnostic.cpu);
  const window=new WorkWindow({deadlineMs:context.deadlineMs,reserveMillis:10000,expired:()=>new CloudSyncDeadlineError(),report:metric=>diagnostic.report(JSON.stringify(metric))});

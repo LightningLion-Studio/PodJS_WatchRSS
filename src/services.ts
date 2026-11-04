@@ -1,3 +1,4 @@
+import {idleHit} from './diagnostics/idle-counters';
 import {clearCloudSqlState} from './cloud/state-sql';
 import {createNoteAssetWriter} from './notes/cloud-assets';
 import {readReaderBody} from './reader/body-state.ts';
@@ -91,7 +92,7 @@ export async function getExternalSavedStore(){await init();return externalSavedS
 export async function getDouyinSavedStore(){await init();return douyinSavedStore;}
 export const memoRepository = new MemoRepository(db, "podjs-watch");
 let ready: Promise<void> | undefined;
-function init(): Promise<void> { return ready ??= (async()=>{
+function init(): Promise<void> { idleHit(20);return ready ??= (async()=>{idleHit(21);
   const fresh=await startupStep('init.probe',async()=>!(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")).length);
   await startupStep('init.schema',()=>initializeSchema(clearDatabase,{seedBuiltinChannels:fresh}));
   await startupStep('init.syncDevice',()=>ensureSyncDevice(clearDatabase,async()=>base64ToBytes((await hostOperation<{bytesBase64:string}>("crypto.random",{bytes:16}).result).bytesBase64)));

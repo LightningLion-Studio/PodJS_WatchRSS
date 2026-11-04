@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import { ScrollEntries, type ScrollEntry } from "./ScrollEntries.tsx";
@@ -72,7 +73,7 @@ function ChannelActions(props:{width:number;height:number;target:HomeLongPressTa
 
 // OWW242 round resource geometry: 18dp insets and 6dp gaps.
 // Glyph origins include the measured difference between Compose and atlas baselines.
-export default function HomeScreen(props: HomeScreenProps) {
+export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
   const [selected,setSelected]=createSignal<HomeLongPressTarget>();
   let scroller:Scroller|undefined;let roundStart=()=>0;
   // Native HomeDefaultItem: 14dp start / 6dp end / 14.5dp vertical padding, title maxLines 1,

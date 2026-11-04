@@ -4,6 +4,7 @@ import type {SyncBodyCodec} from './article-body';
 import {hashJavaText} from './article-export';
 import {SqlDomainDefinitions,SYNC_DOMAINS,type SyncDomain,DOMAIN_ENCODERS} from './domain-definitions';
 export {SYNC_DOMAINS,type SyncDomain} from './domain-definitions';
+export const PHONE_SAFETY_CHECK_MS=24*60*60*1000;
 export const DOMAIN_FAST_PATH_PROFILE='rss-canonical-books-reading-v1:merge:domain-v2';
 export interface DomainExternalState {scope:string;roots:Partial<Record<SyncDomain,string>>;revalidate?():Promise<DomainExternalState>}
 export interface DomainVectorProvider {open(peer:string,profile:string):Promise<AckedStateVector>}
@@ -56,7 +57,7 @@ export class SqlDomainVectorStore implements DomainVectorProvider {
   const nonce=String((await this.db.query('SELECT lower(hex(randomblob(16))) nonce'))[0]!.nonce);
   return new AckedStateVector(SYNC_DOMAINS,roots,async()=>{
    const receipts:StateReceipts={};for(const r of await this.db.query('SELECT * FROM sync_fast_receipts WHERE peer=? AND scope=? AND profile=?',[peer,scope,profile])){
-    if(receiptIsCurrent(Number(r.verified_at),now())&&SYNC_DOMAINS.includes(String(r.domain) as SyncDomain))receipts[String(r.domain)]={localRoot:String(r.local_root),remoteRoot:String(r.remote_root)};
+    if(receiptIsCurrent(Number(r.verified_at),now())&&now()-Number(r.verified_at)<PHONE_SAFETY_CHECK_MS&&SYNC_DOMAINS.includes(String(r.domain) as SyncDomain))receipts[String(r.domain)]={localRoot:String(r.local_root),remoteRoot:String(r.remote_root)};
    }return checkedStateReceipts(receipts,SYNC_DOMAINS);
   },async(receipts,publication)=>{
    const time=now();await this.db.transaction(Object.entries(receipts).map(([d,r])=>publication.completedDomains.includes(d)?{
@@ -64,7 +65,7 @@ export class SqlDomainVectorStore implements DomainVectorProvider {
    }:{
     // No INSERT for SKIP. Revalidation/GC during the exchange must not resurrect
     // a removed credential, and warm rounds never move verified_at forward.
-    sql:'UPDATE sync_fast_receipts SET local_root=local_root WHERE peer=? AND scope=? AND profile=? AND domain=? AND local_root=? AND remote_root=? AND verified_at>0 AND verified_at<=? AND verified_at>?',params:[peer,scope,profile,d,r.localRoot,r.remoteRoot,time,time-604800000]
+    sql:'UPDATE sync_fast_receipts SET local_root=local_root WHERE peer=? AND scope=? AND profile=? AND domain=? AND local_root=? AND remote_root=? AND verified_at>0 AND verified_at<=? AND verified_at>?',params:[peer,scope,profile,d,r.localRoot,r.remoteRoot,time,time-PHONE_SAFETY_CHECK_MS]
    }));
   },()=>nonce+'-'+(++windowSerial),{versions:()=>versions,allowSkip:async d=>d!=='library'||!!await this.options.canSkipLibrary?.(peer)});
  }

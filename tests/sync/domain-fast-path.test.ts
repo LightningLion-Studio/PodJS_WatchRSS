@@ -3,7 +3,7 @@ import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {readFile} from 'node:fs/promises';
 import {versionRootText,AckedStateVector,type StateRoots,type StateReceipts} from '@podjs/framework/acked-state-vector';
-import {SqlDomainVectorStore,SYNC_DOMAINS,DOMAIN_FAST_PATH_PROFILE,type DomainExternalState} from '../../src/sync/domain-fast-path';
+import {SqlDomainVectorStore,SYNC_DOMAINS,DOMAIN_FAST_PATH_PROFILE,PHONE_SAFETY_CHECK_MS,type DomainExternalState} from '../../src/sync/domain-fast-path';
 import {LibraryProjectionCache} from '../../src/sync/projection-cache';
 import {initializeSchema} from '../../src/core/schema';
 import {initializeMemoSchema} from '../../src/notes/repository';
@@ -77,3 +77,5 @@ test('R47 raw imports and pending display edits invalidate books before registra
  const s=await (await f.store().open('phone',DOMAIN_FAST_PATH_PROFILE)).summary(remote,known,descriptors);expect(s.skipDomains).not.toContain('books');expect(await f.db.query('SELECT * FROM sync_books')).toEqual([]);
  const newer=await prime(f);await f.db.execute("INSERT INTO sync_book_display_dirty(book_id) VALUES('pending-display')");expect((await (await f.store().open('phone',DOMAIN_FAST_PATH_PROFILE)).summary(remote,newer,descriptors)).skipDomains).not.toContain('books');
  }finally{f.sql.close();}});
+
+test('phone projection receipts expire within one day without sliding on idle SKIP',async()=>{const f=await setup();try{const known=await prime(f);await f.db.execute('UPDATE sync_fast_receipts SET verified_at=?',[Date.now()-PHONE_SAFETY_CHECK_MS]);const v=await f.store().open('phone',DOMAIN_FAST_PATH_PROFILE);expect((await v.summary(remote,known,descriptors)).skipDomains).toEqual([]);}finally{f.sql.close();}});

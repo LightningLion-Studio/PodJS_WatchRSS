@@ -215,3 +215,57 @@ test('production plaintext projections migrate verified legacy entries once and 
  local=0;expect(await f.records().pull()).toBe(0);expect(local).toBe(0);expect(originals).toBe(0);expect(encryption).toBe(0);
  await f.put(cachedRss(2));await f.records().pull();expect(f.state().projections.every((g:any)=>typeof g.plaintext==='string')).toBe(true);expect(encryption).toBe(0);
 });
+
+test('idle record preparation does not rewrite a warm 1000-record cache and still uploads an edited tail',async()=>{
+ const f=env(),documents=Array.from({length:1000},(_,i)=>cachedRss(i));f.export(documents);
+ let preparation:string|undefined,writes=0;
+ f.ports.readPreparation=async()=>preparation;
+ f.ports.writePreparation=async value=>{writes++;preparation=value;};
+ f.ports.writeStateObject=async value=>f.ports.writeState(JSON.stringify(value));
+ let records=f.records();await records.pull();await records.flush();
+ expect(f.posts).toHaveLength(1000);expect(JSON.parse(preparation!).entries).toHaveLength(2000);
+ writes=0;records=f.records();await records.pull();await records.flush();
+ expect(writes).toBe(0);expect(f.posts).toHaveLength(1000);
+ const edited=documents.map((d,i)=>i===999?{...d,value:{...d.value,readingProgress:.5,readingPositionChangedAt:2000}}:d);f.export(edited);
+ await records.flush();expect(writes).toBeGreaterThan(0);expect(f.posts).toHaveLength(1001);
+ expect(JSON.parse(preparation!).entries.length).toBeGreaterThan(2000);
+});
+
+test('idle record preparation object port keeps receipt identity without using string ports',async()=>{
+ const f=env();f.export(Array.from({length:60},(_,i)=>cachedRss(i)));
+ let saved:Record<string,any>|undefined,writes=0;
+ f.ports.readPreparationObject=async()=>saved;
+ f.ports.writePreparationObject=async value=>{writes++;saved={scope:value.scope,entries:value.entries.map((e:any)=>[...e])};};
+ f.ports.readPreparation=async()=>{throw Error('string preparation path used');};
+ f.ports.writePreparation=async()=>{throw Error('string preparation path used');};
+ f.ports.writeStateObject=async value=>f.ports.writeState(JSON.stringify(value));
+ let records=f.records();await records.pull();await records.flush();const receipt=saved!.entries[0][1];
+ expect(saved!.entries).toHaveLength(120);writes=0;records=f.records();await records.pull();await records.flush();
+ expect(writes).toBe(0);expect(saved!.entries[0][1]).toBe(receipt);expect(f.posts).toHaveLength(60);
+});
+
+test('idle retirement keeps unchanged reading projections cold after an unrelated ACK and rejects a forged no-action receipt',async()=>{
+ const f=env(),documents=Array.from({length:260},(_,i)=>cachedRss(i));for(const d of documents)await f.put(d);f.export(documents);
+ let preparation:string|undefined,projectionLoads=0;
+ f.ports.lazyProjections=true;f.ports.readPreparation=async()=>preparation;f.ports.writePreparation=async value=>{preparation=value;};
+ f.ports.writeStateObject=async value=>f.ports.writeState(JSON.stringify(value));
+ f.ports.work=metric=>{if(metric.stage==='projection-load'&&metric.outcome==='started')projectionLoads++;};
+ let records=f.records();await records.pull();await records.reapply('same-heads');await records.flush();
+ await f.put(cachedRss(999));records=f.records();await records.pull();await records.reapply('same-heads');projectionLoads=0;
+ await records.flush();expect(projectionLoads).toBe(0);expect(f.posts).toHaveLength(0);expect(f.state().cursor).toBe('261');
+ const saved=JSON.parse(preparation!),noopScope=await c.sha256(utf8Encode('retire-known-nonarticle-v1'));
+ const receipt=saved.entries.find((e:any)=>e[1].hash===noopScope);expect(receipt).toBeDefined();receipt[1].proof='0'.repeat(64);preparation=JSON.stringify(saved);
+ records=f.records();await records.pull();await records.reapply('same-heads');projectionLoads=0;await records.flush();
+ expect(projectionLoads).toBeGreaterThan(0);expect(f.posts).toHaveLength(0);
+});
+
+test('the applied revision includes own contiguous ACKs but never certifies a remote revision gap',async()=>{
+ const f=env(),r=f.records();await r.pull();expect(r.fullyAppliedRevision).toBe('0');f.export([doc('own-one')]);await r.flush();expect(r.fullyAppliedRevision).toBe('1');
+ await f.put(doc('unread-other-device'));f.export([doc('own-one'),doc('own-three')]);await r.flush();expect(r.fullyAppliedRevision).toBe('1');await r.pull();expect(r.fullyAppliedRevision).toBe('3');
+});
+
+test('local publish loads the persisted contiguous own-ACK fence without network, hydration or apply; gaps force pull',async()=>{
+ const f=env(),r=f.records();await r.pull();f.export([doc('own-one')]);await r.flush();expect(f.state().cursor).toBe('0');expect(f.state().appliedHead).toBe('1');
+ const get=f.ports.get;let gets=0;f.ports.get=async after=>{gets++;return get(after);};f.ports.hydrate=async()=>{throw Error('local publish must not hydrate remote projections');};f.ports.apply=async()=>{throw Error('local publish must not reapply remote data');};
+ const local=f.records();expect(await local.openForPublish('1')).toBe(true);expect(local.fullyAppliedRevision).toBe('1');expect(await local.openForPublish('2')).toBe(false);expect(gets).toBe(0);
+});

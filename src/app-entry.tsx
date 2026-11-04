@@ -1,3 +1,4 @@
+import {installIdleDiagnostics} from './diagnostics/idle-host';
 import {afterFirstScreen,startupMark} from './core/startup-trace.ts';
 import {trackDebugMemoryOwner} from '@podjs/framework/debug-memory';
 import {initializeDebugBuild} from './debug/host.ts';
@@ -48,7 +49,7 @@ function ContentApp(){
 }
 // The startup gate (activity state, onboarding) loads in parallel with the build info read;
 // only the content waits for the debug gate so debug-only UI is decided before it mounts.
-function App(props:{beforeContent?:()=>Promise<void>}){const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(async()=>{await props.beforeContent?.();startupMark('debugBuild.ready');setReady(true);});return <StartupGate content={()=> <Show when={ready()}><ContentApp/></Show>}/>;}
+function App(props:{beforeContent?:()=>Promise<void>}){installIdleDiagnostics();const [ready,setReady]=createSignal(false);startupMark('app.mount');void initializeDebugBuild().then(async()=>{await props.beforeContent?.();startupMark('debugBuild.ready');setReady(true);});return <StartupGate content={()=> <Show when={ready()}><ContentApp/></Show>}/>;}
 /** Shared by the normal entry and endpoint-isolated runtime fixtures. */
 export function startWatchRssApp(beforeContent?:()=>Promise<void>){
  warmServices();

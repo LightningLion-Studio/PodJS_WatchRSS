@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import {querySyncPages} from '../sync/sql-pages';
 import type {SqlDatabase} from '../core/types';
 import {buildArticleBlocksAsync} from './media';
@@ -36,7 +37,7 @@ export class OfflineMediaQueue {
   await this.wake();return readOfflineMedia(this.db,this.port,id);
  }
  private async drain(){
-  for(;;){
+  for(;;){idleHit(41);
    if(this.paused)return;
    const row=(await this.db.query('SELECT * FROM offline_media_jobs WHERE next_at<=? AND attempts<6 ORDER BY item_id LIMIT 1',[this.now()]))[0];
    if(!row){const next=(await this.db.query('SELECT min(next_at) AS next FROM offline_media_jobs WHERE attempts<6'))[0]?.next;if(next!=null)this.cancelTimer=this.port.schedule(Math.max(1000,Number(next)-this.now()),()=>{void this.wake().catch(()=>{});});return;}

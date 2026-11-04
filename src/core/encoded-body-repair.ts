@@ -1,3 +1,4 @@
+import {idleHit} from '../diagnostics/idle-counters';
 import {querySyncPages} from '../sync/sql-pages';
 import {unwrapEscapedHtml} from '@podjs/framework/html';
 import {yieldWorkTurn} from '@podjs/framework/text-layout';
@@ -11,7 +12,7 @@ import type {SqlDatabase} from './types';
 export async function repairEncodedRssBodies(db:SqlDatabase,options:{id?:number;yieldTurn?:()=>Promise<unknown>}={}):Promise<number>{
  await db.execute('CREATE TABLE IF NOT EXISTS article_html_repair_backup(article_id INTEGER PRIMARY KEY,body TEXT NOT NULL,was_chunked INTEGER NOT NULL)');
  let cursor=0,repaired=0;
- for(;;){
+ for(;;){idleHit(40);
   const rows=await db.query(`SELECT a.id,a.content,a.description,a.link,a.image_url,c.url FROM articles a JOIN channels c ON c.id=a.channel_id
     WHERE a.id>? ${options.id===undefined?'':'AND a.id=?'} AND NOT EXISTS(SELECT 1 FROM article_sync_content s WHERE s.item_id=a.id)
     AND (a.content LIKE '&lt;%' OR a.content LIKE '&amp;lt;%' OR (a.content IS NULL AND EXISTS(SELECT 1 FROM article_body_chunks b WHERE b.article_id=a.id AND b.chunk_index=0 AND (b.body LIKE '&lt;%' OR b.body LIKE '&amp;lt;%'))))
