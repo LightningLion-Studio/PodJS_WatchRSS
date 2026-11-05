@@ -186,3 +186,22 @@ test('P2 signed metadata cannot substitute a different business ID beneath the s
   const store=db.store();await store.initialize();const reader=new WatchCloudIndex(store,first.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);await expect(reader.pull(server.window())).rejects.toThrow('invalid_schema');expect((await store.readState()).account).toBe(null);
  }finally{first.db.close();db.close();}
 });
+
+test('P2 concurrent flush callers share one response-lost publication journal',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server);try{
+  await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));server.losePublish=true;
+  const one=f.publisher.flush(),two=f.publisher.flush();expect(one).toBe(two);await expect(one).rejects.toThrow('synthetic_response_lost');await expect(two).rejects.toThrow('synthetic_response_lost');
+  expect(server.events).toBe(1);await f.publisher.flush();expect(server.events).toBe(1);expect(server.calls['/account/publish']).toBe(1);expect((await f.store.readState()).cloud.pendingPublish).toBe(null);
+ }finally{f.db.close();}
+});
+
+test('P2 confirmed CAS conflict can retire only after authenticated reread and preserve candidates',async()=>{
+ const server=new SyntheticIndexBackend(),one=await publishingFixture(server),two=await publishingFixture(server);try{
+  await one.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));await two.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'d'.repeat(32));
+  await expect(two.publisher.retryAfterConflict(async()=>{})).rejects.toThrow('publication_pending');await one.publisher.flush();await expect(two.publisher.flush()).rejects.toThrow('ref_conflict');
+  expect((await two.store.readState()).cloud.pendingPublish.phase).toBe('conflicted');await expect(two.publisher.retryAfterConflict(async()=>{})).rejects.toThrow('rollback_conflict');
+  const candidates=await two.store.candidatePage(),reader=new WatchCloudIndex(two.store,two.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);
+  await two.publisher.retryAfterConflict(async()=>{await reader.pull(server.window());});const state=await two.store.readState();expect(state.cloud.pendingPublish).toBe(null);expect(state.cloud.deviceSequence).toBe('1');expect(await two.store.candidatePage()).toEqual(candidates);expect(state.editBase.accountOid).toBe(null);
+  const plan=await two.publisher.prepare('a'.repeat(32),'key',{commitOid:server.account.commitOid,revision:'1'},'e'.repeat(32));expect(plan.deviceSequence).toBe('2');await two.publisher.flush();expect(server.events).toBe(2);
+ }finally{one.db.close();two.db.close();}
+});

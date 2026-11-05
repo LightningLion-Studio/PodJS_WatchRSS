@@ -9,9 +9,10 @@ import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
 import type {WatchProjectionStore} from './store';
 import type {SyncState} from './state';
-import {SyncV2Http} from './http';
+import {SyncV2Http,SyncV2Error} from './http';
 const copy=<T>(x:T):T=>JSON.parse(canonical(x));
 export class WatchIndexPublisher {
+ private flushing?:Promise<any>;
  constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now){}
  /** Reserve the author sequence before any signing. Crashes may leave gaps. */
  async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string){
@@ -52,7 +53,8 @@ export class WatchIndexPublisher {
  }
  private async pending(){const before=await this.store.readState(),plan=before.cloud?.pendingPublish;if(!plan)throw Error('publication_missing');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice||plan.capturedLocalRevision!==before.localChangeRevision||plan.request.account.body.expectedOid!==(before.account?.oid??null)||plan.request.account.body.expectedRevision!==(before.account?.revision??'0'))throw Error('choice_stale');return {before,plan};}
  /** A response-lost retry queries the original request ID before touching refs. */
- async flush(){
+ flush(){return this.flushing??=this.flushOnce().finally(()=>{this.flushing=undefined;});}
+ private async flushOnce(){
   await this.http.capabilities();const {plan}=await this.pending(),known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   const window=await this.http.negotiate([],[]);let after='';for(;;){const page=await this.store.uploadPage(plan.requestId,after,1);if(!page.length)break;for(const object of page){
    if(object.oid.startsWith('state-refs:'))continue;
@@ -65,7 +67,23 @@ export class WatchIndexPublisher {
    const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);
   }after=page.at(-1)!.oid;}
   let refsAfter='';for(;;){const page=await this.store.uploadPage(plan.requestId,refsAfter,1);if(!page.length)break;for(const item of page)if(item.oid.startsWith('state-refs:')){await this.pending();await this.http.json('POST','/state-refs',parseCanonicalJson(item.bytes));}refsAfter=page.at(-1)!.oid;}
-  await this.pending();return this.accept(plan,await this.http.publish(plan.request));
+  await this.pending();let result;try{result=await this.http.publish(plan.request);}catch(error){
+   if(error instanceof SyncV2Error&&error.code==='ref_conflict'){const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId===plan.requestId){const next=copy(before);next.cloud.pendingPublish.phase='conflicted';await this.store.controlUpdate(before,next);}}throw error;
+  }return this.accept(plan,result);
+ }
+ /** Only a definitive CAS rejection permits retiring a journal. Authenticate the
+  * new account before retiring it; never change expected refs on a signed request.
+  * Candidate edits and reserved author sequences survive the retry. */
+ async retryAfterConflict(refresh:()=>Promise<void>){
+  if(this.flushing)throw Error('publication_pending');let before=await this.store.readState(),plan=before.cloud?.pendingPublish;
+  if(!plan||plan.phase!=='conflicted')throw Error('publication_pending');
+  let known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  await refresh();before=await this.store.readState();
+  if(before.cloud?.pendingPublish?.requestId!==plan.requestId||before.cloud.pendingPublish.phase!=='conflicted'||before.localChangeRevision!==plan.capturedLocalRevision||before.pendingChoice)throw Error('choice_stale');
+  if(!before.account||before.cloud.pins.accountOid!==before.account.oid||before.account.generation!==before.rollbackGeneration||before.editBase.generation!==before.rollbackGeneration)throw Error('rollback_conflict');
+  if(before.account.oid===plan.request.account.body.expectedOid&&before.account.revision===plan.request.account.body.expectedRevision)throw Error('ref_conflict');
+  known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')throw Error('choice_stale');if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  const next=copy(before);next.cloud.pendingPublish=null;await this.store.finishUpload(before,next,plan.requestId);
  }
  private async accept(plan:any,result:any){
   if(result?.version!==2)throw Error('invalid_schema');sameScope(result.scope,this.http.scope);const a=result.account,d=result.device;if(a?.commitOid!==plan.commitOid||d?.commitOid!==plan.commitOid||d?.ref!==plan.request.device.body.ref||a.revision!==nextD64(plan.request.account.body.expectedRevision)||d.revision!==nextD64(plan.request.device.body.expectedRevision)||a.rollbackGeneration!==(await this.store.readState()).rollbackGeneration)throw Error('invalid_schema');checkD64(result.serverRevision);
