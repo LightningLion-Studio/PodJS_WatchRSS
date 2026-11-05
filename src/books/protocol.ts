@@ -15,11 +15,12 @@ const lpFields=(fields:readonly (string|number)[])=>lengthPrefixFields(fields.ma
 const lp=(...fields:(string|number)[])=>lpFields(fields);
 export function chapterHash(index:number,title:string,text:string,sha:BookHash){check(integer(index,1,BOOK_MAX_CHAPTERS));return sha(lp('watchrss/book/chapter/v1',index,normalizeBookText(title),normalizeBookText(text)));}
 export function bookFingerprint(hashes:readonly string[],sha:BookHash){check(hashes.length>0&&hashes.length<=BOOK_MAX_CHAPTERS&&hashes.every(x=>hex.test(x)));return sha(lpFields(['watchrss/book/fingerprint/v1',hashes.length,...hashes]));}
-export function bookId(fingerprint:string,sha:BookHash,instanceId?:string){check(hex.test(fingerprint));if(instanceId===undefined)return sha(lp('watchrss/book/id/v1',fingerprint));check(typeof instanceId==='string'&&/^[a-f0-9]{32}$/.test(instanceId));return sha(lp('watchrss/book/instance-id/v1',fingerprint,instanceId));}
+export function bookIdInput(fingerprint:string,instanceId?:string){check(typeof fingerprint==='string'&&hex.test(fingerprint));if(instanceId===undefined)return lp('watchrss/book/id/v1',fingerprint);check(typeof instanceId==='string'&&/^[a-f0-9]{32}$/.test(instanceId));return lp('watchrss/book/instance-id/v1',fingerprint,instanceId);}
+export function bookId(fingerprint:string,sha:BookHash,instanceId?:string){return sha(bookIdInput(fingerprint,instanceId));}
 export function bookArticleId(id:string,index:number,sha:BookHash){check(hex.test(id)&&integer(index,1,BOOK_MAX_CHAPTERS));return sha(lp('watchrss/book/article/v1',id,index));}
 export function validateBookShape(raw:unknown):asserts raw is BookState {
  check(!!raw&&typeof raw==='object'&&!Array.isArray(raw));const v=raw as BookState;
- check(hex.test(v.bookId)&&hex.test(v.fingerprint)&&typeof v.title==='string'&&typeof v.sourceDeviceId==='string'&&typeof v.deleted==='boolean'&&integer(v.chapterCount,1,BOOK_MAX_CHAPTERS));
+ check(typeof v.bookId==='string'&&typeof v.fingerprint==='string'&&hex.test(v.bookId)&&hex.test(v.fingerprint)&&typeof v.title==='string'&&typeof v.sourceDeviceId==='string'&&typeof v.deleted==='boolean'&&integer(v.chapterCount,1,BOOK_MAX_CHAPTERS));
  for(const n of [v.deletionClock,v.deletedAt,v.updatedAt])check(integer(n));
  for(const n of [v.sourceUrl,v.kind])check(n===undefined||typeof n==='string');
  check(v.instanceId===undefined||typeof v.instanceId==='string'&&/^[a-f0-9]{32}$/.test(v.instanceId));if(v.lifecycle!==undefined)validateLifecycleToken(v.lifecycle);

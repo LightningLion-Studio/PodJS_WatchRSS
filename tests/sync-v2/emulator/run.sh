@@ -6,6 +6,8 @@ framework=$(realpath "${1:?framework worktree required}")
 [[ $(git -C "$framework" rev-parse HEAD) == a48eafe* ]] || { echo 'Framework base mismatch' >&2; exit 2; }
 serial=${2:?owned emulator serial required}
 evidence=${3:?evidence directory required}
+mode=${4:-full}
+[[ $mode == full || $mode == audit ]] || { echo 'Unsupported integration mode' >&2; exit 2; }
 [[ $serial =~ ^emulator-[0-9]+$ ]] || { echo 'Physical devices are forbidden' >&2; exit 2; }
 project=$(cd "$(dirname "$0")/../../.." && pwd)
 [[ $(realpath "$project/node_modules/@podjs/framework") == "$framework/packages/framework" ]] || { echo 'Framework link mismatch' >&2; exit 2; }
@@ -28,6 +30,6 @@ trap 'rm -f "$native_test"' EXIT
 "$adb" -s "$serial" push "$evidence/guest.js" /data/local/tmp/wrss-guest.js
 "$adb" -s "$serial" shell run-as dev.podjs.runtime.test cp /data/local/tmp/wrss-guest.js files/syncv2-integration/guest.js
 "$adb" -s "$serial" shell rm /data/local/tmp/wrss-guest.js
-"$adb" -s "$serial" shell am instrument -w -e class dev.podjs.runtime.SyncV2IntegrationTest dev.podjs.runtime.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.log" 2>&1
+"$adb" -s "$serial" shell am instrument -w -e mode "$mode" -e class dev.podjs.runtime.SyncV2IntegrationTest dev.podjs.runtime.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.log" 2>&1
 "$adb" -s "$serial" exec-out run-as dev.podjs.runtime.test cat files/syncv2-integration/result.json > "$evidence/result.json"
 rg -q '^OK \(1 test\)' "$evidence/instrumentation.log"

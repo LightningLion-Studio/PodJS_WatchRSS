@@ -58,6 +58,7 @@ public final class SyncV2IntegrationTest {
   root=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"syncv2-integration");
   fixture=new JSONObject(new String(Files.readAllBytes(new File(root,"watch.json").toPath()),StandardCharsets.UTF_8));assertTrue(fixture.getBoolean("syntheticOnly"));assertEquals("watch",fixture.getString("platform"));
   String pem=fixture.getJSONObject("signingKey").getString("privateKeyPkcs8Pem").replaceAll("-----[^-]+-----","").replaceAll("\\s","");signer=KeyFactory.getInstance("EC").generatePrivate(new PKCS8EncodedKeySpec(decode(pem)));
+  fixture.put("integrationMode",InstrumentationRegistry.getArguments().getString("mode","full"));
   String source=new String(Files.readAllBytes(new File(root,"guest.js").toPath()),StandardCharsets.UTF_8);
   sql=database(new JSONObject());device=new PodDeviceServices(new File(root,"host/files"),()->new SecretKeySpec(new byte[32],"AES"));
   ExecutorService executor=Executors.newSingleThreadExecutor(),network=Executors.newFixedThreadPool(4);try(PodBackgroundRun run=new PodBackgroundRun("watch-p2-integration","integration",source,300000,256*1024*1024,fixture,new String[]{"cloud.host"})){

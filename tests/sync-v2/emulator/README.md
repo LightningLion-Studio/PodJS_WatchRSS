@@ -44,3 +44,19 @@ The runner rejects physical serial numbers. It does not start or modify a backen
 The report at `.codex-tmp/cloud-v2/reports/T-SYNCGIT-P2-watch.md` records exact
 commands, limits and observed results. Framework crypto/Keystore acceptance and
 this synthetic-key integration are separate evidence.
+
+Read-only four-device re-audit (no publication or generation probes):
+
+```sh
+bash tests/sync-v2/emulator/run.sh <framework-worktree> <emulator-serial> <evidence-directory> audit
+```
+
+The audit mode verifies all four captured C5 refs, including the watch ref. It
+also reopens the three public historical OIDs recorded by the prior run. Only
+controlled identity/shape validation counts are exported. Legacy bootstrap
+platform labels for phone-backed CLI/mini sessions are not treated as role labels;
+role labels use the public fixed device mapping in the cross-client reports.
+All book rows must have string H64 fingerprints and the correct derived bookId,
+including instanceId when present. The normal reader and a separate raw-envelope
+inspection must agree. No body download, account publication or business apply
+occurs in this mode.

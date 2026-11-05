@@ -1,8 +1,9 @@
 /** Executable wire boundary, frozen to sync-v2.md sections 3/14. This boundary
  * never fills optional fields or changes business IDs, clocks, or ancestry. */
+import {sha256Hex} from '@podjs/framework/crypto';
 import {validateRecord} from '../cloud/records';
 import {recordFields} from '../cloud/compatibility';
-import {validateBookShape,validateBookReading,mergeBook,mergeBookReading} from '../books/protocol';
+import {validateBookShape,validateBookReading,bookIdInput,mergeBook,mergeBookReading} from '../books/protocol';
 import {mergeNoteMarkdown} from '../notes/merge';
 import {validateSet} from './note-conflict-set';
 import {KINDS,canonical,jsonBytes,text,uint,exact,type Kind} from './protocol';
@@ -26,7 +27,7 @@ export function toWire(kind:Kind,value:Record<string,any>){
   if(kind==='note'&&value.folderId!==null)text(value.folderId);
   if(kind==='folder')text(value.folderId);if(kind==='asset'){text(value.mime,255);text(value.originalFilename,1024);}
  }
- if(kind==='book')validateBookShape(value);if(kind==='book-reading')validateBookReading(value);
+ if(kind==='book'){validateBookShape(value);if(sha256Hex(bookIdInput(value.fingerprint,value.instanceId))!==value.bookId)throw Error('book_sync_invalid');}if(kind==='book-reading')validateBookReading(value);
  const meta:Record<string,any>={},state:Record<string,any>={};
  for(const [key,v]of Object.entries(value)){
   if(v===undefined)throw Error('invalid_schema');

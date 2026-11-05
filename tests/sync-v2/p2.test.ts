@@ -3,8 +3,8 @@ import {createCipheriv,createDecipheriv,createPublicKey,createPrivateKey,generat
 import {gunzipSync} from 'node:zlib';
 import {hex,unhex,lengthPrefixFields} from '@podjs/framework/crypto';
 import {createSyncV2Crypto} from '@podjs/framework/crypto';
-import {vector,scope,idKey,SqlFixture,binding,noteValue} from './fixture';
-import {canonical,jsonBytes,bytes,parseCanonicalJson,nextD64} from '../../src/sync-v2/protocol';
+import {vector,scope,idKey,SqlFixture,binding,noteValue,cipher,libraryId} from './fixture';
+import {canonical,jsonBytes,bytes,parseCanonicalJson,nextD64,entityKey,digest} from '../../src/sync-v2/protocol';
 import {b64,unb64,indexRow,commitBody} from '../../src/sync-v2/wire';
 import {sealV2,openV2,objectOid,type EnvelopeCrypto} from '../../src/sync-v2/sealed';
 import {verifyCommit,lowSignature,accountIdFromUserId,signingAlias,signedMessage,type SigningPort} from '../../src/sync-v2/signing';
@@ -17,6 +17,7 @@ import {watchMaterializer} from '../../src/sync-v2/materializer';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
 import {WatchCloudIndex} from '../../src/sync-v2/cloud-index';
 import {WatchIndexPublisher} from '../../src/sync-v2/publisher';
+import {observeAccount} from '../../src/sync-v2/state';
 import {candidates} from '../../src/sync-v2/business';
 const pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwk=pair.publicKey.export({format:'jwk'});
 const publicBytes=Buffer.concat([Buffer.from([4]),Buffer.from(jwk.x!,'base64url'),Buffer.from(jwk.y!,'base64url')]);
@@ -226,4 +227,32 @@ test('P2 response-loss result wins over the expired publication deadline',async(
 
 test('P2 authenticated index raw reference-table reads retain their fixed window',async()=>{
  const server=new SyntheticIndexBackend(),f=await publishingFixture(server),db=new SqlFixture();try{await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));await f.publisher.flush();const send=server.request.bind(server);let tables=0;server.request=async r=>{const u=new URL(r.url);if(r.method==='GET'&&decodeURIComponent(u.pathname).includes('/objects/state-refs:')){tables++;expect(u.searchParams.get('windowId')).toBe('1'.repeat(32));}return send(r);};const store=db.store();await store.initialize();const reader=new WatchCloudIndex(store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);await reader.pull(server.window());expect(tables).toBe(1);expect((await store.readState()).cloud.current.rowCount).toBe(1);}finally{f.db.close();db.close();}
+});
+
+async function signedBookFixture(mutate:(candidate:any)=>void){
+ const server=new SyntheticIndexBackend(),first=await publishingFixture(server);await first.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));await first.publisher.flush();
+ const book=structuredClone(vector('book-merge').cases[0].expected),entity=entityKey(idKey,scope.repoId,'book',book.bookId),candidate=candidates('book',book.bookId,entity,book,50);mutate(candidate);
+ const meta=await sealV2(crypto,idKey,Buffer.alloc(32,0x22),scope,'meta',1,jsonBytes(candidate.meta)),state=await sealV2(crypto,idKey,Buffer.alloc(32,0x22),scope,'state',1,jsonBytes(candidate.state));server.objects.set(meta.oid,meta.bytes);server.objects.set(state.oid,state.bytes);
+ const refs={body:{scope,stateOid:state.oid,segmentOids:[]},signature:''};refs.signature=b64(await crypto.sign('',signedMessage('wrss.sync.v2/state-refs-sign',refs.body)));const raw=jsonBytes(refs),refsOid=objectOid('state-refs',raw);server.objects.set(refsOid,raw);server.tables.set(state.oid,{parentOid:state.oid,refsOid,authorDeviceId:'a'.repeat(32),keyId:'b'.repeat(32),totalBytes:raw.length});
+ const original=parseCanonicalJson(server.objects.get(server.account.commitOid)!),oldRows=await readTree(scope,original.body.treeRoot,async id=>server.objects.get(id)!),row={...oldRows[0],entityKey:entity,metaOid:meta.oid,stateOid:state.oid,deleted:book.deleted},tree=buildTree(scope,[row]);for(const [id,raw]of tree.nodes)server.objects.set(id,raw);original.body.treeRoot=tree.oid;const id=objectOid('commit',jsonBytes(original.body));original.signature=b64(await crypto.sign('',lengthPrefixFields([bytes('wrss.sync.v2/commit-sign'),bytes(id)])));server.objects.set(id,jsonBytes(original));server.account={...server.account,commitOid:id};
+ return {server,first,book,candidate,row,tree,envelope:original,id,approved:async(deviceId:string)=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)})};
+}
+for(const [name,change]of [['fingerprint',(c:any)=>{c.meta.payload.fingerprint='not-h64';}],['derived-id',(c:any)=>{c.meta.payload.fingerprint='f'.repeat(64);}]] as const)test('P2 authenticated invalid book '+name+' cannot advance a fresh index',async()=>{
+ const f=await signedBookFixture(change),db=new SqlFixture();try{const store=db.store();await store.initialize();const before=await store.readState();expect(await verifyCommit(crypto,b64(publicBytes),f.envelope,f.id,scope)).toEqual(f.envelope.body);const reader=new WatchCloudIndex(store,f.first.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},f.approved,async()=>{},()=>100);await expect(reader.pull(f.server.window())).rejects.toThrow('book_sync_invalid');expect(await store.readState()).toEqual(before);expect(db.raw.query("SELECT name FROM sqlite_master WHERE name='syncv2_cloud_rows'").all()).toHaveLength(0);}finally{f.first.db.close();db.close();}
+});
+
+test('P2 stronger business audit invalidates old checkpoint and does not publish invalid cached rows',async()=>{
+ const f=await signedBookFixture(c=>{c.meta.payload.fingerprint='f'.repeat(64);}),db=new SqlFixture();try{
+  const store=db.store();await store.initialize();let state=await store.stageHeaders([{oid:f.id,...f.envelope}],await store.readState());state=await store.stageCloudRows(f.tree.oid,[{row:f.row,meta:f.candidate.meta,state:f.candidate.state,placeholder:'source-pending',placeholderText:'正文尚未就绪'}],state);
+  const next=observeAccount(state,{oid:f.id,revision:'1',generation:'0'});next.cloud={pins:{accountOid:f.id,authors:{['a'.repeat(32)]:{sequence:'1',oid:f.id,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}},seenOids:[]},current:{commitOid:f.id,treeRoot:f.tree.oid,rowCount:1},cursor:f.server.serverRevision,deviceSequence:'1',pendingPublish:null,auditBinding:digest({scope,keyVersion:1,features:[],schema:'v2-rc6c'})};await store.controlUpdate(state,next);
+  const baseline=await store.readState(),calls=f.server.calls['/objects/'+f.row.metaOid]??0,reader=new WatchCloudIndex(store,f.first.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},f.approved,async()=>{},()=>100);await expect(reader.pull(f.server.window())).rejects.toThrow('book_sync_invalid');expect(f.server.calls['/objects/'+f.row.metaOid]).toBeGreaterThan(calls);expect(await store.readState()).toEqual(baseline);
+  await store.beginScan(binding);await store.scanPage({page:async()=>({rows:[],after:'done',done:true}),changed:async()=>[]});const publisher=new WatchIndexPublisher(store,f.first.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>100);await expect(publisher.prepare('a'.repeat(32),'key',{commitOid:f.id,revision:'1'},'d'.repeat(32))).rejects.toThrow('book_sync_invalid');expect((await store.readState()).cloud.pendingPublish).toBe(null);expect(f.server.calls['/account/publish']).toBe(1);
+ }finally{f.first.db.close();db.close();}
+});
+
+test('P2 pre-upgrade encrypted candidates cannot bypass book identity validation at publication',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server);try{const old=await f.store.candidatePage(),candidate=structuredClone(old[0].candidate),book=structuredClone(vector('book-merge').cases[0].expected),entity=entityKey(idKey,scope.repoId,'book',book.bookId),invalid=candidates('book',book.bookId,entity,book,50);invalid.meta.payload.fingerprint='f'.repeat(64);
+  const aad=canonical({domain:'wrss.sync.v2/local-projection',version:2,scope,libraryId,purpose:'candidate',id:entity});await f.db.execute('DELETE FROM syncv2_candidates');await f.db.execute('INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?)',[canonical(scope),entity,await cipher.seal(aad,invalid),invalid.metaBytes,invalid.stateBytes,50,'1']);
+  const before=await f.store.candidatePage();await expect(f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'e'.repeat(32))).rejects.toThrow('book_sync_invalid');expect(await f.store.candidatePage()).toEqual(before);expect((await f.store.readState()).cloud.pendingPublish).toBe(null);expect(server.calls['/account/publish']??0).toBe(0);
+ }finally{f.db.close();}
 });

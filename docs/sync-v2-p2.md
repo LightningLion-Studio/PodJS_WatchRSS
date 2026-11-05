@@ -85,3 +85,11 @@ The opt-in emulator harness is documented in `tests/sync-v2/emulator/README.md`.
 It reads only the synthetic watch fixture at runtime and preserves existing
 SQLite state. Legacy clients retain structured `upgrade_required` from HTTP 426
 and display the upgrade action instead of treating a v2 account as an empty library.
+
+Books require both string H64 identity fields and the existing fingerprint-derived
+bookId (with the instance domain when instanceId is present). `bookIdInput()` shares
+the exact derivation bytes between the existing book module and the synchronous
+v2 wire validator. The reader audit binding includes the business validator
+revision, so older successful checkpoints cannot skip a stronger validation pass.
+Publication also validates previously cached current rows and candidate payloads.
+An invalid cached book cannot be propagated by a new signed index.

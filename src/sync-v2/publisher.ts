@@ -4,6 +4,7 @@ import {hex} from '@podjs/framework/crypto';
 import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
 import {signCommit,signControl,verifyCommit,type SigningPort} from './signing';
+import {fromWire} from './business';
 import {readConflicts} from './notes-conflict';
 import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
@@ -23,9 +24,9 @@ export class WatchIndexPublisher {
   let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=parseCanonicalJson(await this.http.object(own.commitOid)),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...saved,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
   const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),currentRows=new Map<string,any>(),changedRows:any[]=[];
-  if(saved.current?.treeRoot){let after='';for(;;){const page=await this.store.cloudRows(saved.current.treeRoot,after,32);if(!page.length)break;for(const r of page){rows.set(r.row.entityKey,r.row);currentRows.set(r.row.entityKey,r);}after=page.at(-1).row.entityKey;}}
+  if(saved.current?.treeRoot){let after='';for(;;){const page=await this.store.cloudRows(saved.current.treeRoot,after,32);if(!page.length)break;for(const r of page){fromWire(r.meta.kind,r.meta.payload,r.state.payload);rows.set(r.row.entityKey,r.row);currentRows.set(r.row.entityKey,r);}after=page.at(-1).row.entityKey;}}
   let after='';for(;;){const page=await this.store.candidatePage(after,32);if(!page.length)break;for(const entry of page){
-   const c=copy(entry.candidate),existing=currentRows.get(entry.entityKey);
+   const c=copy(entry.candidate),existing=currentRows.get(entry.entityKey);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
    if(existing&&c.meta.kind==='note'){
     if(existing.meta.kind!=='note'||existing.meta.logicalId!==c.meta.logicalId)throw Error('identity_conflict');
     const context={entityKey:entry.entityKey,noteId:c.meta.logicalId},local=readConflicts(c.state,context,['note-conflicts.v1']),remote=readConflicts(existing.state,context,['note-conflicts.v1']);
