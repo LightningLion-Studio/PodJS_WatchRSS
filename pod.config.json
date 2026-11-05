@@ -46,7 +46,8 @@
       }
     },
     "takeover": {
-      "sourceVersionCode": 40
+      "sourceVersionCode": 40,
+      "inactiveGenerationGc": "inactive"
     },
     "workManagerTakeover": {
       "nativeAppId": "com.lightningstudio.watchrss",
