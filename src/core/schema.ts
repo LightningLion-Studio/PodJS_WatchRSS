@@ -1,3 +1,4 @@
+import {stableSqlTriggers} from '@podjs/framework/sql-projection';
 import {ARTICLE_REGISTER_SCHEMA} from '../sync/article-register-store';
 import {ArticleKeepStore,ARTICLE_KEEP_SCHEMA} from '../sync/article-keep';
 import {LOCAL_RSS_SCHEMA} from '../rss/acquisition';
@@ -121,7 +122,7 @@ export async function initializeSchema(db: SchemaDatabase,options:{seedBuiltinCh
   if(current===SCHEMA_VERSION){
     // A single transaction also makes interrupted auxiliary installation safe
     // to retry. Reject future schemas above before any CREATE or version write.
-    await db.transaction([...lifecycleSchema,...AUXILIARY_SCHEMA].map(sql=>({sql})));
+    await stableSqlTriggers(db,lifecycleSchema.filter(sql=>sql.startsWith('CREATE TRIGGER ')),[...lifecycleSchema.filter(sql=>!sql.startsWith('DROP TRIGGER ')&&!sql.startsWith('CREATE TRIGGER ')),...AUXILIARY_SCHEMA].map(sql=>({sql})));
     return;
   }
   const existingCacheColumns=current>=1?new Set((await db.query('PRAGMA table_info(article_sync_encoding_cache)')).map(r=>String(r.name))):new Set<string>();

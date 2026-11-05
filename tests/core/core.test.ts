@@ -104,13 +104,13 @@ test('schema upgrades in order, repairs matching-version helpers without data mi
     expect(raw.query('PRAGMA user_version').get()).toEqual({user_version:SCHEMA_VERSION});
     expect(raw.query('SELECT dedup_key FROM articles').get()).toEqual({dedup_key:'guid:raw-guid'});
     const queries:string[]=[];let transactions=0;const before=raw.query('SELECT total_changes() AS n').get();
-    const matching={query:async(sql:string)=>{queries.push(sql);return db.query(sql);},transaction:async(statements:{sql:string;params?:readonly unknown[]}[])=>{
+    const matching={query:async(sql:string,params:readonly unknown[]=[])=>{queries.push(sql);return db.query(sql,params);},transaction:async(statements:{sql:string;params?:readonly unknown[]}[])=>{
       transactions++;expect(statements.length).toBeGreaterThan(0);
       for(const statement of statements){expect(BOOK_LIFECYCLE_SCHEMA.includes(statement.sql)||/^CREATE (TABLE|INDEX) IF NOT EXISTS /.test(statement.sql)).toBe(true);expect(statement.params).toBeUndefined();}
       await db.transaction(statements);
     }};
     await initializeSchema(matching,{seedBuiltinChannels:true,now:()=>{throw Error('must not prepare migrations');}});
-    expect(transactions).toBe(1);expect(queries).toEqual(['PRAGMA user_version',"SELECT name FROM sqlite_master WHERE type='table' AND name='sync_books'"]);expect(raw.query('SELECT total_changes() AS n').get()).toEqual(before);
+    expect(transactions).toBe(1);expect(queries).toEqual(['PRAGMA user_version',"SELECT name FROM sqlite_master WHERE type='table' AND name='sync_books'","SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?","SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?"]);expect(raw.query('SELECT total_changes() AS n').get()).toEqual(before);
   }finally{raw.close();}
 });
 test('dedup upgrade merges native-prefix and sync-hash rows without losing user or sync state',async()=>{
