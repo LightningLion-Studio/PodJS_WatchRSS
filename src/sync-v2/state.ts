@@ -4,6 +4,7 @@ export type Account={oid:string;revision:string;generation:string};
 export type Capture=Readonly<{stateVersion:string;accountOid:string;accountRevision:string;generation:string;localChangeRevision:string}>;
 export interface SyncState {
  stateVersion:string;localChangeRevision:string;rollbackGeneration:string;
+ businessRevision?:import('./business-revision').BusinessRevision;
  account:Account|null;lastSeenAccountOid:string|null;lastSeenAccountRevision:string;lastSeen:string;
  editBase:{accountOid:string|null;generation:string};pendingChoice:null|{generation:string;inboxKeys:string[]};
  activeGeneration:string|null;applied:Record<string,string>;knownAuthors:Record<string,unknown>;knownAccountParents:Record<string,unknown>;
@@ -18,7 +19,7 @@ export function currentAccount(state:any):Account {
 }
 export function checkCapture(state:any,capture:any,key?:string){
  const account=currentAccount(state);
- try{exact(capture,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);if(!Object.isFrozen(capture))throw Error();for(const k of ['stateVersion','accountRevision','generation','localChangeRevision'])checkD64(capture[k]);oid(capture.accountOid,'commit');}catch{throw Error('choice_stale');}
+ try{exact(capture,['stateVersion','accountOid','accountRevision','generation','localChangeRevision'],true);if(!Object.isFrozen(capture))throw Error();for(const k of ['stateVersion','accountRevision','generation','localChangeRevision'])checkD64(capture[k]);oid(capture.accountOid,'commit');}catch{throw Error('choice_stale');}
  if(!state.pendingChoice||capture.stateVersion!==state.stateVersion||capture.localChangeRevision!==state.localChangeRevision||capture.accountOid!==account.oid||capture.accountRevision!==account.revision||capture.generation!==account.generation||capture.generation!==state.pendingChoice.generation||(key!==undefined&&!state.pendingChoice.inboxKeys.includes(key)))throw Error('choice_stale');
 }
 export function captureChoice(state:any,window:Account):Capture {

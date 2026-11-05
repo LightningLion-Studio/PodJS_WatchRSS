@@ -2,6 +2,7 @@ import type {CloudHostRequest} from '../cloud/host-ports';
 import type {LocalArticleManifestStore} from '../sync/local-manifest';
 import {unhex} from '@podjs/framework/crypto';
 import {ProjectionGate} from './gate';
+import {stopExistingProjection} from './business-revision';
 import {WatchProjectionStore} from './store';
 import {SqlBusinessSource} from './source';
 import {watchMaterializer} from './materializer';
@@ -12,9 +13,10 @@ import {entityKey,type Scope} from './protocol';
  * scheduler, key creation or original business writes are introduced in P1. */
 export function watchLocalProjection(options:{enabled?:boolean;host:CloudHostRequest;identity:Pick<WatchIdentityStore,'installed'>;descriptor:unknown;scope:Scope;libraryId:string;accountScope:string;metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>}){
  const gate=new ProjectionGate(options.enabled??false);let opened:Promise<{store:WatchProjectionStore;source:SqlBusinessSource}>|undefined;
+ gate.onClose(()=>stopExistingProjection(projectionSql(options.host)));
  return {
   gate,
-  open(){if(!gate.isEnabled)return Promise.resolve(null);return opened??=(async()=>{
+  open(){if(!gate.isEnabled)return stopExistingProjection(projectionSql(options.host)).then(()=>null);return opened??=(async()=>{
    // Approved identity access ends before any SQL writer or content work starts.
    const installed=await options.identity.installed(options.descriptor),db=projectionSql(options.host),key=unhex(installed.idKeyHex);
    const store=new WatchProjectionStore(db,localProjectionCipher(options.host,options.accountScope),gate,options.scope,options.libraryId,key,async()=>{await options.identity.installed(options.descriptor);});

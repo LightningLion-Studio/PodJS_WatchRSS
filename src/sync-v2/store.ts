@@ -1,9 +1,10 @@
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
 import {sha256Hex} from '@podjs/framework/crypto';
-import {commitSqlCas,readSqlKeysetPage,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
+import {commitSqlCas,stableSqlTriggers,checkD64,nextD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
 import {canonical,canonicalLegacy,jsonBytes,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
 import {candidates} from './business';
 import {ProjectionGate} from './gate';
+import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
 export interface LocalCipher {seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>}
 export type SourceRecord={kind:Kind;logicalId:string;value:Record<string,any>;addedAtMillis?:number;source?:{table:string;locator:string}};
@@ -12,7 +13,7 @@ export interface SourcePage {rows:SourceRecord[];after:string;done:boolean}
 export interface SourceReader {
  /** Stable keyset token. The caller never passes offset or a full inventory. */
  page(after:string,limit:number):Promise<SourcePage>;
- /** Called for a bounded native outbox entry; never read body files/recipes. */
+ /** Reserved keyed lookup for future incremental work; never read body recipes. */
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
 export const PROJECTION_SCHEMA=[
@@ -28,63 +29,59 @@ export const PROJECTION_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS syncv2_control(id INTEGER PRIMARY KEY CHECK(id=1),scope TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_legacy_inbox(scope TEXT NOT NULL,inbox_key TEXT NOT NULL,input_hash TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,inbox_key))`,
 ];
-export const PROJECTION_SOURCE_TABLES:Record<string,string[]>={
- sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],
- memo_notes:['note_id'],memo_folders:['folder_id'],sync_source_states:['url'],
- // Native mutations that precede normalization still invalidate a captured
- // choice and create durable work. They cannot be silently omitted on resume.
- articles:['id'],channels:['id'],article_reading_state:['article_id'],article_saved_states:['article_id','save_type'],
- sync_article_ids:['article_id'],cloud_rss_article_ids:['item_id'],article_sync_encoding_cache:['item_id'],article_sync_content:['item_id'],article_native_sync_hash:['item_id'],sync_body_revision:['item_id'],
- sync_saved_states:['article_id','save_type'],sync_article_deletions:['article_id'],note_merge_conflicts:['conflict_id'],
-};
-/** Decimal successor using only SQLite text and a single digit integer. Native
- * outbox triggers never convert D64 into signed SQLite or JS numeric counters. */
-function nextSql(column:string){const head=`rtrim(${column},'9')`,zeros=`replace(substr(${column},length(${head})+1),'9','0')`;return `CASE WHEN ${head}='' THEN '1'||${zeros} ELSE substr(${head},1,length(${head})-1)||CAST(CAST(substr(${head},-1) AS INTEGER)+1 AS TEXT)||${zeros} END`;}
-function triggers(table:string,columns:string[],allColumns:string[]){return ['INSERT','UPDATE','DELETE'].map(op=>{
- const ref=op==='DELETE'?'OLD':'NEW',locator="'hex-v1:'||"+columns.map(c=>'hex(CAST('+ref+'.'+c+' AS BLOB))').join("||':'||");
- return `CREATE TRIGGER IF NOT EXISTS syncv2_${table}_${op.toLowerCase()} AFTER ${op} ON ${table} WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND enabled=1)${op==='UPDATE'?' AND ('+allColumns.map(c=>'OLD.'+c+' IS NOT NEW.'+c).join(' OR ')+')':''} BEGIN
- SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state s JOIN syncv2_control c ON s.scope=c.scope WHERE c.id=1 AND (s.state_version='18446744073709551615' OR s.local_revision='18446744073709551615')) THEN RAISE(ABORT,'counter_exhausted') END;
- UPDATE syncv2_state SET state_version=${nextSql('state_version')},local_revision=${nextSql('local_revision')},awaiting_user=CASE WHEN account_generation!=edit_generation THEN 1 ELSE awaiting_user END WHERE scope=(SELECT scope FROM syncv2_control WHERE id=1);
- INSERT INTO syncv2_outbox(scope,source_table,locator) SELECT scope,'${table}',${locator} FROM syncv2_control WHERE id=1;END`;
- });}
-export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null};
+export {PROJECTION_SOURCE_TABLES} from './business-revision';
+export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision};
 export class WatchProjectionStore {
  private readonly scopeKey:string;
  constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{}){
-  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');
+  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
  }
  private aad(purpose:string,id=''){return canonical({domain:'wrss.sync.v2/local-projection',version:2,scope:this.scope,libraryId:this.libraryId,purpose,id});}
- /** Gate off means zero SQL/secure/crypto/network calls, including schema work. */
- async initialize(){if(!this.gate.isEnabled)return {ddl:0,unchanged:0};
-  await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.map(sql=>({sql})));
+ /** Reopening disabled must durably stop a previously enabled projection. */
+ async initialize(){if(!this.gate.isEnabled){await stopExistingProjection(this.db);return {ddl:0,unchanged:0};}
+  await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.map(sql=>({sql})));const markerDdl=await installBusinessRevision(this.db);
   if(!(await this.db.query('SELECT 1 FROM syncv2_state WHERE scope=?',[this.scopeKey])).length){
-   const initial=initialState(),tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(row=>String(row.name)));
+   const initial=initialState();initial.businessRevision=await businessRevision(this.db);const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(row=>String(row.name)));
    const witnesses=[['sync_change_log',"SELECT 1 FROM sync_change_log WHERE seq>COALESCE((SELECT MIN(last_local_seq_acked) FROM sync_peer_state),0) LIMIT 1"],['memo_notes','SELECT 1 FROM memo_notes WHERE content_hash!=base_content_hash LIMIT 1'],['article_register_state','SELECT 1 FROM article_register_state WHERE pending_json IS NOT NULL OR raw_conflict=1 LIMIT 1'],['sync_book_reading_dirty','SELECT 1 FROM sync_book_reading_dirty LIMIT 1']];
    for(const [table,query]of witnesses)if(tables.has(table!)&&(await this.db.query(query!)).length){initial.hasUnsentEdits=true;break;}
    const body=await this.cipher.seal(this.aad('state'),initial);
    await this.db.transaction([{sql:'INSERT OR IGNORE INTO syncv2_state VALUES(?,?,?,?,?,?,0)',params:[this.scopeKey,'0','0',body,'0','0']}]);
   }
-  const existing=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name))),definitions:string[]=["CREATE TRIGGER IF NOT EXISTS syncv2_identity_immutable BEFORE INSERT ON syncv2_identity_map WHEN EXISTS(SELECT 1 FROM syncv2_identity_map WHERE local_library=NEW.local_library AND repo=NEW.repo AND kind=NEW.kind AND logical_id=NEW.logical_id AND (entity_key!=NEW.entity_key OR mapping_version!=NEW.mapping_version)) BEGIN SELECT RAISE(ABORT,'identity_conflict');END"];
-  for(const [table,keys]of Object.entries(PROJECTION_SOURCE_TABLES))if(existing.has(table)){const columns=(await this.db.query('PRAGMA table_info('+table+')')).map(r=>String(r.name));if(columns.some(c=>!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(c)))throw Error('unsupported_feature');definitions.push(...triggers(table,keys,columns));}
-  const result=await stableSqlTriggers(this.db,definitions);
+  const result=await stableSqlTriggers(this.db,["CREATE TRIGGER IF NOT EXISTS syncv2_identity_immutable BEFORE INSERT ON syncv2_identity_map WHEN EXISTS(SELECT 1 FROM syncv2_identity_map WHERE local_library=NEW.local_library AND repo=NEW.repo AND kind=NEW.kind AND logical_id=NEW.logical_id AND (entity_key!=NEW.entity_key OR mapping_version!=NEW.mapping_version)) BEGIN SELECT RAISE(ABORT,'identity_conflict');END"]);
+  result.ddl+=markerDdl.ddl;result.unchanged+=markerDdl.unchanged;
   // A local test/diagnostic entry must activate explicitly. No cloud transport,
   // worker, settings migration, or account registration is attached here.
-  await this.db.transaction([{sql:'INSERT INTO syncv2_control VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,enabled=1 WHERE scope IS NOT excluded.scope OR enabled!=1',params:[this.scopeKey]}]);return result;
+  this.gate.require();await this.db.transaction([{sql:'INSERT INTO syncv2_control VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,enabled=1 WHERE scope IS NOT excluded.scope OR enabled!=1',params:[this.scopeKey]}]);if(!this.gate.isEnabled){await stopExistingProjection(this.db);throw Error('feature_disabled');}return result;
  }
- async disable(){if(!this.gate.isEnabled)return;await this.db.transaction([{sql:'UPDATE syncv2_control SET enabled=0 WHERE id=1 AND scope=?',params:[this.scopeKey]}]);this.gate.close();}
- async readState():Promise<SyncState>{this.gate.require();await this.checkIdentity();const row=(await this.db.query('SELECT * FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('projection_not_initialized');const state=await this.cipher.open(this.aad('state'),String(row.body));state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);if(checkD64(row.account_generation)!==state.rollbackGeneration||checkD64(row.edit_generation)!==state.editBase.generation)throw Error('projection_state_inconsistent');if(Number(row.awaiting_user)===1&&!state.pendingChoice)state.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};return state;}
- private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion);next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();hook?.();
-  try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},state.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) THEN 1 ELSE 0 END',params:[this.scopeKey]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...statements]);}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
+ async disable(){await this.gate.close();}
+ async readState():Promise<SyncState>{
+  this.gate.require();await this.checkIdentity();const row=(await this.db.query('SELECT * FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('projection_not_initialized');
+  const state:SyncState=await this.cipher.open(this.aad('state'),String(row.body));state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);
+  if(checkD64(row.account_generation)!==state.rollbackGeneration||checkD64(row.edit_generation)!==state.editBase.generation)throw Error('projection_state_inconsistent');
+  if(Number(row.awaiting_user)===1&&!state.pendingChoice)state.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};
+  const current=await businessRevision(this.db);
+  if(!sameBusinessRevision(state.businessRevision,current)){
+   nextD64(state.stateVersion);const localRevision=addRevision(state.localChangeRevision,revisionDelta(state.businessRevision,current));
+   if(localRevision.length>20||localRevision.length===20&&localRevision>'18446744073709551615')throw Error('counter_exhausted');
+   const next={...state,businessRevision:current,localChangeRevision:checkD64(localRevision),hasUnsentEdits:true};
+   if(state.rollbackGeneration!==state.editBase.generation&&!next.pendingChoice)next.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};
+   await this.commit(state,next);return next;
+  }
+  return state;
+ }
+ private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion),marker=next.businessRevision??await businessRevision(this.db);next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
+  try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},state.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...statements]);}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** The caller supplies an authenticated HeadPins observation. No network DTO
   * or unverified server checkpoint may be passed as an account observation. */
  async observe(account:Account,authenticate:(account:Account,state:SyncState)=>Promise<{authors:Record<string,unknown>;parents:Record<string,unknown>}>,hook?:()=>void){const state=await this.readState();nextD64(state.stateVersion);const pins=await authenticate(account,state),next=observeAccount(state,account);next.knownAuthors=pins.authors;next.knownAccountParents=pins.parents;await this.commit(state,next,[],hook);}
  async capture(window:Account){return captureChoice(await this.readState(),window);}
  async checkpoint():Promise<Checkpoint|null>{this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];return row?this.cipher.open(this.aad('checkpoint'),String(row.body)):null;}
- async beginScan(binding:ScanBinding){const state=await this.readState();nextD64(state.stateVersion);const bind=canonical(binding),prior=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];if(prior?.binding===bind)return {hit:true,reason:'same-binding',checkpoint:await this.checkpoint()};
-  const outbox=(await this.db.query('SELECT CAST(COALESCE(MAX(seq),0) AS TEXT) AS seq FROM syncv2_outbox WHERE scope=?',[this.scopeKey]))[0];
-  const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:String(outbox!.seq),tailEnd:null,phase:'scan',rows:0};
-  await this.commit(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-changed':'first-scan',checkpoint:cp};
+ async beginScan(binding:ScanBinding){
+  const state=await this.readState();nextD64(state.stateVersion);const bind=canonical(binding),prior=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0],old=await this.checkpoint();
+  if(prior?.binding===bind&&old&&(sameBusinessRevision(old.businessRevision,state.businessRevision)||old.phase!=='complete'&&old.businessRevision?.epoch===state.businessRevision?.epoch))return {hit:true,reason:sameBusinessRevision(old.businessRevision,state.businessRevision)?'same-binding-and-revision':'resume-prefix-then-reconcile',checkpoint:old};
+  const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:'0',tailEnd:null,phase:'scan',rows:0,businessRevision:state.businessRevision!};
+  await this.commit(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-or-revision-changed':'first-scan',checkpoint:cp};
  }
  private async prepareRows(rows:SourceRecord[],revision:string,sequence:string){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
@@ -107,32 +104,28 @@ export class WatchProjectionStore {
  }
  /** One bounded page per invocation. Returning is the execution-budget pause;
   * the next host/guest reads the committed checkpoint and resumes its prefix. */
- async scanPage(source:SourceReader,limit=32,hook?:()=>void){
-  const state=await this.readState(),revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp)throw Error('scan_not_started');if(cp.phase!=='scan')return cp;
+ async scanPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'scan',hook);}
+ private async projectPage(source:SourceReader,limit:number,phase:'scan'|'tail',hook?:()=>void){
+  const state=await this.readState(),revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp)throw Error('scan_not_started');if(cp.phase!==phase)return cp;
   let page:SourcePage,prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>;
   for(;;){page=await source.page(cp.after,limit);if(page.rows.length>limit||!page.done&&page.after===cp.after)throw Error('scan_no_progress');try{prepared=await this.prepareRows(page.rows,state.localChangeRevision,revision);break;}catch(error){if(limit===1||(error as Error).message!=='page_too_large')throw error;limit=Math.max(1,Math.floor(limit/2));}}
-  const nextCp={...cp,after:page.after,rows:cp.rows+page.rows.length};
-  if(page.done){nextCp.phase='tail';nextCp.R1=state.localChangeRevision;nextCp.tailEnd=String((await this.db.query('SELECT CAST(COALESCE(MAX(seq),0) AS TEXT) AS seq FROM syncv2_outbox WHERE scope=?',[this.scopeKey]))[0]!.seq);}
+  const nextCp:Checkpoint={...cp,after:page.after,rows:cp.rows+page.rows.length};
+  if(page.done){
+   nextCp.R1=state.localChangeRevision;
+   if(sameBusinessRevision(cp.businessRevision,state.businessRevision)){nextCp.phase='complete';nextCp.tailEnd=state.businessRevision!.revision;nextCp.tail=nextCp.tailEnd;}
+   else {nextCp.phase='tail';nextCp.after='';nextCp.rows=0;nextCp.businessRevision=state.businessRevision!;nextCp.tailEnd=null;}
+  }
   await this.commit(state,{...state},[...prepared.statements,{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),nextCp),this.scopeKey]}],hook);return nextCp;
  }
+ /** A global tiny witness cannot identify changed rows. Conservatively rescan
+  * in bounded pages; unchanged candidates and radix paths are not rewritten. */
  async beginTailWindow(){
   const state=await this.readState();nextD64(state.stateVersion);const cp=await this.checkpoint();if(!cp||cp.phase!=='complete')throw Error('scan_not_complete');
-  const end=String((await this.db.query('SELECT CAST(COALESCE(MAX(seq),0) AS TEXT) AS seq FROM syncv2_outbox WHERE scope=?',[this.scopeKey]))[0]!.seq);if(end===cp.tail)return cp;
-  const next:Checkpoint={...cp,R0:cp.R1!,R1:state.localChangeRevision,tailEnd:end,phase:'tail'};
+  if(sameBusinessRevision(cp.businessRevision,state.businessRevision))return cp;
+  const next:Checkpoint={...cp,R0:cp.R1!,R1:state.localChangeRevision,phase:'tail',after:'',rows:0,tailEnd:null,businessRevision:state.businessRevision!};
   await this.commit(state,{...state},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]}]);return next;
  }
- async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){
-  const state=await this.readState(),revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp||cp.phase==='scan')throw Error('scan_not_ready');if(cp.phase==='complete')return cp;
-  let page:Awaited<ReturnType<typeof readSqlKeysetPage>>,prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>;
-  for(;;){
-   page=await readSqlKeysetPage(this.db,'SELECT CAST(seq AS TEXT) AS seq,source_table,locator FROM syncv2_outbox WHERE scope=? AND seq>? AND seq<=? ORDER BY seq',[this.scopeKey,cp.tail,cp.tailEnd],limit);
-   const byId=new Map<string,SourceRecord>();for(const event of page.rows)for(const row of await source.changed(String(event.source_table),String(event.locator)))byId.set(canonical([row.kind,row.logicalId]),row);
-   try{prepared=await this.prepareRows([...byId.values()],state.localChangeRevision,revision);break;}catch(error){if(limit===1||(error as Error).message!=='page_too_large')throw error;limit=Math.max(1,Math.floor(limit/2));}
-  }
-  const nextCp={...cp,tail:page.rows.length?String(page.rows.at(-1)!.seq):cp.tailEnd!};if(nextCp.tail===cp.tailEnd)nextCp.phase='complete';
-
-  await this.commit(state,{...state},[...prepared.statements,{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),nextCp),this.scopeKey]}],hook);return nextCp;
- }
+ async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.cipher.open(this.aad('candidate',entity),String(row.body)):null;}
  /** No business apply or ACK. Legacy data is an encrypted shadow journal. */

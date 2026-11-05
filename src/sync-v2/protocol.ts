@@ -5,10 +5,10 @@ import {checkD64} from '@podjs/framework/sql-projection';
 export {checkD64,compareD64,nextD64} from '@podjs/framework/sql-projection';
 export type Scope={repoId:string;libraryEpoch:string;contentGeneration:string};
 export const bytes=(s:string)=>encodeUtf8(s,'strict');
-export function exact(value:any,keys:readonly string[]){
+export function exact(value:any,keys:readonly string[],enumerable=false){
  if(!value||Object.getPrototypeOf(value)!==Object.prototype)throw Error('invalid_schema');
  const own=Reflect.ownKeys(value);if(own.length!==keys.length||own.some(k=>typeof k!=='string'||!keys.includes(k)))throw Error('invalid_schema');
- for(const key of keys){const d=Object.getOwnPropertyDescriptor(value,key);if(!d||!Object.hasOwn(d,'value'))throw Error('invalid_schema');}
+ for(const key of keys){const d=Object.getOwnPropertyDescriptor(value,key);if(!d||(!Object.hasOwn(d,'value')||enumerable&&d.enumerable!==true))throw Error('invalid_schema');}
 }
 function scalar(s:string){for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);if(c>=0xd800&&c<=0xdbff){const d=s.charCodeAt(++i);if(!(d>=0xdc00&&d<=0xdfff))throw Error('invalid_encoding');}else if(c>=0xdc00&&c<=0xdfff)throw Error('invalid_encoding');}}
 export function canonical(value:any):string {
