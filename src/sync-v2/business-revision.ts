@@ -21,7 +21,15 @@ export async function installBusinessRevision(db:ProjectionSql){
   for(const op of ['INSERT','UPDATE','DELETE'])definitions.push(`CREATE TRIGGER IF NOT EXISTS syncv2_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${op==='UPDATE'?' WHEN '+columns.map(c=>'OLD.'+c+' IS NOT NEW.'+c).join(' OR '):''} BEGIN
  INSERT INTO business_sync_revision(id,epoch,revision) VALUES(1,lower(hex(randomblob(16))),1) ON CONFLICT(id) DO UPDATE SET epoch=CASE WHEN revision=9223372036854775807 THEN excluded.epoch ELSE epoch END,revision=CASE WHEN revision=9223372036854775807 THEN 1 ELSE revision+1 END;END`);
  }
- return stableSqlTriggers(db,definitions,[{sql:'CREATE TABLE IF NOT EXISTS business_sync_revision(id INTEGER PRIMARY KEY CHECK(id=1),epoch TEXT NOT NULL,revision INTEGER NOT NULL)'},{sql:'INSERT OR IGNORE INTO business_sync_revision VALUES(1,lower(hex(randomblob(16))),0)'}]);
+ // The framework decides which definitions actually need replacement. Bind
+ // this business-specific coverage change to that same native transaction:
+ // restored SQL alone cannot prove that edits during a coverage gap were seen.
+ return stableSqlTriggers({
+  query:(sql,params)=>db.query(sql,params),
+  transaction:statements=>db.transaction(statements.some(s=>s.sql.startsWith('CREATE TRIGGER '))
+   ? [...statements,{sql:'UPDATE business_sync_revision SET epoch=lower(hex(randomblob(16))) WHERE id=1'}]
+   : statements),
+ },definitions,[{sql:'CREATE TABLE IF NOT EXISTS business_sync_revision(id INTEGER PRIMARY KEY CHECK(id=1),epoch TEXT NOT NULL,revision INTEGER NOT NULL)'},{sql:'INSERT OR IGNORE INTO business_sync_revision VALUES(1,lower(hex(randomblob(16))),0)'}]);
 }
 export async function businessRevision(db:ProjectionSql):Promise<BusinessRevision>{
  let row=(await db.query('SELECT epoch,CAST(revision AS TEXT) AS revision FROM business_sync_revision WHERE id=1'))[0];

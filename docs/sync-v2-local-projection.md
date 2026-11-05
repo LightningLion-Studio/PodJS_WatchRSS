@@ -26,7 +26,11 @@ A short projection writer fences both stateVersion and the business revision.
 
 Native business triggers only upsert the single `(epoch, revision)` witness.
 They do not access projection state, outbox, mappings, candidates, logs or crypto.
-A projection failure or exhausted projection counter therefore cannot roll back
+When any witness trigger is missing or its full SQL definition differs, installing
+the replacement rotates the witness epoch in the same transaction. This invalidates
+checkpoints from a possible untracked gap, even when the restored SQL is identical
+to the pre-gap definition. Identical definitions cause neither trigger DDL nor epoch
+rotation. A projection failure or exhausted projection counter therefore cannot roll back
 an otherwise valid business edit. Genuine business constraints still fail normally.
 The witness remains active while projection is disabled. Missing witnesses and
 SQLite integer rollover receive a new epoch; revision reads use decimal text.
