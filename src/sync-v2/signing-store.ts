@@ -1,0 +1,25 @@
+/** Durable fixed author identity. Native signing keys never leave AndroidKeyStore. */
+import {canonical,digest,hexId,exact,type Scope} from './protocol';
+import {hex} from '@podjs/framework/crypto';
+import {signingAlias,signingRegistration,type SigningPort} from './signing';
+import type {EnvelopeCrypto} from './sealed';
+import type {IdentityStorage} from './identity-store';
+import {b64} from './wire';
+import {SyncV2Http} from './http';
+export class WatchSigningIdentity {
+ private slot:string;
+ constructor(private readonly secure:IdentityStorage,private readonly crypto:SigningPort&EnvelopeCrypto,private readonly accountId:string,private readonly scope:Scope,private readonly idKey:Uint8Array){this.slot='watchrss.syncv2.signer.'+digest({accountId,scope});}
+ async ensure():Promise<{deviceId:string;keyId:string;registration:any;registered:boolean}>{
+  const old=await this.secure.get(this.slot);if(old){const record=JSON.parse(old);exact(record,['deviceId','keyId','registration','registered']);hexId(record.deviceId,32);hexId(record.keyId,32);if(typeof record.registered!=='boolean')throw Error('secure_store_corrupt');return record;}
+  const deviceId=hex(await this.crypto.random(16)),keyId=hex(await this.crypto.random(16));hexId(deviceId,32);hexId(keyId,32);
+  const record={deviceId,keyId,registration:null,registered:false};if(!await this.secure.compareAndSet(this.slot,null,canonical(record)))return this.ensure();return record;
+ }
+ async register(http:SyncV2Http,revocationRevision:string,now:number){
+  if(!http.indexWrite||(await http.capabilities()).flags?.indexWrite!==true)throw Error('feature_disabled');let record=await this.ensure();
+  const alias=signingAlias(this.accountId,this.scope,record.deviceId,record.keyId);
+  if(!record.registration){const registration=await signingRegistration(this.crypto,this.idKey,this.accountId,this.scope,record.deviceId,record.keyId,now,revocationRevision,true),next={...record,registration};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
+  // Retry exactly the persisted randomized signature, never generate a replacement proof.
+  if(!record.registered){const result=await http.json('POST','/devices/signing-key',record.registration);if(result.deviceId!==record.deviceId||result.keyId!==record.keyId||result.registered!==true)throw Error('signature_invalid');const next={...record,registered:true};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
+  const publicKey=await this.crypto.signingKey(alias,false);if(b64(publicKey)!==record.registration.body.publicKey)throw Error('signature_invalid');return {...record,alias};
+ }
+}

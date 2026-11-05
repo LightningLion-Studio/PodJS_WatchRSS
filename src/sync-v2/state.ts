@@ -3,6 +3,7 @@ import {exact,oid,canonical} from './protocol';
 export type Account={oid:string;revision:string;generation:string};
 export type Capture=Readonly<{stateVersion:string;accountOid:string;accountRevision:string;generation:string;localChangeRevision:string}>;
 export interface SyncState {
+ cloud?:any;acknowledgedLocalChangeRevision?:string;
  stateVersion:string;localChangeRevision:string;rollbackGeneration:string;
  businessRevision?:import('./business-revision').BusinessRevision;
  account:Account|null;lastSeenAccountOid:string|null;lastSeenAccountRevision:string;lastSeen:string;
@@ -33,7 +34,7 @@ export function observeAccount(state:SyncState,account:Account):SyncState {
  if(account.revision===state.lastSeenAccountRevision&&state.lastSeenAccountOid!==null&&account.oid!==state.lastSeenAccountOid)throw Error('replay_detected');
  const following=nextD64(state.stateVersion),next=JSON.parse(canonical(state)) as SyncState;
  next.account={...account};next.lastSeenAccountOid=account.oid;next.lastSeenAccountRevision=account.revision;next.lastSeen=account.generation;next.rollbackGeneration=account.generation;
- if(next.pendingChoice||compareD64(next.editBase.generation,account.generation)<0&&(next.localChangeRevision!=='0'||next.hasUnsentEdits))next.pendingChoice={generation:account.generation,inboxKeys:next.pendingChoice?.inboxKeys??[]};
+ if(next.pendingChoice||compareD64(next.editBase.generation,account.generation)<0&&(compareD64(next.localChangeRevision,next.acknowledgedLocalChangeRevision??'0')>0||next.hasUnsentEdits))next.pendingChoice={generation:account.generation,inboxKeys:next.pendingChoice?.inboxKeys??[]};
  next.stateVersion=following;return next;
 }
 

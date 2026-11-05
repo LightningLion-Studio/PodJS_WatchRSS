@@ -1,3 +1,6 @@
+import {conflictSet} from './note-conflict-set';
+import {importLegacy} from './notes-conflict';
+import {uint} from './protocol';
 import {BUSINESS_FIELDS,fromWire} from './business';
 import {materializeFrozen,type Materialize} from './source';
 import type {ProjectionSql} from '@podjs/framework/sql-projection';
@@ -6,6 +9,15 @@ import type {LocalArticleManifestStore} from '../sync/local-manifest';
  * initialization, body scan, recipe computation, old cursor, or business writes. */
 export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleManifestStore,'cloudRestoreMetadata'>,previousBySource?:(table:string,locator:string)=>Promise<any>,previousById?:(kind:'article',logicalId:string)=>Promise<any>):Materialize {
  return async(table,row)=>{
+  if(table==='memo_notes'){
+   const records=await materializeFrozen(table,row);
+   const tables=new Set((await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('note_merge_conflicts','syncv2_note_resolutions')")).map(r=>String(r.name)));
+   const conflicts=tables.has('note_merge_conflicts')?await db.query('SELECT * FROM note_merge_conflicts WHERE note_id=?',[row.note_id]):[];
+   const resolved=tables.has('syncv2_note_resolutions')?await db.query('SELECT conflict_id,resolved_at FROM syncv2_note_resolutions WHERE note_id=?',[row.note_id]):[];
+   const markers=new Map(resolved.map(r=>{if(typeof r.conflict_id!=='string')throw Error('invalid_schema');uint(r.resolved_at);return [r.conflict_id,r.resolved_at as number] as const;}));
+   for(const record of records)record.value.noteConflicts=conflictSet(record.logicalId,importLegacy('watch',record.logicalId,conflicts).records.map(r=>({...r,resolvedAt:markers.get(r.conflictId)??0})));
+   return records;
+  }
   if(table==='articles'){
    if(row.__removed){
     const previous=await previousBySource?.(table,String(row.__locator));if(!previous)throw Error('source_tombstone_required');

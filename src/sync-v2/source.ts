@@ -36,7 +36,12 @@ export class SqlBusinessSource implements SourceReader {
  }
 
  async changed(table:string,locator:string){
-  if(table==='note_merge_conflicts')return []; // Explicit P1 exception: preserve the original table; no conflict candidate writes.
+  if(table==='note_merge_conflicts'){
+   const values=decodeLocator(locator),incident=(await this.db.query('SELECT note_id FROM note_merge_conflicts WHERE conflict_id=?',values))[0];
+   if(!incident)throw Error('source_reconciliation_required');
+   const row=(await this.db.query('SELECT * FROM memo_notes WHERE note_id=?',[incident.note_id]))[0];if(!row)throw Error('source_identity_missing');
+   return this.materialize('memo_notes',row);
+  }
   if(['article_reading_state','article_saved_states','cloud_rss_article_ids','article_sync_encoding_cache','article_sync_content','article_native_sync_hash','sync_body_revision','sync_saved_states','sync_article_ids'].includes(table)){
    const values=decodeLocator(locator);let id:unknown=values[0];
    if(table==='sync_saved_states')id=(await this.db.query('SELECT item_id FROM sync_saved_states WHERE article_id=? AND save_type=?',values))[0]?.item_id;
@@ -67,10 +72,4 @@ export async function materializeFrozen(table:string,row:Record<string,unknown>)
  if(table==='memo_folders'){const value={folderId:text('folder_id'),name:text('name'),sortOrder:number('sort_order'),updatedAt:number('updated_at'),modifiedBy:text('modified_by'),deleted:bool('deleted'),deletedAt:number('deleted_at')};return [{kind:'folder',logicalId:value.folderId,value}];}
  if(table==='sync_source_states'){const value={url:text('url'),sourceDeviceId:text('source_device_id'),title:text('title'),description:text('description'),siteUrl:row.site_url===null?null:text('site_url'),imageUrl:row.image_url===null?null:text('image_url'),createdAt:number('created_at'),updatedAt:number('updated_at'),sortOrder:number('sort_order'),isPinned:bool('is_pinned'),deleted:bool('deleted'),deletedAt:number('deleted_at')};return [{kind:'source',logicalId:value.url,value,...(value.createdAt>0?{addedAtMillis:value.createdAt}:{})}];}
  throw Error('source_reconciliation_required');
-}
-
-/** Reserved for the schema author before P2. P1 never invokes this interface. */
-export interface DeferredNoteConflictProjection {
- readonly enabled:false;
- readConflictCandidates(noteId:string):Promise<SourceRecord[]>;
 }

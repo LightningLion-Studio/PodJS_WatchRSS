@@ -24,3 +24,4 @@ export function watchLocalProjection(options:{enabled?:boolean;host:CloudHostReq
   })().catch(error=>{opened=undefined;throw error;});},
  };
 }
+export {watchSyncV2} from './runtime';

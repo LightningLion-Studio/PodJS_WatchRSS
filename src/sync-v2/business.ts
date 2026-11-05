@@ -4,6 +4,7 @@ import {validateRecord} from '../cloud/records';
 import {recordFields} from '../cloud/compatibility';
 import {validateBookShape,validateBookReading,mergeBook,mergeBookReading} from '../books/protocol';
 import {mergeNoteMarkdown} from '../notes/merge';
+import {validateSet} from './note-conflict-set';
 import {KINDS,canonical,jsonBytes,text,uint,exact,type Kind} from './protocol';
 export {mergeBook,mergeBookReading,mergeNoteMarkdown};
 const metaFields=new Set('articleId url title siteName excerpt imageUrl rssSourceUrl rssSourceTitle contentHash importedAt guid sourceUrl sourceId description siteUrl createdAt fingerprint chapterCount kind instanceId bookId articleIdHash chapterIndex noteId folderId name assetId mime originalFilename'.split(' '));
@@ -15,7 +16,9 @@ export const BUSINESS_FIELDS=Object.freeze(fields);
 const clone=(value:any)=>JSON.parse(canonical(value));
 export function toWire(kind:Kind,value:Record<string,any>){
  if(!KINDS.includes(kind)||!value||Object.getPrototypeOf(value)!==Object.prototype)throw Error('unsupported_feature');
- exact(value,Object.keys(value));if(Object.keys(value).some(k=>!fields[kind].includes(k)))throw Error('unsupported_feature');
+ exact(value,Object.keys(value));if(Object.keys(value).some(k=>!fields[kind].includes(k)&&!(kind==='note'&&k==='noteConflicts')))throw Error('unsupported_feature');
+ const noteConflicts=value.noteConflicts;const conflictChannel=kind==='note'&&Object.hasOwn(value,'noteConflicts');
+ if(conflictChannel){validateSet(String(value.noteId),value.noteConflicts);value={...value};delete value.noteConflicts;}
  if('readingProgressMicros'in value)throw Error('invalid_schema');
  if(['article','source','rss-state','book','book-reading'].includes(kind))validateRecord({kind,value});
  if(kind==='note'||kind==='folder'||kind==='asset'){
@@ -35,6 +38,7 @@ export function toWire(kind:Kind,value:Record<string,any>){
   (metaFields.has(key)?meta:state)[key]=v;
  }
  // Canonicalization rejects unsupported nested types and noninteger wire numbers.
+ if(conflictChannel)state.noteConflicts=clone(noteConflicts);
  return {meta:clone(meta),state:clone(state)};
 }
 export function fromWire(kind:Kind,meta:Record<string,any>,state:Record<string,any>){
@@ -45,7 +49,7 @@ export function fromWire(kind:Kind,meta:Record<string,any>,state:Record<string,a
 export function candidates(kind:Kind,logicalId:string,entityKey:string,value:Record<string,any>,addedAtMillis?:number){
  text(logicalId);const wire=toWire(kind,value);if(addedAtMillis!==undefined)uint(addedAtMillis);
  const meta={version:2,entityKey,kind,logicalId,addedAtSource:addedAtMillis===undefined?'unknown':'original',requiredFeatures:[],payload:wire.meta};
- const state={version:2,entityKey,requiredFeatures:[],payload:wire.state,noteSegments:[]};
+ const state={version:2,entityKey,requiredFeatures:kind==='note'&&Object.hasOwn(wire.state,'noteConflicts')?['note-conflicts.v1']:[],payload:wire.state,noteSegments:[]};
  const metaBytes=jsonBytes(meta),stateBytes=jsonBytes(state);if(metaBytes.length>262144||stateBytes.length>262144)throw Error('object_too_large');
  return {meta,state,addedAtMillis:addedAtMillis??0,metaBytes:metaBytes.length,stateBytes:stateBytes.length};
 }

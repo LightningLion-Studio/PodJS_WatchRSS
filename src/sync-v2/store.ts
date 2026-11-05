@@ -1,4 +1,6 @@
+import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
+import {bytesToBase64,base64ToBytes} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {commitSqlCas,stableSqlTriggers,checkD64,nextD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
 import {canonical,canonicalLegacy,jsonBytes,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
@@ -33,9 +35,11 @@ export {PROJECTION_SOURCE_TABLES} from './business-revision';
 export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision};
 export class WatchProjectionStore {
  private readonly scopeKey:string;
+ private legacyAdapter?:WatchEquivalentLegacy;
  constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{}){
   validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
  }
+ equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
  private aad(purpose:string,id=''){return canonical({domain:'wrss.sync.v2/local-projection',version:2,scope:this.scope,libraryId:this.libraryId,purpose,id});}
  /** Reopening disabled must durably stop a previously enabled projection. */
  async initialize(){if(!this.gate.isEnabled){await stopExistingProjection(this.db);return {ddl:0,unchanged:0};}
@@ -71,6 +75,58 @@ export class WatchProjectionStore {
  }
  private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion),marker=next.businessRevision??await businessRevision(this.db);next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
   try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},state.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...statements]);}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
+ }
+ /** P2 control persistence uses the same stateVersion and business witness.
+  * Preparation runs outside SQL; all prepared statements commit at this CAS. */
+ async controlUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){
+  const current=await this.readState();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
+  await this.commit(expected,next,statements,hook);
+ }
+ async candidatePage(after='',limit=32){
+  this.gate.require();const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
+  const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.cipher.open(this.aad('candidate',String(row.entity_key)),String(row.body))});return out;
+ }
+ /** Bounded encrypted staging. active tree switches only after all rows authenticate. */
+ async stageCloudRows(root:string,rows:any[],baseline:SyncState){
+  this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))'}]);
+  let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
+  for(const row of rows){
+   const body=await this.cipher.seal(this.aad('cloud-row',root+row.row.entityKey),row),next={...state};
+   await this.controlUpdate(state,next,[{sql:'INSERT INTO syncv2_cloud_rows VALUES(?,?,?,?) ON CONFLICT(scope,root,entity_key) DO UPDATE SET body=excluded.body',params:[this.scopeKey,root,row.row.entityKey,body]}]);state=next;
+  }
+  return state;
+ }
+ async cloudRowCount(root:string){this.gate.require();return Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0);}
+ async cloudRows(root:string,after='',limit=32){
+  this.gate.require();const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
+  const out=[];for(const row of rows)out.push(await this.cipher.open(this.aad('cloud-row',root+String(row.entity_key)),String(row.body)));return out;
+ }
+ async stageUpload(planId:string,objects:Map<string,Uint8Array>){
+  this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_upload_objects(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))'}]);
+  for(const [id,bytes]of objects){const before=await this.readState(),body=await this.cipher.seal(this.aad('upload',planId+id),bytesToBase64(bytes));await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);}
+ }
+ async uploadPage(planId:string,after='',limit=1){
+  this.gate.require();const rows=await this.db.query('SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>? ORDER BY oid LIMIT ?',[this.scopeKey,planId,after,limit]),out=[];
+  for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
+ }
+ async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string){
+  this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
+  let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
+  for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),bytesToBase64(raw)),next={...state};await this.controlUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]);state=next;}
+  const next={...state,cloud:{...state.cloud,blockedCommitOid:root,blockedCode:code}};await this.controlUpdate(state,next);
+ }
+ async finishUpload(before:SyncState,next:SyncState,planId:string){await this.controlUpdate(before,next,[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
+ async readHeader(id:string){
+  this.gate.require();if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_commit_headers'")).length)return null;
+  const row=(await this.db.query('SELECT body FROM syncv2_commit_headers WHERE scope=? AND oid=?',[this.scopeKey,id]))[0];return row?this.cipher.open(this.aad('commit-header',id),String(row.body)):null;
+ }
+ async stageHeaders(entries:{oid:string;body:any;signature:string}[],baseline:SyncState){
+  this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))'}]);
+  let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
+  for(const entry of entries){const envelope={body:entry.body,signature:entry.signature},old=await this.readHeader(entry.oid);if(old){if(canonical(old)!==canonical(envelope))throw Error('idempotency_conflict');continue;}const sealed=await this.cipher.seal(this.aad('commit-header',entry.oid),envelope),next={...state};await this.controlUpdate(state,next,[{sql:'INSERT INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,entry.oid,sealed]}]);state=next;}return state;
+ }
+ async dropInactiveCloudRows(root:string){
+  for(;;){const before=await this.readState();if(before.pendingChoice)return;const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length)return;await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
  }
  /** The caller supplies an authenticated HeadPins observation. No network DTO
   * or unverified server checkpoint may be passed as an account observation. */

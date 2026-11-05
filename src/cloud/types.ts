@@ -61,7 +61,7 @@ export interface StoredCloudKeyEnvelope { id: string; recipientType: string; rec
 export interface CloudKeyEnvelope { algorithm: string; keyVersion: number; wrappedKeyBase64: string; nonceBase64: string; ephemeralPublicKeySpki: string | null; }
 export interface KeyCommitment {keyVersion:number;commitment:string;rotationProof:string|null;}
 export interface CloudTrust {libraryEpoch:string;keyVersionFloor:number;keyCommitments:KeyCommitment[];}
-export interface CloudBootstrap extends CloudTrust,CloudContentState { member: CloudMemberState; devices: RegisteredCloudDevice[]; keyEnvelopes: StoredCloudKeyEnvelope[]; }
+export interface CloudBootstrap extends CloudTrust,CloudContentState { syncV2?:import('../sync-v2/service-key').ServiceKey; member: CloudMemberState; devices: RegisteredCloudDevice[]; keyEnvelopes: StoredCloudKeyEnvelope[]; }
 export interface CloudSnapshotHead { contentLayout?:3|null;totalSizeBytes?:number; id: string; sourceDeviceId: string; deviceSequence: number; keyVersion: number; manifestSha256: string; manifestSizeBytes: number; parentHeads: Record<string, string>; observedHeads: Record<string, number>; }
 export interface CloudUploadObject {transport?:string;uploadUrl?:string;uploadMethod?:string;reservationId?:string; kind: string; sha256: string; sizeBytes: number; objectPath: string; signedUrl: string; token: string; tusEndpoint: string; bucketName: string; }
 export interface CloudSnapshotReservation { snapshotId: string; reservedBytes: number; missingObjects: CloudUploadObject[]; }
