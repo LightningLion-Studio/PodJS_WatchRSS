@@ -93,3 +93,8 @@ v2 wire validator. The reader audit binding includes the business validator
 revision, so older successful checkpoints cannot skip a stronger validation pass.
 Publication also validates previously cached current rows and candidate payloads.
 An invalid cached book cannot be propagated by a new signed index.
+
+Section 14 sort orders retain their original signed I53 values in v2 reading
+records. A private validation-only copy adapts the legacy nonnegative sort checks;
+all other legacy field/type/clock/coupling validation remains active. Serialization
+uses the original record. Legacy v13/v14 validators and merge behavior are unchanged.

@@ -37,3 +37,16 @@ test('SyncV2 book wire rejects malformed H64 and mismatched derived identity inc
  expect(()=>fromWire('book',{...wire.meta,bookId:'f'.repeat(64)},wire.state)).toThrow('book_sync_invalid');
  const instanceId='12'.repeat(16),instance={...base,instanceId,bookId:await bookId(base.fingerprint,async b=>sha256Hex(b),instanceId)},good=toWire('book',instance);expect(fromWire('book',good.meta,good.state)).toEqual(instance);expect(()=>fromWire('book',{...good.meta,bookId:base.bookId},good.state)).toThrow('book_sync_invalid');
 });
+
+const r05Reading=(order:number)=>({bookId:'a'.repeat(64),chapterIndex:1,isRead:false,readingProgress:.125,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,sourceDeviceId:'',favoriteSaved:true,favoriteChangedAt:1,favoriteSortOrder:order,watchLaterSaved:false,watchLaterChangedAt:2,watchLaterSortOrder:order});
+for(const order of [-Number.MAX_SAFE_INTEGER,-1,0,Number.MAX_SAFE_INTEGER])test('SyncV2 R05 signed I53 sort roundtrip '+order,()=>{
+ const value=r05Reading(order),before=JSON.stringify(value),wire=toWire('book-reading',value);expect(wire.state.favoriteSortOrder).toBe(order);expect(wire.state.watchLaterSortOrder).toBe(order);expect(fromWire('book-reading',wire.meta,wire.state)).toEqual(value);expect(JSON.stringify(value)).toBe(before);
+ const projected=candidates('book-reading',value.bookId+':1','a'.repeat(64),value);expect(projected.state.payload.favoriteSortOrder).toBe(order);expect(projected.state.payload.watchLaterSortOrder).toBe(order);
+});
+test('SyncV2 R05 invalid sort values and other legacy reading constraints still reject',()=>{
+ for(const order of [-0,-9007199254740992,9007199254740992,.5,NaN,Infinity]){expect(()=>toWire('book-reading',r05Reading(order))).toThrow('invalid_schema');}
+ for(const change of [{isRead:undefined},{readingProgress:undefined},{readingPositionBytes:-1},{readingPositionChangedAt:-1},{favoriteChangedAt:-1},{favoriteSaved:undefined},{watchLaterSaved:undefined}])expect(()=>toWire('book-reading',{...r05Reading(-1),...change})).toThrow();
+});
+test('SyncV2 R05 does not relax legacy book reading validator or merge behavior',async()=>{
+ const legacy=await import('../../src/books/protocol'),{validateRecord}=await import('../../src/cloud/records'),negative=r05Reading(-1),positive=r05Reading(0);expect(()=>legacy.validateBookReading(negative)).toThrow('book_sync_invalid');expect(()=>legacy.mergeBookReading(undefined,negative)).toThrow('book_sync_invalid');expect(()=>validateRecord({kind:'book-reading',value:negative})).toThrow('book_sync_invalid');expect(()=>legacy.validateBookReading(positive)).not.toThrow();expect(fromWire('book-reading',...Object.values(toWire('book-reading',negative)) as [any,any])).toEqual(negative);
+});

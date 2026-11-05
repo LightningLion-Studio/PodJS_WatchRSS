@@ -18,7 +18,7 @@ import {SqlBusinessSource} from '../../src/sync-v2/source';
 import {WatchCloudIndex} from '../../src/sync-v2/cloud-index';
 import {WatchIndexPublisher} from '../../src/sync-v2/publisher';
 import {observeAccount} from '../../src/sync-v2/state';
-import {candidates} from '../../src/sync-v2/business';
+import {candidates,fromWire} from '../../src/sync-v2/business';
 const pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwk=pair.publicKey.export({format:'jwk'});
 const publicBytes=Buffer.concat([Buffer.from([4]),Buffer.from(jwk.x!,'base64url'),Buffer.from(jwk.y!,'base64url')]);
 function pub(sec:Uint8Array){return createPublicKey({key:{kty:'EC',crv:'P-256',x:b64(sec.subarray(1,33)),y:b64(sec.subarray(33))},format:'jwk'});}
@@ -255,4 +255,13 @@ test('P2 pre-upgrade encrypted candidates cannot bypass book identity validation
   const aad=canonical({domain:'wrss.sync.v2/local-projection',version:2,scope,libraryId,purpose:'candidate',id:entity});await f.db.execute('DELETE FROM syncv2_candidates');await f.db.execute('INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?)',[canonical(scope),entity,await cipher.seal(aad,invalid),invalid.metaBytes,invalid.stateBytes,50,'1']);
   const before=await f.store.candidatePage();await expect(f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'e'.repeat(32))).rejects.toThrow('book_sync_invalid');expect(await f.store.candidatePage()).toEqual(before);expect((await f.store.readState()).cloud.pendingPublish).toBe(null);expect(server.calls['/account/publish']??0).toBe(0);
  }finally{f.db.close();}
+});
+
+test('P2 R05 negative sort survives projection sealed publication authenticated read and cached republish',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server),db=new SqlFixture();try{
+  const value={bookId:'a'.repeat(64),chapterIndex:1,isRead:false,readingProgress:.125,readingPositionBytes:0,readingPositionContentHash:'',readingPositionChangedAt:0,sourceDeviceId:'',favoriteSaved:true,favoriteChangedAt:1,favoriteSortOrder:-1,watchLaterSaved:false,watchLaterChangedAt:2,watchLaterSortOrder:-Number.MAX_SAFE_INTEGER},original=structuredClone(value);
+  await f.store.beginScan({...binding,schema:'r05-i53'});await f.store.scanPage({page:async()=>({rows:[{kind:'book-reading',logicalId:value.bookId+':1',value}],after:'done',done:true}),changed:async()=>[]});await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));await f.publisher.flush();
+  const store=db.store();await store.initialize();const reader=new WatchCloudIndex(store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);expect((await reader.pull(server.window())).bodyReads).toBe(0);const current=await store.readState(),rows=await store.cloudRows(current.cloud.current.treeRoot),reading=rows.find(r=>r.meta.kind==='book-reading');expect(reading.state.payload.favoriteSortOrder).toBe(-1);expect(reading.state.payload.watchLaterSortOrder).toBe(-Number.MAX_SAFE_INTEGER);expect(fromWire('book-reading',reading.meta.payload,reading.state.payload)).toEqual(original);
+  await store.beginScan(binding);await store.scanPage({page:async()=>({rows:[],after:'done',done:true}),changed:async()=>[]});const cached=new WatchIndexPublisher(store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>100);await cached.prepare('a'.repeat(32),'key',{commitOid:server.account.commitOid,revision:'1'},'d'.repeat(32));await cached.flush();expect(server.events).toBe(2);const latest=parseCanonicalJson(server.objects.get(server.account.commitOid)!),latestRows=await readTree(scope,latest.body.treeRoot,async id=>server.objects.get(id)!);expect(latestRows.find(r=>r.entityKey===reading.row.entityKey).stateOid).toBe(reading.row.stateOid);expect(value).toEqual(original);
+ }finally{f.db.close();db.close();}
 });

@@ -15,19 +15,29 @@ const fields:Record<Kind,readonly string[]>={...recordFields,
  asset:'assetId mime originalFilename updatedAt sourceDeviceId deleted deletedAt'.split(' ')} as unknown as Record<Kind,readonly string[]>;
 export const BUSINESS_FIELDS=Object.freeze(fields);
 const clone=(value:any)=>JSON.parse(canonical(value));
+/** Section 14 permits signed I53 sort orders. The legacy validator still checks
+ * all field types, clocks and save-field coupling against a validation-only copy.
+ * The original values are retained for v2 payloads; v13/v14 validators are unchanged. */
+function bookReadingValidationInput(value:Record<string,any>){
+ const checked={...value};for(const field of ['favoriteSortOrder','watchLaterSortOrder'])if(Object.hasOwn(value,field)){
+  if(!Number.isSafeInteger(value[field])||Object.is(value[field],-0))throw Error('invalid_schema');
+  checked[field]=0;
+ }return checked;
+}
 export function toWire(kind:Kind,value:Record<string,any>){
  if(!KINDS.includes(kind)||!value||Object.getPrototypeOf(value)!==Object.prototype)throw Error('unsupported_feature');
  exact(value,Object.keys(value));if(Object.keys(value).some(k=>!fields[kind].includes(k)&&!(kind==='note'&&k==='noteConflicts')))throw Error('unsupported_feature');
  const noteConflicts=value.noteConflicts;const conflictChannel=kind==='note'&&Object.hasOwn(value,'noteConflicts');
  if(conflictChannel){validateSet(String(value.noteId),value.noteConflicts);value={...value};delete value.noteConflicts;}
  if('readingProgressMicros'in value)throw Error('invalid_schema');
- if(['article','source','rss-state','book','book-reading'].includes(kind))validateRecord({kind,value});
+ const checked=kind==='book-reading'?bookReadingValidationInput(value):value;
+ if(['article','source','rss-state','book','book-reading'].includes(kind))validateRecord({kind,value:checked});
  if(kind==='note'||kind==='folder'||kind==='asset'){
   exact(value,fields[kind]);for(const [key,v]of Object.entries(value))if(!['folderId','pinned','deleted','sortOrder','updatedAt','createdAt','deletedAt'].includes(key)&&typeof v!=='string')throw Error('invalid_schema');
   if(kind==='note'&&value.folderId!==null)text(value.folderId);
   if(kind==='folder')text(value.folderId);if(kind==='asset'){text(value.mime,255);text(value.originalFilename,1024);}
  }
- if(kind==='book'){validateBookShape(value);if(sha256Hex(bookIdInput(value.fingerprint,value.instanceId))!==value.bookId)throw Error('book_sync_invalid');}if(kind==='book-reading')validateBookReading(value);
+ if(kind==='book'){validateBookShape(value);if(sha256Hex(bookIdInput(value.fingerprint,value.instanceId))!==value.bookId)throw Error('book_sync_invalid');}if(kind==='book-reading')validateBookReading(checked);
  const meta:Record<string,any>={},state:Record<string,any>={};
  for(const [key,v]of Object.entries(value)){
   if(v===undefined)throw Error('invalid_schema');
