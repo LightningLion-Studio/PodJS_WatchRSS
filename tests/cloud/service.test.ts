@@ -132,3 +132,10 @@ test('lost completion response retries the existing identity without uploading b
  expect(f.reservations.size).toBe(1);expect((await f.cache.latest('user'))!.id).toBe(id);
  expect(f.calls.filter(c=>c.method==='PUT').length).toBe(puts);
 });
+
+test('structured Sync Objects 426 retains upgrade_required and displays upgrade instead of empty library',async()=>{
+ const paths:string[]=[],client=new WatchCloudClient({request:async r=>{paths.push(r.url);return {status:426,headers:{},body:bytes({error:{code:'upgrade_required',retryable:false,retryAfterMillis:null,details:{requiredFeatures:['sync-objects.v2']}}})};}},{baseUrl:'http://localhost:18942',accessToken:'synthetic'},crypto,enabled);
+ await expect(client.snapshotHeads()).rejects.toMatchObject({status:426,code:'upgrade_required'});
+ const service=new WatchCloudSyncService({open:async()=>{await client.records('0','synthetic-device');throw Error('must not apply empty library');},network:async()=>({active:true,validated:true,wifi:false,metered:true}),hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async(fn:any)=>fn()} as any,enabled);
+ expect(await service.syncNow()).toBe(false);expect(service.status.message).toContain('请升级');expect(service.status.retryable).toBe(false);expect(paths).toHaveLength(2);
+});

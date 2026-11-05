@@ -20,6 +20,10 @@ are delivered under the task evidence directory, outside this repository.
   must match the bootstrap bytes. No key rotation is accepted.
 - C4 verifies the original K_id-HMAC and possession signature unchanged, then
   verifies the separate service-signed deviceMapping and current legacy approval.
+- C5 checkpoint verifies the generic version/scope envelope and the original
+  service signature over the device-sorted refs and captured account window.
+- C6 tests wrong generations without advancing the shared rollback generation.
+  Actual rollback and post-rollback old-generation acceptance remain P3.
 - Native author keys have separate AndroidKeyStore aliases, strict SEC1/P1363
   low-S conversion and a missing-key sentinel. They never reuse ECDH keys.
 - New envelopes obtain CSPRNG salt/nonce before computing final AAD. Identity
@@ -30,7 +34,7 @@ are delivered under the task evidence directory, outside this repository.
 
 P1's encrypted state and its stateVersion/business witness CAS remain the single
 writer fence. New current index rows, pending upload bytes, quarantine objects
-and permanent signed headers use separate encrypted SQLite records. A complete
+and permanent signed headers use separate encrypted SQLite records. Raw control reads retain the negotiated windowId. A complete
 current pointer changes only after all tree/meta/state and empty state-refs
 closures authenticate. A failed staging pass cannot expose a partial current
 index. Unrelated ancestry objects do not change accepted author pins.
@@ -76,3 +80,8 @@ instrumentation tests for signing persistence and missing-key rejection.
 Production, real accounts, physical devices, body workers, note segments,
 rotation, history restore, local_objects, GC and automatic content eviction are
 outside this integration entry point.
+
+The opt-in emulator harness is documented in `tests/sync-v2/emulator/README.md`.
+It reads only the synthetic watch fixture at runtime and preserves existing
+SQLite state. Legacy clients retain structured `upgrade_required` from HTTP 426
+and display the upgrade action instead of treating a v2 account as an empty library.

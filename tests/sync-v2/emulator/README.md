@@ -10,21 +10,28 @@ Use only the isolated watch fixture. Never embed the fixture in source, APK asse
 command arguments or logs. The instrumentation reads an app-private file and
 injects it into QuickJS memory. Only controlled result events are exported.
 
-The original object-path decoding issue was fixed in backend 0725372. The next
-integration is **blocked** at GET /checkpoint: the response omits the generic
-version/scope envelope required by backend-api.md section 1. The watch successfully
-published its five-row synthetic snapshot and recovered a deliberately lost
-response using its original request ID. Do not run more network requests until
-Claude supplies the checkpoint correction. Existing SQLite data is retained.
+Backend 1a2378f satisfies C5. The complete emulator run passes checkpoint,
+legacy upgrade handling, full snapshot publication, CAS reread/retry, concurrent
+request replay with lost responses, exactly one account event for the replayed
+request, and all three peer snapshot audits. C6 rejects signed generation 1 and
+9007199254740993 while the account remains generation 0. Real rollback stays in P3.
 
-After the backend fix, resume with the existing SQLite state. Expired unknown requests are resolved
-before retiring their journals; candidate edits and signing sequences survive.
-The harness accepts empty initial accounts, refreshes and authenticates after CAS
-conflicts, and retries response loss with the original request ID. It asserts that
-same-instance concurrent flush calls share a promise. The old-generation live
-check is still outstanding; the harness deliberately returns failure at the end
-until that acceptance item is implemented and verified. Do not treat a future
-partial run as all five integration checks passing.
+The main projection SQLite database is reused. Expired unknown requests are
+resolved before retiring journals; candidate edits and signing sequences survive.
+The CAS case inserts one separately signed competing request, expects the original
+CAS to fail, authenticates the new account and prepares a new request. Two actual
+HTTP worker threads then send identical final request bytes. Both results must
+match; their response is discarded and recovered through the original request ID.
+Only the final commit is counted in the account event assertion; unrelated peer
+commits are permitted. The competing request is a separate logical transaction.
+
+Each peer audit uses an independent app-private SQLite database. Its test-only
+account slot represents that device snapshot, not account/current. The bootstrap
+proof is the captured C5 service signature over the exact device ref. The normal
+watch reader still authenticates the complete author/account parent chains,
+control closure and decrypted business IDs before the audit pointer is committed.
+The real account pointer is not changed by an audit. No business applied ACK is
+sent. Blob/recipe body requests are forbidden by the test transport.
 
 Build and run (requires the independent patched framework worktree and an already
 booted owned emulator):
