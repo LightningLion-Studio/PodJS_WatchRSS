@@ -10,11 +10,15 @@ Use only the isolated watch fixture. Never embed the fixture in source, APK asse
 command arguments or logs. The instrumentation reads an app-private file and
 injects it into QuickJS memory. Only controlled result events are exported.
 
-The initial backend integration is **blocked**: the delivered backend does not
-percent-decode object path segments, so the first encoded raw PUT returns
-`400 invalid_oid`. Do not run further requests until Claude provides a fix.
+The original object-path decoding issue was fixed in backend 0725372. The next
+integration is **blocked** at GET /checkpoint: the response omits the generic
+version/scope envelope required by backend-api.md section 1. The watch successfully
+published its five-row synthetic snapshot and recovered a deliberately lost
+response using its original request ID. Do not run more network requests until
+Claude supplies the checkpoint correction. Existing SQLite data is retained.
 
-After the backend fix, resume with the existing encrypted publication journal.
+After the backend fix, resume with the existing SQLite state. Expired unknown requests are resolved
+before retiring their journals; candidate edits and signing sequences survive.
 The harness accepts empty initial accounts, refreshes and authenticates after CAS
 conflicts, and retries response loss with the original request ID. It asserts that
 same-instance concurrent flush calls share a promise. The old-generation live

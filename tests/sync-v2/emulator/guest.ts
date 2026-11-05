@@ -11,7 +11,8 @@ import {projectionSql,localProjectionCipher} from '../../../src/sync-v2/host';
 import {WatchCloudIndex} from '../../../src/sync-v2/cloud-index';
 import {WatchIndexPublisher} from '../../../src/sync-v2/publisher';
 import {bookId as deriveBookId} from '../../../src/books/protocol';
-import {sha256Hex} from '@podjs/framework/crypto';
+import {sha256Hex,hmacSha256Bytes} from '@podjs/framework/crypto';
+import {attest,commit,validateTrust} from '../../../src/cloud/v2';
 const assert=(v:unknown,code:string)=>{if(!v)throw Error(code);};
 (globalThis as any).backgroundHandler=async(ctx:any)=>{
  const f=ctx.payload,host:any=(method:string,args:any)=>ctx.request('cloud.host',{method,args});
@@ -20,9 +21,9 @@ const assert=(v:unknown,code:string)=>{if(!v)throw Error(code);};
  try{
  const crypto=createSyncV2Crypto(host),origin='http://127.0.0.1:18942';
  let losePublish=false,publishCalls=0;
- const transport={async request(r:any){const out=await host('http',{...r,body:r.body?encodeBase64(r.body):null});if(r.url.endsWith('/account/publish')){publishCalls++;if(losePublish&&out.status===200){losePublish=false;throw Error('synthetic_response_lost');}}return {...out,body:decodeBase64(out.body)};}};
+ const transport={async request(r:any){const out=await host('http',{...r,body:r.body?encodeBase64(r.body):null});if(out.status>=400){const v=parseNetwork(decodeBase64(out.body));await mark('http-error',{method:r.method,path:r.url.split('?')[0].replace(origin,''),status:out.status,code:v.error?.code??'unknown'});}if(r.url.endsWith('/account/publish')){publishCalls++;if(losePublish&&out.status===200){losePublish=false;throw Error('synthetic_response_lost');}}return {...out,body:decodeBase64(out.body)};}};
  const session=async()=>({accessToken:f.auth.accessToken,legacyDeviceId:f.legacyDeviceId,userId:f.userId,scope:f.scope});
- const bootstrap=async()=>{const r=await transport.request({method:'POST',url:origin+'/functions/v1/cloud/bootstrap',headers:f.headers,body:new Uint8Array([123,125])});assert(r.status===200,'bootstrap_http');const b=parseNetwork(r.body);return {accountId:f.accountId,syncV2:b.syncV2,devices:b.devices};};
+ const bootstrap=async()=>{const r=await transport.request({method:'POST',url:origin+'/functions/v1/cloud/bootstrap',headers:f.headers,body:new Uint8Array([123,125])});assert(r.status===200,'bootstrap_http');const b=parseNetwork(r.body);validateTrust(b);const legacyCrypto={sha256:async(raw:Uint8Array)=>sha256Hex(raw),hmac:async(k:Uint8Array,raw:Uint8Array)=>hex(hmacSha256Bytes(k,raw))};const content=unhex(f.crypto.contentKeyHex);assert(b.libraryEpoch===f.legacyLibraryEpoch,'legacy_epoch_changed');const commitment=b.keyCommitments.find((x:any)=>x.keyVersion===f.crypto.wrappingKeyVersion);assert(commitment&&await commit(legacyCrypto,content,f.userId,b.libraryEpoch,f.crypto.wrappingKeyVersion)===commitment.commitment,'legacy_commitment_invalid');for(const d of b.devices){if(d.revokedAt!==null)continue;assert(d.attestationKeyVersion===f.crypto.wrappingKeyVersion&&await attest(legacyCrypto,content,f.userId,b.libraryEpoch,d.deviceId,d.publicKeySpki)===d.attestation,'legacy_attestation_invalid');}return {accountId:f.accountId,syncV2:b.syncV2,devices:b.devices};};
  const secure={async get(key:string){return host('secure.get',{key});},async compareAndSet(key:string,expected:string|null,value:string){return (await host('secure.compareAndSet',{key,expected,value})).updated;}};
  const pin=new WatchServiceKeyPin(secure,f.accountId,bootstrap),http=new SyncV2Http(transport,origin,f.scope,session,true,pin);
  const caps=await http.capabilities();assert(caps.receiptKeyId===f.servicePin.receiptKeyId&&caps.receiptSigningPublicKey===f.servicePin.receiptSigningPublicKey,'fixture_pin_mismatch');await mark('c3',{keyId:caps.receiptKeyId});
@@ -32,8 +33,10 @@ const assert=(v:unknown,code:string)=>{if(!v)throw Error(code);};
  phase='store';const db=projectionSql(host),store=new WatchProjectionStore(db,localProjectionCipher(host,'integration-watch'),new ProjectionGate(true),f.scope,'49'.repeat(16),unhex(f.crypto.idKeyHex));await store.initialize();
  const keys={id:unhex(f.crypto.idKeyHex),content:unhex(f.crypto.contentKeyHex),version:f.crypto.wrappingKeyVersion};
  const reader=new WatchCloudIndex(store,http,crypto,keys,async id=>authors.get(id),async(w)=>{const v=await http.json('GET','/checkpoint');exact(v,['version','scope','body','signature']);const c=await pin.checkpoint(crypto,{body:v.body,signature:v.signature},f.scope,Date.now());assert(canonical(c.account)===canonical(w.account)&&c.serverRevision===w.serverRevision,'ref_conflict');});
+ const publisher=new WatchIndexPublisher(store,http,crypto,keys);if((await store.readState()).cloud?.pendingPublish){try{await publisher.flush();await mark('resume-pending',{status:'accepted'});}catch(e){if(!['ref_conflict','publication_expired'].includes(String((e as Error).message)))throw e;await mark('resume-pending',{status:String((e as Error).message)});}}
  phase='read-other';const pull=async()=>{for(let i=0;i<16;i++){try{const w=await http.negotiate([],['note-conflicts.v1']);await authors.refresh(w.windowId);const result=await reader.pull(w);return {window:w,result};}catch(e){if((e as Error).message!=='ref_conflict')throw e;}}throw Error('concurrency_retry_exhausted');};
  const readOther=async()=>{const incoming=await pull(),state=await store.readState();if(!state.cloud?.current)return false;const rows=await store.cloudRows(state.cloud.current.treeRoot,'',64),header=await store.readHeader(state.cloud.current.commitOid);assert(incoming.result.bodyReads===0,'body_read');if(header?.body.authorDeviceId===f.deviceId)return false;assert(rows.length>0,'incoming_empty');await mark('read-other',{rows:rows.length,author:header.body.authorDeviceId,commitOid:state.cloud.current.commitOid,bodyReads:0});return true;};
+ const originalPending=(await store.readState()).cloud?.pendingPublish;if(originalPending){if(Date.now()>originalPending.request.account.body.expiresAtMillis+30000)await publisher.retryExpired(async()=>{await pull();});else if(originalPending.phase==='conflicted')await publisher.retryAfterConflict(async()=>{await pull();});}
  let sawOther=await readOther();
  phase='scan';const fingerprint=sha256Hex(new Uint8Array([19,42,58])),bookId=await deriveBookId(fingerprint,async b=>sha256Hex(b)),sourceId='watch-p2-feed',articleHash=sha256Hex(new Uint8Array([42,19]));
  const noteId='watch-p2-integration-note',sourceUrl='https://watch-p2.invalid/feed.xml';
@@ -45,7 +48,7 @@ const assert=(v:unknown,code:string)=>{if(!v)throw Error(code);};
  {kind:'note',logicalId:noteId,value:{noteId,folderId:null,title:'Watch synthetic note',markdown:'Synthetic watch note\n',plainText:'Synthetic watch note',contentHash:'synthetic-content',baseContentHash:'synthetic-base',baseMarkdown:'',pinned:false,createdAt:100,updatedAt:100,modifiedBy:f.deviceId,deleted:false,deletedAt:0}},
  ].map(r=>({...r,addedAtMillis:100}));
  await store.beginScan({schema:'v2-rc6c',descriptorPin:'isolated-watch',accountScope:f.accountId,capability:'p2-index'});await store.scanPage({page:async()=>({rows:documents,after:'done',done:true}),changed:async()=>[]});
- phase='publish';const publisher=new WatchIndexPublisher(store,http,crypto,keys);let prepared:any,result:any;
+ phase='publish';let prepared:any,result:any;
  for(let attempt=0;attempt<16;attempt++){
   const {window:w}=await pull(),own=w.refs.find((r:any)=>r.deviceId===f.deviceId);const pending=(await store.readState()).cloud?.pendingPublish;prepared=pending?{commitOid:pending.commitOid,rows:null,deviceSequence:(await store.readState()).cloud.deviceSequence}:await publisher.prepare(f.deviceId,'fixture',{commitOid:own?.commitOid??null,revision:own?.refRevision??'0'},hex(await crypto.random(16)));losePublish=true;
   try{const one=publisher.flush(),two=publisher.flush();assert(one===two,'flush_not_shared');await Promise.all([one,two]);throw Error('response_loss_not_injected');}catch(e){const code=String((e as Error).message);if(code==='synthetic_response_lost'){result=await publisher.flush();break;}if(code!=='ref_conflict')throw e;await publisher.retryAfterConflict(async()=>{await pull();});await mark('cas-retry',{attempt:attempt+1});}

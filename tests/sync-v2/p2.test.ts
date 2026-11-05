@@ -16,6 +16,7 @@ import {SyncV2Http,parseNetwork,P2_CLOSED_GATES} from '../../src/sync-v2/http';
 import {watchMaterializer} from '../../src/sync-v2/materializer';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
 import {WatchCloudIndex} from '../../src/sync-v2/cloud-index';
+import {WatchIndexPublisher} from '../../src/sync-v2/publisher';
 import {candidates} from '../../src/sync-v2/business';
 const pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwk=pair.publicKey.export({format:'jwk'});
 const publicBytes=Buffer.concat([Buffer.from([4]),Buffer.from(jwk.x!,'base64url'),Buffer.from(jwk.y!,'base64url')]);
@@ -204,4 +205,21 @@ test('P2 confirmed CAS conflict can retire only after authenticated reread and p
   await two.publisher.retryAfterConflict(async()=>{await reader.pull(server.window());});const state=await two.store.readState();expect(state.cloud.pendingPublish).toBe(null);expect(state.cloud.deviceSequence).toBe('1');expect(await two.store.candidatePage()).toEqual(candidates);expect(state.editBase.accountOid).toBe(null);
   const plan=await two.publisher.prepare('a'.repeat(32),'key',{commitOid:server.account.commitOid,revision:'1'},'e'.repeat(32));expect(plan.deviceSequence).toBe('2');await two.publisher.flush();expect(server.events).toBe(2);
  }finally{one.db.close();two.db.close();}
+});
+
+test('P2 lease replay renews an expired reservation without changing logical publication',async()=>{
+ const server=new SyntheticIndexBackend(),send=server.request.bind(server),ids:string[]=[];let expired=false;
+ server.request=async r=>{const response=await send(r);if(new URL(r.url).pathname.endsWith('/objects/reserve')){ids.push(parseNetwork(r.body).requestId);if(!expired){expired=true;const value=parseNetwork(response.body);value.expiresAtMillis=99;return {...response,body:jsonBytes(value)};}}return response;};
+ const f=await publishingFixture(server);try{const plan=await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));const result=await f.publisher.flush();expect(ids.length).toBeGreaterThan(1);expect(ids[0]).not.toBe(ids[1]);expect(result.account.commitOid).toBe(plan.commitOid);expect(server.events).toBe(1);expect(server.calls['/account/publish']).toBe(1);}finally{f.db.close();}
+});
+
+test('P2 expired unknown publication retires only its journal and preserves candidate edits',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server);try{
+  await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));const candidates=await f.store.candidatePage(),state=await f.store.readState();await expect(f.publisher.retryExpired(async()=>{})).rejects.toThrow('publication_pending');
+  const resumed=new WatchIndexPublisher(f.store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>400101);await expect(resumed.flush()).rejects.toThrow('publication_expired');expect(server.calls['/objects/have-want']??0).toBe(0);let reads=0;await resumed.retryExpired(async()=>{reads++;});expect(reads).toBe(1);const next=await f.store.readState();expect(next.cloud.pendingPublish).toBe(null);expect(next.cloud.deviceSequence).toBe('1');expect(next.localChangeRevision).toBe(state.localChangeRevision);expect(next.editBase).toEqual(state.editBase);expect(await f.store.candidatePage()).toEqual(candidates);const plan=await resumed.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'d'.repeat(32));expect(plan.deviceSequence).toBe('2');await resumed.flush();expect(server.events).toBe(1);
+ }finally{f.db.close();}
+});
+
+test('P2 response-loss result wins over the expired publication deadline',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server);try{await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));server.losePublish=true;await expect(f.publisher.flush()).rejects.toThrow('synthetic_response_lost');const resumed=new WatchIndexPublisher(f.store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>400101);await resumed.flush();expect(server.events).toBe(1);expect(server.calls['/account/publish']).toBe(1);expect((await f.store.readState()).cloud.pendingPublish).toBe(null);}finally{f.db.close();}
 });
