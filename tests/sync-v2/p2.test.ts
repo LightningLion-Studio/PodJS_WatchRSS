@@ -265,3 +265,16 @@ test('P2 R05 negative sort survives projection sealed publication authenticated 
   await store.beginScan(binding);await store.scanPage({page:async()=>({rows:[],after:'done',done:true}),changed:async()=>[]});const cached=new WatchIndexPublisher(store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>100);await cached.prepare('a'.repeat(32),'key',{commitOid:server.account.commitOid,revision:'1'},'d'.repeat(32));await cached.flush();expect(server.events).toBe(2);const latest=parseCanonicalJson(server.objects.get(server.account.commitOid)!),latestRows=await readTree(scope,latest.body.treeRoot,async id=>server.objects.get(id)!);expect(latestRows.find(r=>r.entityKey===reading.row.entityKey).stateOid).toBe(reading.row.stateOid);expect(value).toEqual(original);
  }finally{f.db.close();db.close();}
 });
+
+test('P3 C10 P2 double CAS publishes recipe IndexRow without availability',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server),receiverDb=new SqlFixture();
+ try{
+  const manifest={bodyRevision:'f'.repeat(32),promiseId:null,recipeOid:'recipe:sha256:'+'e'.repeat(64),opaqueContentId:'d'.repeat(64),contentBytes:100000};
+  const publisher=new WatchIndexPublisher(f.store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>100,async()=>manifest);
+  await publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));await publisher.flush();
+  const store=receiverDb.store();await store.initialize();const reader=new WatchCloudIndex(store,f.http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);
+  await reader.pull(server.window());const row=(await store.cloudRows((await store.readState()).cloud.current.treeRoot))[0].row;
+  for(const key of ['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'] as const)expect(row[key]).toBe(manifest[key]);
+  expect(server.events).toBe(1);expect(server.calls['/account/publish']).toBe(1);expect(server.calls['/availability/check']??0).toBe(0);
+ }finally{f.db.close();receiverDb.close();}
+});

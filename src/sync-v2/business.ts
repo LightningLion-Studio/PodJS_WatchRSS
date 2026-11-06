@@ -6,7 +6,7 @@ import {recordFields} from '../cloud/compatibility';
 import {validateBookShape,validateBookReading,bookIdInput,mergeBook,mergeBookReading} from '../books/protocol';
 import {mergeNoteMarkdown} from '../notes/merge';
 import {validateSet} from './note-conflict-set';
-import {KINDS,canonical,jsonBytes,text,uint,exact,type Kind} from './protocol';
+import {KINDS,canonical,jsonBytes,bytes,text,uint,exact,type Kind} from './protocol';
 export {mergeBook,mergeBookReading,mergeNoteMarkdown};
 const metaFields=new Set('articleId url title siteName excerpt imageUrl rssSourceUrl rssSourceTitle contentHash importedAt guid sourceUrl sourceId description siteUrl createdAt fingerprint chapterCount kind instanceId bookId articleIdHash chapterIndex noteId folderId name assetId mime originalFilename'.split(' '));
 const fields:Record<Kind,readonly string[]>={...recordFields,
@@ -42,6 +42,7 @@ export function toWire(kind:Kind,value:Record<string,any>){
  for(const [key,v]of Object.entries(value)){
   if(v===undefined)throw Error('invalid_schema');
   if(key==='readingProgress'){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>1)throw Error('invalid_schema');state.readingProgressMicros=Math.floor(v*1e6+.5);continue;}
+  if(kind==='note'&&['markdown','plainText','baseMarkdown'].includes(key)&&typeof v==='string'&&bytes(v).length>245760)throw Error('object_too_large');
   if(typeof v==='string')text(v,/^(url|guid|.*Url)$/.test(key)?8192:/^(title|name|description|excerpt|siteName|originalFilename|markdown|plainText|baseMarkdown)$/.test(key)?245760:1024);
   if(/(?:At|ChangedAt|Bytes|Clock)$/.test(key))uint(v);
   if(/SortOrder$/.test(key)||key==='sortOrder'){if(!Number.isSafeInteger(v)||Object.is(v,-0))throw Error('invalid_schema');}

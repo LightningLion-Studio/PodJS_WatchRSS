@@ -12,9 +12,11 @@ import type {WatchProjectionStore} from './store';
 import type {SyncState} from './state';
 import {SyncV2Http,SyncV2Error} from './http';
 const copy=<T>(x:T):T=>JSON.parse(canonical(x));
+export interface BodyManifest {bodyRevision:string;promiseId:string|null;recipeOid:string|null;opaqueContentId:string|null;contentBytes:number|null;}
+export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 export class WatchIndexPublisher {
  private flushing?:Promise<any>;
- constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now){}
+ constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now,private readonly resolveBody?:BodyResolver){}
  /** Reserve the author sequence before any signing. Crashes may leave gaps. */
  async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string){
   if(!this.http.indexWrite)throw Error('feature_disabled');await this.http.capabilities();hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);if(own.commitOid!==null)oid(own.commitOid,'commit');
@@ -32,12 +34,13 @@ export class WatchIndexPublisher {
     const context={entityKey:entry.entityKey,noteId:c.meta.logicalId},local=readConflicts(c.state,context,['note-conflicts.v1']),remote=readConflicts(existing.state,context,['note-conflicts.v1']);
     if(local||remote){c.state.payload.noteConflicts=mergeConflicts(context.noteId,local??conflictSet(context.noteId,[]),remote??conflictSet(context.noteId,[]));c.state.requiredFeatures=[...new Set([...c.state.requiredFeatures,'note-conflicts.v1'])].sort();}
    }
-   if(existing&&canonical(existing.meta)===canonical(c.meta)&&canonical(existing.state)===canonical(c.state)&&existing.row.addedAtMillis===c.addedAtMillis)continue;
+   const body=this.resolveBody?await this.resolveBody(entry,existing):null;
+   if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(existing.state)===canonical(c.state)&&existing.row.addedAtMillis===c.addedAtMillis)continue;
    const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,jsonBytes(c.state));
    if(c.state.noteSegments.length)throw Error('unsupported_feature');objects.set(meta.oid,meta.bytes);objects.set(state.oid,state.bytes);
    const refs=await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid:state.oid,segmentOids:[]}),refsRaw=jsonBytes(refs);objects.set(objectOid('state-refs',refsRaw),refsRaw);
    const hasBody=['article','book','asset'].includes(c.meta.kind),old=rows.get(entry.entityKey),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
-   const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[]};
+   const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
    // No unproved field merge: an advanced account must be reconciled by the frozen
    // business adapter before replacing an overlapping authenticated row.
    if(old&&before.account&&before.editBase.accountOid!==before.account.oid)throw Error('merge_unavailable');

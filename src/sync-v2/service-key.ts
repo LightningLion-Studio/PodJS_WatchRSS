@@ -43,3 +43,15 @@ export class WatchServiceKeyPin {
   const b=value?.body;exact(b,['version','scope','oid','totalBytes','durableOffset','storeId','receiptRevision','createdAtMillis','expiresAtMillis']);if(b.version!==2||b.oid!==expectedOid||b.totalBytes!==totalBytes)throw Error('invalid_schema');oid(b.oid,b.oid?.split(':')[0]);uint(b.totalBytes);uint(b.durableOffset);hexId(b.storeId,32);if(checkD64(b.receiptRevision)==='0')throw Error('invalid_schema');uint(b.createdAtMillis);uint(b.expiresAtMillis);if(b.durableOffset>b.totalBytes||complete&&b.durableOffset!==b.totalBytes||b.expiresAtMillis<b.createdAtMillis||b.expiresAtMillis-b.createdAtMillis>604800000)throw Error('invalid_schema');return this.verify(port,'wrss.sync.v2/object-receipt-sign',value,scope,now);
  }
 }
+
+/** Complete-body receipt, distinct from ObjectReceipt. Does not authorize eviction. */
+export async function signedAvailability(pin:WatchServiceKeyPin,port:SigningPort,value:any,scope:Scope,
+ expected:{entityKey:string;bodyRevision:string;recipeOid:string;blobOids:string[]},now:number){
+ const b=value?.body;exact(b,['version','scope','entityKey','bodyRevision','recipeOid','status','blobOidsHash','storeId','receiptRevision','createdAtMillis','expiresAtMillis']);
+ if(b.version!==2||b.entityKey!==expected.entityKey||b.bodyRevision!==expected.bodyRevision||b.recipeOid!==expected.recipeOid||!['source-pending','cloud-ready','source-unavailable'].includes(b.status))throw Error('invalid_schema');
+ hexId(b.entityKey,64);hexId(b.bodyRevision,32);oid(b.recipeOid,'recipe');hexId(b.storeId,32);if(checkD64(b.receiptRevision)==='0')throw Error('invalid_schema');uint(b.createdAtMillis);uint(b.expiresAtMillis);
+ if(b.expiresAtMillis<=b.createdAtMillis||b.expiresAtMillis-b.createdAtMillis>604800000)throw Error('invalid_schema');
+ const {digest}=await import('./protocol');
+ if(b.status==='cloud-ready'?b.blobOidsHash!==digest(expected.blobOids):b.blobOidsHash!==null)throw Error('fingerprint_mismatch');
+ return pin.verify(port,'wrss.sync.v2/availability-sign',value,scope,now);
+}
