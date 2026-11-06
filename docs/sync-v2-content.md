@@ -75,3 +75,17 @@ The stress program uses real codecs/files/SQLite and a synthetic in-memory HTTP
 server with virtual network time. Its process RSS includes the synthetic server
 and is not a device memory measurement. The emulator harness uses synthetic data,
 Android crypto/SQLite/fsync, and QuickJS. It does not contact an account or backend.
+
+P3AR recovery: failed recipe/blob authentication discards only that untrusted
+ciphertext prefix through the framework's bounded `content.files.discard` port.
+A durable zero checkpoint precedes truncation. The next window downloads from
+zero even if the discard reply was lost; already authenticated plaintext blocks,
+original sources and business rows are retained. No failed object becomes ready.
+
+C11 repair now has a cumulative per-object budget. Both the content worker and
+P2 control helper commit the attempted high-water mark and overlap charge before PUT, including attempts whose
+response may be lost. A new worker or publication journal does not clear that
+charge. More than 65536 replay bytes fails `offset_conflict` before another PUT;
+a checkpoint failure before commit sends nothing, while a lost committed reply
+conservatively keeps the charge. The replay records are encrypted projection
+metadata; they never alter a source/body version, business cursor or cloud ref.

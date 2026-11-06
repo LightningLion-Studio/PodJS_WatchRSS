@@ -8,3 +8,11 @@ export function checkedResumeOffset(confirmed:number,remote:number,total:number)
  if(remote<Math.max(0,confirmed-65536))throw Error('offset_conflict');
  return remote;
 }
+/** Charge the overlap, including an uncertain response, BEFORE any PUT. Never
+ * refund on timeout or reset the cumulative count when reopening a worker. */
+export function chargedReplayBytes(confirmed:number,offset:number,partBytes:number,total:number,used:number){
+ checkedResumeOffset(confirmed,offset,total);uint(partBytes,65536);uint(used,65536);
+ if(offset+partBytes>total)throw Error('invalid_schema');
+ const next=used+Math.max(0,Math.min(confirmed,offset+partBytes)-offset);
+ if(next>65536)throw Error('offset_conflict');return next;
+}

@@ -4,6 +4,7 @@ import {ContentFiles} from '@podjs/framework/content-files';
 import {digest,canonical,jsonBytes,parseCanonicalJson} from './protocol';
 import {contentRecordCipher} from '@podjs/framework/content-record';
 import type {LocalCipher} from './store';
+import {chargedReplayBytes} from './resume';
 export class WatchContentStore {
  readonly prefix:string;readonly cipher:LocalCipher;
  constructor(readonly sql:ProjectionSql,cipher:LocalCipher,readonly files:ContentFiles,binding:unknown){this.prefix=digest(binding);this.cipher=contentRecordCipher(cipher,jsonBytes,parseCanonicalJson);}
@@ -25,4 +26,10 @@ export class WatchContentStore {
  async verified(key:string,bytes:Uint8Array,proof:any){const checkpoint=await this.cipher.seal(this.aad('verified:'+key),proof);if(checkpoint.length>8192)throw Error('object_too_large');await this.files.publish(this.path(key),bytes,checkpoint);}
  async recover(key:string){const [stat]=await this.files.stat([this.path(key)]);if(!stat?.exists||!stat.checkpoint)return null;return {size:stat.size,proof:await this.cipher.open(this.aad('verified:'+key),stat.checkpoint)};}
  async raw(key:string,bytes:Uint8Array){await this.files.publish(this.path(key),bytes);}
+ async consumeReplay(oid:string,total:number,confirmed:number,offset:number,length:number){
+  const id='upload-replay:'+oid,saved=await this.get(id),prior=saved?.value;
+  if(prior&&prior.total!==total)throw Error('hash_mismatch');
+  const high=Math.max(confirmed,prior?.confirmed??0),attempted=Math.max(prior?.attempted??0,offset+length),used=prior?.bytes??0,next=chargedReplayBytes(Math.max(high,prior?.attempted??0),offset,length,total,used);
+  if(!prior||next!==used||attempted!==prior.attempted||high!==prior.confirmed)await this.put(id,{total,confirmed:high,attempted,bytes:next},saved?.revision??null);
+ }
 }

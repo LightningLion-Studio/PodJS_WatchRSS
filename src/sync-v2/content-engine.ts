@@ -96,6 +96,7 @@ export class WatchContentEngine {
    const r=await this.remote.reserve(object.oid,object.total,digest([object.oid,this.now(),offset]).slice(0,32));object.reservation={id:r.reservationId,expires:r.expiresAtMillis};
   }
   const bytes=await this.store.bytes(object.cache,object.total,offset,Math.min(65536,object.total-offset));this.metric('file',bytes.length);
+  this.remote.http.requestGuard?.();await this.store.consumeReplay(object.oid,object.total,confirmed,offset,bytes.length);
   const result=await this.remote.http.putPart(object.oid,offset,object.reservation.id,digest([object.oid,object.reservation.id,offset]).slice(0,32),bytes);
   await this.remote.http.servicePin!.receipt(this.crypto,result.receipt,this.scope,object.oid,object.total,this.now());
   if(result.oid!==object.oid||result.durableOffset!==offset+bytes.length||result.receipt.body.durableOffset!==result.durableOffset)throw Error('offset_conflict');object.confirmedOffset=Math.max(confirmed,result.durableOffset);object.receipt=result.receipt;this.metric('network',bytes.length);
@@ -111,6 +112,14 @@ export class WatchContentEngine {
   return {objectDone:offset+bytes.length===object.total,...unit(bytes.length,0,1)};
  }
  private async objectFor(id:string,windowId:string):Promise<ObjectPlan>{const have=await this.haveObject(id,windowId);if(have.status!=='present')throw Error('object_missing');return {oid:id,total:have.totalBytes,cache:'download:'+id,receipt:have.receipt};}
+ private async authenticate(object:ObjectPlan,validate?:(opened:Awaited<ReturnType<typeof openV2>>)=>void){
+  try{const opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,object.oid,await this.store.bytes(object.cache,object.total));validate?.(opened);return opened;}
+  catch(error){if(['hash_mismatch','aead_invalid','fingerprint_mismatch','invalid_encoding','invalid_schema','scope_mismatch'].includes((error as Error).message)){
+    // This cache has never been accepted as plaintext. Persist a zero prefix
+    // before returning the error; confirmed plaintext blocks stay untouched.
+    const path=this.store.path(object.cache);try{await this.store.files.discard(path);}finally{this.localStats.delete(path);}
+   }throw error;}
+ }
  private async step(key:string,b:BodyPlan,windowId:string):Promise<ReturnType<typeof unit>&{blob?:boolean}> {
   if(b.direction==='upload')return this.send(key,b,windowId);return this.receive(key,b,windowId);
  }
@@ -147,7 +156,7 @@ return unit();
   if(b.phase==='recipe'){
    if(!b.recipeObject){b.recipeObject=await this.objectFor(b.item.recipeOid!,windowId);return unit();}
    const result=await this.download(b.recipeObject,windowId);if(!result.objectDone)return result;
-   const opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,b.recipeObject.oid,await this.store.bytes(b.recipeObject.cache,b.recipeObject.total));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');const r=recipe(opened.value);
+   const opened=await this.authenticate(b.recipeObject,o=>recipe(o.value));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');const r=recipe(opened.value);
    if(r.entityKey!==b.item.entityKey||r.bodyRevision!==b.item.bodyRevision||r.opaqueContentId!==b.item.opaqueContentId||r.totalPlainBytes!==b.item.contentBytes)throw Error('body_revision_changed');
    await readControlRefs(this.remote.http,this.crypto,this.options.approved,windowId,{type:'recipe',oid:b.recipeObject.oid,value:r});b.recipe=r;b.phase='availability';this.metric('authenticate',opened.plain.length,1);return result;
   }
@@ -158,7 +167,7 @@ return unit();
    const block=r.blocks[index]!;if(!b.object){b.object=await this.objectFor(block.oid,windowId);return unit();}
    const cache='plain:'+key+':'+index,recovered=await this.store.recover(cache);if(recovered){const p=recovered.proof;if(p.oid!==block.oid||p.offset!==b.offset+block.plainBytes||recovered.size!==block.plainBytes)throw Error('content_checkpoint_corrupt');new ContentSha256(p.hash);b.offset=p.offset;b.hash=p.hash;b.object=null;return {...unit(0,1),blob:true};}
    const result=await this.download(b.object,windowId);if(!result.objectDone)return result;
-   await this.options.yieldControl();const opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,block.oid,await this.store.bytes(b.object.cache,b.object.total));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');recipeBlock(r,index,opened.plain,this.keys.id,this.scope);
+   await this.options.yieldControl();const opened=await this.authenticate(b.object,o=>recipeBlock(r,index,o.plain,this.keys.id,this.scope));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');
    const hash=new ContentSha256(b.hash).update(opened.plain);await this.store.verified(cache,opened.plain,{oid:block.oid,offset:b.offset+opened.plain.length,hash:hash.snapshot()});b.offset+=opened.plain.length;b.hash=hash.snapshot();b.object=null;this.metric('authenticate',opened.plain.length,1);return {...result,objects:1,blob:true};
   }return unit();
  }

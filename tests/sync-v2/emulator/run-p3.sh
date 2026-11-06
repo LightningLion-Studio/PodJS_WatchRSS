@@ -21,6 +21,7 @@ fi
 (cd "$framework/platforms/android" && ./gradlew :runtime:assembleDebugAndroidTest --max-workers=2 -PpodAbis=x86_64 --offline) > "$evidence/build.log" 2>&1
 adb=${ANDROID_SDK_ROOT:-/home/wilf/Android/Sdk}/platform-tools/adb
 "$adb" -s "$serial" install -r "$framework/platforms/android/runtime/build/outputs/apk/androidTest/debug/runtime-debug-androidTest.apk"
+"$adb" -s "$serial" shell run-as dev.podjs.runtime.test mkdir -p files
 "$adb" -s "$serial" push "$evidence/p3-guest.js" /data/local/tmp/wrss-p3-guest.js
 "$adb" -s "$serial" shell run-as dev.podjs.runtime.test cp /data/local/tmp/wrss-p3-guest.js files/wrss-p3-guest.js
 "$adb" -s "$serial" shell rm /data/local/tmp/wrss-p3-guest.js
@@ -28,4 +29,4 @@ adb=${ANDROID_SDK_ROOT:-/home/wilf/Android/Sdk}/platform-tools/adb
 "$adb" -s "$serial" exec-out run-as dev.podjs.runtime.test cat files/wrss-p3-result.json > "$evidence/result.json"
 "$adb" -s "$serial" exec-out run-as dev.podjs.runtime.test cat files/wrss-p3-outcome.json > "$evidence/outcome.json"
 "$adb" -s "$serial" shell run-as dev.podjs.runtime.test rm files/wrss-p3-guest.js files/wrss-p3-result.json files/wrss-p3-outcome.json
-rg -q '^OK \(3 tests\)' "$evidence/instrumentation.log"
+rg -q '^OK \(4 tests\)' "$evidence/instrumentation.log"

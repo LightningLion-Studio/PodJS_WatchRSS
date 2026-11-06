@@ -1,3 +1,4 @@
+import {chargedReplayBytes} from './resume';
 import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
 import {bytesToBase64,base64ToBytes} from '@podjs/framework/bytes';
@@ -26,6 +27,7 @@ export const PROJECTION_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS syncv2_tree_nodes(scope TEXT NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,prefix))`,
  `CREATE TABLE IF NOT EXISTS syncv2_change_log(scope TEXT NOT NULL,revision TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,revision,entity_key))`,
  `CREATE TABLE IF NOT EXISTS syncv2_upload_receipts(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_upload_replays(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))`,
  `CREATE TABLE IF NOT EXISTS syncv2_checkpoint(scope TEXT PRIMARY KEY,binding TEXT NOT NULL,body TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,source_table TEXT NOT NULL,locator TEXT NOT NULL)`,
  `CREATE INDEX IF NOT EXISTS syncv2_outbox_scope ON syncv2_outbox(scope,seq)`,
@@ -119,6 +121,12 @@ export class WatchProjectionStore {
   if(prior&&prior.totalBytes!==totalBytes)throw Error('hash_mismatch');if(prior&&prior.durableOffset>=offset)return;
   const before=await this.readState(),body=await this.cipher.seal(this.aad('upload-receipt',planId+id),{totalBytes,durableOffset:offset,receipt});
   await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_receipts VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);
+ }
+ async consumeUploadReplay(id:string,total:number,confirmed:number,offset:number,length:number){
+  this.gate.require();const before=await this.readState(),row=(await this.db.query('SELECT body FROM syncv2_upload_replays WHERE scope=? AND oid=?',[this.scopeKey,id]))[0],prior=row?await this.cipher.open(this.aad('upload-replay',id),String(row.body)):null;
+  if(prior&&prior.total!==total)throw Error('hash_mismatch');const high=Math.max(confirmed,prior?.confirmed??0),attempted=Math.max(prior?.attempted??0,offset+length),used=prior?.bytes??0,next=chargedReplayBytes(Math.max(high,prior?.attempted??0),offset,length,total,used);if(prior&&next===used&&attempted===prior.attempted&&high===prior.confirmed)return;
+  const body=await this.cipher.seal(this.aad('upload-replay',id),{total,confirmed:high,attempted,bytes:next});
+  await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_replays VALUES(?,?,?) ON CONFLICT(scope,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);
  }
  async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
