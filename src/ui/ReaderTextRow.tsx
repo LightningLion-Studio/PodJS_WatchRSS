@@ -7,7 +7,7 @@ import type { ContentStyle } from "../reader/content.ts";
 import { readerTextClass, type ReaderRow } from "../reader/content-layout.ts";
 import type { ReaderFontResolver } from "../reader/font-assets.ts";
 import { DEFAULT_READER_TEXT, resolvedReaderStyle, type ReaderPreset } from "../reader/preset.ts";
-import { requiresReaderSystemText, systemTextOptions } from "../reader/system-text.ts";
+import { requiresReaderSystemText, readerTextLineOptions } from "../reader/system-text.ts";
 
 type TextRow = ReaderRow & { kind: "text" };
 
@@ -51,10 +51,7 @@ export function ReaderTextRow(props: {
     textAlign: props.textAlign ?? props.row.textAlign ?? 0,
   }}>{props.row.text}</Text>;
   const raster = createMemo(() => requiresReaderSystemText(props.row.text, props.preset, props.style) && environment().rasterSupported);
-  const options = createMemo(() => raster() ? {
-    ...systemTextOptions(row(), props.style, props.fontSize, props.width, pixelScale(), props.preset, environment().fontMetrics(props.row.fontSlot), props.fonts, props.profile),
-    heightPx: Math.min(1024, Math.ceil(props.row.lineHeight * pixelScale()) + (props.rasterHeightExtraPx ?? 0)),
-  } : undefined);
+  const options = createMemo(() => raster() ? readerTextLineOptions(row(), props.style, props.fontSize, props.width, pixelScale(), props.preset, environment().fontMetrics(props.row.fontSlot), props.fonts, props.profile,props.rasterHeightExtraPx??0) : undefined);
   const textWidth = () => Math.min(props.width, getOps().measureText(props.row.text, props.row.fontSlot) * props.row.scale);
   const left = () => (props.textAlign ?? props.row.textAlign) === 1 ? (props.width - textWidth()) / 2 : 0;
   const baseline = () => props.row.nativeBaseline ?? props.row.lineHeight * .8;
@@ -62,7 +59,8 @@ export function ReaderTextRow(props: {
     {raster()
       ? <SystemTextLine
           pixelScale={pixelScale()}
-          {...(props.top===undefined?{}:{get top(){return props.top;},get cache(){return props.cache;},renderFallback:(visible:()=>boolean)=>fallback(visible)})}
+          cache={props.cache}
+          {...(props.top===undefined?{}:{get top(){return props.top;},renderFallback:(visible:()=>boolean)=>fallback(visible)})}
           options={options()!}
           onCarets={((owner:TextRow)=>positions=>props.onCarets?.(positions,owner))(props.row)}
           fallback={fallback()}

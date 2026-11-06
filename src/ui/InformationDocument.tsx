@@ -199,7 +199,7 @@ export function useInformationDocument(props: InformationDocumentProps): Informa
     const availablePx = Math.max(1, Math.ceil(available * pixelScale));
     const source: TextLayoutOptions = {
       text: BEIAN_NUMBER, widthPx: availablePx,
-      fontAsset: 'fonts/watch-sans.ttf', fontWeight: 400, fontSizePx,
+      fontWeight: 400, fontSizePx,
       lineHeightPx: composeLineHeightPx(14, fontSizePx, 2, scale),
       lineHeightMode: 'span', fallbackLineSpacing: true, lineBreak: 'simple',
       align: 'left', textMotion: 'static', colorArgb: 0xffb6b6b6,

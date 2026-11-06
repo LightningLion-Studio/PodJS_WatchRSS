@@ -18,3 +18,8 @@ export function requiresReaderSystemText(text:string,preset?:ReaderPreset,style:
  const spec=preset?(style==="body"?preset.body:resolvedReaderStyle(preset,style)):undefined;
  return requiresSystemText(text)||!!spec;
 }
+
+/** Exact line texture geometry shared by visible rows and adjacent-page preparation. */
+export function readerTextLineOptions(row:ReaderRow & {kind:"text"},style:ContentStyle,fontSize:number,width:number,pixelScale:number,preset?:ReaderPreset,metrics?:AtlasLineMetrics,resolveFont?:ReaderFontResolver,profile:"compose"|"preview"="compose",heightExtraPx=0):SystemTextLineOptions {
+ return {...systemTextOptions(row,style,fontSize,width,pixelScale,preset,metrics,resolveFont,profile),heightPx:Math.min(1024,Math.ceil(row.lineHeight*pixelScale)+heightExtraPx)};
+}
