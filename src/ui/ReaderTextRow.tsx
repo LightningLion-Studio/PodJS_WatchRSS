@@ -59,7 +59,8 @@ export function ReaderTextRow(props: {
     {raster()
       ? <SystemTextLine
           pixelScale={pixelScale()}
-          {...(props.top===undefined?{}:{get top(){return props.top;},get cache(){return props.cache;},renderFallback:(visible:()=>boolean)=>fallback(visible)})}
+          cache={props.cache}
+          {...(props.top===undefined?{}:{get top(){return props.top;},renderFallback:(visible:()=>boolean)=>fallback(visible)})}
           options={options()!}
           onCarets={((owner:TextRow)=>positions=>props.onCarets?.(positions,owner))(props.row)}
           fallback={fallback()}

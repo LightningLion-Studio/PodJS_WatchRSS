@@ -38,3 +38,9 @@ test('caret callbacks retain the source row that owned their raster request',()=
   old(undefined);next([0,1]);expect(events[0].owner).toBe(row);expect(events[1].owner).toBe(replacement);dispose();
  });
 });
+
+
+test('paged rows forward their cache without requiring an absolute top',()=>{
+ createRoot(dispose=>{const cache={close(){},stats(){return {retained:0,retainedBytes:0,entries:0};}};
+ try{expect(raster(ReaderTextRow({row,style:'body',fontSize:16,width:205,cache})).props.cache).toBe(cache);}finally{dispose();}});
+});
