@@ -8,7 +8,9 @@ The caller owns execution windows, trusted time and UI events.
 
 The factory receives the P2 projection and P3 content engine. `adopt` accepts
 only an authenticated **download** descriptor. Original imported sources and
-upload caches are never registered for deletion. Current account rows, immutable
+upload caches are never registered for deletion. `adoptEntity(id, access)` derives RSS/import/note/image classification and stable
+identity from the authenticated business row. Inline notes are protected state;
+local image assets inherit memo protection. Current account rows, immutable
 body revision, recipe, previously authenticated ordered blobs and readable key
 version are matched before `/availability/check`. Only a valid, unexpired
 `SignedAvailability` for `cloud-ready` authorizes a placeholder. C17 relies on
@@ -63,11 +65,34 @@ prepared business apply/ACK SQL statements. Partial legacy inputs must supply
 entity values pass the frozen business schema, so credentials and unrelated
 snapshots are rejected. Only differences that lose local values are sealed.
 
-The required `source(refs, changes)` port must derive/verify the **complete**
-necessary recipe/blob closure for these set values, including attachments. It
-must reject omissions and dangling references. This is a local authenticated
-object port, not HTTP. Each returned sealed object is hash-checked again and
-wrapped with the independent recovery key in 64 KiB chunks. Plaintext, source
+The factory wires `WatchBusinessClosure.source(refs, changes)` directly to the
+P3A content store; production callers cannot replace it with a synthetic source.
+`contentBodyResolver` persists kind/logicalId/sourceBinding/bodyRevision bindings
+and a witness of body identity fields. A changed article contentHash, book
+fingerprint or asset body version cannot reuse a stale completed plan. Reading
+state does not change that witness. Uploaded sources also recheck the original
+immutable source guard; prepared ciphertext alone cannot bless a changed source.
+The source matches each captured business value and original ID to its entityKey.
+RSS articles, imported articles and books resolve complete durable content plans.
+Notes keep Markdown inline and collect images from Markdown, baseMarkdown, and
+all conflict texts, including resolved conflicts. Image assetIds derive the
+normal keyed asset entityKeys. Missing mappings, files, blocks, durable offsets,
+keys or reference tables reject the entire recovery preparation.
+
+The source opens the sealed recipe, verifies its signed ordered reference table,
+then authenticates every necessary blob, checking block fingerprints and the
+whole plaintext hash with bounded object reads. Its returned readers bind the
+persisted content-plan revision and read at most 64 KiB. Existing P3A receive
+plans without a cached reference table verify the public table before use.
+Recovery stores frozen business wire values; reading progress uses integer micros.
+It never guesses a new body revision from a reading-state change.
+
+Cleanup uses the completed AEAD/hash witness, recipe authentication and batched
+stats/durable checkpoints, then a fresh `/availability/check` signed receipt.
+It does not read complete blob bodies during cleanup. Signature, ordered OID
+hash, lifetime bounds and expiry use the existing SignedAvailability verifier;
+there is no extra assumption that two machines have identical millisecond clocks.
+Each necessary recovery object is wrapped with the independent local key in 64 KiB chunks. Plaintext, source
 files and ordinary demand caches are not copied wholesale. The factory provides
 persistent worst-case quota reservation from app filesystem capacity; tests can
 supply a deterministic reservation port.
@@ -99,3 +124,26 @@ The emulator harness uses synthetic SQLite, Android secure crypto, QuickJS,
 app-private files and an in-memory HTTP fixture. It never uses a real account,
 physical device, production backend or main checkout. Process RSS includes the
 JVM and native host. A guest memory cap is not a measured guest heap peak.
+
+## Isolated backend acceptance
+
+```
+ANDROID_SDK_ROOT=/home/wilf/Android/Sdk bash tests/sync-v2/emulator/run-live-p3b.sh \
+  /home/wilf/data/PodJS/podjs-watch.wt-syncv2-p3b emulator-5584 /path/to/evidence/attempt
+```
+
+This opt-in runner requires the owned AVD `WrssP3BWatchLive`. It restricts both
+control and native content transports to `127.0.0.1:18952`, installs adb reverse
+only on that emulator, and loads the private `integration-p3b/watch.json` fixture
+at runtime. Credentials are never compiled into the guest or printed. A separate
+public author reservation watermark is retained between attempts; no 18942
+fixture, clock-derived sequence, server reset or key replacement is used.
+
+The product P2 reader/publisher and P3 workers upload and authenticate current
+RSS/import/note/asset business rows. The product space factory, without a source
+override, tests default-off behavior, real signed availability, placeholder and
+fresh-generation download/hash/identity preservation for RSS and import. Notes
+and images stay protected. Negatives use a rejected old revision, an actual
+65536-byte partial upload, and a real backend signature checked with a controlled
+expired verifier clock. The final local setting is off. Shared backend rows and
+other client data are retained. Reports/evidence belong outside this repository.

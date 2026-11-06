@@ -63,7 +63,7 @@ export class WatchSpaceV2 {
   const availability=await this.ports.remote.availability({...p});
   const current=this.ports.trustedNow();if(current===null||current<now)throw Error('clock_unknown');
   const receipt=availability.receipt,b=await signedAvailability(this.ports.remote.http.servicePin!,this.ports.remote.crypto,receipt,i.scope,p,current);
-  if(b.status!=='cloud-ready'||b.createdAtMillis>current||b.expiresAtMillis<=current)throw Error('closure_incomplete');
+  if(b.status!=='cloud-ready'||b.expiresAtMillis<=current)throw Error('closure_incomplete');
   return {kind:'cloud-current',accountOid:p.accountOid,scope:i.scope,entityKey:i.entityKey,bodyRevision:i.bodyRevision,recipeOid:i.recipeOid,blobOidsHash:digest(p.blobOids),receipt};
  }
  /** Download into fresh immutable resources. Whole plaintext hash must match

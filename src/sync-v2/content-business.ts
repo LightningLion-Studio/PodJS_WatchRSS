@@ -3,13 +3,14 @@
 import type {WatchContentEngine} from './content-engine';
 import type {BodyResolver} from './publisher';
 import {fromWire} from './business';
+import {businessBodyWitness} from './body-binding';
 import {hexId,oid,uint} from './protocol';
 export function contentBodyResolver(engine:WatchContentEngine,describe:(entry:any)=>Promise<{bodyRevision:string;sourceBinding:string;importedFile:boolean;parentEntityKey?:string;parentKind?:string}|null>):BodyResolver {
  return async(entry,existing)=>{
   const c=entry.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);
   if(!['article','book','asset'].includes(c.meta.kind))return null;
   const source=await describe(entry);if(!source)return null;
-  hexId(source.bodyRevision,32);const manifest=await engine.manifest(entry.entityKey,source.bodyRevision);
+  hexId(source.bodyRevision,32);await engine.bindBusiness(entry.entityKey,c.meta.kind,c.meta.logicalId,source.bodyRevision,source.sourceBinding,businessBodyWitness(c.meta.kind,fromWire(c.meta.kind,c.meta.payload,c.state.payload)));const manifest=await engine.manifest(entry.entityKey,source.bodyRevision);
   await engine.enqueue({entityKey:entry.entityKey,bodyRevision:source.bodyRevision,sourceBinding:source.sourceBinding,kind:c.meta.kind==='article'?'rss':'file',importedFile:source.importedFile,addedAtMillis:c.addedAtMillis,deleted:c.state.payload.deleted===true,...(source.parentEntityKey?{parentEntityKey:source.parentEntityKey}:{}),...(source.parentKind?{parentKind:source.parentKind}:{})},'upload');
   if(manifest)return {...manifest,promiseId:null};
   return {bodyRevision:source.bodyRevision,promiseId:source.bodyRevision,recipeOid:null,opaqueContentId:null,contentBytes:null};

@@ -23,13 +23,19 @@ export interface RecoveryPort {
  /** Reserves worst-case persistent quota, released after commit or failure. */
  reserve:(bytes:number)=>Promise<()=>Promise<void>>;
 }
+/** Recovery uses the authenticated v2 business representation: fractional
+ * runtime reading progress is stored as exact integer micros, per section 14. */
+export function recoveryBusiness(kind:Kind,value:Record<string,any>){
+ let input=value;if(Object.hasOwn(value,'readingProgressMicros')){if(Object.hasOwn(value,'readingProgress'))throw Error('invalid_schema');uint(value.readingProgressMicros,1000000);input={...value,readingProgress:value.readingProgressMicros/1000000};delete input.readingProgressMicros;}
+ const wire=toWire(kind,input);return {...wire.meta,...wire.state};
+}
 export function recoveryDelta(local:Record<string,RecoveryValue>,cloud:Record<string,RecoveryValue>,editBase:SyncState['editBase'],capturedKeys?:string[]):RecoveryDelta {
  const keys=capturedKeys??[...new Set([...Object.keys(local),...Object.keys(cloud)])],changes:RecoveryDelta['changes']=[],refs=new Set<string>();
  if(new Set(keys).size!==keys.length)throw Error('invalid_schema');
  for(const id of [...keys].sort()){
-  hexId(id,64);const l=local[id],c=cloud[id];for(const entry of [l,c])if(entry){exact(entry,['kind','value','bodyRefs']);toWire(entry.kind,entry.value);if(!Array.isArray(entry.bodyRefs))throw Error('invalid_schema');}
-  if(canonical(l?{kind:l.kind,value:l.value}:null)===canonical(c?{kind:c.kind,value:c.value}:null))continue;
-  if(l){changes.push({id,kind:'set',value:l.value});for(const ref of l.bodyRefs){oid(ref,ref.split(':')[0]);if(!/^(recipe|blob):/.test(ref))throw Error('invalid_oid');refs.add(ref);}}
+  hexId(id,64);const l=local[id],c=cloud[id];for(const entry of [l,c])if(entry){exact(entry,['kind','value','bodyRefs']);recoveryBusiness(entry.kind,entry.value);if(!Array.isArray(entry.bodyRefs))throw Error('invalid_schema');}
+  if(canonical(l?{kind:l.kind,value:recoveryBusiness(l.kind,l.value)}:null)===canonical(c?{kind:c.kind,value:recoveryBusiness(c.kind,c.value)}:null))continue;
+  if(l){changes.push({id,kind:'set',value:recoveryBusiness(l.kind,l.value)});for(const ref of l.bodyRefs){oid(ref,ref.split(':')[0]);if(!/^(recipe|blob):/.test(ref))throw Error('invalid_oid');refs.add(ref);}}
   else if(c)changes.push({id,kind:'remove'});
  }
  return {version:2,changes,editBase:{...editBase},bodyRefs:[...refs].sort()};

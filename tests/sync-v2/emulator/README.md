@@ -109,3 +109,8 @@ Synthetic signer protection is unchanged from the P2 harness: JCA loads the fixe
 test private key, and native local storage uses an injected test AES key. This
 proves wire/codec interoperability, not production non-exportability. Full app
 UI, physical watch power and production accounts remain outside this harness.
+
+P3B live storage/eviction acceptance uses `run-live-p3b.sh`, the owned AVD
+`WrssP3BWatchLive`, `integration-p3b/watch.json`, and port 18952 exclusively.
+See `docs/sync-v2-space.md` for the full invocation and negative cases. The new
+runner never reads or modifies the original 18942 fixture or service.
