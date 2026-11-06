@@ -12,7 +12,8 @@ const node=(kind:string,props:any={}):Node=>({id:++id,kind,props,children:[]});
 const renderer={createComponent,mergeProps,memo:createMemo,effect:createRenderEffect,createElement:node,insertNode:(p:Node,c:Node)=>p.children.push(c),insert:(p:Node,read:()=>unknown)=>{const index=p.children.length;p.children.push(undefined);createRenderEffect(()=>{p.children[index]=read();});},setProp:(n:Node,key:string,v:unknown)=>n.props[key]=v};
 const component=(kind:string)=>(props:any)=>{const n=node(kind,props);props.ref?.(n);if('children'in props)createRenderEffect(()=>n.children=[props.children]);return n;};
 const images:[number,number][]=[],freed:number[]=[],requests:{options:any;resolve:(v:any)=>void}[]=[];let uploads=0;
-const host={getOps:()=>({measureText:(s:string)=>s.length*7,setImage:(n:number,h:number)=>images.push([n,h]),freeTexture:(h:number)=>freed.push(h)})};
+const actualHost=await import(Bun.resolveSync('@pocketjs/framework/host',textPath));
+const host={...actualHost,getOps:()=>({measureText:(s:string)=>s.length*7,setImage:(n:number,h:number)=>images.push([n,h]),freeTexture:(h:number)=>freed.push(h)})};
 const services={textRaster:{line:(options:any)=>{let resolve!:(v:any)=>void;const result=new Promise(yes=>resolve=yes);requests.push({options,resolve});return{result,cancel(){}};}},fileChunks:{remove:async()=>{}},base64ToBytes:()=>{throw Error('expected direct texture file');},hasTextureFileUpload:()=>true,uploadTextureFile:()=>900+uploads++};
 for(const base of [import.meta.dir,textPath]){
  mock.module(Bun.resolveSync('@pocketjs/framework/renderer',base),()=>renderer);

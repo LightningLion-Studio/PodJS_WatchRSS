@@ -16,7 +16,7 @@ import {WatchContentHttp} from './content-http';
 export interface ContentSource {binding:string;size:number;ranges:ContentRange[];assertCurrent():Promise<void>;read(offset:number,length:number):Promise<Uint8Array>;}
 export interface QueuedBody extends PriorityItem {bodyRevision:string;recipeOid?:string;opaqueContentId?:string;contentBytes?:number;sourceBinding?:string;}
 interface ObjectPlan {oid:string;total:number;cache:string;receipt?:any;confirmedOffset?:number;reservation?:{id:string;expires:number};}
-interface BodyPlan {direction:'upload'|'download';item:QueuedBody;phase:'blocks'|'recipe'|'refs'|'availability'|'done';offset:number;hash:Sha256State;recipe:ContentRecipe|null;object:ObjectPlan|null;recipeObject:ObjectPlan|null;refs?:any;receipt?:any;}
+interface BodyPlan {direction:'upload'|'download';item:QueuedBody;phase:'blocks'|'recipe'|'refs'|'availability'|'done'|'evicted';cacheEpoch?:string;offset:number;hash:Sha256State;recipe:ContentRecipe|null;object:ObjectPlan|null;recipeObject:ObjectPlan|null;refs?:any;receipt?:any;}
 export interface ContentMetric {stage:'source'|'seal'|'network'|'authenticate'|'checkpoint'|'file';bytes:number;objects:number;}
 const unit=(bytes=0,objects=0,frames=0)=>({bytes,objects,frames,progressed:true});
 export class WatchContentEngine {
@@ -40,6 +40,7 @@ export class WatchContentEngine {
   await this.options.assertCurrent();const key=this.key(item);uint(item.addedAtMillis);
   const found=await this.store.get<BodyPlan>('body:'+key);
   if(found&&found.value.direction!==direction&&found.value.phase==='done'&&(!item.recipeOid||item.recipeOid===found.value.recipeObject?.oid))return key;
+  if(found?.value.phase==='evicted'&&direction==='download'){if(found.value.direction!=='download'||item.recipeOid!==found.value.recipeObject?.oid)throw Error('body_revision_changed');const reset:BodyPlan={direction,item:JSON.parse(canonical(item)),phase:'recipe',cacheEpoch:digest(Array.from(await this.crypto.random(16))),offset:0,hash:new ContentSha256().snapshot(),recipe:null,object:null,recipeObject:null};const q=await this.store.get('queue:'+key);await this.store.putMany([{id:'body:'+key,value:reset,expected:found.revision},{id:'queue:'+key,value:{...item,id:key,complete:false},expected:q!.revision}]);return key;}
   if(found){if(found.value.direction!==direction||found.value.item.sourceBinding!==item.sourceBinding||found.value.item.recipeOid!==item.recipeOid)throw Error('body_revision_changed');return key;}
   if(direction==='upload'&&!item.sourceBinding||direction==='download'&&!item.recipeOid)throw Error('invalid_schema');
   const body:BodyPlan={direction,item:JSON.parse(canonical(item)),phase:direction==='upload'?'blocks':'recipe',offset:0,hash:new ContentSha256().snapshot(),recipe:null,object:null,recipeObject:null};
@@ -111,7 +112,7 @@ export class WatchContentEngine {
   await this.store.files.frame(path,offset,bytes,canonical({oid:object.oid,totalBytes:object.total,binding:this.store.prefix}));this.localStats.set(path,{...stat,durableOffset:offset+bytes.length});this.metric('network',bytes.length);this.metric('file',bytes.length);
   return {objectDone:offset+bytes.length===object.total,...unit(bytes.length,0,1)};
  }
- private async objectFor(id:string,windowId:string):Promise<ObjectPlan>{const have=await this.haveObject(id,windowId);if(have.status!=='present')throw Error('object_missing');return {oid:id,total:have.totalBytes,cache:'download:'+id,receipt:have.receipt};}
+ private async objectFor(id:string,windowId:string,epoch=''):Promise<ObjectPlan>{const have=await this.haveObject(id,windowId);if(have.status!=='present')throw Error('object_missing');return {oid:id,total:have.totalBytes,cache:'download:'+(epoch?epoch+':':'')+id,receipt:have.receipt};}
  private async authenticate(object:ObjectPlan,validate?:(opened:Awaited<ReturnType<typeof openV2>>)=>void){
   try{const opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,object.oid,await this.store.bytes(object.cache,object.total));validate?.(opened);return opened;}
   catch(error){if(['hash_mismatch','aead_invalid','fingerprint_mismatch','invalid_encoding','invalid_schema','scope_mismatch'].includes((error as Error).message)){
@@ -154,7 +155,7 @@ return unit();
  }
  private async receive(key:string,b:BodyPlan,windowId:string):Promise<any>{
   if(b.phase==='recipe'){
-   if(!b.recipeObject){b.recipeObject=await this.objectFor(b.item.recipeOid!,windowId);return unit();}
+   if(!b.recipeObject){b.recipeObject=await this.objectFor(b.item.recipeOid!,windowId,b.cacheEpoch);return unit();}
    const result=await this.download(b.recipeObject,windowId);if(!result.objectDone)return result;
    const opened=await this.authenticate(b.recipeObject,o=>recipe(o.value));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');const r=recipe(opened.value);
    if(r.entityKey!==b.item.entityKey||r.bodyRevision!==b.item.bodyRevision||r.opaqueContentId!==b.item.opaqueContentId||r.totalPlainBytes!==b.item.contentBytes)throw Error('body_revision_changed');
@@ -164,16 +165,29 @@ return unit();
   if(b.phase==='blocks'){
    const r=b.recipe!,index=Math.floor(b.offset/262144);
    if(b.offset===r.totalPlainBytes){const hash=new ContentSha256(b.hash).finish();if(hash!==r.plaintextSha256||contentIdFromHash(this.keys.id,this.scope,'recipe',hash)!==r.opaqueContentId)throw Error('fingerprint_mismatch');b.phase='done';return unit();}
-   const block=r.blocks[index]!;if(!b.object){b.object=await this.objectFor(block.oid,windowId);return unit();}
-   const cache='plain:'+key+':'+index,recovered=await this.store.recover(cache);if(recovered){const p=recovered.proof;if(p.oid!==block.oid||p.offset!==b.offset+block.plainBytes||recovered.size!==block.plainBytes)throw Error('content_checkpoint_corrupt');new ContentSha256(p.hash);b.offset=p.offset;b.hash=p.hash;b.object=null;return {...unit(0,1),blob:true};}
+   const block=r.blocks[index]!;if(!b.object){b.object=await this.objectFor(block.oid,windowId,b.cacheEpoch);return unit();}
+   const cache='plain:'+(b.cacheEpoch?b.cacheEpoch+':':'')+key+':'+index,recovered=await this.store.recover(cache);if(recovered){const p=recovered.proof;if(p.oid!==block.oid||p.offset!==b.offset+block.plainBytes||recovered.size!==block.plainBytes)throw Error('content_checkpoint_corrupt');new ContentSha256(p.hash);b.offset=p.offset;b.hash=p.hash;b.object=null;return {...unit(0,1),blob:true};}
    const result=await this.download(b.object,windowId);if(!result.objectDone)return result;
    await this.options.yieldControl();const opened=await this.authenticate(b.object,o=>recipeBlock(r,index,o.plain,this.keys.id,this.scope));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');
    const hash=new ContentSha256(b.hash).update(opened.plain);await this.store.verified(cache,opened.plain,{oid:block.oid,offset:b.offset+opened.plain.length,hash:hash.snapshot()});b.offset+=opened.plain.length;b.hash=hash.snapshot();b.object=null;this.metric('authenticate',opened.plain.length,1);return {...result,objects:1,blob:true};
   }return unit();
  }
  async readRange(entityKey:string,bodyRevision:string,offset:number,length:number){uint(offset);uint(length,262144);const key=this.key({entityKey,bodyRevision} as QueuedBody),b=await this.store.get<BodyPlan>('body:'+key);if(!b||b.value.direction!=='download'||b.value.phase!=='done')throw Error('content_not_ready');if(offset>b.value.recipe!.totalPlainBytes-length)throw Error('invalid_range');
-  const ranges=[];for(let at=offset;at<offset+length;){const index=Math.floor(at/262144),start=at%262144,n=Math.min(offset+length-at,262144-start);ranges.push({path:this.store.path('plain:'+key+':'+index),offset:start,length:n});at+=n;}
+  const ranges=[];for(let at=offset;at<offset+length;){const index=Math.floor(at/262144),start=at%262144,n=Math.min(offset+length-at,262144-start);ranges.push({path:this.store.path('plain:'+(b.value.cacheEpoch?b.value.cacheEpoch+':':'')+key+':'+index),offset:start,length:n});at+=n;}
   const parts=await this.store.files.read(ranges),out=new Uint8Array(length);let at=0;for(const p of parts){out.set(p,at);at+=p.length;}return out;
+ }
+ async verifiedBody(entityKey:string,bodyRevision:string){const saved=await this.store.get<BodyPlan>('body:'+this.key({entityKey,bodyRevision} as QueuedBody));if(!saved||saved.value.direction!=='download'||!['done','evicted'].includes(saved.value.phase))throw Error('content_not_ready');return {item:saved.value.item,recipe:saved.value.recipe!,recipeOid:saved.value.recipeObject!.oid};}
+ /** Authenticated derived-cache descriptor. Never exposes original upload files. */
+ async derivedBody(entityKey:string,bodyRevision:string){
+  const key=this.key({entityKey,bodyRevision} as QueuedBody),saved=await this.store.get<BodyPlan>('body:'+key);if(!saved||saved.value.direction!=='download'||saved.value.phase!=='done')throw Error('content_not_ready');const b=saved.value,r=b.recipe!,epoch=b.cacheEpoch?b.cacheEpoch+':':'';
+  // Raw encrypted transfer objects remain P3-owned. Shared transfer files
+  // must not be reclaimed from an entity-only plaintext cache journal.
+  const paths=r.blocks.map((block,index)=>this.store.path('plain:'+epoch+key+':'+index));
+  const resources:{id:string;path:string;bytes:number}[]=[];for(let at=0;at<paths.length;at+=32){const stats=await this.store.files.stat(paths.slice(at,at+32));for(const stat of stats){if(!stat.exists)throw Error('content_not_ready');resources.push({id:digest(stat.path),path:stat.path,bytes:stat.size});}}
+  return {item:b.item,recipe:r,recipeOid:b.recipeObject!.oid,resources:[...new Map(resources.map(r=>[r.id,r])).values()]};
+ }
+ async prepareEviction(entityKey:string,bodyRevision:string){
+  if(this.active)throw Error('content_busy');const id='body:'+this.key({entityKey,bodyRevision} as QueuedBody),saved=await this.store.get<BodyPlan>(id);if(!saved||saved.value.direction!=='download'||saved.value.phase!=='done')throw Error('content_not_ready');return this.store.prepareMany([{id,value:{...saved.value,phase:'evicted'},expected:saved.revision}]);
  }
  async demand(entityKey:string,bodyRevision:string,requesterDeviceId:string,demandId:string){
   const now=this.now(),value={entityKey,bodyRevision,requesterDeviceId,demandId,demandAtMillis:now,expiresAtMillis:now+600000};await this.options.assertCurrent();const response=await this.remote.demand(value);await this.refreshDemands(true);return response;

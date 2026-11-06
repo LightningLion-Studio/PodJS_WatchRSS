@@ -3,6 +3,7 @@ import {exact,oid,canonical} from './protocol';
 export type Account={oid:string;revision:string;generation:string};
 export type Capture=Readonly<{stateVersion:string;accountOid:string;accountRevision:string;generation:string;localChangeRevision:string}>;
 export interface SyncState {
+ recoveryCopies?:import('./recovery').RecoveryCopy[];recoveryPins?:import('./recovery').RecoveryPin[];recoveryClock?:number;
  cloud?:any;acknowledgedLocalChangeRevision?:string;
  stateVersion:string;localChangeRevision:string;rollbackGeneration:string;
  businessRevision?:import('./business-revision').BusinessRevision;

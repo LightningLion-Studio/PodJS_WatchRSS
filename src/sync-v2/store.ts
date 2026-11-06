@@ -100,6 +100,9 @@ export class WatchProjectionStore {
   return state;
  }
  async cloudRowCount(root:string){this.gate.require();return Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0);}
+ async cloudRow(root:string,entityKey:string){
+  this.gate.require();hexId(entityKey,64);const row=(await this.db.query('SELECT body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key=?',[this.scopeKey,root,entityKey]))[0];return row?this.cipher.open(this.aad('cloud-row',root+entityKey),String(row.body)):null;
+ }
  async cloudRows(root:string,after='',limit=32){
   this.gate.require();const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
   const out=[];for(const row of rows)out.push(await this.cipher.open(this.aad('cloud-row',root+String(row.entity_key)),String(row.body)));return out;
