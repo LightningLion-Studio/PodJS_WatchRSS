@@ -38,7 +38,15 @@ C10 ordering is mandatory:
 `runWindow()` does not schedule another window. Every content HTTP request is
 admitted before dispatch, with its 10 second transport bound and shutdown reserve.
 An expired full-prefix reservation is renewed before the C8 have/want retry.
-Neither path reexports or replays an already persisted body frame. The owner must preserve the
+Neither path reexports a confirmed body. C11 treats a reserve replay only as a
+reservation identity. Resume uses have/want, after verifying its signed scope,
+OID, total and durable offset, against the encrypted local frame high-water mark.
+A server-ahead receipt is checkpointed before another frame. A server-behind
+offset repairs at most 65536 bytes; a greater rollback fails `offset_conflict`
+without lowering the checkpoint. Every frame ACK is checkpointed before the next
+frame. The same rule applies to P2 control uploads; their encrypted receipt
+journal is removed with the accepted/retired publication plan.
+The owner must preserve the
 300 second/10 second reserve and 8 MiB budget. Conditions are rechecked at frame
 boundaries. Unknown conditions wait. Demand never bypasses these gates.
 

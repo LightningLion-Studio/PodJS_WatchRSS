@@ -25,6 +25,7 @@ export const PROJECTION_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS syncv2_source_map(scope TEXT NOT NULL,source_table TEXT NOT NULL,locator TEXT NOT NULL,entity_key TEXT NOT NULL,PRIMARY KEY(scope,source_table,locator))`,
  `CREATE TABLE IF NOT EXISTS syncv2_tree_nodes(scope TEXT NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,prefix))`,
  `CREATE TABLE IF NOT EXISTS syncv2_change_log(scope TEXT NOT NULL,revision TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,revision,entity_key))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_upload_receipts(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))`,
  `CREATE TABLE IF NOT EXISTS syncv2_checkpoint(scope TEXT PRIMARY KEY,binding TEXT NOT NULL,body TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,source_table TEXT NOT NULL,locator TEXT NOT NULL)`,
  `CREATE INDEX IF NOT EXISTS syncv2_outbox_scope ON syncv2_outbox(scope,seq)`,
@@ -109,13 +110,23 @@ export class WatchProjectionStore {
   this.gate.require();const rows=await this.db.query('SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>? ORDER BY oid LIMIT ?',[this.scopeKey,planId,after,limit]),out=[];
   for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
  }
+ async uploadReceipt(planId:string,id:string){
+  this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_upload_receipts WHERE scope=? AND plan_id=? AND oid=?',[this.scopeKey,planId,id]))[0];
+  return row?this.cipher.open(this.aad('upload-receipt',planId+id),String(row.body)):null;
+ }
+ async confirmUploadReceipt(planId:string,id:string,totalBytes:number,receipt:any){
+  this.gate.require();const prior=await this.uploadReceipt(planId,id),offset=receipt.body.durableOffset;
+  if(prior&&prior.totalBytes!==totalBytes)throw Error('hash_mismatch');if(prior&&prior.durableOffset>=offset)return;
+  const before=await this.readState(),body=await this.cipher.seal(this.aad('upload-receipt',planId+id),{totalBytes,durableOffset:offset,receipt});
+  await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_receipts VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);
+ }
  async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
   let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
   for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),bytesToBase64(raw)),next={...state};await this.controlUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]);state=next;}
   const next={...state,cloud:{...state.cloud,blockedCommitOid:root,blockedCode:code}};await this.controlUpdate(state,next);
  }
- async finishUpload(before:SyncState,next:SyncState,planId:string){await this.controlUpdate(before,next,[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
+ async finishUpload(before:SyncState,next:SyncState,planId:string){await this.controlUpdate(before,next,[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]},{sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
  async readHeader(id:string){
   this.gate.require();if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_commit_headers'")).length)return null;
   const row=(await this.db.query('SELECT body FROM syncv2_commit_headers WHERE scope=? AND oid=?',[this.scopeKey,id]))[0];return row?this.cipher.open(this.aad('commit-header',id),String(row.body)):null;

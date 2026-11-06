@@ -114,6 +114,21 @@ async function publishingFixture(server:SyntheticIndexBackend){
  const http=new SyncV2Http(server,'http://localhost:3000',scope,async()=>({accessToken:'synthetic',legacyDeviceId:'approved-old',userId:'00000000-0000-0000-0000-000000000001',scope}),true,serverPin());const {WatchIndexPublisher}=await import('../../src/sync-v2/publisher');return {db,store,http,publisher:new WatchIndexPublisher(store,http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>100)};
 }
 
+for(const remoteOffset of [65536,131072,0])test('P2 C11 '+(remoteOffset===65536?'repairs one confirmed frame':remoteOffset?'ignores stale reserve offset':'rejects rollback beyond64KiB'),async()=>{
+ const server=new SyntheticIndexBackend(),db=new SqlFixture(),store=db.store(),responses=new Map<string,{request:string;response:any}>(),send=server.request.bind(server);let replays=0,pause=true;
+ await store.initialize();await store.beginScan(binding);await store.scanPage({page:async()=>({rows:[{kind:'note',logicalId:'large',value:{...noteValue('large'),markdown:'x'.repeat(180000)},addedAtMillis:50}],after:'done',done:true}),changed:async()=>[]});
+ server.request=async r=>{const path=decodeURIComponent(new URL(r.url).pathname),body=r.headers['Content-Type']==='application/octet-stream'?null:r.body?parseNetwork(r.body):null;
+  if(path.endsWith('/objects/reserve')){const saved=responses.get(body.requestId);if(saved){expect(canonical(body)).toBe(saved.request);replays++;return saved.response;}const response=await send(r);responses.set(body.requestId,{request:canonical(body),response});return response;}
+  if(pause&&path.includes('/objects/state:')&&path.endsWith('/parts/131072')){pause=false;throw Error('pause_after_confirmed_frames');}return send(r);
+ };
+ const http=new SyncV2Http(server,'http://localhost:3000',scope,async()=>({accessToken:'synthetic',legacyDeviceId:'approved-old',userId:'00000000-0000-0000-0000-000000000001',scope}),true,serverPin()),make=()=>new WatchIndexPublisher(store,http,crypto,{id:idKey,content:Buffer.alloc(32,0x22),version:1},()=>100);
+ try{await make().prepare('a'.repeat(32),'synthetic-key',{commitOid:null,revision:'0'},'c'.repeat(32));await expect(make().flush()).rejects.toThrow('pause_after_confirmed_frames');const id=[...server.partials.keys()].find(id=>id.startsWith('state:'))!;expect((await store.uploadReceipt('c'.repeat(32),id)).durableOffset).toBe(131072);const candidatesBefore=await store.candidatePage(),callsBefore={...server.calls};server.partials.set(id,server.partials.get(id)!.slice(0,remoteOffset));
+  if(remoteOffset){await make().flush();expect(replays).toBeGreaterThan(0);expect(server.calls['/objects/'+id+'/parts/0']).toBe(1);expect(server.calls['/objects/'+id+'/parts/65536']).toBe(remoteOffset===65536?2:1);expect(server.events).toBe(1);expect(await store.uploadReceipt('c'.repeat(32),id)).toBeNull();}
+  else{await expect(make().flush()).rejects.toThrow('offset_conflict');expect(server.calls['/objects/'+id+'/parts/0']).toBe(callsBefore['/objects/'+id+'/parts/0']);expect((await store.uploadReceipt('c'.repeat(32),id)).durableOffset).toBe(131072);expect(server.events).toBe(0);}
+  expect(await store.candidatePage()).toEqual(candidatesBefore);
+ }finally{db.close();}
+});
+
 test('P2 encrypted index publishes once after response loss, then authenticates into another SQLite store without body',async()=>{
  const server=new SyntheticIndexBackend(),first=await publishingFixture(server),db2=new SqlFixture();try{
   const plan=await first.publisher.prepare('a'.repeat(32),'synthetic-key',{commitOid:null,revision:'0'},'c'.repeat(32));server.losePublish=true;await expect(first.publisher.flush()).rejects.toThrow('synthetic_response_lost');expect(server.events).toBe(1);const result=await first.publisher.flush();expect(result.serverRevision).toBe('9007199254740993');expect(server.events).toBe(1);expect(server.calls['/account/publish']).toBe(1);expect((await first.store.readState()).cloud.pendingPublish).toBe(null);

@@ -2,6 +2,7 @@
  * Source callbacks must expose an immutable business revision, never an account lock. */
 import {ContentWorker,ContentWindow,selectContentTask,completedContentTask,type ContentSignals,type Fairness} from '@podjs/framework/content-worker';
 import {ContentSha256,type Sha256State} from '@podjs/framework/content-sha256';
+import {checkedResumeOffset} from './resume';
 import {digest,canonical,jsonBytes,hexId,uint,type Scope} from './protocol';
 import {sealV2,openV2,type EnvelopeCrypto} from './sealed';
 import type {SigningPort} from './signing';
@@ -14,7 +15,7 @@ import {WatchContentStore} from './content-store';
 import {WatchContentHttp} from './content-http';
 export interface ContentSource {binding:string;size:number;ranges:ContentRange[];assertCurrent():Promise<void>;read(offset:number,length:number):Promise<Uint8Array>;}
 export interface QueuedBody extends PriorityItem {bodyRevision:string;recipeOid?:string;opaqueContentId?:string;contentBytes?:number;sourceBinding?:string;}
-interface ObjectPlan {oid:string;total:number;cache:string;receipt?:any;reservation?:{id:string;expires:number};}
+interface ObjectPlan {oid:string;total:number;cache:string;receipt?:any;confirmedOffset?:number;reservation?:{id:string;expires:number};}
 interface BodyPlan {direction:'upload'|'download';item:QueuedBody;phase:'blocks'|'recipe'|'refs'|'availability'|'done';offset:number;hash:Sha256State;recipe:ContentRecipe|null;object:ObjectPlan|null;recipeObject:ObjectPlan|null;refs?:any;receipt?:any;}
 export interface ContentMetric {stage:'source'|'seal'|'network'|'authenticate'|'checkpoint'|'file';bytes:number;objects:number;}
 const unit=(bytes=0,objects=0,frames=0)=>({bytes,objects,frames,progressed:true});
@@ -87,16 +88,17 @@ export class WatchContentEngine {
   let have;try{have=await this.haveObject(object.oid,windowId);}catch(error){if((error as Error).message!=='reservation_expired')throw error;
    const renewal=await this.remote.reserve(object.oid,object.total,digest([object.oid,'renew',this.now()]).slice(0,32));object.reservation={id:renewal.reservationId,expires:renewal.expiresAtMillis};
    [have]=await this.remote.have(windowId,[object.oid]);this.remoteStatuses.set(object.oid,have);
-  }if(have.status==='present'){if(have.totalBytes!==object.total)throw Error('hash_mismatch');object.receipt=have.receipt;return {objectDone:true,...unit(0,1)};}
-  if(have.status==='partial'&&have.totalBytes!==object.total)throw Error('hash_mismatch');
-  const offset=have.durableOffset;if(offset%65536)throw Error('invalid_schema');
+  }if(have.status!=='missing'&&have.totalBytes!==object.total)throw Error('hash_mismatch');
+  const confirmed=object.confirmedOffset??0,offset=checkedResumeOffset(confirmed,have.durableOffset,object.total);
+  if(have.status==='present'){object.confirmedOffset=object.total;object.receipt=have.receipt;return {objectDone:true,...unit(0,1)};}
+  if(offset>confirmed){object.confirmedOffset=offset;object.receipt=have.receipt;return {objectDone:false,...unit()};}
   if(!object.reservation||object.reservation.expires<=this.now()){
-   const r=await this.remote.reserve(object.oid,object.total,digest([object.oid,this.now(),offset]).slice(0,32));object.reservation={id:r.reservationId,expires:r.expiresAtMillis};if(r.objects[0].durableOffset!==offset)throw Error('offset_conflict');
+   const r=await this.remote.reserve(object.oid,object.total,digest([object.oid,this.now(),offset]).slice(0,32));object.reservation={id:r.reservationId,expires:r.expiresAtMillis};
   }
   const bytes=await this.store.bytes(object.cache,object.total,offset,Math.min(65536,object.total-offset));this.metric('file',bytes.length);
   const result=await this.remote.http.putPart(object.oid,offset,object.reservation.id,digest([object.oid,object.reservation.id,offset]).slice(0,32),bytes);
   await this.remote.http.servicePin!.receipt(this.crypto,result.receipt,this.scope,object.oid,object.total,this.now());
-  if(result.oid!==object.oid||result.durableOffset!==offset+bytes.length||result.receipt.body.durableOffset!==result.durableOffset)throw Error('offset_conflict');this.metric('network',bytes.length);
+  if(result.oid!==object.oid||result.durableOffset!==offset+bytes.length||result.receipt.body.durableOffset!==result.durableOffset)throw Error('offset_conflict');object.confirmedOffset=Math.max(confirmed,result.durableOffset);object.receipt=result.receipt;this.metric('network',bytes.length);
   this.remoteStatuses.set(object.oid,{...have,totalBytes:object.total,durableOffset:result.durableOffset,receipt:result.receipt,status:'partial'});
   if(result.durableOffset===object.total){object.receipt=await this.remote.complete(object.oid,object.total,object.reservation.id,digest([object.oid,object.reservation.id,'complete']).slice(0,32));this.remoteStatuses.set(object.oid,{oid:object.oid,totalBytes:object.total,durableOffset:object.total,status:'present',receipt:object.receipt});return {objectDone:true,...unit(bytes.length,1,1)};}
   return {objectDone:false,...unit(bytes.length,0,1)};

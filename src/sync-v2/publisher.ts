@@ -1,4 +1,5 @@
 /** Durable index publication journal. No body worker or account-choice apply. */
+import {checkedResumeOffset} from './resume';
 import {canonical,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,digest,uint,type Scope} from './protocol';
 import {hex} from '@podjs/framework/crypto';
 import {b64,unb64,indexRow,sameScope} from './wire';
@@ -63,18 +64,19 @@ export class WatchIndexPublisher {
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');
   const window=await this.http.negotiate([],[]);let after='';for(;;){const page=await this.store.uploadPage(plan.requestId,after,1);if(!page.length)break;for(const object of page){
    if(object.oid.startsWith('state-refs:'))continue;
-   const have=await this.http.json('POST','/objects/have-want',{scope:this.http.scope,windowId:window.windowId,oids:[object.oid]});const status=have.objects?.[0];if(status?.oid!==object.oid)throw Error('invalid_schema');let offset=0;
-   if(status.status==='present'||status.status==='partial'){await this.http.servicePin!.receipt(this.crypto,status.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),status.status==='present');offset=status.durableOffset;if(offset!==status.receipt.body.durableOffset)throw Error('invalid_schema');if(status.status==='present')continue;}
+   const have=await this.http.json('POST','/objects/have-want',{scope:this.http.scope,windowId:window.windowId,oids:[object.oid]});const status=have.objects?.[0];if(status?.oid!==object.oid)throw Error('invalid_schema');const savedReceipt=await this.store.uploadReceipt(plan.requestId,object.oid);if(savedReceipt&&savedReceipt.totalBytes!==object.bytes.length)throw Error('hash_mismatch');let offset=0;
+   if(status.status==='present'||status.status==='partial'){await this.http.servicePin!.receipt(this.crypto,status.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),status.status==='present');offset=status.durableOffset;if(offset!==status.receipt.body.durableOffset)throw Error('invalid_schema');checkedResumeOffset(savedReceipt?.durableOffset??0,offset,object.bytes.length);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,status.receipt);if(status.status==='present')continue;}
    else if(status.status!=='missing')throw Error('invalid_schema');
+   checkedResumeOffset(savedReceipt?.durableOffset??0,offset,object.bytes.length);
    const reserve=async(requestId:string)=>this.http.json('POST','/objects/reserve',{scope:this.http.scope,requestId,channel:'control',objects:[{oid:object.oid,totalBytes:object.bytes.length}],leaseMillis:600000});
    let reservation=await reserve(digest([plan.requestId,'reserve',object.oid]).slice(0,32));uint(reservation.expiresAtMillis);
    // Request replay preserves the original lease deadline. Renew the lease with
    // a fresh reservation ID, while retaining the signed publication and bytes.
    if(reservation.expiresAtMillis<=this.now())reservation=await reserve(hex(await this.crypto.random(16)));
    uint(reservation.expiresAtMillis);if(reservation.expiresAtMillis<=this.now())throw Error('reservation_expired');hexId(reservation.reservationId,32);
-   if(reservation.objects?.[0]?.oid!==object.oid||reservation.objects[0].totalBytes!==object.bytes.length||reservation.objects[0].durableOffset!==offset)throw Error('offset_conflict');
-   for(;offset<object.bytes.length;){await this.pending();const part=object.bytes.subarray(offset,offset+65536),r=await this.http.putPart(object.oid,offset,reservation.reservationId,digest([plan.requestId,object.oid,offset]).slice(0,32),part);await this.http.servicePin!.receipt(this.crypto,r.receipt,this.http.scope,object.oid,object.bytes.length,this.now());if(r.durableOffset!==offset+part.length||r.receipt.body.durableOffset!==r.durableOffset)throw Error('offset_conflict');offset=r.durableOffset;}
-   const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);
+   if(reservation.objects?.[0]?.oid!==object.oid||reservation.objects[0].totalBytes!==object.bytes.length)throw Error('offset_conflict');
+   for(;offset<object.bytes.length;){await this.pending();const part=object.bytes.subarray(offset,offset+65536),r=await this.http.putPart(object.oid,offset,reservation.reservationId,digest([plan.requestId,object.oid,offset]).slice(0,32),part);await this.http.servicePin!.receipt(this.crypto,r.receipt,this.http.scope,object.oid,object.bytes.length,this.now());if(r.durableOffset!==offset+part.length||r.receipt.body.durableOffset!==r.durableOffset)throw Error('offset_conflict');offset=r.durableOffset;await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,r.receipt);}
+   const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,complete.receipt);
   }after=page.at(-1)!.oid;}
   let refsAfter='';for(;;){const page=await this.store.uploadPage(plan.requestId,refsAfter,1);if(!page.length)break;for(const item of page)if(item.oid.startsWith('state-refs:')){await this.pending();await this.http.json('POST','/state-refs',parseCanonicalJson(item.bytes));}refsAfter=page.at(-1)!.oid;}
   await this.pending();let result;try{result=await this.http.publish(plan.request);}catch(error){
