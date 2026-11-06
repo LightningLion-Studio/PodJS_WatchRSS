@@ -46,10 +46,11 @@ export class WatchContentEngine {
  }
  async manifest(entityKey:string,bodyRevision:string){const b=await this.store.get<BodyPlan>('body:'+this.key({entityKey,bodyRevision} as QueuedBody));if(!b||b.value.phase!=='done')return null;const r=b.value.recipe!;return {bodyRevision,recipeOid:b.value.recipeObject!.oid,opaqueContentId:r.opaqueContentId,contentBytes:r.totalPlainBytes};}
  async runWindow(budget?:{millis?:number;maxBytes?:number}){
-  if(this.active)return {status:'busy',bytes:0,objects:0,frames:0};this.active=true;
+  if(this.active)return {status:'busy',bytes:0,objects:0,frames:0};this.active=true;const previousGuard=this.remote.http.requestGuard;
   try{
    this.remoteStatuses.clear();this.localStats.clear();
    const window=new ContentWindow(this.options.monotonic??Date.now,budget?.millis??300000,10000,budget?.maxBytes??8*1048576);
+   this.remote.http.requestGuard=()=>{previousGuard?.();if(!window.available(0,10000))throw Error('content_window_paused');};
    let wireWindow:string|undefined;
    return await this.worker.run({window,signals:this.options.signals,yieldControl:this.options.yieldControl,step:async()=>{
     await this.options.assertCurrent();if(!wireWindow){const w=await this.remote.http.negotiate([],[]);wireWindow=w.windowId;await this.refreshDemands(true);}
@@ -66,12 +67,13 @@ export class WatchContentEngine {
     const q=await this.store.get('queue:'+task.id);changes.push({id:'queue:'+task.id,value:{...q!.value,complete:b.phase==='done',pendingObject:b.object??(b.phase==='recipe'?b.recipeObject:null)},expected:q!.revision});
     await this.store.putMany(changes);this.metric('checkpoint');return progress;
    }});
-  }finally{this.active=false;}
+  }finally{this.remote.http.requestGuard=previousGuard;this.active=false;}
  }
  private async haveObject(id:string,windowId:string){
   if(!this.remoteStatuses.has(id)){
    const ids=[...new Set([id,...this.pendingObjects.map(o=>o.oid)])].slice(0,32).sort();
-   const values=await this.remote.have(windowId,ids);for(const v of values)this.remoteStatuses.set(v.oid,v);
+   let values;try{values=await this.remote.have(windowId,ids);}catch(error){if((error as Error).message!=='reservation_expired'||ids.length===1)throw error;values=await this.remote.have(windowId,[id]);}
+   for(const v of values)this.remoteStatuses.set(v.oid,v);
   }return this.remoteStatuses.get(id);
  }
  private async fileStat(object:ObjectPlan){
@@ -82,7 +84,10 @@ export class WatchContentEngine {
  }
  private async upload(object:ObjectPlan,windowId:string){
   // C8 resolves a lost final ACK here. No cache read/hash/export precedes exact have.
-  const have=await this.haveObject(object.oid,windowId);if(have.status==='present'){if(have.totalBytes!==object.total)throw Error('hash_mismatch');object.receipt=have.receipt;return {objectDone:true,...unit(0,1)};}
+  let have;try{have=await this.haveObject(object.oid,windowId);}catch(error){if((error as Error).message!=='reservation_expired')throw error;
+   const renewal=await this.remote.reserve(object.oid,object.total,digest([object.oid,'renew',this.now()]).slice(0,32));object.reservation={id:renewal.reservationId,expires:renewal.expiresAtMillis};
+   [have]=await this.remote.have(windowId,[object.oid]);this.remoteStatuses.set(object.oid,have);
+  }if(have.status==='present'){if(have.totalBytes!==object.total)throw Error('hash_mismatch');object.receipt=have.receipt;return {objectDone:true,...unit(0,1)};}
   if(have.status==='partial'&&have.totalBytes!==object.total)throw Error('hash_mismatch');
   const offset=have.durableOffset;if(offset%65536)throw Error('invalid_schema');
   if(!object.reservation||object.reservation.expires<=this.now()){

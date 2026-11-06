@@ -72,3 +72,15 @@ test('P3 gzip block checkpoint resumes without repeating authentication or decom
  await expect(f.e.runWindow()).rejects.toThrow('after_gzip_checkpoint');expect(inflations).toBe(1);const before=decryptions;f.db.close();f=engine(root,b,plain,{crypto});await f.store.init();await f.e.runWindow();expect(inflations).toBe(1);expect(decryptions).toBe(before);expect(await f.e.readRange(item.entityKey,item.bodyRevision,0,plain.length)).toEqual(plain);
  }finally{f.db.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('P3 every HTTP admission preserves the 10-second shutdown reserve on a slow link',async()=>{
+ const root=scratch(),b=new ContentBackend(),source=randomBytes(6*1048576),counter={reads:0,bytes:0};b.requestCost=3000;let f=engine(root,b,source,{sourceCounter:counter});
+ try{await f.store.init();await f.e.enqueue(item,'upload');let completed=false;for(let i=0;i<5;i++){const start=b.clock,before=b.uploaded,result=await f.e.runWindow();expect(b.clock-start).toBeLessThanOrEqual(290000);expect(b.uploaded).toBeGreaterThan(before);expect(result.bytes).toBeLessThanOrEqual(b.uploaded-before);if(i===0)expect(result.status).toBe('paused');if(result.status==='complete'){completed=true;break;}f.db.close();f=engine(root,b,source,{sourceCounter:counter});await f.store.init();}expect(completed).toBe(true);expect(counter.bytes).toBe(source.length);
+ }finally{f.db.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('P3 C8 expired full-prefix reservation renews without reexport or frame replay',async()=>{
+ const root=scratch(),b=new ContentBackend(),source=randomBytes(100000),counter={reads:0,bytes:0};let f=engine(root,b,source,{sourceCounter:counter});
+ try{await f.store.init();await f.e.enqueue(item,'upload');b.losePartAt=2;await expect(f.e.runWindow()).rejects.toThrow('lost_part_response');for(const r of b.reservations.values())r.valid=false;b.clock+=600000;const before=b.uploaded;f.db.close();f=engine(root,b,source,{sourceCounter:counter});await f.store.init();expect((await f.e.runWindow()).status).toBe('complete');expect(counter.reads).toBe(1);expect(b.partCount).toBe(3);expect(b.uploaded-before).toBeLessThan(65536);
+ }finally{f.db.close();rmSync(root,{recursive:true,force:true});}
+});

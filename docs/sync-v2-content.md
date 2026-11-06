@@ -35,7 +35,10 @@ C10 ordering is mandatory:
    Availability is checked only on this bound receive path. It is not an upload
    prerequisite or a P3A deletion authorization.
 
-`runWindow()` does not schedule another window. The owner must preserve the
+`runWindow()` does not schedule another window. Every content HTTP request is
+admitted before dispatch, with its 10 second transport bound and shutdown reserve.
+An expired full-prefix reservation is renewed before the C8 have/want retry.
+Neither path reexports or replays an already persisted body frame. The owner must preserve the
 300 second/10 second reserve and 8 MiB budget. Conditions are rechecked at frame
 boundaries. Unknown conditions wait. Demand never bypasses these gates.
 
@@ -55,7 +58,7 @@ Tests:
 
 ```
 bun test tests/sync-v2/p2.test.ts tests/sync-v2/p3.test.ts
-bun tests/sync-v2/p3-stress.ts /path/to/evidence.json
+bun tests/sync-v2/p3-stress.ts /path/to/evidence.json 1800
 ANDROID_SDK_ROOT=/home/wilf/Android/Sdk bash tests/sync-v2/emulator/run-p3.sh \
   /path/to/framework-worktree emulator-5578 /path/to/evidence
 ```

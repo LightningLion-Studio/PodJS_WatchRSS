@@ -19,16 +19,16 @@ export function parseNetwork(input:Uint8Array){try{
 
 export type Session={accessToken:string;legacyDeviceId:string;userId:string;scope:Scope};
 export class SyncV2Http {
- readonly prefix:string;private flags:any;
+ readonly prefix:string;private flags:any;requestGuard?:()=>void;
  constructor(private readonly transport:HttpTransport,origin:string,readonly scope:Scope,private readonly session:()=>Promise<Session>,readonly indexWrite=false,readonly servicePin?:WatchServiceKeyPin,readonly contentWrite=false){
   validateScope(scope);if(!/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/.test(origin))throw Error('isolated_backend_required');this.prefix=origin+'/functions/v1/sync/v2';
  }
  private async send(method:string,path:string,body?:any,extra:Record<string,string>={},raw?:Uint8Array):Promise<HttpResponse>{
-  if(!this.servicePin)throw Error('service_key_unpinned');await this.servicePin.assertBootstrap();
+  this.requestGuard?.();if(!this.servicePin)throw Error('service_key_unpinned');await this.servicePin.assertBootstrap();
   const s=await this.session();if(accountIdFromUserId(s.userId)!==this.servicePin.accountId)throw Error('cloud_account_busy');sameScope(s.scope,this.scope);
   if(path!=='/capabilities'){if(!this.flags)await this.capabilities();const route=decodeURIComponent(path.split('?')[0]!),write=method==='PUT'||method==='POST'&&(['/devices/signing-key','/objects/reserve','/state-refs','/recipe-refs','/refs/cas','/account/publish'].includes(route)||/^\/objects\/[^/]+\/complete$/.test(route));const content=(route==='/objects/reserve'&&body?.channel==='content')||route==='/recipe-refs'||/^\/objects\/(blob|recipe)(?::|%3A)/i.test(route)&&write;if((route==='/demand'||route==='/availability/check'||route==='/recipe-refs'||/^\/objects\/(blob|recipe):/.test(route))&&(!this.contentWrite||this.flags.contentWrite!==true))throw Error('feature_disabled');if(this.flags.read!==true||write&&(content?this.flags.contentWrite:this.flags.indexWrite)!==true)throw Error('feature_disabled');}if(!s.accessToken||!s.legacyDeviceId)throw Error('authorization_required');
   const query=method==='GET'?(path.includes('?')?'&':'?')+Object.entries(this.scope).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&'):'';
-  return this.transport.request({method,url:this.prefix+path+query,headers:{Authorization:'Bearer '+s.accessToken,'x-watchrss-cloud-device-id':s.legacyDeviceId,'Content-Type':raw?'application/octet-stream':'application/json',...extra},...(raw||body!==undefined?{body:raw??jsonBytes(body)}:{}),timeoutMs:10000,readTimeoutMs:path.startsWith('/events')?30000:10000,acceptHttpErrors:true});
+  this.requestGuard?.();return this.transport.request({method,url:this.prefix+path+query,headers:{Authorization:'Bearer '+s.accessToken,'x-watchrss-cloud-device-id':s.legacyDeviceId,'Content-Type':raw?'application/octet-stream':'application/json',...extra},...(raw||body!==undefined?{body:raw??jsonBytes(body)}:{}),timeoutMs:10000,readTimeoutMs:path.startsWith('/events')?30000:10000,acceptHttpErrors:true});
  }
  async json(method:string,path:string,body?:any){
   const route=decodeURIComponent(path.split('?')[0]!);
