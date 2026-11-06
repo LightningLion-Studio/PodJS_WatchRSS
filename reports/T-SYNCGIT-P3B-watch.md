@@ -220,3 +220,21 @@
 - `P3B resumed deletion requires fresh current availability after placeholder commit`。
 - `P3B lease endpoint stays closed before HTTP`。
 - `P3B custody endpoint stays closed before HTTP`。
+
+## 验证环境与清理
+
+- 本地依赖链接指向本端框架工作树。
+- 依赖清单与锁文件不包含该路径。
+- 子模块固定为 `214fd8c1e7450c21c5052fb060b4cb9540fba907`。
+- 全量 UI 测试前生成中性样式镜像。
+- 镜像只供测试初始化。该文件不进入提交。
+- 初始化命令在框架根目录执行：
+
+```sh
+bun -e 'import {compileClasses,generateStylesModule} from "./vendor/pocketjs/framework/compiler/tailwind.ts"; await Bun.write("./vendor/pocketjs/framework/src/styles.generated.ts",generateStylesModule(compileClasses([])));'
+```
+
+- 已完成：清理本次 scratch 与 Android 构建产物。
+- 已完成：清理中性样式镜像和临时测试日志。
+- 已完成：关闭自建模拟器 `emulator-5582`。
+- 完整验证日志保留在证据目录。
