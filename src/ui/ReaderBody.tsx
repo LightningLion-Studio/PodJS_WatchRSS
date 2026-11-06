@@ -8,7 +8,8 @@ import {displayPower} from "@podjs/framework/services";
 import {lifecycle} from "@podjs/framework/watch";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {createWindowValue} from "@podjs/framework/windowed-list";
-import {createSystemTextCache} from "@podjs/framework/text";
+import {createSystemTextCache,prefetchSystemTextLines} from "@podjs/framework/text";
+import {adjacentPageTextOptions} from '../reader/page-text-prefetch.ts';
 import {prepareTextLayout} from "@podjs/framework/text";
 import {readerRowKey} from "../reader/content-layout.ts";
 import {updateSystemCarets} from "../reader/system-carets.ts";
@@ -214,6 +215,16 @@ function ReaderBodyImpl(props:{
   createEffect(()=>{void syncAwake();});
   let tapTimer:(()=>void)|undefined,feedbackTimer:(()=>void)|undefined;
   const schedule=(milliseconds:number,callback:()=>void)=>{const timer=delay(Math.max(1,milliseconds));void timer.result.then(callback,()=>{});return ()=>timer.cancel();};
+  createEffect(()=>{
+    if(!props.pageMode||!props.active||!restored()||lifecycle()!=="active")return;
+    const options=adjacentPageTextOptions(bookPages(),bookPageIndex(),blocks(),props.fontSize,props.preset,fonts(),textEnvironment());
+    if(!options.length)return;
+    // Let the current page submit first. Foreground text also keeps a host slot.
+    let current=true,release=()=>{};
+    const cancel=schedule(120,()=>{if(current)release=prefetchSystemTextLines(options,textCache);});
+    // New visible owners can promote a pending entry before its old prefetch lease ends.
+    onCleanup(()=>{current=false;cancel();void Promise.resolve().then(release);});
+  });
   const currentProgress=()=>{
     if(importedReadFailed)return;
     if(!restored()||disposed)return;
@@ -451,7 +462,7 @@ function ReaderBodyImpl(props:{
     {props.preset&&<ReaderBackground background={props.preset.background} snapshot={backgrounds()} width={props.width} height={props.height} active={props.active}/>}
     <Show when={props.pageMode} fallback={<>
     <ScrollEntries retainRows={0} minRows={Math.ceil((props.height+160)/Math.max(1,props.fontSize*(props.preset?.body.lineHeightEm??1.35)))+4} recycleKey={entry=>(entry.data as ReaderRow|undefined)?.kind==="text"?"reader-text":undefined} entryEquals={(a,b)=>!!a.data&&!!b.data&&a.key===b.key&&a.top===b.top&&a.height===b.height&&a.data===b.data&&a.onPress===b.onPress} onManualScroll={manualScroll} onScrollStateChange={moving=>{setScrolling(moving);props.onMoving?.(moving);if(moving&&!followingSpeech)manualScroll();}} controller={scroller} height={props.height} padding={14} verticalPadding={0} gap={0} inputActive={()=>props.active&&restored()} onLongPress={props.onSpeechControls?contact=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const anchor=pressedSpeechAnchor(layout(),blocks(),contact.startX-(props.touchOrigin?.left??0),contact.startY-(props.touchOrigin?.top??0)-(props.top??40),scroller.offset(),headerHeight(),props.width,(text,slot)=>getOps().measureText(text,slot),14,systemCarets());if(anchor?.contentBlockIndex!==undefined)appLogger.d("ReadAloudTouch",`${imported?"imported chunk":"content block"}=${anchor.contentBlockIndex} position=Offset(${contact.startX}, ${contact.startY-(props.top??40)}) offset=${anchor.contentCharOffset??null} text=<redacted>`);props.onSpeechControls?.(imported&&anchor?.contentBlockIndex!==undefined?{importedChunkIndex:anchor.contentBlockIndex,importedCharOffset:anchor.contentCharOffset??0}:anchor);}:undefined} entries={props.header??[]} footerEntries={footerReady()?props.footer??[]:[]} indexedEntries={indexedEntries()}/>
-    </>}><Show when={restored()?bookPage():undefined}>{page=><ReaderBookPage page={page()} width={props.width} height={props.height} round={round()} active={props.active&&restored()} touchOrigin={props.touchOrigin} header={props.header??[]} footer={props.footer??[]} blocks={blocks()} preset={props.preset} fontSize={props.fontSize} fonts={fonts()} environment={textEnvironment()} offlineMedia={props.offlineMedia} baseUrl={props.baseUrl} onImageSize={(index,width,height)=>untrack(()=>{const block=blocks()[index];if(!block||block.type==="text")return;const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(block,ratios()[index])!==ratio)setRatios({...ratios(),[index]:ratio});})} onTap={direction=>tap(direction)} onMedia={props.onMedia} onLongPress={props.onSpeechControls?line=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const start=line?{blockIndex:line.row.blockIndex,sourceStart:line.row.sourceStart??0}:bookPage()!.anchor;props.onSpeechControls?.(imported?{importedChunkIndex:start.blockIndex,importedCharOffset:start.sourceStart}:{contentBlockIndex:start.blockIndex,contentCharOffset:start.sourceStart});}:undefined}/>}</Show></Show>
+    </>}><Show when={restored()?bookPage():undefined}>{page=><ReaderBookPage cache={textCache} page={page()} width={props.width} height={props.height} round={round()} active={props.active&&restored()} touchOrigin={props.touchOrigin} header={props.header??[]} footer={props.footer??[]} blocks={blocks()} preset={props.preset} fontSize={props.fontSize} fonts={fonts()} environment={textEnvironment()} offlineMedia={props.offlineMedia} baseUrl={props.baseUrl} onImageSize={(index,width,height)=>untrack(()=>{const block=blocks()[index];if(!block||block.type==="text")return;const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(block,ratios()[index])!==ratio)setRatios({...ratios(),[index]:ratio});})} onTap={direction=>tap(direction)} onMedia={props.onMedia} onLongPress={props.onSpeechControls?line=>{if(tapTimer){tapTimer();tapTimer=undefined;}handle.pause();const start=line?{blockIndex:line.row.blockIndex,sourceStart:line.row.sourceStart??0}:bookPage()!.anchor;props.onSpeechControls?.(imported?{importedChunkIndex:start.blockIndex,importedCharOffset:start.sourceStart}:{contentBlockIndex:start.blockIndex,contentCharOffset:start.sourceStart});}:undefined}/>}</Show></Show>
 
     <View class="absolute h-[18] items-center justify-center" style={{insetL:(props.width-Math.min(160,props.width-24))/2,width:Math.min(160,props.width-24),...(props.pageMode?{insetT:props.height/2-9}:{insetB:0}),opacity:feedback()?1:0}}><Text class="text-xs text-[#45d6a7]">{feedback()}</Text></View>
   </View>;

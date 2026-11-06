@@ -249,3 +249,14 @@ if(mode==='saved')test('switching modes without scrolling returns to the same bo
  expect(visible(root)).toBe(expected);
  dispose();await pump();
 });
+
+if(mode==='saved')test('paged line slots keep their owners while text, media and geometry change',async()=>{
+ const {ReaderBookPage}=await import('../src/ui/ReaderBookPage.tsx');
+ const make=(text:string,left=12):any=>({anchor:{section:'body',character:0,blockIndex:0,sourceStart:0,sectionOffset:0},lines:[{row:{kind:'text',text,top:0,height:23,lineHeight:23,gap:0,blockIndex:0,character:0,fontSlot:2,scale:1,color:'#ffffffff'},left,top:12,width:128}]});
+ const [page,setPage]=createSignal(make('旧页'));
+ let stop!:()=>void;const root=createRoot(dispose=>{stop=dispose;return createComponent(ReaderBookPage,{get page(){return page();},width:233,height:233,round:false,active:true,header:[],footer:[],blocks:[{type:'text',style:'body',text:'正文'}],fontSize:14,environment:{pixelScale:2,rasterSupported:false,fontMetrics:()=>({cellWidth:14,cellHeight:18,baseline:14,lineHeight:23,rasterDensity:2})},onTap(){},onMedia(){}});});
+ const first=nodes(root).find(n=>n.props.debugName==='ReaderPageLine');expect(first).toBeDefined();expect(visible(root)).toContain('旧页');
+ setPage(make('新页',20));expect(nodes(root).find(n=>n.props.debugName==='ReaderPageLine')).toBe(first);expect(visible(root)).toContain('新页');expect(visible(root)).not.toContain('旧页');expect(first!.props.style.insetL).toBe(20);
+ const media=make('');media.lines[0].row={kind:'video',block:{type:'video',url:'https://example.invalid/video'},blockIndex:0,character:0,top:0,height:80,gap:0};setPage(media);expect(nodes(root).find(n=>n.props.debugName==='ReaderPageLine')).toBe(first);expect(visible(root)).toContain('视频');expect(visible(root)).not.toContain('新页');
+ setPage(make('返回页'));expect(visible(root)).toContain('返回页');stop();await pump();expect(gestures.size).toBe(0);
+});
