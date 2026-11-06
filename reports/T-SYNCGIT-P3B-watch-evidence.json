@@ -1,0 +1,228 @@
+{
+  "syntheticOnly": true,
+  "hostResource": {
+    "syntheticOnly": true,
+    "items": 2048,
+    "metadataBatchLimit": 32,
+    "perItemQueryBaseline": 2048,
+    "windows": [
+      {
+        "result": {
+          "status": "insufficient",
+          "freed": 0,
+          "scanned": 2048
+        },
+        "elapsedMillis": 23.24702200000138,
+        "sqlBridgeCalls": 70,
+        "scanBatchQueries": 65,
+        "bodyReadBytes": 0,
+        "maxRows": 32,
+        "peakProcessRssKiB": 81388
+      },
+      {
+        "result": {
+          "status": "insufficient",
+          "freed": 0,
+          "scanned": 2048
+        },
+        "elapsedMillis": 14.281981000000087,
+        "sqlBridgeCalls": 70,
+        "scanBatchQueries": 65,
+        "bodyReadBytes": 0,
+        "maxRows": 32,
+        "peakProcessRssKiB": 82932
+      },
+      {
+        "result": {
+          "status": "insufficient",
+          "freed": 0,
+          "scanned": 2048
+        },
+        "elapsedMillis": 13.618447999999262,
+        "sqlBridgeCalls": 70,
+        "scanBatchQueries": 65,
+        "bodyReadBytes": 0,
+        "maxRows": 32,
+        "peakProcessRssKiB": 82964
+      }
+    ],
+    "scope": "Bun/Linux metadata scanning; not physical watch acceptance"
+  },
+  "emulator": {
+    "batchLimit": 32,
+    "capacity": 4832452608,
+    "eviction": {
+      "freed": 128,
+      "scanned": 97,
+      "status": "sufficient"
+    },
+    "expiry": true,
+    "hostCalls": {
+      "content.files.discard": 5,
+      "content.files.publish": 4,
+      "content.files.read": 9,
+      "content.files.stat": 2,
+      "crypto.aesGcmDecrypt": 229,
+      "crypto.aesGcmEncrypt": 111,
+      "crypto.random": 4,
+      "crypto.v2.sign": 2,
+      "crypto.v2.signingKey": 1,
+      "crypto.v2.verify": 4,
+      "file.stat": 1,
+      "result": 1,
+      "secure.compareAndSet": 4,
+      "secure.get": 11,
+      "sql.query": 65,
+      "sql.transaction": 131
+    },
+    "perItemBaseline": 96,
+    "recovery": true,
+    "recoveryBodyBytes": 131075,
+    "scan": {
+      "freed": 0,
+      "scanned": 96,
+      "status": "insufficient"
+    },
+    "scanBodyReadBytes": 0,
+    "scanMetadataPageQueries": 4,
+    "scanMillis": 76,
+    "scanSqlQueries": 8,
+    "stableMetadata": true,
+    "syntheticOnly": true,
+    "peakProcessRssKiB": 157488,
+    "guestMemoryLimitBytes": 33554432,
+    "hostCallsByMethod": {
+      "crypto.v2.signingKey": 1,
+      "sql.transaction": 131,
+      "sql.query": 65,
+      "secure.get": 11,
+      "crypto.random": 4,
+      "secure.compareAndSet": 4,
+      "crypto.aesGcmEncrypt": 111,
+      "crypto.aesGcmDecrypt": 229,
+      "content.files.publish": 4,
+      "crypto.v2.sign": 2,
+      "crypto.v2.verify": 4,
+      "content.files.stat": 2,
+      "content.files.discard": 5,
+      "file.stat": 1,
+      "content.files.read": 9,
+      "result": 1
+    },
+    "maxHostRequestBytes": 155650
+  },
+  "emulatorOutcome": {
+    "status": "success",
+    "code": "completed",
+    "elapsedMs": 1166
+  },
+  "newTests": {
+    "watch": {
+      "count": 62,
+      "names": [
+        "P3B fixed eviction vector 0",
+        "P3B fixed eviction vector 1",
+        "P3B factory is inert by default",
+        "P3B auto_evict defaults off and survives reopen",
+        "P3B protects memo",
+        "P3B protects memo-image",
+        "P3B protects note-image",
+        "P3B protects unknown-rss",
+        "P3B protects recent-rss",
+        "P3B protects opened-boundary",
+        "P3B protects opened-now",
+        "P3B protects dirty",
+        "P3B rejects old-version independently",
+        "P3B rejects old-recipe independently",
+        "P3B rejects expired-receipt independently",
+        "P3B rejects partial-upload independently",
+        "P3B rejects missing-blob independently",
+        "P3B rejects wrong-scope independently",
+        "P3B rejects future-receipt independently",
+        "P3B offline-copy cannot authorize deletion",
+        "P3B peer-only cannot authorize deletion",
+        "P3B ten-minute-lease cannot authorize deletion",
+        "P3B historical-copy cannot authorize deletion",
+        "P3B staged-copy cannot authorize deletion",
+        "P3B concurrent open invalidates eviction",
+        "P3B concurrent edit invalidates eviction",
+        "P3B concurrent account-change invalidates eviction",
+        "P3B concurrent disable invalidates eviction",
+        "P3B old local account proof cannot authorize current cleanup",
+        "P3B fixed ordering is old RSS then unopened import then least recently opened import",
+        "P3B shared resources are retained until their last owner detaches",
+        "P3B placeholder re-download retains metadata and rejects bad plaintext hash",
+        "P3B clock null pauses eviction",
+        "P3B clock 999999999 pauses eviction",
+        "P3B unknown free space pauses eviction",
+        "P3B crash before-placeholder reopens consistently",
+        "P3B crash during-placeholder reopens consistently",
+        "P3B crash after-body-delete reopens consistently",
+        "P3B scan uses bounded metadata pages and zero body bytes",
+        "N07 minimal differences exclude unchanged entities and unrelated captured rows",
+        "N07 business schema rejects credentials in recovery values",
+        "N07 encrypted recovery and pin commit with active/edit acknowledgement",
+        "N07 stable copy IDs survive first expiry, append, restart and later expiry",
+        "N07 quota failure preserves edits and pendingChoice",
+        "N07 encryption failure preserves edits and pendingChoice",
+        "N07 closure failure preserves edits and pendingChoice",
+        "N07 io failure preserves edits and pendingChoice",
+        "N07 cas failure preserves edits and pendingChoice",
+        "N07 disabling affects future choices and retains prior promises",
+        "N07 tampered copyId cannot decrypt another copy",
+        "N07 clock rollback and unknown time retain ciphertext and pins",
+        "N07 expiry CAS failure keeps ciphertext and pins together",
+        "P3B real SIGKILL before-placeholder opens a complete SQLite state",
+        "P3B real SIGKILL during-placeholder opens a complete SQLite state",
+        "P3B real SIGKILL after-body-delete opens a complete SQLite state",
+        "N07 necessary body closure is encrypted, pinned, readable and released at expiry",
+        "N07 body hash failure cannot acknowledge local edits",
+        "P3B real content receiver detaches atomically and re-downloads into a fresh cache generation",
+        "N07 explicit restore creates pending edits without changing cloud or active state",
+        "P3B resumed deletion requires fresh current availability after placeholder commit",
+        "P3B lease endpoint stays closed before HTTP",
+        "P3B custody endpoint stays closed before HTTP"
+      ]
+    },
+    "framework": {
+      "count": 9,
+      "names": [
+        "resource journal detaches owner before bounded physical collection",
+        "resource journal shared current and recovery owners protect a resource",
+        "resource journal lost deletion reply retries without double counting freed bytes",
+        "resource journal retired identities cannot be reattached or revived",
+        "resource journal immutable identity allows same metadata and rejects replacement",
+        "resource journal CAS rolls back stale metadata and reference detach together",
+        "resource journal pages metadata and resources at 32 items",
+        "resource quota reserves persistently and rejects overcommit",
+        "resource journal staging reference prevents collection before owner commit"
+      ]
+    },
+    "emulator": {
+      "count": 1,
+      "names": [
+        "P3BSpaceGuestTest.spaceGuest"
+      ]
+    }
+  },
+  "validation": {
+    "watchFull": {
+      "passed": 3307,
+      "skipped": 4,
+      "failed": 0,
+      "files": 439
+    },
+    "watchFocused": {
+      "passed": 110,
+      "failed": 0
+    },
+    "frameworkFullExit": 0,
+    "typecheckExit": 0,
+    "emulatorExit": 0
+  },
+  "codeCommits": {
+    "watch": "b4649b53ba3bf0eb14faff7e9fdf8bd82a2df137",
+    "framework": "849aa6f62bc87d03313cb4f10c616934f17b2de4"
+  },
+  "frameworkDeliveryCommit": "f7a9bc85c5a0ebd6e8d257a796dc68267258320d"
+}
