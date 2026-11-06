@@ -1,9 +1,10 @@
+import {frameworkRoot} from '../framework-path';
 /** Collect existing HTML fixture literals plus explicit local captures. Outputs
  * private content only to --out; never checks captured articles into git. */
 import {createRequire} from 'node:module';
 import {resolve,dirname} from 'node:path';
 const arg=(key:string,fallback:string)=>process.argv.find(v=>v.startsWith(`--${key}=`))?.slice(key.length+3)??fallback;
-const framework=resolve(arg('framework','/home/wilf/data/PodJS/podjs-watch.wt-minor-rs1'));
+const framework=resolve(arg('framework',frameworkRoot));
 const parser=createRequire(resolve(framework,'vendor/pocketjs/package.json'))('@babel/parser');
 const root=resolve(import.meta.dir,'../..'),fixtures:{name:string;html:string}[]=[],seen=new Set<string>();
 const add=(name:string,value:unknown)=>{if(typeof value==='string'&&/<\s*\/?\s*[a-z][\w:-]*\b/i.test(value)&&!seen.has(value)){seen.add(value);fixtures.push({name,html:value});}};

@@ -1,3 +1,4 @@
+import {frameworkRoot} from '../framework-path';
 /** Mounted ReaderBody/NoteDetailScreen on the device runtime's QuickJS.
  * Native layout/raster/font/GPU timings are explicit synthetic IO boundaries.
  * Example: bun scripts/bench/reader-entry.ts --framework=... --out=/tmp/entry.js
@@ -9,7 +10,7 @@ import {resolve,dirname} from 'node:path';
 import {realpathSync} from 'node:fs';
 import {memoPlainText} from '../../src/notes/text.ts';
 const arg=(key:string,fallback:string)=>process.argv.find(v=>v.startsWith(`--${key}=`))?.slice(key.length+3)??fallback;
-const framework=resolve(arg('framework','/home/wilf/data/PodJS/podjs-watch.wt-c-k19')),pocket=resolve(framework,'vendor/pocketjs');
+const framework=resolve(arg('framework',frameworkRoot)),pocket=resolve(framework,'vendor/pocketjs');
 const req=createRequire(resolve(pocket,'package.json')), {transformSync}=req('@babel/core'),t=req('@babel/types');
 const out=resolve(arg('out','/tmp/reader-entry.js'));
 const aliases:Record<string,string>={'@podjs/framework':resolve(framework,'packages/framework/src/index.ts'),'@pocketjs/framework':resolve(pocket,'framework/src/index.ts'),'solid-js':resolve(pocket,'node_modules/solid-js/dist/solid.js'),'solid-js/universal':resolve(pocket,'node_modules/solid-js/universal/dist/universal.js')};

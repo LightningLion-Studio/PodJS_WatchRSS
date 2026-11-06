@@ -2,7 +2,7 @@
 # Build only. No adb, native/formal installation, keystore-properties load, or signing secrets.
 set -euo pipefail
 app=$(cd "$(dirname "$0")/../.." && pwd)
-framework=${PODJS_FRAMEWORK_SOURCE:-/home/wilf/data/PodJS/podjs-watch.wt-c}
+framework=${PODJS_FRAMEWORK_SOURCE:-$(bun "$app/scripts/framework-path.ts")}
 native=${WATCHRSS_RECOVERY_SOURCE:-/home/wilf/data/OPPO_Develop/Android_WatchRSS.wt-recovery}
 package=com.lightningstudio.watchrss.podjs.rehearsal
 bun "$framework/packages/cli/src/cli.ts" build --target=android-watch --project="$app"

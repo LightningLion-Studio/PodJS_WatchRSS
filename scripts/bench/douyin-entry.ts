@@ -1,9 +1,10 @@
+import {frameworkRoot} from '../framework-path';
 /** Full production navigation on QuickJS; synthetic IO and scratch KV only. */
 import {createRequire} from 'node:module';
 import {resolve,dirname} from 'node:path';
 import {realpathSync} from 'node:fs';
 const arg=(key:string,fallback:string)=>process.argv.find(v=>v.startsWith(`--${key}=`))?.slice(key.length+3)??fallback;
-const framework=resolve(arg('framework','/home/wilf/data/PodJS/podjs-watch.wt-c-k21')),pocket=resolve(framework,'vendor/pocketjs'),app=resolve(import.meta.dir,'../..');
+const framework=resolve(arg('framework',frameworkRoot)),pocket=resolve(framework,'vendor/pocketjs'),app=resolve(import.meta.dir,'../..');
 const req=createRequire(resolve(pocket,'package.json')),{transformSync}=req('@babel/core'),t=req('@babel/types');
 const out=resolve(arg('out','/tmp/douyin-entry.js'));
 const aliases:Record<string,string>={'@podjs/framework':resolve(framework,'packages/framework/src/index.ts'),'@pocketjs/framework':resolve(pocket,'framework/src/index.ts'),'solid-js':resolve(pocket,'node_modules/solid-js/dist/solid.js'),'solid-js/universal':resolve(pocket,'node_modules/solid-js/universal/dist/universal.js')};

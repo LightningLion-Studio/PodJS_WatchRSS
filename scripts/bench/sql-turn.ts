@@ -1,3 +1,4 @@
+import {frameworkRoot} from '../framework-path';
 import {htmlToText} from '../../src/core/html.ts';
 import {articlePreview} from '../../src/core/preview.ts';
 import {buildArticleBlocks} from '../../src/reader/media.ts';
@@ -49,7 +50,7 @@ ${source.match(/function mapArticle\([\s\S]*?\n\}/)![0]}
 ${getter.trim().replace('async getArticle(id)','async function getReaderArticle(id:string)').replace(/},$/,'}')}`;
 const runner=resolve(import.meta.dir,'sql-turn-runner.tsx');
 // Inject at build time; keep the fixture runner in source free of copied product logic.
-const bundle=arg('bundle','/tmp/sql-turn.js'),framework=arg('framework','/home/wilf/data/PodJS/podjs-watch.wt-c-k20');
+const bundle=arg('bundle','/tmp/sql-turn.js'),framework=arg('framework',frameworkRoot);
 await Bun.write(out+'.loader.ts',helper);
 const result=Bun.spawnSync(['bun',resolve(import.meta.dir,'reader-entry.ts'),`--framework=${framework}`,`--runner=${runner}`,`--sql-loader=${out}.loader.ts`,`--sql-fixture=${out}`,`--mode=app`,`--out=${bundle}`],{stdout:'inherit',stderr:'inherit'});
 if(result.exitCode)throw Error('SQL probe build failed');

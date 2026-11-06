@@ -1,8 +1,9 @@
+import {frameworkRoot} from '../framework-path';
 import {createRequire} from 'node:module';
 import {resolve,dirname} from 'node:path';
 const arg=(key:string,fallback:string)=>process.argv.find(v=>v.startsWith(`--${key}=`))?.slice(key.length+3)??fallback;
 if(arg('runtime','quickjs')!=='quickjs')throw Error('QuickJS required');
-const framework=resolve(arg('framework','/home/wilf/data/PodJS/podjs-watch.wt-minor-rs1')),pocket=resolve(framework,'vendor/pocketjs');
+const framework=resolve(arg('framework',frameworkRoot)),pocket=resolve(framework,'vendor/pocketjs');
 const req=createRequire(resolve(pocket,'package.json')), {transformSync}=req('@babel/core');
 const out=resolve(arg('out','/tmp/rs1-note.js'));
 const aliases:Record<string,string>={'@podjs/framework':resolve(framework,'packages/framework/src/index.ts'),'solid-js':resolve(pocket,'node_modules/solid-js/dist/solid.js')};

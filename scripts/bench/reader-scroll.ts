@@ -1,3 +1,4 @@
+import {frameworkRoot} from '../framework-path';
 /** Build a standalone, instrumented copy; production sources are not patched.
  * bun scripts/bench/reader-scroll.ts --framework=... --out=.../baseline.js
  * bun baseline.js --html=... --timing=... --out=.../baseline.json
@@ -8,7 +9,7 @@ import {createRequire} from "node:module";
 import {resolve, dirname} from "node:path";
 import {realpathSync} from "node:fs";
 const arg=(name:string,fallback:string)=>process.argv.find(v=>v.startsWith(`--${name}=`))?.slice(name.length+3)??fallback;
-const framework=resolve(arg("framework","/home/wilf/data/PodJS/podjs-watch.wt-c"));
+const framework=resolve(arg("framework",frameworkRoot));
 const pocket=resolve(framework,"vendor/pocketjs");
 const require=createRequire(resolve(pocket,"package.json"));
 const {transformSync}=require("@babel/core"),t=require("@babel/types");

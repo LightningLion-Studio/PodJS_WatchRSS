@@ -1,3 +1,4 @@
+import {frameworkRoot} from '../framework-path';
 /** Offline refresh-all replay. Read-only local snapshot supplies real body/row
  * shapes; reconstructed RSS/Atom is explicitly not an upstream capture. Bun
  * executes the production repository SQL against a private SQLite copy; QuickJS
@@ -10,7 +11,7 @@ import {resolve,dirname} from 'node:path';
 import {WatchRssRepository} from '../../src/core/repository.ts';
 const arg=(k:string,d='')=>process.argv.find(v=>v.startsWith(`--${k}=`))?.slice(k.length+3)??d;
 const snapshot=arg('db');if(!snapshot)throw Error('--db=<readonly snapshot> required');
-const framework=arg('framework','/home/wilf/data/PodJS/podjs-watch.wt-c-k21'),out=arg('out','/tmp/refresh-all.js');
+const framework=arg('framework',frameworkRoot),out=arg('out','/tmp/refresh-all.js');
 const folder=mkdtempSync(resolve(tmpdir(),'refresh-replay-')),path=resolve(folder,'db.sqlite');
 copyFileSync(snapshot,path);const raw=new Database(path),fixed=1750000000000,clock=Date.now;Date.now=()=>fixed;
 try{

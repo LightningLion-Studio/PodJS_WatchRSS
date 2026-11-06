@@ -1,3 +1,5 @@
+import {resolve} from 'node:path';
+import {frameworkRoot} from '../../scripts/framework-path';
 import {contentFixture} from './content-fixture';
 import {test,expect} from 'bun:test';
 import {createHash,createHmac,verify,createPublicKey,randomBytes} from 'node:crypto';
@@ -90,8 +92,8 @@ test('QR configure/key/finish readiness requires verified bootstrap and batch at
 });
 test('host crypto orphan cleanup touches only staging files; secret service arguments are absent from PERF_TRACE',async()=>{
  const {createCloudHostPorts}=await import('../../src/cloud/host-ports');const deleted:string[]=[];const ports=createCloudHostPorts(async<T>(m:string,args:any)=>{if(m==='file.list')return{entries:[{path:'cloud-crypto/.pod-write-orphan.part'},{path:'cloud-crypto/keep.bin'}]} as T;if(m==='file.delete')deleted.push(args.path);return{} as T;},guard);await ports.cleanupCrypto();expect(deleted).toEqual(['cloud-crypto/.pod-write-orphan.part']);
- const java=await Bun.file('/home/wilf/data/PodJS/podjs-watch.wt-cloud-v2/platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java').text();expect(java).not.toContain('args.toString().substring');expect(java).toContain('private static final boolean PERF_TRACE = false;');
- const gradle=await Bun.file('/home/wilf/data/PodJS/podjs-watch.wt-cloud-v2/platforms/android/runtime/build.gradle.kts').text();expect(gradle).toContain('dependsOn(verifyReleaseServiceTracing)');
+ const java=await Bun.file(resolve(frameworkRoot,'platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java')).text();expect(java).not.toContain('args.toString().substring');expect(java).toContain('private static final boolean PERF_TRACE = false;');
+ const gradle=await Bun.file(resolve(frameworkRoot,'platforms/android/runtime/build.gradle.kts')).text();expect(gradle).toContain('dependsOn(verifyReleaseServiceTracing)');
 });
 
 test('concurrent account saves reject the second owner, and an old refresh cannot resurrect logout',async()=>{
