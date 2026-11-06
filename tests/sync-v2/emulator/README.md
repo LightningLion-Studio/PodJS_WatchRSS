@@ -60,3 +60,52 @@ All book rows must have string H64 fingerprints and the correct derived bookId,
 including instanceId when present. The normal reader and a separate raw-envelope
 inspection must agree. No body download, account publication or business apply
 occurs in this mode.
+
+P3A live content acceptance (opt-in; product startup remains disabled):
+
+```sh
+bash tests/sync-v2/emulator/run-live-p3.sh \
+  /home/wilf/data/PodJS/podjs-watch.wt-syncv2-p3 \
+  emulator-5578 /path/to/owned/evidence/attempt
+```
+
+This runner additionally verifies the AVD name `WrssP3WatchLive`. The owner must
+create that isolated Wear OS emulator and stop/delete it after acceptance. The
+runner installs `adb reverse tcp:18942 tcp:18942`; the guest only accepts the
+loopback integration backend. No backend service or database is stopped/reset.
+The fixed synthetic watch fixture is loaded from an app-private file, never from
+compiled assets or command arguments. The file is removed after the run.
+
+`P3LiveIntegrationTest` uses real Android `PodHttpServices`, `PodContentFiles`,
+SQLite and crypto, with a separate content network executor. The guest runs the
+product P2 reader/publisher and P3 engine. It uploads complete bodies, drops real
+successful prefix/tail PUT responses, queries signed have/want, replays the exact
+original reserve request, and verifies no repeated body frames. It checks C9
+POST/GET demand, rank0 selection and waiting conditions. Real authenticated
+`events?waitMillis=0` requests and local small-state transactions run concurrently
+with PUT. The final checks authenticate current account rows and download one
+complete body from each available peer author, including recipe, block and full
+plaintext fingerprint checks. Completed sources are checked for zero reexport.
+
+The CAS probe first submits a separately signed watch request for the prepared
+commit. This advances the shared ref while preserving its complete captured tree.
+The original request must fail CAS; the normal P2 reader authenticates the new
+head and the normal publisher prepares a new commit. No peer rows or refs are
+cleared. No body is exported again during this retry. Test rows remain available
+for other clients' read-only interoperability checks.
+
+Fresh emulator storage lacks the old watch's local signing reservation journal.
+`live-p3-watermark.py` reconstructs the fixed synthetic lower bound from the
+retained P2 `c5-full/summary.json` and its guest source: the successful publication
+was followed by two C6 probes, each reserving another sequence. It then retains
+every subsequent local `author-reserved` event in `../author-watermark.json`.
+The guest authenticates the old witness commit or a newer own ref before seeding
+its NEW test projection. This is explicit test recovery from retained evidence;
+it does not add a production recovery policy or derive a sequence from time.
+Keep that public journal with the evidence between runs. Never replace the
+original signing binding or reset shared server objects to resolve a collision.
+
+Synthetic signer protection is unchanged from the P2 harness: JCA loads the fixed
+test private key, and native local storage uses an injected test AES key. This
+proves wire/codec interoperability, not production non-exportability. Full app
+UI, physical watch power and production accounts remain outside this harness.
