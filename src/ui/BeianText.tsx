@@ -7,8 +7,6 @@ import { hasCapability } from "@podjs/framework/watch";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor } from "solid-js";
 import {composeLineHeightPx,composeSpToPx} from './compose-font-scale.ts';
 
-const WATCH_FONT_ASSET = "fonts/watch-sans.ttf";
-
 export interface BeianTextLine {
   heightPx: number;
   options?: SystemTextLineOptions;
@@ -26,9 +24,8 @@ export function useBeianText(width: Accessor<number>, density: number) {
     setMeasured(undefined);
     if (!hasCapability("text.layout") || !hasCapability("text.raster")) return;
     const paragraph = (text: string, size: number, lineHeight: number, colorArgb: number, fontScale: number): TextLayoutOptions => ({
-      text, widthPx: availablePx, fontAsset: WATCH_FONT_ASSET,
-      // Native registers this same variable resource as Normal/Medium/SemiBold.
-      // Its Medium descriptor does not itself change the default wght=400 axis.
+      text, widthPx: availablePx,
+      // The host resolves the device font for both measurement and pixels.
       fontWeight: 400,
       fontSizePx: composeSpToPx(size,density,fontScale),
       lineHeightPx: composeLineHeightPx(lineHeight,composeSpToPx(size,density,fontScale),density,fontScale),

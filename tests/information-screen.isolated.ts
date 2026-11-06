@@ -182,9 +182,9 @@ test("failure uses native typography and centered natural geometry before retry 
   const messageRequest = nativeRequests.find(options => options.text === failure)!;
   const labelRequest = nativeRequests.find(options => options.text === "重新加载")!;
   const nativeFontSize = Math.fround(37.6); // Compose 14sp at fixed Info density 2 and fontScale 1.3.
-  expect(messageRequest).toMatchObject({widthPx: 370, align: "center", fontAsset: "fonts/watch-sans.ttf", fontWeight: 400, fontSizePx: nativeFontSize});
-  expect(nativeMeasurements).toEqual([{text: "重新加载", fontAsset: "fonts/watch-sans.ttf", fontWeight: 400, fontSizePx: nativeFontSize, textMotion: "static"}]);
-  expect(labelRequest).toMatchObject({widthPx: 151, align: "left", fontAsset: "fonts/watch-sans.ttf", fontSizePx: nativeFontSize});
+  expect(messageRequest).toMatchObject({widthPx: 370, align: "center", fontWeight: 400, fontSizePx: nativeFontSize});
+  expect(nativeMeasurements).toEqual([{text: "重新加载", fontWeight: 400, fontSizePx: nativeFontSize, textMotion: "static"}]);
+  expect(labelRequest).toMatchObject({widthPx: 151, align: "left", fontSizePx: nativeFontSize});
   const message = nodes.find(node => node.props.accessibilityLabel === failure)!;
   const control = nodes.find(node => node.props.accessibilityRole === "button" && node.props.accessibilityLabel === "重新加载")!;
   // Native host replies: two message lines total 69px, one label line 35px.

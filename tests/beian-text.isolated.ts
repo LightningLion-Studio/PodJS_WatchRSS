@@ -65,7 +65,7 @@ const nativeSizes=[
  {fontScale:1.3,titleSize:48.599998474121094,titleLineHeight:60.17143630981445,subtitleSize:31.200000762939453,subtitleLineHeight:36.400001525878906},
 ] as const;
 function expectedOptions(text:string,widthPx:number,fontSizePx:number,lineHeightPx:number,colorArgb:number):TextLayoutOptions {
- return {text,widthPx,fontAsset:'fonts/watch-sans.ttf',fontWeight:400,fontSizePx,lineHeightPx,lineHeightMode:'span',fallbackLineSpacing:true,lineBreak:'simple',align:'center',textMotion:'static',colorArgb};
+ return {text,widthPx,fontWeight:400,fontSizePx,lineHeightPx,lineHeightMode:'span',fallbackLineSpacing:true,lineBreak:'simple',align:'center',textMotion:'static',colorArgb};
 }
 
 for(const native of nativeSizes)test(`fontScale ${native.fontScale} sends exact native typography and the original 400-weight asset`,async()=>{

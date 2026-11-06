@@ -1,7 +1,7 @@
 {
-  "path": "/home/wilf/data/PodJS/podjs-watch",
-  "revision": "b57b7ec575bba007f8ba4999c8aec1004e5cf143",
+  "path": "/home/wilf/data/PodJS/podjs-watch.wt-sysfont",
+  "revision": "b7f155ac27d41411a64a50a5d5abd3a91fc29f2f",
   "requiresLocalChanges": false,
-  "pocketjsRevision": "5f76221c21057a37db2926bc141effc06b933924",
-  "branch": "watchrss-migration"
+  "pocketjsRevision": "afe849f3c586bb1d5fb79f5410bd7016c5066032",
+  "branch": "sysfont"
 }

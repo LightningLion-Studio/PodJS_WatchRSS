@@ -187,11 +187,11 @@ function InformationError(props:{width:number;height:number;message:string;activ
       if (!Number.isFinite(environment.fontScale) || environment.fontScale <= 0) throw Error('Invalid system font scale');
       const fontSizePx = composeSpToPx(14, 2, environment.fontScale);
       const paragraph = (text:string, widthPx:number):TextLayoutOptions => ({
-        text, widthPx, fontAsset:'fonts/watch-sans.ttf', fontWeight:400, fontSizePx,
+        text, widthPx,  fontWeight:400, fontSizePx,
         lineHeightPx:composeLineHeightPx(17, fontSizePx, 2, environment.fontScale),
         lineHeightMode:'span', fallbackLineSpacing:true, lineBreak:'simple', align:'center', textMotion:'static', colorArgb:0xfff5f5f5,
       });
-      measure = textLayout.measure({text:'重新加载', fontAsset:'fonts/watch-sans.ttf', fontWeight:400, fontSizePx, textMotion:'static'});
+      measure = textLayout.measure({text:'重新加载',  fontWeight:400, fontSizePx, textMotion:'static'});
       const intrinsic = await measure.result;
       if (!current) return;
       if (!Number.isFinite(intrinsic.widthPx) || intrinsic.widthPx < 0) throw Error('Invalid retry label width');

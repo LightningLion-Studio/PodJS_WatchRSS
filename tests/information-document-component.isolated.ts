@@ -503,9 +503,9 @@ test("Compose font scale uses Info's fixed density and the footer uses its raw f
   expect(visible).toHaveLength(1);
   expect(visible[0]!.hidden).toBe(true);
   const options = visible[0]!.node.props.options as SystemTextLineOptions;
-  expect(options).toMatchObject({fontAsset: "fonts/watch-sans.ttf", fontWeight: 400, heightPx: 25, baselinePx: 20, widthPx: 281, align: "left"});
+  expect(options).toMatchObject({fontWeight: 400, heightPx: 25, baselinePx: 20, widthPx: 281, align: "left"});
   expect(options.fontPath).toBeUndefined();
-  expect(options.paragraph).toMatchObject({fontAsset: "fonts/watch-sans.ttf", text: BEIAN_NUMBER});
+  expect(options.paragraph).toMatchObject({text: BEIAN_NUMBER});
   expect(footer.entry.height).toBe(18.5); // native six-dp gap plus 25px/2 measured text
   expect(footer.nodes.find(({node}) => node.props.accessibilityLabel === BEIAN_NUMBER)!.node.props.style).toMatchObject({insetL: 32.5, width: 140.5});
 });
@@ -521,7 +521,7 @@ test("a large-font footer wraps left within the centered available box and keeps
   expect(lines.map(({node}) => (node.props.options as SystemTextLineOptions).heightPx)).toEqual([29, 25]);
   for (const {node} of lines) {
     const options = node.props.options as SystemTextLineOptions;
-    expect(options).toMatchObject({fontAsset: "fonts/watch-sans.ttf", widthPx: 304, align: "left"});
+    expect(options).toMatchObject({widthPx: 304, align: "left"});
     expect(options.paragraph).toMatchObject({widthPx: 304, align: "left"});
   }
   expect(footer.entry.height).toBe(33);
