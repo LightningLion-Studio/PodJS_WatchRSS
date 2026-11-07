@@ -2,9 +2,17 @@ import {SyncV2Http} from './http';
 import {exact,hexId,oid,uint,jsonBytes,canonical,type Scope} from './protocol';
 import type {SigningPort} from './signing';
 import {signedAvailability} from './service-key';
+import {custodyBody} from './peer-custody';
+import {verifySigned} from './signing';
+import type {ApprovedKey} from './head-pins';
 /** Content-only methods on a separate HTTP instance/transport. */
 export class WatchContentHttp {
  constructor(readonly http:SyncV2Http,readonly crypto:SigningPort,readonly now:()=>number){if(!http.contentWrite)throw Error('feature_disabled');}
+ private async custodySignature(value:any,approved:(id:string)=>Promise<ApprovedKey>){exact(value,['body','signature']);const b=custodyBody(value.body,this.http.scope),key=await approved(b.holderDeviceId);if(key.deviceId!==b.holderDeviceId)throw Error('member_unknown');await verifySigned(this.crypto,key.publicKey,'wrss.sync.v2/custody-pin-sign',b,value.signature);return b;}
+ async custody(value:any,approved:(id:string)=>Promise<ApprovedKey>){
+  const b=await this.custodySignature(value,approved),v=await this.http.json('POST','/availability/custody',value);exact(v,['version','scope','pinId','state','result']);if(v.pinId!==b.pinId||v.state!=='active')throw Error('invalid_schema');await this.custodySignature(v.result,approved);if(canonical(v.result.body)!==canonical(b))throw Error('idempotency_conflict');return v;
+ }
+ async custodyGet(pinId:string,approved:(id:string)=>Promise<ApprovedKey>){hexId(pinId,32);const v=await this.http.json('GET','/availability/custody/'+pinId);exact(v,['version','scope','body','signature','state']);if(!['active','released'].includes(v.state)||v.body.pinId!==pinId)throw Error('invalid_schema');await this.custodySignature({body:v.body,signature:v.signature},approved);return v;}
  async have(windowId:string,ids:string[]){
   hexId(windowId,32);if(ids.length>512||ids.some((id,i)=>i>0&&id<=ids[i-1]!))throw Error('invalid_schema');
   const v=await this.http.json('POST','/objects/have-want',{scope:this.http.scope,windowId,oids:ids});exact(v,['version','scope','windowId','objects']);if(v.windowId!==windowId||!Array.isArray(v.objects)||v.objects.length!==ids.length)throw Error('invalid_schema');

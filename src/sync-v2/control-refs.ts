@@ -5,7 +5,7 @@ import {objectOid} from './sealed';
 import {verifySigned,type SigningPort} from './signing';
 import type {SyncV2Http} from './http';
 import type {ApprovedKey} from './head-pins';
-export async function readControlRefs(http:SyncV2Http,crypto:SigningPort,approved:(deviceId:string)=>Promise<ApprovedKey>,windowId:string,parent:{type:'state'|'recipe';oid:string;value:any}){
+export async function readControlRefs(http:Pick<SyncV2Http,'scope'|'stateRefs'|'recipeRefs'|'object'>,crypto:SigningPort,approved:(deviceId:string)=>Promise<ApprovedKey>,windowId:string,parent:{type:'state'|'recipe';oid:string;value:any}){
  oid(parent.oid,parent.type);const state=parent.type==='state',type=state?'state-refs':'recipe-refs',mapping=await(state?http.stateRefs(windowId,parent.oid):http.recipeRefs(windowId,parent.oid));
  exact(mapping,['version','scope','parentOid','refsOid','authorDeviceId','keyId','totalBytes']);sameScope(mapping.scope,http.scope);if(mapping.version!==2||mapping.parentOid!==parent.oid)throw Error('invalid_schema');oid(mapping.refsOid,type);hexId(mapping.authorDeviceId,32);hexId(mapping.keyId,32);if(uint(mapping.totalBytes,262144)===0)throw Error('invalid_schema');
  const raw=await http.object(mapping.refsOid,undefined,windowId);if(raw.length!==mapping.totalBytes||objectOid(type,raw)!==mapping.refsOid)throw Error('hash_mismatch');const refs=parseCanonicalJson(raw);exact(refs,['body','signature']);const b=refs.body;exact(b,['scope',state?'stateOid':'recipeOid',state?'segmentOids':'blobOids']);sameScope(b.scope,http.scope);

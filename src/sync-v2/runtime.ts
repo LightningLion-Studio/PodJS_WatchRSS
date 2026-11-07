@@ -31,7 +31,7 @@ export function watchSyncV2(options:{enabled?:boolean;indexWrite?:boolean;bodyRe
       const current=await options.session();if(accountIdFromUserId(current.userId)!==accountId)throw Error('cloud_account_busy');sameScope(current.scope,session.scope);
      }}).open();})().catch(error=>{contentOpen=undefined;throw error;});
   },async pull(){const window=await http.negotiate([],['note-conflicts.v1']);await authors.refresh(window.windowId);return reader.pull(window);},async publish(){
-   const current=await local.store.readState();if(current.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(current.pendingChoice)throw Error('choice_pending');
+   const current=await local.store.readState();if(current.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(current.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(current.pendingChoice)throw Error('choice_pending');
    const window=await http.negotiate([],[]),revision=await authors.refresh(window.windowId),identity=await signer.register(http,revision,now()),own=window.refs.find((ref:any)=>ref.deviceId===identity.deviceId),requestId=hex(await crypto.random(16));
    await publisher.prepare(identity.deviceId,identity.alias,{commitOid:own?.commitOid??null,revision:own?.refRevision??'0'},requestId);return publisher.flush();
   }};

@@ -7,11 +7,12 @@ import {localProjectionCipher,projectionSql} from './host';
 import {WatchSpaceStore,type CachedBody} from './space-store';
 import {WatchSpaceV2} from './space';
 import {WatchRecovery,type RecoveryPort} from './recovery';
+import type {PeerCustodyStore} from './peer-custody';
 /** Caller-owned isolated entry. No account write, timer, original-body delete,
  * lease/custody action or UI string. Reuse the authenticated P3 receive cache. */
-export async function watchSpaceV2(options:{enabled?:boolean;host:CloudHostRequest;projection:WatchProjectionStore;content:WatchContentEngine;accountScope:string;trustedNow:()=>number|null;recovery?:Partial<Pick<RecoveryPort,'reserve'>>;event?:ConstructorParameters<typeof WatchSpaceV2>[1]['event']}){
+export async function watchSpaceV2(options:{enabled?:boolean;host:CloudHostRequest;projection:WatchProjectionStore;content:WatchContentEngine;accountScope:string;trustedNow:()=>number|null;peerCustody?:PeerCustodyStore;recovery?:Partial<Pick<RecoveryPort,'reserve'>>;event?:ConstructorParameters<typeof WatchSpaceV2>[1]['event']}){
  if(options.enabled!==true)return null;const {content,host,projection}=options,binding=content.store.prefix,store=new WatchSpaceStore(projectionSql(host),localProjectionCipher(host,'space:'+options.accountScope+':'+binding),content.store.files,binding);await store.init();const closures=new WatchBusinessClosure(projection,content);
- const space=new WatchSpaceV2(store,{projection,remote:content.remote,trustedNow:options.trustedNow,event:options.event,
+ const space=new WatchSpaceV2(store,{projection,remote:content.remote,peerCustody:options.peerCustody,trustedNow:options.trustedNow,event:options.event,
   capacity:async()=>{const stat=await host<{usableBytes?:number}>('file.stat',{path:binding});return Number.isSafeInteger(stat.usableBytes)?stat.usableBytes!:null;},
   detach:body=>content.prepareEviction(body.item.entityKey,body.item.bodyRevision),
   localProof:(body,check)=>closures.cloudProof(body,check),

@@ -21,7 +21,7 @@ export class WatchIndexPublisher {
  /** Reserve the author sequence before any signing. Crashes may leave gaps. */
  async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string){
   if(!this.http.indexWrite)throw Error('feature_disabled');await this.http.capabilities();hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);if(own.commitOid!==null)oid(own.commitOid,'commit');
-  let before=await this.store.readState();if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice)throw Error('choice_pending');if(before.account&&before.editBase.generation!==before.account.generation)throw Error('rollback_conflict');
+  let before=await this.store.readState();if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice)throw Error('choice_pending');if(before.account&&before.editBase.generation!==before.account.generation)throw Error('rollback_conflict');
   const saved=before.cloud??{deviceSequence:'0',current:null,pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',pendingPublish:null};if(saved.pendingPublish)throw Error('publication_pending');
   if((await this.store.checkpoint())?.phase!=='complete')throw Error('projection_incomplete');
   let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=parseCanonicalJson(await this.http.object(own.commitOid)),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
@@ -56,7 +56,7 @@ export class WatchIndexPublisher {
   const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'}};
   await this.store.controlUpdate(latest,next);return {commitOid:commit.oid,objects:objects.size,rows:rows.size,deviceSequence:sequence};
  }
- private async pending(){const before=await this.store.readState(),plan=before.cloud?.pendingPublish;if(!plan)throw Error('publication_missing');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice||plan.capturedLocalRevision!==before.localChangeRevision||plan.request.account.body.expectedOid!==(before.account?.oid??null)||plan.request.account.body.expectedRevision!==(before.account?.revision??'0'))throw Error('choice_stale');return {before,plan};}
+ private async pending(){const before=await this.store.readState(),plan=before.cloud?.pendingPublish;if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(!plan)throw Error('publication_missing');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice||plan.capturedLocalRevision!==before.localChangeRevision||plan.request.account.body.expectedOid!==(before.account?.oid??null)||plan.request.account.body.expectedRevision!==(before.account?.revision??'0'))throw Error('choice_stale');return {before,plan};}
  /** A response-lost retry queries the original request ID before touching refs. */
  flush(){return this.flushing??=this.flushOnce().finally(()=>{this.flushing=undefined;});}
  private async flushOnce(){

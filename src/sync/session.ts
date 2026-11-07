@@ -10,6 +10,7 @@ import {parseArticleManifest,selectArticleBodyRequests,type ArticleManifest} fro
 import {buildCursorResponse,buildManifestResponse,buildManifestFrames,buildChunkedResponseFrames,combineManifestFrames,manifestBatchCount,parseCursor,parseChangeSequence,parseResponseAck,parseSources,type SyncCursor,type ChangeSequence,type ResponseAck,type SyncedSource} from './library-wire.ts';
 import type {PreparedArticle} from './article-export.ts';
 import {LibrarySnapshotBusyError} from './manifest-contention';
+import type {WatchLocalObjectSession} from '../sync-v2/local-session';
 const {string,trim,bool,optLong}=wireFields;
 /** Byte deltas, including the four-byte prefix; never article/resource counts. */
 export interface TransferByteProgress {direction:'read'|'write';bytes:number}
@@ -44,6 +45,7 @@ export interface SessionActionResult {request:JsonObject;response:JsonObject;ack
 /** Opaque connection identity generated locally; never taken from wire fields. */
 export interface SyncActionContext {readonly session:object; checkCancelled?:()=>void; onCancel?:(cancel:()=>void)=>()=>void; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
 export interface LibrarySessionOptions {
+ localObjects?:WatchLocalObjectSession;
  actionSession?:object;
  acquireSession?:()=>()=>void;
  filterRequest?:RequestFilter<JsonObject,JsonObject>;
@@ -112,7 +114,7 @@ export class LibrarySyncSession {
  private async timed<T>(event:string,action:()=>Promise<T>):Promise<T>{const start=this.monotonic();try{return await action();}finally{this.log.event(event,{elapsedMs:Math.max(0,Math.round(this.monotonic()-start))});}}
  private check():void {if(this.cancelled)throw this.cancelled;}
  private status(status:SyncSessionStatus):void {this.options.onStatus?.(status);}
- private close():Promise<void>{if(this.closeJob)return this.closeJob;this.closed=true;return this.closeJob=(async()=>{try{await this.connection.close();}catch(error){if(this.aborting)this.log.event("server.exchange.abort.close.failed",{},"W");throw error;}})();}
+ private close():Promise<void>{if(this.closeJob)return this.closeJob;this.closed=true;return this.closeJob=(async()=>{try{await this.options.localObjects?.close();await this.connection.close();}catch(error){if(this.aborting)this.log.event("server.exchange.abort.close.failed",{},"W");throw error;}})();}
  private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
  private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
  private async ack(minimumWaitMs=0):Promise<ResponseAck|null>{
@@ -131,6 +133,7 @@ export class LibrarySyncSession {
    const localId=await this.repository.deviceId();this.check();
    while(true){
     this.status({phase:'request'});let request=await this.read(timeout);releaseSession??=this.options.acquireSession?.();
+    if(typeof request.action==='string'&&request.action.startsWith('syncObjectsV2.')&&this.options.localObjects){if(await this.options.localObjects.handle(request,this.connection))return results;continue;}
     const accepted=!persistent&&bool(request.requestPersistentSession)&&bool(request.supportsPersistentSession);
     if(accepted){persistent=true;this.persistentSession=true;timeout=15*60*1000;this.log.event("server.session.accepted");}
     if(string(request.action)==='syncSession'){
@@ -171,7 +174,7 @@ export class LibrarySyncSession {
       if(descriptor&&this.options.offerIpEndpoint)try{ipUpgradeAccepted=await this.options.offerIpEndpoint(descriptor);}catch{}
       this.log.event("request.syncLibrary.probe",{remoteDeviceId:request.deviceId,ipUpgradeAccepted});
       const account=await this.options.handleAction?.accountBinding?.();this.check();
-      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
+      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...await this.options.localObjects?.probe(request),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
      }
      else if(request.action==='syncDomains')response=await this.domainAction(request,persistent,localId);
      else if(this.options.handleAction){
