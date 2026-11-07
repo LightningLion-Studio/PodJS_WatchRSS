@@ -4,7 +4,7 @@ import {sha256Hex} from '@podjs/framework/crypto';
 import {exact,hexId,uint,jsonBytes,parseCanonicalJson,canonical,type Scope} from './protocol';
 import {parseNetwork} from './http';
 import {sameScope} from './wire';
-import {anyObjectOid,partHeader,validatePart,type PartHeader,type LocalObjectStore} from './local-objects';
+import {anyObjectOid,partHeader,partFrameHeader,validatePart,type PartHeader,type LocalObjectStore} from './local-objects';
 import {checkedResumeOffset} from './resume';
 import type {WatchContentStore} from './content-store';
 export function localObjectFrames(stream:FrameByteStream,scope:Scope,sessionId:string,enabled:()=>boolean){return new ObjectFrameConnection<any,PartHeader>(stream,{
@@ -17,16 +17,16 @@ export function localRequest(value:any){exact(value,['requestId','action','body'
 export const localResponse=(requestId:string,body:any)=>({requestId,ok:true,body,error:null});
 export const localFailure=(requestId:string,code:string)=>({requestId,ok:false,body:null,error:{code,retryable:false,retryAfterMillis:null,details:{}}});
 export class LocalReadService {
- constructor(readonly objects:LocalObjectStore,readonly scope:Scope,readonly sessionId:string,private readonly window:(id:string)=>Promise<void>,private readonly nonce:()=>Promise<string>,private readonly check:()=>void){}
+ constructor(readonly objects:LocalObjectStore,readonly scope:Scope,readonly sessionId:string,private readonly window:(id:string)=>Promise<void>,private readonly nonce:()=>Promise<string>,private readonly check:()=>void|Promise<void>){}
  async read(request:any,frames:ObjectFrameConnection<any,PartHeader>){
-  localRequest(request);this.check();const {body:b,action,requestId}=request;sameScope(b?.scope,this.scope);hexId(b.windowId,32);await this.window(b.windowId);this.check();
+  localRequest(request);await this.check();const {body:b,action,requestId}=request;sameScope(b?.scope,this.scope);hexId(b.windowId,32);await this.window(b.windowId);await this.check();
   if(action==='syncObjectsV2.stateRefsGet'||action==='syncObjectsV2.recipeRefsGet'){
-   exact(b,['scope','windowId','parentOid']);const refs=await this.objects.refs(b.parentOid,action.includes('stateRefs')?'state':'recipe');this.check();await frames.writeControl(localResponse(requestId,refs));return;
+   exact(b,['scope','windowId','parentOid']);const refs=await this.objects.refs(b.parentOid,action.includes('stateRefs')?'state':'recipe');await this.check();await frames.writeControl(localResponse(requestId,refs));return;
   }
-  if(action!=='syncObjectsV2.objectGet')throw Error('unknown_action');exact(b,['scope','windowId','oid','range']);anyObjectOid(b.oid);const source=await this.objects.object(b.oid);this.check();
+  if(action!=='syncObjectsV2.objectGet')throw Error('unknown_action');exact(b,['scope','windowId','oid','range']);anyObjectOid(b.oid);const source=await this.objects.object(b.oid);await this.check();
   let start=0,end=source.size-1;if(b.range!==null){try{exact(b.range,['start','end']);start=uint(b.range.start);end=uint(b.range.end);}catch{throw Error('invalid_range');}if(start>end||end>=source.size)throw Error('invalid_range');}
-  const transferId=await this.nonce();hexId(transferId,32);this.check();await frames.writeControl(localResponse(requestId,{scope:this.scope,oid:b.oid,totalBytes:source.size,start,end,transferId}));
-  for(let at=start;at<=end;){this.check();await this.window(b.windowId);const payload=await source.read(at,Math.min(65536,end-at+1));if(!payload.length)throw Error('closure_incomplete');this.check();await frames.writePart({scope:this.scope,sessionId:this.sessionId,transferId,oid:b.oid,totalBytes:source.size,offset:at,partBytes:payload.length,partSha256:sha256Hex(payload)},payload);at+=payload.length;}
+  const transferId=await this.nonce();hexId(transferId,32);await this.check();await frames.writeControl(localResponse(requestId,{scope:this.scope,oid:b.oid,totalBytes:source.size,start,end,transferId}));
+  for(let at=start;at<=end;){await this.check();await this.window(b.windowId);const payload=await source.read(at,Math.min(65536,end-at+1));if(!payload.length)throw Error('closure_incomplete');await this.check();await frames.writePart({scope:this.scope,sessionId:this.sessionId,oid:b.oid,totalBytes:source.size,offset:at,partBytes:payload.length,partSha256:sha256Hex(payload)},payload);at+=payload.length;}
  }
 }
 class LocalPeerError extends Error {}
@@ -50,7 +50,7 @@ export class LocalReadClient {
   await remember(at);if(r.status==='present')return {sentBytes,receipt:r.receipt};
   while(at<source.size){const payload=await source.read(at,Math.min(65536,source.size-at));if(payload.length!==Math.min(65536,source.size-at))throw Error('closure_incomplete');const part={scope:this.scope,transferId,oid:id,totalBytes:source.size,offset:at,partBytes:payload.length,partSha256:sha256Hex(payload)};
    if(this.receipts)await this.receipts.store.consumeReplay('local:'+this.receipts.peerDeviceId+':'+id,source.size,confirmed,at,payload.length);
-   const reply=await this.exchange('syncObjectsV2.putPart',part,()=>this.frames.writePart({...part,sessionId:this.sessionId},payload));exact(reply,['transferId','oid','durableOffset']);if(reply.transferId!==transferId||reply.oid!==id||reply.durableOffset!==at+payload.length)throw Error('offset_conflict');at=reply.durableOffset;sentBytes+=payload.length;await remember(at);
+   const reply=await this.exchange('syncObjectsV2.putPart',part,()=>this.frames.writePart(partFrameHeader(part,this.sessionId),payload));exact(reply,['transferId','oid','durableOffset']);if(reply.transferId!==transferId||reply.oid!==id||reply.durableOffset!==at+payload.length)throw Error('offset_conflict');at=reply.durableOffset;sentBytes+=payload.length;await remember(at);
   }
   const receipt=await this.exchange('syncObjectsV2.complete',{scope:this.scope,transferId,oid:id,totalBytes:source.size});if(canonical(receipt)!==canonical({kind:'local',oid:id,totalBytes:source.size,durableOffset:source.size}))throw Error('invalid_schema');return {sentBytes,receipt};
  });}
@@ -60,7 +60,7 @@ export class LocalReadClient {
  object(id:string,range?:{start:number;end:number;totalBytes:number},windowId?:string){return this.single(async()=>{
   anyObjectOid(id);hexId(windowId,32);const b=await this.exchange('syncObjectsV2.objectGet',{scope:this.scope,windowId,oid:id,range:range?{start:range.start,end:range.end}:null});
   exact(b,['scope','oid','totalBytes','start','end','transferId']);sameScope(b.scope,this.scope);hexId(b.transferId,32);uint(b.totalBytes,266264);uint(b.start);uint(b.end);if(b.oid!==id||b.start!==(range?.start??0)||b.end!==(range?.end??b.totalBytes-1)||range&&b.totalBytes!==range.totalBytes||b.start>b.end||b.end>=b.totalBytes)throw Error('invalid_range');
-  const raw=new Uint8Array(b.end-b.start+1);let at=b.start;while(at<=b.end){const f=await this.frames.read(10000);if(f.kind!=='part')throw Error('unexpected_control_frame');const h=f.header;partHeader(h,this.scope,this.sessionId);validatePart(h,f.payload);if(h.transferId!==b.transferId||h.oid!==id||h.totalBytes!==b.totalBytes||h.offset!==at||h.partBytes>b.end-at+1)throw Error('offset_conflict');raw.set(f.payload,at-b.start);at+=f.payload.length;}
+  const raw=new Uint8Array(b.end-b.start+1);let at=b.start;while(at<=b.end){const f=await this.frames.read(10000);if(f.kind!=='part')throw Error('unexpected_control_frame');const h=f.header;partHeader(h,this.scope,this.sessionId);validatePart(h,f.payload);if(h.oid!==id||h.totalBytes!==b.totalBytes||h.offset!==at||h.partBytes>b.end-at+1)throw Error('offset_conflict');raw.set(f.payload,at-b.start);at+=f.payload.length;}
   if(!range){const type=id.split(':')[0],input=type==='commit'?jsonBytes(parseCanonicalJson(raw).body):raw;if(type+':sha256:'+sha256Hex(input)!==id)throw Error('hash_mismatch');}return raw;
  });}
 }

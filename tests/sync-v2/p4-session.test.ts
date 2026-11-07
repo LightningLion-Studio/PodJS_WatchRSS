@@ -1,3 +1,4 @@
+import {partFrameHeader} from '../../src/sync-v2/local-objects';
 import {test,expect} from 'bun:test';
 import {randomBytes} from 'node:crypto';
 import {LibrarySyncSession,type LibrarySessionRepository} from '../../src/sync/session';
@@ -25,7 +26,7 @@ for(const version of [13,14])test('real TCP v'+version+' product session upgrade
   await peer.negotiate(await exchange('syncObjectsV2.negotiate',peer.hello));const remote=await exchange('syncObjectsV2.negotiate',{scope,proof:peer.proof()});await peer.verify(remote.proof,[]);
   const window=await exchange('syncObjectsV2.negotiate',{scope,knownRefs:[],features:[]}),switchId=await nonce();await exchange('syncObjectsV2.prepareFraming',{sessionId,framing:'WRP2',switchId});expect(objects.boundary.enabled).toBe(false);const final=await exchange('syncObjectsV2.commitFraming',{switchId});expect(final.committed).toBe(true);
   const frames=localObjectFrames(old.detachStream(),scope,sessionId,()=>peer.verified),client=new LocalReadClient(scope,sessionId,frames,nonce),blob=await sealV2(crypt,keys.id,keys.content,scope,'blob',1,randomBytes(100000));await client.upload(blob.oid,{size:blob.bytes.length,read:async(at,n)=>blob.bytes.slice(at,at+n)},window.windowId);expect(await client.object(blob.oid,undefined,window.windowId)).toEqual(blob.bytes);
-  const b={scope,transferId:await nonce(),oid:'blob:sha256:'+'0'.repeat(64),totalBytes:1,offset:0,partBytes:1,partSha256:'0'.repeat(64)};await expect(client.control('syncObjectsV2.putPart',b,()=>frames.writePart({...b,sessionId},new Uint8Array([9])))).rejects.toThrow('hash_mismatch');expect((await f.objects.status(b.oid)).status).toBe('missing');
+  const b={scope,transferId:await nonce(),oid:'blob:sha256:'+'0'.repeat(64),totalBytes:1,offset:0,partBytes:1,partSha256:'0'.repeat(64)};await expect(client.control('syncObjectsV2.putPart',b,()=>frames.writePart(partFrameHeader(b,sessionId),new Uint8Array([9])))).rejects.toThrow('hash_mismatch');expect((await f.objects.status(b.oid)).status).toBe('missing');
   const pin=await signControl(crypt,'fixture','wrss.sync.v2/custody-pin-sign',{version:2,scope,pinId:await nonce(),holderDeviceId:phoneId,claimantDeviceId:watchId,entityKey:'1'.repeat(64),bodyRevision:'2'.repeat(32),recipeOid:'recipe:sha256:'+'3'.repeat(64),blobOidsHash:digest([]),createdAtMillis:1}),receipt=await client.control('syncObjectsV2.receipt',{kind:'custody',custody:pin});expect(receipt.pinId).toBe(pin.body.pinId);expect(receipt.state).toBe('active');expect(resets).toBe(0);expect(marks).toBe(0);await frames.close();
  }finally{await sockets.close();await running;await f.close();}
 });

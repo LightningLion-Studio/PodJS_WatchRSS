@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {randomBytes} from 'node:crypto';
 import {sealV2,objectOid} from '../../src/sync-v2/sealed';
-import {LocalObjectStore} from '../../src/sync-v2/local-objects';
+import {LocalObjectStore,partFrameHeader} from '../../src/sync-v2/local-objects';
 import {localResponse} from '../../src/sync-v2/local-read';
 import {jsonBytes,parseCanonicalJson,digest} from '../../src/sync-v2/protocol';
 import {signControl} from '../../src/sync-v2/signing';
@@ -25,11 +25,11 @@ test('lost final part ACK is recovered as present without another source read',a
 });
 test('partial prefix survives connection switch; only the suffix is sent',async()=>{
  const f=await cache(),source=await sealV2(crypt,keys.id,keys.content,scope,'blob',1,randomBytes(150000)),part=source.bytes.slice(0,65536),b={scope,transferId:await nonce(),oid:source.oid,totalBytes:source.bytes.length,offset:0,partBytes:part.length,partSha256:sha256Hex(part)};
- try{await f.objects.part(b,{...b,sessionId},part,sessionId);const s=await openLocal(f.objects);try{const offsets:number[]=[];const result=await s.client.upload(source.oid,{size:source.bytes.length,read:async(at,n)=>{offsets.push(at);return source.bytes.slice(at,at+n);}},s.windowId);expect(offsets[0]).toBe(65536);expect(result.sentBytes).toBe(source.bytes.length-65536);}finally{await s.close();}}
+ try{await f.objects.part(b,partFrameHeader(b,sessionId),part,sessionId);const s=await openLocal(f.objects);try{const offsets:number[]=[];const result=await s.client.upload(source.oid,{size:source.bytes.length,read:async(at,n)=>{offsets.push(at);return source.bytes.slice(at,at+n);}},s.windowId);expect(offsets[0]).toBe(65536);expect(result.sentBytes).toBe(source.bytes.length-65536);}finally{await s.close();}}
  finally{await f.close();}
 });
 test('C26 mismatched control/header, hash, offset and old session do zero writes',async()=>{
- const f=await cache(),data=new Uint8Array(65536).fill(3),b={scope,transferId:await nonce(),oid:objectOid('blob',data),totalBytes:data.length,offset:0,partBytes:data.length,partSha256:sha256Hex(data)},header={...b,sessionId};
+ const f=await cache(),data=new Uint8Array(65536).fill(3),b={scope,transferId:await nonce(),oid:objectOid('blob',data),totalBytes:data.length,offset:0,partBytes:data.length,partSha256:sha256Hex(data)},header=partFrameHeader(b,sessionId);
  try{const before=f.host.writeBytes;for(const patch of [{transferId:'f'.repeat(32)},{offset:1},{partSha256:'0'.repeat(64)},{sessionId:'e'.repeat(32)}])await expect(f.objects.part(b,{...header,...patch},data,sessionId)).rejects.toThrow();const corrupt=data.slice();corrupt[0]^=1;await expect(f.objects.part(b,header,corrupt,sessionId)).rejects.toThrow('hash_mismatch');expect(f.host.writeBytes).toBe(before);expect((await f.objects.status(b.oid)).status).toBe('missing');}finally{await f.close();}
 });
 test('stateRefsGet and recipeRefsGet authenticate immutable raw J OIDs and parents',async()=>{

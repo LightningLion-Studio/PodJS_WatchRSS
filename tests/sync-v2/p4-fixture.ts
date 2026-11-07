@@ -5,7 +5,7 @@ import {ContentFiles} from '@podjs/framework/content-files';
 import type {FrameByteStream} from '@podjs/framework/frame-stream';
 import {WatchContentStore} from '../../src/sync-v2/content-store';
 import {LocalObjectStore} from '../../src/sync-v2/local-objects';
-import {LocalProofSession} from '../../src/sync-v2/local-proof';
+import {LocalProofSession,type MemberStatus} from '../../src/sync-v2/local-proof';
 import {objectCapability} from '../../src/sync-v2/local-capability';
 import {WatchLocalObjectSession} from '../../src/sync-v2/local-session';
 import {localObjectFrames,LocalReadClient} from '../../src/sync-v2/local-read';
@@ -31,8 +31,8 @@ export async function cache(authenticate=(id:string,raw:Uint8Array)=>openV2(cryp
 export async function proofs(features:string[]=[],id=sessionId){
  const a=new LocalProofSession(id,keys.id,{scope,deviceId:watchId,nonce:await nonce(),features},async()=> 'active',()=>true),b=new LocalProofSession(id,keys.id,{scope,deviceId:phoneId,nonce:await nonce(),features},async()=> 'active',()=>true);await a.negotiate(b.hello);await b.negotiate(a.hello);await a.verify(b.proof(),[]);await b.verify(a.proof(),[]);return [a,b] as const;
 }
-export async function openLocal(objects:LocalObjectStore,extra:Partial<ConstructorParameters<typeof WatchLocalObjectSession>[0]>={},pair=streams()){
- const [clientStream,serverStream]=pair,id=await nonce(),features=extra.supportedFeatures??[],clientProof=new LocalProofSession(id,keys.id,{scope,deviceId:watchId,nonce:await nonce(),features},async()=> 'active',()=>true),serverProof=new LocalProofSession(id,keys.id,{scope,deviceId:phoneId,nonce:await nonce(),features},async()=> 'active',()=>true);
+export async function openLocal(objects:LocalObjectStore,extra:Partial<ConstructorParameters<typeof WatchLocalObjectSession>[0]>={},pair=streams(),member:()=>Promise<MemberStatus>=async()=> 'active'){
+ const [clientStream,serverStream]=pair,id=await nonce(),features=extra.supportedFeatures??[],clientProof=new LocalProofSession(id,keys.id,{scope,deviceId:watchId,nonce:await nonce(),features},async()=> 'active',()=>true),serverProof=new LocalProofSession(id,keys.id,{scope,deviceId:phoneId,nonce:await nonce(),features},member,()=>true);
  const server=new WatchLocalObjectSession({enabled:true,objects,proof:serverProof,requiredFeatures:[],supportedFeatures:features,snapshot:async()=>({serverRevision:'0',refs:[],account:{commitOid:null,revision:'0',rollbackGeneration:'0'},historyFloorRevision:'0',checkpointOid:null}),nonce,closeSocket:()=>serverStream.close(),...extra}),responses:any[]=[];
  const old={readFrame:async()=>{throw Error('unexpected_old_read');},writeFrame:async(value:any)=>{responses.push(value);},close:()=>serverStream.close(),detachStream:()=>serverStream};
  await server.probe(objectCapability(scope,true,[],features));

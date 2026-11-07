@@ -30,6 +30,12 @@ export class LocalProofSession {
  get verified(){return !this.closed&&this.proven&&this.authenticated();}
  get peerDeviceId(){if(!this.verified||!this.remote)throw Error('proof_invalid');return this.remote.deviceId;}
  get peerFeatures(){if(!this.verified||!this.remote)throw Error('proof_invalid');return [...this.remote.features];}
+ /** Re-read the owner's latest verified membership. The socket owner must
+  * send a precise refusal, invalidate its windows and close on failure. */
+ async assertCurrent(){
+  if(!this.verified||!this.remote)throw Error('proof_invalid');const peer=this.remote,status=await this.member(peer.deviceId);
+  if(!this.verified||this.remote!==peer)throw Error('proof_invalid');if(status!=='active')throw Error(status==='revoked'?'member_revoked':'member_unknown');
+ }
  async negotiate(value:unknown){
   if(this.closed||this.remote||this.busy||!this.authenticated()){this.close();throw Error('proof_invalid');}this.busy=true;
   try{const remote=localHello(value);if(canonical(remote.scope)!==canonical(this.hello.scope))throw Error('scope_mismatch');if(remote.deviceId===this.hello.deviceId||this.seen.has(remote.nonce))throw Error('proof_invalid');
