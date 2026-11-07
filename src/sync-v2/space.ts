@@ -26,19 +26,25 @@ export class WatchSpaceV2 {
   const now=this.ports.trustedNow();if(!await this.store.trustedTime(now))return {status:'clock-unknown',freed:0,scanned:0};
   const available=await this.ports.capacity();if(available===null||!Number.isSafeInteger(available)||available<0)return {status:'space-unknown',freed:0,scanned:0};
   const needed=Math.max(0,requiredFree-available);if(!needed)return {status:'sufficient',freed:0,scanned:0};
-  const clock=this.ports.monotonic??Date.now,start=clock();let freed=0,scanned=0,after='';
+  const clock=this.ports.monotonic??Date.now,start=clock();let freed=0,scanned=0,cursor=await this.store.scanCursor();let after=cursor.after;
+  const saveCursor=async()=>{if(after!==cursor.after)cursor=await this.store.advanceScan(cursor,after);};
   // Resume durable deletions first. No source/body read occurs in this scan.
   freed+=await this.collectNeeded(needed-freed,start,budgetMillis,clock);
-  while(freed<needed){if(clock()-start>=budgetMillis)return {status:'budget',freed,scanned};const page=await this.store.journal.page(after,32);if(!page.length)break;
-   for(const row of page){after=row.sort;if(row.id.startsWith('recovery:'))continue;scanned++;if(clock()-start>=budgetMillis)return {status:'budget',freed,scanned};const body=await this.store.open(row);if(body.status!=='ready'||!eligible(body.item,now!))continue;
+  while(freed<needed){if(clock()-start>=budgetMillis){await saveCursor();return {status:'budget',freed,scanned};}const page=await this.store.journal.page(after,32);if(!page.length){await this.store.advanceScan(cursor,'');break;}
+   let first=true;for(const row of page){if(!first&&clock()-start>=budgetMillis){await saveCursor();return {status:'budget',freed,scanned};}
+    first=false;
+    // The next unexamined row remains eligible after a budget pause/restart.
+    // Non-body recovery/edit descriptors occupy the same journal after 'z:'.
+    if(!/^[0-9a-f]{64}$/.test(row.id)){after=row.sort;continue;}scanned++;const body=await this.store.open(row);
+    after=row.sort;if(body.status!=='ready'||!eligible(body.item,now!))continue;
     const captured=await this.ports.projection.readState();let proof:any;
     try{proof=await this.authorize(body,captured,now!);}catch{continue;}
-    const finalNow=this.ports.trustedNow();if(finalNow===null||finalNow<now!||finalNow>=proof.receipt.body.expiresAtMillis)return {status:'proof-expired',freed,scanned};
+    const finalNow=this.ports.trustedNow();if(finalNow===null||finalNow<now!||finalNow>=proof.receipt.body.expiresAtMillis){await saveCursor();return {status:'proof-expired',freed,scanned};}
     const value=await this.store.seal(row.id,{...body,status:'placeholder',proof});
     // Business changes and opens are fenced by stateVersion + row revision.
     try{await this.ports.projection.controlUpdate(captured,{...captured},[...this.store.placeholder(row,value,now!),...await this.ports.detach?.(body)??[]]);}catch(error){if(/choice_stale|CHECK constraint failed/.test(String(error)))continue;throw error;}
     freed+=await this.collectNeeded(needed-freed,start,budgetMillis,clock);if(freed>=needed)break;
-   }
+   }await saveCursor();
   }
   if(freed<needed)this.ports.event?.({type:'space-insufficient',needed,freed});return {status:freed>=needed?'sufficient':'insufficient',freed,scanned};
  }

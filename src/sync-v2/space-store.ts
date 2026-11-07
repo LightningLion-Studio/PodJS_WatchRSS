@@ -1,7 +1,7 @@
 import {ResourceJournal,type Resource,type CacheRow} from '@podjs/framework/resource-journal';
 import {ContentFiles} from '@podjs/framework/content-files';
 import type {ProjectionSql,Statement as typeStatement} from '@podjs/framework/sql-projection';
-import {canonical,digest,jsonBytes,parseCanonicalJson} from './protocol';
+import {canonical,digest,jsonBytes,parseCanonicalJson,nextD64} from './protocol';
 import type {LocalCipher} from './store';
 import {evictionSort,type EvictionItem} from './eviction';
 export type CachedBody={item:EvictionItem;metadata:Record<string,unknown>;status:'ready'|'placeholder';plaintextSha256:string;proof?:unknown};
@@ -10,13 +10,22 @@ export type CachedBody={item:EvictionItem;metadata:Record<string,unknown>;status
 export class WatchSpaceStore {
  readonly journal:ResourceJournal;
  constructor(db:ProjectionSql,readonly cipher:LocalCipher,readonly files:ContentFiles,readonly binding:string){this.journal=new ResourceJournal(db,binding);}
- async init(){await this.journal.init();await this.journal.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS sync2_space_settings(binding TEXT PRIMARY KEY,auto_evict INTEGER NOT NULL DEFAULT 0,clock INTEGER NOT NULL DEFAULT 0)'},{sql:'INSERT OR IGNORE INTO sync2_space_settings(binding) VALUES(?)',params:[this.binding]}]);}
+ async init(){await this.journal.init();await this.journal.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS sync2_space_settings(binding TEXT PRIMARY KEY,auto_evict INTEGER NOT NULL DEFAULT 0,clock INTEGER NOT NULL DEFAULT 0)'},{sql:'INSERT OR IGNORE INTO sync2_space_settings(binding) VALUES(?)',params:[this.binding]},{sql:"CREATE TABLE IF NOT EXISTS sync2_space_scan(binding TEXT PRIMARY KEY,revision TEXT NOT NULL,after_key TEXT NOT NULL)"},{sql:"INSERT OR IGNORE INTO sync2_space_scan VALUES(?,'0','')",params:[this.binding]}]);}
  aad(id:string){return canonical({domain:'wrss.sync.v2/space',binding:this.binding,id});}
  seal(id:string,value:CachedBody){if(jsonBytes(value).length>8192)throw Error('space_metadata_limit');return this.cipher.seal(this.aad(id),value);}
  open(row:CacheRow):Promise<CachedBody>{return this.cipher.open(this.aad(row.id),row.value);}
  async enabled(){return Number((await this.journal.db.query('SELECT auto_evict FROM sync2_space_settings WHERE binding=?',[this.binding]))[0]?.auto_evict)===1;}
  async setAutoEvict(enabled:boolean){await this.journal.db.transaction([{sql:'UPDATE sync2_space_settings SET auto_evict=? WHERE binding=?',params:[enabled?1:0,this.binding]}]);}
  async trustedTime(now:number|null){if(now===null||!Number.isSafeInteger(now)||now<0)return false;const old=Number((await this.journal.db.query('SELECT clock FROM sync2_space_settings WHERE binding=?',[this.binding]))[0]?.clock??0);if(now<old)return false;await this.journal.db.transaction([{sql:'UPDATE sync2_space_settings SET clock=MAX(clock,?) WHERE binding=?',params:[now,this.binding]}]);return true;}
+ /** Cursor advances only after a row has been examined. Revision fences two
+  * independently reopened controllers; exhaustion alone starts a new round. */
+ async scanCursor(){const row=(await this.journal.db.query('SELECT revision,after_key FROM sync2_space_scan WHERE binding=?',[this.binding]))[0]!;return {revision:String(row.revision),after:String(row.after_key)};}
+ async advanceScan(cursor:{revision:string;after:string},after:string){await this.journal.db.transaction([
+  {sql:'CREATE TABLE IF NOT EXISTS podjs_sql_cas_guard(id INTEGER NOT NULL CHECK(id=1))'},
+  {sql:'UPDATE sync2_space_scan SET revision=?,after_key=? WHERE binding=? AND revision=? AND after_key=?',params:[nextD64(cursor.revision),after,this.binding,cursor.revision,cursor.after]},
+  {sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN changes()=1 THEN 1 ELSE 0 END'},
+  {sql:'DELETE FROM podjs_sql_cas_guard'},
+ ]);return {revision:nextD64(cursor.revision),after};}
  guard(now:number):typeStatement{return {sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM sync2_space_settings WHERE binding=? AND auto_evict=1 AND clock<=?) THEN 1 ELSE 0 END',params:[this.binding,now]};}
  /** Register only immutable synthetic/derived files in this namespace. */
  async register(resources:Resource[]){for(const r of resources)if(!r.path.startsWith(this.binding+'/'))throw Error('source_path_forbidden');await this.journal.db.transaction([...this.journal.register(resources),...resources.flatMap(r=>this.journal.attach('stage:'+r.id,[r.id]))]);}
