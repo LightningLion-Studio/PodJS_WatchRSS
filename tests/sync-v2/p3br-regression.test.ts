@@ -126,14 +126,14 @@ test('P3BR two restored edits retain shared body until both revisions are acknow
  }finally{s.close();}
 });
 
-test('P3BR budget cursor survives SQLite reopen and resets after successful or exhausted rounds',async()=>{
+test('P3BR checked-set budget progress survives SQLite reopen and starts a new round after completion',async()=>{
  const f=await fixture();let db:any;try{
   const {body,item}=await import('./p3b-fixture'),{SqlFixture,cipher}=await import('./fixture'),{WatchSpaceStore}=await import('../../src/sync-v2/space-store'),{WatchSpaceV2}=await import('../../src/sync-v2/space'),{join}=await import('node:path');
   for(let n=0;n<3;n++){const key=n.toString(16).padStart(64,'0');await f.add({...body(key),item:{...item(key),dirty:n<2}});}await f.cache.setAutoEvict(true);let tick=0;f.space.ports.monotonic=()=>tick++;
-  expect((await f.space.runWindow(1,4)).status).toBe('budget');const cursor=await f.cache.scanCursor();expect(cursor.after).toBe((await f.cache.journal.page())[1].sort);
-  f.db.close();db=new SqlFixture(join(f.root,'state.sqlite'));const cache=new WatchSpaceStore(db,cipher,f.cache.files,f.cache.binding);await cache.init();expect(await cache.scanCursor()).toEqual(cursor);
+  expect((await f.space.runWindow(1,4)).status).toBe('budget');const saved=await f.cache.roundState(),checked=await f.cache.examinedPage(saved);expect(checked.length).toBe(2);
+  f.db.close();db=new SqlFixture(join(f.root,'state.sqlite'));const cache=new WatchSpaceStore(db,cipher,f.cache.files,f.cache.binding);await cache.init();expect(await cache.roundState()).toEqual(saved);expect(await cache.examinedPage(saved)).toEqual(checked);
   const space=new WatchSpaceV2(cache,{...f.space.ports,projection:db.store()});expect((await space.runWindow(1,4)).freed).toBe(128);
-  expect((await cache.scanCursor()).after).toBe('');await cache.touch('0'.repeat(64),{dirty:false});expect((await space.runWindow(1,100)).freed).toBe(128);expect((await cache.scanCursor()).after).toBe('');expect((await space.runWindow(1,100)).scanned).toBe(3);expect((await cache.scanCursor()).after).toBe('');
+  expect((await cache.roundState()).active).toBe(false);await cache.touch('0'.repeat(64),{dirty:false});expect((await space.runWindow(1,100)).freed).toBe(128);expect((await cache.roundState()).active).toBe(false);expect((await space.runWindow(1,100)).scanned).toBe(3);expect((await cache.roundState()).active).toBe(false);
  }finally{db?.close();f.close();}
 });
 

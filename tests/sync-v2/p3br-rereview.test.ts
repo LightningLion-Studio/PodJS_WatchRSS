@@ -12,7 +12,7 @@ test('REREVIEW new old-RSS must precede an existing import after a sufficient wi
   await f.cache.setAutoEvict(true);expect((await f.space.runWindow(1,10000)).freed).toBe(128);
   await f.add({...body(rss),item:{...item(rss),addedAtMillis:1}});
   const result=await f.space.runWindow(1,10000),rssState=(await f.cache.open((await f.cache.journal.row(rss))!)).status,importState=(await f.cache.open((await f.cache.journal.row(imported))!)).status;
-  console.log(JSON.stringify({case:'cursor-new-rss-priority',rssState,importState,result,cursor:await f.cache.scanCursor()}));
+  console.log(JSON.stringify({case:'cursor-new-rss-priority',rssState,importState,result,round:await f.cache.roundState()}));
   expect(rssState).toBe('placeholder');expect(importState).toBe('ready');
  }finally{f.close();}
 });
@@ -33,19 +33,19 @@ test('REREVIEW newer acknowledged title with the same complete body must retire 
  }finally{s.close();}
 });
 
-for(const mutation of ['add','touch'])test('REREVIEW '+mutation+' invalidates a paused candidate order across SQLite reopen',async()=>{
+for(const mutation of ['add','touch'])test('REREVIEW '+mutation+' reorders unchecked candidates across SQLite reopen',async()=>{
  const f=await fixture();let db:any;try{
   const {SqlFixture,cipher}=await import('./fixture'),{WatchSpaceStore}=await import('../../src/sync-v2/space-store'),{WatchSpaceV2}=await import('../../src/sync-v2/space'),{join}=await import('node:path');
   const prefix=['1'.repeat(64),'2'.repeat(64)],rss=mutation==='add'?'0'.repeat(64):prefix[0],imported='3'.repeat(64);
   for(const id of prefix)await f.add({...body(id),item:{...item(id),dirty:true}});await f.add({...body(imported),item:{...item(imported),kind:'import'}});
-  await f.cache.setAutoEvict(true);let tick=0;f.space.ports.monotonic=()=>tick++;expect((await f.space.runWindow(1,4)).status).toBe('budget');expect((await f.cache.scanCursor()).after).not.toBe('');
-  if(mutation==='add')await f.add(body(rss));else await f.cache.touch(rss,{dirty:false});expect((await f.cache.scanCursor()).after).toBe('');
+  await f.cache.setAutoEvict(true);let tick=0;f.space.ports.monotonic=()=>tick++;expect((await f.space.runWindow(1,4)).status).toBe('budget');expect((await f.cache.examinedPage(await f.cache.roundState())).length).toBe(2);
+  if(mutation==='add')await f.add(body(rss));else await f.cache.touch(rss,{dirty:false});expect((await f.cache.roundState()).active).toBe(true);
   f.db.close();db=new SqlFixture(join(f.root,'state.sqlite'));const cache=new WatchSpaceStore(db,cipher,f.cache.files,f.cache.binding);await cache.init();const space=new WatchSpaceV2(cache,{...f.space.ports,projection:db.store()});expect((await space.runWindow(1,10000)).freed).toBe(128);
   expect((await cache.open((await cache.journal.row(rss))!)).status).toBe('placeholder');expect((await cache.open((await cache.journal.row(imported))!)).status).toBe('ready');
  }finally{db?.close();f.close();}
 });
 
-test('REREVIEW restoring an earlier RSS invalidates a paused import cursor',async()=>{
+test('REREVIEW restoring an earlier RSS reorders a paused checked-set round',async()=>{
  const f=await fixture();try{
   const rss='0'.repeat(64),blocked='1'.repeat(64),imported='2'.repeat(64);await f.add(body(rss));await f.add({...body(blocked),item:{...item(blocked),kind:'import',dirty:true}});await f.add({...body(imported),item:{...item(imported),kind:'import'}});await f.cache.setAutoEvict(true);expect((await f.space.runWindow(1)).freed).toBe(128);
   let tick=0;f.space.ports.monotonic=()=>tick++;expect((await f.space.runWindow(1,4)).status).toBe('budget');const resource={id:'9'.repeat(64),path:f.cache.binding+'/'+'9'.repeat(64)+'.data',bytes:128},plain=new Uint8Array(128).fill(33);await f.cache.files.publish(resource.path,plain);await f.space.restore(rss,async()=>({resources:[resource],size:128,read:async(at,length)=>plain.subarray(at,at+length)}));
@@ -60,10 +60,11 @@ test('REREVIEW an in-flight import cannot commit after an earlier RSS joins the 
  }finally{f.close();}
 });
 
-test('REREVIEW adding the candidate epoch resets an ambiguous legacy cursor once',async()=>{
+test('REREVIEW legacy positions are ignored by the checked-set round model',async()=>{
  const f=await fixture();try{
-  const {WatchSpaceStore}=await import('../../src/sync-v2/space-store'),{cipher}=await import('./fixture'),{WatchSpaceV2}=await import('../../src/sync-v2/space'),rss='a'.repeat(64),imported='c'.repeat(64);await f.add(body(rss));await f.add({...body(imported),item:{...item(imported),kind:'import'}});await f.cache.setAutoEvict(true);await f.cache.advanceScan(await f.cache.scanCursor(),(await f.cache.journal.row(rss))!.sort);await f.db.execute('DROP TABLE sync2_space_candidates');
-  const cache=new WatchSpaceStore(f.db,cipher,f.cache.files,f.cache.binding);await cache.init();expect((await cache.scanCursor()).after).toBe('');expect((await new WatchSpaceV2(cache,f.space.ports).runWindow(1)).freed).toBe(128);expect((await cache.open((await cache.journal.row(rss))!)).status).toBe('placeholder');expect((await cache.open((await cache.journal.row(imported))!)).status).toBe('ready');
+  const {WatchSpaceStore}=await import('../../src/sync-v2/space-store'),{cipher}=await import('./fixture'),{WatchSpaceV2}=await import('../../src/sync-v2/space'),rss='a'.repeat(64),imported='c'.repeat(64);await f.add(body(rss));await f.add({...body(imported),item:{...item(imported),kind:'import'}});await f.cache.setAutoEvict(true);
+  await f.db.transaction([{sql:'CREATE TABLE sync2_space_scan(binding TEXT PRIMARY KEY,revision TEXT,after_key TEXT)'},{sql:'INSERT INTO sync2_space_scan VALUES(?,?,?)',params:[f.cache.binding,'99',(await f.cache.journal.row(rss))!.sort]}]);
+  const cache=new WatchSpaceStore(f.db,cipher,f.cache.files,f.cache.binding);await cache.init();expect((await cache.roundState()).active).toBe(false);expect((await new WatchSpaceV2(cache,f.space.ports).runWindow(1)).freed).toBe(128);expect((await cache.open((await cache.journal.row(rss))!)).status).toBe('placeholder');expect((await cache.open((await cache.journal.row(imported))!)).status).toBe('ready');
  }finally{f.close();}
 });
 
@@ -84,9 +85,9 @@ for(const mode of ['recipe','body-revision','body-hash','partial','expired','una
  }finally{s.close();}
 });
 
-test('REREVIEW sufficient capacity closes a paused round and fences its stale cursor',async()=>{
+test('REREVIEW sufficient capacity closes a paused round and fences its stale controller',async()=>{
  const f=await fixture();try{
-  for(let n=0;n<3;n++){const id=n.toString(16).padStart(64,'0');await f.add({...body(id),item:{...item(id),dirty:true}});}await f.cache.setAutoEvict(true);let tick=0;f.space.ports.monotonic=()=>tick++;expect((await f.space.runWindow(1,4)).status).toBe('budget');const paused=await f.cache.scanCursor();expect(paused.after).not.toBe('');
-  f.capacity=1;expect((await f.space.runWindow(1,4)).status).toBe('sufficient');expect((await f.cache.scanCursor()).after).toBe('');await expect(f.cache.advanceScan(paused,paused.after)).rejects.toThrow('scan_stale');expect((await f.cache.scanCursor()).after).toBe('');
+  for(let n=0;n<3;n++){const id=n.toString(16).padStart(64,'0');await f.add({...body(id),item:{...item(id),dirty:true}});}await f.cache.setAutoEvict(true);let tick=0;f.space.ports.monotonic=()=>tick++;expect((await f.space.runWindow(1,4)).status).toBe('budget');const paused=await f.cache.roundState();expect((await f.cache.examinedPage(paused)).length).toBe(2);
+  f.capacity=1;expect((await f.space.runWindow(1,4)).status).toBe('sufficient');expect((await f.cache.roundState()).active).toBe(false);await expect(f.cache.endRound(paused)).rejects.toThrow('round_stale');expect((await f.cache.roundState()).active).toBe(false);
  }finally{f.close();}
 });
