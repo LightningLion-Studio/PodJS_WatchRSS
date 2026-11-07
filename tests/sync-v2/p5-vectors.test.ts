@@ -1,0 +1,12 @@
+import {test,expect} from 'bun:test';
+import {unhex} from '@podjs/framework/crypto';
+import {vector,scope} from './fixture';
+import {crypto} from './p2-fixture';
+import {canMerge,detectRollback} from '../../src/sync-v2/merge-planner';
+import {verifyCommit} from '../../src/sync-v2/signing';
+import {canonical} from '../../src/sync-v2/protocol';
+import {b64} from '../../src/sync-v2/wire';
+const rollback=vector('rollback');
+for(const name of ['targetCommit','currentCommit','rollbackCommit'])test('P5 fixed rollback signature canonical bytes and OID '+name,async()=>{const x=rollback[name];expect(canonical(x.body)).toBe(x.expected.canonicalBody);expect(await verifyCommit(crypto,b64(unhex(rollback.publicKeyHex)),{body:x.body,signature:x.expected.signature},x.expected.oid,scope)).toEqual(x.body);});
+for(const [i,c]of rollback.detection.entries())test('P5 fixed rollback generation detection '+i,()=>expect(detectRollback(c.seen,c.current,c.dirty)).toBe(c.expected));
+for(const c of rollback.mergeCases)test('P5 fixed unique merge planner '+c.name,()=>{const before=canonical(c.input);expect(canMerge(c.input)).toEqual(c.expected);expect(canonical(c.input)).toBe(before);});

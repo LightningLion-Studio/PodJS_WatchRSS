@@ -8,7 +8,7 @@ import type {SourceReader,SourceRecord} from './store';
  * Missing metadata/identity/ancestry fails the page; no invented defaults. */
 export type Materialize=(table:string,row:Record<string,unknown>)=>Promise<SourceRecord[]>;
 export const BUSINESS_TABLE_KEYS:Readonly<Record<string,readonly string[]>>=Object.freeze({
- sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],memo_notes:['note_id'],memo_folders:['folder_id'],sync_source_states:['url'],articles:['id'],channels:['id'],sync_article_deletions:['article_id'],
+ sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],memo_notes:['note_id'],memo_folders:['folder_id'],sync_source_states:['url'],articles:['id'],channels:['id'],sync_article_deletions:['article_id'],sync_book_reading_dirty:['item_id'],syncv2_rss_states:['id'],
 });
 export function encodeLocator(values:unknown[]){return 'hex-v1:'+values.map(value=>hex(encodeUtf8(String(value),'strict')).toUpperCase()).join(':');}
 function decodeLocator(value:string){
@@ -28,10 +28,16 @@ export class SqlBusinessSource implements SourceReader {
   if(token.table>=this.tables.length)return {rows:[],after,done:true};
   const table=this.tables[token.table]!,keys=BUSINESS_TABLE_KEYS[table]!,values=token.keys as unknown[]|null;
   if(values&&values.length!==keys.length)throw Error('invalid_checkpoint');
+  const attach=(row:Record<string,unknown>,records:SourceRecord[])=>records.map(record=>({...record,source:{table,locator:encodeLocator(keys.map(key=>row[key]))}}));
+  if(token.pending){
+   const row=(await this.db.query(`SELECT ${table==='articles'?'id':'*'} FROM ${quote(table)} WHERE ${keys.map(k=>quote(k)+' IS ?').join(' AND ')}`,token.pending.keys))[0],records=row?attach(row,await this.materialize(table,row)):[],end=Math.min(records.length,token.pending.offset+limit),pending=end<records.length?{keys:token.pending.keys,offset:end}:null;
+   return {rows:records.slice(token.pending.offset,end),after:canonical(pending?{...token,pending}:{table:token.table,keys:token.pending.keys}),done:false};
+  }
   const params:unknown[]=[],where=values?' WHERE '+keys.map((key,i)=>{for(let j=0;j<i;j++)params.push(values[j]);params.push(values[i]);return '('+[...keys.slice(0,i).map(k=>quote(k)+' IS ?'),quote(key)+'>?'].join(' AND ')+')';}).join(' OR '):'';
   const result=await readSqlKeysetPage(this.db,`SELECT ${table==='articles'?'id':'*'} FROM ${quote(table)}${where} ORDER BY ${keys.map(quote).join(',')}`,params,limit);
-  const rows:SourceRecord[]=[];for(const row of result.rows)rows.push(...(await this.materialize(table,row)).map(record=>({...record,source:{table,locator:encodeLocator(keys.map(key=>row[key]))}})));
-  const next=result.rows.length===0?{table:token.table+1,keys:null}:{table:token.table,keys:keys.map(k=>result.rows.at(-1)![k])};
+  const rows:SourceRecord[]=[];let last=values;
+  for(const row of result.rows){const records=attach(row,await this.materialize(table,row)),space=limit-rows.length;if(records.length>space){rows.push(...records.slice(0,space));return {rows,after:canonical({table:token.table,keys:last,pending:{keys:keys.map(k=>row[k]),offset:space}}),done:false};}rows.push(...records);last=keys.map(k=>row[k]);}
+  const next=result.rows.length===0?{table:token.table+1,keys:null}:{table:token.table,keys:last};
   return {rows,after:canonical(next),done:next.table>=this.tables.length};
  }
 
@@ -59,6 +65,7 @@ export class SqlBusinessSource implements SourceReader {
 }
 export async function materializeFrozen(table:string,row:Record<string,unknown>):Promise<SourceRecord[]>{
  const json=(value:unknown)=>{if(typeof value!=='string')throw Error('source_record_invalid');return JSON.parse(value);};
+ if(table==='syncv2_rss_states'){const value=json(row.state_json);return [{kind:'rss-state',logicalId:String(row.id),value}];}
  if(table==='sync_books'||table==='sync_book_reading'){
   const value=json(row.state_json),kind:Kind=table==='sync_books'?'book':'book-reading',logicalId=kind==='book'?value.bookId:value.bookId+':'+value.chapterIndex;
   return [{kind,logicalId,value}];

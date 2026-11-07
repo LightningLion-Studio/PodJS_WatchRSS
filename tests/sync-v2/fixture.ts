@@ -1,11 +1,12 @@
 import {Database} from 'bun:sqlite';
 import {createCipheriv,createDecipheriv,randomBytes,hkdfSync,createPublicKey,verify} from 'node:crypto';
 import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {canonical} from '../../src/sync-v2/protocol';
 import {WatchProjectionStore,type LocalCipher} from '../../src/sync-v2/store';
 import {ProjectionGate} from '../../src/sync-v2/gate';
 import type {IdentityCrypto} from '../../src/sync-v2/identity';
-export const sharedRoot='/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/syncv2';
+export const sharedRoot=process.env.WRSS_SYNCV2_SPEC_ROOT??resolve(import.meta.dir,'../../../.codex-tmp/cloud-v2/syncv2');
 export const vector=(name:string)=>JSON.parse(readFileSync(sharedRoot+'/vectors/'+name+'.json','utf8'));
 export const scope={repoId:'01'.repeat(16),libraryEpoch:'1',contentGeneration:'2'};
 export const idKey=Uint8Array.from({length:32},()=>17),libraryId='aa'.repeat(16);

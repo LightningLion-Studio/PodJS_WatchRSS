@@ -3,7 +3,7 @@ import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
 import {bytesToBase64,base64ToBytes} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
-import {commitSqlCas,stableSqlTriggers,checkD64,nextD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
+import {commitSqlCas,captureSqlBasis,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
 import {canonical,canonicalLegacy,jsonBytes,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
 import {candidates} from './business';
 import {ProjectionGate} from './gate';
@@ -21,6 +21,9 @@ export interface SourceReader {
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
 export const PROJECTION_SCHEMA=[
+ `CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)`,
+ `CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_business_basis(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,epoch TEXT NOT NULL,revision TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_state(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,local_revision TEXT NOT NULL,body TEXT NOT NULL,account_generation TEXT NOT NULL,edit_generation TEXT NOT NULL,awaiting_user INTEGER NOT NULL CHECK(awaiting_user IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_identity_map(local_library TEXT NOT NULL,repo TEXT NOT NULL,kind TEXT NOT NULL,logical_id TEXT NOT NULL,entity_key TEXT NOT NULL,mapping_version INTEGER NOT NULL CHECK(mapping_version=2),PRIMARY KEY(local_library,repo,kind,logical_id))`,
  `CREATE TABLE IF NOT EXISTS syncv2_candidates(scope TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,meta_bytes INTEGER NOT NULL,state_bytes INTEGER NOT NULL,added_at INTEGER NOT NULL,row_sequence TEXT NOT NULL,PRIMARY KEY(scope,entity_key))`,
@@ -36,7 +39,7 @@ export const PROJECTION_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS syncv2_legacy_inbox(scope TEXT NOT NULL,inbox_key TEXT NOT NULL,input_hash TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,inbox_key))`,
 ];
 export {PROJECTION_SOURCE_TABLES} from './business-revision';
-export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision};
+export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision;accountApplyVersion?:string};
 export class WatchProjectionStore {
  private readonly scopeKey:string;
  private legacyAdapter?:WatchEquivalentLegacy;
@@ -67,6 +70,7 @@ export class WatchProjectionStore {
   const state:SyncState=await this.cipher.open(this.aad('state'),String(row.body));state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);
   if(checkD64(row.account_generation)!==state.rollbackGeneration||checkD64(row.edit_generation)!==state.editBase.generation)throw Error('projection_state_inconsistent');
   if(Number(row.awaiting_user)===1&&!state.pendingChoice)state.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};
+  const basis=(await this.db.query('SELECT epoch,revision FROM syncv2_business_basis WHERE scope=? AND state_version=?',[this.scopeKey,state.stateVersion]))[0];if(basis)state.businessRevision={epoch:String(basis.epoch),revision:String(basis.revision)};
   return state;
  }
  /** Cleanup preparation must never reconcile or recreate a missing witness.
@@ -87,6 +91,7 @@ export class WatchProjectionStore {
    if(state.rollbackGeneration!==state.editBase.generation&&!next.pendingChoice)next.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};
    await this.commit(state,next);return next;
   }
+  if(!state.pendingChoice&&compareD64(state.editBase.generation,state.rollbackGeneration)<0&&(state.hasUnsentEdits||compareD64(state.localChangeRevision,state.acknowledgedLocalChangeRevision??'0')>0)){const next={...state,pendingChoice:{generation:state.rollbackGeneration,inboxKeys:[],accountOid:state.account!.oid,accountRevision:state.account!.revision,selectedLocalChangeRevision:state.localChangeRevision}};await this.commit(state,next);return next;}
   return state;
  }
  private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
@@ -103,6 +108,48 @@ export class WatchProjectionStore {
  async controlUpdateStable(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){
   const current=await this.readStableState();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
   await this.commit(expected,next,statements,hook);
+ }
+ /** Prepare only. Original business rows and identity_map remain untouched until
+  * the caller commits this batch with active/applied and edit acknowledgement. */
+ async prepareAccountProjection(before:SyncState,records:SourceRecord[],business:Statement[]){
+  const prepared=await this.prepareRows(records,before.localChangeRevision,nextD64(before.stateVersion),true),checkpoint=await this.checkpoint(),scan:Statement[]=[];if(checkpoint?.phase==='complete'){const next={...checkpoint,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};scan.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}
+  return [...business,{sql:'DELETE FROM syncv2_candidates WHERE scope=?',params:[this.scopeKey]},
+   {sql:'DELETE FROM syncv2_tree_nodes WHERE scope=?',params:[this.scopeKey]},...prepared.statements,...scan,
+   captureSqlBasis('syncv2_business_basis',this.scopeKey,nextD64(before.stateVersion),'business_sync_revision')];
+ }
+ /** Reset only the scan checkpoint. Retain candidates, IDs, edits and the DB. */
+ async restartScan(){
+  const before=await this.readState(),row=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('scan_not_started');
+  const cp:Checkpoint={R0:before.localChangeRevision,R1:null,after:'',tail:'0',phase:'scan',rows:0,tailEnd:null,businessRevision:before.businessRevision!};
+  await this.controlUpdate(before,{...before},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),cp),this.scopeKey]}]);
+ }
+ async publicationUpdate(before:SyncState,next:SyncState,statements:Statement[]=[]){
+  const plan=before.cloud?.pendingPublish;if(plan?.guardVersion!==undefined){if(plan.guardVersion!==before.stateVersion)throw Error('choice_stale');next.cloud={...next.cloud,pendingPublish:{...next.cloud.pendingPublish,guardVersion:nextD64(before.stateVersion)}};}
+  await this.controlUpdate(before,next,statements);
+ }
+ async preparePublicationFinish(plan:any){
+  const header=await this.cipher.seal(this.aad('commit-header',plan.commitOid),plan.commit);
+  return [{sql:'INSERT OR IGNORE INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,plan.commitOid,header]},
+   {sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,plan.requestId]},
+   {sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,plan.requestId]}];
+ }
+ async legacyChoiceEntry(key:string){
+  const row=(await this.db.query('SELECT input_hash,body FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,key]))[0];if(!row)throw Error('choice_stale');
+  const entry=await this.cipher.open(this.aad('legacy',key),String(row.body)),{route,applied,...original}=entry;
+  if(!(route==='discarded-for-cloud'&&entry.discardedInputHash===row.input_hash)&&digest(original)!==row.input_hash)throw Error('idempotency_conflict');return {entry,inputHash:String(row.input_hash)};
+ }
+ async prepareLegacyDecision(before:SyncState,key:string,route:'discarded-for-cloud'|'resolve-local'){
+  const selected=await this.legacyChoiceEntry(key);checkCapture(before,captureChoice(before,before.account!),key);if(selected.entry.route!=='pendingChoice'||selected.entry.applied)throw Error('choice_stale');
+  const rows=await this.db.query('SELECT inbox_key FROM syncv2_legacy_inbox WHERE scope=? ORDER BY rowid',[this.scopeKey]),entries=[];for(const row of rows)entries.push({key:String(row.inbox_key),...(await this.legacyChoiceEntry(String(row.inbox_key)))});
+  const value={...selected.entry,route,applied:route==='resolve-local'};if(route==='discarded-for-cloud'){value.body='{}';value.bodyRefsByEntity={};value.discardedInputHash=selected.inputHash;}
+  const next=JSON.parse(canonical(before)) as SyncState,remaining=next.pendingChoice!.inboxKeys.filter(k=>k!==key);next.pendingChoice=remaining.length||before.hasUnsentEdits&&before.editBase.generation!==before.rollbackGeneration?{...next.pendingChoice!,inboxKeys:remaining}:null;
+  const streams=new Map<string,typeof entries>();for(const e of entries){const stream=canonical([e.entry.peer,e.entry.version]);const list=streams.get(stream)??[];list.push(e.key===key?{...e,entry:value}:e);streams.set(stream,list);}
+  for(const [stream,list]of streams){let cursor:string|undefined;for(const e of list){if(!e.entry.applied)break;cursor=e.entry.cursor;}if(cursor!==undefined)next.applied[stream]=cursor;const peer=list[0]!.entry.peer;if([...streams.values()].filter(v=>v[0]!.entry.peer===peer).length===1){if(cursor!==undefined)next.applied[peer]=cursor;}else delete next.applied[peer];}
+  return {next,statements:[{sql:'UPDATE syncv2_legacy_inbox SET body=? WHERE scope=? AND inbox_key=? AND input_hash=?',params:[await this.cipher.seal(this.aad('legacy',key),value),this.scopeKey,key,selected.inputHash]}]};
+ }
+ validateEntityIdentity(id:string,kind:Kind,logicalId:string){if(entityKey(this.key,this.scope.repoId,kind,logicalId)!==id)throw Error('identity_conflict');}
+ async identityForEntity(entity:string){
+  const row=(await this.db.query('SELECT kind,logical_id FROM syncv2_identity_map WHERE local_library=? AND repo=? AND entity_key=?',[this.libraryId,this.scope.repoId,entity]))[0];if(!row)throw Error('source_identity_missing');return {kind:String(row.kind) as Kind,logicalId:String(row.logical_id)};
  }
  async candidatePage(after='',limit=32){
   this.gate.require();const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
@@ -126,9 +173,10 @@ export class WatchProjectionStore {
   this.gate.require();const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
   const out=[];for(const row of rows)out.push(await this.cipher.open(this.aad('cloud-row',root+String(row.entity_key)),String(row.body)));return out;
  }
- async stageUpload(planId:string,objects:Map<string,Uint8Array>){
+ async stageUpload(planId:string,objects:Map<string,Uint8Array>,expected?:SyncState){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_upload_objects(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))'}]);
-  for(const [id,bytes]of objects){const before=await this.readState(),body=await this.cipher.seal(this.aad('upload',planId+id),bytesToBase64(bytes));await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);}
+  for(const [id,bytes]of objects){const before=await this.readState();if(expected&&canonical(before)!==canonical(expected))throw Error('choice_stale');const next={...before},body=await this.cipher.seal(this.aad('upload',planId+id),bytesToBase64(bytes));await this.controlUpdate(before,next,[{sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);expected=expected?next:undefined;}
+  return expected;
  }
  async uploadPage(planId:string,after='',limit=1){
   this.gate.require();const rows=await this.db.query('SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>? ORDER BY oid LIMIT ?',[this.scopeKey,planId,after,limit]),out=[];
@@ -142,13 +190,13 @@ export class WatchProjectionStore {
   this.gate.require();const prior=await this.uploadReceipt(planId,id),offset=receipt.body.durableOffset;
   if(prior&&prior.totalBytes!==totalBytes)throw Error('hash_mismatch');if(prior&&prior.durableOffset>=offset)return;
   const before=await this.readState(),body=await this.cipher.seal(this.aad('upload-receipt',planId+id),{totalBytes,durableOffset:offset,receipt});
-  await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_receipts VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);
+  await this.publicationUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_receipts VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);
  }
  async consumeUploadReplay(id:string,total:number,confirmed:number,offset:number,length:number){
   this.gate.require();const before=await this.readState(),row=(await this.db.query('SELECT body FROM syncv2_upload_replays WHERE scope=? AND oid=?',[this.scopeKey,id]))[0],prior=row?await this.cipher.open(this.aad('upload-replay',id),String(row.body)):null;
   if(prior&&prior.total!==total)throw Error('hash_mismatch');const high=Math.max(confirmed,prior?.confirmed??0),attempted=Math.max(prior?.attempted??0,offset+length),used=prior?.bytes??0,next=chargedReplayBytes(Math.max(high,prior?.attempted??0),offset,length,total,used);if(prior&&next===used&&attempted===prior.attempted&&high===prior.confirmed)return;
   const body=await this.cipher.seal(this.aad('upload-replay',id),{total,confirmed:high,attempted,bytes:next});
-  await this.controlUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_replays VALUES(?,?,?) ON CONFLICT(scope,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);
+  await this.publicationUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_replays VALUES(?,?,?) ON CONFLICT(scope,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);
  }
  async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
@@ -173,20 +221,20 @@ export class WatchProjectionStore {
   * or unverified server checkpoint may be passed as an account observation. */
  async observe(account:Account,authenticate:(account:Account,state:SyncState)=>Promise<{authors:Record<string,unknown>;parents:Record<string,unknown>}>,hook?:()=>void){const state=await this.readState();nextD64(state.stateVersion);const pins=await authenticate(account,state),next=observeAccount(state,account);next.knownAuthors=pins.authors;next.knownAccountParents=pins.parents;await this.commit(state,next,[],hook);}
  async capture(window:Account){return captureChoice(await this.readState(),window);}
- async checkpoint():Promise<Checkpoint|null>{this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];return row?this.cipher.open(this.aad('checkpoint'),String(row.body)):null;}
+ async checkpoint():Promise<Checkpoint|null>{this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];if(!row)return null;const cp:Checkpoint=await this.cipher.open(this.aad('checkpoint'),String(row.body));if(cp.phase==='complete'&&cp.accountApplyVersion){const basis=(await this.db.query('SELECT epoch,revision FROM syncv2_business_basis WHERE scope=? AND state_version=?',[this.scopeKey,cp.accountApplyVersion]))[0];if(!basis)throw Error('projection_state_inconsistent');cp.businessRevision={epoch:String(basis.epoch),revision:String(basis.revision)};}return cp;}
  async beginScan(binding:ScanBinding){
   const state=await this.readState();nextD64(state.stateVersion);const bind=canonical(binding),prior=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0],old=await this.checkpoint();
   if(prior?.binding===bind&&old&&(sameBusinessRevision(old.businessRevision,state.businessRevision)||old.phase!=='complete'&&old.businessRevision?.epoch===state.businessRevision?.epoch))return {hit:true,reason:sameBusinessRevision(old.businessRevision,state.businessRevision)?'same-binding-and-revision':'resume-prefix-then-reconcile',checkpoint:old};
   const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:'0',tailEnd:null,phase:'scan',rows:0,businessRevision:state.businessRevision!};
   await this.commit(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-or-revision-changed':'first-scan',checkpoint:cp};
  }
- private async prepareRows(rows:SourceRecord[],revision:string,sequence:string){
+ private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
   for(const row of rows){const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId),candidate=candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis),mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
    const existing=(await this.db.query('SELECT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind=? AND logical_id=?',mapKey))[0];if(existing&&existing.entity_key!==entity)throw Error('identity_conflict');
    if(row.source)statements.push({sql:'INSERT INTO syncv2_source_map VALUES(?,?,?,?) ON CONFLICT(scope,source_table,locator) DO UPDATE SET entity_key=excluded.entity_key WHERE entity_key IS NOT excluded.entity_key',params:[this.scopeKey,row.source.table,row.source.locator,entity]});
    const prior=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];
-   if(prior&&canonical(await this.cipher.open(this.aad('candidate',entity),String(prior.body)))===canonical(candidate))continue;
+   if(!force&&prior&&canonical(await this.cipher.open(this.aad('candidate',entity),String(prior.body)))===canonical(candidate))continue;
    const sealed=await this.cipher.seal(this.aad('candidate',entity),candidate);total+=sealed.length;
    if(total>384*1024)throw Error('page_too_large');
    treeChanges.push({key:entity,value:{candidateHash:sha256Hex(jsonBytes(sealed)),rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
@@ -220,13 +268,13 @@ export class WatchProjectionStore {
   const state=await this.readState();nextD64(state.stateVersion);const cp=await this.checkpoint();if(!cp||cp.phase!=='complete')throw Error('scan_not_complete');
   if(sameBusinessRevision(cp.businessRevision,state.businessRevision))return cp;
   const next:Checkpoint={...cp,R0:cp.R1!,R1:state.localChangeRevision,phase:'tail',after:'',rows:0,tailEnd:null,businessRevision:state.businessRevision!};
-  await this.commit(state,{...state},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]}]);return next;
+  delete next.accountApplyVersion;await this.commit(state,{...state},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]}]);return next;
  }
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
  async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.cipher.open(this.aad('candidate',entity),String(row.body)):null;}
  /** No business apply or ACK. Legacy data is an encrypted shadow journal. */
- async receiveLegacy(input:{peer:string;version:13|14;cursor:string;entityKeys:string[];body:unknown},affected:string[]|null){
+ async receiveLegacy(input:{peer:string;version:13|14;cursor:string;entityKeys:string[];body:unknown;removedEntityKeys?:string[];bodyRefsByEntity?:Record<string,string[]>;identitiesByEntity?:Record<string,{kind:Kind;logicalId:string}>},affected:string[]|null){
   const state=await this.readState();nextD64(state.stateVersion);const inboxKey=canonical([input.peer,input.version,input.cursor]),body=canonicalLegacy(input.body),retained={...input,body,bodyEncoding:'legacy-json'},hash=digest(retained),old=(await this.db.query('SELECT input_hash FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,inboxKey]))[0];
   if(old){if(old.input_hash!==hash)throw Error('idempotency_conflict');return {duplicate:true,ack:false};}
   const route=legacyInputRoute(state,input.entityKeys,affected),pending=route==='pendingChoice',next={...state,localChangeRevision:nextD64(state.localChangeRevision)};

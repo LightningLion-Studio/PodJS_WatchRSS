@@ -1,7 +1,7 @@
 import {stableSqlTriggers,type ProjectionSql} from '@podjs/framework/sql-projection';
 export type BusinessRevision={epoch:string;revision:string};
 export const PROJECTION_SOURCE_TABLES:Record<string,string[]>={
- sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],
+ source_preferences:['channel_id'],source_media_preferences:['channel_id'],sync_book_events:['book_id','chapter_index'],sync_book_reading_dirty:['item_id'],syncv2_rss_states:['id'],sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],
  memo_notes:['note_id'],memo_folders:['folder_id'],sync_source_states:['url'],
  // Native mutations that precede normalization still invalidate a captured
  // choice and create durable work. They cannot be silently omitted on resume.

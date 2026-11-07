@@ -14,6 +14,10 @@ export const ARTICLE_REGISTER_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS article_register_conflicts(article_id TEXT NOT NULL REFERENCES article_register_state(article_id) ON DELETE CASCADE,version_hash TEXT NOT NULL,raw_json TEXT NOT NULL,PRIMARY KEY(article_id,version_hash))`,
 ];
 type Statement={sql:string;params?:SqlParams};
+export function articleProjectionSignature(row:Record<string,unknown>|undefined,reading:Record<string,unknown>|undefined,saved:Record<string,unknown>[],deletion:Record<string,unknown>|undefined){
+  const save=(p:string)=>{const s=saved.find(r=>r.save_type===p);return [Number(s?.saved??(p==='favorite'?row?.is_saved:0)??0),Number(s?.changed_at??0),Number(s?.sort_order??0)];};
+  return JSON.stringify([!!row,row?.title??null,row?.description??null,row?.image_url??null,row?.link??null,Number(row?.is_read??0),Number(row?.reading_progress??0),Number(row?.fetched_at??0),row?.body_hash??null,Number(reading?.progress??row?.reading_progress??0),Number(reading?.changed_at??0),Number(reading?.position_bytes??0),reading?.position_hash??'',...save('favorite'),...save('watchLater'),Number(deletion?.changed_at??0),deletion?.source_device_id??'']);
+ }
 /** Business evidence, not an encoding cache. A legacy witness is frozen only
  * once, on the first protected receipt. No startup scan/re-encryption occurs. */
 export class ArticleRegisterStore {
@@ -45,12 +49,9 @@ export class ArticleRegisterStore {
   const id=Number(row?.id??0),reading=(await this.db.query('SELECT progress,changed_at,position_bytes,position_hash FROM article_reading_state WHERE article_id=?',[id]))[0];
   const saved=await this.db.query('SELECT save_type,saved,changed_at,sort_order FROM article_saved_states WHERE article_id=? ORDER BY save_type',[id]);
   const deletion=(await this.db.query('SELECT changed_at,source_device_id FROM sync_article_deletions WHERE article_id=?',[articleId]))[0];
-  const sig=this.signature(row,reading,saved,deletion);return {row,reading,saved,deletion,sig};
+  const sig=articleProjectionSignature(row,reading,saved,deletion);return {row,reading,saved,deletion,sig};
  }
- private signature(row:Record<string,unknown>|undefined,reading:Record<string,unknown>|undefined,saved:Record<string,unknown>[],deletion:Record<string,unknown>|undefined){
-  const save=(p:string)=>{const s=saved.find(r=>r.save_type===p);return [Number(s?.saved??(p==='favorite'?row?.is_saved:0)??0),Number(s?.changed_at??0),Number(s?.sort_order??0)];};
-  return JSON.stringify([!!row,row?.title??null,row?.description??null,row?.image_url??null,row?.link??null,Number(row?.is_read??0),Number(row?.reading_progress??0),Number(row?.fetched_at??0),row?.body_hash??null,Number(reading?.progress??row?.reading_progress??0),Number(reading?.changed_at??0),Number(reading?.position_bytes??0),reading?.position_hash??'',...save('favorite'),...save('watchLater'),Number(deletion?.changed_at??0),deletion?.source_device_id??'']);
- }
+
  async apply(incoming:RecordDocument,legacy?:RecordDocument){
   const revision=await libraryRevision(this.db),id=incoming.value.articleId;
   const old=(await this.db.query('SELECT * FROM article_register_state WHERE article_id=?',[id]))[0],local=await this.projection(id);
@@ -86,7 +87,7 @@ export class ArticleRegisterStore {
   const nextReading=v.deleted?undefined:{progress:v.readingProgress,changed_at:v.readingPositionChangedAt,position_bytes:v.readingPositionBytes,position_hash:v.readingPositionContentHash};
   const nextSaved=v.deleted?[]:['favorite','watchLater'].map(p=>({save_type:p,saved:v[p+'Saved']?1:0,changed_at:v[p+'ChangedAt'],sort_order:-v[p+'SortOrder']}));
   const nextDeletion=v.deleted?{changed_at:v.deletedAt,source_device_id:v.registerSources.deletion}:undefined;
-  const materialized=pending?String(old?.materialized_json??local.sig):this.signature(nextRow,nextReading,nextSaved,nextDeletion);
+  const materialized=pending?String(old?.materialized_json??local.sig):articleProjectionSignature(nextRow,nextReading,nextSaved,nextDeletion);
   statements.push({sql:`INSERT INTO article_register_state(article_id,item_id,state_json,legacy_json,materialized_json,pending_json,raw_json,raw_conflict,body_pending) VALUES(?,COALESCE(?,(SELECT item_id FROM sync_article_ids WHERE article_id=?)),?,?,?,?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET item_id=excluded.item_id,state_json=excluded.state_json,materialized_json=excluded.materialized_json,pending_json=excluded.pending_json,raw_json=excluded.raw_json,raw_conflict=excluded.raw_conflict,body_pending=excluded.body_pending`,params:[id,local.row?.id??null,id,state,frozen??null,materialized,pending??null,rawText,conflict?1:0,bodyPending]});
   if(conflict){for(const text of [old?.raw_json&&String(old.raw_json),rawText].filter((s):s is string=>!!s))statements.push({sql:'INSERT OR IGNORE INTO article_register_conflicts VALUES(?,?,?)',params:[id,await this.hash(utf8Encode(text)),text]});}
   const item='(SELECT item_id FROM article_register_state WHERE article_id=?)';

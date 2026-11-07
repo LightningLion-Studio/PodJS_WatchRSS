@@ -2,6 +2,7 @@
  * never fills optional fields or changes business IDs, clocks, or ancestry. */
 import {sha256Hex} from '@podjs/framework/crypto';
 import {validateRecord} from '../cloud/records';
+import {ARTICLE_REGISTER_FEATURE} from '../cloud/article-register';
 import {recordFields} from '../cloud/compatibility';
 import {validateBookShape,validateBookReading,bookIdInput,mergeBook,mergeBookReading} from '../books/protocol';
 import {mergeNoteMarkdown} from '../notes/merge';
@@ -31,7 +32,7 @@ export function toWire(kind:Kind,value:Record<string,any>){
  if(conflictChannel){validateSet(String(value.noteId),value.noteConflicts);value={...value};delete value.noteConflicts;}
  if('readingProgressMicros'in value)throw Error('invalid_schema');
  const checked=kind==='book-reading'?bookReadingValidationInput(value):value;
- if(['article','source','rss-state','book','book-reading'].includes(kind))validateRecord({kind,value:checked});
+ if(['article','source','rss-state','book','book-reading'].includes(kind))validateRecord({kind,value:checked,...(kind==='article'&&Object.hasOwn(checked,'registerSources')?{features:{incompat:[],roCompat:[ARTICLE_REGISTER_FEATURE]}}:{})});
  if(kind==='note'||kind==='folder'||kind==='asset'){
   exact(value,fields[kind]);for(const [key,v]of Object.entries(value))if(!['folderId','pinned','deleted','sortOrder','updatedAt','createdAt','deletedAt'].includes(key)&&typeof v!=='string')throw Error('invalid_schema');
   if(kind==='note'&&value.folderId!==null)text(value.folderId);
@@ -64,4 +65,14 @@ export function candidates(kind:Kind,logicalId:string,entityKey:string,value:Rec
  const state={version:2,entityKey,requiredFeatures:kind==='note'&&Object.hasOwn(wire.state,'noteConflicts')?['note-conflicts.v1']:[],payload:wire.state,noteSegments:[]};
  const metaBytes=jsonBytes(meta),stateBytes=jsonBytes(state);if(metaBytes.length>262144||stateBytes.length>262144)throw Error('object_too_large');
  return {meta,state,addedAtMillis:addedAtMillis??0,metaBytes:metaBytes.length,stateBytes:stateBytes.length};
+}
+/** The frozen save-register merger compares only the relative order of two
+ * sort values. Rank just those values for its legacy nonnegative validator,
+ * then restore the selected exact I53. Legacy validators remain unchanged. */
+export function mergeWireBookReading(local:any,remote:any){
+ const originals=[local,remote],normalized=originals.map(v=>{if(v===undefined)return undefined;toWire('book-reading',v);return {...v};});
+ for(const prefix of ['favorite','watchLater']){const values=originals.filter(v=>v?.[prefix+'Saved']!==undefined).map(v=>v[prefix+'SortOrder']),ranks=[...new Set(values)].sort((a,b)=>a-b);for(const v of normalized)if(v?.[prefix+'Saved']!==undefined)v[prefix+'SortOrder']=ranks.indexOf(v[prefix+'SortOrder']);}
+ const out=mergeBookReading(normalized[0],normalized[1]);
+ for(const prefix of ['favorite','watchLater'])if((out as any)[prefix+'Saved']!==undefined){const tuple=(v:any)=>[v[prefix+'ChangedAt'],v[prefix+'SourceDeviceId']??v.sourceDeviceId,v[prefix+'Saved'],v[prefix+'SortOrder']];const index=normalized[1]?.[prefix+'Saved']!==undefined&&canonical(tuple(out))===canonical(tuple(normalized[1]))?1:0;(out as any)[prefix+'SortOrder']=originals[index][prefix+'SortOrder'];}
+ return out;
 }

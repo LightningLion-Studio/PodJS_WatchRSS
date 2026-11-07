@@ -1,3 +1,4 @@
+import {frozenDataRecord} from '@podjs/framework/frozen-data';
 import {checkD64,compareD64,nextD64} from '@podjs/framework/sql-projection';
 import {exact,oid,canonical} from './protocol';
 export type Account={oid:string;revision:string;generation:string};
@@ -9,7 +10,7 @@ export interface SyncState {
  stateVersion:string;localChangeRevision:string;rollbackGeneration:string;
  businessRevision?:import('./business-revision').BusinessRevision;
  account:Account|null;lastSeenAccountOid:string|null;lastSeenAccountRevision:string;lastSeen:string;
- editBase:{accountOid:string|null;generation:string};pendingChoice:null|{generation:string;inboxKeys:string[]};
+ editBase:{accountOid:string|null;generation:string};pendingChoice:null|{generation:string;inboxKeys:string[];accountOid?:string;accountRevision?:string;selectedLocalChangeRevision?:string};
  activeGeneration:string|null;applied:Record<string,string>;knownAuthors:Record<string,unknown>;knownAccountParents:Record<string,unknown>;
  keepDiscardedLocalChanges7Days:boolean;hasUnsentEdits:boolean;
 }
@@ -22,7 +23,7 @@ export function currentAccount(state:any):Account {
 }
 export function checkCapture(state:any,capture:any,key?:string){
  const account=currentAccount(state);
- try{exact(capture,['stateVersion','accountOid','accountRevision','generation','localChangeRevision'],true);if(!Object.isFrozen(capture))throw Error();for(const k of ['stateVersion','accountRevision','generation','localChangeRevision'])checkD64(capture[k]);oid(capture.accountOid,'commit');}catch{throw Error('choice_stale');}
+ try{frozenDataRecord(capture,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);for(const k of ['stateVersion','accountRevision','generation','localChangeRevision'])checkD64(capture[k]);oid(capture.accountOid,'commit');}catch{throw Error('choice_stale');}
  if(!state.pendingChoice||capture.stateVersion!==state.stateVersion||capture.localChangeRevision!==state.localChangeRevision||capture.accountOid!==account.oid||capture.accountRevision!==account.revision||capture.generation!==account.generation||capture.generation!==state.pendingChoice.generation||(key!==undefined&&!state.pendingChoice.inboxKeys.includes(key)))throw Error('choice_stale');
 }
 export function captureChoice(state:any,window:Account):Capture {
@@ -36,7 +37,7 @@ export function observeAccount(state:SyncState,account:Account):SyncState {
  if(account.revision===state.lastSeenAccountRevision&&state.lastSeenAccountOid!==null&&account.oid!==state.lastSeenAccountOid)throw Error('replay_detected');
  const following=nextD64(state.stateVersion),next=JSON.parse(canonical(state)) as SyncState;
  next.account={...account};next.lastSeenAccountOid=account.oid;next.lastSeenAccountRevision=account.revision;next.lastSeen=account.generation;next.rollbackGeneration=account.generation;
- if(next.pendingChoice||compareD64(next.editBase.generation,account.generation)<0&&(compareD64(next.localChangeRevision,next.acknowledgedLocalChangeRevision??'0')>0||next.hasUnsentEdits))next.pendingChoice={generation:account.generation,inboxKeys:next.pendingChoice?.inboxKeys??[]};
+ if(next.pendingChoice||compareD64(next.editBase.generation,account.generation)<0&&(compareD64(next.localChangeRevision,next.acknowledgedLocalChangeRevision??'0')>0||next.hasUnsentEdits))next.pendingChoice={generation:account.generation,inboxKeys:next.pendingChoice?.inboxKeys??[],accountOid:account.oid,accountRevision:account.revision,selectedLocalChangeRevision:next.localChangeRevision};
  next.stateVersion=following;return next;
 }
 
