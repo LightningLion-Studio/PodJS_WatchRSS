@@ -172,7 +172,7 @@ export class WatchProjectionStore {
  async validateAccountProjection(before:SyncState,statements:Statement[]){
   const program=(statements as any).preparedPlan as SqlProgramRef|undefined;if(!program)throw Error('sql_program_incomplete');const marker=await this.applyProgram(program.id).statement(program,true);
   // Execute the exact native operations, including constraints, then rollback.
-  await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},before.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[before.businessRevision!.epoch,before.businessRevision!.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},marker]);
+  try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},before.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[before.businessRevision!.epoch,before.businessRevision!.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},marker]);}catch(error){if(/CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
   return program;
  }
  /** Reset only the scan checkpoint. Retain candidates, IDs, edits and the DB. */
