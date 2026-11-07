@@ -25,12 +25,13 @@ export class WatchSpaceV2 {
   uint(requiredFree);if(!await this.store.enabled())return {status:'disabled',freed:0,scanned:0};
   const now=this.ports.trustedNow();if(!await this.store.trustedTime(now))return {status:'clock-unknown',freed:0,scanned:0};
   const available=await this.ports.capacity();if(available===null||!Number.isSafeInteger(available)||available<0)return {status:'space-unknown',freed:0,scanned:0};
-  const needed=Math.max(0,requiredFree-available);if(!needed)return {status:'sufficient',freed:0,scanned:0};
+  const needed=Math.max(0,requiredFree-available);if(!needed){await this.store.resetScan();return {status:'sufficient',freed:0,scanned:0};}
   const clock=this.ports.monotonic??Date.now,start=clock();let freed=0,scanned=0,cursor=await this.store.scanCursor();let after=cursor.after;
   const saveCursor=async()=>{if(after!==cursor.after)cursor=await this.store.advanceScan(cursor,after);};
+  try{
   // Resume durable deletions first. No source/body read occurs in this scan.
   freed+=await this.collectNeeded(needed-freed,start,budgetMillis,clock);
-  while(freed<needed){if(clock()-start>=budgetMillis){await saveCursor();return {status:'budget',freed,scanned};}const page=await this.store.journal.page(after,32);if(!page.length){await this.store.advanceScan(cursor,'');break;}
+  while(freed<needed){if(clock()-start>=budgetMillis){await saveCursor();return {status:'budget',freed,scanned};}const page=await this.store.journal.page(after,32);if(!page.length){await this.store.resetScan();break;}
    let first=true;for(const row of page){if(!first&&clock()-start>=budgetMillis){await saveCursor();return {status:'budget',freed,scanned};}
     first=false;
     // The next unexamined row remains eligible after a budget pause/restart.
@@ -39,14 +40,16 @@ export class WatchSpaceV2 {
     after=row.sort;if(body.status!=='ready'||!eligible(body.item,now!))continue;
     const captured=await this.ports.projection.readState();let proof:any;
     try{proof=await this.authorize(body,captured,now!);}catch{continue;}
-    const finalNow=this.ports.trustedNow();if(finalNow===null||finalNow<now!||finalNow>=proof.receipt.body.expiresAtMillis){await saveCursor();return {status:'proof-expired',freed,scanned};}
+    const finalNow=this.ports.trustedNow();if(finalNow===null||finalNow<now!||finalNow>=proof.receipt.body.expiresAtMillis){await this.store.resetScan();return {status:'proof-expired',freed,scanned};}
     const value=await this.store.seal(row.id,{...body,status:'placeholder',proof});
     // Business changes and opens are fenced by stateVersion + row revision.
-    try{await this.ports.projection.controlUpdate(captured,{...captured},[...this.store.placeholder(row,value,now!),...await this.ports.detach?.(body)??[]]);}catch(error){if(/choice_stale|CHECK constraint failed/.test(String(error)))continue;throw error;}
+    try{await this.ports.projection.controlUpdate(captured,{...captured},[...this.store.scanGuard(cursor),...this.store.placeholder(row,value,now!),...await this.ports.detach?.(body)??[]]);}catch(error){if(/choice_stale|CHECK constraint failed/.test(String(error))){if((await this.store.scanCursor()).epoch!==cursor.epoch)throw Error('scan_stale');continue;}throw error;}
     freed+=await this.collectNeeded(needed-freed,start,budgetMillis,clock);if(freed>=needed)break;
-   }await saveCursor();
+   }if(freed<needed)await saveCursor();
   }
+  if(freed>=needed)await this.store.resetScan();
   if(freed<needed)this.ports.event?.({type:'space-insufficient',needed,freed});return {status:freed>=needed?'sufficient':'insufficient',freed,scanned};
+  }catch(error){if((error as Error).message==='scan_stale')return {status:'candidates-changed',freed,scanned};throw error;}
  }
  /** Re-authenticate every resumed deletion. A persisted old receipt never
   * grants a later GC window permission to remove the last physical bytes. */
@@ -80,6 +83,6 @@ export class WatchSpaceV2 {
   for(let at=0;at<next.size;at+=65536){const n=Math.min(65536,next.size-at),part=await next.read(at,n);if(part.length!==n)throw Error('hash_mismatch');hash.update(part);}
   if(hash.finish()!==body.plaintextSha256)throw Error('hash_mismatch');
   try{for(let at=0;at<next.resources.length;at+=32)await this.store.register(next.resources.slice(at,at+32));
-  const statements=[...this.store.journal.replace(row,await this.store.seal(id,{...body,status:'ready'})),...this.store.journal.attach('body:'+id,next.resources.map(r=>r.id))];await this.store.journal.db.transaction(statements);}finally{await this.store.unstage(next.resources);}
+  const statements=[...this.store.journal.replace(row,await this.store.seal(id,{...body,status:'ready'})),...this.store.journal.attach('body:'+id,next.resources.map(r=>r.id)),...this.store.invalidateScan()];await this.store.journal.db.transaction(statements);}finally{await this.store.unstage(next.resources);}
  }
 }

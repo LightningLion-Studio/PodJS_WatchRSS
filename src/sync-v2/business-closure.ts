@@ -69,33 +69,22 @@ export class WatchBusinessClosure {
   const after=await this.projection.readState();if(canonical(before)!==canonical(after))throw Error('choice_stale');
   return required.map(id=>objects.get(id)!);
  }
- /** Release a restored edit only after its exact business values occur in the
-  * authenticated CURRENT account and every pinned body gets a fresh C17 receipt.
-  * Read recipes from the edit owner: its original P3A source may no longer exist. */
+ /** Release the BODY owner after upload acknowledgement and fresh current
+  * closure receipts. Later title/reading/inline state edits do not change a
+  * pinned recipe's identity. Read recipes from the durable edit owner. */
  async acknowledgeRecovery(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>,now:()=>number|null){
   const before=await this.projection.readState(),scope=this.content.remote.http.scope;
   if(!before.account||before.pendingChoice||before.hasUnsentEdits||before.cloud?.current?.commitOid!==before.account.oid)throw Error('closure_incomplete');
-  const refs=new Set<string>(),seen=new Set<string>();let expiresAtMillis=Number.MAX_SAFE_INTEGER;
-  const visit=async(id:string,expected?:Record<string,any>)=>{
-   const r=await this.record(id,true),row=r.entry.row;
-   if(!row||row.deleted||expected&&canonical(recoveryBusiness(r.kind,r.value))!==canonical(expected))throw Error('body_revision_changed');
-   if(seen.has(id))return;seen.add(id);
-   if(r.kind==='note'){
-    const texts=[r.value.markdown,r.value.baseMarkdown];if(r.value.noteConflicts){validateSet(r.logicalId,r.value.noteConflicts);texts.push(...conflictTexts(r.value.noteConflicts));}
-    const assets=new Set<string>();for(const text of texts)for(const asset of noteAssetKeys(text))assets.add(asset);
-    for(const asset of [...assets].sort())await visit(entityKey(this.content.keys.id,scope.repoId,'asset',asset));
-   }else if(['article','book','asset'].includes(r.kind)){
-    if(!row.recipeOid||!delta.bodyRefs.includes(row.recipeOid))throw Error('closure_incomplete');
-    const parts=await read(row.recipeOid),size=parts.reduce((n,p)=>n+p.length,0);if(size>266264)throw Error('object_too_large');const raw=new Uint8Array(size);let at=0;for(const part of parts){raw.set(part,at);at+=part.length;}
-    const opened=await openV2(this.content.crypto,this.content.keys.id,this.content.keys.content,scope,row.recipeOid,raw),body=recipe(opened.value);
-    if(opened.header.keyVersion!==this.content.keys.version||body.entityKey!==id||body.bodyRevision!==row.bodyRevision||body.opaqueContentId!==row.opaqueContentId||body.totalPlainBytes!==row.contentBytes)throw Error('body_revision_changed');
-    const blobOids=body.blocks.map(b=>b.oid),expected={entityKey:id,bodyRevision:row.bodyRevision,recipeOid:row.recipeOid,blobOids};refs.add(row.recipeOid);for(const oid of blobOids)refs.add(oid);
-    const response=await this.content.remote.availability(expected),time=now();if(time===null)throw Error('clock_unknown');
-    const signed=await signedAvailability(this.content.remote.http.servicePin!,this.content.crypto,response.receipt,scope,expected,time);
-    if(signed.status!=='cloud-ready'||signed.expiresAtMillis<=time)throw Error('closure_incomplete');expiresAtMillis=Math.min(expiresAtMillis,signed.expiresAtMillis);
-   }else if(!['folder','source','rss-state','book-reading'].includes(r.kind))throw Error('unsupported_feature');
-  };
-  for(const change of delta.changes){if(change.kind==='set')await visit(change.id,change.value);else{const row=await this.projection.cloudRow(before.cloud.current.treeRoot,change.id);if(row&&!row.row.deleted)throw Error('body_revision_changed');}}
+  const refs=new Set<string>();let expiresAtMillis=Number.MAX_SAFE_INTEGER;
+  for(const ref of delta.bodyRefs.filter(ref=>ref.startsWith('recipe:'))){
+   const parts=await read(ref),size=parts.reduce((n,p)=>n+p.length,0);if(size>266264)throw Error('object_too_large');const raw=new Uint8Array(size);let at=0;for(const part of parts){raw.set(part,at);at+=part.length;}
+   const opened=await openV2(this.content.crypto,this.content.keys.id,this.content.keys.content,scope,ref,raw),body=recipe(opened.value),r=await this.record(body.entityKey,true),row=r.entry.row;
+   if(!row||row.deleted||!['article','book','asset'].includes(r.kind)||opened.header.keyVersion!==this.content.keys.version||row.recipeOid!==ref||body.bodyRevision!==row.bodyRevision||body.opaqueContentId!==row.opaqueContentId||body.totalPlainBytes!==row.contentBytes)throw Error('body_revision_changed');
+   const blobOids=body.blocks.map(b=>b.oid),expected={entityKey:body.entityKey,bodyRevision:row.bodyRevision,recipeOid:ref,blobOids};refs.add(ref);for(const oid of blobOids)refs.add(oid);
+   const response=await this.content.remote.availability(expected),time=now();if(time===null)throw Error('clock_unknown');
+   const signed=await signedAvailability(this.content.remote.http.servicePin!,this.content.crypto,response.receipt,scope,expected,time);
+   if(signed.status!=='cloud-ready'||signed.expiresAtMillis<=time)throw Error('closure_incomplete');expiresAtMillis=Math.min(expiresAtMillis,signed.expiresAtMillis);
+  }
   if(canonical([...refs].sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
   if(canonical(before)!==canonical(await this.projection.readState()))throw Error('choice_stale');return {expiresAtMillis};
  }
