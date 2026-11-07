@@ -5,8 +5,19 @@ import {anyObjectOid} from './local-objects';
 import {verifyCommit,verifySigned,signControl,type SigningPort} from './signing';
 import type {ApprovedKey} from './head-pins';
 import type {WatchProjectionStore} from './store';
+import type {LocalProofSession} from './local-proof';
 export class WatchRelayAuthor {
  constructor(private readonly options:{enabled?:boolean;scope:Scope;deviceId:string;alias:string;store:WatchProjectionStore;crypto:SigningPort;approved:(id:string)=>Promise<ApprovedKey>;cloudAuthorization:()=>Promise<void>;now:()=>number}){}
+ /** C29 queue ACK is neither a publication result nor cleanup authority.
+  * The original pending publication remains durable until cloud reconciliation. */
+ async queue(relayDeviceId:string,objectOids:string[],grantId:string,session:LocalProofSession,local:{control(action:string,body:any):Promise<any>}){
+  const check=()=>{if(!session.verified||session.hello.deviceId!==this.options.deviceId||session.peerDeviceId!==relayDeviceId)throw Error('proof_invalid');sameScope(session.hello.scope,this.options.scope);};
+  check();const granted=await this.grant(relayDeviceId,objectOids,grantId);check();
+  const requestId=granted.account.body.requestId;hexId(requestId,32);
+  const result=await local.control('syncObjectsV2.refUpdate',{account:granted.account,device:granted.device,relayGrant:granted.relayGrant});
+  check();exact(result,['kind','requestId','grantId']);if(result.kind!=='relay-queued'||result.requestId!==requestId||result.grantId!==grantId)throw Error('invalid_schema');
+  return result;
+ }
  async grant(relayDeviceId:string,objectOids:string[],grantId:string){
   const o=this.options;if(o.enabled!==true)throw Error('feature_disabled');hexId(relayDeviceId,32);hexId(grantId,32);hexId(o.deviceId,32);if(relayDeviceId===o.deviceId)throw Error('invalid_schema');sorted(objectOids,512,anyObjectOid);const objects=[...objectOids];
   await o.cloudAuthorization();const author=await o.approved(o.deviceId),relay=await o.approved(relayDeviceId);if(author.deviceId!==o.deviceId||relay.deviceId!==relayDeviceId)throw Error('member_unknown');

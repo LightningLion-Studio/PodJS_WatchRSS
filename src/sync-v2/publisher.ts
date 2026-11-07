@@ -59,6 +59,15 @@ export class WatchIndexPublisher {
  private async pending(){const before=await this.store.readState(),plan=before.cloud?.pendingPublish;if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(!plan)throw Error('publication_missing');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice||plan.capturedLocalRevision!==before.localChangeRevision||plan.request.account.body.expectedOid!==(before.account?.oid??null)||plan.request.account.body.expectedRevision!==(before.account?.revision??'0'))throw Error('choice_stale');return {before,plan};}
  /** A response-lost retry queries the original request ID before touching refs. */
  flush(){return this.flushing??=this.flushOnce().finally(()=>{this.flushing=undefined;});}
+ /** C29: poll using the author's own cloud session. An unknown relay outcome
+  * keeps the original journal and never uploads or re-signs any object. */
+ async reconcileRelayResult(){
+  if(this.flushing)throw Error('publication_pending');
+  const poll=async()=>{await this.http.capabilities();const {plan}=await this.pending(),known=await this.http.requestResult(plan.requestId);
+   if(known.status==='succeeded')return this.accept(plan,known.response);
+   if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');return null;};
+  return this.flushing=poll().finally(()=>{this.flushing=undefined;});
+ }
  private async flushOnce(){
   await this.http.capabilities();const {plan}=await this.pending(),known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');

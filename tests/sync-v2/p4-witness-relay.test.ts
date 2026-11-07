@@ -7,7 +7,7 @@ import {objectOid} from '../../src/sync-v2/sealed';
 import {canonical,jsonBytes} from '../../src/sync-v2/protocol';
 import {scope} from './fixture';
 import {crypt,keys} from './p3-fixture';
-import {cache,proofs,approved,watchId,phoneId,nonce} from './p4-fixture';
+import {cache,proofs,approved,watchId,phoneId,nonce,openLocal} from './p4-fixture';
 const commitBody=(author=watchId,sequence='1',parent:string|null=null,own:string|null=null)=>({version:2,scope,authorDeviceId:author,deviceSequence:sequence,previousOwnCommit:own,mergedParents:[],treeRoot:'tree:sha256:'+'1'.repeat(64),requiredFeatures:[],createdAtMillis:1,observedRefs:[],indexComplete:true,accountParent:parent,rollbackGeneration:'0',operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}});
 const header=(c:any)=>({commitOid:c.oid,headerOid:objectOid('commit-header',jsonBytes({body:c.body,signature:c.signature})),body:c.body,signature:c.signature});
 test('C27 independent future headers do not poison accepted account or author pins (B07)',async()=>{
@@ -32,4 +32,20 @@ test('C23 grant retains the original signed author commit and both RefUpdates',a
 });
 test('no cloud authorization, revoked members, unowned objects or closed relay gate cannot issue a grant',async()=>{
  const f=await relayFixture();for(const patch of [{enabled:false},{cloudAuthorization:async()=>{throw Error('authorization_required');}},{approved:async(id:string)=>{if(id===phoneId)throw Error('member_revoked');return approved(id);}},{approved:async(id:string)=>{if(id===watchId)throw Error('member_revoked');return approved(id);}}])await expect(new WatchRelayAuthor({...f.options,...patch}).grant(phoneId,[f.c.oid],await nonce())).rejects.toThrow();await expect(new WatchRelayAuthor(f.options).grant(phoneId,['blob:sha256:'+'0'.repeat(64)],await nonce())).rejects.toThrow('object_missing');
+});
+test('C29 queues the exact signed publication and keeps the journal after queue ACK or lost ACK',async()=>{
+ const f=await relayFixture(),[session]=await proofs(),grantId=await nonce(),before=canonical(f.state),author=new WatchRelayAuthor(f.options);let calls=0;
+ const local={control:async(action:string,body:any)=>{calls++;expect(action).toBe('syncObjectsV2.refUpdate');expect(Object.keys(body).sort()).toEqual(['account','device','relayGrant']);expect(body.account).toEqual(f.account);expect(body.device).toEqual(f.device);expect(body.relayGrant.body.grantId).toBe(grantId);return {kind:'relay-queued',requestId:f.account.body.requestId,grantId};}};
+ expect((await author.queue(phoneId,[f.c.oid],grantId,session,local)).kind).toBe('relay-queued');expect(canonical(f.state)).toBe(before);
+ await expect(author.queue(phoneId,[f.c.oid],grantId,session,{control:async()=>{throw Error('lost_ack');}})).rejects.toThrow('lost_ack');expect(canonical(f.state)).toBe(before);
+ await expect(author.queue(phoneId,[f.c.oid],grantId,session,{control:async()=>({kind:'local',requestId:f.account.body.requestId,grantId})})).rejects.toThrow('invalid_schema');
+ session.close();await expect(author.queue(phoneId,[f.c.oid],grantId,session,local)).rejects.toThrow('proof_invalid');expect(calls).toBe(1);
+});
+test('C29 local dispatcher checks all publication scopes before invoking the relay port',async()=>{
+ const f=await relayFixture(),c=await cache(),grant=await new WatchRelayAuthor(f.options).grant(phoneId,[f.c.oid],await nonce());let calls=0;
+ const s=await openLocal(c.objects,{refUpdate:async()=>{calls++;return {kind:'relay-queued',requestId:f.account.body.requestId,grantId:grant.relayGrant.body.grantId};}}),body={account:grant.account,device:grant.device,relayGrant:grant.relayGrant};
+ try{expect((await s.client.control('syncObjectsV2.refUpdate',body)).kind).toBe('relay-queued');
+  for(const field of ['account','device','relayGrant']){const bad=JSON.parse(canonical(body));bad[field].body.scope.contentGeneration='99';await expect(s.client.control('syncObjectsV2.refUpdate',bad)).rejects.toThrow('scope_mismatch');}
+  expect(calls).toBe(1);
+ }finally{await s.close();await c.close();}
 });

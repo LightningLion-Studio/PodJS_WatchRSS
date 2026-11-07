@@ -73,8 +73,10 @@ export class WatchLocalObjectSession {
        // reaches cloud receipt verification or the cleanup authorizer.
        const id='local-peer-receipt:'+o.proof.peerDeviceId+':'+b.oid,prior=await o.objects.store.get(id);if(prior&&(prior.value.totalBytes!==b.totalBytes||prior.value.durableOffset>b.durableOffset))throw Error('offset_conflict');await o.objects.store.put(id,JSON.parse(canonical(b)),prior?.revision??null);result={accepted:true};}
      }else if(action==='syncObjectsV2.refUpdate'){
-      // SignedRefUpdate carries scope inside its signed body, as on cloud.
-      sameScope(b?.body?.scope,this.scope);if(!o.refUpdate)throw Error('feature_disabled');result=await o.refUpdate(b);
+      // C29 publication envelopes retain the cloud's original author signatures.
+      if(b?.account!==undefined){exact(b,['account','device','relayGrant']);for(const signed of [b.account,b.device,b.relayGrant])sameScope(signed?.body?.scope,this.scope);}
+      else sameScope(b?.body?.scope,this.scope);
+      if(!o.refUpdate)throw Error('feature_disabled');result=await o.refUpdate(b);
      }else{
       sameScope(b?.scope,this.scope);
       if(action==='syncObjectsV2.negotiate'){result=await this.negotiateWindow(b);}

@@ -303,3 +303,10 @@ for(const checkpointLoss of [false,true])test('P3AR R04 P2 control helper consum
   server.partials.set(id,original.slice(0,65536));db.afterCommit=checkpointLoss;await expect(make().flush()).rejects.toThrow(checkpointLoss?'injected_after_commit':'lost_control_repair_ack');db.afterCommit=false;server.partials.set(id,original.slice(0,65536));await expect(make().flush()).rejects.toThrow('offset_conflict');expect(server.calls['/objects/'+id+'/parts/65536']!-before).toBe(checkpointLoss?0:1);expect((await store.uploadReceipt('d'.repeat(32),id)).durableOffset).toBe(131072);expect(server.events).toBe(0);
  }finally{db.close();}
 });
+test('C29 relay result poll leaves unknown journals intact and accepts cloud success without new writes',async()=>{
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server);
+ try{await f.publisher.prepare('a'.repeat(32),'key',{commitOid:null,revision:'0'},'c'.repeat(32));const before=canonical(await f.store.readState());
+  expect(await f.publisher.reconcileRelayResult()).toBeNull();expect(canonical(await f.store.readState())).toBe(before);expect(server.calls['/objects/reserve']??0).toBe(0);expect(server.calls['/account/publish']??0).toBe(0);
+  server.losePublish=true;await expect(f.publisher.flush()).rejects.toThrow('synthetic_response_lost');const calls={...server.calls},result=await f.publisher.reconcileRelayResult();expect(result.account.commitOid).toBe(server.account.commitOid);expect(server.calls['/account/publish']).toBe(calls['/account/publish']);expect(server.calls['/objects/reserve']).toBe(calls['/objects/reserve']);expect((await f.store.readState()).cloud.pendingPublish).toBeNull();
+ }finally{f.db.close();}
+});
