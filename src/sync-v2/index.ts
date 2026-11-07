@@ -25,3 +25,5 @@ export function watchLocalProjection(options:{enabled?:boolean;host:CloudHostReq
  };
 }
 export {watchSyncV2} from './runtime';
+
+export {watchSpaceV2} from './space-runtime';

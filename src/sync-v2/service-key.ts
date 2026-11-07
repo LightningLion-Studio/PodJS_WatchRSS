@@ -17,19 +17,20 @@ export class WatchServiceKeyPin {
  private failed=false;
  constructor(private readonly secure:IdentityStorage,readonly accountId:string,private readonly bootstrap:()=>Promise<{accountId:string;syncV2:unknown}>){hexId(accountId,32);}
  private slot(){return 'watchrss.syncv2.service-key.'+this.accountId;}
- async assertBootstrap(){
+ async assertBootstrap(readOnly=false){
   if(this.failed)throw Error(SERVICE_KEY_CHANGED);const approved=await this.bootstrap();if(approved.accountId!==this.accountId)throw Error('cloud_account_busy');if(approved.syncV2===undefined)throw Error('upgrade_required');const current=serviceKey(approved.syncV2),raw=canonical(current),old=await this.secure.get(this.slot());
   if(old&&old!==raw){this.failed=true;throw Error(SERVICE_KEY_CHANGED);}
+  if(!old&&readOnly)throw Error('service_key_unpinned');
   if(!old&&!await this.secure.compareAndSet(this.slot(),null,raw)){const winner=await this.secure.get(this.slot());if(winner!==raw){this.failed=true;throw Error(SERVICE_KEY_CHANGED);}}
   return current;
  }
- async capabilities(value:any){const key=await this.assertBootstrap();if(value.receiptKeyId!==key.receiptKeyId||value.receiptSigningPublicKey!==key.receiptSigningPublicKey){this.failed=true;throw Error(SERVICE_KEY_CHANGED);}return key;}
- async signature(port:SigningPort,domain:string,value:any,scope:Scope){
-  const key=await this.assertBootstrap();exact(value,['body','signature']);sameScope(value.body.scope,scope);const sec1=b64(unb64(key.receiptSigningPublicKey).subarray(26));
+ async capabilities(value:any,readOnly=false){const key=await this.assertBootstrap(readOnly);if(value.receiptKeyId!==key.receiptKeyId||value.receiptSigningPublicKey!==key.receiptSigningPublicKey){this.failed=true;throw Error(SERVICE_KEY_CHANGED);}return key;}
+ async signature(port:SigningPort,domain:string,value:any,scope:Scope,readOnly=false){
+  const key=await this.assertBootstrap(readOnly);exact(value,['body','signature']);sameScope(value.body.scope,scope);const sec1=b64(unb64(key.receiptSigningPublicKey).subarray(26));
   await verifySigned(port,sec1,domain,value.body,value.signature);return value.body;
  }
- async verify(port:SigningPort,domain:string,value:any,scope:Scope,now:number){
-  await this.signature(port,domain,value,scope);uint(now);uint(value.body.expiresAtMillis);if(now>value.body.expiresAtMillis)throw Error('lease_expired');return value.body;
+ async verify(port:SigningPort,domain:string,value:any,scope:Scope,now:number,readOnly=false){
+  await this.signature(port,domain,value,scope,readOnly);uint(now);uint(value.body.expiresAtMillis);if(now>value.body.expiresAtMillis)throw Error('lease_expired');return value.body;
  }
  async checkpoint(port:SigningPort,value:any,scope:Scope,now:number){
   const b=value?.body;exact(b,['scope','checkpointId','serverRevision','refs','account','historyFloorRevision','historyFloorMillis','windowId','issuedAtMillis','expiresAtMillis']);
@@ -46,12 +47,12 @@ export class WatchServiceKeyPin {
 
 /** Complete-body receipt, distinct from ObjectReceipt. Does not authorize eviction. */
 export async function signedAvailability(pin:WatchServiceKeyPin,port:SigningPort,value:any,scope:Scope,
- expected:{entityKey:string;bodyRevision:string;recipeOid:string;blobOids:string[]},now:number){
+ expected:{entityKey:string;bodyRevision:string;recipeOid:string;blobOids:string[]},now:number,readOnly=false){
  const b=value?.body;exact(b,['version','scope','entityKey','bodyRevision','recipeOid','status','blobOidsHash','storeId','receiptRevision','createdAtMillis','expiresAtMillis']);
  if(b.version!==2||b.entityKey!==expected.entityKey||b.bodyRevision!==expected.bodyRevision||b.recipeOid!==expected.recipeOid||!['source-pending','cloud-ready','source-unavailable'].includes(b.status))throw Error('invalid_schema');
  hexId(b.entityKey,64);hexId(b.bodyRevision,32);oid(b.recipeOid,'recipe');hexId(b.storeId,32);if(checkD64(b.receiptRevision)==='0')throw Error('invalid_schema');uint(b.createdAtMillis);uint(b.expiresAtMillis);
  if(b.expiresAtMillis<=b.createdAtMillis||b.expiresAtMillis-b.createdAtMillis>604800000)throw Error('invalid_schema');
  const {digest}=await import('./protocol');
  if(b.status==='cloud-ready'?b.blobOidsHash!==digest(expected.blobOids):b.blobOidsHash!==null)throw Error('fingerprint_mismatch');
- return pin.verify(port,'wrss.sync.v2/availability-sign',value,scope,now);
+ return pin.verify(port,'wrss.sync.v2/availability-sign',value,scope,now,readOnly);
 }

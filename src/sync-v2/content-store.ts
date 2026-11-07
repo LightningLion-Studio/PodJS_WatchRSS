@@ -12,13 +12,14 @@ export class WatchContentStore {
  private aad(id:string){return canonical({version:2,binding:this.prefix,id});}
  async get<T=any>(id:string):Promise<{revision:number;value:T}|null>{const rows=await this.sql.query('SELECT revision,value FROM sync2_content_projection WHERE binding=? AND id=?',[this.prefix,id]);const row=rows[0];return row?{revision:Number(row.revision),value:await this.cipher.open(this.aad(id),String(row.value))}:null;}
  async put(id:string,value:any,expected:number|null){return this.putMany([{id,value,expected}]);}
- async putMany(changes:{id:string;value:any;expected:number|null}[]){
+ async putMany(changes:{id:string;value:any;expected:number|null}[]){await this.sql.transaction(await this.prepareMany(changes));}
+ async prepareMany(changes:{id:string;value:any;expected:number|null}[]){
   const statements:{sql:string;params?:unknown[]}[]=[];
   for(const c of changes){const sealed=await this.cipher.seal(this.aad(c.id),c.value);
    if(c.expected===null)statements.push({sql:'INSERT INTO sync2_content_projection(binding,id,revision,value) VALUES (?,?,1,?)',params:[this.prefix,c.id,sealed]});
    else statements.push({sql:'UPDATE sync2_content_projection SET revision=revision+1,value=? WHERE binding=? AND id=? AND revision=?',params:[sealed,this.prefix,c.id,c.expected]},
     {sql:'INSERT INTO sync2_content_projection(binding,id,revision,value) SELECT NULL,NULL,0,NULL WHERE changes()!=1'});
-  }await this.sql.transaction(statements);
+  }return statements;
  }
  async page(after='',limit=32,prefix=''){if(limit<1||limit>32)throw Error('content_batch_limit');const rows=await this.sql.query('SELECT id,revision,value FROM sync2_content_projection WHERE binding=? AND id>? AND substr(id,1,?)=? ORDER BY id LIMIT ?',[this.prefix,after,prefix.length,prefix,limit]);return Promise.all(rows.map(async r=>({id:String(r.id),revision:Number(r.revision),value:await this.cipher.open(this.aad(String(r.id)),String(r.value))})));}
  path(key:string,suffix='data'){return this.prefix+'/'+digest(key)+'.'+suffix;}
