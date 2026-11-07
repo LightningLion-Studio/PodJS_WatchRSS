@@ -1,4 +1,5 @@
 /** Explicit P3B controller. No timers, startup registration, or UI text. */
+import {ResourceCollectionError} from '@podjs/framework/resource-journal';
 import {ContentSha256} from '@podjs/framework/content-sha256';
 import type {Statement} from '@podjs/framework/sql-projection';
 import {eligible,nextEligibilityChange} from './eviction';
@@ -32,7 +33,7 @@ export class WatchSpaceV2 {
   try{
    const available=await this.ports.capacity();if(available===null||!Number.isSafeInteger(available)||available<0)return await finish('space-unknown');
    const needed=Math.max(0,requiredFree-available);if(!needed)return await finish('sufficient');
-   freed+=await this.collectNeeded(needed-freed,start,budgetMillis,clock,session);
+   await this.collectNeeded(needed-freed,start,budgetMillis,clock,session,bytes=>{freed+=bytes;});
    while(freed<needed){
     if(clock()-start>=budgetMillis){await flush();return {status:'budget',freed,scanned};}
     const page=await this.store.uncheckedPage(session,now!,32);if(!page.length){const result=await finish('insufficient');this.ports.event?.({type:'space-insufficient',needed,freed});return result;}
@@ -46,27 +47,43 @@ export class WatchSpaceV2 {
      const value=await this.store.seal(row.id,{...body,status:'placeholder',proof});
      try{await this.ports.projection.controlUpdate(captured,{...captured},[
       ...this.store.examineStatements(session,pending),...this.store.headGuard(session,row,finalNow),
-      ...this.store.placeholder(row,value,now!),...await this.ports.detach?.(body)??[],
+      ...this.store.placeholder(row,value,finalNow),...await this.ports.detach?.(body)??[],
       ...this.store.examineStatements(session,[{entityKey:row.id,version:nextD64(row.revision),validUntil:null}]),
      ]);pending=[];}catch(error){if(/choice_stale|CHECK constraint failed/.test(String(error))){await flush();return {status:'candidates-changed',freed,scanned};}throw error;}
-     freed+=await this.collectNeeded(needed-freed,start,budgetMillis,clock,session);if(freed>=needed)return await finish('sufficient');
+     await this.collectNeeded(needed-freed,start,budgetMillis,clock,session,bytes=>{freed+=bytes;});if(freed>=needed)return await finish('sufficient');
     }await flush();
    }return await finish('sufficient');
   }catch(error){if((error as Error).message==='round_stale')return {status:'candidates-changed',freed,scanned};throw error;}
  }
  /** Re-authenticate every resumed deletion. A persisted old receipt never
   * grants a later GC window permission to remove the last physical bytes. */
- private async collectNeeded(needed:number,start:number,budget:number,clock:()=>number,session:SpaceRound){let freed=0;while(freed<needed&&clock()-start<budget){const result=await this.collect(session);freed+=result.freed;if(result.files<32)break;}return freed;}
- async collect(session?:SpaceRound){return this.store.collect(async resources=>{
-  const state=await this.ports.projection.readState(),ids:string[]=[],guards:Statement[]=[],checked=new Map<string,boolean>(),now=this.ports.trustedNow();let expires=Number.MAX_SAFE_INTEGER;
-  for(const resource of resources){if(!resource.authority){ids.push(resource.id);continue;}
-   if(!checked.has(resource.authority)){let accepted=false;const row=await this.store.journal.row(resource.authority);
-    if(row&&now!==null&&await this.store.trustedTime(now)){const body=await this.store.open(row);if(body.status==='placeholder'&&eligible(body.item,now))try{const proof=await this.authorize(body,state,now);expires=Math.min(expires,proof.receipt.body.expiresAtMillis);guards.push(...this.store.rowGuard(row),this.store.guard(now),{sql:'DELETE FROM podjs_sql_cas_guard'});accepted=true;}catch{}}
-    checked.set(resource.authority,accepted);
-   }if(checked.get(resource.authority))ids.push(resource.id);
-  }
-  return {ids,commit:async statements=>{const current=this.ports.trustedNow();if(now===null||current===null||current<now||current>=expires)throw Error('proof_expired');try{await this.ports.projection.controlUpdate(state,{...state},[...session?this.store.roundGuard(session):[],...guards,...statements]);}catch(error){if(session&&/choice_stale|CHECK constraint failed/.test(String(error)))throw Error('round_stale');throw error;}}};
- });}
+ private async collectNeeded(needed:number,start:number,budget:number,clock:()=>number,session:SpaceRound,onFreed:(bytes:number)=>void){
+  let completed=0;const record=(bytes:number)=>{completed+=bytes;onFreed(bytes);};
+  while(completed<needed&&clock()-start<budget){let result;try{result=await this.collect(session);}catch(error){if(error instanceof ResourceCollectionError)record(error.completed.freed);throw error;}record(result.freed);if(result.files<32)break;}
+ }
+ async collect(session?:SpaceRound){
+  // Invalid requests do no work in authorizers, including clock/key persistence.
+  if(session&&!await this.store.isCurrentRound(session))throw Error('round_stale');
+  return this.store.collect(async resources=>{
+   let state=await this.ports.projection.readState();const ids:string[]=[],guards:Statement[]=[],checked=new Map<string,boolean>(),now=this.ports.trustedNow();let expires=Number.MAX_SAFE_INTEGER,hasAuthority=false;
+   if(now===null||!await this.store.timeValid(now))throw Error('clock_unknown');
+   for(const resource of resources){if(!resource.authority){ids.push(resource.id);continue;}
+    if(!checked.has(resource.authority)){let accepted=false;const row=await this.store.journal.row(resource.authority);
+     if(row){const body=await this.store.open(row);if(body.status==='placeholder'&&eligible(body.item,now))try{const proof=await this.authorize(body,state,now);expires=Math.min(expires,proof.receipt.body.expiresAtMillis);guards.push(...this.store.rowGuard(row));accepted=true;}catch{}}
+     checked.set(resource.authority,accepted);hasAuthority ||=accepted;
+    }if(checked.get(resource.authority))ids.push(resource.id);
+   }
+   return {ids,commit:async statements=>{
+    const current=this.ports.trustedNow();if(current===null||!Number.isSafeInteger(current)||current<now||current>=expires)throw Error('proof_expired');const next={...state};
+    try{await this.ports.projection.controlUpdate(state,next,[
+     ...session?this.store.roundGuard(session):[],
+     this.store.timeGuard(current),{sql:'DELETE FROM podjs_sql_cas_guard'},
+     ...hasAuthority?[this.store.guard(current),{sql:'DELETE FROM podjs_sql_cas_guard'}]:[],
+     ...guards,...statements,this.store.advanceClock(current),
+    ]);state=next;}catch(error){if(session&&/choice_stale|CHECK constraint failed/.test(String(error)))throw Error('round_stale');throw error;}
+   }};
+  });
+ }
  private async authorize(body:CachedBody,state:SyncState,now:number){
   if(state.pendingChoice||!state.account)throw Error('choice_pending');const p=await this.ports.localProof(body),i=body.item;
   if(!p.authenticated||p.keyVersion<1||p.accountOid!==state.account.oid||p.entityKey!==i.entityKey||p.bodyRevision!==i.bodyRevision||p.recipeOid!==i.recipeOid||canonical(p.scope)!==canonical(i.scope))throw Error('closure_incomplete');

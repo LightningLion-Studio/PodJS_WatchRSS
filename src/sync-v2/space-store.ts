@@ -24,7 +24,11 @@ export class WatchSpaceStore {
  open(row:CacheRow):Promise<CachedBody>{return this.cipher.open(this.aad(row.id),row.value);}
  async enabled(){return Number((await this.journal.db.query('SELECT auto_evict FROM sync2_space_settings WHERE binding=?',[this.binding]))[0]?.auto_evict)===1;}
  async setAutoEvict(enabled:boolean){await this.journal.db.transaction([{sql:'UPDATE sync2_space_settings SET auto_evict=? WHERE binding=?',params:[enabled?1:0,this.binding]}]);}
- async trustedTime(now:number|null){if(now===null||!Number.isSafeInteger(now)||now<0)return false;const old=Number((await this.journal.db.query('SELECT clock FROM sync2_space_settings WHERE binding=?',[this.binding]))[0]?.clock??0);if(now<old)return false;await this.journal.db.transaction([{sql:'UPDATE sync2_space_settings SET clock=MAX(clock,?) WHERE binding=?',params:[now,this.binding]}]);return true;}
+ async timeValid(now:number|null){if(now===null||!Number.isSafeInteger(now)||now<0)return false;const old=Number((await this.journal.db.query('SELECT clock FROM sync2_space_settings WHERE binding=?',[this.binding]))[0]?.clock??0);return now>=old;}
+ advanceClock(now:number):typeStatement{return {sql:'UPDATE sync2_space_settings SET clock=MAX(clock,?) WHERE binding=?',params:[now,this.binding]};}
+ timeGuard(now:number):typeStatement{return {sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM sync2_space_settings WHERE binding=? AND clock<=?) THEN 1 ELSE 0 END',params:[this.binding,now]};}
+ async trustedTime(now:number|null){if(!await this.timeValid(now))return false;await this.journal.db.transaction([this.advanceClock(now!)]);return true;}
+ async isCurrentRound(session:SpaceRound){const row=(await this.journal.db.query('SELECT 1 AS current FROM sync2_space_round WHERE binding=? AND round=? AND controller=? AND active=1',[this.binding,session.round,session.controller]))[0];return !!row;}
  /** Each window claims the active round with a new controller token. A crash
   * keeps the checked set; a finished round makes the next claim increment round.
   * Legacy position/candidate tables are deliberately neither read nor written. */
