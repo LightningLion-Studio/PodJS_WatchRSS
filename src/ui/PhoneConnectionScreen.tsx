@@ -36,7 +36,7 @@ export function PhoneConnectionScreen(props: { width: number; height: number; ac
   const inner = () => props.width - 36;
 
   const option = (title: string, subtitle: string, press: () => void, primary: boolean, trailing?: string): ScrollEntry => ({
-    height: 64, render: () => <View class="absolute inset-0 rounded-[32]" style={{ bgColor: primary ? PHONE_PAGE.primary : "#2a2a2a" }} focusable accessibilityRole="button" accessibilityLabel={`${title}，${subtitle}`} onPress={act(press)}>
+    height: 64, render: () => <View class="absolute inset-0 rounded-[32] active:scale-96" style={{ bgColor: primary ? PHONE_PAGE.primary : "#2a2a2a" }} focusable accessibilityRole="button" accessibilityLabel={`${title}，${subtitle}`} onPress={act(press)}>
       <Text class="absolute left-[20] top-[11]" style={{ fontSlot: 22, lineHeight: 21, textColor: primary ? PHONE_PAGE.onPrimary : PHONE_PAGE.foreground }}>{title}</Text>
       <Text class="absolute left-[20] top-[34]" style={{ fontSlot: 0, lineHeight: 14, textColor: primary ? "#000000b8" : PHONE_PAGE.secondary }}>{subtitle}</Text>
       {trailing ? <Text class="absolute right-[18] top-[22]" style={{ fontSlot: 0, lineHeight: 14, textColor: PHONE_PAGE.secondary }}>{trailing}</Text> : null}

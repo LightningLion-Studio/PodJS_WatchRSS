@@ -46,7 +46,7 @@ export function RemoteInputScreen(props:{exportMode?:HttpExportMode;width:number
    <Text class="absolute left-[14] right-[14] text-xs leading-[14] text-center" style={{insetT:contentTop()+(state()?25:128),textColor:foreground(),opacity:.7}}>{hint().join('\n')}</Text>
    </Show>
    <Show when={synced()&&!state()}><Text class="absolute left-[14] right-[14] text-sm leading-[17] text-center" style={{insetT:contentTop()+128,textColor:transition()>.5?'#1976d2':'#64b5f6'}}>已同步至手机端</Text></Show>
-   <Show when={state()||synced()}><View onPress={props.onDismiss} focusable class="absolute w-[200] h-[48] rounded-[47] items-center justify-center" style={{insetL:(props.width-200)/2,insetT:contentTop()+(state()?25+hint().length*14+12:128+17+12),bgColor:transition()>.5?'#e0e0e0':'#2c2c2c'}}><Text class="text-[17px]" style={{textColor:foreground()}}>关闭</Text></View></Show>
+   <Show when={state()||synced()}><View onPress={props.onDismiss} focusable class="absolute w-[200] h-[48] rounded-[47] items-center justify-center active:scale-96" style={{insetL:(props.width-200)/2,insetT:contentTop()+(state()?25+hint().length*14+12:128+17+12),bgColor:transition()>.5?'#e0e0e0':'#2c2c2c'}}><Text class="text-[17px]" style={{textColor:foreground()}}>关闭</Text></View></Show>
   </Show>
   <View onPress={()=>setDownload(true)} focusable class="absolute left-[14] right-[14] items-center justify-center" style={{insetT:linkTop(),height:downloadHint().length*14}}><Text class="text-xs leading-[14] text-center" style={{textColor:foreground(),opacity:.8}}>{downloadHint().join("\n")}</Text></View>
   <Show when={download()}><DownloadPhoneAppDialog width={props.width} height={props.height} operation={title()} onDismiss={()=>setDownload(false)} onError={props.onError}/></Show>

@@ -25,7 +25,7 @@ export function feedEmptyStateEntry(title:string,subtitle:string,width:number):S
 export function feedPillEntry(label:string,width:number,onPress?:()=>void):ScrollEntry {
   return {height:52,render:()=>{
     const buttonWidth=Math.min(width-44,getOps().measureText(label,22)+18);
-    return <View class="absolute inset-0"><View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center" style={{insetL:(width-36-buttonWidth)/2,width:buttonWidth,opacity:onPress?1:.5}}>
+    return <View class="absolute inset-0"><View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96" style={{insetL:(width-36-buttonWidth)/2,width:buttonWidth,opacity:onPress?1:.5}}>
       <Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
     </View></View>;
   }};
@@ -79,7 +79,7 @@ export function RssFeedScreen(props:{width:number;height:number;title:string;act
       // Native FeedPillButton: 17sp text, 9dp horizontal padding, 44dp height, surfaceVariant, 0.5 alpha when disabled.
       const buttonWidth=Math.min(props.width-44,getOps().measureText(label,22)+18);
       return <View class="absolute inset-0">
-        <View onPress={enabled?props.onNext:undefined} focusable={enabled} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center" style={{insetL:(props.width-36-buttonWidth)/2,width:buttonWidth,opacity:enabled?1:.5}}>
+        <View onPress={enabled?props.onNext:undefined} focusable={enabled} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96" style={{insetL:(props.width-36-buttonWidth)/2,width:buttonWidth,opacity:enabled?1:.5}}>
           <Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
         </View>
       </View>;
@@ -100,6 +100,6 @@ export function RssActionsScreen(props:{width:number;height:number;article:Artic
     {label:"分享",act:props.onShare,enabled:!props.busy&&shareActionEnabled(props.article.title,props.article.link,!!props.systemShare)},
     ...(isDeletableLocalContentChannel(props.channelUrl)?[{label:"删除",act:()=>setConfirm(true),enabled:!props.busy}]:[]),
     {label:"取消",act:props.onBack,enabled:!props.busy}
-  ].map(item=>({height:48,render:()=> <View onPress={item.enabled?item.act:undefined} focusable={item.enabled} class="absolute top-[0] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center" style={{width:Math.min(160,props.width-44),insetL:Math.max(0,(props.width-44-160)/2)}}><Text class={item.enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#939393]"}>{item.label}</Text></View>}));
+  ].map(item=>({height:48,render:()=> <View onPress={item.enabled?item.act:undefined} focusable={item.enabled} class="absolute top-[0] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{width:Math.min(160,props.width-44),insetL:Math.max(0,(props.width-44-160)/2)}}><Text class={item.enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#939393]"}>{item.label}</Text></View>}));
   return <><ScrollEntries height={props.height} entries={entries()} padding={22} verticalPadding={22} gap={8} inputActive={()=>!confirm()&&!props.busy} ref={value=>props.ref?.({...value,goBack})}/><Show when={confirm()}><DeleteConfirmDialog width={props.width} height={props.height} title="删除内容" message="删除后会从本机和下次同步中移除此内容" busy={props.busy} onCancel={()=>setConfirm(false)} onConfirm={props.onDelete}/></Show></>;
 }

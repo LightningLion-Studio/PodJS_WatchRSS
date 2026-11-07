@@ -13,7 +13,7 @@ const messages:Record<InternetStatus,{guidance:string;status:string}>={
 };
 
 export function OnboardingPrimaryButton(props:{text:string;enabled:boolean;onPress:()=>void}){
- return <View focusable={props.enabled} accessibilityRole="button" accessibilityState={{disabled:!props.enabled}} onPress={()=>{if(props.enabled)props.onPress();}} class="rounded-[24] px-[22] py-[12] items-center justify-center" style={{bgColor:props.enabled?'#ff6026':'#23272a'}}><Text class="text-lg leading-[21]" style={{textColor:props.enabled?'#000000':'#b6b6b6'}}>{props.text}</Text></View>;
+ return <View focusable={props.enabled} accessibilityRole="button" accessibilityState={{disabled:!props.enabled}} onPress={()=>{if(props.enabled)props.onPress();}} class="rounded-[24] px-[22] py-[12] items-center justify-center active:scale-96" style={{bgColor:props.enabled?'#ff6026':'#23272a'}}><Text class="text-lg leading-[21]" style={{textColor:props.enabled?'#000000':'#b6b6b6'}}>{props.text}</Text></View>;
 }
 
 function NetworkIndicator(props:{status:InternetStatus;active?:()=>boolean}){
@@ -55,8 +55,8 @@ export function OnboardingOfflineDialog(props:{width:number;height:number;status
   <View class="absolute left-[0] top-[0] rounded-[9999] bg-black" style={{width:size(),height:size()}}>
    <Text class="absolute text-[17px] text-center text-[#f5f5f5]" style={{insetL:40*scale(),insetT:top()*scale(),width:193,height:23,lineHeight:23,scale:2*scale(),originX:-.5,originY:-.5}}>警告</Text>
    <Text class="absolute text-[17px] text-center text-[#b6b6b6]" style={{insetL:40*scale(),insetT:(top()+54)*scale(),width:193,height:23*lines().length,lineHeight:23,scale:2*scale(),originX:-.5,originY:-.5}}>{lines().join('\n')}</Text>
-   <View focusable accessibilityLabel="取消" onPress={props.onCancel} class="absolute rounded-[9999] bg-[#23272a]" style={{insetL:113*scale(),insetT:332*scale(),width:104*scale(),height:104*scale()}}><Image src="../assets/icons/close.svg" class="absolute" style={{insetL:28*scale(),insetT:28*scale(),width:48*scale(),height:48*scale()}}/></View>
-   <View focusable accessibilityLabel="确认继续" onPress={props.onConfirm} class="absolute rounded-[9999] bg-[#ff6026]" style={{insetL:249*scale(),insetT:332*scale(),width:104*scale(),height:104*scale()}}><Image src="../assets/icons/onboarding-check.svg" class="absolute" style={{insetL:28*scale(),insetT:28*scale(),width:48*scale(),height:48*scale()}}/></View>
+   <View focusable accessibilityLabel="取消" onPress={props.onCancel} class="absolute rounded-[9999] bg-[#23272a] active:scale-96" style={{insetL:113*scale(),insetT:332*scale(),width:104*scale(),height:104*scale()}}><Image src="../assets/icons/close.svg" class="absolute" style={{insetL:28*scale(),insetT:28*scale(),width:48*scale(),height:48*scale()}}/></View>
+   <View focusable accessibilityLabel="确认继续" onPress={props.onConfirm} class="absolute rounded-[9999] bg-[#ff6026] active:scale-96" style={{insetL:249*scale(),insetT:332*scale(),width:104*scale(),height:104*scale()}}><Image src="../assets/icons/onboarding-check.svg" class="absolute" style={{insetL:28*scale(),insetT:28*scale(),width:48*scale(),height:48*scale()}}/></View>
   </View>
  </View>;
 }

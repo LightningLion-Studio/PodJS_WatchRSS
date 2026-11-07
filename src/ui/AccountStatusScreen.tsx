@@ -58,7 +58,7 @@ export function AccountStatusScreen(props: {
       line('未绑定', 21, false, 26),
       line('请在手机端登录后点击同步账号。', 12, true, 34),
       {height:8,render:()=>null},
-      {height:promptHeight,render:()=><View onPress={()=>setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] text-[17px] leading-[21] text-[#f5f5f5]" style={{insetT:(promptHeight-prompt.length*21)/2}}>{prompt.join('\n')}</Text></View>},
+      {height:promptHeight,render:()=><View onPress={()=>setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] text-[17px] leading-[21] text-[#f5f5f5]" style={{insetT:(promptHeight-prompt.length*21)/2}}>{prompt.join('\n')}</Text></View>},
     );
     else {
       rows.push(

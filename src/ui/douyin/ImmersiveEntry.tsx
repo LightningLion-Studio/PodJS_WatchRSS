@@ -159,17 +159,17 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   // Submit no guest scene while restoring: frame zero is the first page content.
   return <Show when={(props.active??true)&&!stockPending()}><View class="absolute inset-0 bg-black">
    <View class="absolute inset-0">
-    <View class="absolute left-[18] right-[18] top-[18] h-[42]" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
+    <View class="absolute left-[18] right-[18] top-[18] h-[42] active:scale-96" onPress={()=>props.onNavigate({name:"channel-info"})} focusable accessibilityRole="button" accessibilityLabel="抖音频道信息">
       <Text class="absolute top-[0] text-[21px] leading-[26] text-[#f5f5f5]" style={{insetL:groupLeft-18}}>抖音</Text>
       <Image src="../assets/icons/info-hint.svg" class="absolute top-[3.4]" style={{insetL:groupLeft-18+titleWidth+hintGap-3.6,width:hintBox,height:hintBox}}/>
       <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
     </View>
     <Show when={slow()&&items().length>0&&!error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#b6b6b6]">内容加载较慢，请稍候</Text></Show>
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text>
-      <View class="absolute left-[65] right-[65] top-[92] h-[36] rounded-[18] items-center justify-center bg-[#2a2a2a]" onPress={()=>void (retryPlayback?enter():load(true,true))} focusable accessibilityRole="button" accessibilityLabel="重试"><Text class="text-sm text-[#f5f5f5]">重试</Text></View>
+      <View class="absolute left-[65] right-[65] top-[92] h-[36] rounded-[18] items-center justify-center bg-[#2a2a2a] active:scale-96" onPress={()=>void (retryPlayback?enter():load(true,true))} focusable accessibilityRole="button" accessibilityLabel="重试"><Text class="text-sm text-[#f5f5f5]">重试</Text></View>
     </Show>
     {/* 44dp visual circle inside a 120×80 transparent hit area. */}
-    <View class="absolute bottom-[12] w-[120] h-[80] rounded-full items-center justify-center" style={{insetL:(props.width-120)/2}} onPress={auth()==='unknown'&&!items().length?undefined:()=>void enter()} focusable={auth()!=='unknown'||items().length>0} accessibilityRole="button" accessibilityLabel={auth()==='unknown'&&!items().length?"正在读取登录状态…":(logged()||auth()==='unknown'&&items().length>0)?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}>
+    <View class="absolute bottom-[12] w-[120] h-[80] rounded-full items-center justify-center active:scale-96" style={{insetL:(props.width-120)/2}} onPress={auth()==='unknown'&&!items().length?undefined:()=>void enter()} focusable={auth()!=='unknown'||items().length>0} accessibilityRole="button" accessibilityLabel={auth()==='unknown'&&!items().length?"正在读取登录状态…":(logged()||auth()==='unknown'&&items().length>0)?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}>
       <View class="w-[44] h-[44] rounded-full items-center justify-center" style={{bgColor:"#2a2a2aeb"}}><Show when={logged()||auth()==='unknown'&&items().length>0} fallback={<Text class="text-base text-[#f5f5f5]">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
     </View>
   </View></View></Show>;

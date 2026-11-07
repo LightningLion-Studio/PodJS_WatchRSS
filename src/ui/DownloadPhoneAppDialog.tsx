@@ -21,8 +21,8 @@ export function DownloadPhoneAppDialog(props: { width: number; height: number; o
           <QRCode value={PHONE_APP_DOWNLOAD_URL} size={176 * scale()} onError={() => setQrFailed(true)} />
         </Show>
       </View>
-      <View onPress={props.onDismiss} focusable class="absolute rounded-[9999] bg-[#23272a] items-center justify-center" style={{ insetL: 57 * scale(), insetT: buttonsTop(), width: 104 * scale(), height: 104 * scale() }}><Image src="../assets/icons/close.svg" style={{ width: 48 * scale(), height: 48 * scale() }} /></View>
-      <View onPress={() => { void openBrowserUrl(PHONE_APP_DOWNLOAD_URL, "phone-download").catch(error => props.onError(String(error))); }} focusable class="absolute rounded-[9999] bg-[#2a2a2a] items-center justify-center" style={{ insetL: 177 * scale(), insetT: buttonsTop(), width: 232 * scale(), height: 104 * scale() }}><Text class="text-[#f5f5f5]" style={{ fontSlot: 0, scale: 22 / 12 * scale() }}>浏览器打开下载页</Text></View>
+      <View onPress={props.onDismiss} focusable class="absolute rounded-[9999] bg-[#23272a] items-center justify-center active:scale-96" style={{ insetL: 57 * scale(), insetT: buttonsTop(), width: 104 * scale(), height: 104 * scale() }}><Image src="../assets/icons/close.svg" style={{ width: 48 * scale(), height: 48 * scale() }} /></View>
+      <View onPress={() => { void openBrowserUrl(PHONE_APP_DOWNLOAD_URL, "phone-download").catch(error => props.onError(String(error))); }} focusable class="absolute rounded-[9999] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{ insetL: 177 * scale(), insetT: buttonsTop(), width: 232 * scale(), height: 104 * scale() }}><Text class="text-[#f5f5f5]" style={{ fontSlot: 0, scale: 22 / 12 * scale() }}>浏览器打开下载页</Text></View>
     </View>
   </View>;
 }

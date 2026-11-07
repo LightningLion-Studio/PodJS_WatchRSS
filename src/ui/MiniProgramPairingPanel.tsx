@@ -73,12 +73,12 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  // Narrower than the row: these pills often sit low on the face, where the circle is tight.
  const PILL_WIDTH=140;
  const pill=(label:string,press:()=>void,primary=false):ScrollEntry=>({height:PHONE_PAGE.touchHeight,bounds:centredBounds(inner(),Math.min(PILL_WIDTH,inner()),0,PHONE_PAGE.touchHeight),render:()=>
-  <View class="absolute top-[0] rounded-[24] items-center justify-center" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner()),height:PHONE_PAGE.touchHeight,bgColor:primary?PHONE_PAGE.primary:'#2a2a2a'}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
+  <View class="absolute top-[0] rounded-[24] items-center justify-center active:scale-96" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner()),height:PHONE_PAGE.touchHeight,bgColor:primary?PHONE_PAGE.primary:'#2a2a2a'}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
    <Text style={{fontSlot:22,lineHeight:21,textColor:primary?PHONE_PAGE.onPrimary:PHONE_PAGE.foreground}}>{label}</Text>
   </View>});
  // Secondary actions are text links: a second stacked pill would fall below the round edge.
  const link=(label:string,press:()=>void):ScrollEntry=>({height:40,bounds:centredBounds(inner(),Math.min(measure(label,1)+24,inner()),10,20),render:()=>
-  <View class="absolute top-[0] h-[40] items-center justify-center" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner())}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
+  <View class="absolute top-[0] h-[40] items-center justify-center active:scale-96" style={{insetL:(inner()-Math.min(PILL_WIDTH,inner()))/2,width:Math.min(PILL_WIDTH,inner())}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={act(press)}>
    <Text style={{fontSlot:1,lineHeight:17,textColor:PHONE_PAGE.secondary}}>{label}</Text>
   </View>});
  const spinner=(label:string):ScrollEntry=>({height:40,bounds:centredBounds(inner(),40,0,40),render:()=> <View class="absolute inset-0 items-center justify-center"><WatchProgressIndicator size={40} strokeWidth={4} color={PHONE_PAGE.primary} trackColor="#00000000" active={props.active} accessibilityLabel={label}/></View>});
@@ -109,8 +109,8 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
      ...(sas?[{height:30,render:()=> <Text class="absolute inset-0 text-center" accessibilityLabel={`核对码 ${current.sas}`} style={{fontSlot:23,lineHeight:30,textColor:PHONE_PAGE.foreground}}>{sas}</Text>} as ScrollEntry]:[]),
      gap(4),...text(`账号 ${current.account} · 确认后手表将登录`,'small'),gap(14),
      {height:48,bounds:centredBounds(inner(),156,0,48),render:()=> <View class="absolute inset-0">
-      <View class="absolute w-[44] h-[44] rounded-full bg-[#23272a] items-center justify-center" style={{insetL:(inner()-156)/2,insetT:2}} focusable accessibilityRole="button" accessibilityLabel="不一致，不绑定" onPress={act(()=>pairing.confirmSas(false))}><Image src="../assets/icons/close.svg" style={{width:26,height:26}}/></View>
-      <View class="absolute top-[0] w-[104] h-[48] rounded-[24] items-center justify-center" style={{insetL:(inner()-156)/2+52,bgColor:sas?PHONE_PAGE.primary:'#2a2a2a'}} focusable={!!sas} accessibilityRole="button" accessibilityState={{disabled:!sas}} accessibilityLabel="一致，绑定" onPress={sas?act(()=>pairing.confirmSas(true)):undefined}><Text style={{fontSlot:22,lineHeight:21,textColor:sas?PHONE_PAGE.onPrimary:PHONE_PAGE.secondary}}>一致，绑定</Text></View>
+      <View class="absolute w-[44] h-[44] rounded-full bg-[#23272a] items-center justify-center active:scale-96" style={{insetL:(inner()-156)/2,insetT:2}} focusable accessibilityRole="button" accessibilityLabel="不一致，不绑定" onPress={act(()=>pairing.confirmSas(false))}><Image src="../assets/icons/close.svg" style={{width:26,height:26}}/></View>
+      <View class="absolute top-[0] w-[104] h-[48] rounded-[24] items-center justify-center active:scale-96" style={{insetL:(inner()-156)/2+52,bgColor:sas?PHONE_PAGE.primary:'#2a2a2a'}} focusable={!!sas} accessibilityRole="button" accessibilityState={{disabled:!sas}} accessibilityLabel="一致，绑定" onPress={sas?act(()=>pairing.confirmSas(true)):undefined}><Text style={{fontSlot:22,lineHeight:21,textColor:sas?PHONE_PAGE.onPrimary:PHONE_PAGE.secondary}}>一致，绑定</Text></View>
      </View>},
     ];
    }

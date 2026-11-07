@@ -69,7 +69,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
     if (menu()) { setMenu(undefined); return true; }
     return false;
   };
-  const outlined = (label: string, press: () => void, top = 0) => <View onPress={press} focusable class="absolute left-[0] right-[0] h-[40] rounded-[20]" style={{ insetT: top, borderWidth: 1, borderColor: "#2c3135" }}>
+  const outlined = (label: string, press: () => void, top = 0) => <View onPress={press} focusable class="absolute left-[0] right-[0] h-[40] rounded-[20] active:scale-96" style={{ insetT: top, borderWidth: 1, borderColor: "#2c3135" }}>
     <Text class="absolute left-[12] right-[12] top-[11.5] text-sm leading-[17] text-center text-[#ff6026]">{label}</Text>
   </View>;
   const entries = createMemo<ScrollEntry[]>(() => {
@@ -78,10 +78,10 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
     const rows: ScrollEntry[] = [
       { height: 28, render: () => <Text class="absolute inset-0 text-[23px] leading-[28] text-center text-[#f5f5f5]">阅读器预设</Text> },
       { height: explanation.length * 14 - 1, render: () => <Text class="absolute inset-0 text-xs leading-[14] text-[#f5f5f5]">{explanation.join("\n")}</Text> },
-      { height: Math.max(52, prompt.length * 21 + 15), render: () => <View onPress={() => setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[8] text-[17px] leading-[21] text-[#f5f5f5]">{prompt.join("\n")}</Text></View> },
+      { height: Math.max(52, prompt.length * 21 + 15), render: () => <View onPress={() => setDownload(true)} focusable class="absolute inset-0 rounded-[47] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] top-[8] text-[17px] leading-[21] text-[#f5f5f5]">{prompt.join("\n")}</Text></View> },
       { height: 17, render: () => <Text class="absolute inset-0 text-sm leading-[17] text-[#f5f5f5]">当前：{active().name}</Text> },
       { height: 17, render: () => <Text class="absolute inset-0 text-sm leading-[17] text-[#f5f5f5]">显示方式</Text> },
-      { height: 48, render: () => <View class="absolute left-[0] right-[0] top-[4] h-[40] rounded-[20] overflow-hidden" style={{ borderWidth: 1, borderColor: "#2c3135" }}>{(["DARK", "LIGHT", "SYSTEM"] as const).map((mode, index) => <View onPress={() => props.onMode(mode)} focusable class="absolute top-[1] h-[38] items-center justify-center" style={{ insetL: 1 + index * (width - 2) / 3, width: (width - 2) / 3, bgColor: props.state.selection.mode === mode ? "#2a2a2a" : "#1c1f21" }}><Text class="text-sm leading-[17] text-[#f5f5f5]">{["深色", "浅色", "自动"][index]}</Text></View>)}{[1,2].map(index=><View class="absolute top-[0] w-[1] h-[40] bg-[#2c3135]" style={{insetL:width*index/3}}/>)}</View> },
+      { height: 48, render: () => <View class="absolute left-[0] right-[0] top-[4] h-[40] rounded-[20] overflow-hidden" style={{ borderWidth: 1, borderColor: "#2c3135" }}>{(["DARK", "LIGHT", "SYSTEM"] as const).map((mode, index) => <View onPress={() => props.onMode(mode)} focusable class="absolute top-[1] h-[38] items-center justify-center active:scale-96" style={{ insetL: 1 + index * (width - 2) / 3, width: (width - 2) / 3, bgColor: props.state.selection.mode === mode ? "#2a2a2a" : "#1c1f21" }}><Text class="text-sm leading-[17] text-[#f5f5f5]">{["深色", "浅色", "自动"][index]}</Text></View>)}{[1,2].map(index=><View class="absolute top-[0] w-[1] h-[40] bg-[#2c3135]" style={{insetL:width*index/3}}/>)}</View> },
     ];
     if (props.state.selection.mode === "SYSTEM") {
       const solarText = today() ? `今天 ${formatScheduleMinutes(today()!.sunrise)} 日出 · ${formatScheduleMinutes(today()!.sunset)} 日落` : "当前位置今天无法计算日出日落，将暂用固定时间。";
@@ -91,13 +91,13 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
       rows.push(...cardSlices([
         { height: 85, render: () => <>
         <Text class="absolute left-[10] right-[10] top-[10] text-sm leading-[17] text-[#f5f5f5]">自动切换规则</Text>
-        {(["FIXED_TIME", "SUNRISE_SUNSET"] as const).map((mode, index) => <View onPress={() => { if (mode === "SUNRISE_SUNSET" && (schedule().latitude === null || schedule().longitude === null)) void updateLocation(); else props.onSchedule({ mode }); }} focusable class="absolute top-[43] h-[32] rounded-[8] items-center justify-center" style={{ insetL: 10 + index * 92, width: index ? width - 112 : 88, bgColor: schedule().mode === mode ? "#2a2a2a" : "#23272a", borderWidth: schedule().mode === mode ? 0 : 1, borderColor: "#2c3135" }}><Text class="absolute left-[16] right-[16] text-sm leading-[17] text-[#f5f5f5]">{index ? lines("日出日落", width - 144, 1).join("\n") : "固定时间"}</Text></View>)}
+        {(["FIXED_TIME", "SUNRISE_SUNSET"] as const).map((mode, index) => <View onPress={() => { if (mode === "SUNRISE_SUNSET" && (schedule().latitude === null || schedule().longitude === null)) void updateLocation(); else props.onSchedule({ mode }); }} focusable class="absolute top-[43] h-[32] rounded-[8] items-center justify-center active:scale-96" style={{ insetL: 10 + index * 92, width: index ? width - 112 : 88, bgColor: schedule().mode === mode ? "#2a2a2a" : "#23272a", borderWidth: schedule().mode === mode ? 0 : 1, borderColor: "#2c3135" }}><Text class="absolute left-[16] right-[16] text-sm leading-[17] text-[#f5f5f5]">{index ? lines("日出日落", width - 144, 1).join("\n") : "固定时间"}</Text></View>)}
         </> },
         fixed
           ? { height: 120, bounds: { x: 10, y: 10, width: width - 20, height: 96 }, render: () => <View class="absolute left-[10] right-[10] top-[10] h-[96]">{outlined(`浅色开始  ${formatScheduleMinutes(schedule().lightStartMinutes)}`, () => void pickTime("lightStartMinutes"))}{outlined(`深色开始  ${formatScheduleMinutes(schedule().darkStartMinutes)}`, () => void pickTime("darkStartMinutes"), 56)}</View> }
           : { height: 72 + solarLines.length * 14, bounds: { x: 10, y: 6, width: width - 20, height: 52 + solarLines.length * 14 }, render: () => <>
           <Text class="absolute left-[10] right-[10] top-[6] text-xs leading-[14] text-[#f5f5f5]">{solarLines.join("\n")}</Text>
-          <View onPress={() => void updateLocation()} focusable={!locating()} class="absolute left-[10] right-[10] h-[40] rounded-[20] bg-[#ff6026] items-center justify-center" style={{ insetT: 18 + solarLines.length * 14 }}><Text class="text-sm leading-[17] text-black">{locating() ? "正在定位…" : "更新当前位置"}</Text></View>
+          <View onPress={() => void updateLocation()} focusable={!locating()} class="absolute left-[10] right-[10] h-[40] rounded-[20] bg-[#ff6026] items-center justify-center active:scale-96" style={{ insetT: 18 + solarLines.length * 14 }}><Text class="text-sm leading-[17] text-black">{locating() ? "正在定位…" : "更新当前位置"}</Text></View>
           </> },
       ], 10, "#23272a"));
     }
@@ -106,7 +106,7 @@ export function ReaderPresetScreen(props: ReaderPresetScreenProps) {
       const selectedName = () => kind === "dark" && props.state.selection.darkFollowsLight ? "跟随浅色" : presets().find(preset => preset.id === (kind === "light" ? props.state.selection.lightPresetId : props.state.selection.darkPresetId))?.name ?? "请选择";
       rows.push({ height: 69, render: () => <View class="absolute inset-0">
         <Text class="absolute left-[0] top-[0] text-sm leading-[17] text-[#f5f5f5]">{kind === "light" ? "浅色预设" : "深色预设"}</Text>
-        <View onPress={() => { scroller?.stop(); setMenu({ kind, top: roundStart() + rowTop + 65 - (scroller?.offset() ?? 0) }); }} focusable class="absolute left-[0] right-[0] top-[25] h-[40] rounded-[20]" style={{ borderWidth: 1, borderColor: "#2c3135" }}><Text class="absolute left-[24] right-[48] top-[11.5] text-sm leading-[17] text-[#ff6026]">{selectedName()}</Text><Image src="../assets/icons/reader-preset-down.svg" class="absolute right-[24] top-[8] w-[24] h-[24]"/></View>
+        <View onPress={() => { scroller?.stop(); setMenu({ kind, top: roundStart() + rowTop + 65 - (scroller?.offset() ?? 0) }); }} focusable class="absolute left-[0] right-[0] top-[25] h-[40] rounded-[20] active:scale-96" style={{ borderWidth: 1, borderColor: "#2c3135" }}><Text class="absolute left-[24] right-[48] top-[11.5] text-sm leading-[17] text-[#ff6026]">{selectedName()}</Text><Image src="../assets/icons/reader-preset-down.svg" class="absolute right-[24] top-[8] w-[24] h-[24]"/></View>
       </View> });
     }
     if (message()) { const text = lines(message(), width, 1); rows.push({ height: text.length * 17, render: () => <Text class="absolute inset-0 text-sm leading-[17] text-[#ff6026]">{text.join("\n")}</Text> }); }

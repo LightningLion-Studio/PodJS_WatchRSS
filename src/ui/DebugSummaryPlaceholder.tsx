@@ -52,7 +52,7 @@ export function DebugSummaryPlaceholder(props:{id:string;width:number;height:num
     <Text class="absolute left-[12] right-[12] top-[34] text-xs leading-[14] text-center" style={{textColor:ON_SURFACE_VARIANT}}>{reason.join('\n')}</Text>
    </View>});
    const pill=Math.min(160,inner()-18);
-   rows.push(gap(8),{height:48,render:()=> <View class="absolute top-[0] h-[48] rounded-[24] items-center justify-center" style={{insetL:(inner()-pill)/2,width:pill,bgColor:SURFACE_VARIANT}}
+   rows.push(gap(8),{height:48,render:()=> <View class="absolute top-[0] h-[48] rounded-[24] items-center justify-center active:scale-96" style={{insetL:(inner()-pill)/2,width:pill,bgColor:SURFACE_VARIANT}}
     focusable accessibilityRole="button" accessibilityLabel="重试" onPress={()=>{if(props.active())void summary.retry();}}>
     <Text class="text-[17px] leading-[23]" style={{textColor:ON_SURFACE}}>重试</Text>
    </View>});

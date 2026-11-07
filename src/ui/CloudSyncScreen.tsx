@@ -120,7 +120,7 @@ export function CloudSyncScreen(props: {
     const background = !enabled ? '#2a2a2a' : danger ? '#ff7777' : primary ? PHONE_PAGE.primary : '#2a2a2a';
     const foreground = !enabled ? PHONE_PAGE.secondary : primary || danger ? PHONE_PAGE.onPrimary : PHONE_PAGE.foreground;
     return {height: PHONE_PAGE.touchHeight, bounds: centredBounds(inner(), width, 0, PHONE_PAGE.touchHeight), render: () =>
-      <View class="absolute rounded-[24] items-center justify-center" focusable={enabled}
+      <View class="absolute rounded-[24] items-center justify-center active:scale-96" focusable={enabled}
         accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled: !enabled}}
         onPress={enabled ? () => { if (props.active()) onPress(); } : undefined}
         style={{insetL: (inner() - width) / 2, insetT: 0, width, height: PHONE_PAGE.touchHeight, bgColor: background}}>
@@ -130,7 +130,7 @@ export function CloudSyncScreen(props: {
   const link = (label: string, onPress: () => void, enabled = true): ScrollEntry => {
     const width = Math.min(ACTION_WIDTH, inner());
     return {height: 36, bounds: centredBounds(inner(), width, 0, 36), render: () =>
-      <View class="absolute items-center justify-center" focusable={enabled} accessibilityRole="button" accessibilityLabel={label}
+      <View class="absolute items-center justify-center active:scale-96" focusable={enabled} accessibilityRole="button" accessibilityLabel={label}
         onPress={enabled ? () => { if (props.active()) onPress(); } : undefined}
         style={{insetL: (inner() - width) / 2, insetT: 0, width, height: 36}}>
         <Text style={{fontSlot: 1, lineHeight: 17, textColor: enabled ? PHONE_PAGE.secondary : '#555555'}}>{label}</Text>
@@ -182,7 +182,7 @@ export function CloudSyncScreen(props: {
     if (button) {
       const width = Math.min(ACTION_WIDTH, inner());
       rows.push(gap(14), {height: PHONE_PAGE.touchHeight, bounds: centredBounds(inner(), width, 0, PHONE_PAGE.touchHeight), render: () =>
-        <View class="absolute rounded-[24] items-center justify-center" focusable={button.enabled}
+        <View class="absolute rounded-[24] items-center justify-center active:scale-96" focusable={button.enabled}
           accessibilityRole="button" accessibilityLabel={button.label} accessibilityState={{disabled: !button.enabled}}
           onPress={button.enabled ? () => press(button.action) : undefined}
           style={{insetL: (inner() - width) / 2, insetT: 0, width, height: PHONE_PAGE.touchHeight, bgColor: button.enabled ? PHONE_PAGE.primary : '#2a2a2a'}}>

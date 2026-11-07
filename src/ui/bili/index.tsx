@@ -85,7 +85,7 @@ function asyncData<S, T>(first: (() => S) | (() => Promise<T>), second?: (source
 
 function titleEntry(label: string, summary?: string): ScrollEntry { return { height: summary ? 48 : 34, render: () => <View class="absolute inset-0"><Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[26] text-[#f5f5f5] text-center">{label}</Text><Show when={summary}><Text class="absolute left-[0] right-[0] top-[28] text-[9px] leading-[17] text-[#aaa] text-center">{summary}</Text></Show></View> }; }
 function wrappedTitleEntry(label: string, width: number, summary?: string): ScrollEntry { const wrapped = lines(label, width - 44, 21); const titleHeight = wrapped.length * 25; return { height: titleHeight + (summary ? 18 : 4), render: () => <View class="absolute inset-0"><Text class="absolute left-[0] right-[0] top-[0] text-[21px] leading-[25] text-[#f5f5f5] text-center">{wrapped.join("\n")}</Text><Show when={summary}><Text style={{ insetT: titleHeight + 1 }} class="absolute left-[0] right-[0] text-[9px] leading-[17] text-[#aaa] text-center">{summary}</Text></Show></View> }; }
-function buttonEntry(label: string, onPress?: () => void, accent = false): ScrollEntry { return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class={accent ? "absolute inset-0 rounded-[24] bg-[#fb7299] items-center justify-center" : "absolute inset-0 rounded-[24] bg-[#292929] items-center justify-center"}><Text class="text-[17px] leading-[21] text-white">{label}</Text></View> }; }
+function buttonEntry(label: string, onPress?: () => void, accent = false): ScrollEntry { return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class={accent ? "absolute inset-0 rounded-[24] bg-[#fb7299] items-center justify-center active:scale-96" : "absolute inset-0 rounded-[24] bg-[#292929] items-center justify-center active:scale-96"}><Text class="text-[17px] leading-[21] text-white">{label}</Text></View> }; }
 function messageEntry(message: string, width: number): ScrollEntry { const wrapped = lines(message, width - 36); return { height: Math.max(42, wrapped.length * 18 + 18), render: () => <View class="absolute inset-0 rounded-[16] bg-[#1d1d1d] items-center justify-center"><Text class="absolute left-[12] right-[12] top-[9] text-[13px] leading-[18] text-[#bbb] text-center">{wrapped.join("\n")}</Text></View> }; }
 function rssFeedEntry(item: BiliItem, width: number, onPress: () => void): ScrollEntry {
   const title = lines(item.title?.trim() || "未命名视频", width - 56, 13).slice(0, 2);
@@ -180,7 +180,7 @@ function FeedScreen(props: BiliScreenProps) {
 /** Native ActionButton (watch_action_button 160x48dp, pill #2A2A2A, 17/23sp, disabled 60% text). */
 function pillEntry(label: string, width: number, onPress?: () => void, gapBelow = 4): ScrollEntry {
   const pill = Math.min(160, width - 36 - 18);
-  return { height: 48 + gapBelow, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center" style={{ insetL: (width - 36 - pill) / 2, width: pill }}>
+  return { height: 48 + gapBelow, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{ insetL: (width - 36 - pill) / 2, width: pill }}>
     <Text class={onPress ? "text-[17px] leading-[23] text-[#f5f5f5]" : "text-[17px] leading-[23] text-[#f5f5f599]"}>{label}</Text>
   </View> };
 }
@@ -310,7 +310,7 @@ function statusText(value: QrPollResult) { if (value.status === "scanned") retur
 /** Native SearchInputBar: 56dp outlined field (30dp radius, 1dp #2C3135), 17sp text, trailing search icon. */
 function searchBarEntry(keyword: string, width: number, onPress: () => void): ScrollEntry {
   const text = keyword ? measuredLines(keyword, width - 36 - 56, measureFor(17), 1).join("") : "搜索";
-  return { height: 56, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={keyword ? `搜索关键词：${keyword}` : "输入关键词开始搜索"} class="absolute inset-0 rounded-[30]" style={{ borderWidth: 1, borderColor: "#2c3135" }}>
+  return { height: 56, render: () => <View onPress={onPress} focusable accessibilityRole="button" accessibilityLabel={keyword ? `搜索关键词：${keyword}` : "输入关键词开始搜索"} class="absolute inset-0 rounded-[30] active:scale-96" style={{ borderWidth: 1, borderColor: "#2c3135" }}>
     <Text class={keyword ? "absolute left-[16] right-[40] top-[17.5] text-[17px] leading-[21] text-[#f5f5f5]" : "absolute left-[16] right-[40] top-[17.5] text-[17px] leading-[21] text-[#b6b6b6b3]"}>{text}</Text>
     <Image src="../assets/icons/search.svg" class="absolute right-[14] top-[16] w-[24] h-[24]" />
   </View> };
@@ -327,7 +327,7 @@ function chipFlowEntry(labels: { label: string; onPress: () => void }[], width: 
     placed.push({ ...chip, label: text, left, top, w }); left += w + 8;
   }
   return { height: placed.length ? top + 32 : 0, render: () => <View class="absolute inset-0">
-    {placed.map(chip => <View onPress={chip.onPress} focusable accessibilityRole="button" accessibilityLabel={chip.label} class="absolute h-[32] rounded-[8] items-center justify-center" style={{ insetL: chip.left, insetT: chip.top, width: chip.w, borderWidth: 1, borderColor: "#2c3135" }}><Text class="text-sm leading-[20] text-[#f5f5f5]">{chip.label}</Text></View>)}
+    {placed.map(chip => <View onPress={chip.onPress} focusable accessibilityRole="button" accessibilityLabel={chip.label} class="absolute h-[32] rounded-[8] items-center justify-center active:scale-96" style={{ insetL: chip.left, insetT: chip.top, width: chip.w, borderWidth: 1, borderColor: "#2c3135" }}><Text class="text-sm leading-[20] text-[#f5f5f5]">{chip.label}</Text></View>)}
   </View> };
 }
 
@@ -343,7 +343,7 @@ function SearchScreen(props: BiliScreenProps) {
     return [searchTitleEntry, searchBarEntry(draft(), width, () => void search()),
       ...(historyItems().length ? [{ height: 40, render: () => <View class="absolute inset-0">
         <Text class="absolute left-[0] top-[10] text-sm leading-[20] text-white">搜索历史</Text>
-        <View onPress={() => { try { history.clear(); setHistoryItems([]); } catch (error) { fail(props, error); } }} focusable accessibilityRole="button" accessibilityLabel="清空搜索历史" class="absolute right-[0] top-[0] h-[40] w-[56] items-center justify-center"><Text class="text-sm leading-[20] text-[#ff6026]">清空</Text></View>
+        <View onPress={() => { try { history.clear(); setHistoryItems([]); } catch (error) { fail(props, error); } }} focusable accessibilityRole="button" accessibilityLabel="清空搜索历史" class="absolute right-[0] top-[0] h-[40] w-[56] items-center justify-center active:scale-96"><Text class="text-sm leading-[20] text-[#ff6026]">清空</Text></View>
       </View> } as ScrollEntry, chipFlowEntry(historyItems().map(query => ({ label: query, onPress: () => submit(query) })), width)] : []),
       ...(hotWords.length ? [{ height: 34, render: () => <Text class="absolute left-[0] top-[0] text-[21px] leading-[26] text-[#f5f5f5]">热门搜索</Text> } as ScrollEntry, chipFlowEntry(hotWords.slice(0, 20).map(word => ({ label: word.showName || word.keyword, onPress: () => submit(word.keyword) })), width)] : []),
       { height: 26, render: () => null }];
@@ -473,7 +473,7 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
     ];
     const iconSize = Math.min(24, Math.max(18, size * .55));
     const actions: ScrollEntry = { height: size, render: () => <View class="absolute inset-0">
-      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center" style={{ bgColor: button.selected ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
+      {actionButtons.map((button, index) => <View onPress={button.onPress} focusable={!!button.onPress} accessibilityRole="button" accessibilityLabel={button.label} class="absolute items-center justify-center active:scale-96" style={{ bgColor: button.selected ? "#ff6026" : pal.surfaceVariant, insetL: rowLeft + index * (size + 6), insetT: 0, width: size, height: size, radius: size / 2 }}>
         <Image src={button.icon} style={{ width: iconSize * 32 / 24, height: iconSize * 32 / 24 }} />
       </View>)}
     </View> };

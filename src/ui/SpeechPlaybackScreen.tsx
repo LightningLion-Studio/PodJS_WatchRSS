@@ -36,7 +36,7 @@ export function SpeechPlaybackScreen(props: {
   const controlsTop = () => 85 + (errors().length ? 5 + errors().length * 14 : 0);
   const gap = () => Math.max(0, (inner() - 184) / 5);
   const button = (name: string, src: () => string, x: () => number, y: () => number, size: number, press: () => void, selected = false) =>
-    <View debugName={name} onPress={press} focusable class="absolute rounded-[9999] items-center justify-center" style={{ insetL: x(), insetT: y(), width: size, height: size, bgColor: selected ? "#ff6026" : "#00000000" }}><Image src={src()} style={{ width: size / 2, height: size / 2 }} /></View>;
+    <View debugName={name} onPress={press} focusable class="absolute rounded-[9999] items-center justify-center active:scale-96" style={{ insetL: x(), insetT: y(), width: size, height: size, bgColor: selected ? "#ff6026" : "#00000000" }}><Image src={src()} style={{ width: size / 2, height: size / 2 }} /></View>;
   return <View ref={value => surface = value} debugName="SpeechPlayback" class="absolute inset-0 bg-black">
     <Text class="absolute top-[12] left-[18] right-[18] text-lg leading-[22] text-white text-center">朗读播控</Text>
     <View class="absolute left-[18] top-[40] right-[18] h-[36]">
@@ -52,7 +52,7 @@ export function SpeechPlaybackScreen(props: {
       {button("SpeechStop", () => "../assets/icons/speech-stop.svg", () => 142 + gap() * 4, () => 8, 42, props.onStop)}
     </View>
     <View class="absolute left-[18] right-[18] h-[36]" style={{ insetT: controlsTop() + 67 }}>
-      <View debugName="SpeechAutoAdvance" onPress={props.onAutoAdvance} focusable class="absolute left-[0] top-[0] h-[36] items-center justify-center" style={{ width: Math.max(36, inner() - 116) }}><Image src={props.state.autoAdvance ? "../assets/icons/speech-auto.svg" : "../assets/icons/speech-auto-off.svg"} class="w-[24] h-[24]" /></View>
+      <View debugName="SpeechAutoAdvance" onPress={props.onAutoAdvance} focusable class="absolute left-[0] top-[0] h-[36] items-center justify-center active:scale-96" style={{ width: Math.max(36, inner() - 116) }}><Image src={props.state.autoAdvance ? "../assets/icons/speech-auto.svg" : "../assets/icons/speech-auto-off.svg"} class="w-[24] h-[24]" /></View>
       {button("SpeechSlower", () => "../assets/icons/speech-minus.svg", () => inner() - 106, () => 2, 32, () => props.onRate(-1))}
       <Text class="absolute top-[7] w-[42] text-lg leading-[22] text-white text-center" style={{ insetL: inner() - 74 }}>{`${props.state.rate}x`}</Text>
       {button("SpeechFaster", () => "../assets/icons/speech-plus.svg", () => inner() - 32, () => 2, 32, () => props.onRate(1))}

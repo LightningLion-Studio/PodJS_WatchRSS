@@ -25,7 +25,7 @@ export function mediaVolumeSettingsRows(props: SettingsScreenProps, width: numbe
       else props.onChange({ [key]: !props.state[key] });
     };
     return describedRows(width, { height: pillHeight, render: () =>
-      <View onPress={enabled ? undefined : unavailable} focusable={!enabled} class="absolute left-[0] right-[0] top-[0] rounded-[47] bg-[#2a2a2a]" style={{ height: pillHeight }}>
+      <View onPress={enabled ? undefined : unavailable} focusable={!enabled} class="absolute left-[0] right-[0] top-[0] rounded-[47] bg-[#2a2a2a] active:scale-96" style={{ height: pillHeight }}>
         <Text class="absolute left-[10] text-[17px] leading-[21] text-[#f5f5f5]" style={{ insetT: (pillHeight - labelLines.length * 21) / 2, width: labelWidth }}>{labelLines.join("\n")}</Text>
         <View class="absolute right-[15]" style={{ insetT: (pillHeight - 35 / density) / 2, opacity: enabled ? 1 : .5 }}><WatchSwitch checked={props.state[key]} onChange={change}/></View>
       </View> }, details);
@@ -44,9 +44,9 @@ export function mediaVolumeSettingsRows(props: SettingsScreenProps, width: numbe
       <View class="absolute left-[0] right-[0] top-[0] rounded-[47] bg-[#2a2a2a]" style={{ height: pillHeight }}>
         <Text class="absolute left-[10] text-[17px] leading-[21] text-[#f5f5f5]" style={{ insetT: (pillHeight - label.length * 21) / 2, width: labelWidth }}>{label.join("\n")}</Text>
         <View class="absolute right-[10] w-[100]" style={{ insetT: (pillHeight - 21) / 2, height: 21 }}>
-          <View onPress={() => step(-1)} focusable class="absolute left-[0] top-[0.5] w-[20] h-[20] rounded-full bg-[#444444]"><View class="absolute left-[5] top-[9.5] w-[10] h-[1] bg-[#f5f5f5]"/></View>
+          <View onPress={() => step(-1)} focusable class="absolute left-[0] top-[0.5] w-[20] h-[20] rounded-full bg-[#444444] active:scale-96"><View class="absolute left-[5] top-[9.5] w-[10] h-[1] bg-[#f5f5f5]"/></View>
           <Text class="absolute left-[24] top-[0] w-[52] text-center text-[17px] leading-[21] text-[#f5f5f5]">{formatPlaybackStartVolumeLimit(props.state.playbackStartVolumeLimit)}</Text>
-          <View onPress={() => step(1)} focusable class="absolute right-[0] top-[0.5] w-[20] h-[20] rounded-full bg-[#444444]"><View class="absolute left-[5] top-[9.5] w-[10] h-[1] bg-[#f5f5f5]"/><View class="absolute left-[9.5] top-[5] w-[1] h-[10] bg-[#f5f5f5]"/></View>
+          <View onPress={() => step(1)} focusable class="absolute right-[0] top-[0.5] w-[20] h-[20] rounded-full bg-[#444444] active:scale-96"><View class="absolute left-[5] top-[9.5] w-[10] h-[1] bg-[#f5f5f5]"/><View class="absolute left-[9.5] top-[5] w-[1] h-[10] bg-[#f5f5f5]"/></View>
         </View>
       </View> }, [description, status]),
   ];

@@ -15,7 +15,7 @@ export function RecommendationScreen(props: {height:number; width:number; groupI
       return {height:16+21+2+14*lines.length,render:()=> <View class="absolute left-[0] right-[0] top-[0] bottom-[0] rounded-[16] bg-[#1c1f21]">
         <Text class="absolute left-[12] right-[34] top-[8] text-[17px] leading-[21] text-[#f5f5f5]">{channel.title}</Text>
         <Text class="absolute left-[12] right-[34] top-[31] text-xs leading-[14] text-[#b6b6b6]">{lines.join("\n")}</Text>
-        <View onPress={()=>props.onAdd(channel)} focusable class="absolute right-[6] top-[20] w-[20] h-[20] rounded-full bg-[#2a2a2a] items-center justify-center"><Text class="text-[17px] leading-[21] text-[#f5f5f5]">+</Text></View>
+        <View onPress={()=>props.onAdd(channel)} focusable class="absolute right-[6] top-[20] w-[20] h-[20] rounded-full bg-[#2a2a2a] items-center justify-center active:scale-96"><Text class="text-[17px] leading-[21] text-[#f5f5f5]">+</Text></View>
       </View>};
     }) : recommendationGroups.map(item => {
       const lines = wrapBody(item.description,props.width-60);
