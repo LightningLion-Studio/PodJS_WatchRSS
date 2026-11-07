@@ -188,7 +188,7 @@ return unit();
  /** Return authenticated, complete sealed recipe/blob sources. Cleanup uses
   * bounded stats plus the durable completed AEAD/hash witness; N07 additionally
   * authenticates every necessary object, one <=256KiB object at a time. */
- async authenticatedClosure(entityKey:string,bodyRevision:string,expectedRecipe:string|undefined,verifyBodies:boolean){
+ async authenticatedClosure(entityKey:string,bodyRevision:string,expectedRecipe:string|undefined,verifyBodies:boolean,readOnly=false){
   const key=this.key({entityKey,bodyRevision} as QueuedBody),saved=await this.store.get<BodyPlan>('body:'+key);
   if(!saved||!['done','evicted'].includes(saved.value.phase))throw Error('closure_incomplete');
   const b=saved.value,r=recipe(b.recipe),ro=b.recipeObject;if(!ro||expectedRecipe&&ro.oid!==expectedRecipe||r.entityKey!==entityKey||r.bodyRevision!==bodyRevision)throw Error('body_revision_changed');
@@ -205,7 +205,7 @@ return unit();
    if(deviceId){const approved=await this.options.approved(deviceId);if(approved.keyId!==refs.keyId)throw Error('signature_invalid');await (await import('./signing')).verifySigned(this.crypto,approved.publicKey,'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
    else {const publicKey=await this.crypto.signingKey(this.options.alias,false);await (await import('./signing')).verifySigned(this.crypto,(await import('./wire')).b64(publicKey),'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
    if(canonical(refs.body)!==canonical({scope:this.scope,recipeOid:ro.oid,blobOids:r.blocks.map(block=>block.oid)}))throw Error('closure_incomplete');
-  }else {const window=await this.remote.http.negotiate([],[]);await readControlRefs(this.remote.http,this.crypto,this.options.approved,window.windowId,{type:'recipe',oid:ro.oid,value:r});}
+  }else {const http=readOnly?this.remote.http.readOnly():this.remote.http,window=await http.negotiate([],[]);await readControlRefs(http,this.crypto,this.options.approved,window.windowId,{type:'recipe',oid:ro.oid,value:r});}
 
   if(verifyBodies){const hash=new ContentSha256();for(let i=0;i<r.blocks.length;i++){const object=objects[i+1]!,block=r.blocks[i]!,raw=await this.store.bytes(object.cache,object.size),value=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,object.oid,raw);if(value.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');recipeBlock(r,i,value.plain,this.keys.id,this.scope);hash.update(value.plain);await this.options.yieldControl();}if(hash.finish()!==r.plaintextSha256)throw Error('hash_mismatch');}
   await assertCurrent();

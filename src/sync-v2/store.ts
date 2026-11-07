@@ -9,6 +9,7 @@ import {candidates} from './business';
 import {ProjectionGate} from './gate';
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
+/** open authenticates with an existing key; it must never persist a new key. */
 export interface LocalCipher {seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>}
 export type SourceRecord={kind:Kind;logicalId:string;value:Record<string,any>;addedAtMillis?:number;source?:{table:string;locator:string}};
 export type ScanBinding={schema:string;descriptorPin:string;accountScope:string;capability:string};
@@ -61,11 +62,23 @@ export class WatchProjectionStore {
   this.gate.require();await this.db.transaction([{sql:'INSERT INTO syncv2_control VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,enabled=1 WHERE scope IS NOT excluded.scope OR enabled!=1',params:[this.scopeKey]}]);if(!this.gate.isEnabled){await stopExistingProjection(this.db);throw Error('feature_disabled');}return result;
  }
  async disable(){await this.gate.close();}
- async readState():Promise<SyncState>{
+ private async persistedState():Promise<SyncState>{
   this.gate.require();await this.checkIdentity();const row=(await this.db.query('SELECT * FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('projection_not_initialized');
   const state:SyncState=await this.cipher.open(this.aad('state'),String(row.body));state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);
   if(checkD64(row.account_generation)!==state.rollbackGeneration||checkD64(row.edit_generation)!==state.editBase.generation)throw Error('projection_state_inconsistent');
   if(Number(row.awaiting_user)===1&&!state.pendingChoice)state.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};
+  return state;
+ }
+ /** Cleanup preparation must never reconcile or recreate a missing witness.
+  * A business edit makes this snapshot unusable until a normal sync reconciles.
+  * checkIdentity and cipher.open are read-only installed-identity/key checks. */
+ async readStableState():Promise<SyncState>{
+  const state=await this.persistedState(),row=(await this.db.query('SELECT epoch,CAST(revision AS TEXT) AS revision FROM business_sync_revision WHERE id=1'))[0];
+  if(!row||!sameBusinessRevision(state.businessRevision,{epoch:String(row.epoch),revision:String(row.revision)}))throw Error('choice_stale');
+  return state;
+ }
+ async readState():Promise<SyncState>{
+  const state=await this.persistedState();
   const current=await businessRevision(this.db);
   if(!sameBusinessRevision(state.businessRevision,current)){
    nextD64(state.stateVersion);const localRevision=addRevision(state.localChangeRevision,revisionDelta(state.businessRevision,current));
@@ -76,13 +89,19 @@ export class WatchProjectionStore {
   }
   return state;
  }
- private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion),marker=next.businessRevision??await businessRevision(this.db);next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
+ private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
   try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},state.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...statements]);}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** P2 control persistence uses the same stateVersion and business witness.
   * Preparation runs outside SQL; all prepared statements commit at this CAS. */
  async controlUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){
   const current=await this.readState();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
+  await this.commit(expected,next,statements,hook);
+ }
+ /** No preliminary coordination transaction. The supplied cleanup guards and
+  * every persistent change commit together at the state/business CAS. */
+ async controlUpdateStable(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){
+  const current=await this.readStableState();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
   await this.commit(expected,next,statements,hook);
  }
  async candidatePage(after='',limit=32){

@@ -87,11 +87,11 @@ export class WatchRecovery {
  /** Trusted time watermark is durable. Expiry removes ciphertext references and
   * pins at one CAS. Physical release follows the committed reference deletion. */
  async purgeRecovery(trustedNow:number|null){
-  const before=await this.projection.readState();await this.checkRecords(before);if(trustedNow===null||!Number.isSafeInteger(trustedNow)||trustedNow<(before.recoveryClock??0))return {purged:0};
+  const before=await this.projection.readStableState();await this.checkRecords(before);if(trustedNow===null||!Number.isSafeInteger(trustedNow)||trustedNow<(before.recoveryClock??0))return {purged:0};
   const expired=(before.recoveryCopies??[]).filter(c=>c.header.expiresAtMillis<=trustedNow),ids=new Set(expired.map(c=>c.copyId));
   const next={...before,recoveryClock:trustedNow,recoveryCopies:(before.recoveryCopies??[]).filter(c=>!ids.has(c.copyId)),recoveryPins:(before.recoveryPins??[]).filter(p=>!ids.has(p.copyId))};
   const statements:Statement[]=[];for(const id of ids){statements.push(this.cache.journal.detach('recovery:'+id),{sql:'DELETE FROM podjs_resource_rows WHERE binding=? AND id=?',params:[this.cache.binding,'recovery:'+id]});}
-  await this.projection.controlUpdate(before,next,statements);await this.releaseAcknowledgedEdits();const freed=await this.cache.collect();return {purged:expired.length,...freed};
+  await this.projection.controlUpdateStable(before,next,statements);await this.releaseAcknowledgedEdits();const freed=await this.cache.collect();return {purged:expired.length,...freed};
  }
  /** Explicit user restore creates new pending edits under the current account.
   * The prepare callback returns SQL only; it must not mutate before the CAS. */
@@ -111,22 +111,22 @@ export class WatchRecovery {
   await this.projection.controlUpdate(before,next,statements);return delta.changes.length;
  }
  /** Explicit durable source for the restored edit, including after N07 expiry. */
- async readEditBody(editId:string,ref:string){const pin=(await this.projection.readState()).recoveryEditPins?.find(p=>p.editId===editId);if(!pin)throw Error('object_missing');return this.readPinnedBody(pin.copy,ref,'edit-recovery:'+editId);}
+ async readEditBody(editId:string,ref:string){const pin=(await this.projection.readStableState()).recoveryEditPins?.find(p=>p.editId===editId);if(!pin)throw Error('object_missing');return this.readPinnedBody(pin.copy,ref,'edit-recovery:'+editId);}
  async readBody(copy:RecoveryCopy,ref:string){
   if(await this.cache.journal.row('recovery:'+copy.copyId))return this.readPinnedBody(copy,ref,'recovery:'+copy.copyId);
-  const pin=(await this.projection.readState()).recoveryEditPins?.find(p=>canonical(p.copy)===canonical(copy));if(!pin)throw Error('object_missing');return this.readEditBody(pin.editId,ref);
+  const pin=(await this.projection.readStableState()).recoveryEditPins?.find(p=>canonical(p.copy)===canonical(copy));if(!pin)throw Error('object_missing');return this.readEditBody(pin.editId,ref);
  }
  /** Only an uploaded revision AND current cloud closure acknowledgement can
   * retire an edit owner. Expiry and clearing hasUnsentEdits alone cannot. */
  async releaseAcknowledgedEdits(){
-  if(!this.ports.acknowledge)return {released:0};let released=0;const initial=await this.projection.readState();await this.checkRecords(initial);
+  if(!this.ports.acknowledge)return {released:0};let released=0;const initial=await this.projection.readStableState();await this.checkRecords(initial);
   for(const pin of initial.recoveryEditPins??[]){
-   const before=await this.projection.readState();if(before.pendingChoice||before.hasUnsentEdits||!before.account||compareD64(before.acknowledgedLocalChangeRevision??'0',pin.localChangeRevision)<0)continue;
+   const before=await this.projection.readStableState();if(before.pendingChoice||before.hasUnsentEdits||!before.account||compareD64(before.acknowledgedLocalChangeRevision??'0',pin.localChangeRevision)<0)continue;
    if(!before.recoveryEditPins?.some(p=>canonical(p)===canonical(pin)))continue;
    const now=this.ports.trustedNow();if(now===null||!Number.isSafeInteger(now)||now<(before.recoveryClock??0))continue;
    let proof:{expiresAtMillis:number};try{proof=await this.ports.acknowledge(await this.read(pin.copy),ref=>this.readEditBody(pin.editId,ref));}catch{continue;}
    const current=this.ports.trustedNow();if(current===null||!Number.isSafeInteger(current)||current<now||!Number.isSafeInteger(proof.expiresAtMillis)||current>=proof.expiresAtMillis)continue;
-   await this.projection.controlUpdate(before,{...before,recoveryEditPins:before.recoveryEditPins.filter(p=>p.editId!==pin.editId)},[
+   await this.projection.controlUpdateStable(before,{...before,recoveryEditPins:before.recoveryEditPins.filter(p=>p.editId!==pin.editId)},[
     this.cache.journal.detach('edit-recovery:'+pin.editId),{sql:'DELETE FROM podjs_resource_rows WHERE binding=? AND id=?',params:[this.cache.binding,'edit-recovery:'+pin.editId]},
    ]);released++;
   }return {released};

@@ -33,13 +33,15 @@ export class WatchSpaceStore {
   * keeps the checked set; a finished round makes the next claim increment round.
   * Legacy position/candidate tables are deliberately neither read nor written. */
  async roundState(){const row=(await this.journal.db.query('SELECT round,controller,active FROM sync2_space_round WHERE binding=?',[this.binding]))[0]!;return {round:String(row.round),controller:String(row.controller),active:Number(row.active)===1};}
- async beginRound():Promise<SpaceRound>{
+ async beginRound(now?:number):Promise<SpaceRound>{
+  if(now!==undefined)uint(now);
   const old=(await this.journal.db.query('SELECT round,controller,active,lower(hex(randomblob(16))) AS claim FROM sync2_space_round WHERE binding=?',[this.binding]))[0]!,round=Number(old.active)===1?String(old.round):nextD64(String(old.round)),controller=String(old.claim);
   await this.commitRound([
    {sql:'CREATE TABLE IF NOT EXISTS podjs_sql_cas_guard(id INTEGER NOT NULL CHECK(id=1))'},
    {sql:'UPDATE sync2_space_round SET round=?,controller=?,active=1 WHERE binding=? AND round=? AND controller=? AND active=?',params:[round,controller,this.binding,old.round,old.controller,old.active]},
    {sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN changes()=1 THEN 1 ELSE 0 END'},
    {sql:'DELETE FROM podjs_sql_cas_guard'},
+   ...now===undefined?[]:[this.timeGuard(now),{sql:'DELETE FROM podjs_sql_cas_guard'},this.advanceClock(now)],
   ]);return {round,controller};
  }
  roundGuard(session:SpaceRound):typeStatement[]{return [
