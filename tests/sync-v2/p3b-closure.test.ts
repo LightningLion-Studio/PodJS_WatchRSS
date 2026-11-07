@@ -29,3 +29,13 @@ test('P3B downloaded product closure checks durable frame totalBytes and reads n
 test('P3B formal mapping rejects mismatched original business ID and entity identity',async()=>{const s=await setup(records=>{records.find(r=>r.logicalId==='rss').value.articleId='different-business-id';});try{const r=s.records.find(r=>r.logicalId==='rss');await expect(s.closures.recoveryValue(r.id)).rejects.toThrow('source_identity_missing');}finally{s.close();}});
 
 for(const change of ['body-fingerprint','reading-state'])test('P3B persisted body binding fences '+change+' without losing edits',async()=>{const s=await setup(records=>{records.find(r=>r.logicalId==='rss').value.contentHash='a'.repeat(64);});try{const r=s.records.find(r=>r.logicalId==='rss');if(change==='body-fingerprint')r.value.contentHash='b'.repeat(64);else r.value.readingProgress=.5;await s.projection.beginScan({...binding,schema:'binding-change-'+change});await s.projection.scanPage({page:async()=>({rows:s.records,after:'done',done:true}),changed:async()=>[]});if(change==='body-fingerprint')await expect(s.closures.recoveryValue(r.id)).rejects.toThrow();else expect((await s.closures.recoveryValue(r.id)).bodyRefs.length).toBe(3);}finally{s.close();}});
+
+for(const takeover of ['before-negotiate','after-negotiate'])test('REVIEW5 cleanup recipe-ref fallback checks ownership '+takeover,async()=>{
+ const s=await setup();try{
+  const r=s.records.find(r=>r.logicalId==='rss'),binding=await s.f.e.businessBinding(r.id),manifest=await s.f.e.manifest(r.id,binding.bodyRevision),key='body:'+digest([r.id,binding.bodyRevision]),saved=(await s.f.store.get(key))!;
+  delete saved.value.refs;await s.f.store.put(key,saved.value,saved.revision);const before={...s.backend.calls};let active=takeover!=='before-negotiate',checks=0;const request=s.backend.request.bind(s.backend);
+  s.backend.request=async input=>{const response=await request(input);if(input.url.includes('/negotiate'))active=false;return response;};
+  await expect(s.f.e.authenticatedClosure(r.id,binding.bodyRevision,manifest!.recipeOid,false,true,async()=>{checks++;if(!active)throw Error('round_stale');})).rejects.toThrow('round_stale');
+  expect(checks).toBeGreaterThan(0);expect(Object.values(s.backend.calls).reduce((a,b)=>a+b,0)-Object.values(before).reduce((a,b)=>a+b,0)).toBe(takeover==='before-negotiate'?0:1);
+ }finally{s.close();}
+});

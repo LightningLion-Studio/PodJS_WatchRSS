@@ -15,11 +15,11 @@ export class WatchContentHttp {
  }
  async reserve(id:string,totalBytes:number,requestId:string){const v=await this.http.json('POST','/objects/reserve',{scope:this.http.scope,requestId,channel:'content',objects:[{oid:id,totalBytes}],leaseMillis:300000});exact(v,['version','scope','reservationId','expiresAtMillis','objects','reservedBytes']);hexId(v.reservationId,32);uint(v.expiresAtMillis);uint(v.reservedBytes);if(v.expiresAtMillis<=this.now()||v.expiresAtMillis-this.now()>600000||v.objects?.length!==1)throw Error('invalid_schema');const o=v.objects[0];exact(o,['oid','totalBytes','durableOffset']);if(o.oid!==id||o.totalBytes!==totalBytes||uint(o.durableOffset)>totalBytes)throw Error('invalid_schema');return v;}
  async complete(id:string,total:number,reservationId:string,requestId:string){const v=await this.http.json('POST','/objects/'+encodeURIComponent(id)+'/complete',{scope:this.http.scope,reservationId,requestId,totalBytes:total});exact(v,['version','scope','oid','receipt']);if(v.oid!==id)throw Error('invalid_schema');await this.http.servicePin!.receipt(this.crypto,v.receipt,this.http.scope,id,total,this.now(),true);return v.receipt;}
- async availability(expected:{entityKey:string;bodyRevision:string;recipeOid:string;blobOids:string[]},readOnly=false){
-  const http=readOnly?this.http.readOnly():this.http,v=await http.json('POST','/availability/check',{scope:http.scope,entityKey:expected.entityKey,bodyRevision:expected.bodyRevision,recipeOid:expected.recipeOid});exact(v,['version','scope','availability','leaseId','expiresAtMillis']);
+ async availability(expected:{entityKey:string;bodyRevision:string;recipeOid:string;blobOids:string[]},readOnly=false,check?:()=>Promise<void>){
+  const http=readOnly?this.http.readOnly(check):this.http,v=await http.json('POST','/availability/check',{scope:http.scope,entityKey:expected.entityKey,bodyRevision:expected.bodyRevision,recipeOid:expected.recipeOid});exact(v,['version','scope','availability','leaseId','expiresAtMillis']);
   const a=v.availability;exact(a,['scope','entityKey','bodyRevision','recipeOid','status','receipt']);
   if(canonical(a.scope)!==canonical(this.http.scope)||a.entityKey!==expected.entityKey||a.bodyRevision!==expected.bodyRevision||a.recipeOid!==expected.recipeOid)throw Error('invalid_schema');
-  const receipt=await signedAvailability(http.servicePin!,this.crypto,a.receipt,http.scope,expected,this.now(),readOnly);if(receipt.status!==a.status)throw Error('invalid_schema');return a;
+  await check?.();const receipt=await signedAvailability(http.servicePin!,this.crypto,a.receipt,http.scope,expected,this.now(),readOnly);if(receipt.status!==a.status)throw Error('invalid_schema');return a;
  }
  async demands(approved:(deviceId:string)=>Promise<{deviceId:string}>){
   const v=await this.http.json('GET','/demand');exact(v,['version','scope','serverNowMillis','demands']);uint(v.serverNowMillis);

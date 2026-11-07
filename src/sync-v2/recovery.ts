@@ -25,7 +25,7 @@ export interface RecoveryPort {
  reserve:(bytes:number)=>Promise<()=>Promise<void>>;
  /** Authenticated CURRENT business rows + fresh SignedAvailability for every
   * necessary recipe/blob closure. No upload/lease/custody receipt can substitute. */
- acknowledge?:(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>)=>Promise<{expiresAtMillis:number}>;
+ acknowledge?:(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>,check?:()=>Promise<void>)=>Promise<{expiresAtMillis:number}>;
 }
 /** Recovery uses the authenticated v2 business representation: fractional
  * runtime reading progress is stored as exact integer micros, per section 14. */
@@ -124,7 +124,8 @@ export class WatchRecovery {
    const before=await this.projection.readStableState();if(before.pendingChoice||before.hasUnsentEdits||!before.account||compareD64(before.acknowledgedLocalChangeRevision??'0',pin.localChangeRevision)<0)continue;
    if(!before.recoveryEditPins?.some(p=>canonical(p)===canonical(pin)))continue;
    const now=this.ports.trustedNow();if(now===null||!Number.isSafeInteger(now)||now<(before.recoveryClock??0))continue;
-   let proof:{expiresAtMillis:number};try{proof=await this.ports.acknowledge(await this.read(pin.copy),ref=>this.readEditBody(pin.editId,ref));}catch{continue;}
+   const check=async()=>{if(canonical(before)!==canonical(await this.projection.readStableState()))throw Error('choice_stale');};
+   let proof:{expiresAtMillis:number};try{proof=await this.ports.acknowledge(await this.read(pin.copy),ref=>this.readEditBody(pin.editId,ref),check);}catch{continue;}
    const current=this.ports.trustedNow();if(current===null||!Number.isSafeInteger(current)||current<now||!Number.isSafeInteger(proof.expiresAtMillis)||current>=proof.expiresAtMillis)continue;
    await this.projection.controlUpdateStable(before,{...before,recoveryEditPins:before.recoveryEditPins.filter(p=>p.editId!==pin.editId)},[
     this.cache.journal.detach('edit-recovery:'+pin.editId),{sql:'DELETE FROM podjs_resource_rows WHERE binding=? AND id=?',params:[this.cache.binding,'edit-recovery:'+pin.editId]},

@@ -11,9 +11,10 @@ import type {WatchProjectionStore} from './store';
 import type {SyncState} from './state';
 export interface SpaceProofInput {accountOid:string;blobOids:string[];recipeOid:string;entityKey:string;bodyRevision:string;scope:unknown;keyVersion:number;authenticated:boolean;}
 export interface SpacePorts {
- /** Read-only: authenticated current row + verified local recipe. No bootstrap,
-  * revision reconciliation, downloads, pin writes or file publication. */
- localProof:(body:CachedBody)=>Promise<SpaceProofInput>;
+ /** Persistent-state read-only: current row + verified local recipe. No key/pin
+  * initialization, reconciliation or cache publication. HTTP scratch belongs
+  * to the bounded host pool; every request must await the supplied guard. */
+ localProof:(body:CachedBody,check?:()=>Promise<void>)=>Promise<SpaceProofInput>;
  remote:WatchContentHttp;projection:WatchProjectionStore;
  capacity:()=>Promise<number|null>;trustedNow:()=>number|null;monotonic?:()=>number;
  /** Prepare SQL only; the controller commits it with its round/state guards. */
@@ -44,7 +45,7 @@ export class WatchSpaceV2 {
      const body=await this.store.open(row),checked={entityKey:row.id,version:row.revision,validUntil:body.status==='ready'?nextEligibilityChange(body.item,now!):null};
      if(body.status!=='ready'||!eligible(body.item,now!)){pending.push(checked);continue;}
      const captured=await this.ports.projection.readStableState();let proof:any;
-     try{proof=await this.authorize(body,captured,now!);}catch{pending.push(checked);continue;}
+     try{proof=await this.authorize(body,captured,now!,session);}catch{pending.push(checked);continue;}
      const finalNow=this.ports.trustedNow();if(finalNow===null||finalNow<now!||finalNow>=proof.receipt.body.expiresAtMillis)return await finish('proof-expired');
      const value=await this.store.seal(row.id,{...body,status:'placeholder',proof});
      try{await this.ports.projection.controlUpdateStable(captured,{...captured},[
@@ -71,7 +72,7 @@ export class WatchSpaceV2 {
    if(now===null||!await this.store.timeValid(now))throw Error('clock_unknown');
    for(const resource of resources){if(!resource.authority){ids.push(resource.id);continue;}
     if(!checked.has(resource.authority)){let accepted=false;const row=await this.store.journal.row(resource.authority);
-     if(row){const body=await this.store.open(row);if(body.status==='placeholder'&&eligible(body.item,now))try{const proof=await this.authorize(body,state,now);expires=Math.min(expires,proof.receipt.body.expiresAtMillis);guards.push(...this.store.rowGuard(row));accepted=true;}catch{}}
+     if(row){const body=await this.store.open(row);if(body.status==='placeholder'&&eligible(body.item,now))try{const proof=await this.authorize(body,state,now,session);expires=Math.min(expires,proof.receipt.body.expiresAtMillis);guards.push(...this.store.rowGuard(row));accepted=true;}catch{}}
      checked.set(resource.authority,accepted);hasAuthority ||=accepted;
     }if(checked.get(resource.authority))ids.push(resource.id);
    }
@@ -86,13 +87,15 @@ export class WatchSpaceV2 {
    }};
   }).catch(error=>{if(session&&!(error instanceof ResourceCollectionError)&&/choice_stale|CHECK constraint failed/.test(String(error)))throw Error('round_stale');throw error;});
  }
- private async authorize(body:CachedBody,state:SyncState,now:number){
-  if(state.pendingChoice||!state.account)throw Error('choice_pending');const p=await this.ports.localProof(body),i=body.item;
+ private async authorize(body:CachedBody,state:SyncState,now:number,session?:SpaceRound){
+  const check=async()=>{if(session&&!await this.store.isCurrentRound(session))throw Error('round_stale');if(canonical(state)!==canonical(await this.ports.projection.readStableState()))throw Error('choice_stale');};
+  await check();
+  if(state.pendingChoice||!state.account)throw Error('choice_pending');const p=await this.ports.localProof(body,check),i=body.item;
   if(!p.authenticated||p.keyVersion<1||p.accountOid!==state.account.oid||p.entityKey!==i.entityKey||p.bodyRevision!==i.bodyRevision||p.recipeOid!==i.recipeOid||canonical(p.scope)!==canonical(i.scope))throw Error('closure_incomplete');
   hexId(p.entityKey,64);hexId(p.bodyRevision,32);oid(p.recipeOid,'recipe');if(p.blobOids.length>2048)throw Error('object_too_large');for(const id of p.blobOids)oid(id,'blob');
   // C17: /availability/check is the only network authorization. No lease/custody.
-  const availability=await this.ports.remote.availability({...p},true);
-  const current=this.ports.trustedNow();if(current===null||current<now)throw Error('clock_unknown');
+  await check();const availability=await this.ports.remote.availability({...p},true,check);
+  await check();const current=this.ports.trustedNow();if(current===null||current<now)throw Error('clock_unknown');
   const receipt=availability.receipt,b=await signedAvailability(this.ports.remote.http.servicePin!,this.ports.remote.crypto,receipt,i.scope,p,current,true);
   if(b.status!=='cloud-ready'||b.expiresAtMillis<=current)throw Error('closure_incomplete');
   return {kind:'cloud-current',accountOid:p.accountOid,scope:i.scope,entityKey:i.entityKey,bodyRevision:i.bodyRevision,recipeOid:i.recipeOid,blobOidsHash:digest(p.blobOids),receipt};

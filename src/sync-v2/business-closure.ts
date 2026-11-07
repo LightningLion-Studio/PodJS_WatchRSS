@@ -72,17 +72,18 @@ export class WatchBusinessClosure {
  /** Release the BODY owner after upload acknowledgement and fresh current
   * closure receipts. Later title/reading/inline state edits do not change a
   * pinned recipe's identity. Read recipes from the durable edit owner. */
- async acknowledgeRecovery(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>,now:()=>number|null){
+ async acknowledgeRecovery(delta:RecoveryDelta,read:(ref:string)=>Promise<Uint8Array[]>,now:()=>number|null,check?:()=>Promise<void>){
   const before=await this.projection.readStableState(),scope=this.content.remote.http.scope;
   if(!before.account||before.pendingChoice||before.hasUnsentEdits||before.cloud?.current?.commitOid!==before.account.oid)throw Error('closure_incomplete');
+  const guard=async()=>{await check?.();if(canonical(before)!==canonical(await this.projection.readStableState()))throw Error('choice_stale');};
   const refs=new Set<string>();let expiresAtMillis=Number.MAX_SAFE_INTEGER;
   for(const ref of delta.bodyRefs.filter(ref=>ref.startsWith('recipe:'))){
    const parts=await read(ref),size=parts.reduce((n,p)=>n+p.length,0);if(size>266264)throw Error('object_too_large');const raw=new Uint8Array(size);let at=0;for(const part of parts){raw.set(part,at);at+=part.length;}
    const opened=await openV2(this.content.crypto,this.content.keys.id,this.content.keys.content,scope,ref,raw),body=recipe(opened.value),r=await this.record(body.entityKey,true,true),row=r.entry.row;
    if(!row||row.deleted||!['article','book','asset'].includes(r.kind)||opened.header.keyVersion!==this.content.keys.version||row.recipeOid!==ref||body.bodyRevision!==row.bodyRevision||body.opaqueContentId!==row.opaqueContentId||body.totalPlainBytes!==row.contentBytes)throw Error('body_revision_changed');
    const blobOids=body.blocks.map(b=>b.oid),expected={entityKey:body.entityKey,bodyRevision:row.bodyRevision,recipeOid:ref,blobOids};refs.add(ref);for(const oid of blobOids)refs.add(oid);
-   const response=await this.content.remote.availability(expected,true),time=now();if(time===null)throw Error('clock_unknown');
-   const signed=await signedAvailability(this.content.remote.http.servicePin!,this.content.crypto,response.receipt,scope,expected,time,true);
+   await guard();const response=await this.content.remote.availability(expected,true,guard),time=now();if(time===null)throw Error('clock_unknown');
+   await guard();const signed=await signedAvailability(this.content.remote.http.servicePin!,this.content.crypto,response.receipt,scope,expected,time,true);
    if(signed.status!=='cloud-ready'||signed.expiresAtMillis<=time)throw Error('closure_incomplete');expiresAtMillis=Math.min(expiresAtMillis,signed.expiresAtMillis);
   }
   if(canonical([...refs].sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
@@ -90,10 +91,11 @@ export class WatchBusinessClosure {
  }
  /** Metadata/stat-only cleanup proof. The controller obtains and verifies a
   * fresh SignedAvailability before its atomic placeholder/retirement commits. */
- async cloudProof(body:CachedBody){
+ async cloudProof(body:CachedBody,check?:()=>Promise<void>){
   const r=await this.record(body.item.entityKey,true,true),row=r.entry.row,state=r.state;
   if(!state.account||state.hasUnsentEdits||state.pendingChoice||!row||row.deleted||row.recipeOid!==body.item.recipeOid||row.bodyRevision!==body.item.bodyRevision)throw Error('closure_incomplete');
-  const descriptor=await this.content.authenticatedClosure(row.entityKey,row.bodyRevision,row.recipeOid,false,true);
+  const guard=async()=>{await check?.();if(canonical(state)!==canonical(await this.projection.readStableState()))throw Error('choice_stale');};
+  await guard();const descriptor=await this.content.authenticatedClosure(row.entityKey,row.bodyRevision,row.recipeOid,false,true,guard);
   const kind=r.kind==='book'?'import':r.kind==='article'?(descriptor.item.importedFile?'import':'rss'):'memo';
   if(body.item.kind!==kind||body.item.addedAtMillis!==row.addedAtMillis||body.item.addedAtSource!==r.entry.meta.addedAtSource)throw Error('closure_incomplete');
   return {accountOid:state.account.oid,scope:this.content.remote.http.scope,entityKey:row.entityKey,bodyRevision:row.bodyRevision,recipeOid:row.recipeOid,blobOids:descriptor.recipe.blocks.map(b=>b.oid),keyVersion:this.content.keys.version,authenticated:true};
