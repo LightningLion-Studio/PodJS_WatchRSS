@@ -1,5 +1,6 @@
 import {mkdtempSync,mkdirSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 import {randomBytes} from 'node:crypto';
 import {ContentFiles} from '@podjs/framework/content-files';
 import type {FrameByteStream} from '@podjs/framework/frame-stream';
@@ -13,7 +14,7 @@ import {openV2} from '../../src/sync-v2/sealed';
 import {SqlFixture,cipher,scope} from './fixture';
 import {FileHost,crypt,keys,pub} from './p3-fixture';
 import {b64} from '../../src/sync-v2/wire';
-export const scratch='/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/scratch/p4-watch';
+export const scratch=process.env.WRSS_TEST_SCRATCH??join(tmpdir(),'wrss-p4-watch');
 export const nonce=async()=>randomBytes(16).toString('hex');
 export const watchId='a'.repeat(32),phoneId='b'.repeat(32),windowId='c'.repeat(32),sessionId='d'.repeat(32);
 export const approved=async(deviceId:string)=>({deviceId,keyId:'e'.repeat(32),publicKey:b64(pub)});

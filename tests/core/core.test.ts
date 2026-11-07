@@ -1,6 +1,8 @@
 import {BOOK_LIFECYCLE_SCHEMA} from '../../src/books/schema';
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import { htmlToText, parseFeed, resolveUrl, rssDedupKey, WatchRssRepository, initializeSchema, SCHEMA, SCHEMA_VERSION } from "../../src/core";
 import {builtinForInput} from '../../src/core/builtin-channels.ts';
 import nativeDedup from '../fixtures/rss-dedup-native.json';
@@ -151,7 +153,7 @@ test('dedup upgrade merges native-prefix and sync-hash rows without losing user 
   }finally{raw.close();}
 });
 test("bun:sqlite preserves read, saved and source preferences across restart", async () => {
-  const path=`/tmp/podjs-watchrss-${Date.now()}.db`, first=new BunDb(new Database(path)); await initializeSchema(first); await first.execute(`INSERT INTO channels(id,url,title,created_at) VALUES(1,'u','F',1)`); await first.execute(`INSERT INTO articles(id,channel_id,title,dedup_key,fetched_at) VALUES(7,1,'A','g',1)`);
+  const path=join(tmpdir(),`podjs-watchrss-${Date.now()}.db`), first=new BunDb(new Database(path)); await initializeSchema(first); await first.execute(`INSERT INTO channels(id,url,title,created_at) VALUES(1,'u','F',1)`); await first.execute(`INSERT INTO articles(id,channel_id,title,dedup_key,fetched_at) VALUES(7,1,'A','g',1)`);
   const repo=new WatchRssRepository(first,async()=>""); await repo.setRead(7,true,.4); await repo.setSaved(7,true); await repo.setSourcePreferences(1,{useOriginalContent:true,readPreset:"compact"}); first.raw.close();
   const second=new BunDb(new Database(path)); const row=(await second.query(`SELECT is_read,is_saved,reading_progress FROM articles WHERE id=7`))[0]; expect(row).toMatchObject({is_read:1,is_saved:1,reading_progress:.4}); expect(await new WatchRssRepository(second,async()=>"").getSourcePreferences(1)).toMatchObject({useOriginalContent:true,readPreset:"compact"}); second.raw.close();
 });
