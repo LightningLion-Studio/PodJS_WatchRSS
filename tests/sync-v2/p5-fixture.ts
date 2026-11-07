@@ -37,9 +37,9 @@ export class P5Backend extends SyntheticIndexBackend {
   if(path==='/account/publish'&&response.status===200&&old.commitOid&&old.commitOid!==this.account.commitOid)this.history.set(old.commitOid,{retiredAtMillis:this.clock,expiresAtMillis:this.clock+604800000});return response;
  }
 }
-export async function p5Fixture(){
- const root=mkdtempSync(join(tmpdir(),'wrss-p5-')),db=new SqlFixture(join(root,'state.sqlite')),server=new P5Backend();await initializeMemoSchema(db as any);
- const value=noteValue('n');db.raw.query('INSERT INTO memo_notes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('n',null,value.title,value.markdown,value.plainText,value.contentHash,value.baseContentHash,value.baseMarkdown,0,1,2,'watch',0,0);
+export async function p5Fixture(options:{root?:string}={}){
+ const root=options.root??mkdtempSync(join(tmpdir(),'wrss-p5-')),db=new SqlFixture(join(root,'state.sqlite')),server=new P5Backend();await initializeMemoSchema(db as any);
+ const value=noteValue('n');db.raw.query('INSERT OR IGNORE INTO memo_notes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('n',null,value.title,value.markdown,value.plainText,value.contentHash,value.baseContentHash,value.baseMarkdown,0,1,2,'watch',0,0);
  const projection=db.store(),cache=new WatchSpaceStore(db,cipher,new ContentFiles(new FileHost(join(root,'files')).request),'6'.repeat(64));await cache.init();
  const recovery=new WatchRecovery(projection,cache,{cipher:recoveryCipher,randomId:async()=>randomBytes(16).toString('hex'),trustedNow:()=>server.clock,source:async refs=>{if(refs.length)throw Error('closure_incomplete');return [];},reserve:async()=>async()=>{}});
  let reserveFails=false,prepares=0;const native=new WatchAccountBusinessSql(db,projection,scope,idKey,{recoveryValue:async id=>{const c=await projection.readCandidate(id);return {kind:c.meta.kind,value:fromWire(c.meta.kind,c.meta.payload,c.state.payload),bodyRefs:[]};}},async row=>{if(row.bodyRevision!==null)throw Error('closure_incomplete');},async()=>{if(reserveFails)throw Error('quota_exceeded');return async()=>{};});await native.initialize();await projection.initialize();

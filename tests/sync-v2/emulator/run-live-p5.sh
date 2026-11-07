@@ -24,7 +24,7 @@ cleanup(){
  "$adb" -s "$serial" shell run-as dev.podjs.runtime.test rm -f files/syncv2-p5-live/watch.json files/syncv2-p5-live/guest.js >/dev/null || true
 }
 trap cleanup EXIT
-(cd "$project" && bun build tests/sync-v2/emulator/live-p5-guest.ts --target=browser --format=iife --outfile="$evidence/guest.js")
+(cd "$project" && bun build "${WRSS_P5_GUEST_SOURCE:-tests/sync-v2/emulator/live-p5-guest.ts}" --target=browser --format=iife --outfile="$evidence/guest.js")
 (cd "$framework/platforms/android" && ./gradlew :runtime:assembleDebugAndroidTest --max-workers=2 -PpodAbis=x86_64 --offline) > "$evidence/build.log" 2>&1
 "$adb" -s "$serial" reverse tcp:18972 tcp:18972
 "$adb" -s "$serial" install -r "$framework/platforms/android/runtime/build/outputs/apk/androidTest/debug/runtime-debug-androidTest.apk" > "$evidence/install.log"

@@ -4,7 +4,7 @@ import {objectOid} from './sealed';
 /** Canonical wire tree. The P1 local radix cache is not a wire tree. */
 export function buildTree(scope:Scope,rows:any[],prefix=''): {oid:string;bytes:Uint8Array;nodes:Map<string,Uint8Array>} {
  if(rows.length>1000000)throw Error('object_too_large');const sorted=[...rows].sort((a,b)=>a.entityKey<b.entityKey?-1:a.entityKey>b.entityKey?1:0);let prior='';for(const row of sorted){indexRow(row);if(row.entityKey<=prior||!row.entityKey.startsWith(prefix))throw Error('invalid_schema');prior=row.entityKey;}
- const leaf={version:2,scope,form:'leaf',prefix,rows:sorted};let raw=jsonBytes(leaf);const nodes=new Map<string,Uint8Array>();
+ const leaf={version:2,scope,form:'leaf',prefix,rows:sorted};let raw=sorted.length<=256?jsonBytes(leaf):new Uint8Array();const nodes=new Map<string,Uint8Array>();
  if(sorted.length>256||raw.length>262144){if(prefix.length>=64)throw Error('object_too_large');const children=[];for(const digit of '0123456789abcdef'){const group=sorted.filter(r=>r.entityKey[prefix.length]===digit);if(group.length){const child=buildTree(scope,group,prefix+digit);for(const [id,b]of child.nodes)nodes.set(id,b);children.push({digit,oid:child.oid,count:group.length});}}raw=jsonBytes({version:2,scope,form:'node',prefix,children});}
  const id=objectOid('tree',raw);nodes.set(id,raw);return {oid:id,bytes:raw,nodes};
 }

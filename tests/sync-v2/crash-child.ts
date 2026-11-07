@@ -3,5 +3,5 @@ import {SqlFixture} from './fixture';
 import {SqlBusinessSource} from '../../src/sync-v2/source';
 const [path,mode,edge]=process.argv.slice(2),db=new SqlFixture(path,mode),at=Number(edge);
 const source=await SqlBusinessSource.open(db),store=db.store();
-db.transaction=async statements=>{db.raw.exec('BEGIN IMMEDIATE');let i=0;for(const s of statements){if(i++===at)process.exit(78);db.raw.query(s.sql).run(...(s.params??[]) as any[]);}if(i++===at)process.exit(78);db.raw.exec('COMMIT');if(i===at)process.exit(78);};
+const transaction=db.transaction.bind(db);db.transaction=async statements=>{if(edge==='count'){console.log(statements.length);return transaction(statements);}db.raw.exec('BEGIN IMMEDIATE');let i=0;for(const s of statements){if(i++===at)process.exit(78);db.raw.query(s.sql).run(...(s.params??[]) as any[]);}if(i++===at)process.exit(78);db.raw.exec('COMMIT');if(i===at)process.exit(78);};
 await store.scanPage(source,1);db.close();

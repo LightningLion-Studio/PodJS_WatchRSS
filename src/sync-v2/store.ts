@@ -1,3 +1,8 @@
+import {SqlAuthenticatedCache,SQL_AUTHENTICATED_CACHE_SCHEMA} from '@podjs/framework/sql-authenticated-cache';
+import {ResourceQuota,type ResourceReservation} from '@podjs/framework/resource-journal';
+import {ContentSha256} from '@podjs/framework/content-sha256';
+import {SqlProgram,SQL_PROGRAM_SCHEMA,type SqlProgramRef} from '@podjs/framework/sql-program';
+import {SqlStateJournal,SQL_STATE_SCHEMA} from '@podjs/framework/sql-state-journal';
 import {chargedReplayBytes} from './resume';
 import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
@@ -10,7 +15,7 @@ import {ProjectionGate} from './gate';
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
 /** open authenticates with an existing key; it must never persist a new key. */
-export interface LocalCipher {seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>}
+export interface LocalCipher {nativeKey?():Promise<{keyBase64:string;aadJson:boolean}>;seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>}
 export type SourceRecord={kind:Kind;logicalId:string;value:Record<string,any>;addedAtMillis?:number;source?:{table:string;locator:string}};
 export type ScanBinding={schema:string;descriptorPin:string;accountScope:string;capability:string};
 export interface SourcePage {rows:SourceRecord[];after:string;done:boolean}
@@ -20,7 +25,12 @@ export interface SourceReader {
  /** Reserved keyed lookup for future incremental work; never read body recipes. */
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
-export const PROJECTION_SCHEMA=[
+export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,
+ `CREATE TABLE IF NOT EXISTS syncv2_apply_tree_v2(scope TEXT NOT NULL,plan_id TEXT NOT NULL,step INTEGER NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,plan_id,prefix,step))`,
+ ...['INSERT','UPDATE','DELETE'].map(op=>`CREATE TRIGGER IF NOT EXISTS wrss_apply_tree_ready_${op.toLowerCase()} BEFORE ${op} ON syncv2_apply_tree_v2 WHEN EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=${op==='DELETE'?'OLD':'NEW'}.scope AND id=${op==='DELETE'?'OLD':'NEW'}.plan_id AND status='ready') BEGIN SELECT RAISE(ABORT,'sql_program_immutable');END`),
+ `CREATE TABLE IF NOT EXISTS syncv2_apply_work(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,id))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_prepare_clocks(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,id))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_apply_keys(scope TEXT NOT NULL,plan_id TEXT NOT NULL,entity_key TEXT NOT NULL,PRIMARY KEY(scope,plan_id,entity_key))`,
  `CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))`,
  `CREATE TABLE IF NOT EXISTS syncv2_business_basis(scope TEXT PRIMARY KEY,state_version TEXT NOT NULL,epoch TEXT NOT NULL,revision TEXT NOT NULL)`,
@@ -43,14 +53,16 @@ export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:
 export class WatchProjectionStore {
  private readonly scopeKey:string;
  private legacyAdapter?:WatchEquivalentLegacy;
+ private cloudCache:SqlAuthenticatedCache<any>;
+ private readonly stateJournal:SqlStateJournal<SyncState>;
  constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{}){
-  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
+  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
  }
  equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
  private aad(purpose:string,id=''){return canonical({domain:'wrss.sync.v2/local-projection',version:2,scope:this.scope,libraryId:this.libraryId,purpose,id});}
  /** Reopening disabled must durably stop a previously enabled projection. */
  async initialize(){if(!this.gate.isEnabled){await stopExistingProjection(this.db);return {ddl:0,unchanged:0};}
-  await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.map(sql=>({sql})));const markerDdl=await installBusinessRevision(this.db);
+  await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.filter(sql=>!sql.startsWith('CREATE TRIGGER')).map(sql=>({sql})));const infrastructureDdl=await stableSqlTriggers(this.db,PROJECTION_SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER')));const markerDdl=await installBusinessRevision(this.db);
   if(!(await this.db.query('SELECT 1 FROM syncv2_state WHERE scope=?',[this.scopeKey])).length){
    const initial=initialState();initial.businessRevision=await businessRevision(this.db);const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(row=>String(row.name)));
    const witnesses=[['sync_change_log',"SELECT 1 FROM sync_change_log WHERE seq>COALESCE((SELECT MIN(last_local_seq_acked) FROM sync_peer_state),0) LIMIT 1"],['memo_notes','SELECT 1 FROM memo_notes WHERE content_hash!=base_content_hash LIMIT 1'],['article_register_state','SELECT 1 FROM article_register_state WHERE pending_json IS NOT NULL OR raw_conflict=1 LIMIT 1'],['sync_book_reading_dirty','SELECT 1 FROM sync_book_reading_dirty LIMIT 1']];
@@ -59,15 +71,15 @@ export class WatchProjectionStore {
    await this.db.transaction([{sql:'INSERT OR IGNORE INTO syncv2_state VALUES(?,?,?,?,?,?,0)',params:[this.scopeKey,'0','0',body,'0','0']}]);
   }
   const result=await stableSqlTriggers(this.db,["CREATE TRIGGER IF NOT EXISTS syncv2_identity_immutable BEFORE INSERT ON syncv2_identity_map WHEN EXISTS(SELECT 1 FROM syncv2_identity_map WHERE local_library=NEW.local_library AND repo=NEW.repo AND kind=NEW.kind AND logical_id=NEW.logical_id AND (entity_key!=NEW.entity_key OR mapping_version!=NEW.mapping_version)) BEGIN SELECT RAISE(ABORT,'identity_conflict');END"]);
-  result.ddl+=markerDdl.ddl;result.unchanged+=markerDdl.unchanged;
+  result.ddl+=markerDdl.ddl+infrastructureDdl.ddl;result.unchanged+=markerDdl.unchanged+infrastructureDdl.unchanged;
   // A local test/diagnostic entry must activate explicitly. No cloud transport,
   // worker, settings migration, or account registration is attached here.
   this.gate.require();await this.db.transaction([{sql:'INSERT INTO syncv2_control VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,enabled=1 WHERE scope IS NOT excluded.scope OR enabled!=1',params:[this.scopeKey]}]);if(!this.gate.isEnabled){await stopExistingProjection(this.db);throw Error('feature_disabled');}return result;
  }
  async disable(){await this.gate.close();}
- private async persistedState():Promise<SyncState>{
+ private async persistedState(attempt=0):Promise<SyncState>{
   this.gate.require();await this.checkIdentity();const row=(await this.db.query('SELECT * FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('projection_not_initialized');
-  const state:SyncState=await this.cipher.open(this.aad('state'),String(row.body));state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);
+  let state:SyncState;try{state=await this.stateJournal.read(String(row.body),checkD64(row.state_version));}catch(error){const latest=(await this.db.query('SELECT state_version FROM syncv2_state WHERE scope=?',[this.scopeKey]))[0];if(attempt<3&&latest?.state_version!==row.state_version)return this.persistedState(attempt+1);throw error;}state.stateVersion=checkD64(row.state_version);state.localChangeRevision=checkD64(row.local_revision);
   if(checkD64(row.account_generation)!==state.rollbackGeneration||checkD64(row.edit_generation)!==state.editBase.generation)throw Error('projection_state_inconsistent');
   if(Number(row.awaiting_user)===1&&!state.pendingChoice)state.pendingChoice={generation:state.rollbackGeneration,inboxKeys:[]};
   const basis=(await this.db.query('SELECT epoch,revision FROM syncv2_business_basis WHERE scope=? AND state_version=?',[this.scopeKey,state.stateVersion]))[0];if(basis)state.businessRevision={epoch:String(basis.epoch),revision:String(basis.revision)};
@@ -94,8 +106,8 @@ export class WatchProjectionStore {
   if(!state.pendingChoice&&compareD64(state.editBase.generation,state.rollbackGeneration)<0&&(state.hasUnsentEdits||compareD64(state.localChangeRevision,state.acknowledgedLocalChangeRevision??'0')>0)){const next={...state,pendingChoice:{generation:state.rollbackGeneration,inboxKeys:[],accountOid:state.account!.oid,accountRevision:state.account!.revision,selectedLocalChangeRevision:state.localChangeRevision}};await this.commit(state,next);return next;}
   return state;
  }
- private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const following=nextD64(state.stateVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const body=await this.cipher.seal(this.aad('state'),next);await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
-  try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},state.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...statements]);}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
+ private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){this.gate.require();const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const encoded=await this.stateJournal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
+  try{await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** P2 control persistence uses the same stateVersion and business witness.
   * Preparation runs outside SQL; all prepared statements commit at this CAS. */
@@ -111,11 +123,54 @@ export class WatchProjectionStore {
  }
  /** Prepare only. Original business rows and identity_map remain untouched until
   * the caller commits this batch with active/applied and edit acknowledgement. */
- async prepareAccountProjection(before:SyncState,records:SourceRecord[],business:Statement[]){
-  const prepared=await this.prepareRows(records,before.localChangeRevision,nextD64(before.stateVersion),true),checkpoint=await this.checkpoint(),scan:Statement[]=[];if(checkpoint?.phase==='complete'){const next={...checkpoint,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};scan.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}
-  return [...business,{sql:'DELETE FROM syncv2_candidates WHERE scope=?',params:[this.scopeKey]},
-   {sql:'DELETE FROM syncv2_tree_nodes WHERE scope=?',params:[this.scopeKey]},...prepared.statements,...scan,
-   captureSqlBasis('syncv2_business_basis',this.scopeKey,nextD64(before.stateVersion),'business_sync_revision')];
+ async preparationClock(state:SyncState,now:number):Promise<number>{const id=digest(state),row=(await this.db.query('SELECT body FROM syncv2_prepare_clocks WHERE scope=? AND id=?',[this.scopeKey,id]))[0];if(row){const v=await this.cipher.open(this.aad('prepare-clock',id),String(row.body));if(v.stateHash!==id||!Number.isSafeInteger(v.now)||v.now>now)throw Error('clock_unknown');return v.now;}const body=await this.cipher.seal(this.aad('prepare-clock',id),{stateHash:id,now});await this.db.transaction([{sql:'INSERT OR IGNORE INTO syncv2_prepare_clocks VALUES(?,?,?)',params:[this.scopeKey,id,body]}]);return this.preparationClock(state,now);}
+ /** Collect obsolete private preparation only. Signed unknown publication
+  * journals, upload receipts and original edits are never collection targets. */
+ async collectPreparations(before:SyncState,limit=16){const stateHash=digest(before),protectedIds=new Set([before.cloud?.pendingPublish?.applyPlan?.id,before.cloud?.preparingPublication?.applyPlan?.id].filter(Boolean));let removed=0;const rows=await this.db.query('SELECT id,body FROM syncv2_apply_work WHERE scope=? ORDER BY id LIMIT ?',[this.scopeKey,limit]);for(const row of rows){const id=String(row.id);if(protectedIds.has(id))continue;const work=await this.cipher.open(this.aad('apply-work',id),String(row.body));if(work.stateHash===stateHash)continue;const statements:Statement[]=[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,before.stateVersion]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'DELETE FROM podjs_sql_programs WHERE binding=? AND id=?',params:[this.scopeKey,id]},...['syncv2_apply_tree_v2','syncv2_apply_keys'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND plan_id=?',params:[this.scopeKey,id]})),...['podjs_sql_program_pages'].map(table=>({sql:'DELETE FROM '+table+' WHERE binding=? AND id=?',params:[this.scopeKey,id]})),{sql:'DELETE FROM syncv2_apply_work WHERE scope=? AND id=?',params:[this.scopeKey,id]}];if(work.reservation)statements.push({sql:'DELETE FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?',params:[work.reservation.binding,work.reservation.id,work.reservation.bytes]});await this.db.transaction(statements);removed++;}return removed;}
+ async prepareAccountProjection(before:SyncState,records:SourceRecord[],business:Statement[],budget:{maxSteps?:number;maxMillis?:number;onCheckpoint?:(progress:any)=>void}={}){
+  await this.collectPreparations(before);const input=new ContentSha256();for(const r of records)input.update(jsonBytes(candidates(r.kind,r.logicalId,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId),r.value,r.addedAtMillis)));const inputHash=input.finish();
+  const bh=new ContentSha256();for(const op of business)bh.update(jsonBytes(JSON.stringify(op)));const businessHash=bh.finish(),stateHash=digest(before),id=digest(['account-apply-v3',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
+  const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];let savedBody=saved?String(saved.body):null;let work=saved?await this.cipher.open(this.aad('apply-work',id),String(saved.body)):{stateHash,inputHash,businessHash,phase:'business',offset:0,after:'',step:0,ref:{...program.snapshot(),pages:0,fragments:0,operations:0,bytes:0,root:'0'.repeat(64)}};
+  if(work.stateHash!==stateHash||work.inputHash!==inputHash||work.businessHash!==businessHash)throw Error('choice_stale');if(work.phase==='ready')return this.preparedResult(before,work.ref);
+  if(status==='ready'&&work.phase!=='finalize')throw Error('sql_program_invalid');if(status!=='ready')await program.rewind(work.ref);
+  const checkpoint=async()=>{work.ref=program.snapshot();const body=await this.cipher.seal(this.aad('apply-work',id),work);await this.db.transaction([{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN (? IS NULL AND NOT EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=?) OR EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=? AND body=?)) AND EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=? AND id=? AND pages=? AND root=?) THEN 1 ELSE 0 END',params:[savedBody,this.scopeKey,id,this.scopeKey,id,savedBody,this.scopeKey,id,work.ref.pages,work.ref.root]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'INSERT INTO syncv2_apply_work VALUES(?,?,?) ON CONFLICT(scope,id) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);savedBody=body;if(work.phase!=='ready')await this.db.transaction([{sql:'DELETE FROM syncv2_apply_tree_v2 AS t WHERE scope=? AND plan_id=? AND step<? AND EXISTS(SELECT 1 FROM syncv2_apply_tree_v2 newer WHERE newer.scope=t.scope AND newer.plan_id=t.plan_id AND newer.prefix=t.prefix AND newer.step>t.step AND newer.step<=?)',params:[this.scopeKey,id,work.step,work.step]}]);budget.onCheckpoint?.({...work,id});};
+  const readTree=async(prefix:string)=>{const row=(await this.db.query('SELECT hash,body FROM syncv2_apply_tree_v2 WHERE scope=? AND plan_id=? AND prefix=? AND step<=? ORDER BY step DESC LIMIT 1',[this.scopeKey,id,prefix,work.step]))[0]??(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return row?{hash:String(row.hash),node:JSON.parse(String(row.body))}:null;};
+  const stageTrees=async(writes:Statement[])=>{let batch:Statement[]=[],size=0;const flush=async()=>{if(batch.length)await this.db.transaction(batch);batch=[];size=0;};for(const op of writes.filter(s=>s.sql.startsWith('INSERT INTO syncv2_tree_nodes'))){const statement={sql:'INSERT INTO syncv2_apply_tree_v2 VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,plan_id,prefix,step) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,id,work.step+1,...op.params!.slice(1)]},n=JSON.stringify(statement).length;if(batch.length&&(batch.length>=16||size+n>65536))await flush();batch.push(statement);size+=n;}await flush();work.step++;};
+  const start=Date.now();let steps=0;const maxSteps=budget.maxSteps??64,maxMillis=budget.maxMillis??150000;
+  while(work.phase!=='ready'){
+   if(steps>=maxSteps||Date.now()-start>=maxMillis){await checkpoint();throw Object.assign(Error('projection_preparing'),{preparation:{id,phase:work.phase,offset:work.offset,after:work.after,bytes:work.ref.bytes}});}steps++;
+   if(work.phase==='business'){const page=business.slice(work.offset,work.offset+64);await program.append(page);work.offset+=page.length;if(work.offset>=business.length){work.phase='records';work.offset=0;}await checkpoint();continue;}
+   if(work.phase==='records'){
+    if(work.offset>=records.length){work.phase='remove';work.after='';await checkpoint();continue;}let limit=Math.min(32,records.length-work.offset),prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>;
+    for(;;){try{prepared=await this.prepareRows(records.slice(work.offset,work.offset+limit),before.localChangeRevision,nextD64(before.stateVersion),false,readTree);break;}catch(error){if((error as Error).message!=='page_too_large'||limit===1)throw error;limit=Math.max(1,Math.floor(limit/2));}}
+    await program.append(prepared!.statements.filter(s=>!s.sql.startsWith('INSERT INTO syncv2_tree_nodes')));await stageTrees(prepared!.statements);const keys=records.slice(work.offset,work.offset+limit).map(r=>({sql:'INSERT OR IGNORE INTO syncv2_apply_keys VALUES(?,?,?)',params:[this.scopeKey,id,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId)]}));for(let i=0;i<keys.length;i+=32)await this.db.transaction(keys.slice(i,i+32));work.offset+=limit;await checkpoint();continue;
+   }
+   if(work.phase==='remove'){
+    const page=await this.db.query('SELECT entity_key FROM syncv2_candidates c WHERE scope=? AND entity_key>? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=c.scope AND k.plan_id=? AND k.entity_key=c.entity_key) ORDER BY entity_key LIMIT 32',[this.scopeKey,work.after,id]);
+    if(page.length){const tree=await updateRadixIndex({read:readTree,encode:jsonBytes,hash:sha256Hex},page.map(r=>({key:String(r.entity_key),value:null,remove:true as const}))),writes=tree.writes.map(r=>({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,r.prefix,r.hash,canonical(r.node),r.count]}));await stageTrees(writes);work.after=String(page.at(-1)!.entity_key);await checkpoint();continue;}
+    await program.append([{sql:'INSERT INTO syncv2_tree_nodes(scope,prefix,hash,body,count) SELECT scope,prefix,hash,body,count FROM syncv2_apply_tree_v2 t WHERE scope=? AND plan_id=? AND step=(SELECT MAX(newer.step) FROM syncv2_apply_tree_v2 newer WHERE newer.scope=t.scope AND newer.plan_id=t.plan_id AND newer.prefix=t.prefix) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,id]},{sql:'DELETE FROM syncv2_candidates WHERE scope=? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=syncv2_candidates.scope AND k.plan_id=? AND k.entity_key=syncv2_candidates.entity_key)',params:[this.scopeKey,id]}]);work.phase='finalize';await checkpoint();continue;
+   }
+   if(work.phase==='finalize'){work.ref=await program.finish();work.phase='ready';await checkpoint();}
+  }
+  return this.preparedResult(before,work.ref);
+ }
+ private async preparedResult(before:SyncState,ref:SqlProgramRef){const result=await this.resumeAccountProjection(before,ref);Object.defineProperty(result,'preparedPlan',{value:ref});return result;}
+ async keepPlanReservation(ref:SqlProgramRef,reservation:ResourceReservation){const row=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,ref.id]))[0];if(!row)throw Error('sql_program_incomplete');const work=await this.cipher.open(this.aad('apply-work',ref.id),String(row.body));if(work.reservation&&canonical(work.reservation)===canonical(reservation))return {...ref,reservation};if(work.reservation){try{await new ResourceQuota(this.db,work.reservation.binding).resume(work.reservation);throw Error('choice_stale');}catch(e){if((e as Error).message!=='storage_pressure')throw e;}}work.reservation=reservation;await this.db.transaction([{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=? AND body=?) AND EXISTS(SELECT 1 FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?) THEN 1 ELSE 0 END',params:[this.scopeKey,ref.id,row.body,reservation.binding,reservation.id,reservation.bytes]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_apply_work SET body=? WHERE scope=? AND id=?',params:[await this.cipher.seal(this.aad('apply-work',ref.id),work),this.scopeKey,ref.id]}]);return {...ref,reservation};}
+ async existingPlanReservation(ref:SqlProgramRef){const row=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,ref.id]))[0];if(!row)return null;const work=await this.cipher.open(this.aad('apply-work',ref.id),String(row.body));if(!work.reservation)return null;try{return await new ResourceQuota(this.db,work.reservation.binding).resume(work.reservation);}catch(error){if((error as Error).message==='storage_pressure')return null;throw error;}}
+ async planOwned(id:string){const s=await this.readState();if(s.cloud?.pendingPublish?.applyPlan?.id===id||s.cloud?.preparingPublication?.applyPlan?.id===id)return true;const row=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];if(!row)return false;const work=await this.cipher.open(this.aad('apply-work',id),String(row.body));return !!s.cloud?.pendingCloudChoice&&work.stateHash===digest(s);}
+ async releasePlanReservation(ref:SqlProgramRef){if(await this.planOwned(ref.id))return;const reservation=(ref as any).reservation as ResourceReservation|undefined,release=reservation?await new ResourceQuota(this.db,reservation.binding).resume(reservation).catch(error=>{if((error as Error).message==='storage_pressure')return null;throw error;}):await this.existingPlanReservation(ref);if(!release?.reservation)return;const before=await this.readState();if(before.cloud?.pendingPublish?.applyPlan?.id===ref.id||before.cloud?.preparingPublication?.applyPlan?.id===ref.id)return;const r=release.reservation;await this.db.transaction([{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,before.stateVersion]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'DELETE FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?',params:[r.binding,r.id,r.bytes]}]);}
+ private applyProgram(id:string){return new SqlProgram(this.db,this.cipher,this.scopeKey,id,this.aad('apply-program',id));}
+ async resumeAccountProjection(before:SyncState,ref:SqlProgramRef,validateOnly=false){
+  if(ref.binding!==this.scopeKey)throw Error('choice_stale');const cp=await this.checkpoint(),tail:Statement[]=[];
+  if(cp?.phase==='complete'){const next={...cp,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};tail.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}
+  return [await this.applyProgram(ref.id).statement(ref,validateOnly),...tail,captureSqlBasis('syncv2_business_basis',this.scopeKey,nextD64(before.stateVersion),'business_sync_revision')];
+ }
+ accountProjectionReservationBytes(statements:Statement[]){let size=jsonBytes(JSON.stringify(statements)).length*2+32768;for(const s of statements){const program=(s as any).program;if(program)size+=program.bytes*6;}if(!Number.isSafeInteger(size))throw Error('storage_pressure');return size;}
+ async validateAccountProjection(before:SyncState,statements:Statement[]){
+  const program=(statements as any).preparedPlan as SqlProgramRef|undefined;if(!program)throw Error('sql_program_incomplete');const marker=await this.applyProgram(program.id).statement(program,true);
+  // Execute the exact native operations, including constraints, then rollback.
+  await commitSqlCas(this.db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},before.stateVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[before.businessRevision!.epoch,before.businessRevision!.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},marker]);
+  return program;
  }
  /** Reset only the scan checkpoint. Retain candidates, IDs, edits and the DB. */
  async restartScan(){
@@ -159,23 +214,21 @@ export class WatchProjectionStore {
  async stageCloudRows(root:string,rows:any[],baseline:SyncState){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_cloud_rows(scope TEXT NOT NULL,root TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,root,entity_key))'}]);
   let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
-  for(const row of rows){
-   const body=await this.cipher.seal(this.aad('cloud-row',root+row.row.entityKey),row),next={...state};
-   await this.controlUpdate(state,next,[{sql:'INSERT INTO syncv2_cloud_rows VALUES(?,?,?,?) ON CONFLICT(scope,root,entity_key) DO UPDATE SET body=excluded.body',params:[this.scopeKey,root,row.row.entityKey,body]}]);state=next;
-  }
+  for(let at=0;at<rows.length;at+=32){const statements=await this.cloudCache.prepare(root,rows.slice(at,at+32).map(value=>({key:value.row.entityKey,value})));if(!statements.length)continue;const next={...state};await this.controlUpdate(state,next,statements);state=next;}
   return state;
  }
- async cloudRowCount(root:string){this.gate.require();return Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0);}
+ async cloudRowCount(root:string){this.gate.require();return Math.max(await this.cloudCache.count(root),Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0));}
  async cloudRow(root:string,entityKey:string){
-  this.gate.require();hexId(entityKey,64);const row=(await this.db.query('SELECT body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key=?',[this.scopeKey,root,entityKey]))[0];return row?this.cipher.open(this.aad('cloud-row',root+entityKey),String(row.body)):null;
+  this.gate.require();hexId(entityKey,64);const cached=await this.cloudCache.get(root,entityKey);if(cached)return cached;const row=(await this.db.query('SELECT body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key=?',[this.scopeKey,root,entityKey]))[0];return row?this.cipher.open(this.aad('cloud-row',root+entityKey),String(row.body)):null;
  }
  async cloudRows(root:string,after='',limit=32){
-  this.gate.require();const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
+  this.gate.require();const cached=await this.cloudCache.page(root,after,limit);if(await this.cloudCache.count(root)>=Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0))return cached;const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
   const out=[];for(const row of rows)out.push(await this.cipher.open(this.aad('cloud-row',root+String(row.entity_key)),String(row.body)));return out;
  }
  async stageUpload(planId:string,objects:Map<string,Uint8Array>,expected?:SyncState){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_upload_objects(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))'}]);
-  for(const [id,bytes]of objects){const before=await this.readState();if(expected&&canonical(before)!==canonical(expected))throw Error('choice_stale');const next={...before},body=await this.cipher.seal(this.aad('upload',planId+id),bytesToBase64(bytes));await this.controlUpdate(before,next,[{sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]}]);expected=expected?next:undefined;}
+  let batch:Statement[]=[],size=0;const flush=async()=>{if(!batch.length)return;const before=await this.readState();if(expected&&canonical(before)!==canonical(expected))throw Error('choice_stale');const next={...before};await this.controlUpdate(before,next,batch);expected=expected?next:undefined;batch=[];size=0;};
+  for(const [id,bytes]of objects){const body=await this.cipher.seal(this.aad('upload',planId+id),bytesToBase64(bytes));if(batch.length&&(batch.length>=16||size+body.length>65536))await flush();batch.push({sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]});size+=body.length;}await flush();
   return expected;
  }
  async uploadPage(planId:string,after='',limit=1){
@@ -212,10 +265,10 @@ export class WatchProjectionStore {
  async stageHeaders(entries:{oid:string;body:any;signature:string}[],baseline:SyncState){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))'}]);
   let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
-  for(const entry of entries){const envelope={body:entry.body,signature:entry.signature},old=await this.readHeader(entry.oid);if(old){if(canonical(old)!==canonical(envelope))throw Error('idempotency_conflict');continue;}const sealed=await this.cipher.seal(this.aad('commit-header',entry.oid),envelope),next={...state};await this.controlUpdate(state,next,[{sql:'INSERT INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,entry.oid,sealed]}]);state=next;}return state;
+  for(let at=0;at<entries.length;at+=16){const statements:Statement[]=[];for(const entry of entries.slice(at,at+16)){const envelope={body:entry.body,signature:entry.signature},old=await this.readHeader(entry.oid);if(old){if(canonical(old)!==canonical(envelope))throw Error('idempotency_conflict');continue;}statements.push({sql:'INSERT INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,entry.oid,await this.cipher.seal(this.aad('commit-header',entry.oid),envelope)]});}if(statements.length){const next={...state};await this.controlUpdate(state,next,statements);state=next;}}return state;
  }
  async dropInactiveCloudRows(root:string){
-  for(;;){const before=await this.readState();if(before.pendingChoice)return;const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length)return;await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
+  for(;;){const before=await this.readState();if(before.pendingChoice||before.cloud?.pendingPublish||before.cloud?.preparingPublication)return;const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length){await this.controlUpdate(before,{...before},this.cloudCache.dropExcept(root));return;}await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
  }
  /** The caller supplies an authenticated HeadPins observation. No network DTO
   * or unverified server checkpoint may be passed as an account observation. */
@@ -228,7 +281,7 @@ export class WatchProjectionStore {
   const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:'0',tailEnd:null,phase:'scan',rows:0,businessRevision:state.businessRevision!};
   await this.commit(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-or-revision-changed':'first-scan',checkpoint:cp};
  }
- private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false){
+ private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false,readTree?: (prefix:string)=>Promise<any>){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
   for(const row of rows){const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId),candidate=candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis),mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
    const existing=(await this.db.query('SELECT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind=? AND logical_id=?',mapKey))[0];if(existing&&existing.entity_key!==entity)throw Error('identity_conflict');
@@ -242,7 +295,7 @@ export class WatchProjectionStore {
     {sql:'INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body,meta_bytes=excluded.meta_bytes,state_bytes=excluded.state_bytes,added_at=excluded.added_at,row_sequence=excluded.row_sequence',params:[this.scopeKey,entity,sealed,candidate.metaBytes,candidate.stateBytes,candidate.addedAtMillis,sequence]},
     {sql:'INSERT OR IGNORE INTO syncv2_change_log VALUES(?,?,?,?)',params:[this.scopeKey,revision,entity,canonical({revision,entityKey:entity,candidateHash:sha256Hex(jsonBytes(sealed))})]});
   }
-  if(treeChanges.length){const tree=await updateRadixIndex({read:async prefix=>{const saved=(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return saved?{hash:String(saved.hash),node:JSON.parse(String(saved.body))}:null;},encode:jsonBytes,hash:sha256Hex},treeChanges);
+  if(treeChanges.length){const tree=await updateRadixIndex({read:readTree??(async prefix=>{const saved=(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return saved?{hash:String(saved.hash),node:JSON.parse(String(saved.body))}:null;}),encode:jsonBytes,hash:sha256Hex},treeChanges);
    for(const row of tree.writes){const body=canonical(row.node);total+=body.length;if(total>384*1024)throw Error('page_too_large');statements.push({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,row.prefix,row.hash,body,row.count]});}
   }
   return {statements,total};

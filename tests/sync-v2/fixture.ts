@@ -1,3 +1,4 @@
+import {readSqlProgram} from '@podjs/framework/sql-program';
 import {Database} from 'bun:sqlite';
 import {createCipheriv,createDecipheriv,randomBytes,hkdfSync,createPublicKey,verify} from 'node:crypto';
 import {readFileSync} from 'node:fs';
@@ -20,8 +21,9 @@ export const identityCrypto:IdentityCrypto={
 };
 const localKey=Buffer.alloc(32,0x55);
 export const cipher:LocalCipher={
- async seal(aad,value){const nonce=randomBytes(12),c=createCipheriv('aes-256-gcm',localKey,nonce);c.setAAD(Buffer.from(aad));return JSON.stringify({nonce:nonce.toString('hex'),ciphertext:Buffer.concat([c.update(canonical(value),'utf8'),c.final(),c.getAuthTag()]).toString('hex')});},
- async open(aad,value){const v=JSON.parse(value),b=Buffer.from(v.ciphertext,'hex'),d=createDecipheriv('aes-256-gcm',localKey,Buffer.from(v.nonce,'hex'));d.setAAD(Buffer.from(aad));d.setAuthTag(b.subarray(-16));return JSON.parse(Buffer.concat([d.update(b.subarray(0,-16)),d.final()]).toString('utf8'));},
+ async nativeKey(){return {keyBase64:localKey.toString("base64"),aadJson:false};},
+ async seal(aad,value){const nonce=randomBytes(12),c=createCipheriv('aes-256-gcm',localKey,nonce);c.setAAD(Buffer.from(aad));return JSON.stringify({nonceBase64:nonce.toString('base64'),ciphertextBase64:Buffer.concat([c.update(canonical(value),'utf8'),c.final(),c.getAuthTag()]).toString('base64')});},
+ async open(aad,value){const v=JSON.parse(value),b=Buffer.from(v.ciphertextBase64??v.ciphertext,v.ciphertextBase64?'base64':'hex'),d=createDecipheriv('aes-256-gcm',localKey,Buffer.from(v.nonceBase64??v.nonce,v.nonceBase64?'base64':'hex'));d.setAAD(Buffer.from(aad));d.setAuthTag(b.subarray(-16));return JSON.parse(Buffer.concat([d.update(b.subarray(0,-16)),d.final()]).toString('utf8'));},
 };
 export class SqlFixture {
  readonly raw:Database;calls=0;maxRows=0;maxTxBytes=0;sql:string[]=[];
@@ -29,8 +31,12 @@ export class SqlFixture {
  constructor(path=':memory:',mode='DELETE'){this.raw=new Database(path);this.raw.exec('PRAGMA journal_mode='+mode);this.raw.exec('PRAGMA synchronous=FULL');}
  async query(q:string,p:readonly unknown[]=[]):Promise<Record<string,unknown>[]>{this.calls++;this.sql.push(q);const rows=this.raw.query(q).all(...p as any[]) as Record<string,unknown>[];this.maxRows=Math.max(this.maxRows,rows.length);return rows;}
  async execute(q:string,p:readonly unknown[]=[]){await this.transaction([{sql:q,params:p}]);}
- async transaction(statements:{sql:string;params?:readonly unknown[]}[]){this.calls++;this.maxTxBytes=Math.max(this.maxTxBytes,JSON.stringify(statements).length);this.raw.exec('BEGIN IMMEDIATE');try{let i=0;for(const s of statements){if(this.crashAt===i++)throw Error('injected_crash');this.sql.push(s.sql);this.raw.query(s.sql).run(...(s.params??[]) as any[]);}if(this.crashAt===i)throw Error('injected_crash');this.raw.exec('COMMIT');}catch(e){this.raw.exec('ROLLBACK');throw e;}if(this.afterCommit)throw Error('injected_after_commit');}
+ async transaction(statements:{sql:string;params?:readonly unknown[]}[]){this.calls++;this.maxTxBytes=Math.max(this.maxTxBytes,JSON.stringify(statements).length);this.raw.exec('BEGIN IMMEDIATE');try{let i=0;for(const s of statements){if(this.crashAt===i++)throw Error('injected_crash');this.sql.push(s.sql);if((s as any).program){for await(const op of readSqlProgram(this,cipher,(s as any).program))this.raw.query(op.sql).run(...(op.params??[]) as any[]);}else this.raw.query(s.sql).run(...(s.params??[]) as any[]);}if(this.crashAt===i)throw Error('injected_crash');this.raw.exec((statements as any[]).some(s=>s.program?.validateOnly)?'ROLLBACK':'COMMIT');}catch(e){this.raw.exec('ROLLBACK');throw e;}if(this.afterCommit)throw Error('injected_after_commit');}
  store(enabled=true){return new WatchProjectionStore(this,cipher,new ProjectionGate(enabled),scope,libraryId,idKey);}
  close(){this.raw.close();}
 }
 export const noteValue=(id='n')=>({noteId:id,folderId:null,title:'title '+id,markdown:'local\ntext',plainText:'local text',contentHash:'h',baseContentHash:'base-h',baseMarkdown:'ancestor',pinned:false,createdAt:1,updatedAt:2,modifiedBy:'watch',deleted:false,deletedAt:0});
+
+/** Test boundary seed: a fully authenticated legacy-compatible state version.
+ * Product callers always use the authoritative journal/state CAS. */
+export async function fixtureStateVersion(db:SqlFixture,version:string){const state=await db.store().readState();state.stateVersion=version;return {sql:'UPDATE syncv2_state SET state_version=?,body=? WHERE scope=?',params:[version,await cipher.seal(canonical({domain:'wrss.sync.v2/local-projection',version:2,scope,libraryId,purpose:'state',id:''}),state),canonical(scope)]};}

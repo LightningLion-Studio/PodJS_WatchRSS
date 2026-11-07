@@ -22,8 +22,9 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
   * yet. No body materialization or identity replacement occurs. */
  async initialize(){await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);}
  async prepare(records:SourceRecord[],before:SyncState){
-  const statements:Statement[]=[],old:SourceRecord[]=[];let after='';
-  for(;;){const page=await this.projection.candidatePage(after,32);if(!page.length)break;for(const r of page)old.push({kind:r.candidate.meta.kind,logicalId:r.candidate.meta.logicalId,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload)});after=page.at(-1)!.entityKey;}
+  const statements:Statement[]=[],old:SourceRecord[]=[],selected=new Map(records.map(r=>[r.kind+'\0'+r.logicalId,r])),unchanged=new Set<string>();let after='';
+  for(;;){const page=await this.projection.candidatePage(after,32);if(!page.length)break;for(const r of page){const c=r.candidate,id=c.meta.kind+'\0'+c.meta.logicalId,next=selected.get(id);if(next&&canonical(toWire(next.kind,next.value))===canonical({meta:c.meta.payload,state:c.state.payload}))unchanged.add(id);else old.push({kind:c.meta.kind,logicalId:c.meta.logicalId,value:fromWire(c.meta.kind,c.meta.payload,c.state.payload)});}after=page.at(-1)!.entityKey;}
+  if(!old.length&&unchanged.size===records.length)return [];
   const ids=new Set(records.map(r=>r.kind+'\0'+r.logicalId)),tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
   const requireTable=(table:string)=>{if(!tables.has(table))throw Error('unsupported_feature');};
   const retiredSources=new Set([...old.filter(r=>r.kind==='source'&&!ids.has('source\0'+r.logicalId)).map(r=>r.logicalId),...records.filter(r=>r.kind==='source'&&r.value.deleted).map(r=>r.logicalId)]);
@@ -43,7 +44,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    // Asset bytes remain in the content store until all authenticated pins allow
    // collection. Removing an account row never deletes a native attachment.
   }
-  for(const r of records){let v=r.value;toWire(r.kind,v);
+  for(const r of records){let v=r.value;toWire(r.kind,v);if(unchanged.has(r.kind+'\0'+r.logicalId))continue;
    // Use the frozen legacy interpretation only for the native representation.
    // The authenticated v2 candidate remains byte-for-byte unchanged.
    if(r.kind==='article'&&!Object.hasOwn(v,'registerSources')){if(!Object.hasOwn(v,'contentHash')||!Object.hasOwn(v,'updatedAt'))throw Error('closure_incomplete');v=readArticleRegisters(JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v}),true).value;}

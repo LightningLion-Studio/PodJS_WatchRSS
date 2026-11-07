@@ -18,6 +18,7 @@ export interface BodyManifest {bodyRevision:string;promiseId:string|null;recipeO
 export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 export class WatchIndexPublisher {
  private flushing?:Promise<any>;
+ private preparing?:string;
  constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now,private readonly resolveBody?:BodyResolver){}
  private async ownHeader(id:string){
   const stored=await this.store.readHeader(id);if(stored)return stored;
@@ -28,7 +29,7 @@ export class WatchIndexPublisher {
  async prepare(deviceId:string,alias:string,own:{commitOid:string|null;revision:string},requestId:string){
   if(!this.http.indexWrite)throw Error('feature_disabled');await this.http.capabilities();hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);if(own.commitOid!==null)oid(own.commitOid,'commit');
   let before=await this.store.readState();if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if(before.pendingChoice)throw Error('choice_pending');if(before.account&&before.editBase.generation!==before.account.generation)throw Error('rollback_conflict');
-  const saved=before.cloud??{deviceSequence:'0',current:null,pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',pendingPublish:null};if(saved.pendingPublish)throw Error('publication_pending');
+  const saved=before.cloud??{deviceSequence:'0',current:null,pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',pendingPublish:null};if(saved.pendingPublish||saved.preparingPublication)throw Error('publication_pending');
   const checkpoint=await this.store.checkpoint();if(checkpoint?.phase!=='complete'||!sameBusinessRevision(checkpoint.businessRevision,before.businessRevision))throw Error('projection_incomplete');
   let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=await this.ownHeader(own.commitOid),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...saved,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
@@ -62,30 +63,42 @@ export class WatchIndexPublisher {
   const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'}};
   await this.store.controlUpdate(latest,next);return {commitOid:commit.oid,objects:objects.size,rows:rows.size,deviceSequence:sequence};
  }
+ /** Size the FINAL roots, public refs and canonical tree before reserving an
+  * author sequence. Unproved reuse is charged at identity's worst-case size. */
+ preflightRecords(records:any[]){let wireBytes=0;const rows:any[]=[];for(const entry of records){const c=entry.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);if(c.state.noteSegments.length)throw Error('unsupported_feature');if(c.meta.kind==='note')readConflicts(c.state,{entityKey:entry.entityKey,noteId:c.meta.logicalId},['note-conflicts.v1']);
+  const meta=jsonBytes(c.meta),state=jsonBytes(c.state);if(meta.length>262144||state.length>262144)throw Error('object_too_large');wireBytes+=meta.length+state.length+8240;
+  const refs=jsonBytes({body:{scope:this.http.scope,stateOid:'state:sha256:'+('0'.repeat(64)),segmentOids:[]},signature:'A'.repeat(86)});wireBytes+=refs.length;
+  const row={entityKey:entry.entityKey,metaOid:'meta:sha256:'+('0'.repeat(64)),stateOid:'state:sha256:'+('0'.repeat(64)),addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);rows.push(row);if(!Number.isSafeInteger(wireBytes))throw Error('object_too_large');
+ }const tree=buildTree(this.http.scope,rows);for(const raw of tree.nodes.values())wireBytes+=raw.length;wireBytes+=16384;if(!Number.isSafeInteger(wireBytes))throw Error('object_too_large');return {wireBytes,rows:rows.length};}
  /** Explicit P5 publication. The complete selected snapshot is compiled before
   * upload. Internal writes carry an exact expected state; unrelated writes fail. */
- async prepareExplicit(input:{kind:'rollback'|'resolve-local'|'resolve-merge';expected:SyncState;deviceId:string;alias:string;own:{commitOid:string|null;revision:string};requestId:string;records:any[];target?:{oid:string;treeRoot:string};mergedParents?:string[];legacyKey?:string}){
+ async prepareExplicit(input:{kind:'rollback'|'resolve-local'|'resolve-merge';expected:SyncState;deviceId:string;alias:string;own:{commitOid:string|null;revision:string};requestId:string;records:any[];target?:{oid:string;treeRoot:string};mergedParents?:string[];legacyKey?:string;applyPlan?:import('@podjs/framework/sql-program').SqlProgramRef}){
   if(!this.http.indexWrite||input.kind==='rollback'&&!this.http.historyRestore||input.kind!=='rollback'&&!this.http.choiceApply)throw Error('feature_disabled');
   await this.http.capabilities();let before=await this.store.readStableState();if(canonical(before)!==canonical(input.expected))throw Error('choice_stale');
-  if(!before.account||before.cloud?.pins?.accountOid!==before.account.oid)throw Error('choice_stale');if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');
-  const {deviceId,alias,own,requestId}=input;hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);
+  if(!before.account||before.cloud?.pins?.accountOid!==before.account.oid)throw Error('choice_stale');if(before.cloud?.pendingPublish||before.cloud?.preparingPublication)throw Error('publication_pending');if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');
+  this.preflightRecords(input.records);const {deviceId,alias,own,requestId}=input;hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);
   let sequence=before.cloud?.deviceSequence??'0';if(own.commitOid){const signed=await this.store.readHeader(own.commitOid)??await this.ownHeader(own.commitOid);const body=await verifyCommit(this.crypto,b64(await this.crypto.signingKey(alias)),signed,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
-  sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...reserved.cloud,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
+  sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...reserved.cloud,deviceSequence:sequence,preparingPublication:{kind:input.kind,requestId,...(input.applyPlan?{applyPlan:input.applyPlan}:{}),capturedLocalRevision:before.localChangeRevision}};const checks:any[]=[];if(input.applyPlan){checks.push({sql:"INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=? AND id=? AND status='ready' AND root=?) THEN 1 ELSE 0 END",params:[input.applyPlan.binding,input.applyPlan.id,input.applyPlan.root]},{sql:'DELETE FROM podjs_sql_cas_guard'});const r=(input.applyPlan as any).reservation;if(r)checks.push({sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?) THEN 1 ELSE 0 END',params:[r.binding,r.id,r.bytes]},{sql:'DELETE FROM podjs_sql_cas_guard'});}await this.store.controlUpdate(before,reserved,checks);before=reserved;this.preparing=requestId;try{
   const objects=new Map<string,Uint8Array>(),decoded:any[]=[];
   for(const entry of input.records){
    const c=entry.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);if(c.state.noteSegments.length)throw Error('unsupported_feature');
    if(input.kind==='rollback'){indexRow(entry.row);decoded.push({row:entry.row,meta:c.meta,state:c.state});continue;}
-   const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,jsonBytes(c.state));objects.set(meta.oid,meta.bytes);objects.set(state.oid,state.bytes);
-   const refs=await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid:state.oid,segmentOids:[]}),raw=jsonBytes(refs);objects.set(objectOid('state-refs',raw),raw);
-   const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);decoded.push({row,meta:c.meta,state:c.state});
+   const existing=before.cloud?.current?.treeRoot?await this.store.cloudRow(before.cloud.current.treeRoot,entry.entityKey):null;
+   const metaSame=existing&&canonical(existing.meta)===canonical(c.meta),stateSame=existing&&canonical(existing.state)===canonical(c.state);
+   const manifestSame=existing&&['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical(entry.manifest?.[k]??null)===canonical(existing.row[k]));
+   if(metaSame&&stateSame&&manifestSame&&existing.row.addedAtMillis===c.addedAtMillis){decoded.push(existing);continue;}
+   let metaOid=existing?.row.metaOid,stateOid=existing?.row.stateOid;
+   if(!metaSame){const sealed=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta));metaOid=sealed.oid;objects.set(sealed.oid,sealed.bytes);}
+   if(!stateSame){const sealed=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,jsonBytes(c.state));stateOid=sealed.oid;objects.set(sealed.oid,sealed.bytes);const refs=await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid,segmentOids:[]}),raw=jsonBytes(refs);objects.set(objectOid('state-refs',raw),raw);}
+   const row={entityKey:entry.entityKey,metaOid,stateOid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);decoded.push({row,meta:c.meta,state:c.state});
   }
   const tree=input.kind==='rollback'?{oid:input.target!.treeRoot,nodes:new Map<string,Uint8Array>()}:buildTree(this.http.scope,decoded.map(r=>r.row));for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),generation=input.kind==='rollback'?nextD64(before.rollbackGeneration):before.rollbackGeneration,parents=[...new Set(input.kind==='rollback'?[input.target!.oid]:input.mergedParents??[])].filter(id=>id!==own.commitOid).sort();
   const body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:parents,treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account!.oid,rollbackGeneration:generation,operation:{kind:input.kind,rollbackTarget:input.kind==='rollback'?input.target!.oid:null,resolvesGeneration:input.kind==='rollback'?null:generation}},commit=await signCommit(this.crypto,alias,body);objects.set(commit.oid,jsonBytes({body:commit.body,signature:commit.signature}));
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000},account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account!.oid,expectedRevision:before.account!.revision}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
   before=await this.store.stageCloudRows(tree.oid,decoded,before);before=(await this.store.stageUpload(requestId,objects,before))!;
-  const next=copy(before);next.cloud.pendingPublish={explicit:true,kind:input.kind,...(input.legacyKey?{legacyKey:input.legacyKey}:{}),guardVersion:nextD64(before.stateVersion),requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,rowCount:decoded.length,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'};
-  await this.store.controlUpdate(before,next);return {commitOid:commit.oid,objects:objects.size,rows:decoded.length,deviceSequence:sequence};
+  if(before.cloud.preparingPublication?.requestId!==requestId)throw Error('choice_stale');const next=copy(before);next.cloud.preparingPublication=null;next.cloud.pendingPublish={explicit:true,kind:input.kind,...(input.applyPlan?{applyPlan:input.applyPlan}:{}),...(input.legacyKey?{legacyKey:input.legacyKey}:{}),guardVersion:nextD64(before.stateVersion),requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,rowCount:decoded.length,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'};
+  await this.store.controlUpdate(before,next);return {commitOid:commit.oid,objects:objects.size,rows:decoded.length,deviceSequence:sequence};}finally{this.preparing=undefined;}
  }
  private async pending(){const before=await this.store.readState(),plan=before.cloud?.pendingPublish;if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(!plan)throw Error('publication_missing');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if((before.pendingChoice&&!plan.explicit)||plan.guardVersion!==undefined&&plan.guardVersion!==before.stateVersion||plan.capturedLocalRevision!==before.localChangeRevision||plan.request.account.body.expectedOid!==(before.account?.oid??null)||plan.request.account.body.expectedRevision!==(before.account?.revision??'0'))throw Error('choice_stale');return {before,plan};}
  /** A response-lost retry queries the original request ID before touching refs. */
@@ -124,6 +137,23 @@ export class WatchIndexPublisher {
   await this.pending();let result;try{result=await this.http.publish(plan.request);}catch(error){
    if(error instanceof SyncV2Error&&error.code==='ref_conflict'){const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId===plan.requestId){const next=copy(before);next.cloud.pendingPublish.phase='conflicted';await this.store.publicationUpdate(before,next);}}throw error;
   }return this.accept(plan,result);
+ }
+ /** Detach an obsolete user intent without deleting its signed request or
+  * receipts. Unknown may still succeed: detached intents are queried, never sent.
+  * A later observation remains fenced by the normal account/state CAS. */
+ async detachPublication(force=false){
+  if(this.flushing)throw Error('publication_pending');const original=await this.store.readState(),building=original.cloud?.preparingPublication;if(building){if(!force&&this.preparing===building.requestId)return {detached:false};const next=copy(original);next.cloud.preparingPublication=null;next.cloud.detachedPublications={...next.cloud.detachedPublications,[building.requestId]:{...building,phase:'detached',outcome:'not-sent'}};await this.store.controlUpdate(original,next);if(building.applyPlan)await this.store.releasePlanReservation(building.applyPlan);return {detached:true,requestId:building.requestId,outcome:'not-sent'};}const plan=original.cloud?.pendingPublish;if(!plan?.explicit)return {detached:false};
+  const stale=plan.guardVersion!==original.stateVersion||plan.capturedLocalRevision!==original.localChangeRevision||plan.request.account.body.expectedOid!==original.account?.oid||plan.request.account.body.expectedRevision!==original.account?.revision;
+  if(!force&&!stale)return {detached:false};const known=await this.http.requestResult(plan.requestId);if(!['succeeded','unknown'].includes(known.status)||known.status==='unknown'&&known.response!==null)throw Error('invalid_schema');
+  const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');
+  const next=copy(before);next.cloud.pendingPublish=null;next.cloud.detachedPublications={...next.cloud.detachedPublications,[plan.requestId]:{...plan,phase:'detached',outcome:known.status,...(known.status==='succeeded'?{result:known.response}:{})}};
+  await this.store.controlUpdate(before,next);if(plan.applyPlan)await this.store.releasePlanReservation(plan.applyPlan);return {detached:true,requestId:plan.requestId,outcome:known.status};
+ }
+ async reconcileDetached(){
+  const s=await this.store.readState(),out=[];for(const [id,plan]of Object.entries(s.cloud?.detachedPublications??{}) as [string,any][]){
+   if(plan.outcome==='succeeded'||plan.outcome==='not-sent'){out.push({requestId:id,outcome:plan.outcome});continue;}const known=await this.http.requestResult(id);if(!['succeeded','unknown'].includes(known.status)||known.status==='unknown'&&known.response!==null)throw Error('invalid_schema');
+   if(known.status==='succeeded'){const before=await this.store.readState(),next=copy(before);if(next.cloud.detachedPublications?.[id]){next.cloud.detachedPublications[id]={...next.cloud.detachedPublications[id],outcome:'succeeded',result:known.response};await this.store.controlUpdate(before,next);}}out.push({requestId:id,outcome:known.status});
+  }return out;
  }
  /** Only a definitive CAS rejection permits retiring a journal. Authenticate the
   * new account before retiring it; never change expected refs on a signed request.

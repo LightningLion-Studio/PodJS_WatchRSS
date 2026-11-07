@@ -52,7 +52,7 @@ public final class P5AccountIntegrationTest {
    case "runtime.delay":Thread.sleep(Math.min(5,args.optInt("milliseconds",1)));return JSONObject.NULL;
    case "result":args.put("guestMemoryLimitBytes",32*1024*1024).put("peakProcessRssKiB",peakRssKiB).put("maxHostRequestBytes",maxHostRequestBytes);events.add(new JSONObject(args.toString()));Files.write(new File(root.getParentFile(),"result.json").toPath(),new JSONArray(events).toString(2).getBytes(StandardCharsets.UTF_8));android.util.Log.i("WrssP5Live",args.toString());return JSONObject.NULL;
    case "sql.query":return query(args);
-   case "sql.transaction":SQLiteDatabase db=database(args);db.beginTransaction();try{JSONArray statements=args.getJSONArray("statements");for(int i=0;i<statements.length();i++){JSONObject s=statements.getJSONObject(i);JSONArray p=s.optJSONArray("params");Object[] values=new Object[p==null?0:p.length()];for(int j=0;j<values.length;j++)values[j]=p.isNull(j)?null:p.get(j);db.execSQL(s.getString("sql"),values);}db.setTransactionSuccessful();}finally{db.endTransaction();}return JSONObject.NULL;
+   case "sql.transaction":SQLiteDatabase db=database(args);db.beginTransaction();try{JSONArray statements=args.getJSONArray("statements");for(int i=0;i<statements.length();i++){JSONObject s=statements.getJSONObject(i);if(s.has("program")){PodSqlProgram.execute(db,s.getJSONObject("program"),new android.os.CancellationSignal());continue;}JSONArray p=s.optJSONArray("params");Object[] values=new Object[p==null?0:p.length()];for(int j=0;j<values.length;j++)values[j]=p.isNull(j)?null:p.get(j);db.execSQL(s.getString("sql"),values);}if(!args.optBoolean("validateOnly",false)&&!PodSqlProgram.validateOnly(statements))db.setTransactionSuccessful();}finally{db.endTransaction();}return JSONObject.NULL;
    case "crypto.v2.sign":return new JSONObject().put("signatureBase64",encode(PodSyncV2Crypto.sign(signer,decode(args.getString("dataBase64")))));
    case "crypto.v2.signingKey":return new JSONObject().put("publicKeySec1",encode(decode(fixture.getJSONObject("signingKey").getString("publicKeyBase64Url"))));
    case "secure.get":return device.execute(method,args).opt("value");
@@ -63,10 +63,10 @@ public final class P5AccountIntegrationTest {
   root=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"syncv2-p5-live");
   fixture=new JSONObject(new String(Files.readAllBytes(new File(root,"watch.json").toPath()),StandardCharsets.UTF_8));assertTrue(fixture.getBoolean("syntheticOnly"));assertEquals("watch",fixture.getString("platform"));
   String pem=fixture.getJSONObject("signingKey").getString("privateKeyPkcs8Pem").replaceAll("-----[^-]+-----","").replaceAll("\\s","");signer=KeyFactory.getInstance("EC").generatePrivate(new PKCS8EncodedKeySpec(decode(pem)));
-  fixture.put("runId",UUID.randomUUID().toString().replace("-",""));
+  String runId=fixture.optString("resourceRunId",UUID.randomUUID().toString().replace("-",""));assertTrue(runId.matches("[a-f0-9]{32}"));fixture.put("runId",runId);
   File watermark=new File(root,"author-watermark.json");if(watermark.exists())fixture.put("resumeWatermark",new JSONObject(new String(Files.readAllBytes(watermark.toPath()),StandardCharsets.UTF_8)));
   String source=new String(Files.readAllBytes(new File(root,"guest.js").toPath()),StandardCharsets.UTF_8);
-  root=new File(root,fixture.getString("runId"));assertTrue(root.mkdirs());sql=database(new JSONObject());
+  root=new File(root,fixture.getString("runId"));assertTrue(root.isDirectory()||root.mkdirs());sql=database(new JSONObject());
   File fileRoot=new File(root,"owned-files");fileRoot.mkdirs();device=new PodDeviceServices(fileRoot,()->new SecretKeySpec(new byte[32],"AES"));contentFiles=new PodContentFiles(fileRoot);contentHttp=new PodHttpServices(InstrumentationRegistry.getInstrumentation().getTargetContext());
   ExecutorService executor=Executors.newSingleThreadExecutor(),network=Executors.newFixedThreadPool(2),content=Executors.newSingleThreadExecutor();try(PodBackgroundRun run=new PodBackgroundRun("watch-p5-live","integration",source,300000,32*1024*1024,fixture,new String[]{"cloud.host"})){
    Future<JSONObject> outcome=executor.submit(run::run);

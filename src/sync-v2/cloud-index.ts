@@ -36,11 +36,11 @@ export class WatchCloudIndex {
   const headerCache=new Map<string,any>();
   const readHeader=async(id:string)=>{
    const retained=await this.store.readHeader(id);if(retained)return retained;if(headerCache.has(id))return headerCache.get(id);if(saved.headers?.[id])return saved.headers[id];
-   const page=await this.http.json('GET','/account/ancestry?head='+encodeURIComponent(id)+'&stop=null&limit=64');
+   const stop=saved.pins.accountOid;const page=await this.http.json('GET','/account/ancestry?head='+encodeURIComponent(id)+'&stop='+encodeURIComponent(stop??'null')+'&limit=64');
    exact(page,['version','scope','head','stop','headers','nextOid','complete']);sameScope(page.scope,this.scope);
-   if(page.head!==id||page.stop!==null||!Array.isArray(page.headers)||page.headers.length<1||page.headers.length>64||jsonBytes(page).length>262144)throw Error('ref_continuity_unavailable');let cursor:string|null=id;
+   if(page.head!==id||page.stop!==stop||!Array.isArray(page.headers)||page.headers.length<1||page.headers.length>64||jsonBytes(page).length>262144)throw Error('ref_continuity_unavailable');let cursor:string|null=id;
    for(const entry of page.headers){exact(entry,['commitOid','headerOid','body','signature']);if(entry.commitOid!==cursor)throw Error('ref_continuity_unavailable');oid(entry.commitOid,'commit');oid(entry.headerOid,'commit-header');if(objectOid('commit-header',jsonBytes({body:entry.body,signature:entry.signature}))!==entry.headerOid)throw Error('hash_mismatch');headerCache.set(entry.commitOid,entry);cursor=entry.body.accountParent;}
-   if(page.nextOid!==cursor||page.complete!==(cursor===null))throw Error('ref_continuity_unavailable');return headerCache.get(id);
+   if(page.nextOid!==cursor||page.complete!==(cursor===stop))throw Error('ref_continuity_unavailable');return headerCache.get(id);
   };
   const path=await authenticatePath(this.crypto,this.scope,a.commitOid,saved.pins,readHeader,this.approved),head=path.head??(await this.store.readHeader(a.commitOid))?.body??saved.headers?.[a.commitOid]?.body;
   for(const entry of path.path)objects.set(entry.oid,jsonBytes({body:entry.body,signature:entry.signature}));
