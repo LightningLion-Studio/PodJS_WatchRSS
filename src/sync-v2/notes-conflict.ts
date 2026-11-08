@@ -12,6 +12,15 @@ export {feature,validateSet,conflictSet,mergeConflicts,openConflicts,conflictTex
 export type {Conflict,ConflictSet} from './note-conflict-set.ts';
 const fail=(code:string):never=>{throw Error(code);};
 const fields=['conflictId','noteId','baseMarkdown','localMarkdown','remoteMarkdown','remoteDeviceId','createdAt','resolvedAt'];
+/** W2/F6: for edit detection and reseal decisions an empty conflict container
+ * `{version:1,records:[]}` equals its absence. Only comparisons use this view;
+ * the received or local wire form is never rewritten by it. */
+export function conflictNeutral(state:any){
+ const v=state?.payload?.noteConflicts;
+ if(!v||typeof v!=='object'||v.version!==1||!Array.isArray(v.records)||v.records.length||Object.keys(v).length!==2)return state;
+ const payload={...state.payload};delete payload.noteConflicts;
+ return {...state,requiredFeatures:state.requiredFeatures.filter((f:string)=>f!==feature),payload};
+}
 /** This preserves the existing creation algorithm; migrated IDs remain opaque. */
 export function newConflictId(noteId:string,base:string,local:string,remote:string,device:string){
  for(const v of [noteId,base,local,remote,device])c.canonical(v);

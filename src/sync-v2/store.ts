@@ -1,12 +1,13 @@
 import {SqlAuthenticatedCache,SQL_AUTHENTICATED_CACHE_SCHEMA} from '@podjs/framework/sql-authenticated-cache';
 import {ResourceQuota,type ResourceReservation} from '@podjs/framework/resource-journal';
 import {ContentSha256} from '@podjs/framework/content-sha256';
+import {updateSha256Parts} from '@podjs/framework/json-text-segments';
 import {SqlProgram,SQL_PROGRAM_SCHEMA,sqlExactSetGuards,sqlProgramRelationGuards,type SqlProgramRef} from '@podjs/framework/sql-program';
 import {SqlStateJournal,SQL_STATE_SCHEMA} from '@podjs/framework/sql-state-journal';
 import {chargedReplayBytes} from './resume';
 import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
-import {bytesToBase64,base64ToBytes} from '@podjs/framework/bytes';
+import {encodeBase64,base64ToBytes} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {readBoundedKeysetBatch,commitSqlCas,captureSqlBasis,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
 import {canonical,canonicalLegacy,jsonBytes,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
@@ -58,9 +59,9 @@ export type NoteBinding={revision:string|null;life:'live'|'deleted'};
 const LONG_CANDIDATE_PAGE=12*1024*1024;
 export {PROJECTION_SOURCE_TABLES} from './business-revision';
 export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision;accountApplyVersion?:string};
-/** ContentSha256 takes at most 262144 bytes per update; long-note candidates
- * are larger. Slicing keeps the digest identical to one update. */
-const hashLong=(hash:ContentSha256,value:Uint8Array)=>{for(let at=0;at<value.length;at+=262144)hash.update(value.subarray(at,at+262144));};
+/** Stored-ciphertext bound of one candidate or cloud-row page on the publish
+ * and pull paths. A single long note may exceed it; it is then read alone. */
+export const PAGE_BYTES=384*1024;
 export class WatchProjectionStore {
  private readonly scopeKey:string;
  private legacyAdapter?:WatchEquivalentLegacy;
@@ -141,8 +142,8 @@ export class WatchProjectionStore {
   * journals, upload receipts and original edits are never collection targets. */
  async collectPreparations(before:SyncState,limit=16){const stateHash=digest(before),protectedIds=new Set([before.cloud?.pendingPublish?.applyPlan?.id,before.cloud?.preparingPublication?.applyPlan?.id].filter(Boolean));let removed=0;const rows=await this.db.query('SELECT id,body FROM syncv2_apply_work WHERE scope=? ORDER BY id LIMIT ?',[this.scopeKey,limit]);for(const row of rows){const id=String(row.id);if(protectedIds.has(id))continue;const work=await this.cipher.open(this.aad('apply-work',id),String(row.body));if(work.stateHash===stateHash)continue;const statements:Statement[]=[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,before.stateVersion]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'DELETE FROM podjs_sql_programs WHERE binding=? AND id=?',params:[this.scopeKey,id]},...['syncv2_apply_tree_v2','syncv2_apply_keys'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND plan_id=?',params:[this.scopeKey,id]})),...['podjs_sql_program_pages'].map(table=>({sql:'DELETE FROM '+table+' WHERE binding=? AND id=?',params:[this.scopeKey,id]})),{sql:'DELETE FROM syncv2_apply_work WHERE scope=? AND id=?',params:[this.scopeKey,id]}];if(work.reservation)statements.push({sql:'DELETE FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?',params:[work.reservation.binding,work.reservation.id,work.reservation.bytes]});await this.db.transaction(statements);removed++;}return removed;}
  async prepareAccountProjection(before:SyncState,records:SourceRecord[],business:Statement[],budget:{maxSteps?:number;maxMillis?:number;onCheckpoint?:(progress:any)=>void}={}){
-  await this.collectPreparations(before);const input=new ContentSha256();for(const r of records)hashLong(input,jsonBytes(candidates(r.kind,r.logicalId,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId),r.value,r.addedAtMillis,this.segmentOptions())));const inputHash=input.finish();
-  const bh=new ContentSha256();for(const op of business)hashLong(bh,jsonBytes(JSON.stringify(op)));const businessHash=bh.finish(),stateHash=digest(before),id=digest(['account-apply-v4',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
+  await this.collectPreparations(before);const input=new ContentSha256();for(const r of records)updateSha256Parts(input,[jsonBytes(candidates(r.kind,r.logicalId,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId),r.value,r.addedAtMillis,this.segmentOptions()))]);const inputHash=input.finish();
+  const bh=new ContentSha256();for(const op of business)updateSha256Parts(bh,[jsonBytes(JSON.stringify(op))]);const businessHash=bh.finish(),stateHash=digest(before),id=digest(['account-apply-v4',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
   const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];let savedBody=saved?String(saved.body):null;let work=saved?await this.cipher.open(this.aad('apply-work',id),String(saved.body)):{membershipVersion:1,stateHash,inputHash,businessHash,phase:'membership',offset:0,after:'',step:0,ref:{...program.snapshot(),pages:0,fragments:0,operations:0,bytes:0,root:'0'.repeat(64)}};
   if(work.stateHash!==stateHash||work.inputHash!==inputHash||work.businessHash!==businessHash)throw Error('choice_stale');if(work.phase==='ready')return this.preparedResult(before,work.ref);
   if(status==='ready'&&work.phase!=='finalize')throw Error('sql_program_invalid');if(status!=='ready')await program.rewind(work.ref);
@@ -223,8 +224,10 @@ export class WatchProjectionStore {
  async identityForEntity(entity:string){
   const row=(await this.db.query('SELECT kind,logical_id FROM syncv2_identity_map WHERE local_library=? AND repo=? AND entity_key=?',[this.libraryId,this.scope.repoId,entity]))[0];if(!row)throw Error('source_identity_missing');return {kind:String(row.kind) as Kind,logicalId:String(row.logical_id)};
  }
- async candidatePage(after='',limit=32){
-  this.gate.require();const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
+ /** With `maxBytes`, stops before the stored ciphertext total exceeds it (at
+  * least one row), so pages of long notes are decoded one at a time. */
+ async candidatePage(after='',limit=32,maxBytes=Number.POSITIVE_INFINITY){
+  this.gate.require();limit=await this.boundedLimit('SELECT length(body) AS n FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit],limit,maxBytes);if(!limit)return [];const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
   const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.cipher.open(this.aad('candidate',String(row.entity_key)),String(row.body))});return out;
  }
  /** Bounded encrypted staging. active tree switches only after all rows authenticate. */
@@ -238,16 +241,20 @@ export class WatchProjectionStore {
  async cloudRow(root:string,entityKey:string){
   this.gate.require();hexId(entityKey,64);const cached=await this.cloudCache.get(root,entityKey);if(cached)return cached;const row=(await this.db.query('SELECT body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key=?',[this.scopeKey,root,entityKey]))[0];return row?this.cipher.open(this.aad('cloud-row',root+entityKey),String(row.body)):null;
  }
- async cloudRows(root:string,after='',limit=32){
-  this.gate.require();const cached=await this.cloudCache.page(root,after,limit);if(await this.cloudCache.count(root)>=Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0))return cached;const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
+ private async boundedLimit(sql:string,params:unknown[],limit:number,maxBytes:number){if(!Number.isFinite(maxBytes))return limit;let total=0,n=0;for(const row of await this.db.query(sql,params)){total+=Number(row.n);if(n&&total>maxBytes)break;n++;}return n;}
+ async cloudRows(root:string,after='',limit=32,maxBytes=Number.POSITIVE_INFINITY){
+  this.gate.require();if(await this.cloudCache.count(root)>=Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=?',[this.scopeKey,root]))[0]?.n??0))return this.cloudCache.page(root,after,limit,maxBytes);limit=await this.boundedLimit('SELECT length(body) AS n FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit],limit,maxBytes);if(!limit)return [];const rows=await this.db.query('SELECT entity_key,body FROM syncv2_cloud_rows WHERE scope=? AND root=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,root,after,limit]);
   const out=[];for(const row of rows)out.push(await this.cipher.open(this.aad('cloud-row',root+String(row.entity_key)),String(row.body)));return out;
  }
  async stageUpload(planId:string,objects:Map<string,Uint8Array>,expected?:SyncState){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_upload_objects(scope TEXT NOT NULL,plan_id TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,plan_id,oid))'}]);
   let batch:Statement[]=[],size=0;const flush=async()=>{if(!batch.length)return;const before=await this.readState();if(expected&&canonical(before)!==canonical(expected))throw Error('choice_stale');const next={...before};await this.controlUpdate(before,next,batch);expected=expected?next:undefined;batch=[];size=0;};
-  for(const [id,bytes]of objects){const body=await this.cipher.seal(this.aad('upload',planId+id),bytesToBase64(bytes));if(batch.length&&(batch.length>=16||size+body.length>65536))await flush();batch.push({sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]});size+=body.length;}await flush();
+  for(const [id,bytes]of objects){const body=await this.cipher.seal(this.aad('upload',planId+id),encodeBase64(bytes));if(batch.length&&(batch.length>=16||size+body.length>65536))await flush();batch.push({sql:'INSERT INTO syncv2_upload_objects VALUES(?,?,?,?) ON CONFLICT(scope,plan_id,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,planId,id,body]});size+=body.length;}await flush();
   return expected;
  }
+ /** Abandoned preparation only: removes this plan's staged objects. */
+ async dropUpload(planId:string){this.gate.require();if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_upload_objects'")).length)return;const before=await this.readState();if(before.cloud?.pendingPublish?.requestId===planId)return;await this.controlUpdate(before,{...before},[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
+ async uploadCount(planId:string){this.gate.require();return Number((await this.db.query('SELECT COUNT(*) AS n FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',[this.scopeKey,planId]))[0]?.n??0);}
  async uploadPage(planId:string,after='',limit=1){
   this.gate.require();const rows=await this.db.query('SELECT oid,body FROM syncv2_upload_objects WHERE scope=? AND plan_id=? AND oid>? ORDER BY oid LIMIT ?',[this.scopeKey,planId,after,limit]),out=[];
   for(const row of rows)out.push({oid:String(row.oid),bytes:base64ToBytes(await this.cipher.open(this.aad('upload',planId+String(row.oid)),String(row.body)))});return out;
@@ -272,7 +279,7 @@ export class WatchProjectionStore {
  async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string){
   this.gate.require();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
   let state=await this.readState();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
-  for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),bytesToBase64(raw)),next={...state};await this.controlUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]);state=next;}
+  for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),encodeBase64(raw)),next={...state};await this.controlUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]);state=next;}
   const next={...state,cloud:{...state.cloud,blockedCommitOid:root,blockedCode:code}};await this.controlUpdate(state,next);
  }
  async finishUpload(before:SyncState,next:SyncState,planId:string,plan?:any){await this.controlUpdate(before,next,plan?await this.preparePublicationFinish(plan):[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]},{sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}

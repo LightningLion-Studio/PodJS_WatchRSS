@@ -7,21 +7,21 @@ import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
 import {signCommit,signControl,verifyCommit,type SigningPort} from './signing';
 import {fromWire} from './business';
-import {readConflicts} from './notes-conflict';
+import {readConflicts,conflictNeutral} from './notes-conflict';
 import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
-import type {WatchProjectionStore} from './store';
+import {PAGE_BYTES,type WatchProjectionStore} from './store';
 import type {SyncState} from './state';
 import {SyncV2Http,SyncV2Error} from './http';
 import {openV2} from './sealed';
 import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,STATE_LIMIT,sealSegmentedNote,segmentedClosureBudget,type PriorSegments} from './note-segments';
-import {bytesToBase64,base64ToBytes} from '@podjs/framework/bytes';
+import {encodeBase64,base64ToBytes} from '@podjs/framework/bytes';
 import type {Statement} from '@podjs/framework/sql-projection';
 const copy=<T>(x:T):T=>JSON.parse(canonical(x));
 export interface BodyManifest {bodyRevision:string;promiseId:string|null;recipeOid:string|null;opaqueContentId:string|null;contentBytes:number|null;}
 export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 /** Authenticated segment objects retained with a decoded cloud row (25.7). */
-export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:bytesToBase64(o.sealed)}))});
+export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:encodeBase64(o.sealed)}))});
 const priorSegments=(row:any):PriorSegments|null=>row?.segments?{noteRevision:row.segments.noteRevision,objects:row.segments.objects.map((o:any)=>({oid:o.oid,sealed:base64ToBytes(o.sealed)}))}:null;
 export interface PublisherOptions {noteSegments?:boolean;noteTextBudget?:number}
 export class WatchIndexPublisher {
@@ -65,17 +65,24 @@ export class WatchIndexPublisher {
   const checkpoint=await this.store.checkpoint();if(checkpoint?.phase!=='complete'||!sameBusinessRevision(checkpoint.businessRevision,before.businessRevision))throw Error('projection_incomplete');
   let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=await this.ownHeader(own.commitOid),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...saved,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
-  const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),currentRows=new Map<string,any>(),changedRows:any[]=[],bindings:Statement[]=[];this.segmentStats={uploaded:0,reused:0};
-  if(saved.current?.treeRoot){let after='';for(;;){const page=await this.store.cloudRows(saved.current.treeRoot,after,32);if(!page.length)break;for(const r of page){fromWire(r.meta.kind,r.meta.payload,r.state.payload);rows.set(r.row.entityKey,r.row);currentRows.set(r.row.entityKey,r);}after=page.at(-1).row.entityKey;}}
-  let after='';for(;;){const page=await this.store.candidatePage(after,32);if(!page.length)break;for(const entry of page){
-   const c=copy(entry.candidate),existing=currentRows.get(entry.entityKey);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
+  // F2: only index rows are kept across entities. Decoded rows, candidates and
+  // sealed objects are read or staged one bounded page/entity at a time.
+  const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),changedRows:any[]=[],bindings:Statement[]=[],root=saved.current?.treeRoot??null;this.segmentStats={uploaded:0,reused:0};
+  let staged=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
+  try{
+  if(root){let after='';for(;;){const page=await this.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){if(!r.unopenable)fromWire(r.meta.kind,r.meta.payload,r.state.payload);rows.set(r.row.entityKey,r.row);}after=page.at(-1).row.entityKey;}}
+  let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){
+   const existing=root?await this.store.cloudRow(root,entry.entityKey):null;
+   // F1: a row this device cannot open is carried back unchanged (same OIDs).
+   if(existing?.unopenable)continue;
+   const c=copy(entry.candidate);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
    if(existing&&c.meta.kind==='note'){
     if(existing.meta.kind!=='note'||existing.meta.logicalId!==c.meta.logicalId)throw Error('identity_conflict');
     const context={entityKey:entry.entityKey,noteId:c.meta.logicalId},local=readConflicts(c.state,context,['note-conflicts.v1']),remote=readConflicts(existing.state,context,['note-conflicts.v1']);
     if(local||remote){c.state.payload.noteConflicts=mergeConflicts(context.noteId,local??conflictSet(context.noteId,[]),remote??conflictSet(context.noteId,[]));c.state.requiredFeatures=[...new Set([...c.state.requiredFeatures,'note-conflicts.v1'])].sort();}
    }
    const body=this.resolveBody?await this.resolveBody(entry,existing):null;
-   if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(existing.state)===canonical(c.state)&&existing.row.addedAtMillis===c.addedAtMillis)continue;
+   if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state))&&existing.row.addedAtMillis===c.addedAtMillis)continue;
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
    const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state={oid:await this.sealState(entry.entityKey,c,existing,alias,objects,bindings)};objects.set(meta.oid,meta.bytes);
    const hasBody=['article','book','asset'].includes(c.meta.kind),old=rows.get(entry.entityKey),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
@@ -84,15 +91,17 @@ export class WatchIndexPublisher {
    // business adapter before replacing an overlapping authenticated row.
    if(old&&before.account&&before.editBase.accountOid!==before.account.oid)throw Error('merge_unavailable');
    indexRow(row);rows.set(entry.entityKey,row);changedRows.push(row);
+   await stage();
   }after=page.at(-1)!.entityKey;}
-  const tree=saved.current?.treeRoot?await updateTree(this.http.scope,saved.current.treeRoot,id=>this.http.object(id),changedRows):buildTree(this.http.scope,[...rows.values()]);for(const [id,raw]of tree.nodes)objects.set(id,raw);
+  const tree=root?await updateTree(this.http.scope,root,id=>this.http.object(id),changedRows):buildTree(this.http.scope,[...rows.values()]);for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:[],treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account?.oid??null,rollbackGeneration:before.rollbackGeneration,operation:{kind:'normal',rollbackTarget:null,resolvesGeneration:null}},commit=await signCommit(this.crypto,alias,body);
   objects.set(commit.oid,jsonBytes({body:commit.body,signature:commit.signature}));
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000};
   const account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account?.oid??null,expectedRevision:before.account?.revision??'0'}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
-  await this.store.stageUpload(requestId,objects);const latest=await this.store.readState();if(latest.localChangeRevision!==before.localChangeRevision||canonical(latest.account)!==canonical(before.account)||latest.pendingChoice)throw Error('choice_stale');
+  const total=await this.store.stageUpload(requestId,objects).then(()=>this.store.uploadCount(requestId));staged=true;const latest=await this.store.readState();if(latest.localChangeRevision!==before.localChangeRevision||canonical(latest.account)!==canonical(before.account)||latest.pendingChoice)throw Error('choice_stale');
   const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'}};
-  await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:objects.size,rows:rows.size,deviceSequence:sequence,segments:{...this.segmentStats}};
+  await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:total,rows:rows.size,deviceSequence:sequence,segments:{...this.segmentStats}};
+  }catch(error){if(staged)await this.store.dropUpload(requestId).catch(()=>{});throw error;}
  }
  /** Size the FINAL roots, public refs and canonical tree before reserving an
   * author sequence. Unproved reuse is charged at identity's worst-case size. */
@@ -116,13 +125,15 @@ export class WatchIndexPublisher {
    const c=entry.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);if(c.state.noteSegments.length)throw Error('unsupported_feature');
    if(input.kind==='rollback'){indexRow(entry.row);decoded.push({row:entry.row,meta:c.meta,state:c.state});continue;}
    const existing=before.cloud?.current?.treeRoot?await this.store.cloudRow(before.cloud.current.treeRoot,entry.entityKey):null;
-   const metaSame=existing&&canonical(existing.meta)===canonical(c.meta),stateSame=existing&&canonical(existing.state)===canonical(c.state);
+   if(existing?.unopenable){decoded.push(existing);continue;}
+   const metaSame=existing&&canonical(existing.meta)===canonical(c.meta),stateSame=existing&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state));
    const manifestSame=existing&&['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical(entry.manifest?.[k]??null)===canonical(existing.row[k]));
    if(metaSame&&stateSame&&manifestSame&&existing.row.addedAtMillis===c.addedAtMillis){decoded.push(existing);continue;}
    let metaOid=existing?.row.metaOid,stateOid=existing?.row.stateOid;
    if(!metaSame){const sealed=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta));metaOid=sealed.oid;objects.set(sealed.oid,sealed.bytes);}
    if(!stateSame)stateOid=await this.sealState(entry.entityKey,c,existing,alias,objects,bindings);
-   const row={entityKey:entry.entityKey,metaOid,stateOid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);decoded.push({row,meta:c.meta,state:c.state});
+   // A kept state OID keeps the received state form (and its segments) in the cache.
+   const row={entityKey:entry.entityKey,metaOid,stateOid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);decoded.push(stateSame?{row,meta:c.meta,state:existing.state,...(existing.segments?{segments:existing.segments}:{})}:{row,meta:c.meta,state:c.state});
   }
   const tree=input.kind==='rollback'?{oid:input.target!.treeRoot,nodes:new Map<string,Uint8Array>()}:buildTree(this.http.scope,decoded.map(r=>r.row));for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),generation=input.kind==='rollback'?nextD64(before.rollbackGeneration):before.rollbackGeneration,parents=[...new Set(input.kind==='rollback'?[input.target!.oid]:input.mergedParents??[])].filter(id=>id!==own.commitOid).sort();

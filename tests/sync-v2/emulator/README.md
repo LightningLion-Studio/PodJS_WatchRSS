@@ -114,3 +114,28 @@ P3B live storage/eviction acceptance uses `run-live-p3b.sh`, the owned AVD
 `WrssP3BWatchLive`, `integration-p3b/watch.json`, and port 18952 exclusively.
 See `docs/sync-v2-space.md` for the full invocation and negative cases. The new
 runner never reads or modifies the original 18942 fixture or service.
+
+C7 review F2 memory probe (synthetic loopback server, owned emulator only):
+
+```sh
+ANDROID_SDK_ROOT=... bash tests/sync-v2/emulator/run-c7-memory.sh \
+  <framework-worktree> <emulator-serial> <evidence-dir> \
+  1:publish:32:flush 1:pull:24 20:publish:32:flush 20:pull:24
+```
+
+Each run is `notes:mode:limitMiB[:flush]` and starts a new instrumentation
+process. `publish` scans N long notes (`WRSS_C7_NOTE_CHARS`, default 36000 CJK
+characters per field) and prepares; `flush` also uploads after resetting the
+synthetic account. `pull` reads that account into a fresh database, then
+prepares one unrelated edit. The guest memory limit is the QuickJS runtime
+limit; out-of-memory is recorded, not asserted. `peakHwmKiB` is the process
+VmHWM. The server (`c7-memory-server.ts`) generates one synthetic key per
+process and writes the fixture with mode 0600; `WRSS_C7_SERVER_FIXTURE` reuses a
+running server so two checkouts can share one account.
+
+Product limits the probe works around and reports: `PodDeviceServices` rejects
+`crypto.aesGcm*` input above 256 KiB, `localProjectionCipher` rejects plaintext
+above 768 KiB, and one background host request is at most 1 MiB. The Java test
+seals larger local values itself (`oversizedLocalCipherCalls`) and the guest
+lifts the 768 KiB check (`oversizedSeals`), so measurements are of guest memory,
+not of product acceptance.
