@@ -32,6 +32,7 @@ interface Props {
 interface DockState { right: boolean; verticalFraction: number }
 const dock: DockState = { right: true, verticalFraction: 0.65 };
 const now = () => globalThis.performance?.now?.() ?? Date.now();
+const SNAP_SETTLE_LIMIT_MS = 1_100;
 const statePoint = (position: Point, velocity: Point = { x: 0, y: 0 }): MotionState => ({ position, velocity });
 const clampPoint = (point: Point, props: Props) => clampBubbleCenter(point, props.width, props.height, props.round);
 
@@ -63,6 +64,7 @@ export function ReadAloudFloatingBubble(props: Props) {
   let snapTarget = position();
   let snapOrigin = position();
   let snapCrossed = false;
+  let snapStartedAt = 0;
   let lastFrame = 0;
 
   const isVisible = () => !!props.active && props.page !== 'speech-playback' && props.state?.phase !== 'idle' && !!props.state;
@@ -99,14 +101,8 @@ export function ReadAloudFloatingBubble(props: Props) {
     },
     onPanMove: contact => {
       if (!dragging) return;
+      // Retarget only; the frame loop is the single motion integrator.
       target = clampPoint({ x: contact.x + pointerOffset.x, y: contact.y + pointerOffset.y }, props);
-      const frameNow = now();
-      const dt = lastFrame ? Math.min(0.05, Math.max(0, frameNow - lastFrame) / 1000) : 0;
-      lastFrame = frameNow;
-      motion = criticallyDampedStep(motion, target, dt);
-      const safe = clampPoint(motion.position, props);
-      if (safe.x !== motion.position.x || safe.y !== motion.position.y) motion = { position: safe, velocity: { x: 0, y: 0 } };
-      setPosition(motion.position);
     },
     onPanEnd: contact => {
       if (!dragging) return;
@@ -130,7 +126,15 @@ export function ReadAloudFloatingBubble(props: Props) {
     snapOrigin = motion.position;
     snapCrossed = Math.hypot(snapOrigin.x - snapTarget.x, snapOrigin.y - snapTarget.y) < 1e-4;
     phase = 'snap';
-    lastFrame = now();
+    snapStartedAt = lastFrame = now();
+  }
+
+  function finishSnap() {
+    motion = statePoint(snapTarget);
+    updatePosition(snapTarget);
+    phase = 'idle';
+    dock.right = snapTarget.x >= props.width / 2;
+    dock.verticalFraction = snapTarget.y / Math.max(1, props.height);
   }
 
   onFrame(() => {
@@ -167,15 +171,12 @@ export function ReadAloudFloatingBubble(props: Props) {
       const safe = clampPoint(motion.position, props);
       if (safe.x !== motion.position.x || safe.y !== motion.position.y) motion = { position: safe, velocity: { x: 0, y: 0 } };
       setPosition(motion.position);
-      if (Math.hypot(snapTarget.x - motion.position.x, snapTarget.y - motion.position.y) < 0.15 && Math.hypot(motion.velocity.x, motion.velocity.y) < 1) {
-        motion = statePoint(snapTarget);
-        updatePosition(snapTarget);
-        phase = 'idle';
-        dock.right = snapTarget.x >= props.width / 2;
-        dock.verticalFraction = snapTarget.y / Math.max(1, props.height);
-      }
+      const settled = Math.hypot(snapTarget.x - motion.position.x, snapTarget.y - motion.position.y) < 0.15 && Math.hypot(motion.velocity.x, motion.velocity.y) < 1;
+      // Avoid leaving the ball between corners if clamping prevents the spring
+      // from meeting its strict numeric settling threshold.
+      if (settled || frameNow - snapStartedAt >= SNAP_SETTLE_LIMIT_MS) finishSnap();
     }
-  });
+  }, () => props.active && visible() && (dragging || phase !== 'idle'));
 
   createEffect(() => {
     props.width; props.height; props.round;
