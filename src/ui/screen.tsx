@@ -123,6 +123,7 @@ import { entryDisclosure } from "./entry-disclosure.ts";
 import { PendingDisclosure } from "./PlatformNotice.tsx";
 import type { Announcement, PushMessage } from "../announcement/models.ts";
 import { HomeNoticeDialog } from "./HomeNoticeDialog.tsx";
+import { ReadAloudFloatingBubble } from "./ReadAloudFloatingBubble.tsx";
 import { bindPairingRequestRoute } from "./routes/pairing.ts";
 
 type Entry = RouteEntry;
@@ -1769,6 +1770,15 @@ export default function WatchRSS(props: {
       style={{ width, height }}
     >
       <For each={stack()}>{renderPage}</For>
+      <ReadAloudFloatingBubble
+        width={width}
+        height={height}
+        round={metrics.shape === "round"}
+        active={foreground()}
+        page={page()}
+        state={speechState()}
+        onOpen={() => setPage("speech-playback")}
+      />
     </View>
   );
 }

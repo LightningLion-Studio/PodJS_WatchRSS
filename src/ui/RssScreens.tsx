@@ -22,11 +22,11 @@ export function feedEmptyStateEntry(title:string,subtitle:string,width:number):S
   </View>};
 }
 /** Native FeedPillButton: 17sp, 9dp horizontal padding, 44dp tall surfaceVariant pill; 0.5 alpha disabled. */
-export function feedPillEntry(label:string,width:number,onPress?:()=>void):ScrollEntry {
+export function feedPillEntry(label:string,width:number,onPress?:()=>void,prominent=false):ScrollEntry {
   return {height:52,render:()=>{
     const buttonWidth=Math.min(width-44,getOps().measureText(label,22)+18);
-    return <View class="absolute inset-0"><View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96" style={{insetL:(width-36-buttonWidth)/2,width:buttonWidth,opacity:onPress?1:.5}}>
-      <Text class="text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
+    return <View class="absolute inset-0"><View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class={prominent?"absolute top-[4] h-[44] rounded-[47] bg-[#fe2c55] items-center justify-center active:scale-96":"absolute top-[4] h-[44] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96"} style={{insetL:(width-36-buttonWidth)/2,width:buttonWidth,opacity:onPress?1:.5}}>
+      <Text class={prominent?"text-[17px] leading-[21] font-bold text-white":"text-[17px] leading-[21] text-[#f5f5f5]"}>{label}</Text>
     </View></View>;
   }};
 }

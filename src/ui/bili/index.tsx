@@ -15,8 +15,8 @@ import { layoutUiText } from "../../reader/line-break.ts";
 import { measuredLines } from "../../reader/measured-text.ts";
 import { getOps } from "@pocketjs/framework/host";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
-import { platformCardEntry } from "../PlatformNotice.tsx";
-import { platformScope } from "../../announcement/platform.ts";
+import { platformCardEntry, platformNoticeEntry } from "../PlatformNotice.tsx";
+import { platformNotice, platformScope } from "../../announcement/platform.ts";
 import { RemoteImage } from "../RemoteImage.tsx";
 import { SwipeCard } from "../SwipeCard.tsx";
 import { BiliSideMenu } from "./BiliSideMenu.tsx";
@@ -143,7 +143,8 @@ function FeedScreen(props: BiliScreenProps) {
       <Image src="../assets/icons/info-hint.svg" style={{ insetL: groupLeft + titleWidth + hintGap - 3.6, width: hintBox, height: hintBox }} class="absolute top-[3.9]" />
       <Text class="absolute left-[0] right-[0] top-[32.5] text-[9px] leading-[17] text-[#b6b6b6] text-center">{loggedIn ? "已登录" : "未登录"}</Text>
     </View> } as ScrollEntry,
-      ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }))] : []),
+      platformNoticeEntry(contentWidth, platformNotice("哔哩哔哩", true)),
+      ...(!session.loading() && !loggedIn ? [buttonEntry("登录", () => props.onNavigate({ name: "login" }), true)] : []),
       ...(!session.loading() && loggedIn && !feed.state().loading && !values.length ? [emptyStateEntry("暂无内容", feed.state().error ? String(feed.state().error instanceof Error ? (feed.state().error as Error).message : feed.state().error) : "稍后再试或刷新", props.width ?? 233)] : []),
       ...(!session.loading() && !loggedIn ? [emptyStateEntry("需要登录", "登录后获取推荐内容", props.width ?? 233)] : []),
       ...values.map(item => {
@@ -178,10 +179,10 @@ function FeedScreen(props: BiliScreenProps) {
 }
 
 /** Native ActionButton (watch_action_button 160x48dp, pill #2A2A2A, 17/23sp, disabled 60% text). */
-function pillEntry(label: string, width: number, onPress?: () => void, gapBelow = 4): ScrollEntry {
+function pillEntry(label: string, width: number, onPress?: () => void, gapBelow = 4, prominent = false): ScrollEntry {
   const pill = Math.min(160, width - 36 - 18);
-  return { height: 48 + gapBelow, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{ insetL: (width - 36 - pill) / 2, width: pill }}>
-    <Text class={onPress ? "text-[17px] leading-[23] text-[#f5f5f5]" : "text-[17px] leading-[23] text-[#f5f5f599]"}>{label}</Text>
+  return { height: 48 + gapBelow, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class={prominent ? "absolute top-[0] h-[48] rounded-[24] bg-[#fb7299] items-center justify-center active:scale-96" : "absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center active:scale-96"} style={{ insetL: (width - 36 - pill) / 2, width: pill }}>
+    <Text class={prominent ? "text-[17px] leading-[23] font-bold text-white" : onPress ? "text-[17px] leading-[23] text-[#f5f5f5]" : "text-[17px] leading-[23] text-[#f5f5f599]"}>{label}</Text>
   </View> };
 }
 
@@ -200,7 +201,7 @@ function ChannelInfoScreen(props: BiliScreenProps) {
       platformCardEntry(width - 36, platformScope),
       { height: 8, render: () => null },
       pillEntry("设置", width, () => props.onNavigate({ name: "settings" })),
-      ...(!loggedIn ? [pillEntry("登录", width, () => props.onNavigate({ name: "login" }))] : []),
+      ...(!loggedIn ? [pillEntry("登录", width, () => props.onNavigate({ name: "login" }), 4, true)] : []),
       pillEntry("搜索", width, go({ name: "search" })),
       pillEntry("稍后再看", width, go({ name: "watch-later" })),
       pillEntry("历史记录", width, go({ name: "history" })),
