@@ -14,35 +14,37 @@ import {deviceOrder} from '../sync/saved-state';
 import {ARTICLE_REGISTER_FEATURE,readArticleRegisters} from '../cloud/article-register';
 import {articleProjectionSignature} from '../sync/article-register-store';
 import {rssSourceKey,rssArticleId} from '../cloud/rss-identity';
-const upsert=(table:string,columns:string[],values:unknown[],key:string[]):Statement=>({sql:`INSERT INTO ${table}(${columns}) VALUES(${columns.map(()=>'?')}) ON CONFLICT(${key}) DO UPDATE SET ${columns.filter(c=>!key.includes(c)).map(c=>c+'=excluded.'+c)}`,params:values});
-/** N1: a long note's text crosses the bridge as bounded appends inside the
- * same prepared program, never as one statement holding the whole note. */
-const NOTE_TEXT_PIECE=64*1024;
-function pieces(text:string){const out:string[]=[];for(let at=0;at<text.length;){let end=Math.min(text.length,at+NOTE_TEXT_PIECE);const c=text.charCodeAt(end-1);if(end<text.length&&c>=0xd800&&c<=0xdbff)end--;out.push(text.slice(at,end));at=end;}return out;}
-export function noteUpsert(v:any):Statement[]{
- const texts:[string,string][]=[['markdown',v.markdown],['plain_text',v.plainText],['base_markdown',v.baseMarkdown]],long=texts.reduce((n,[,t])=>n+t.length,0)>NOTE_TEXT_PIECE;
- const head=upsert('memo_notes','note_id folder_id title markdown plain_text content_hash base_content_hash base_markdown pinned created_at updated_at modified_by deleted deleted_at'.split(' '),[v.noteId,v.folderId,v.title,long?'':v.markdown,long?'':v.plainText,v.contentHash,v.baseContentHash,long?'':v.baseMarkdown,+v.pinned,v.createdAt,v.updatedAt,v.modifiedBy,+v.deleted,v.deletedAt],['note_id']);
- if(!long)return [head];const out=[head];for(const [column,text] of texts)for(const part of pieces(text))out.push({sql:`UPDATE memo_notes SET ${column}=${column}||? WHERE note_id=?`,params:[part,v.noteId]});return out;
-}
+import {noteUpsert,upsert} from './note-rows';
+import {arrayRecordFeed,feedPages,wireDigest,type RecordFeed,type StatementFeed} from './record-feed';
+import {PAGE_BYTES} from './store';
+export {noteUpsert};
 export class WatchAccountBusinessSql implements AccountBusinessPort {
  constructor(private readonly db:ProjectionSql,private readonly projection:WatchProjectionStore,private readonly scope:Scope,private readonly idKey:Uint8Array,private readonly closures:Pick<WatchBusinessClosure,'recoveryValue'>,readonly verifyBody:AccountBusinessPort['verifyBody'],readonly reserve:AccountBusinessPort['reserve']){}
  recoveryValue(id:string){return this.closures.recoveryValue(id);}
  /** Additive metadata table for interaction records which have no local article
   * yet. No body materialization or identity replacement occurs. */
  async initialize(){await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);}
- async prepare(records:SourceRecord[],before:SyncState){
-  const statements:Statement[]=[],old:SourceRecord[]=[],selected=new Map(records.map(r=>[r.kind+'\0'+r.logicalId,r])),unchanged=new Set<string>();let after='';
-  for(;;){const page=await this.projection.candidatePage(after,32);if(!page.length)break;for(const r of page){const c=r.candidate,id=c.meta.kind+'\0'+c.meta.logicalId,next=selected.get(id);if(next&&canonical(toWire(next.kind,next.value))===canonical({meta:c.meta.payload,state:c.state.payload}))unchanged.add(id);else old.push({kind:c.meta.kind,logicalId:c.meta.logicalId,value:fromWire(c.meta.kind,c.meta.payload,c.state.payload)});}after=page.at(-1)!.entityKey;}
-  if(!old.length&&unchanged.size===records.length)return [];
-  const ids=new Set(records.map(r=>r.kind+'\0'+r.logicalId)),tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
+ async prepare(records:SourceRecord[],before:SyncState){const out:Statement[]=[];for await(const page of this.prepareFeed(arrayRecordFeed(records,r=>entityKey(this.idKey,this.scope.repoId,r.kind,r.logicalId)),before).run())out.push(...page);return out;}
+ /** R4: the same statements as `prepare`, produced page by page. Each run reads
+  * the records twice and the candidates once; across records it keeps only
+  * identities and the small source/article/reading facts later steps need. */
+ prepareFeed(feed:RecordFeed,_before:SyncState):StatementFeed{return {run:()=>this.statements(feed)};}
+ private async *statements(feed:RecordFeed):AsyncGenerator<Statement[]>{
+  const statements:Statement[]=[],ids=new Set<string>(),unchanged=new Set<string>(),facts=feed.facts,count=facts.length;
+  const sources=facts.flatMap(f=>f.source?[f.source]:[]),articles=facts.filter(f=>f.kind==='article'),readings=facts.filter(f=>f.kind==='book-reading');
+  for(const f of facts){const id=f.kind+'\0'+f.logicalId;ids.add(id);const c=await this.projection.readCandidate(entityKey(this.idKey,this.scope.repoId,f.kind,f.logicalId));if(c&&c.meta.kind===f.kind&&c.meta.logicalId===f.logicalId&&wireDigest(f.kind,{meta:c.meta.payload,state:c.state.payload})===f.wire)unchanged.add(id);}
+  const removed:SourceRecord[]=[];let after='';
+  for(;;){const page=await this.projection.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){const c=r.candidate;if(ids.has(c.meta.kind+'\0'+c.meta.logicalId))continue;const v=fromWire(c.meta.kind,c.meta.payload,c.state.payload);removed.push({kind:c.meta.kind,logicalId:c.meta.logicalId,value:c.meta.kind==='book-reading'?{bookId:v.bookId,chapterIndex:v.chapterIndex}:{}});}after=page.at(-1)!.entityKey;}
+  if(!removed.length&&unchanged.size===count)return;
+  const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
   const requireTable=(table:string)=>{if(!tables.has(table))throw Error('unsupported_feature');};
-  const retiredSources=new Set([...old.filter(r=>r.kind==='source'&&!ids.has('source\0'+r.logicalId)).map(r=>r.logicalId),...records.filter(r=>r.kind==='source'&&r.value.deleted).map(r=>r.logicalId)]);
+  const retiredSources=new Set([...removed.filter(r=>r.kind==='source').map(r=>r.logicalId),...sources.filter(r=>r.value.deleted).map(r=>r.logicalId)]);
   // Detach retained articles before a source's FK cascade. Their physical IDs,
   // body receipts and reading rows must survive either record input order.
-  for(const r of records.filter(r=>r.kind==='article'&&retiredSources.has(r.value.rssSourceUrl))){requireTable('channels');requireTable('articles');statements.push({sql:"INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) VALUES('watchrss://phone-imports','',0,0)"},{sql:"UPDATE articles SET channel_id=(SELECT id FROM channels WHERE url='watchrss://phone-imports') WHERE id=COALESCE((SELECT item_id FROM article_register_state WHERE article_id=?),(SELECT item_id FROM sync_article_ids WHERE article_id=?))",params:[r.logicalId,r.logicalId]});}
+  for(const r of articles.filter(r=>retiredSources.has(r.rssSourceUrl as string))){requireTable('channels');requireTable('articles');statements.push({sql:"INSERT OR IGNORE INTO channels(url,title,created_at,sort_order) VALUES('watchrss://phone-imports','',0,0)"},{sql:"UPDATE articles SET channel_id=(SELECT id FROM channels WHERE url='watchrss://phone-imports') WHERE id=COALESCE((SELECT item_id FROM article_register_state WHERE article_id=?),(SELECT item_id FROM sync_article_ids WHERE article_id=?))",params:[r.logicalId,r.logicalId]});}
 
   if(tables.has('sync_book_context'))statements.push({sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'});if(tables.has('sync_book_reading_projection'))statements.push({sql:'UPDATE sync_book_reading_projection SET active=1 WHERE id=1'});
-  for(const r of old)if(!ids.has(r.kind+'\0'+r.logicalId)){
+  for(const r of removed){
    if(r.kind==='note'){requireTable('memo_notes');statements.push({sql:'DELETE FROM memo_notes WHERE note_id=?',params:[r.logicalId]});if(tables.has('note_merge_conflicts'))statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[r.logicalId]});}
    else if(r.kind==='folder'){requireTable('memo_folders');statements.push({sql:'DELETE FROM memo_folders WHERE folder_id=?',params:[r.logicalId]});}
    else if(r.kind==='source'){requireTable('sync_source_states');statements.push({sql:'DELETE FROM sync_source_states WHERE url=?',params:[r.logicalId]},{sql:'DELETE FROM channels WHERE url=?',params:[r.logicalId]});}
@@ -53,7 +55,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    // Asset bytes remain in the content store until all authenticated pins allow
    // collection. Removing an account row never deletes a native attachment.
   }
-  for(const r of records){let v=r.value;toWire(r.kind,v);if(unchanged.has(r.kind+'\0'+r.logicalId))continue;
+  for await(const page of feedPages(feed)){for(const r of page){let v=r.value;toWire(r.kind,v);if(unchanged.has(r.kind+'\0'+r.logicalId))continue;
    // Use the frozen legacy interpretation only for the native representation.
    // The authenticated v2 candidate remains byte-for-byte unchanged.
    if(r.kind==='article'&&!Object.hasOwn(v,'registerSources')){if(!Object.hasOwn(v,'contentHash')||!Object.hasOwn(v,'updatedAt'))throw Error('closure_incomplete');v=readArticleRegisters(JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v}),true).value;}
@@ -89,12 +91,12 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
     if(old?.item_id){if(!sameBody)statements.push({sql:'UPDATE articles SET content=NULL WHERE id=?',params:[old.item_id]},...['article_body_chunks','article_original_chunks','article_sync_content','article_sync_encoding_cache'].map(table=>({sql:`DELETE FROM ${table} WHERE ${table.startsWith('article_sync_')?'item_id':'article_id'}=?`,params:[old.item_id]})));}statements.push(...this.articleReading(v.articleId,v));if(v.deleted)statements.push(upsert('sync_article_deletions',['article_id','url','changed_at','source_device_id','source_order'],[v.articleId,v.url,v.deletedAt,v.registerSources?.deletion??v.sourceDeviceId??'',deviceOrder(v.registerSources?.deletion??v.sourceDeviceId??'')],['article_id']));else statements.push({sql:'DELETE FROM sync_article_deletions WHERE article_id=?',params:[v.articleId]});if(v.deleted)statements.push({sql:'DELETE FROM articles WHERE id=(SELECT item_id FROM article_register_state WHERE article_id=?)',params:[v.articleId]});
    }else if(r.kind==='rss-state'){
     requireTable('syncv2_rss_states');statements.push(upsert('syncv2_rss_states',['id','state_json'],[r.logicalId,JSON.stringify(v)],['id']));
-    const sha=async(b:Uint8Array)=>sha256Hex(b),sources=records.filter(r=>r.kind==='source');let afterId=0;
+    const sha=async(b:Uint8Array)=>sha256Hex(b);let afterId=0;
     for(;;){const page=await this.db.query('SELECT a.id,a.link,a.guid,a.dedup_key,c.url FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id>? ORDER BY a.id LIMIT 32',[afterId]);if(!page.length)break;for(const a of page){const source=await rssSourceKey(String(a.url),sha);if(source!==v.sourceId&&!sources.some(s=>s.value.url===a.url&&s.value.sourceId===v.sourceId))continue;const article=await rssArticleId({link:String(a.link??''),guid:a.guid===null?null:String(a.guid),dedupKey:/^[a-f0-9]{64}$/.test(String(a.dedup_key))?String(a.dedup_key):undefined},sha);if(sha256Hex(bytes(article))===v.articleIdHash)statements.push(...this.reading(Number(a.id),v));}afterId=Number(page.at(-1)!.id);}
    }else if(r.kind!=='asset')throw Error('unsupported_feature');
-  }
-  if(tables.has('sync_book_reading_dirty'))for(const r of records.filter(r=>r.kind==='book-reading'))statements.push({sql:'DELETE FROM sync_book_reading_dirty WHERE item_id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND chapter_index=?)',params:[r.value.bookId,r.value.chapterIndex]});if(tables.has('sync_book_reading_projection'))statements.push({sql:'UPDATE sync_book_reading_projection SET active=0 WHERE id=1'});if(tables.has('sync_book_context'))statements.push({sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'});
-  return statements;
+  }if(statements.length)yield statements.splice(0);}
+  if(tables.has('sync_book_reading_dirty'))for(const r of readings)statements.push({sql:'DELETE FROM sync_book_reading_dirty WHERE item_id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND chapter_index=?)',params:[r.bookId,r.chapterIndex]});if(tables.has('sync_book_reading_projection'))statements.push({sql:'UPDATE sync_book_reading_projection SET active=0 WHERE id=1'});if(tables.has('sync_book_context'))statements.push({sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'});
+  if(statements.length)yield statements;
  }
  private articleReading(id:string,v:any):Statement[]{
   const out:Statement[]=[],source=v.registerSources?.reading??v.sourceDeviceId??'';

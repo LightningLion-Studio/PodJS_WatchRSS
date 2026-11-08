@@ -8,6 +8,7 @@ export {memoPlainText,memoTitle} from './text.ts';
 import type { SqlDatabase, SqlParams } from "../core/types.ts";
 import type { MemoFolder, MemoNote } from "./types.ts";
 import { utf8Encode } from "../cloud/types.ts";
+import { noteUnopenable } from "../sync-v2/note-rows.ts";
 
 const MEMO_SCHEMA: { sql: string; params?: SqlParams }[] = [
   { sql: `CREATE TABLE IF NOT EXISTS memo_notes (note_id TEXT PRIMARY KEY, folder_id TEXT, title TEXT NOT NULL, markdown TEXT NOT NULL, plain_text TEXT NOT NULL, content_hash TEXT NOT NULL, base_content_hash TEXT NOT NULL, base_markdown TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, modified_by TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER NOT NULL DEFAULT 0)` },
@@ -117,6 +118,7 @@ export class MemoRepository {
     const row=input.noteId ? (await this.db.query(`SELECT * FROM memo_notes WHERE note_id=? LIMIT 1`,[input.noteId]))[0] : undefined;
     const markdown=normalizeMarkdown(input.markdown), old=row ? note(row) : null;
     if (input.noteId && !old) throw new Error("笔记不存在");
+    if (old) await this.requireOpenable(old.noteId);
     if (!old && !markdown.trim() && !input.title?.trim()) throw new Error("新建备忘录不能为空");
     const now=this.clock(), hash=sha256(markdown), noteId=old?.noteId ?? this.idFactory();
     const title=input.title!==undefined?input.title:(old?.title?.trim()?old.title:memoTitle(markdown));
@@ -127,5 +129,8 @@ export class MemoRepository {
   async move(noteId:string,folderId:string|null): Promise<MemoNote> { if(folderId && !(await this.db.query(`SELECT 1 FROM memo_folders WHERE folder_id=? AND deleted=0`,[folderId])).length) throw new Error("文件夹不存在"); return this.updateMeta(noteId,`folder_id=?`,[folderId]); }
   async delete(noteId:string): Promise<MemoNote> { const now=this.clock(); return this.updateMeta(noteId,`deleted=1,deleted_at=?`,[now],now,true); }
   async createFolder(name:string,sortOrder=0): Promise<MemoFolder> { const value=name.trim(); if(!value) throw new Error("文件夹名称不能为空"); const id=this.idFactory(), now=this.clock(); await this.db.execute(`INSERT INTO memo_folders(folder_id,name,sort_order,updated_at,modified_by) VALUES(?,?,?,?,?)`,[id,value,sortOrder,now,this.deviceId]); return folder((await this.db.query(`SELECT * FROM memo_folders WHERE folder_id=?`,[id]))[0]); }
-  private async updateMeta(noteId:string,setSql:string,params:unknown[],now=this.clock(),includeDeleted=false): Promise<MemoNote> { const current=includeDeleted ? (await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0] : await this.get(noteId); if(!current) throw new Error("笔记不存在"); await this.db.execute(`UPDATE memo_notes SET ${setSql},updated_at=?,modified_by=? WHERE note_id=?`,[...params,now,this.deviceId,noteId]); return note((await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0]); }
+  /** Sync v2 R2: a note this device cannot open is read-only; edits fail with
+   * `note_unopenable` so the interface can explain why. */
+  private async requireOpenable(noteId:string){ if(await noteUnopenable(this.db,noteId)) throw new Error("note_unopenable"); }
+  private async updateMeta(noteId:string,setSql:string,params:unknown[],now=this.clock(),includeDeleted=false): Promise<MemoNote> { const current=includeDeleted ? (await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0] : await this.get(noteId); if(!current) throw new Error("笔记不存在"); await this.requireOpenable(noteId); await this.db.execute(`UPDATE memo_notes SET ${setSql},updated_at=?,modified_by=? WHERE note_id=?`,[...params,now,this.deviceId,noteId]); return note((await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0]); }
 }

@@ -3,7 +3,8 @@
 # Usage: run-c7-memory.sh <framework-worktree> <emulator-serial> <evidence-dir> <run>...
 # Each run is notes:mode:limitMiB[:flush[:oversizeChars]]. A publish run with
 # flush resets the synthetic account first; pull runs read the account left by
-# the last flush (and, with flush, upload the edit). oversizeChars > 0 first adds
+# the last flush (and, with flush, upload the edit); follow runs only follow
+# that account (R4). oversizeChars > 0 first adds
 # a phone-written note `big`; with WRSS_C7_READER_BUDGET below its size the
 # watch must quarantine it (F1). The writer itself is capped at 2 MiB.
 # Product local cipher and host bounds apply; nothing is bypassed.

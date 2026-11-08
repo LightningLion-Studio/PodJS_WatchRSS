@@ -7,7 +7,7 @@ import {b64,unb64,indexRow,sameScope} from './wire';
 import {sealV2,objectOid,type EnvelopeCrypto} from './sealed';
 import {signCommit,signControl,verifyCommit,type SigningPort} from './signing';
 import {fromWire} from './business';
-import {readConflicts,conflictNeutral} from './notes-conflict';
+import {readConflicts,conflictNeutral,noteEditDigest} from './notes-conflict';
 import {conflictSet,mergeConflicts} from './note-conflict-set';
 import {buildTree,updateTree} from './merkle';
 import {PAGE_BYTES,type WatchProjectionStore} from './store';
@@ -68,13 +68,14 @@ export class WatchIndexPublisher {
   // F2: only index rows are kept across entities. Decoded rows, candidates and
   // sealed objects are read or staged one bounded page/entity at a time.
   const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),changedRows:any[]=[],bindings:Statement[]=[],root=saved.current?.treeRoot??null;this.segmentStats={uploaded:0,reused:0};
-  let staged=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
+  let staged=false,heldEdits=false;const stage=async()=>{let held=0;for(const raw of objects.values())held+=raw.length;if(held<=PAGE_BYTES)return;staged=true;await this.store.stageUpload(requestId,objects);objects.clear();};
   try{
   if(root){let after='';for(;;){const page=await this.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){if(!r.unopenable)fromWire(r.meta.kind,r.meta.payload,r.state.payload);rows.set(r.row.entityKey,r.row);}after=page.at(-1).row.entityKey;}}
   let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){
    const existing=root?await this.store.cloudRow(root,entry.entityKey):null;
-   // F1: a row this device cannot open is carried back unchanged (same OIDs).
-   if(existing?.unopenable)continue;
+   // F1: a row this device cannot open is carried back unchanged (same OIDs);
+   // R2: a local change against its quarantine baseline is held as unsent.
+   if(existing?.unopenable){if(Object.hasOwn(before.cloud?.unopenableBaselines??{},entry.entityKey)&&before.cloud.unopenableBaselines[entry.entityKey]!==noteEditDigest(entry.candidate))heldEdits=true;continue;}
    const c=copy(entry.candidate);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
    if(existing&&c.meta.kind==='note'){
     if(existing.meta.kind!=='note'||existing.meta.logicalId!==c.meta.logicalId)throw Error('identity_conflict');
@@ -99,7 +100,7 @@ export class WatchIndexPublisher {
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000};
   const account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account?.oid??null,expectedRevision:before.account?.revision??'0'}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
   const total=await this.store.stageUpload(requestId,objects).then(()=>this.store.uploadCount(requestId));staged=true;const latest=await this.store.readState();if(latest.localChangeRevision!==before.localChangeRevision||canonical(latest.account)!==canonical(before.account)||latest.pendingChoice)throw Error('choice_stale');
-  const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'}};
+  const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued',...(heldEdits?{heldEdits:true}:{})}};
   await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:total,rows:rows.size,deviceSequence:sequence,segments:{...this.segmentStats}};
   }catch(error){if(staged)await this.store.dropUpload(requestId).catch(()=>{});throw error;}
  }
@@ -135,6 +136,9 @@ export class WatchIndexPublisher {
    // A kept state OID keeps the received state form (and its segments) in the cache.
    const row={entityKey:entry.entityKey,metaOid,stateOid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);decoded.push(stateSame?{row,meta:c.meta,state:existing.state,...(existing.segments?{segments:existing.segments}:{})}:{row,meta:c.meta,state:c.state});
   }
+  // R3: every quarantined row of the current tree travels back unchanged, also
+  // when the selected records do not name it (no local note): no choice deletes it.
+  const root=before.cloud?.current?.treeRoot;if(input.kind!=='rollback'&&root){const held=new Set(decoded.map(r=>r.row.entityKey));let after='';for(;;){const page=await this.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page)if(r.unopenable&&!held.has(r.row.entityKey))decoded.push(r);after=page.at(-1).row.entityKey;}}
   const tree=input.kind==='rollback'?{oid:input.target!.treeRoot,nodes:new Map<string,Uint8Array>()}:buildTree(this.http.scope,decoded.map(r=>r.row));for(const [id,raw]of tree.nodes)objects.set(id,raw);
   const now=this.now(),generation=input.kind==='rollback'?nextD64(before.rollbackGeneration):before.rollbackGeneration,parents=[...new Set(input.kind==='rollback'?[input.target!.oid]:input.mergedParents??[])].filter(id=>id!==own.commitOid).sort();
   const body={version:2,scope:this.http.scope,authorDeviceId:deviceId,deviceSequence:sequence,previousOwnCommit:own.commitOid,mergedParents:parents,treeRoot:tree.oid,requiredFeatures:[],createdAtMillis:now,observedRefs:[],indexComplete:true,accountParent:before.account!.oid,rollbackGeneration:generation,operation:{kind:input.kind,rollbackTarget:input.kind==='rollback'?input.target!.oid:null,resolvesGeneration:input.kind==='rollback'?null:generation}},commit=await signCommit(this.crypto,alias,body);objects.set(commit.oid,jsonBytes({body:commit.body,signature:commit.signature}));
@@ -230,6 +234,8 @@ export class WatchIndexPublisher {
  private async accept(plan:any,result:any){
   if(result?.version!==2)throw Error('invalid_schema');sameScope(result.scope,this.http.scope);const a=result.account,d=result.device;if(a?.commitOid!==plan.commitOid||d?.commitOid!==plan.commitOid||d?.ref!==plan.request.device.body.ref||a.revision!==nextD64(plan.request.account.body.expectedRevision)||d.revision!==nextD64(plan.request.device.body.expectedRevision)||a.rollbackGeneration!==(plan.explicit?plan.commit.body.rollbackGeneration:(await this.store.readState()).rollbackGeneration))throw Error('invalid_schema');checkD64(result.serverRevision);
   if(plan.explicit){const before=await this.store.readState(),next=copy(before);if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');next.cloud.pendingPublish={...next.cloud.pendingPublish,phase:'confirmed',result};if(before.cloud.pendingPublish.guardVersion===before.stateVersion)await this.store.publicationUpdate(before,next);else await this.store.controlUpdate(before,next);return result;}
-  const {before}=await this.pending(),next=copy(before);next.hasUnsentEdits=false;next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result}};await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);return result;
+  // R2: a local change of a quarantined note is not uploaded; it stays unsent
+  // until the next pull keeps it as a new note.
+  const {before}=await this.pending(),next=copy(before);next.hasUnsentEdits=plan.heldEdits===true;next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result}};await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);return result;
  }
 }

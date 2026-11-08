@@ -1,6 +1,6 @@
 import {unhex,hex} from '@podjs/framework/crypto';
 import {decodeUtf8Chunk,encodeUtf8} from '@podjs/framework/bytes';
-import {readSqlKeysetPage,type ProjectionSql} from '@podjs/framework/sql-projection';
+import {readSqlKeysetPage,readSqlTextPieces,type ProjectionSql} from '@podjs/framework/sql-projection';
 import {canonical,type Kind} from './protocol';
 import type {SourceReader,SourceRecord} from './store';
 /** A materializer consumes one existing business row plus its stable key. It
@@ -17,18 +17,18 @@ function decodeLocator(value:string){
  });
 }
 const quote=(id:string)=>{if(!/^[a-z_][a-z0-9_]*$/.test(id))throw Error('invalid_sql_identifier');return id;};
-/** N1: a page reply carries a note's text only up to NOTE_INLINE_CHARS; longer
- * text is read in NOTE_PIECE_CHARS substrings (SQLite counts characters), so no
- * single SQL reply holds a long note. */
-const NOTE_TEXT=['markdown','plain_text','base_markdown'],NOTE_INLINE_CHARS=8192,NOTE_PIECE_CHARS=65536;
-const LONG_TEXT=NOTE_TEXT.map(c=>`length(${c})`).join('+')+'>'+NOTE_INLINE_CHARS;
+/** N1: a page reply carries a note's text only up to NOTE_INLINE_BYTES; longer
+ * text is read in byte pieces, so no single SQL reply holds a long note. R1:
+ * sizes and pieces count BLOB bytes, never TEXT length()/substr(), which stop
+ * at U+0000. */
+const NOTE_TEXT=['markdown','plain_text','base_markdown'],NOTE_INLINE_BYTES=8192;
+const LONG_TEXT=NOTE_TEXT.map(c=>`coalesce(length(CAST(${c} AS BLOB)),0)`).join('+')+'>'+NOTE_INLINE_BYTES;
 /** The memo_notes projection with long text left out, or `*` when the table
  * lacks the text columns. */
 const noteColumns=(names:string[])=>NOTE_TEXT.every(c=>names.includes(c))?[...names.filter(c=>!NOTE_TEXT.includes(c)).map(quote),...NOTE_TEXT.map(c=>`CASE WHEN ${LONG_TEXT} THEN NULL ELSE ${c} END AS ${c}`),`${LONG_TEXT} AS __long_text`].join(','):'*';
 export async function completeNoteRow(db:Pick<ProjectionSql,'query'>,row:Record<string,unknown>){
  const long=row.__long_text;delete row.__long_text;if(!Number(long))return row;
- for(const c of NOTE_TEXT){const n=Number((await db.query(`SELECT length(${c}) AS n FROM memo_notes WHERE note_id=?`,[row.note_id]))[0]?.n);if(!Number.isSafeInteger(n))throw Error('source_record_invalid');let text='';
-  for(let at=1;at<=n;at+=NOTE_PIECE_CHARS){const part=(await db.query(`SELECT substr(${c},?,?) AS t FROM memo_notes WHERE note_id=?`,[at,NOTE_PIECE_CHARS,row.note_id]))[0]?.t;if(typeof part!=='string')throw Error('source_record_invalid');text+=part;}row[c]=text;}
+ for(const c of NOTE_TEXT){let text:string|null;try{text=await readSqlTextPieces(db,{table:'memo_notes',column:c,key:{note_id:row.note_id}});}catch{throw Error('source_record_invalid');}if(text===null)throw Error('source_record_invalid');row[c]=text;}
  return row;
 }
 export class SqlBusinessSource implements SourceReader {

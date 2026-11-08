@@ -6,6 +6,7 @@
  *  publish: seed memo_notes, scan, prepare and (with flush) upload.
  *  pull:    fresh database; follow (pull, reassemble, apply to memo_notes),
  *           edit the tail of note 0, scan, prepare and upload.
+ *  follow:  fresh database; follow only (R4: peak vs number of long notes).
  * The writer side caps notes at the 2 MiB budget, so an F1 check lowers the
  * watch reader budget (`readerBudget`) below a phone-written note, as the Bun
  * F1 test does; all other runs use the product budget. */
@@ -38,7 +39,7 @@ const check=(v:unknown,code:string)=>{if(!v)throw Error(code);};
  const f=ctx.payload,origin=f.baseUrl,host:any=(method:string,args:any)=>ctx.request('cloud.host',{method,args});
  let requests=0,stage='setup';
  try{
-  check(/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)&&(f.mode==='publish'||f.mode==='pull')&&f.notes>=1&&f.notes<=64&&f.chars>=1,'isolated_fixture_required');
+  check(/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)&&['publish','pull','follow'].includes(f.mode)&&f.notes>=1&&f.notes<=64&&f.chars>=1,'isolated_fixture_required');
   const crypto=createSyncV2Crypto(host),keys={id:idKey,content:new Uint8Array(32).fill(0x22),version:1},db=projectionSql(host);
   const transport={async request(r:any){requests++;const out=await host('http',{...r,body:r.body?encodeBase64(r.body):null});return {...out,body:decodeBase64(out.body)};}};
   const control=async(path:string)=>{const r=await transport.request({method:'GET',url:origin+'/c7/'+path,headers:{},body:null});check(r.status===200,'control_http');return parseNetwork(r.body);};
@@ -68,6 +69,7 @@ const check=(v:unknown,code:string)=>{if(!v)throw Error(code);};
    if(f.flush)await timed('flush',()=>publisher.flush());
   }else{
    const followed=await timed('follow',async()=>account.follow(await control('window')));check(followed.applied===true,'follow_applied');check(await textLength()===3*f.chars,'follow_text');
+   if(f.mode==='follow'){await host('result',{event:'done',mode:f.mode,notes:f.notes,chars:f.chars,requests});return 'success';}
    // F1: an over-budget remote note is held per entity; the other notes apply.
    if(f.oversize){const u=(await store.readState()).cloud?.unopenableNotes?.big;check(u?.code==='storage_pressure','oversize_not_quarantined');await host('result',{event:'quarantined',noteId:'big',code:u.code});}
    await timed('edit',()=>db.transaction([{sql:"UPDATE memo_notes SET markdown=substr(markdown,1,length(markdown)-1)||'y',updated_at=updated_at+1 WHERE note_id=?",params:['n0']}]));

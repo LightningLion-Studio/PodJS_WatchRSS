@@ -1,10 +1,10 @@
-import {canonical,jsonBytes,parseCanonicalJson,digest,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
+import {canonical,jsonBytes,parseCanonicalJson,digest,bytes,hexId,oid,exact,checkD64,compareD64,nextD64,uint,entityKey,validateScope,type Scope} from './protocol';
 import {sameScope,features,b64,unb64,indexRow} from './wire';
 import {authenticatePath,type ApprovedKey,type Pins} from './head-pins';
 import {openV2,objectOid,type EnvelopeCrypto,sealV2} from './sealed';
 import {signCommit,signControl,verifySigned,type SigningPort} from './signing';
 import {readTree,buildTree} from './merkle';
-import {readConflicts,conflictNeutral} from './notes-conflict';
+import {readConflicts,conflictNeutral,noteEditDigest} from './notes-conflict';
 import {fromWire} from './business';
 import {observeAccount,type SyncState} from './state';
 import {PAGE_BYTES,type WatchProjectionStore} from './store';
@@ -12,6 +12,8 @@ import {SyncV2Http,SyncV2Error} from './http';
 import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,readSegmentedNote,type ClosurePorts} from './note-segments';
 import {storedSegments} from './publisher';
 import type {Statement} from '@podjs/framework/sql-projection';
+import {hex,sha256Hex} from '@podjs/framework/crypto';
+import {noteUpsert} from './note-rows';
 const missing=(error:unknown)=>error instanceof SyncV2Error&&error.code==='object_missing';
 /** 25.5 closure ports over the authenticated window. Missing objects/tables are
  * null (closure_incomplete is decided by the caller's order). Malformed
@@ -44,6 +46,7 @@ export type CloudPullResult={empty:boolean;rows?:number;awaitingUser?:boolean;bo
 export const placeholder=(row:any)=>row.bodyRevision===null?'no-body':row.recipeOid===null?'source-pending':'body-not-downloaded';
 export const placeholderText=(row:any)=>row.bodyRevision===null?null:row.recipeOid===null?'正文尚未就绪':'正文尚未下载';
 const copy=<T>(v:T):T=>JSON.parse(canonical(v));
+const uuid=(b:Uint8Array)=>{const h=hex(Uint8Array.from(b,(v,i)=>i===6?(v&0x0f)|0x40:i===8?(v&0x3f)|0x80:v));return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
 /** P2 index coordinator. No body export, worker, history restore or local framing. */
 export class WatchCloudIndex {
  constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly approved:(deviceId:string)=>Promise<ApprovedKey>,private readonly bootstrap:(window:any)=>Promise<void>,private readonly now:()=>number=Date.now,private readonly rebuild?:()=>Promise<void>,private readonly options:CloudIndexOptions={}){}
@@ -93,8 +96,25 @@ export class WatchCloudIndex {
   next.cloud={...saved,editBases,editCreates,pins:path.pins,headers:{},cursor:window.serverRevision,current:{commitOid:a.commitOid,treeRoot:head.treeRoot,rowCount:count},windowId:window.windowId,auditBinding,blockedCommitOid:null,blockedCode:null};
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
-  next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null);
-  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.controlUpdate(staged,next,[...baseWrites,...bindings]);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+  next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,before,saved);next.cloud.unopenableBaselines=kept.baselines;
+  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.controlUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+ }
+ /** R2: a local note edit never stays only on a note this device cannot open.
+  * An unsent edit when the note enters quarantine, or any later local change of
+  * a quarantined note (against its recorded baseline), is kept as a new local
+  * note ("keep both") that publishes normally. The original stays quarantined
+  * and its remote row travels back unchanged. Baselines are digests, never text. */
+ private async keepQuarantinedEdits(seen:readonly ObservedRow[],before:SyncState,saved:any){
+  const baselines:Record<string,string|null>={},statements:Statement[]=[],prior:Record<string,string|null>=saved.unopenableBaselines??{},root=saved.current?.treeRoot??null,sameBase=saved.current?.commitOid===before.editBase.accountOid;
+  for(const r of seen){if(!r.note||!r.unopenable)continue;
+   const candidate=await this.store.readCandidate(r.entityKey),local=candidate?noteEditDigest(candidate):null;baselines[r.entityKey]=local;if(!candidate)continue;
+   const old=root?await this.store.cloudRow(root,r.entityKey):null;
+   const edited=old?.unopenable?Object.hasOwn(prior,r.entityKey)&&prior[r.entityKey]!==local:before.hasUnsentEdits&&(sameBase?!old||noteEditDigest(old)!==local:Object.hasOwn(saved.editBases??{},r.entityKey)||(saved.editCreates??[]).includes(r.entityKey));
+   const value=edited?fromWire('note',candidate.meta.payload,candidate.state.payload):null;if(!value||value.deleted)continue;
+   const id=uuid(await this.crypto.random(16)),now=this.now(),{noteConflicts:_,...rest}=value,hash=sha256Hex(bytes(value.markdown));
+   statements.push(...noteUpsert({...rest,noteId:id,baseMarkdown:value.markdown,contentHash:hash,baseContentHash:hash,createdAt:now,updatedAt:now,deleted:false,deletedAt:0}));
+  }
+  return {baselines,statements};
  }
  /** 25.3 observation. A remote tombstone ends the local note life. A remote
   * segmented row with another binding replaces the local binding only when this

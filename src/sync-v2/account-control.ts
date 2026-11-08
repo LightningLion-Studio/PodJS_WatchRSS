@@ -12,7 +12,8 @@ import {canMerge} from './merge-planner';
 import {verifyCommit,type SigningPort} from './signing';
 import type {EnvelopeCrypto} from './sealed';
 import type {ApprovedKey} from './head-pins';
-import type {WatchProjectionStore,SourceRecord} from './store';
+import {PAGE_BYTES,type WatchProjectionStore,type SourceRecord} from './store';
+import {recordFact,type RecordFact,type RecordFeed,type StatementFeed} from './record-feed';
 import type {WatchCloudIndex} from './cloud-index';
 import type {WatchIndexPublisher,BodyResolver} from './publisher';
 import type {WatchRecovery,RecoveryValue} from './recovery';
@@ -25,6 +26,8 @@ export interface AccountBusinessPort {
  /** Pure preparation against the same business DB. Commit must occur only at
   * WatchProjectionStore's CAS, never inside this callback. */
  prepare(records:SourceRecord[],before:SyncState):Promise<Statement[]>;
+ /** R4: the same statements as a replayable feed over a replayable record feed. */
+ prepareFeed?(records:RecordFeed,before:SyncState):StatementFeed;
  /** Authenticated complete local recovery closure, including note attachments. */
  recoveryValue(entityKey:string):Promise<RecoveryValue>;
  /** Verify the complete target recipe/blob closure without changing the DB. */
@@ -205,8 +208,22 @@ export class WatchAccountControl {
  private async followCurrent():Promise<any>{
   const before=await this.o.store.readState();if(before.pendingChoice||before.hasUnsentEdits)return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){await this.flushApplied();return this.followCurrent();}
-  if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const rows=await this.cloud(before),records=this.records(rows),business=await this.o.business.prepare(records,before),statements=await this.o.store.prepareAccountProjection(before,records,business),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
+  if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
   try{await this.o.store.controlUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
+ }
+ /** R4: follow reads the current tree one entity (or one bounded page) at a
+  * time for every pass; the peak is one long note, whatever the row count. */
+ private async followStatements(before:SyncState){
+  if(!this.o.business.prepareFeed){const records=this.records(await this.cloud(before));return this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before));}
+  const feed=await this.cloudFeed(before);return this.o.store.prepareAccountProjection(before,feed,this.o.business.prepareFeed(feed,before));
+ }
+ private async cloudFeed(s:SyncState):Promise<RecordFeed>{
+  if(!s.account||s.cloud?.current?.commitOid!==s.account.oid)throw Error('choice_stale');const root=s.cloud.current.treeRoot,keys:string[]=[],facts:RecordFact[]=[],input=this.o.store.inputHasher();let after='';
+  // One decoding pass yields the keys, the small facts and the input digest.
+  for(;;){const page=await this.o.store.cloudRows(root,after,32,PAGE_BYTES);if(!page.length)break;for(const r of page){const row=await this.openable(r);if(!row)continue;const [record]=this.records([row]);keys.push(r.row.entityKey);facts.push(recordFact(record!));input.add(record!);}after=page.at(-1)!.row.entityKey;}
+  return {keys,facts,inputHash:input.finish(),read:async(from,limit)=>{const out:SourceRecord[]=[];let size=0;
+   for(let i=from;i<Math.min(keys.length,from+limit);i++){const r=await this.o.store.cloudRow(root,keys[i]!);const row=r?await this.openable(r):null;if(!row)throw Error('choice_stale');const n=r.segments?PAGE_BYTES:JSON.stringify(r.state).length;if(out.length&&size+n>PAGE_BYTES)break;out.push(...this.records([row]));size+=n;}
+   return out;}};
  }
  /** Durable post-commit ACK. Failure retries the same request and never reapplies. */
  async flushApplied(){const before=await this.o.store.readState(),ack=before.cloud?.pendingApplied;if(!ack)return null;const author=await this.o.author(),reply=await this.request('/acks/applied',{scope:this.o.http.scope,...ack,deviceId:author.deviceId});if(reply.accepted!==true)throw Error('invalid_schema');const current=await this.o.store.readState();if(canonical(current.cloud?.pendingApplied)!==canonical(ack))throw Error('choice_stale');const next=clone(current);next.cloud.pendingApplied=null;await this.o.store.controlUpdate(current,next);return reply;}

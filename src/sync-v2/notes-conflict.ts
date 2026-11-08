@@ -22,6 +22,9 @@ export function conflictNeutral(state:any){
  return {...state,requiredFeatures:state.requiredFeatures.filter((f:string)=>f!==feature),payload};
 }
 /** This preserves the existing creation algorithm; migrated IDs remain opaque. */
+/** R2: digest of the conflict-neutral note model compared for local edits of a
+ * candidate or decoded row (the edit-base shape). */
+export const noteEditDigest=(r:any)=>sha256Hex(jb({identity:r.meta.logicalId,...r.meta.payload,...conflictNeutral(r.state).payload}));
 export function newConflictId(noteId:string,base:string,local:string,remote:string,device:string){
  for(const v of [noteId,base,local,remote,device])c.canonical(v);
  return sha256Hex(utf8([noteId,base,local,remote,device].join('\0')));

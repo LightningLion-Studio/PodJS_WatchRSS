@@ -130,6 +130,8 @@ instrumentation process. `publish` seeds N long notes into `memo_notes`
 `flush` also uploads after resetting the synthetic account. `pull` follows that
 account into a fresh database (pull, reassembly and apply to `memo_notes`),
 edits the tail of note 0, scans and prepares; `flush` uploads the edit.
+`follow` only follows that account into a fresh database (R4: compare the
+minimum passing limit for 1 and 3 long notes).
 `oversizeChars` first adds a phone-written note `big`; writers are capped at the
 2 MiB budget, so `WRSS_C7_READER_BUDGET` lowers the watch reader budget below it
 and the watch must quarantine it (F1). The guest memory limit is the QuickJS runtime
