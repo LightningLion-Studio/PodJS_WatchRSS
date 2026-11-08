@@ -4,6 +4,7 @@ import {sha256Hex} from '@podjs/framework/crypto';
 const c={canonical,jb};
 const clone=<T>(v:T):T=>JSON.parse(canonical(v));
 import {mergeNoteMarkdown} from '../notes/merge';
+import {segmentedClosureBudget} from './note-segments';
 import * as s from './notes-strict';
 import {feature,text,validateSet,conflictSet,mergeConflicts,openConflicts} from './note-conflict-set.ts';
 import type {Conflict,ConflictSet} from './note-conflict-set.ts';
@@ -44,12 +45,14 @@ function outer(state:any,context:{entityKey:string;noteId:string}){
   s.exact(p,['segmentedNote','noteRevision','segmentCount','plaintextSha256','metadata']);
   if(typeof p.noteRevision!=='string'||!/^[a-f0-9]{32}$/.test(p.noteRevision)||typeof p.plaintextSha256!=='string'||!/^[a-f0-9]{64}$/.test(p.plaintextSha256)||!p.metadata||Object.getPrototypeOf(p.metadata)!==Object.prototype||s.uint(p.segmentCount,2048)<1||p.segmentCount!==state.noteSegments.length||new Set(state.noteSegments).size!==state.noteSegments.length)fail('invalid_schema');
  }else if(state.noteSegments.length)fail('invalid_schema');
- if(c.jb(state).length>262144)fail('object_too_large');
+ // Only wire roots are size-bound here. A reassembled long note (rc7 S0) is an
+ // ordinary business record above L; its encoder enforces every wire limit.
+ if(segmented&&c.jb(state).length>262144)fail('object_too_large');
 }
 export function attachConflicts(state:any,context:{entityKey:string;noteId:string},value:ConflictSet){
  validateSet(context.noteId,value);outer(state,context);const next=clone(state),target=holder(next);
  if(Object.hasOwn(target,'noteConflicts')||next.requiredFeatures.includes(feature))fail('invalid_schema');
- target.noteConflicts=clone(value);next.requiredFeatures=[...next.requiredFeatures,feature].sort();readConflicts(next,context);return next;
+ target.noteConflicts=clone(value);next.requiredFeatures=[...next.requiredFeatures,feature].sort();readConflicts(next,context);if(c.jb(next).length>262144)fail('object_too_large');return next;
 }
 /** null means no conflict channel, NOT an authoritative empty table. */
 export function readConflicts(state:any,context:{entityKey:string;noteId:string},supported=[feature,'note-segments.v1']):ConflictSet|null{
@@ -69,11 +72,19 @@ export function mergeNoteWithConflicts(noteId:string,base:string,local:string,re
 export function noteResolutionBudget(before:any,next:any){
  const payload:any={};for(const [key,value]of Object.entries(next.note))if(!['noteId','title','folderId','createdAt'].includes(key))payload[key]=clone(value);
  const context={entityKey:Object.hasOwn(next,'entityKey')?next.entityKey:'0'.repeat(64),noteId:next.note.noteId};
- const root=attachConflicts({version:2,entityKey:context.entityKey,requiredFeatures:[],payload,noteSegments:[]},context,next.conflicts),rootPlainBytes=c.jb(root).length;
  const add=(a:number,b:number)=>{const sum=BigInt(a)+BigInt(b);if(sum>BigInt(Number.MAX_SAFE_INTEGER))fail('object_too_large');return Number(sum);};
+ const widest={repoId:'0'.repeat(32),libraryEpoch:'18446744073709551615',contentGeneration:'18446744073709551615'};
  // Identity encoding and the maximum AAD/frame overhead bound compression too.
- const rootRefsBytesUpperBound=c.jb({body:{scope:{repoId:'0'.repeat(32),libraryEpoch:'18446744073709551615',contentGeneration:'18446744073709551615'},stateOid:'state:sha256:'+'0'.repeat(64),segmentOids:[]},signature:'A'.repeat(86)}).length;
- let closureStoredBytes=add(rootPlainBytes,4120+rootRefsBytesUpperBound);const closures=Object.hasOwn(next,'resolutionClosures')?next.resolutionClosures:[];
+ const rootRefsBytesUpperBound=c.jb({body:{scope:widest,stateOid:'state:sha256:'+'0'.repeat(64),segmentOids:[]},signature:'A'.repeat(86)}).length;
+ const base={version:2,entityKey:context.entityKey,requiredFeatures:[],payload,noteSegments:[]};let root:any,rootPlainBytes:number,closureStoredBytes:number;
+ try{root=attachConflicts(base,context,next.conflicts);rootPlainBytes=c.jb(root).length;closureStoredBytes=add(rootPlainBytes,4120+rootRefsBytesUpperBound);}
+ catch(error){
+  if((error as Error).message!=='object_too_large')throw error;
+  // rc7 25.6: a long final note is charged as parent, every segment and every
+  // refs table. The conflict container stays in M and is never segmented.
+  validateSet(context.noteId,next.conflicts);root={...base,requiredFeatures:[feature],payload:{...payload,noteConflicts:clone(next.conflicts)}};rootPlainBytes=c.jb(root).length;
+  closureStoredBytes=segmentedClosureBudget(root,'0'.repeat(32),widest)!.bytes;
+ }const closures=Object.hasOwn(next,'resolutionClosures')?next.resolutionClosures:[];
  if(!Array.isArray(closures))fail('invalid_schema');const seen=new Map<string,number>();
  for(const object of closures){s.exact(object,['oid','storedBytes']);if(typeof object.oid!=='string'||!/^(meta|state|blob|recipe|tree|state-refs|recipe-refs):sha256:[a-f0-9]{64}$/.test(object.oid))fail('invalid_schema');s.uint(object.storedBytes);if(seen.has(object.oid)){if(seen.get(object.oid)!==object.storedBytes)fail('closure_incomplete');continue;}seen.set(object.oid,object.storedBytes);closureStoredBytes=add(closureStoredBytes,object.storedBytes);}
  if(Object.hasOwn(next,'resolutionBodyClosuresReady')&&typeof next.resolutionBodyClosuresReady!=='boolean')fail('invalid_schema');if(next.resolutionBodyClosuresReady===false)fail('closure_incomplete');
@@ -114,7 +125,8 @@ export class NoteConflictPlan {
   const next=clone(this.state),note=next.note,selected=next.conflicts.records.find((r:Conflict)=>r.conflictId===capture.selectedConflictId);
   if(note.updatedAt===Number.MAX_SAFE_INTEGER)fail('counter_exhausted');
   const markdown=choice==='local'?note.markdown:(choice==='remote'?selected.remoteMarkdown:manual);
-  text(markdown,245760);const body=choice==='local'?markdown:markdown.replace(/\r\n?/g,'\n');
+  text(markdown,Number.MAX_SAFE_INTEGER); // rc7: the final candidate budget bounds the body.
+  const body=choice==='local'?markdown:markdown.replace(/\r\n?/g,'\n');
   Object.assign(note,{markdown:body,baseMarkdown:body,contentHash:sha256Hex(utf8(body)),baseContentHash:sha256Hex(utf8(body)),updatedAt:Math.max(now,note.updatedAt+1),modifiedBy:device});
   for(const r of next.conflicts.records)if(capture.openConflictIds.includes(r.conflictId))r.resolvedAt=Math.max(1,now);
   next.stateVersion=s.nextD64(next.stateVersion);next.localChangeRevision=s.nextD64(next.localChangeRevision);

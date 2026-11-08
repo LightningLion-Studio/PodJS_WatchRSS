@@ -48,15 +48,27 @@ export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AU
  `CREATE INDEX IF NOT EXISTS syncv2_outbox_scope ON syncv2_outbox(scope,seq)`,
  `CREATE TABLE IF NOT EXISTS syncv2_control(id INTEGER PRIMARY KEY CHECK(id=1),scope TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_legacy_inbox(scope TEXT NOT NULL,inbox_key TEXT NOT NULL,input_hash TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,inbox_key))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_note_bindings(scope TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,entity_key))`,
 ];
+/** rc7 25.3 local output binding of one note life. `revision:null` forces a
+ * fresh CSPRNG value at the next segmented encoding of that life. */
+export type NoteBinding={revision:string|null;life:'live'|'deleted'};
+/** Single-row projection pages may exceed the 384 KiB batch only for a long
+ * note candidate already admitted by the rc7 text budget. */
+const LONG_CANDIDATE_PAGE=12*1024*1024;
 export {PROJECTION_SOURCE_TABLES} from './business-revision';
 export type Checkpoint={R0:string;R1:string|null;after:string;tail:string;phase:'scan'|'tail'|'complete';rows:number;tailEnd:string|null;businessRevision?:BusinessRevision;accountApplyVersion?:string};
+/** ContentSha256 takes at most 262144 bytes per update; long-note candidates
+ * are larger. Slicing keeps the digest identical to one update. */
+const hashLong=(hash:ContentSha256,value:Uint8Array)=>{for(let at=0;at<value.length;at+=262144)hash.update(value.subarray(at,at+262144));};
 export class WatchProjectionStore {
  private readonly scopeKey:string;
  private legacyAdapter?:WatchEquivalentLegacy;
  private cloudCache:SqlAuthenticatedCache<any>;
  private readonly stateJournal:SqlStateJournal<SyncState>;
- constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{}){
+ /** Candidate options every builder (scan, follow, choice, recovery) must share. */
+ segmentOptions(){return {noteSegments:this.options.noteSegments===true};}
+ constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{},readonly options:{noteSegments?:boolean}={}){
   validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
  }
  equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
@@ -129,8 +141,8 @@ export class WatchProjectionStore {
   * journals, upload receipts and original edits are never collection targets. */
  async collectPreparations(before:SyncState,limit=16){const stateHash=digest(before),protectedIds=new Set([before.cloud?.pendingPublish?.applyPlan?.id,before.cloud?.preparingPublication?.applyPlan?.id].filter(Boolean));let removed=0;const rows=await this.db.query('SELECT id,body FROM syncv2_apply_work WHERE scope=? ORDER BY id LIMIT ?',[this.scopeKey,limit]);for(const row of rows){const id=String(row.id);if(protectedIds.has(id))continue;const work=await this.cipher.open(this.aad('apply-work',id),String(row.body));if(work.stateHash===stateHash)continue;const statements:Statement[]=[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,before.stateVersion]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'DELETE FROM podjs_sql_programs WHERE binding=? AND id=?',params:[this.scopeKey,id]},...['syncv2_apply_tree_v2','syncv2_apply_keys'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND plan_id=?',params:[this.scopeKey,id]})),...['podjs_sql_program_pages'].map(table=>({sql:'DELETE FROM '+table+' WHERE binding=? AND id=?',params:[this.scopeKey,id]})),{sql:'DELETE FROM syncv2_apply_work WHERE scope=? AND id=?',params:[this.scopeKey,id]}];if(work.reservation)statements.push({sql:'DELETE FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?',params:[work.reservation.binding,work.reservation.id,work.reservation.bytes]});await this.db.transaction(statements);removed++;}return removed;}
  async prepareAccountProjection(before:SyncState,records:SourceRecord[],business:Statement[],budget:{maxSteps?:number;maxMillis?:number;onCheckpoint?:(progress:any)=>void}={}){
-  await this.collectPreparations(before);const input=new ContentSha256();for(const r of records)input.update(jsonBytes(candidates(r.kind,r.logicalId,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId),r.value,r.addedAtMillis)));const inputHash=input.finish();
-  const bh=new ContentSha256();for(const op of business)bh.update(jsonBytes(JSON.stringify(op)));const businessHash=bh.finish(),stateHash=digest(before),id=digest(['account-apply-v4',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
+  await this.collectPreparations(before);const input=new ContentSha256();for(const r of records)hashLong(input,jsonBytes(candidates(r.kind,r.logicalId,entityKey(this.key,this.scope.repoId,r.kind,r.logicalId),r.value,r.addedAtMillis,this.segmentOptions())));const inputHash=input.finish();
+  const bh=new ContentSha256();for(const op of business)hashLong(bh,jsonBytes(JSON.stringify(op)));const businessHash=bh.finish(),stateHash=digest(before),id=digest(['account-apply-v4',stateHash,inputHash,businessHash]),program=this.applyProgram(id),status=await program.open();
   const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];let savedBody=saved?String(saved.body):null;let work=saved?await this.cipher.open(this.aad('apply-work',id),String(saved.body)):{membershipVersion:1,stateHash,inputHash,businessHash,phase:'membership',offset:0,after:'',step:0,ref:{...program.snapshot(),pages:0,fragments:0,operations:0,bytes:0,root:'0'.repeat(64)}};
   if(work.stateHash!==stateHash||work.inputHash!==inputHash||work.businessHash!==businessHash)throw Error('choice_stale');if(work.phase==='ready')return this.preparedResult(before,work.ref);
   if(status==='ready'&&work.phase!=='finalize')throw Error('sql_program_invalid');if(status!=='ready')await program.rewind(work.ref);
@@ -206,6 +218,8 @@ export class WatchProjectionStore {
   return {next,statements:[{sql:'UPDATE syncv2_legacy_inbox SET body=? WHERE scope=? AND inbox_key=? AND input_hash=?',params:[await this.cipher.seal(this.aad('legacy',key),value),this.scopeKey,key,selected.inputHash]}]};
  }
  validateEntityIdentity(id:string,kind:Kind,logicalId:string){if(entityKey(this.key,this.scope.repoId,kind,logicalId)!==id)throw Error('identity_conflict');}
+ async noteBinding(entity:string):Promise<NoteBinding|null>{this.gate.require();hexId(entity,64);const row=(await this.db.query('SELECT body FROM syncv2_note_bindings WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];if(!row)return null;const value=await this.cipher.open(this.aad('note-binding',entity),String(row.body));if(!value||!['live','deleted'].includes(value.life)||value.revision!==null&&!/^[a-f0-9]{32}$/.test(value.revision))throw Error('invalid_schema');return value;}
+ async noteBindingStatement(entity:string,value:NoteBinding|null):Promise<Statement>{hexId(entity,64);if(value===null)return {sql:'DELETE FROM syncv2_note_bindings WHERE scope=? AND entity_key=?',params:[this.scopeKey,entity]};return {sql:'INSERT INTO syncv2_note_bindings VALUES(?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body',params:[this.scopeKey,entity,await this.cipher.seal(this.aad('note-binding',entity),{revision:value.revision,life:value.life})]};}
  async identityForEntity(entity:string){
   const row=(await this.db.query('SELECT kind,logical_id FROM syncv2_identity_map WHERE local_library=? AND repo=? AND entity_key=?',[this.libraryId,this.scope.repoId,entity]))[0];if(!row)throw Error('source_identity_missing');return {kind:String(row.kind) as Kind,logicalId:String(row.logical_id)};
  }
@@ -287,20 +301,23 @@ export class WatchProjectionStore {
  }
  private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false,readTree?: (prefix:string)=>Promise<any>){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
-  for(const row of rows){const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId),candidate=candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis),mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
+  for(const row of rows){const entity=entityKey(this.key,this.scope.repoId,row.kind,row.logicalId),candidate=candidates(row.kind,row.logicalId,entity,row.value,row.addedAtMillis,this.segmentOptions()),mapKey=[this.libraryId,this.scope.repoId,row.kind,row.logicalId];
    const existing=(await this.db.query('SELECT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind=? AND logical_id=?',mapKey))[0];if(existing&&existing.entity_key!==entity)throw Error('identity_conflict');
    if(row.source)statements.push({sql:'INSERT INTO syncv2_source_map VALUES(?,?,?,?) ON CONFLICT(scope,source_table,locator) DO UPDATE SET entity_key=excluded.entity_key WHERE entity_key IS NOT excluded.entity_key',params:[this.scopeKey,row.source.table,row.source.locator,entity]});
    const prior=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];
-   if(!force&&prior&&canonical(await this.cipher.open(this.aad('candidate',entity),String(prior.body)))===canonical(candidate))continue;
+   const priorValue=prior?await this.cipher.open(this.aad('candidate',entity),String(prior.body)):null;
+   if(!force&&priorValue&&canonical(priorValue)===canonical(candidate))continue;
+   // rc7 25.3: a local deletion ends the note life in the same transaction.
+   if(row.kind==='note'&&candidate.state.payload.deleted===true&&priorValue&&priorValue.state.payload.deleted!==true)statements.push(await this.noteBindingStatement(entity,{revision:null,life:'deleted'}));
    const sealed=await this.cipher.seal(this.aad('candidate',entity),candidate);total+=sealed.length;
-   if(total>384*1024)throw Error('page_too_large');
+   if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');
    treeChanges.push({key:entity,value:{candidateHash:sha256Hex(jsonBytes(sealed)),rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
    statements.push({sql:'INSERT OR IGNORE INTO syncv2_identity_map VALUES(?,?,?,?,?,2)',params:[...mapKey,entity]},
     {sql:'INSERT INTO syncv2_candidates VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,entity_key) DO UPDATE SET body=excluded.body,meta_bytes=excluded.meta_bytes,state_bytes=excluded.state_bytes,added_at=excluded.added_at,row_sequence=excluded.row_sequence',params:[this.scopeKey,entity,sealed,candidate.metaBytes,candidate.stateBytes,candidate.addedAtMillis,sequence]},
     {sql:'INSERT OR IGNORE INTO syncv2_change_log VALUES(?,?,?,?)',params:[this.scopeKey,revision,entity,canonical({revision,entityKey:entity,candidateHash:sha256Hex(jsonBytes(sealed))})]});
   }
   if(treeChanges.length){const tree=await updateRadixIndex({read:readTree??(async prefix=>{const saved=(await this.db.query('SELECT hash,body FROM syncv2_tree_nodes WHERE scope=? AND prefix=?',[this.scopeKey,prefix]))[0];return saved?{hash:String(saved.hash),node:JSON.parse(String(saved.body))}:null;}),encode:jsonBytes,hash:sha256Hex},treeChanges);
-   for(const row of tree.writes){const body=canonical(row.node);total+=body.length;if(total>384*1024)throw Error('page_too_large');statements.push({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,row.prefix,row.hash,body,row.count]});}
+   for(const row of tree.writes){const body=canonical(row.node);total+=body.length;if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');statements.push({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,row.prefix,row.hash,body,row.count]});}
   }
   return {statements,total};
  }

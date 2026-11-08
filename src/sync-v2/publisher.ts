@@ -13,13 +13,45 @@ import {buildTree,updateTree} from './merkle';
 import type {WatchProjectionStore} from './store';
 import type {SyncState} from './state';
 import {SyncV2Http,SyncV2Error} from './http';
+import {openV2} from './sealed';
+import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,STATE_LIMIT,sealSegmentedNote,segmentedClosureBudget,type PriorSegments} from './note-segments';
+import {bytesToBase64,base64ToBytes} from '@podjs/framework/bytes';
+import type {Statement} from '@podjs/framework/sql-projection';
 const copy=<T>(x:T):T=>JSON.parse(canonical(x));
 export interface BodyManifest {bodyRevision:string;promiseId:string|null;recipeOid:string|null;opaqueContentId:string|null;contentBytes:number|null;}
 export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
+/** Authenticated segment objects retained with a decoded cloud row (25.7). */
+export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:bytesToBase64(o.sealed)}))});
+const priorSegments=(row:any):PriorSegments|null=>row?.segments?{noteRevision:row.segments.noteRevision,objects:row.segments.objects.map((o:any)=>({oid:o.oid,sealed:base64ToBytes(o.sealed)}))}:null;
+export interface PublisherOptions {noteSegments?:boolean;noteTextBudget?:number}
 export class WatchIndexPublisher {
  private flushing?:Promise<any>;
  private preparing?:string;
- constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now,private readonly resolveBody?:BodyResolver){}
+ /** Count of the last preparation's new and reused segment objects. */
+ segmentStats={uploaded:0,reused:0};
+ constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now,private readonly resolveBody?:BodyResolver,private readonly options:PublisherOptions={}){}
+ /** 25.8 write gate: local opt-in AND the backend's advertised feature. A
+  * client without the opt-in cannot segment; that export is object_too_large. */
+ private async segmentsWritable(){if(this.options.noteSegments!==true)throw Error('object_too_large');const caps=await this.http.capabilities();if(!Array.isArray(caps.features)||!caps.features.includes(NOTE_SEGMENTS_FEATURE))throw Error('feature_disabled');}
+ /** Seals one state. Ordinary states and short notes keep the rc6 path. A long
+  * note is segmented under its durable binding; the binding statement commits
+  * with the publication journal (25.3). */
+ private async sealState(entityKey:string,c:any,existing:any,alias:string,objects:Map<string,Uint8Array>,bindings:Statement[]){
+  const raw=jsonBytes(c.state);
+  if(c.meta.kind!=='note'||raw.length<=STATE_LIMIT){const sealed=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,raw);objects.set(sealed.oid,sealed.bytes);const refs=jsonBytes(await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid:sealed.oid,segmentOids:[]}));objects.set(objectOid('state-refs',refs),refs);return sealed.oid;}
+  await this.segmentsWritable();
+  const life=c.state.payload.deleted===true?'deleted':'live',saved=await this.store.noteBinding(entityKey),prior=priorSegments(existing);
+  // Local durable binding first (never replaced by a remote one); otherwise adopt
+  // the current authenticated row of the same life; otherwise a fresh CSPRNG value.
+  const revision=saved?(saved.life===life&&saved.revision?saved.revision:hex(await this.crypto.random(16))):(life==='live'&&prior&&existing.row.deleted===false?prior.noteRevision:hex(await this.crypto.random(16)));
+  if(!saved||saved.revision!==revision||saved.life!==life)bindings.push(await this.store.noteBindingStatement(entityKey,{revision,life}));
+  const out=await sealSegmentedNote(c.state,revision,{
+   seal:plain=>sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,plain),
+   signRefs:async(stateOid,segmentOids)=>jsonBytes(await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid,segmentOids})),
+   open:async(id,sealed)=>{const opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,id,sealed);if(opened.header.keyVersion!==this.keys.version||opened.header.type!=='state')throw Error('unsupported_feature');return opened;},
+  },prior,this.options.noteTextBudget??NOTE_TEXT_BUDGET);
+  for(const [id,bytes]of out.objects)objects.set(id,bytes);this.segmentStats.uploaded+=out.uploadedSegments;this.segmentStats.reused+=out.reusedSegments;return out.stateOid;
+ }
  private async ownHeader(id:string){
   const stored=await this.store.readHeader(id);if(stored)return stored;
   const page=await this.http.json('GET','/account/ancestry?head='+encodeURIComponent(id)+'&stop=null&limit=1');
@@ -33,7 +65,7 @@ export class WatchIndexPublisher {
   const checkpoint=await this.store.checkpoint();if(checkpoint?.phase!=='complete'||!sameBusinessRevision(checkpoint.businessRevision,before.businessRevision))throw Error('projection_incomplete');
   let sequence=saved.deviceSequence??'0';if(own.commitOid){const value=await this.ownHeader(own.commitOid),publicKey=b64(await this.crypto.signingKey(alias));const body=await verifyCommit(this.crypto,publicKey,value,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...saved,deviceSequence:sequence};await this.store.controlUpdate(before,reserved);before=reserved;
-  const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),currentRows=new Map<string,any>(),changedRows:any[]=[];
+  const objects=new Map<string,Uint8Array>(),rows=new Map<string,any>(),currentRows=new Map<string,any>(),changedRows:any[]=[],bindings:Statement[]=[];this.segmentStats={uploaded:0,reused:0};
   if(saved.current?.treeRoot){let after='';for(;;){const page=await this.store.cloudRows(saved.current.treeRoot,after,32);if(!page.length)break;for(const r of page){fromWire(r.meta.kind,r.meta.payload,r.state.payload);rows.set(r.row.entityKey,r.row);currentRows.set(r.row.entityKey,r);}after=page.at(-1).row.entityKey;}}
   let after='';for(;;){const page=await this.store.candidatePage(after,32);if(!page.length)break;for(const entry of page){
    const c=copy(entry.candidate),existing=currentRows.get(entry.entityKey);fromWire(c.meta.kind,c.meta.payload,c.state.payload);
@@ -44,9 +76,8 @@ export class WatchIndexPublisher {
    }
    const body=this.resolveBody?await this.resolveBody(entry,existing):null;
    if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(existing.state)===canonical(c.state)&&existing.row.addedAtMillis===c.addedAtMillis)continue;
-   const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,jsonBytes(c.state));
-   if(c.state.noteSegments.length)throw Error('unsupported_feature');objects.set(meta.oid,meta.bytes);objects.set(state.oid,state.bytes);
-   const refs=await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid:state.oid,segmentOids:[]}),refsRaw=jsonBytes(refs);objects.set(objectOid('state-refs',refsRaw),refsRaw);
+   if(c.state.noteSegments.length)throw Error('unsupported_feature');
+   const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state={oid:await this.sealState(entry.entityKey,c,existing,alias,objects,bindings)};objects.set(meta.oid,meta.bytes);
    const hasBody=['article','book','asset'].includes(c.meta.kind),old=rows.get(entry.entityKey),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
    const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
    // No unproved field merge: an advanced account must be reconciled by the frozen
@@ -61,13 +92,14 @@ export class WatchIndexPublisher {
   const account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account?.oid??null,expectedRevision:before.account?.revision??'0'}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
   await this.store.stageUpload(requestId,objects);const latest=await this.store.readState();if(latest.localChangeRevision!==before.localChangeRevision||canonical(latest.account)!==canonical(before.account)||latest.pendingChoice)throw Error('choice_stale');
   const next=copy(latest);next.cloud={...latest.cloud,pendingPublish:{requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'}};
-  await this.store.controlUpdate(latest,next);return {commitOid:commit.oid,objects:objects.size,rows:rows.size,deviceSequence:sequence};
+  await this.store.controlUpdate(latest,next,bindings);return {commitOid:commit.oid,objects:objects.size,rows:rows.size,deviceSequence:sequence,segments:{...this.segmentStats}};
  }
  /** Size the FINAL roots, public refs and canonical tree before reserving an
   * author sequence. Unproved reuse is charged at identity's worst-case size. */
  preflightRecords(records:any[]){let wireBytes=0;const rows:any[]=[];for(const entry of records){const c=entry.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);if(c.state.noteSegments.length)throw Error('unsupported_feature');if(c.meta.kind==='note')readConflicts(c.state,{entityKey:entry.entityKey,noteId:c.meta.logicalId},['note-conflicts.v1']);
-  const meta=jsonBytes(c.meta),state=jsonBytes(c.state);if(meta.length>262144||state.length>262144)throw Error('object_too_large');wireBytes+=meta.length+state.length+8240;
-  const refs=jsonBytes({body:{scope:this.http.scope,stateOid:'state:sha256:'+('0'.repeat(64)),segmentOids:[]},signature:'A'.repeat(86)});wireBytes+=refs.length;
+  const meta=jsonBytes(c.meta),state=jsonBytes(c.state);if(meta.length>262144)throw Error('object_too_large');
+  if(state.length>262144){if(c.meta.kind!=='note'||this.options.noteSegments!==true)throw Error('object_too_large');const closure=segmentedClosureBudget(c.state,'0'.repeat(32),this.http.scope,this.options.noteTextBudget??NOTE_TEXT_BUDGET)!;wireBytes+=meta.length+4120+closure.bytes;}
+  else{wireBytes+=meta.length+state.length+8240;wireBytes+=jsonBytes({body:{scope:this.http.scope,stateOid:'state:sha256:'+('0'.repeat(64)),segmentOids:[]},signature:'A'.repeat(86)}).length;}
   const row={entityKey:entry.entityKey,metaOid:'meta:sha256:'+('0'.repeat(64)),stateOid:'state:sha256:'+('0'.repeat(64)),addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);rows.push(row);if(!Number.isSafeInteger(wireBytes))throw Error('object_too_large');
  }const tree=buildTree(this.http.scope,rows);for(const raw of tree.nodes.values())wireBytes+=raw.length;wireBytes+=16384;if(!Number.isSafeInteger(wireBytes))throw Error('object_too_large');return {wireBytes,rows:rows.length};}
  /** Explicit P5 publication. The complete selected snapshot is compiled before
@@ -79,7 +111,7 @@ export class WatchIndexPublisher {
   this.preflightRecords(input.records);const {deviceId,alias,own,requestId}=input;hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);
   let sequence=before.cloud?.deviceSequence??'0';if(own.commitOid){const signed=await this.store.readHeader(own.commitOid)??await this.ownHeader(own.commitOid);const body=await verifyCommit(this.crypto,b64(await this.crypto.signingKey(alias)),signed,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...reserved.cloud,deviceSequence:sequence,preparingPublication:{kind:input.kind,requestId,...(input.applyPlan?{applyPlan:input.applyPlan}:{}),capturedLocalRevision:before.localChangeRevision}};const checks:any[]=[];if(input.applyPlan){checks.push({sql:"INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=? AND id=? AND status='ready' AND root=?) THEN 1 ELSE 0 END",params:[input.applyPlan.binding,input.applyPlan.id,input.applyPlan.root]},{sql:'DELETE FROM podjs_sql_cas_guard'});const r=(input.applyPlan as any).reservation;if(r)checks.push({sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?) THEN 1 ELSE 0 END',params:[r.binding,r.id,r.bytes]},{sql:'DELETE FROM podjs_sql_cas_guard'});}await this.store.controlUpdate(before,reserved,checks);before=reserved;this.preparing=requestId;try{
-  const objects=new Map<string,Uint8Array>(),decoded:any[]=[];
+  const objects=new Map<string,Uint8Array>(),decoded:any[]=[],bindings:Statement[]=[];this.segmentStats={uploaded:0,reused:0};
   for(const entry of input.records){
    const c=entry.candidate;fromWire(c.meta.kind,c.meta.payload,c.state.payload);if(c.state.noteSegments.length)throw Error('unsupported_feature');
    if(input.kind==='rollback'){indexRow(entry.row);decoded.push({row:entry.row,meta:c.meta,state:c.state});continue;}
@@ -89,7 +121,7 @@ export class WatchIndexPublisher {
    if(metaSame&&stateSame&&manifestSame&&existing.row.addedAtMillis===c.addedAtMillis){decoded.push(existing);continue;}
    let metaOid=existing?.row.metaOid,stateOid=existing?.row.stateOid;
    if(!metaSame){const sealed=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta));metaOid=sealed.oid;objects.set(sealed.oid,sealed.bytes);}
-   if(!stateSame){const sealed=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,jsonBytes(c.state));stateOid=sealed.oid;objects.set(sealed.oid,sealed.bytes);const refs=await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid,segmentOids:[]}),raw=jsonBytes(refs);objects.set(objectOid('state-refs',raw),raw);}
+   if(!stateSame)stateOid=await this.sealState(entry.entityKey,c,existing,alias,objects,bindings);
    const row={entityKey:entry.entityKey,metaOid,stateOid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,requiredFeatures:[],bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null,...entry.manifest};indexRow(row);decoded.push({row,meta:c.meta,state:c.state});
   }
   const tree=input.kind==='rollback'?{oid:input.target!.treeRoot,nodes:new Map<string,Uint8Array>()}:buildTree(this.http.scope,decoded.map(r=>r.row));for(const [id,raw]of tree.nodes)objects.set(id,raw);
@@ -98,7 +130,7 @@ export class WatchIndexPublisher {
   const common={version:2,scope:this.http.scope,newCommitOid:commit.oid,requestId,issuedAtMillis:now,expiresAtMillis:now+300000},account=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/account/current',expectedOid:before.account!.oid,expectedRevision:before.account!.revision}),device=await signControl(this.crypto,alias,'wrss.sync.v2/ref-update-sign',{...common,ref:'refs/devices/'+deviceId+'/index',expectedOid:own.commitOid,expectedRevision:own.revision});
   before=await this.store.stageCloudRows(tree.oid,decoded,before);before=(await this.store.stageUpload(requestId,objects,before))!;
   if(before.cloud.preparingPublication?.requestId!==requestId)throw Error('choice_stale');const next=copy(before);next.cloud.preparingPublication=null;next.cloud.pendingPublish={explicit:true,kind:input.kind,...(input.applyPlan?{applyPlan:input.applyPlan}:{}),...(input.legacyKey?{legacyKey:input.legacyKey}:{}),guardVersion:nextD64(before.stateVersion),requestId,commitOid:commit.oid,commit:{body:commit.body,signature:commit.signature},treeRoot:tree.oid,rowCount:decoded.length,request:{account,device,relayGrant:null},capturedLocalRevision:before.localChangeRevision,phase:'queued'};
-  await this.store.controlUpdate(before,next);return {commitOid:commit.oid,objects:objects.size,rows:decoded.length,deviceSequence:sequence};}finally{this.preparing=undefined;}
+  await this.store.controlUpdate(before,next,bindings);return {commitOid:commit.oid,objects:objects.size,rows:decoded.length,deviceSequence:sequence,segments:{...this.segmentStats}};}finally{this.preparing=undefined;}
  }
  private async pending(){const before=await this.store.readState(),plan=before.cloud?.pendingPublish;if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(!plan)throw Error('publication_missing');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');if((before.pendingChoice&&!plan.explicit)||plan.guardVersion!==undefined&&plan.guardVersion!==before.stateVersion||plan.capturedLocalRevision!==before.localChangeRevision||plan.request.account.body.expectedOid!==(before.account?.oid??null)||plan.request.account.body.expectedRevision!==(before.account?.revision??'0'))throw Error('choice_stale');return {before,plan};}
  /** A response-lost retry queries the original request ID before touching refs. */
@@ -134,7 +166,8 @@ export class WatchIndexPublisher {
    for(;offset<object.bytes.length;){await this.pending();const part=object.bytes.subarray(offset,offset+65536);this.http.requestGuard?.();await this.store.consumeUploadReplay(object.oid,object.bytes.length,savedReceipt?.durableOffset??0,offset,part.length);const r=await this.http.putPart(object.oid,offset,reservation.reservationId,digest([plan.requestId,object.oid,offset]).slice(0,32),part);await this.http.servicePin!.receipt(this.crypto,r.receipt,this.http.scope,object.oid,object.bytes.length,this.now());if(r.durableOffset!==offset+part.length||r.receipt.body.durableOffset!==r.durableOffset)throw Error('offset_conflict');offset=r.durableOffset;await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,r.receipt);}
    const complete=await this.http.json('POST','/objects/'+encodeURIComponent(object.oid)+'/complete',{scope:this.http.scope,reservationId:reservation.reservationId,requestId:digest([plan.requestId,'complete',object.oid]).slice(0,32),totalBytes:object.bytes.length});await this.http.servicePin!.receipt(this.crypto,complete.receipt,this.http.scope,object.oid,object.bytes.length,this.now(),true);await this.store.confirmUploadReceipt(plan.requestId,object.oid,object.bytes.length,complete.receipt);
   }after=page.at(-1)!.oid;}
-  let refsAfter='';for(;;){const page=await this.store.uploadPage(plan.requestId,refsAfter,1);if(!page.length)break;for(const item of page)if(item.oid.startsWith('state-refs:')){await this.pending();await this.http.json('POST','/state-refs',parseCanonicalJson(item.bytes));}refsAfter=page.at(-1)!.oid;}
+  // 25.9: every segment table is registered before any parent that lists it.
+  for(const parents of [false,true]){let refsAfter='';for(;;){const page=await this.store.uploadPage(plan.requestId,refsAfter,1);if(!page.length)break;for(const item of page)if(item.oid.startsWith('state-refs:')){const refs=parseCanonicalJson(item.bytes);if((refs?.body?.segmentOids?.length>0)!==parents)continue;await this.pending();await this.http.json('POST','/state-refs',refs);}refsAfter=page.at(-1)!.oid;}}
   await this.pending();let result;try{result=await this.http.publish(plan.request);}catch(error){
    if(error instanceof SyncV2Error&&error.code==='ref_conflict'){const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId===plan.requestId){const next=copy(before);next.cloud.pendingPublish.phase='conflicted';await this.store.publicationUpdate(before,next);}}throw error;
   }return this.accept(plan,result);
