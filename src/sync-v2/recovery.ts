@@ -6,7 +6,8 @@ import type {Resource} from '@podjs/framework/resource-journal';
 import {canonical,digest,jsonBytes,parseCanonicalJson,bytes,hexId,oid,exact,uint,nextD64,compareD64,type Kind} from './protocol';
 import {toWire} from './business';
 import {checkCapture,type Capture,type SyncState} from './state';
-import type {WatchProjectionStore,LocalCipher} from './store';
+import {chunkedValues,INLINE_VALUE_BYTES,type WatchProjectionStore,type LocalCipher} from './store';
+import {CHUNKED_REF_KEY,chunkedRef} from '@podjs/framework/chunked-aead';
 import type {WatchSpaceStore} from './space-store';
 import {SEVEN_DAYS} from './eviction';
 export type RecoveryValue={kind:Kind;value:Record<string,any>;bodyRefs:string[]};
@@ -47,8 +48,17 @@ export function recoveryDelta(local:Record<string,RecoveryValue>,cloud:Record<st
 export class WatchRecovery {
  constructor(readonly projection:WatchProjectionStore,readonly cache:WatchSpaceStore,readonly ports:RecoveryPort){}
  async setKeep(enabled:boolean){const state=await this.projection.readState();await this.projection.controlUpdate(state,{...state,keepDiscardedLocalChanges7Days:enabled});}
- private async seal(header:any,value:any):Promise<RecoveryCopy>{const sealed=JSON.parse(await this.ports.cipher.seal(canonical(header),value));if(typeof sealed.nonceBase64!=='string'||typeof sealed.ciphertextBase64!=='string')throw Error('invalid_local_cipher');return {copyId:header.copyId,header,nonce:sealed.nonceBase64,ciphertext:sealed.ciphertextBase64};}
- async read(copy:RecoveryCopy):Promise<RecoveryDelta>{hexId(copy.copyId,32);if(copy.header.copyId!==copy.copyId||copy.header.domain!=='wrss.sync.v2/local-recovery'||copy.header.binding!==this.cache.binding)throw Error('authentication_required');return this.ports.cipher.open(canonical(copy.header),canonical({nonceBase64:copy.nonce,ciphertextBase64:copy.ciphertext}));}
+ /** N1: a delta above one AEAD block (a long note) is stored as chunk rows
+  * owned by its copyId; the copy in state keeps only a sealed small ref. */
+ private chunks(){return chunkedValues(this.cache.journal.db,this.ports.cipher,this.cache.binding+'#recovery');}
+ private async seal(header:any,value:any,statements:Statement[]=[]):Promise<RecoveryCopy>{const raw=jsonBytes(value);let sealedValue=value;
+  if(raw.length>INLINE_VALUE_BYTES){const store=this.chunks(),ref=await store.write(header.copyId,'',canonical(header),raw);statements.push(...store.guard(ref));sealedValue={[CHUNKED_REF_KEY]:ref};}
+  const sealed=JSON.parse(await this.ports.cipher.seal(canonical(header),sealedValue));if(typeof sealed.nonceBase64!=='string'||typeof sealed.ciphertextBase64!=='string')throw Error('invalid_local_cipher');return {copyId:header.copyId,header,nonce:sealed.nonceBase64,ciphertext:sealed.ciphertextBase64};}
+ async read(copy:RecoveryCopy):Promise<RecoveryDelta>{hexId(copy.copyId,32);if(copy.header.copyId!==copy.copyId||copy.header.domain!=='wrss.sync.v2/local-recovery'||copy.header.binding!==this.cache.binding)throw Error('authentication_required');const value=await this.ports.cipher.open(canonical(copy.header),canonical({nonceBase64:copy.nonce,ciphertextBase64:copy.ciphertext})),ref=chunkedRef(value);
+  if(!ref)return value;if(ref.owner!==copy.copyId||ref.version!=='')throw Error('authentication_required');return parseCanonicalJson(await this.chunks().read(ref,canonical(copy.header)));}
+ /** Chunk rows of copies no longer named by a copy or an edit pin of `state`. */
+ private sweep(state:SyncState):Statement{const keep=[...new Set([...(state.recoveryCopies??[]).map(c=>c.copyId),...(state.recoveryEditPins??[]).map(p=>p.copy.copyId)])];
+  return {sql:'DELETE FROM podjs_sql_value_chunks WHERE binding=?'+(keep.length?' AND owner NOT IN ('+keep.map(()=>'?').join(',')+')':''),params:[this.cache.binding+'#recovery',...keep]};}
  private async checkRecords(state:SyncState){
   const copies=state.recoveryCopies??[],pins=state.recoveryPins??[],ids=new Set<string>();if(copies.length!==pins.length)throw Error('recovery_inconsistent');
   for(const c of copies){hexId(c.copyId,32);if(ids.has(c.copyId)||c.copyId!==c.header.copyId)throw Error('recovery_inconsistent');ids.add(c.copyId);const pin=pins.filter(p=>p.copyId===c.copyId);if(pin.length!==1||pin[0].expiresAtMillis!==c.header.expiresAtMillis||c.header.expiresAtMillis!==c.header.createdAtMillis+SEVEN_DAYS)throw Error('recovery_inconsistent');const delta=await this.read(c);if(canonical(delta.bodyRefs)!==canonical(pin[0].bodyRefs))throw Error('recovery_inconsistent');}
@@ -76,11 +86,11 @@ export class WatchRecovery {
      files.push({oid:source.oid,path,offset:at,length,storedBytes:data.length});
     }if(source.oid.split(':sha256:')[1]!==hash.finish())throw Error('hash_mismatch');
    }
-   const header={domain:'wrss.sync.v2/local-recovery',version:2,binding:this.cache.binding,copyId,createdAtMillis:now,expiresAtMillis:now+SEVEN_DAYS,localChangeRevision:before.localChangeRevision,accountOid:input.capture.accountOid},copy=await this.seal(header,delta);
+   const header={domain:'wrss.sync.v2/local-recovery',version:2,binding:this.cache.binding,copyId,createdAtMillis:now,expiresAtMillis:now+SEVEN_DAYS,localChangeRevision:before.localChangeRevision,accountOid:input.capture.accountOid},chunkGuards:Statement[]=[],copy=await this.seal(header,delta,chunkGuards);
    if(canonical(await this.read(copy))!==canonical(delta))throw Error('storage_error');
    // Body files are durable before state CAS. Uncommitted files carry no pin.
    next.recoveryCopies.push(copy);next.recoveryPins.push({copyId,bodyRefs:delta.bodyRefs,expiresAtMillis:header.expiresAtMillis});next.recoveryClock=now;
-   const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
+   const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
    await this.projection.controlUpdate(before,next,statements);committed=true;return copy;
   }finally{await this.cache.unstage(resources);await release();if(!committed)try{await this.cache.collect();}catch{}}
  }
@@ -91,7 +101,7 @@ export class WatchRecovery {
   const expired=(before.recoveryCopies??[]).filter(c=>c.header.expiresAtMillis<=trustedNow),ids=new Set(expired.map(c=>c.copyId));
   const next={...before,recoveryClock:trustedNow,recoveryCopies:(before.recoveryCopies??[]).filter(c=>!ids.has(c.copyId)),recoveryPins:(before.recoveryPins??[]).filter(p=>!ids.has(p.copyId))};
   const statements:Statement[]=[];for(const id of ids){statements.push(this.cache.journal.detach('recovery:'+id),{sql:'DELETE FROM podjs_resource_rows WHERE binding=? AND id=?',params:[this.cache.binding,'recovery:'+id]});}
-  await this.projection.controlUpdateStable(before,next,statements);await this.releaseAcknowledgedEdits();const freed=await this.cache.collect();return {purged:expired.length,...freed};
+  statements.push(this.sweep(next));await this.projection.controlUpdateStable(before,next,statements);await this.releaseAcknowledgedEdits();const freed=await this.cache.collect();return {purged:expired.length,...freed};
  }
  /** Explicit user restore creates new pending edits under the current account.
   * The prepare callback returns SQL only; it must not mutate before the CAS. */
@@ -127,7 +137,8 @@ export class WatchRecovery {
    const check=async()=>{if(canonical(before)!==canonical(await this.projection.readStableState()))throw Error('choice_stale');};
    let proof:{expiresAtMillis:number};try{proof=await this.ports.acknowledge(await this.read(pin.copy),ref=>this.readEditBody(pin.editId,ref),check);}catch{continue;}
    const current=this.ports.trustedNow();if(current===null||!Number.isSafeInteger(current)||current<now||!Number.isSafeInteger(proof.expiresAtMillis)||current>=proof.expiresAtMillis)continue;
-   await this.projection.controlUpdateStable(before,{...before,recoveryEditPins:before.recoveryEditPins.filter(p=>p.editId!==pin.editId)},[
+   const unpinned={...before,recoveryEditPins:before.recoveryEditPins.filter(p=>p.editId!==pin.editId)};
+   await this.projection.controlUpdateStable(before,unpinned,[this.sweep(unpinned),
     this.cache.journal.detach('edit-recovery:'+pin.editId),{sql:'DELETE FROM podjs_resource_rows WHERE binding=? AND id=?',params:[this.cache.binding,'edit-recovery:'+pin.editId]},
    ]);released++;
   }return {released};

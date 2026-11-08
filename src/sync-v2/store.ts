@@ -9,14 +9,22 @@ import {WatchEquivalentLegacy} from './legacy-store';
 import {updateRadixIndex,type RadixRow} from '@podjs/framework/radix-index';
 import {encodeBase64,base64ToBytes} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
+import {CHUNKED_AEAD_BLOCK_BYTES,CHUNKED_REF_KEY,SQL_CHUNKED_VALUE_SCHEMA,SqlChunkedValues,chunkedRef,type AeadBlockPort,type ChunkedValueRef} from '@podjs/framework/chunked-aead';
 import {readBoundedKeysetBatch,commitSqlCas,captureSqlBasis,stableSqlTriggers,checkD64,nextD64,compareD64,type ProjectionSql,type Statement} from '@podjs/framework/sql-projection';
-import {canonical,canonicalLegacy,jsonBytes,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
+import {canonical,canonicalLegacy,jsonBytes,parseCanonicalJson,digest,entityKey,hexId,validateScope,type Scope,type Kind} from './protocol';
 import {candidates} from './business';
 import {ProjectionGate} from './gate';
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
 import {initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
 /** open authenticates with an existing key; it must never persist a new key. */
-export interface LocalCipher {nativeKey?():Promise<{keyBase64:string;aadJson:boolean}>;seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>}
+export interface LocalCipher {nativeKey?():Promise<{keyBase64:string;aadJson:boolean}>;seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>;
+ /** N1: bounded single-call AES-GCM under the same key, for values stored as
+  * chunk rows (framework chunked AEAD). Without it such values are refused. */
+ blocks?:AeadBlockPort}
+/** Values above one AEAD block are stored as chunk rows, one block per row, so
+ * no single host call (AES-GCM, seal, SQL request or reply) holds a long note. */
+export const INLINE_VALUE_BYTES=CHUNKED_AEAD_BLOCK_BYTES;
+export function chunkedValues(db:ProjectionSql,cipher:LocalCipher,binding:string){if(!cipher.blocks)throw Error('object_too_large');return new SqlChunkedValues(db,cipher.blocks,binding);}
 export type SourceRecord={kind:Kind;logicalId:string;value:Record<string,any>;addedAtMillis?:number;source?:{table:string;locator:string}};
 export type ScanBinding={schema:string;descriptorPin:string;accountScope:string;capability:string};
 export interface SourcePage {rows:SourceRecord[];after:string;done:boolean}
@@ -26,7 +34,7 @@ export interface SourceReader {
  /** Reserved keyed lookup for future incremental work; never read body recipes. */
  changed(table:string,locator:string):Promise<SourceRecord[]>;
 }
-export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,
+export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AUTHENTICATED_CACHE_SCHEMA,...SQL_CHUNKED_VALUE_SCHEMA,
  `CREATE TABLE IF NOT EXISTS syncv2_apply_tree_v2(scope TEXT NOT NULL,plan_id TEXT NOT NULL,step INTEGER NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(scope,plan_id,prefix,step))`,
  ...sqlProgramRelationGuards('syncv2_apply_tree_v2','scope','plan_id','wrss_apply_tree_ready'),
  `CREATE TABLE IF NOT EXISTS syncv2_apply_work(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,id))`,
@@ -70,9 +78,29 @@ export class WatchProjectionStore {
  /** Candidate options every builder (scan, follow, choice, recovery) must share. */
  segmentOptions(){return {noteSegments:this.options.noteSegments===true};}
  constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{},readonly options:{noteSegments?:boolean}={}){
-  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
+  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
  }
  equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
+ private chunks(kind:'candidate'|'cloud-row'|'edit-base'){return chunkedValues(this.db,this.cipher,this.scopeKey+'#'+kind);}
+ /** Seals one value; above INLINE_VALUE_BYTES its blocks are written first
+  * (content-addressed version) and `statements` must commit with the row. */
+ private async sealSpilled(kind:'candidate'|'edit-base',owner:string,aad:string,value:unknown):Promise<{body:string;statements:Statement[];ref?:ChunkedValueRef}>{
+  const raw=jsonBytes(value);if(raw.length<=INLINE_VALUE_BYTES)return {body:await this.cipher.seal(aad,value),statements:this.cipher.blocks?[this.chunks(kind).keepOnly(owner,null)]:[]};
+  const store=this.chunks(kind),ref=await store.write(owner,sha256Hex(raw),aad,raw);return {body:await this.cipher.seal(aad,{[CHUNKED_REF_KEY]:ref}),statements:[...store.guard(ref),store.keepOnly(owner,ref.version)],ref};
+ }
+ private async openSpilled(kind:'candidate'|'edit-base',owner:string,aad:string,body:string){
+  const value=await this.cipher.open(aad,body),ref=chunkedRef(value);if(!ref)return value;if(ref.owner!==owner)throw Error('authentication_required');
+  return parseCanonicalJson(await this.chunks(kind).read(ref,aad));
+ }
+ private openCandidate(entity:string,body:unknown){return this.openSpilled('candidate',entity,this.aad('candidate',entity),String(body));}
+ /** Base of an unsent edit kept in state.cloud.editBases. A large base (a long
+  * note) is a chunked ref; the caller commits `statements` with the state. */
+ async editBaseEntry(entity:string,base:any){const sealed=await this.sealSpilled('edit-base',entity,this.aad('edit-base',entity),base);if(!sealed.ref)return {value:base,statements:[]};return {value:{[CHUNKED_REF_KEY]:sealed.ref},statements:sealed.statements.filter(s=>!s.sql.startsWith('DELETE'))};}
+ async editBases(state:SyncState):Promise<Record<string,any>>{const out:Record<string,any>={};for(const [id,v] of Object.entries(state.cloud?.editBases??{})){const ref=chunkedRef(v);out[id]=ref?(ref.owner!==id?(()=>{throw Error('authentication_required');})():parseCanonicalJson(await this.chunks('edit-base').read(ref,this.aad('edit-base',id)))):v;}return out;}
+ /** Drops edit-base chunk rows no longer referenced by `state`. */
+ async sweepEditBases(state:SyncState){if(!this.cipher.blocks)return;const keep=new Set(Object.values(state.cloud?.editBases??{}).map(v=>chunkedRef(v)).filter(Boolean).map(r=>r!.owner+'\0'+r!.version)),binding=this.scopeKey+'#edit-base';
+  const rows=await this.db.query('SELECT DISTINCT owner,version FROM podjs_sql_value_chunks WHERE binding=?',[binding]),drop=rows.filter(r=>!keep.has(String(r.owner)+'\0'+String(r.version)));
+  for(let at=0;at<drop.length;at+=32)await this.db.transaction(drop.slice(at,at+32).map(r=>({sql:'DELETE FROM podjs_sql_value_chunks WHERE binding=? AND owner=? AND version=?',params:[binding,r.owner,r.version]})));}
  private aad(purpose:string,id=''){return canonical({domain:'wrss.sync.v2/local-projection',version:2,scope:this.scope,libraryId:this.libraryId,purpose,id});}
  /** Reopening disabled must durably stop a previously enabled projection. */
  async initialize(){if(!this.gate.isEnabled){await stopExistingProjection(this.db);return {ddl:0,unchanged:0};}
@@ -164,7 +192,7 @@ export class WatchProjectionStore {
    if(work.phase==='remove'){
     const page=await this.db.query('SELECT entity_key FROM syncv2_candidates c WHERE scope=? AND entity_key>? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=c.scope AND k.plan_id=? AND k.entity_key=c.entity_key) ORDER BY entity_key LIMIT 32',[this.scopeKey,work.after,id]);
     if(page.length){const tree=await updateRadixIndex({read:readTree,encode:jsonBytes,hash:sha256Hex},page.map(r=>({key:String(r.entity_key),value:null,remove:true as const}))),writes=tree.writes.map(r=>({sql:'INSERT INTO syncv2_tree_nodes VALUES(?,?,?,?,?) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,r.prefix,r.hash,canonical(r.node),r.count]}));await stageTrees(writes);work.after=String(page.at(-1)!.entity_key);await checkpoint();continue;}
-    await program.append([{sql:'INSERT INTO syncv2_tree_nodes(scope,prefix,hash,body,count) SELECT scope,prefix,hash,body,count FROM syncv2_apply_tree_v2 t WHERE scope=? AND plan_id=? AND step=(SELECT MAX(newer.step) FROM syncv2_apply_tree_v2 newer WHERE newer.scope=t.scope AND newer.plan_id=t.plan_id AND newer.prefix=t.prefix) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,id]},{sql:'DELETE FROM syncv2_candidates WHERE scope=? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=syncv2_candidates.scope AND k.plan_id=? AND k.entity_key=syncv2_candidates.entity_key)',params:[this.scopeKey,id]}]);work.phase='finalize';await checkpoint();continue;
+    await program.append([{sql:'INSERT INTO syncv2_tree_nodes(scope,prefix,hash,body,count) SELECT scope,prefix,hash,body,count FROM syncv2_apply_tree_v2 t WHERE scope=? AND plan_id=? AND step=(SELECT MAX(newer.step) FROM syncv2_apply_tree_v2 newer WHERE newer.scope=t.scope AND newer.plan_id=t.plan_id AND newer.prefix=t.prefix) ON CONFLICT(scope,prefix) DO UPDATE SET hash=excluded.hash,body=excluded.body,count=excluded.count',params:[this.scopeKey,id]},{sql:'DELETE FROM syncv2_candidates WHERE scope=? AND NOT EXISTS(SELECT 1 FROM syncv2_apply_keys k WHERE k.scope=syncv2_candidates.scope AND k.plan_id=? AND k.entity_key=syncv2_candidates.entity_key)',params:[this.scopeKey,id]},{sql:'DELETE FROM podjs_sql_value_chunks WHERE binding=? AND NOT EXISTS(SELECT 1 FROM syncv2_candidates c WHERE c.scope=? AND c.entity_key=podjs_sql_value_chunks.owner)',params:[this.scopeKey+'#candidate',this.scopeKey]}]);work.phase='finalize';await checkpoint();continue;
    }
    if(work.phase==='finalize'){work.ref=await program.finish();work.phase='ready';await checkpoint();}
   }
@@ -227,8 +255,8 @@ export class WatchProjectionStore {
  /** With `maxBytes`, stops before the stored ciphertext total exceeds it (at
   * least one row), so pages of long notes are decoded one at a time. */
  async candidatePage(after='',limit=32,maxBytes=Number.POSITIVE_INFINITY){
-  this.gate.require();limit=await this.boundedLimit('SELECT length(body) AS n FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit],limit,maxBytes);if(!limit)return [];const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
-  const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.cipher.open(this.aad('candidate',String(row.entity_key)),String(row.body))});return out;
+  this.gate.require();limit=await this.boundedLimit('SELECT length(body)'+(this.cipher.blocks?'+'+this.chunks('candidate').sizeSql('entity_key'):'')+' AS n FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit],limit,maxBytes);if(!limit)return [];const rows=await this.db.query('SELECT entity_key,body,row_sequence FROM syncv2_candidates WHERE scope=? AND entity_key>? ORDER BY entity_key LIMIT ?',[this.scopeKey,after,limit]);
+  const out=[];for(const row of rows)out.push({entityKey:String(row.entity_key),rowSequence:String(row.row_sequence),candidate:await this.openCandidate(String(row.entity_key),row.body)});return out;
  }
  /** Bounded encrypted staging. active tree switches only after all rows authenticate. */
  async stageCloudRows(root:string,rows:any[],baseline:SyncState){
@@ -312,11 +340,11 @@ export class WatchProjectionStore {
    const existing=(await this.db.query('SELECT entity_key FROM syncv2_identity_map WHERE local_library=? AND repo=? AND kind=? AND logical_id=?',mapKey))[0];if(existing&&existing.entity_key!==entity)throw Error('identity_conflict');
    if(row.source)statements.push({sql:'INSERT INTO syncv2_source_map VALUES(?,?,?,?) ON CONFLICT(scope,source_table,locator) DO UPDATE SET entity_key=excluded.entity_key WHERE entity_key IS NOT excluded.entity_key',params:[this.scopeKey,row.source.table,row.source.locator,entity]});
    const prior=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];
-   const priorValue=prior?await this.cipher.open(this.aad('candidate',entity),String(prior.body)):null;
+   const priorValue=prior?await this.openCandidate(entity,prior.body):null;
    if(!force&&priorValue&&canonical(priorValue)===canonical(candidate))continue;
    // rc7 25.3: a local deletion ends the note life in the same transaction.
    if(row.kind==='note'&&candidate.state.payload.deleted===true&&priorValue&&priorValue.state.payload.deleted!==true)statements.push(await this.noteBindingStatement(entity,{revision:null,life:'deleted'}));
-   const sealed=await this.cipher.seal(this.aad('candidate',entity),candidate);total+=sealed.length;
+   const spilled=await this.sealSpilled('candidate',entity,this.aad('candidate',entity),candidate),sealed=spilled.body;total+=sealed.length;statements.push(...spilled.statements);
    if(total>(rows.length===1?LONG_CANDIDATE_PAGE:384*1024))throw Error('page_too_large');
    treeChanges.push({key:entity,value:{candidateHash:sha256Hex(jsonBytes(sealed)),rowSequence:sequence,addedAtMillis:candidate.addedAtMillis}});
    statements.push({sql:'INSERT OR IGNORE INTO syncv2_identity_map VALUES(?,?,?,?,?,2)',params:[...mapKey,entity]},
@@ -353,7 +381,7 @@ export class WatchProjectionStore {
  }
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
- async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.cipher.open(this.aad('candidate',entity),String(row.body)):null;}
+ async readCandidate(entity:string){this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_candidates WHERE scope=? AND entity_key=?',[this.scopeKey,entity]))[0];return row?this.openCandidate(entity,row.body):null;}
  /** No business apply or ACK. Legacy data is an encrypted shadow journal. */
  async receiveLegacy(input:{peer:string;version:13|14;cursor:string;entityKeys:string[];body:unknown;removedEntityKeys?:string[];bodyRefsByEntity?:Record<string,string[]>;identitiesByEntity?:Record<string,{kind:Kind;logicalId:string}>},affected:string[]|null){
   const state=await this.readState();nextD64(state.stateVersion);const inboxKey=canonical([input.peer,input.version,input.cursor]),body=canonicalLegacy(input.body),retained={...input,body,bodyEncoding:'legacy-json'},hash=digest(retained),old=(await this.db.query('SELECT input_hash FROM syncv2_legacy_inbox WHERE scope=? AND inbox_key=?',[this.scopeKey,inboxKey]))[0];

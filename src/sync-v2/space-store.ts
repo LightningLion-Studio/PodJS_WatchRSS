@@ -3,6 +3,7 @@ import {ContentFiles} from '@podjs/framework/content-files';
 import type {ProjectionSql,Statement as typeStatement} from '@podjs/framework/sql-projection';
 import {canonical,digest,jsonBytes,parseCanonicalJson,nextD64,hexId,checkD64,uint} from './protocol';
 import type {LocalCipher} from './store';
+import {SQL_CHUNKED_VALUE_SCHEMA} from '@podjs/framework/chunked-aead';
 import {evictionSort,type EvictionItem} from './eviction';
 export type SpaceRound={round:string;controller:string};
 export type Examined={entityKey:string;version:string;validUntil:number|null};
@@ -18,6 +19,7 @@ export class WatchSpaceStore {
   {sql:'CREATE TABLE IF NOT EXISTS sync2_space_round(binding TEXT PRIMARY KEY,round TEXT NOT NULL,controller TEXT NOT NULL,active INTEGER NOT NULL CHECK(active IN (0,1)))'},
   {sql:"INSERT OR IGNORE INTO sync2_space_round VALUES(?,'0','',0)",params:[this.binding]},
   {sql:'CREATE TABLE IF NOT EXISTS sync2_space_examined(binding TEXT NOT NULL,entity_key TEXT NOT NULL,round TEXT NOT NULL,version TEXT NOT NULL,valid_until INTEGER,PRIMARY KEY(binding,entity_key))'},
+  ...SQL_CHUNKED_VALUE_SCHEMA.map(sql=>({sql})),
  ]);}
  aad(id:string){return canonical({domain:'wrss.sync.v2/space',binding:this.binding,id});}
  seal(id:string,value:CachedBody){if(jsonBytes(value).length>8192)throw Error('space_metadata_limit');return this.cipher.seal(this.aad(id),value);}

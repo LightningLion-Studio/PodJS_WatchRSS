@@ -115,27 +115,29 @@ P3B live storage/eviction acceptance uses `run-live-p3b.sh`, the owned AVD
 See `docs/sync-v2-space.md` for the full invocation and negative cases. The new
 runner never reads or modifies the original 18942 fixture or service.
 
-C7 review F2 memory probe (synthetic loopback server, owned emulator only):
+C7 F2/N1 memory probe (synthetic loopback server, owned emulator only):
 
 ```sh
-ANDROID_SDK_ROOT=... bash tests/sync-v2/emulator/run-c7-memory.sh \
+ANDROID_SDK_ROOT=... WRSS_C7_NOTE_CHARS=72222 WRSS_C7_READER_BUDGET=1048576 bash tests/sync-v2/emulator/run-c7-memory.sh \
   <framework-worktree> <emulator-serial> <evidence-dir> \
-  1:publish:32:flush 1:pull:24 20:publish:32:flush 20:pull:24
+  1:publish:32:flush 1:pull:48:flush:180000
 ```
 
-Each run is `notes:mode:limitMiB[:flush]` and starts a new instrumentation
-process. `publish` scans N long notes (`WRSS_C7_NOTE_CHARS`, default 36000 CJK
-characters per field) and prepares; `flush` also uploads after resetting the
-synthetic account. `pull` reads that account into a fresh database, then
-prepares one unrelated edit. The guest memory limit is the QuickJS runtime
+Each run is `notes:mode:limitMiB[:flush[:oversizeChars]]` and starts a new
+instrumentation process. `publish` seeds N long notes into `memo_notes`
+(`WRSS_C7_NOTE_CHARS` CJK characters per text field; 72222 is B of about 650 KB,
+232900 about 2 MiB), scans them through `SqlBusinessSource` and prepares;
+`flush` also uploads after resetting the synthetic account. `pull` follows that
+account into a fresh database (pull, reassembly and apply to `memo_notes`),
+edits the tail of note 0, scans and prepares; `flush` uploads the edit.
+`oversizeChars` first adds a phone-written note `big`; writers are capped at the
+2 MiB budget, so `WRSS_C7_READER_BUDGET` lowers the watch reader budget below it
+and the watch must quarantine it (F1). The guest memory limit is the QuickJS runtime
 limit; out-of-memory is recorded, not asserted. `peakHwmKiB` is the process
 VmHWM. The server (`c7-memory-server.ts`) generates one synthetic key per
 process and writes the fixture with mode 0600; `WRSS_C7_SERVER_FIXTURE` reuses a
 running server so two checkouts can share one account.
 
-Product limits the probe works around and reports: `PodDeviceServices` rejects
-`crypto.aesGcm*` input above 256 KiB, `localProjectionCipher` rejects plaintext
-above 768 KiB, and one background host request is at most 1 MiB. The Java test
-seals larger local values itself (`oversizedLocalCipherCalls`) and the guest
-lifts the 768 KiB check (`oversizedSeals`), so measurements are of guest memory,
-not of product acceptance.
+The guest uses the product `localProjectionCipher`, and local AES-GCM runs in
+the product `PodDeviceServices` (256 KiB per call). The background runtime keeps
+its 1 MiB request and reply bounds. Nothing is bypassed (N1).

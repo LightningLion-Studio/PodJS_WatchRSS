@@ -15,6 +15,15 @@ import {ARTICLE_REGISTER_FEATURE,readArticleRegisters} from '../cloud/article-re
 import {articleProjectionSignature} from '../sync/article-register-store';
 import {rssSourceKey,rssArticleId} from '../cloud/rss-identity';
 const upsert=(table:string,columns:string[],values:unknown[],key:string[]):Statement=>({sql:`INSERT INTO ${table}(${columns}) VALUES(${columns.map(()=>'?')}) ON CONFLICT(${key}) DO UPDATE SET ${columns.filter(c=>!key.includes(c)).map(c=>c+'=excluded.'+c)}`,params:values});
+/** N1: a long note's text crosses the bridge as bounded appends inside the
+ * same prepared program, never as one statement holding the whole note. */
+const NOTE_TEXT_PIECE=64*1024;
+function pieces(text:string){const out:string[]=[];for(let at=0;at<text.length;){let end=Math.min(text.length,at+NOTE_TEXT_PIECE);const c=text.charCodeAt(end-1);if(end<text.length&&c>=0xd800&&c<=0xdbff)end--;out.push(text.slice(at,end));at=end;}return out;}
+export function noteUpsert(v:any):Statement[]{
+ const texts:[string,string][]=[['markdown',v.markdown],['plain_text',v.plainText],['base_markdown',v.baseMarkdown]],long=texts.reduce((n,[,t])=>n+t.length,0)>NOTE_TEXT_PIECE;
+ const head=upsert('memo_notes','note_id folder_id title markdown plain_text content_hash base_content_hash base_markdown pinned created_at updated_at modified_by deleted deleted_at'.split(' '),[v.noteId,v.folderId,v.title,long?'':v.markdown,long?'':v.plainText,v.contentHash,v.baseContentHash,long?'':v.baseMarkdown,+v.pinned,v.createdAt,v.updatedAt,v.modifiedBy,+v.deleted,v.deletedAt],['note_id']);
+ if(!long)return [head];const out=[head];for(const [column,text] of texts)for(const part of pieces(text))out.push({sql:`UPDATE memo_notes SET ${column}=${column}||? WHERE note_id=?`,params:[part,v.noteId]});return out;
+}
 export class WatchAccountBusinessSql implements AccountBusinessPort {
  constructor(private readonly db:ProjectionSql,private readonly projection:WatchProjectionStore,private readonly scope:Scope,private readonly idKey:Uint8Array,private readonly closures:Pick<WatchBusinessClosure,'recoveryValue'>,readonly verifyBody:AccountBusinessPort['verifyBody'],readonly reserve:AccountBusinessPort['reserve']){}
  recoveryValue(id:string){return this.closures.recoveryValue(id);}
@@ -49,7 +58,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    // The authenticated v2 candidate remains byte-for-byte unchanged.
    if(r.kind==='article'&&!Object.hasOwn(v,'registerSources')){if(!Object.hasOwn(v,'contentHash')||!Object.hasOwn(v,'updatedAt'))throw Error('closure_incomplete');v=readArticleRegisters(JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v}),true).value;}
    if(r.kind==='note'){
-    requireTable('memo_notes');statements.push(upsert('memo_notes','note_id folder_id title markdown plain_text content_hash base_content_hash base_markdown pinned created_at updated_at modified_by deleted deleted_at'.split(' '),[v.noteId,v.folderId,v.title,v.markdown,v.plainText,v.contentHash,v.baseContentHash,v.baseMarkdown,+v.pinned,v.createdAt,v.updatedAt,v.modifiedBy,+v.deleted,v.deletedAt],['note_id']));
+    requireTable('memo_notes');statements.push(...noteUpsert(v));
     if(v.noteConflicts){requireTable('note_merge_conflicts');requireTable('syncv2_note_resolutions');statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[v.noteId]},{sql:'DELETE FROM syncv2_note_resolutions WHERE note_id=?',params:[v.noteId]});for(const c of v.noteConflicts.records){statements.push(upsert('note_merge_conflicts','conflict_id note_id base_markdown local_markdown remote_markdown remote_device_id created_at'.split(' '),[c.conflictId,c.noteId,c.baseMarkdown,c.localMarkdown,c.remoteMarkdown,c.remoteDeviceId,c.createdAt],['conflict_id']),upsert('syncv2_note_resolutions',['note_id','conflict_id','resolved_at'],[v.noteId,c.conflictId,c.resolvedAt],['note_id','conflict_id']));}}
    }else if(r.kind==='folder'){
     requireTable('memo_folders');statements.push(upsert('memo_folders','folder_id name sort_order updated_at modified_by deleted deleted_at'.split(' '),[v.folderId,v.name,v.sortOrder,v.updatedAt,v.modifiedBy,+v.deleted,v.deletedAt],['folder_id']));

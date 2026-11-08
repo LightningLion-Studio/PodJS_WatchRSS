@@ -70,8 +70,8 @@ export class WatchAccountControl {
  }
  private manifest(row:any){return Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,row[k]]));}
  private model(rows:RecordRow[]){return Object.fromEntries(rows.map(r=>[r.entityKey,{identity:r.candidate.meta.logicalId,...r.candidate.meta.payload,...r.candidate.state.payload}]));}
- private merge(s:SyncState,local:RecordRow[],cloud:RecordRow[]){
-  const localMap=new Map(local.map(r=>[r.entityKey,r])),l=this.model(local),c=this.model(cloud),base=s.editBase.accountOid===s.account?.oid?clone(c):clone(s.cloud?.editBases??{}),creates=new Set<string>(s.cloud?.editCreates??[]),ops:any[]=[];
+ private merge(s:SyncState,local:RecordRow[],cloud:RecordRow[],editBases:Record<string,any>){
+  const localMap=new Map(local.map(r=>[r.entityKey,r])),l=this.model(local),c=this.model(cloud),base=s.editBase.accountOid===s.account?.oid?clone(c):clone(editBases),creates=new Set<string>(s.cloud?.editCreates??[]),ops:any[]=[];
   for(const id of new Set([...Object.keys(l),...Object.keys(base)])){
    if(canonical(l[id]??null)===canonical(base[id]??null))continue;
    if(!base[id]&&canonical(l[id]??null)===canonical(c[id]??null))continue;
@@ -92,7 +92,7 @@ export class WatchAccountControl {
   const cp=await this.o.store.checkpoint();if(cp?.phase!=='complete'||!sameBusinessRevision(cp.businessRevision,state.businessRevision))throw Error('projection_incomplete');
   const capture=captureChoice(state,currentAccount(state)),local=await this.local(),cloud=await this.cloud(state),cloudMap=new Map(cloud.map(r=>[r.entityKey,r]));
   for(const entry of local){const existing=cloudMap.get(entry.entityKey);if(this.o.resolveBody)entry.manifest=await this.o.resolveBody(entry,existing);else if(existing&&canonical(entry.candidate.meta.payload)===canonical(existing.candidate.meta.payload))entry.manifest=existing.manifest;}
-  let merge=state.pendingChoice!.inboxKeys.length?{canMerge:false,reason:'missing_base'}:this.merge(state,local,cloud),mergedRows:RecordRow[]|undefined,release:(()=>Promise<void>)|undefined;
+  let merge=state.pendingChoice!.inboxKeys.length?{canMerge:false,reason:'missing_base'}:this.merge(state,local,cloud,await this.o.store.editBases(state)),mergedRows:RecordRow[]|undefined,release:(()=>Promise<void>)|undefined;
   let applyPlan:import('@podjs/framework/sql-program').SqlProgramRef|undefined;
   if(merge.canMerge){try{mergedRows=this.mergedRows(merge.tree,local,cloud,await this.o.store.preparationClock(state,this.now()));const preflight=await this.prepareApply(state,mergedRows);release=preflight.release;applyPlan=preflight.plan;}catch(error){if(['choice_stale','projection_preparing'].includes((error as Error).message))throw error;const message=String(error);merge={canMerge:false,reason:/storage|quota/.test(message)?'storage_pressure':/content|closure|body_revision/.test(message)?'missing_content':'unsupported_feature'};}}
 
@@ -167,7 +167,7 @@ export class WatchAccountControl {
  async chooseMerge(proof:object,requestId:string){return this.choose(proof,requestId,true);}
  private async choose(proof:object,requestId:string,merge:boolean){
   await this.gate('choice');const {p,s}=await this.checked(proof);if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(merge&&p.legacyKey){if(!p.legacyMerge)throw Object.assign(Error('merge_unavailable'),{reason:'missing_base'});const result=await this.o.store.equivalentLegacy().resolveLegacyMerge(p.legacyKey,p.legacyMerge);await this.closePreview(proof);return result;}if(s.cloud?.pendingCloudChoice)throw Error('publication_pending');let rows=p.local;
-  if(merge){if(!p.merge.canMerge)throw Object.assign(Error('merge_unavailable'),{reason:p.merge.reason});const checked=this.merge(s,p.local,p.cloud);if(!checked.canMerge||canonical(checked)!==canonical(p.merge))throw Object.assign(Error('merge_unavailable'),{reason:checked.reason??'missing_base'});
+  if(merge){if(!p.merge.canMerge)throw Object.assign(Error('merge_unavailable'),{reason:p.merge.reason});const checked=this.merge(s,p.local,p.cloud,await this.o.store.editBases(s));if(!checked.canMerge||canonical(checked)!==canonical(p.merge))throw Object.assign(Error('merge_unavailable'),{reason:checked.reason??'missing_base'});
    rows=p.mergedRows!;if(!rows)throw Error('merge_unavailable');
   }
   for(const r of rows)if(['article','book','asset'].includes(r.candidate.meta.kind)&&!r.manifest?.recipeOid)throw Error('closure_incomplete');
