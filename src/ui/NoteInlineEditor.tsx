@@ -83,11 +83,11 @@ export function NoteInlineEditor(props:{width:number;height:number;repository:Me
   const statusText=()=>({empty:"未填写",pending:"待保存",saving:"保存中…",saved:"已保存",error:"保存失败，请重试"}[status()]);
   return <View class="absolute inset-0 bg-black">
     <View class="absolute top-[0] left-[0] right-[0] h-[56] bg-gradient-to-b from-[#000000] via-[#000000e6] to-transparent items-start justify-center flex-row">
-      <View class="w-[48] h-[48] mr-[8] items-center justify-center"><Image src={historyState().undo?"../assets/icons/note-undo.svg":"../assets/icons/note-undo-disabled.svg"} class="w-[24] h-[24]"/><View onPress={()=>changeHistory("undo")} focusable={historyState().undo} accessibilityRole="button" accessibilityLabel="撤销" class="absolute inset-0"/></View>
-      <View class="w-[48] h-[48] items-center justify-center"><Image src={historyState().redo?"../assets/icons/note-redo.svg":"../assets/icons/note-redo-disabled.svg"} class="w-[24] h-[24]"/><View onPress={()=>changeHistory("redo")} focusable={historyState().redo} accessibilityRole="button" accessibilityLabel="重做" class="absolute inset-0"/></View>
+      <View class="w-[48] h-[48] mr-[8] items-center justify-center"><Image src={historyState().undo?"../assets/icons/note-undo.svg":"../assets/icons/note-undo-disabled.svg"} class="w-[24] h-[24]"/><View onPress={()=>changeHistory("undo")} focusable={historyState().undo} accessibilityRole="button" accessibilityLabel="撤销" class="absolute inset-0 active:scale-96"/></View>
+      <View class="w-[48] h-[48] items-center justify-center"><Image src={historyState().redo?"../assets/icons/note-redo.svg":"../assets/icons/note-redo-disabled.svg"} class="w-[24] h-[24]"/><View onPress={()=>changeHistory("redo")} focusable={historyState().redo} accessibilityRole="button" accessibilityLabel="重做" class="absolute inset-0 active:scale-96"/></View>
     </View>
     <View class="absolute bottom-[0] left-[0] right-[0] h-[56] bg-gradient-to-b from-transparent via-[#000000e6] to-[#000000] flex-col items-center justify-end">
-      <View onPress={()=>void close()} focusable={!closing} accessibilityRole="button" accessibilityLabel={`关闭编辑，${statusText()}`} class="w-[48] h-[48] items-center justify-center"><Image src={status()==="error"?"../assets/icons/note-close-error.svg":"../assets/icons/close.svg"} class="w-[24] h-[24]"/></View>
+      <View onPress={()=>void close()} focusable={!closing} accessibilityRole="button" accessibilityLabel={`关闭编辑，${statusText()}`} class="w-[48] h-[48] items-center justify-center active:scale-96"><Image src={status()==="error"?"../assets/icons/note-close-error.svg":"../assets/icons/close.svg"} class="w-[24] h-[24]"/></View>
     </View>
   </View>;
 }

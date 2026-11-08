@@ -34,7 +34,7 @@ export function BiliSideMenu(props: { width: number; height: number; active: () 
     <View class="absolute top-[0] bottom-[0] rounded-[18] bg-[#1c1f21] overflow-hidden" style={{ insetL: props.width - menuWidth() + offset() * menuWidth(), width: menuWidth() }} accessibilityLabel="快速入口">
       <Text class="absolute left-[6] right-[6] top-[6] h-[20] overflow-hidden text-[17px] leading-[20] text-[#f5f5f5]">快速入口</Text>
       {props.items().map((item, index) => <View onPress={item.enabled ? () => run(item) : undefined} focusable={item.enabled} accessibilityRole="button" accessibilityLabel={item.label}
-        class="absolute left-[6] right-[6] h-[44] rounded-[16] bg-[#23272a] items-center justify-center" style={{ insetT: 6 + 20 + 6 + index * 50, opacity: item.enabled ? 1 : .45 }}>
+        class="absolute left-[6] right-[6] h-[44] rounded-[16] bg-[#23272a] items-center justify-center active:scale-96" style={{ insetT: 6 + 20 + 6 + index * 50, opacity: item.enabled ? 1 : .45 }}>
         <Text class="text-xs leading-[14] text-[#f5f5f5]">{item.label}</Text>
       </View>)}
     </View>

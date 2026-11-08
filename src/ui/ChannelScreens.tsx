@@ -16,7 +16,7 @@ const measure=(text:string)=>getOps().measureText(text,20);
 const textEntry=(text:string,width:number):ScrollEntry[]=>chunkLines(measuredLines(text,width,measure,100),14,width).map(lines=>
   ({height:lines.length*14,render:()=> <Text class="absolute inset-0 text-[11px] leading-[14] text-center text-[#b6b6b6]">{lines.join("\n")}</Text>}));
 function button(label:string,width:number,action:()=>void,enabled=true,danger=false):ScrollEntry {
-  return {height:48,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} class="absolute top-[0] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center" style={{width:Math.min(160,width),insetL:Math.max(0,(width-160)/2)}}><Text class={danger?"text-[17px] leading-[23] text-[#ff5252]":enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#939393]"}>{label}</Text></View>};
+  return {height:48,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} class="absolute top-[0] h-[48] rounded-[47] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{width:Math.min(160,width),insetL:Math.max(0,(width-160)/2)}}><Text class={danger?"text-[17px] leading-[23] text-[#ff5252]":enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#939393]"}>{label}</Text></View>};
 }
 export function ChannelDetailScreen(props:Base&{onSettings:()=>void;onSearch:()=>void;onShare:()=>void;onMarkRead:()=>void}) {
   const entries=createMemo(()=>{
@@ -33,7 +33,7 @@ export function ChannelDetailScreen(props:Base&{onSettings:()=>void;onSearch:()=
   return <ScrollEntries height={props.height} entries={entries()} gap={4} ref={props.ref}/>;
 }
 function dangerRow(label:string,action:()=>void,enabled:boolean):ScrollEntry {
-  return {height:52,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} class="absolute inset-0 rounded-[47] bg-[#2a2a2a]">
+  return {height:52,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} class="absolute inset-0 rounded-[47] bg-[#2a2a2a] active:scale-96">
     <Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#e54d4d]" style={{opacity:enabled?1:.6}}>{label}</Text>
     <Image src="../assets/icons/delete-outline.svg" class="absolute right-[10] top-[11] w-[30] h-[30]" style={{opacity:enabled?1:.6}}/>
   </View>};

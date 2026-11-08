@@ -42,7 +42,7 @@ export function OnboardingCustomizationScreen(props:{width:number;height:number;
    <Text class="absolute left-[10] text-xs leading-[14] text-[#b6b6b6]" style={{insetT:height+4,width:props.width-10-end,height:details.length*14}}>{details.join('\n')}</Text>
   </View>};
  };
- const stepButton=(label:string,plus:boolean,enabled:boolean,onPress:()=>void)=> <View accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled:!enabled}} focusable={enabled} onPress={()=>{if(enabled)onPress();}} class="absolute top-[0.5] w-[20] h-[20] rounded-[9999] bg-[#444444]" style={plus?{insetR:0}:{insetL:0}}>
+ const stepButton=(label:string,plus:boolean,enabled:boolean,onPress:()=>void)=> <View accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled:!enabled}} focusable={enabled} onPress={()=>{if(enabled)onPress();}} class="absolute top-[0.5] w-[20] h-[20] rounded-[9999] bg-[#444444] active:scale-96" style={plus?{insetR:0}:{insetL:0}}>
   <View class="absolute left-[5] top-[9.5] w-[10] h-[1] bg-[#f5f5f5]" style={{opacity:enabled?1:.38}}/>
   {plus&&<View class="absolute left-[9.5] top-[5] w-[1] h-[10] bg-[#f5f5f5]" style={{opacity:enabled?1:.38}}/>}
  </View>;
@@ -55,7 +55,7 @@ export function OnboardingCustomizationScreen(props:{width:number;height:number;
  const entries=createMemo<ScrollEntry[]>(()=>[
   spacer(10),{height:29,bounds:centred(getOps().measureText('自定义',5),29),render:()=> <Text class="absolute inset-0 text-2xl leading-[29] text-[#f5f5f5] text-center">自定义</Text>},spacer(8),
   {height:hint().length*14,bounds:centred(Math.min(props.width,208),hint().length*14),render:()=> <Text class="absolute text-xs leading-[14] text-[#b6b6b6] text-center" style={{insetL:(props.width-Math.min(props.width,208))/2,width:Math.min(props.width,208),height:hint().length*14}}>{hint().join('\n')}</Text>},spacer(12),
-  setting('阅读主题','切换浅色或深色阅读界面',20,()=> <View focusable accessibilityLabel="切换阅读主题" onPress={props.onToggleReaderTheme} class="relative w-[20] h-[20] rounded-[9999] bg-[#ff6026]"><View class="absolute left-[2] top-[2] w-[16] h-[16] rounded-[9999]" style={{bgColor:props.readerDark?'#000000':'#ffffff'}}/></View>,15),spacer(8),
+  setting('阅读主题','切换浅色或深色阅读界面',20,()=> <View focusable accessibilityLabel="切换阅读主题" onPress={props.onToggleReaderTheme} class="relative w-[20] h-[20] rounded-[9999] bg-[#ff6026] active:scale-96"><View class="absolute left-[2] top-[2] w-[16] h-[16] rounded-[9999]" style={{bgColor:props.readerDark?'#000000':'#ffffff'}}/></View>,15),spacer(8),
   setting('字体大小','调整正文阅读字号',100,()=>stepper(`${font()}sp`,false,font()>12,font()<32,()=>setFont(v=>Math.max(12,v-2)),()=>setFont(v=>Math.min(32,v+2)))),spacer(8),
   setting('使用滚轮调节音量','播放器内可用滚轮调节媒体音量',60/density,()=> <WatchSwitch accessibilityLabel="使用滚轮调节音量" checked={volume()} onChange={()=>setVolume(v=>!v)}/>,15),
   ...(volume()?[spacer(8),setting('音量调节防干扰','滚轮连续上调时先停一下，减少误触后突然过响',60/density,()=> <WatchSwitch accessibilityLabel="音量调节防干扰" checked={guard()} onChange={()=>setGuard(v=>!v)}/>,15)]:[]),spacer(8),

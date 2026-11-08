@@ -286,7 +286,7 @@ export function useInformationDocument(props: InformationDocumentProps): Informa
     documentEntries.push({height: 6 + footerHeight, render: () =>
       <View onPress={() => { if (props.active?.() ?? true) props.onBeian(); }} focusable accessibilityRole="button"
         accessibilityLabel={BEIAN_NUMBER} accessibilityState={{disabled: !(props.active?.() ?? true)}}
-        class="absolute" style={{insetL: footerLeft, width: footerWidth, insetT: 6, height: footerHeight}}>
+        class="absolute active:scale-96" style={{insetL: footerLeft, width: footerWidth, insetT: 6, height: footerHeight}}>
         <View accessibilityHidden class="absolute inset-0"><Show when={footer()} fallback={<Text class="absolute inset-0 text-xs leading-[14] text-center text-[#b6b6b6]">{BEIAN_NUMBER}</Text>}>{value =>
           <For each={value().rows}>{row => <View class="absolute left-[0] right-[0]" style={{insetT: row.top, height: row.options.heightPx / pixelScale}}><SystemTextLine options={row.options} pixelScale={pixelScale}/></View>}</For>
         }</Show></View>

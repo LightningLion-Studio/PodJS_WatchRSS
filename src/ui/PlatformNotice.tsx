@@ -55,7 +55,7 @@ export function TransparencyDialog(props:{width:number;height:number;copy:Copy&{
    rows.push({height:lines.length*20,render:()=> <Text class="absolute left-[0] right-[0] top-[0] text-sm leading-[20]" style={{textColor:ON_SURFACE}}>{lines.join('\n')}</Text>});
   }
   const pill=Math.min(160,inner()-18);
-  rows.push({height:48+4,render:()=> <View class="absolute top-[4] h-[48] rounded-[24] items-center justify-center" style={{insetL:(inner()-pill)/2,width:pill,bgColor:PRIMARY}}
+  rows.push({height:48+4,render:()=> <View class="absolute top-[4] h-[48] rounded-[24] items-center justify-center active:scale-96" style={{insetL:(inner()-pill)/2,width:pill,bgColor:PRIMARY}}
    focusable accessibilityRole="button" accessibilityLabel={props.copy.confirm} onPress={props.onConfirm}>
    <Text class="text-[17px] leading-[23] text-[#000000]">{props.copy.confirm}</Text>
   </View>});

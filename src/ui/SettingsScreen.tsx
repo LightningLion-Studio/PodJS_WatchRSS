@@ -26,22 +26,22 @@ function wrap(text:string,width:number):string[] {
 }
 const row = (label:string,detail:string,width:number,value?:string,onPress?:()=>void,disabled=false):ScrollEntry[] => {
  const lines=wrap(detail,width-10);
- return describedRows(width,{height:52,render:()=> <View onPress={disabled?undefined:onPress} focusable={!disabled&&!!onPress} class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[47] bg-[#2a2a2a]">
+ return describedRows(width,{height:52,render:()=> <View onPress={disabled?undefined:onPress} focusable={!disabled&&!!onPress} class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[47] bg-[#2a2a2a] active:scale-96">
  <Text class="absolute left-[10] right-[44] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
  <Text class={disabled?"absolute right-[10] top-[15.5] text-xs leading-[21] text-[#b6b6b6]":"absolute right-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]"}>{value??""}</Text>
  </View>},[lines]);
 };
 const stepper = (label:string,value:string,detail:string,width:number,dec:()=>void,inc:()=>void):ScrollEntry[] => [{height:70,render:()=> <View class="absolute inset-0"><View class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[47] bg-[#2a2a2a]">
  <Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>
- <View onPress={dec} focusable class="absolute right-[69] top-[14] h-[24] w-[24] rounded-full bg-[#45454a] items-center justify-center"><Text class="text-lg text-white">−</Text></View>
+ <View onPress={dec} focusable class="absolute right-[69] top-[14] h-[24] w-[24] rounded-full bg-[#45454a] items-center justify-center active:scale-96"><Text class="text-lg text-white">−</Text></View>
  <Text class="absolute right-[38] top-[18] w-[30] text-center text-xs text-white">{value}</Text>
- <View onPress={inc} focusable class="absolute right-[10] top-[14] h-[24] w-[24] rounded-full bg-[#45454a] items-center justify-center"><Text class="text-lg text-white">＋</Text></View>
+ <View onPress={inc} focusable class="absolute right-[10] top-[14] h-[24] w-[24] rounded-full bg-[#45454a] items-center justify-center active:scale-96"><Text class="text-lg text-white">＋</Text></View>
  </View><Text class="absolute left-[10] top-[56] text-xs leading-[14] text-[#b6b6b6]">{detail}</Text></View>}];
 const heading=(text:string):ScrollEntry=>({height:34,render:()=> <View class="absolute inset-0 items-center justify-center"><Text class="text-[21px] leading-[26] text-[#f5f5f5]">{text}</Text></View>});
 function aiRows(props:Props,width:number):ScrollEntry[] {
  const entry=(label:string,detail:string,value:string,route:"llm-preset"|"llm-usage"):ScrollEntry[]=>{
   const lines=watchUiLines(detail,{width:width-10,measure:t=>getOps().measureText(t,0)}),open=()=>props.onNavigate(route);
-  return describedRows(width,{height:52,render:()=> <View onPress={open} focusable class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[47] bg-[#2a2a2a]"><Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>{route==="llm-preset"?<Text class="absolute right-[10] top-[19] text-xs leading-[14] text-[#b6b6b6]">{value}</Text>:<View onPress={open} focusable class="absolute right-[10] top-[16] w-[20] h-[20] rounded-full overflow-hidden bg-[#444444]"><Text class="absolute left-[0] top-[-11] w-[20] text-[17px] leading-[21] text-center text-[#f5f5f5]">{"进\n入"}</Text></View>}</View>},[lines]);
+  return describedRows(width,{height:52,render:()=> <View onPress={open} focusable class="absolute left-[0] right-[0] top-[0] h-[52] rounded-[47] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#f5f5f5]">{label}</Text>{route==="llm-preset"?<Text class="absolute right-[10] top-[19] text-xs leading-[14] text-[#b6b6b6]">{value}</Text>:<View onPress={open} focusable class="absolute right-[10] top-[16] w-[20] h-[20] rounded-full overflow-hidden bg-[#444444] active:scale-96"><Text class="absolute left-[0] top-[-11] w-[20] text-[17px] leading-[21] text-center text-[#f5f5f5]">{"进\n入"}</Text></View>}</View>},[lines]);
  };
  const toggle=(label:string,detail:string,key:"llmEnabled"|"llmAutoSummarize"|"llmShowTokenUsage"):ScrollEntry[]=>{
   const density=getDisplayMetrics().density,lines=watchUiLines(detail,{width:width-10,measure:t=>getOps().measureText(t,0)}),labelLines=watchUiLines(label,{width:width-25-60/density,measure:t=>getOps().measureText(t,22)}),pillHeight=Math.max(52,16+labelLines.length*21);

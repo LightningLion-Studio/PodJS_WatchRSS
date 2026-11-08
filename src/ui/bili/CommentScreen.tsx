@@ -88,7 +88,7 @@ export function CommentScreen(props: BiliScreenProps & { route: Extract<BiliRout
   });
   return <View class="relative w-full bg-[#0b1211]" style={{ height: props.height }}>
     <View class="absolute left-[0] right-[0] top-[0] h-[64]">
-      <View onPress={props.onBack} focusable accessibilityLabel="返回" class="absolute left-[4] top-[8] w-[48] h-[48] items-center justify-center"><Image src="../assets/icons/bili-comment-back.svg" style={{ width: 24, height: 24 }} /></View>
+      <View onPress={props.onBack} focusable accessibilityLabel="返回" class="absolute left-[4] top-[8] w-[48] h-[48] items-center justify-center active:scale-96"><Image src="../assets/icons/bili-comment-back.svg" style={{ width: 24, height: 24 }} /></View>
       <Text class="absolute left-[56] right-[4] top-[19] text-[21px] leading-[26] text-[#f5f5f5]">{props.route.name === 'replies' ? '回复详情' : '评论'}</Text>
     </View>
     <View class="absolute left-[0] right-[0] top-[64] bottom-[0]">

@@ -19,7 +19,7 @@ export function switchRow(label: string, checked: boolean, onChange?: () => void
 }
 /** Native SettingsDangerRow: danger red label + 30dp trailing icon, 60% when disabled. */
 export function dangerEntry(label: string, icon: string, onPress?: () => void): ScrollEntry {
-  return { height: 52, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute inset-0 rounded-[47] bg-[#2a2a2a]">
+  return { height: 52, render: () => <View onPress={onPress} focusable={!!onPress} accessibilityRole="button" accessibilityLabel={label} class="absolute inset-0 rounded-[47] bg-[#2a2a2a] active:scale-96">
     <Text class="absolute left-[10] top-[15.5] text-[17px] leading-[21] text-[#e54d4d]" style={{ opacity: onPress ? 1 : .6 }}>{label}</Text>
     <Image src={icon} class="absolute right-[10] top-[11] w-[30] h-[30]" style={{ opacity: onPress ? 1 : .6 }} />
   </View> };
@@ -46,7 +46,7 @@ export function PlatformSettingsScreen(props: PlatformSettingsProps) {
            { height: 18, render: () => <Text class="absolute left-[10] right-[0] top-[4] text-xs leading-[14] text-[#b6b6b6]">刷新时抓取原文正文与图片</Text> }, spacerEntry(8)]
         : [spacerEntry(4)]),
       ...(props.showContinuePlaybackInBackground ? [switchRow("在后台继续播放", props.continuePlaybackInBackgroundEnabled, props.onToggleContinuePlaybackInBackground), spacerEntry(8)] : []),
-      { height: 65, render: () => <View onPress={() => setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] top-[0] h-[57] rounded-[16] bg-[#2a2a2a]"><Text class="absolute left-[10] right-[10] top-[8.5] text-[17px] leading-[20] text-[#f5f5f5]">{prompt}</Text></View> },
+      { height: 65, render: () => <View onPress={() => setDownload(true)} focusable accessibilityRole="button" accessibilityLabel="下载手机端app以在手机上编辑和同步内容" class="absolute left-[0] right-[0] top-[0] h-[57] rounded-[16] bg-[#2a2a2a] active:scale-96"><Text class="absolute left-[10] right-[10] top-[8.5] text-[17px] leading-[20] text-[#f5f5f5]">{prompt}</Text></View> },
       dangerEntry(loggedIn === undefined ? "读取登录状态…" : loggedIn ? "退出登录" : props.onLogin ? "登录" : "退出登录", "../assets/icons/exit-to-app.svg",
         loggedIn === undefined ? undefined : loggedIn ? () => { if(props.loggedIn()===true)void props.onLogout().catch(props.onError); } : props.onLogin ? () => { if(props.loggedIn()===false)props.onLogin?.(); } : undefined),
       spacerEntry(4),

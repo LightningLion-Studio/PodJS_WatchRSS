@@ -41,7 +41,7 @@ function formatTime(timestamp: number): string {
  * ends stay inside the circle), 8dp gaps, 17sp label, disabled text at 60%. */
 function actionEntry(width:number, label:string, action:()=>void, enabled=true, danger=false):ScrollEntry {
   const pill=Math.min(160,width-36-18);
-  return {height:48,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center" style={{insetL:(width-36-pill)/2,width:pill}}>
+  return {height:48,render:()=> <View onPress={enabled?action:undefined} focusable={enabled} accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] h-[48] rounded-[24] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{insetL:(width-36-pill)/2,width:pill}}>
     <Text class={danger?"text-[17px] leading-[23] text-[#e54d4d]":enabled?"text-[17px] leading-[23] text-[#f5f5f5]":"text-[17px] leading-[23] text-[#f5f5f599]"}>{label}</Text>
   </View>};
 }
@@ -117,7 +117,7 @@ export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
   const caption=(text:string)=>textWidthBound(text,9);
   const rows=createMemo<Array<{entry:ScrollEntry;channel?:Channel;notes?:boolean}>>(()=>[
     {entry:{height: 73, bounds:centred(Math.max(44,caption("点击进入我的")),4,65), render: () => <View class="absolute inset-0 items-center">
-      <View onPress={props.onProfile} focusable style={{insetL:(props.width-36-44)/2}} class="absolute top-[4] w-[44] h-[44] rounded-full bg-[#1c1f21] border-[#ff6026] border-[0.7] items-center justify-center">
+      <View onPress={props.onProfile} focusable style={{insetL:(props.width-36-44)/2}} class="absolute top-[4] w-[44] h-[44] rounded-full bg-[#1c1f21] border-[#ff6026] border-[0.7] items-center justify-center active:scale-96">
         <Text class="text-sm leading-[17] text-[#f5f5f5]">我</Text>
       </View>
       <View class="absolute top-[52] left-[0] right-[0] items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">点击进入我的</Text></View>
@@ -128,7 +128,7 @@ export default function HomeScreen(props: HomeScreenProps) {idleHit(3);
       : {entry:channelCard(item.channel),channel:item.channel}),
     ...(shouldShowHomeEmptyState(props.channels)?[{entry:card({title:"还没有 RSS 频道",summary:"点击下方添加你的第一个订阅源",summaryLines:1,titleSize:17})}]:[]),
     {entry:card({title:"RSS推荐",summary:"一键加入官方支持频道",onPress:props.onRecommend,summaryLines:1,titleSize:17})},
-    {entry:{height:56,bounds:centred(48,4,48),render:() => <View class="absolute inset-0 items-center"><View onPress={props.onAdd} focusable style={{insetL:(props.width-36-48)/2}} class="absolute top-[4] w-[48] h-[48] rounded-[47] bg-[#23272a] items-center justify-center"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>}},
+    {entry:{height:56,bounds:centred(48,4,48),render:() => <View class="absolute inset-0 items-center"><View onPress={props.onAdd} focusable style={{insetL:(props.width-36-48)/2}} class="absolute top-[4] w-[48] h-[48] rounded-[47] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-base leading-[17] text-[#f5f5f5]">+</Text></View></View>}},
     {entry:{height:25,bounds:centred(caption("浙ICP备2024111886号-5A"),4,17),render:() => <View onPress={props.onBeian} focusable class="absolute inset-0 items-center justify-center"><Text class="text-[9px] leading-[17] text-[#b6b6b6]">浙ICP备2024111886号-5A</Text></View>}},
   ]);
   const entries=()=>rows().map(row=>row.entry);

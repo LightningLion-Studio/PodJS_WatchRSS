@@ -223,7 +223,7 @@ export function RssRoutes(props: RssRoutesProps) {
       </Show>
       <Show when={props.page() === "articles"}>
         <RssFeedScreen
-          leading={resumeChapter()?[{height:54,render:()=> <View focusable accessibilityRole="button" accessibilityLabel={'继续阅读：'+resumeChapter()!.title} onPress={()=>{const chapter=resumeChapter();if(chapter&&!props.busy())void props.openArticle(chapter);}} class="absolute inset-0 rounded-[20] bg-[#23272a] items-center justify-center"><Text class="text-sm text-[#f5f5f5]">继续阅读</Text><Text class="text-xs text-[#b6b6b6]">{resumeChapter()!.title.length>16?resumeChapter()!.title.slice(0,16)+'…':resumeChapter()!.title}</Text></View>}]:[]}
+          leading={resumeChapter()?[{height:54,render:()=> <View focusable accessibilityRole="button" accessibilityLabel={'继续阅读：'+resumeChapter()!.title} onPress={()=>{const chapter=resumeChapter();if(chapter&&!props.busy())void props.openArticle(chapter);}} class="absolute inset-0 rounded-[20] bg-[#23272a] items-center justify-center active:scale-96"><Text class="text-sm text-[#f5f5f5]">继续阅读</Text><Text class="text-xs text-[#b6b6b6]">{resumeChapter()!.title.length>16?resumeChapter()!.title.slice(0,16)+'…':resumeChapter()!.title}</Text></View>}]:[]}
           width={props.width}
           height={props.height}
           active={props.active()}

@@ -32,7 +32,7 @@ export function BluetoothConnectionScreen(props:BluetoothConnectionScreenProps){
  };
  const button=(label:string,press:()=>void):ScrollEntry=>({height:PHONE_PAGE.touchHeight,render:()=>{
   const width=Math.min(props.width-36,Math.max(58,measure(label,1)+48));
-  return <View class="absolute top-[0] h-[48]" style={{insetL:(props.width-36-width)/2,width}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={()=>{if(props.active())press();}}>
+  return <View class="absolute top-[0] h-[48] active:scale-96" style={{insetL:(props.width-36-width)/2,width}} focusable accessibilityRole="button" accessibilityLabel={label} onPress={()=>{if(props.active())press();}}>
    <View class="absolute left-[0] right-[0] top-[4] h-[40] rounded-[20] items-center justify-center" style={{bgColor:PHONE_PAGE.primary}}><Text class="text-sm leading-[17] text-black">{label}</Text></View>
   </View>;
  }});

@@ -27,7 +27,7 @@ export function MediaReaderDetail(props: {
   const spacer = (height: number): ScrollEntry => ({ height, render: () => null });
   const header = createMemo<ScrollEntry[]>(() => [spacer(22), title(), spacer(6)]);
   const circle = (icon: string, left: number, active: boolean, press: () => void, label: string) =>
-    <View onPress={press} focusable accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] w-[32] h-[32] rounded-[16] items-center justify-center"
+    <View onPress={press} focusable accessibilityRole="button" accessibilityLabel={label} class="absolute top-[0] w-[32] h-[32] rounded-[16] items-center justify-center active:scale-96"
       style={{ insetL: left, bgColor: active ? chrome().activeAction : chrome().action, borderWidth: chrome().dark ? 0 : 1, borderColor: active ? chrome().activeBorder : chrome().border }}>
       <Image src={icon} class="w-[20] h-[20]" />
     </View>;
