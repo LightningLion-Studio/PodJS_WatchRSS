@@ -218,6 +218,48 @@ export class WatchProjectionStore {
  async planOwned(id:string){const s=await this.readState();if(s.cloud?.pendingPublish?.applyPlan?.id===id||s.cloud?.preparingPublication?.applyPlan?.id===id)return true;const row=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];if(!row)return false;const work=await this.cipher.open(this.aad('apply-work',id),String(row.body));return !!s.cloud?.pendingCloudChoice&&work.stateHash===digest(s);}
  async releasePlanReservation(ref:SqlProgramRef){if(await this.planOwned(ref.id))return;const reservation=(ref as any).reservation as ResourceReservation|undefined,release=reservation?await new ResourceQuota(this.db,reservation.binding).resume(reservation).catch(error=>{if((error as Error).message==='storage_pressure')return null;throw error;}):await this.existingPlanReservation(ref);if(!release?.reservation)return;const before=await this.readState();if(before.cloud?.pendingPublish?.applyPlan?.id===ref.id||before.cloud?.preparingPublication?.applyPlan?.id===ref.id)return;const r=release.reservation;await this.db.transaction([{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,before.stateVersion]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'DELETE FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?',params:[r.binding,r.id,r.bytes]}]);}
  private applyProgram(id:string){return new SqlProgram(this.db,this.cipher,this.scopeKey,id,this.aad('apply-program',id));}
+ /** R2/N1: prepare the keep-both copies of quarantined notes the same bounded,
+  * resumable way as the follow apply: every statement crosses the host in one
+  * encrypted small page at a time, the durable `apply_work` cursor names the
+  * operations already appended, and the caller's state CAS carries only the
+  * small program marker plus the plan cleanup. No single host call ever holds
+  * a whole long note. `run` must be deterministic for a stable `inputDigest`
+  * (same statements, same order, in bounded batches); the copy timestamp is
+  * fixed by the first checkpoint, so a crash re-run resumes, never duplicates. */
+ async prepareQuarantineCopies(before:SyncState,inputDigest:string,now:number,run:(now:number)=>AsyncGenerator<Statement[]>):Promise<Statement[]>{
+  this.gate.require();await this.collectPreparations(before);
+  const stateHash=digest(before),id=digest(['quarantine-copy-v1',stateHash,inputDigest]);
+  const cleanup=[{sql:'DELETE FROM podjs_sql_programs WHERE binding=? AND id=?',params:[this.scopeKey,id]},{sql:'DELETE FROM podjs_sql_program_pages WHERE binding=? AND id=?',params:[this.scopeKey,id]},{sql:'DELETE FROM syncv2_apply_work WHERE scope=? AND id=?',params:[this.scopeKey,id]}];
+  const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,id]))[0];
+  let savedBody=saved?String(saved.body):null,work=saved?await this.cipher.open(this.aad('apply-work',id),String(saved.body)):null;
+  if(work&&(work.kind!=='quarantine-copy'||work.stateHash!==stateHash||work.inputDigest!==inputDigest||!['append','ready'].includes(work.phase)||!Number.isSafeInteger(Number(work.operations))||Number(work.operations)<0||typeof work.now!=='number'||!work.ref))throw Error('choice_stale');
+  const reopen=async()=>{const program=this.applyProgram(id);return {program,status:await program.open()};};
+  let {program,status}=await reopen();
+  const restart=async()=>{await this.db.transaction(cleanup);work=null;savedBody=null;return reopen();};
+  // A ready plan is final only when the checkpoint says so and the refs agree;
+  // anything else is rebuilt from scratch, which is deterministic under `id`.
+  if(status==='ready'&&(work?.phase!=='ready'||canonical(work.ref)!==canonical(program.snapshot())))({program,status}=await restart());
+  if(status!=='ready'&&work?.phase==='ready')({program,status}=await restart());
+  if(status==='ready'){const marker=await program.statement(work!.ref);return [marker,...cleanup];}
+  const expected=work?.ref??{binding:this.scopeKey,id,pages:0,fragments:0,operations:0,bytes:0,root:'0'.repeat(64)};
+  if(canonical(expected)!==canonical(program.snapshot()))await program.rewind(expected);
+  if(Number(work?.operations??0)>program.snapshot().operations)throw Error('sql_program_incomplete');
+  const checkpoint=async(phase:'append'|'ready')=>{const ref=program.snapshot();
+   const body=await this.cipher.seal(this.aad('apply-work',id),{kind:'quarantine-copy',stateHash,inputDigest,now:work?.now??now,operations,phase,ref});
+   await this.db.transaction([{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN (? IS NULL AND NOT EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=?) OR EXISTS(SELECT 1 FROM syncv2_apply_work WHERE scope=? AND id=? AND body=?)) AND EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=? AND id=? AND pages=? AND root=?) THEN 1 ELSE 0 END',params:[savedBody,this.scopeKey,id,this.scopeKey,id,savedBody,this.scopeKey,id,ref.pages,ref.root]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'INSERT INTO syncv2_apply_work VALUES(?,?,?) ON CONFLICT(scope,id) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);
+   savedBody=body;};
+  // The resume cursor is a statement count over the deterministic batches.
+  let operations=program.snapshot().operations,skip=Number(work?.operations??0),steps=0;const started=Date.now();
+  for await(const raw of run(Number(work?.now??now))){
+   let at=0;if(skip>0){const n=Math.min(skip,raw.length);at+=n;skip-=n;}
+   for(let off=at;off<raw.length;){const chunk=raw.slice(off,Math.min(raw.length,off+64));off+=chunk.length;
+    if(++steps>2048||Date.now()-started>=150000){await checkpoint('append');throw Object.assign(Error('projection_preparing'),{preparation:{id,operations}});}
+    await program.append(chunk);operations+=chunk.length;await checkpoint('append');}
+   }
+  if(skip>0)throw Error('sql_program_incomplete');
+  const ref=await program.finish();await checkpoint('ready');
+  const marker=await program.statement(ref);return [marker,...cleanup];
+ }
  async resumeAccountProjection(before:SyncState,ref:SqlProgramRef,validateOnly=false){
   if(ref.binding!==this.scopeKey)throw Error('choice_stale');const saved=(await this.db.query('SELECT body FROM syncv2_apply_work WHERE scope=? AND id=?',[this.scopeKey,ref.id]))[0];if(!saved)throw Error('sql_program_incomplete');const work=await this.cipher.open(this.aad('apply-work',ref.id),String(saved.body));if(work.membershipVersion!==1||work.phase!=='ready'||canonical(work.ref)!==canonical(Object.fromEntries(['binding','id','pages','fragments','operations','bytes','root'].map(k=>[k,(ref as any)[k]]))))throw Error('sql_program_incomplete');const cp=await this.checkpoint(),tail:Statement[]=[];
   if(cp?.phase==='complete'){const next={...cp,R0:before.localChangeRevision,R1:before.localChangeRevision,accountApplyVersion:nextD64(before.stateVersion)};tail.push({sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]});}

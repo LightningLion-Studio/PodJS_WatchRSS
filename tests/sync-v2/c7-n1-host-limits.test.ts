@@ -3,7 +3,7 @@
  * request or reply <= 1 MiB). scan -> publish -> pull -> follow -> edit ->
  * publish, plus choose-cloud recovery and rollback. Synthetic backend only. */
 import {test,expect} from 'bun:test';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {copyFileSync,mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -51,30 +51,35 @@ async function phone(server:C7Backend){
   async scan(rows:any[]){const cp=await store.checkpoint();if(cp&&cp.phase!=='scan')await store.restartScan();for(let i=0;i<rows.length;i++)await store.scanPage({page:async()=>({rows:[rows[i]],after:'r'+String(i).padStart(4,'0'),done:i===rows.length-1}),changed:async()=>[]});},
   async publish(){const plan=await publisher.prepare(device,'key',{commitOid:server.device.commitOid,revision:server.device.revision},randomBytes(16).toString('hex'));await publisher.flush();return plan;},
   async adopt(){await reader.pull(server.window());const s=await store.readState();await store.controlUpdate(s,{...s,hasUnsentEdits:false,editBase:{accountOid:s.account!.oid,generation:s.account!.generation}});},
-  async note(id:string){await reader.pull(server.window());const s=await store.readState();let after='';for(;;){const page=await store.cloudRows(s.cloud.current.treeRoot,after,1);if(!page.length)return null;const r=page[0];if(r.meta.logicalId===id)return fromWire('note',r.meta.payload,r.state.payload);after=r.row.entityKey;}},
+  async note(id:string){const r=await this.row(id);return r?fromWire('note',r.meta.payload,r.state.payload):null;},
+  /** Decoded current-tree row of one logical note, with its authenticated OIDs. */
+  async row(id:string){await reader.pull(server.window());const s=await store.readState();let after='';for(;;){const page=await store.cloudRows(s.cloud.current.treeRoot,after,1);if(!page.length)return null;const r=page[0];if(r.meta.logicalId===id)return r;after=r.row.entityKey;}},
   close(){db.close();},
  };
 }
 /** Watch: business DB, product local ciphers, product host and SQL bounds. */
-async function watch(server:C7Backend){
- const root=mkdtempSync(join(tmpdir(),'wrss-c7n1-')),db=new SqlFixture(join(root,'state.sqlite'));await initializeMemoSchema(db as any);
- const {host,stats}=productCipherHost(),projectionCipher=localProjectionCipher(host as any,'n1-projection'),spaceCipher=localProjectionCipher(host as any,'n1-space'),recoveryCipher=localProjectionCipher(host as any,'n1-recovery');
+async function watch(server:C7Backend,o:{readerBudget?:number;publisherBudget?:number;dir?:string;ciphers?:ReturnType<typeof productCipherHost>}={}){
+ const root=o.dir??mkdtempSync(join(tmpdir(),'wrss-c7n1-')),db=new SqlFixture(join(root,'state.sqlite'));await initializeMemoSchema(db as any);
+ const {host,stats}=o.ciphers??productCipherHost(),projectionCipher=localProjectionCipher(host as any,'n1-projection'),spaceCipher=localProjectionCipher(host as any,'n1-space'),recoveryCipher=localProjectionCipher(host as any,'n1-recovery');
  await projectionCipher.seal('probe',{});await spaceCipher.seal('probe',{});await recoveryCipher.seal('probe',{});
  db.programCipher=projectionCipher;db.limits=PRODUCT_LIMITS;
  const projection=new WatchProjectionStore(db,projectionCipher,new ProjectionGate(true),scope,libraryId,idKey,async()=>{},{noteSegments:true}),cache=new WatchSpaceStore(db,spaceCipher,new ContentFiles(new FileHost(join(root,'files')).request),'6'.repeat(64));await cache.init();
  const recovery=new WatchRecovery(projection,cache,{cipher:recoveryCipher,randomId:async()=>randomBytes(16).toString('hex'),trustedNow:()=>server.clock,source:async refs=>{if(refs.length)throw Error('closure_incomplete');return [];},reserve:async()=>async()=>{}});
  const native=new WatchAccountBusinessSql(db,projection,scope,idKey,{recoveryValue:async id=>{const c=await projection.readCandidate(id);return {kind:c.meta.kind,value:fromWire(c.meta.kind,c.meta.payload,c.state.payload),bodyRefs:[]};}},async row=>{if(row.bodyRevision!==null)throw Error('closure_incomplete');},async()=>async()=>{});await native.initialize();await projection.initialize();
  const source=await SqlBusinessSource.open(db,watchMaterializer(db,{cloudRestoreMetadata:async()=>{throw Error('no article body');}} as any)),h=http(server);
- const publisher=new WatchIndexPublisher(projection,h,crypto,keys,()=>server.clock,undefined,{noteSegments:true}),reader=new WatchCloudIndex(projection,h,crypto,keys,approved,async()=>{},()=>server.clock,undefined,{noteSegments:true});
+ const publisher=new WatchIndexPublisher(projection,h,crypto,keys,()=>server.clock,undefined,{noteSegments:true,noteTextBudget:o.publisherBudget??NOTE_TEXT_BUDGET}),reader=new WatchCloudIndex(projection,h,crypto,keys,approved,async()=>{},()=>server.clock,undefined,{noteSegments:true,noteTextBudget:o.readerBudget});
  const control=new WatchAccountControl({store:projection,http:h,publisher,reader,crypto,approved,business:native,recovery,trustedNow:()=>server.clock,historyRestore:true,choiceApply:true,author:async()=>({deviceId:device,alias:'key',own:{commitOid:server.device.commitOid,revision:server.device.revision}})});
  async function scan(){const cp=await projection.checkpoint();if(!cp)await projection.beginScan(binding);else if(cp.phase==='complete')await projection.beginTailWindow();for(;;){const cp=await projection.checkpoint();if(cp?.phase==='complete')break;if(cp?.phase==='tail')await projection.catchUpPage(source);else await projection.scanPage(source);}}
  return {db,projection,publisher,reader,control,stats,scan,
   /** Foreground editor write (outside the background host). */
   write(id:string,text:string,updatedAt:number){db.raw.query('INSERT INTO memo_notes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(note_id) DO UPDATE SET markdown=excluded.markdown,plain_text=excluded.plain_text,base_markdown=excluded.base_markdown,content_hash=excluded.content_hash,updated_at=excluded.updated_at').run(id,null,'title '+id,text,text,'h'+updatedAt,'base-h',text,0,1,updatedAt,'watch',0,0);},
+  /** Foreground editor replacement of one field only (long unsent edit shape). */
+  writeEdit(id:string,markdown:string,updatedAt:number){db.raw.query('UPDATE memo_notes SET markdown=?,plain_text=?,base_markdown=?,content_hash=?,base_content_hash=?,updated_at=? WHERE note_id=?').run(markdown,'','small v1','h'+updatedAt,'base-h',updatedAt,id);},
   async publish(){await scan();const plan=await publisher.prepare(device,'key',{commitOid:server.device.commitOid,revision:server.device.revision},randomBytes(16).toString('hex'));await publisher.flush();await reader.pull(server.window());return plan;},
   async follow(){const r=await control.follow(server.window());await scan();return r;},
   note:async(id:string)=>(await db.query('SELECT length(markdown) AS n,substr(markdown,1,16) AS head,substr(markdown,-16) AS tail FROM memo_notes WHERE note_id=?',[id]))[0]??null,
-  close(){db.close();rmSync(root,{recursive:true,force:true});},
+  notes:async()=>db.raw.query('SELECT note_id,markdown,deleted FROM memo_notes ORDER BY note_id').all() as any[],
+  close(){db.close();if(!o.dir)rmSync(root,{recursive:true,force:true});},
  };
 }
 /** Three equal CJK fields; `chars` per field. */
@@ -131,3 +136,110 @@ test('N1: values sealed before the fix (single-call form) stay readable; a chunk
  const large={v:'长'.repeat(100000)},sealed=await c.seal('a',large);expect(sealed.startsWith('{"podjs":"chunked-aead"')).toBe(true);expect(await c.open('a',sealed)).toEqual(large);
  await expect(c.open('b',sealed)).rejects.toThrow('chunked_aead_corrupt');await expect(c.seal('a',{v:'x'.repeat(800*1024)})).rejects.toThrow('object_too_large');
 });
+
+/** Re-review N1 (probe c7r3 P2): the keep-both copy of a long unsent edit of a
+ * quarantined note must never cross one host call as the whole note. */
+const copyOf=(w:Awaited<ReturnType<typeof watch>>)=>w.notes().then(all=>all.filter(n=>!['x','o'].includes(n.note_id)));
+
+test('N1 R2: a long unsent edit on a note entering quarantine is kept as one new note; both pulls stay inside the product host bounds',async()=>{
+ const server=new C7Backend(),p=await phone(server),w=await watch(server,{readerBudget:300000});try{
+  const edit='w'.repeat(1400000);
+  await p.scan([pnote('x','small v1',10),pnote('o','o1',11)]);await p.publish();
+  expect(await w.follow()).toEqual({applied:true});
+  // A long local edit of x via the foreground editor channel (it stays unsent).
+  w.writeEdit('x',edit,77);await w.scan();
+  expect((await w.projection.readState()).hasUnsentEdits).toBe(true);
+  // The phone replaces x with an over-budget note; the watch must quarantine x
+  // and keep the long unsent edit as a new note (R2) inside the 1 MiB request.
+  await p.adopt();await p.scan([pnote('x','q'.repeat(600000),20),pnote('o','o1',11)]);await p.publish();
+  let first='ok',second='ok';
+  try{await w.reader.pull(server.window());}catch(e){first=(e as Error).message;}
+  try{await w.reader.pull(server.window());}catch(e){second=(e as Error).message;}
+  const copies=await copyOf(w);
+  console.log('N1-R2-keep',JSON.stringify({first,second,copies:copies.length,maxTxBytes:w.db.maxTxBytes,hasUnsentEdits:(await w.projection.readState()).hasUnsentEdits}));
+  expect({first,second}).toEqual({first:'ok',second:'ok'});
+  expect(copies).toHaveLength(1);expect(copies[0].markdown).toBe(edit);expect(Number(copies[0].deleted)).toBe(0);
+  // The edit is unsent until the copy publishes; every host call stayed bounded.
+  expect((await w.projection.readState()).hasUnsentEdits).toBe(true);
+  expect(w.db.maxTxBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.requestBytes);expect(w.db.maxReplyBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.replyBytes);
+  expect(w.stats.maxAesBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.aesBytes);expect(w.stats.maxRequestBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.requestBytes);
+  await w.publish();
+  expect((await w.projection.readState()).hasUnsentEdits).toBe(false);
+  expect((await p.note(copies[0].note_id))!.markdown).toBe(edit);
+  expect((await p.note('x'))!.markdown).toBe('q'.repeat(600000));
+ }finally{p.close();w.close();}
+},900000);
+
+test('N1 R2: two long unsent edits on two notes entering quarantine in one pull are both kept, each copy bounded',async()=>{
+ const server=new C7Backend(),p=await phone(server),w=await watch(server,{readerBudget:300000});try{
+  const editX='w'.repeat(1200000),editO='v'.repeat(1100000);
+  await p.scan([pnote('x','small v1',10),pnote('o','o1',11)]);await p.publish();
+  expect(await w.follow()).toEqual({applied:true});
+  w.writeEdit('x',editX,77);w.writeEdit('o',editO,78);await w.scan();
+  await p.adopt();await p.scan([pnote('x','q'.repeat(600000),20),pnote('o','r'.repeat(500000),21)]);await p.publish();
+  await w.reader.pull(server.window());
+  const copies=await copyOf(w);
+  expect(copies.map(n=>n.markdown).sort()).toEqual([editO,editX].sort());
+  expect((await w.projection.readState()).hasUnsentEdits).toBe(true);
+  expect(w.db.maxTxBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.requestBytes);expect(w.db.maxReplyBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.replyBytes);
+  await w.publish();
+  expect((await w.projection.readState()).hasUnsentEdits).toBe(false);
+  const texts:Record<string,string>={};for(const c of copies)texts[c.note_id]=(await p.note(c.note_id))!.markdown;
+  expect(texts).toEqual({[copies.find(n=>n.markdown===editX)!.note_id]:editX,[copies.find(n=>n.markdown===editO)!.note_id]:editO});
+ }finally{p.close();w.close();}
+},900000);
+
+test('N1 R2: a crash at any point of the keep-both preparation is resumed by a re-run: one copy, nothing lost, nothing duplicated',async()=>{
+ const server=new C7Backend(),p=await phone(server);
+ await p.scan([pnote('x','small v1',10),pnote('o','o1',11)]);await p.publish();
+ const ciphers=productCipherHost(),root=mkdtempSync(join(tmpdir(),'wrss-c7n1k-')),edit='w'.repeat(1400000);
+ const w=await watch(server,{readerBudget:300000,dir:root,ciphers});
+ expect(await w.follow()).toEqual({applied:true});
+ w.writeEdit('x',edit,77);await w.scan();
+ expect((await w.projection.readState()).hasUnsentEdits).toBe(true);w.close();
+ await p.adopt();await p.scan([pnote('x','q'.repeat(600000),20),pnote('o','o1',11)]);await p.publish();
+ // Every crash run starts from this sealed pre-pull copy of the device DB.
+ const seed=mkdtempSync(join(tmpdir(),'wrss-c7n1s-'));copyFileSync(join(root,'state.sqlite'),join(seed,'state.sqlite'));
+ const openFrom=async(dir=mkdtempSync(join(tmpdir(),'wrss-c7n1d-')),fromSeed=true)=>{if(fromSeed)copyFileSync(join(seed,'state.sqlite'),join(dir,'state.sqlite'));return {dir,device:await watch(server,{readerBudget:300000,dir,ciphers})};};
+ // Reference: the host-transaction count of one clean pull.
+ const {device:wr}=await openFrom();let tx=0;const refOrig=wr.db.transaction.bind(wr.db);wr.db.transaction=async(s)=>{tx++;return refOrig(s);};
+ await wr.reader.pull(server.window());wr.db.transaction=refOrig;
+ expect((await copyOf(wr)).map(n=>n.markdown)).toEqual([edit]);const total=tx;wr.close();
+ expect(total).toBeGreaterThan(8);
+ for(const point of [0.25,0.5,0.75] as const){
+  const {device:wc}=await openFrom();let n=0;const orig=wc.db.transaction.bind(wc.db);
+  (wc.db as any).transaction=async(s:any)=>{if(++n===Math.max(1,Math.floor(total*point)))throw Error('injected_crash');return orig(s);};
+  let err='none';try{await wc.reader.pull(server.window());}catch(e){err=(e as Error).message;}
+  expect(err).toBe('injected_crash');(wc.db as any).transaction=orig;
+  // The same pull resumes from the plan cursor and finishes.
+  await wc.reader.pull(server.window());
+  const copies=await copyOf(wc);
+  expect(copies).toHaveLength(1);expect(copies[0].markdown).toBe(edit);
+  expect((await wc.projection.readState()).hasUnsentEdits).toBe(true);
+  expect(wc.db.maxTxBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.requestBytes);
+  expect(Number((await wc.db.query('SELECT COUNT(*) AS n FROM syncv2_apply_work'))[0]!.n)).toBe(0);
+  // Publishing here also re-pulls with the artificially tiny 300000-byte read
+  // budget, under which the watch cannot open its own just-published long copy.
+  // R2 may then keep another copy of that row (correct quarantine semantics);
+  // the hasUnsentEdits clear-on-publish path is asserted in the pull test above.
+  const [first]=await copyOf(wc);
+  await wc.publish();
+  expect((await p.note(first.note_id))!.markdown).toBe(edit);
+  wc.close();
+ }
+ // A crash right after the final CAS committed: the copy is durable, and the
+ // restarted device (whose first control call reconciles the business witness,
+ // as any readState path does) keeps exactly one copy on the re-run.
+ const first=await openFrom();const orig=first.device.db.transaction.bind(first.device.db);
+ (first.device.db as any).transaction=async(s:any[])=>{const r=await orig(s);if(s.some(x=>(x as any).program))throw Error('injected_after_commit');return r;};
+ let err='none';try{await first.device.reader.pull(server.window());}catch(e){err=(e as Error).message;}
+ expect(err).toBe('injected_after_commit');first.device.close();
+ const again=await openFrom(first.dir,false);const wa=again.device;
+ await wa.projection.readState(); // the first control call after the restart
+ await wa.reader.pull(server.window());
+ const copies=await copyOf(wa);
+ expect(copies).toHaveLength(1);expect(copies[0].markdown).toBe(edit);
+ expect((await wa.projection.readState()).hasUnsentEdits).toBe(true);
+ expect(Number((await wa.db.query('SELECT COUNT(*) AS n FROM syncv2_apply_work'))[0]!.n)).toBe(0);
+ wa.close();rmSync(root,{recursive:true,force:true});rmSync(seed,{recursive:true,force:true});
+},900000);

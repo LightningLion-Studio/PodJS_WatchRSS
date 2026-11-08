@@ -47,6 +47,9 @@ export const placeholder=(row:any)=>row.bodyRevision===null?'no-body':row.recipe
 export const placeholderText=(row:any)=>row.bodyRevision===null?null:row.recipeOid===null?'正文尚未就绪':'正文尚未下载';
 const copy=<T>(v:T):T=>JSON.parse(canonical(v));
 const uuid=(b:Uint8Array)=>{const h=hex(Uint8Array.from(b,(v,i)=>i===6?(v&0x0f)|0x40:i===8?(v&0x3f)|0x80:v));return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
+/** N1: noteId of a keep-both copy, derived from device key, scope, entity and
+ * quarantine baseline digest. A crash re-run recreates the same one note. */
+const copyNoteId=(scope:Scope,key:Uint8Array,entity:string,baseline:string)=>uuid(Uint8Array.from(sha256Hex(bytes(canonical({domain:'wrss.sync.v2/quarantine-copy',scope,key:hex(key),entityKey:entity,baseline}))).match(/../g)!.slice(0,16).map(x=>parseInt(x,16))));
 /** P2 index coordinator. No body export, worker, history restore or local framing. */
 export class WatchCloudIndex {
  constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly approved:(deviceId:string)=>Promise<ApprovedKey>,private readonly bootstrap:(window:any)=>Promise<void>,private readonly now:()=>number=Date.now,private readonly rebuild?:()=>Promise<void>,private readonly options:CloudIndexOptions={}){}
@@ -96,24 +99,48 @@ export class WatchCloudIndex {
   next.cloud={...saved,editBases,editCreates,pins:path.pins,headers:{},cursor:window.serverRevision,current:{commitOid:a.commitOid,treeRoot:head.treeRoot,rowCount:count},windowId:window.windowId,auditBinding,blockedCommitOid:null,blockedCode:null};
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
-  next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,before,saved);next.cloud.unopenableBaselines=kept.baselines;
+  next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,staged,saved);next.cloud.unopenableBaselines=kept.baselines;
   if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.controlUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
  }
  /** R2: a local note edit never stays only on a note this device cannot open.
   * An unsent edit when the note enters quarantine, or any later local change of
   * a quarantined note (against its recorded baseline), is kept as a new local
   * note ("keep both") that publishes normally. The original stays quarantined
-  * and its remote row travels back unchanged. Baselines are digests, never text. */
+  * and its remote row travels back unchanged. Baselines are digests, never text.
+  * N1: the copies never enter the state CAS as note statements. Each kept edit
+  * gets a noteId derived from (device key, scope, entity, baseline digest), so
+  * a crash re-run recreates the same single note; WatchProjectionStore
+  * .prepareQuarantineCopies moves every statement through bounded encrypted
+  * pages and the CAS carries only the small program marker. */
  private async keepQuarantinedEdits(seen:readonly ObservedRow[],before:SyncState,saved:any){
-  const baselines:Record<string,string|null>={},statements:Statement[]=[],prior:Record<string,string|null>=saved.unopenableBaselines??{},root=saved.current?.treeRoot??null,sameBase=saved.current?.commitOid===before.editBase.accountOid;
+  const baselines:Record<string,string|null>={},prior:Record<string,string|null>=saved.unopenableBaselines??{},root=saved.current?.treeRoot??null,sameBase=saved.current?.commitOid===before.editBase.accountOid;
+  const copies:{entityKey:string;digest:string;noteId:string}[]=[];
   for(const r of seen){if(!r.note||!r.unopenable)continue;
    const candidate=await this.store.readCandidate(r.entityKey),local=candidate?noteEditDigest(candidate):null;baselines[r.entityKey]=local;if(!candidate)continue;
    const old=root?await this.store.cloudRow(root,r.entityKey):null;
    const edited=old?.unopenable?Object.hasOwn(prior,r.entityKey)&&prior[r.entityKey]!==local:before.hasUnsentEdits&&(sameBase?!old||noteEditDigest(old)!==local:Object.hasOwn(saved.editBases??{},r.entityKey)||(saved.editCreates??[]).includes(r.entityKey));
    const value=edited?fromWire('note',candidate.meta.payload,candidate.state.payload):null;if(!value||value.deleted)continue;
-   const id=uuid(await this.crypto.random(16)),now=this.now(),{noteConflicts:_,...rest}=value,hash=sha256Hex(bytes(value.markdown));
-   statements.push(...noteUpsert({...rest,noteId:id,baseMarkdown:value.markdown,contentHash:hash,baseContentHash:hash,createdAt:now,updatedAt:now,deleted:false,deletedAt:0}));
+   copies.push({entityKey:r.entityKey,digest:local!,noteId:copyNoteId(this.scope,this.keys.id,r.entityKey,local!)});
   }
+  if(!copies.length)return {baselines,statements:[] as Statement[]};
+  const store=this.store;
+  const statements=await store.prepareQuarantineCopies(before,sha256Hex(bytes(canonical(copies))),this.now(),async function*(now){
+   for(const c of copies){
+    const candidate=await store.readCandidate(c.entityKey);
+    if(!candidate||noteEditDigest(candidate)!==c.digest)throw Error('sql_program_incomplete');
+    const value=fromWire('note',candidate.meta.payload,candidate.state.payload);if(value.deleted)throw Error('sql_program_incomplete');
+    const {noteConflicts:_,...rest}=value,hash=sha256Hex(bytes(value.markdown));
+    // The kept note is fresh but published: normally its base is its own text.
+    // Repeating a long text twice would push the copy over the note budget, so
+    // an over-budget copy keeps the edit's own (bounded) base pair instead.
+    const fitsBase=2*bytes(value.markdown).length+bytes(value.plainText).length+bytes(value.baseMarkdown).length<=NOTE_TEXT_BUDGET;
+    let batch:Statement[]=[],size=0;
+    for(const s of noteUpsert({...rest,noteId:c.noteId,baseMarkdown:fitsBase?value.markdown:value.baseMarkdown,contentHash:hash,baseContentHash:fitsBase?hash:value.baseContentHash,createdAt:now,updatedAt:now,deleted:false,deletedAt:0})){
+     const n=JSON.stringify(s).length;if(batch.length&&(batch.length>=64||size+n>512*1024)){yield batch;batch=[];size=0;}
+     batch.push(s);size+=n;}
+    if(batch.length)yield batch;
+   }
+  });
   return {baselines,statements};
  }
  /** 25.3 observation. A remote tombstone ends the local note life. A remote
