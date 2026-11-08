@@ -9,7 +9,7 @@ import {fromWire} from './business';
 import {observeAccount,type SyncState} from './state';
 import {PAGE_BYTES,type WatchProjectionStore} from './store';
 import {SyncV2Http,SyncV2Error} from './http';
-import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,readSegmentedNote,type ClosurePorts} from './note-segments';
+import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,measureNote,readSegmentedNote,splitOrdinary,type ClosurePorts} from './note-segments';
 import {storedSegments} from './publisher';
 import type {Statement} from '@podjs/framework/sql-projection';
 import {hex,sha256Hex} from '@podjs/framework/crypto';
@@ -133,7 +133,16 @@ export class WatchCloudIndex {
     // The kept note is fresh but published: normally its base is its own text.
     // Repeating a long text twice would push the copy over the note budget, so
     // an over-budget copy keeps the edit's own (bounded) base pair instead.
-    const fitsBase=2*bytes(value.markdown).length+bytes(value.plainText).length+bytes(value.baseMarkdown).length<=NOTE_TEXT_BUDGET;
+    // M1: the criterion charges exactly what scan and publish charge (business
+    // .candidates -> encodeNote -> measureNote: the JSON-escaped bytes of the
+    // three text fields against NOTE_TEXT_BUDGET), never a UTF-8 approximation.
+    // Escape-heavy bodies cost more escaped than in UTF-8; admitting base=own
+    // text by a UTF-8 size would fail the copy's next scan with storage_pressure
+    // forever. base=own baseMarkdown is the very field set the scan already
+    // admitted, so it fits by contract; anything else fails closed.
+    const charged=(baseMarkdown:string)=>measureNote(splitOrdinary({version:2,entityKey:c.entityKey,requiredFeatures:[],payload:{markdown:value.markdown,plainText:value.plainText,baseMarkdown},noteSegments:[]})).textBytes;
+    const fitsBase=charged(value.markdown)<=NOTE_TEXT_BUDGET;
+    if(!fitsBase&&charged(value.baseMarkdown)>NOTE_TEXT_BUDGET)throw Error('sql_program_incomplete');
     let batch:Statement[]=[],size=0;
     for(const s of noteUpsert({...rest,noteId:c.noteId,baseMarkdown:fitsBase?value.markdown:value.baseMarkdown,contentHash:hash,baseContentHash:fitsBase?hash:value.baseContentHash,createdAt:now,updatedAt:now,deleted:false,deletedAt:0})){
      const n=JSON.stringify(s).length;if(batch.length&&(batch.length>=64||size+n>512*1024)){yield batch;batch=[];size=0;}
