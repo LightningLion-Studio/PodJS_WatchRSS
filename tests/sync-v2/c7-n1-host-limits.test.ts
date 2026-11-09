@@ -44,9 +44,9 @@ class C7Backend extends P5Backend {
 }
 const http=(server:SyntheticIndexBackend)=>new SyncV2Http(server,'http://localhost:3000',scope,async()=>({accessToken:'synthetic',legacyDeviceId:'old',userId:'00000000-0000-0000-0000-000000000001',scope}),true,serverPin(),false,false,true,true);
 /** Phone: projection-only writer with the unbounded fixture cipher. */
-async function phone(server:C7Backend,o:{readerBudget?:number}={}){
+async function phone(server:C7Backend){
  const db=new SqlFixture(),store=new WatchProjectionStore(db,cipher,new ProjectionGate(true),scope,libraryId,idKey,async()=>{},{noteSegments:true});await store.initialize();await store.beginScan(binding);
- const h=http(server),publisher=new WatchIndexPublisher(store,h,crypto,keys,()=>server.clock,undefined,{noteSegments:true}),reader=new WatchCloudIndex(store,h,crypto,keys,approved,async()=>{},()=>server.clock,undefined,{noteSegments:true,noteTextBudget:o.readerBudget});
+ const h=http(server),publisher=new WatchIndexPublisher(store,h,crypto,keys,()=>server.clock,undefined,{noteSegments:true}),reader=new WatchCloudIndex(store,h,crypto,keys,approved,async()=>{},()=>server.clock,undefined,{noteSegments:true});
  return {store,
   async scan(rows:any[]){const cp=await store.checkpoint();if(cp&&cp.phase!=='scan')await store.restartScan();for(let i=0;i<rows.length;i++)await store.scanPage({page:async()=>({rows:[rows[i]],after:'r'+String(i).padStart(4,'0'),done:i===rows.length-1}),changed:async()=>[]});},
   async publish(){const plan=await publisher.prepare(device,'key',{commitOid:server.device.commitOid,revision:server.device.revision},randomBytes(16).toString('hex'));await publisher.flush();return plan;},
@@ -175,16 +175,13 @@ test('N1 R2: a long unsent edit on a note entering quarantine is kept as one new
  * JSON-escaped bytes of the three text fields (business.candidates ->
  * encodeNote -> measureNote), never a UTF-8 approximation. Escape-heavy bodies
  * (control characters cost 6 escaped bytes, quotes/backslashes 2 per UTF-8
- * byte) fit UTF-8 yet exceed the 2 MiB note budget escaped. The phone peer
- * reads with headroom: segment bodies escape the J(T) escapes once more, so a
- * quote-dense note's held sealed bytes (~4/3 of that doubling) can exceed the
- * default 2 MiB read budget even though its escaped charge fits; the watch
- * side, whose budget is the subject under test, keeps the product default and
- * the 300000-byte quarantine budget. */
+ * byte) fit UTF-8 yet exceed the 2 MiB note budget escaped. Both devices read
+ * at the DEFAULT budget (M1b): the copy must be readable on the phone with the
+ * same NOTE_TEXT_BUDGET its publish charge satisfied. */
 const escCharge=(markdown:string,plainText:string,baseMarkdown:string)=>measureNote(splitOrdinary({version:2,entityKey:'0'.repeat(64),requiredFeatures:[],payload:{markdown,plainText,baseMarkdown},noteSegments:[]})).textBytes;
 for(const [tag,filler,chars] of [['ctrl','\u0001',300000],['quote','"',700000]] as const){
  test(`N1 M1-${tag}: an escape-heavy long unsent edit keeps a scannable, publishable copy`,async()=>{
-  const server=new C7Backend(),p=await phone(server,{readerBudget:8*1024*1024}),w=await watch(server,{readerBudget:300000});try{
+  const server=new C7Backend(),p=await phone(server),w=await watch(server,{readerBudget:300000});try{
    const edit=filler.repeat(chars),utf8=Buffer.byteLength(edit,'utf8'),origEsc=escCharge(edit,'','small v1'),copyEsc=escCharge(edit,'',edit);
    // The UTF-8 criterion would wrongly admit base=own text, while the escaped
    // charge says the edit itself is publishable but a base=own copy is not.
@@ -214,6 +211,43 @@ for(const [tag,filler,chars] of [['ctrl','\u0001',300000],['quote','"',700000]] 
   }finally{p.close();w.close();}
  },900000);
 }
+
+/* M1b (adjudication): devices sharing one budget must agree on
+ * publishable <=> readable. A note that passes scan under the note budget
+ * must open (not quarantine) on another device carrying the same budget even
+ * when its body re-escapes heavily: segment bodies escape the J(T) escapes
+ * once more (`"`/`\` 2->4 bytes, `\u00XX` 6->7), so sealed/reassembly bytes
+ * are a memory-cap dimension, never the budget meter. The watch reads here at
+ * the DEFAULT NOTE_TEXT_BUDGET (no readerBudget override); before the fix the
+ * quote-dense rows held ~2x their escaped charge and were quarantined with a
+ * false storage_pressure. */
+const pnote3=(id:string,markdown:string,plainText:string,baseMarkdown:string,updatedAt:number)=>({kind:'note',logicalId:id,value:{...noteValue(id),title:'title '+id,markdown,plainText,baseMarkdown,contentHash:'p'+updatedAt,updatedAt},addedAtMillis:1});
+test('N1 M1b: every note that passes scan under the budget is readable at the same default budget (ascii, quote, control, multibyte)',async()=>{
+ const server=new C7Backend(),p=await phone(server),w=await watch(server);try{
+  const bodies:[string,string,string,string][]=[
+   ['ascii','a'.repeat(2090000),'','base'],
+   ['quote','"'.repeat(1045000),'','base'],
+   ['ctrl','\u0001'.repeat(345000),'','base'],
+   ['multibyte','中'.repeat(698000),'','base'],
+  ];
+  const rows:any[]=[];let u=10;
+  for(const [tag,m,pt,b]of bodies){const esc=escCharge(m,pt,b);
+   // Each shape sits inside the budget by its escaped charge (the scan meter)
+   // while its sealed hold would cross the old sealed-bytes line.
+   expect(esc).toBeLessThanOrEqual(NOTE_TEXT_BUDGET);expect(esc).toBeGreaterThan(NOTE_TEXT_BUDGET-30000);
+   rows.push(pnote3(tag,m,pt,b,u++));}
+  await p.scan(rows);await p.publish();
+  // The same-budget reader device opens and applies every note verbatim.
+  expect(await w.follow()).toEqual({applied:true});
+  expect((await w.projection.readState()).cloud?.unopenableNotes??{}).toEqual({});
+  const byId:Record<string,string>=Object.fromEntries((await w.notes()).map(n=>[n.note_id,n.markdown]));
+  for(const [tag,m]of bodies)expect(byId[tag]?.length).toBe(m.length);
+  for(const [tag,m]of bodies)expect(byId[tag]).toBe(m);
+  expect(w.db.maxTxBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.requestBytes);expect(w.db.maxReplyBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.replyBytes);
+  expect(w.stats.maxAesBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.aesBytes);expect(w.stats.maxRequestBytes).toBeLessThanOrEqual(PRODUCT_LIMITS.requestBytes);
+  console.log('N1-M1b',JSON.stringify({shapes:bodies.map(([t])=>t),maxTxBytes:w.db.maxTxBytes,maxReplyBytes:w.db.maxReplyBytes}));
+ }finally{p.close();w.close();}
+},900000);
 
 test('N1 R2: two long unsent edits on two notes entering quarantine in one pull are both kept, each copy bounded',async()=>{
  const server=new C7Backend(),p=await phone(server),w=await watch(server,{readerBudget:300000});try{

@@ -9,8 +9,12 @@ import {objectOid} from './sealed';
 export const NOTE_SEGMENTS_FEATURE='note-segments.v1';
 export const STATE_LIMIT=262144,SEGMENT_TEXT_LIMIT=245760,MAX_SEGMENTS=2048,SEALED_OVERHEAD=4120;
 export const NOTE_TEXT_FIELDS:readonly string[]=Object.freeze(['baseMarkdown','markdown','plainText']);
-/** Watch resource budget for B=U(J(T)). Larger notes return storage_pressure
- * before any full-text copy; the codec itself supports the 2048-segment limit. */
+/** Watch resource budget for B=U(J(T)). Larger notes return storage_pressure:
+ * the read side decides the budget on the REASSEMBLED note with this very
+ * meter (measureNote().textBytes, M1b), never on sealed bytes, so devices
+ * sharing one budget always agree on publishable <=> readable. Downloading
+ * stays memory-safe through the independent sealed-hold cap in
+ * readSegmentedNote. The codec itself supports the 2048-segment limit. */
 export const NOTE_TEXT_BUDGET=2*1024*1024;
 const MAX_SEALED=266264,PLACEHOLDER='state:sha256:'+'0'.repeat(64);
 export type TextSource=string|(()=>Iterable<string>);
@@ -119,7 +123,22 @@ export async function readSegmentedNote(parentOid:string,parent:any,ports:Closur
  if(parent.requiredFeatures.some((f:string)=>!options.supported.includes(f)))fail('unsupported_feature');
  if(jsonBytes(parent).length>STATE_LIMIT)fail('object_too_large');
  const ids:string[]=parent.noteSegments,budget=options.budget??Number.MAX_SAFE_INTEGER,parentRefs=await ports.refs(parentOid),items:{raw:Uint8Array|null;refs:RefsRead|null}[]=[];let held=0;
- for(const id of ids){const raw=await ports.object(id);if(raw){held=add(held,raw.length);if(held>budget+SEALED_OVERHEAD*ids.length)fail('storage_pressure');}items.push({raw,refs:await ports.refs(id)});}
+ // M1b: the budget is decided on the reassembled note below with the one
+ // scan/publish meter. Downloading is guarded only by this independent memory
+ // cap. Derivation of its worst legitimate value for textBytes<=budget (E):
+ // one escaped byte of the J(T) body re-escapes into the segment-state JSON
+ // at ratio <=2 (`"`/`\` cost 2 escaped and 4 state bytes; `\u00XX` 6 and 7),
+ // so all segment states together hold <= 2E + ~70 + 160*n. A sealed state is
+ // its plaintext + GCM tag + framing <= plaintext + ~430 <= plaintext +
+ // SEALED_OVERHEAD. Public refs tables (also retained) are the n OIDs plus a
+ // signature. Worst legitimate hold is therefore ~2*budget + n*590, and the
+ // cap 3*budget + SEALED_OVERHEAD*n leaves one whole budget of slack. Only a
+ // body whose escape inflation (or padded refs) passes that bound can be
+ // adversarial: fail closed as storage_pressure, the quarantine code, before
+ // any open or assembly. A default (unbounded) budget keeps the cap unbounded.
+ const holdLimit=budget>Number.MAX_SAFE_INTEGER/4?Number.POSITIVE_INFINITY:add(add(budget,budget),add(budget,SEALED_OVERHEAD*ids.length));
+ const charge=(raw:Uint8Array|null)=>{if(raw){held=add(held,raw.length);if(held>holdLimit)fail('storage_pressure');}};
+ for(const id of ids){const raw=await ports.object(id);charge(raw);const refs=await ports.refs(id);charge(refs?.raw??null);items.push({raw,refs});}
  const tables=[parentRefs,...items.map(x=>x.refs)];
  // 4: sizes of every present object and table.
  for(const x of items)if(x.raw&&(x.raw.length>MAX_SEALED||peekPlainBytes(x.raw)>STATE_LIMIT))fail('object_too_large');
@@ -137,6 +156,14 @@ export async function readSegmentedNote(parentOid:string,parent:any,ports:Closur
  // 9-11.
  if(childLists.some(list=>list.length))fail('invalid_schema');
  const state=assembleSegments(parent,values);
+ // M1b: the budget decision, on the reassembled note and with the exact
+ // scan/publish meter (business.candidates -> encodeNote -> measureNote): it
+ // charges the JSON-escaped bytes of the three text fields against the same
+ // budget, so a note that passed scan is readable on every device carrying
+ // that budget; sealed bytes are no longer a budget criterion (control chars
+ // and quotes re-escape once more per segment, so the old sealed line
+ // quarantined legitimate notes whose escaped charge still fit).
+ if(measureNote(splitOrdinary(state)).textBytes>budget)fail('storage_pressure');
  return {state,segments:{noteRevision:parent.payload.noteRevision as string,objects:ids.map((id,i)=>({oid:id,sealed:items[i]!.raw!}))}};
 }
 
