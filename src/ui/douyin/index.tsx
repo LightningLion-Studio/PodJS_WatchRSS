@@ -36,6 +36,8 @@ import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, untra
 import { layoutText } from "../../reader/index.ts";
 import { ScrollEntries, type ScrollEntry } from "../ScrollEntries.tsx";
 import { RssFeedScreen, feedEmptyStateEntry, feedPillEntry } from "../RssScreens.tsx";
+import { platformNoticeEntry } from "../PlatformNotice.tsx";
+import { platformNotice } from "../../announcement/platform.ts";
 import { PlatformSettingsScreen } from "../PlatformSettingsScreen.tsx";
 import type { Article } from "../service.ts";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
@@ -118,8 +120,8 @@ function formatCount(value: number): string { return value >= 10_000 ? `${(value
 function header(title: string, subtitle?: string): ScrollEntry {
   return { height: subtitle ? 50 : 34, render: () => <View class="absolute inset-0 items-center"><Text class="absolute top-[0] left-[0] right-[0] text-center text-lg leading-[26] text-[#f5f5f5]">{title}</Text><Show when={subtitle}><Text class="absolute top-[29] left-[0] right-[0] text-center text-xs leading-[14] text-[#b6b6b6]">{subtitle}</Text></Show></View> };
 }
-function button(label: string, onPress?: () => void, danger = false): ScrollEntry {
-  return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class="absolute inset-0 rounded-[24] bg-[#2a2a2a] items-center justify-center active:scale-96"><Show when={danger} fallback={<Text class="text-base leading-[20] text-[#f5f5f5]">{label}</Text>}><Text class="text-base leading-[20] text-[#ff5a5f]">{label}</Text></Show></View> };
+function button(label: string, onPress?: () => void, danger = false, prominent = false): ScrollEntry {
+  return { height: 48, render: () => <View onPress={onPress} focusable={!!onPress} class={prominent ? "absolute inset-0 rounded-[24] bg-[#fe2c55] items-center justify-center active:scale-96" : "absolute inset-0 rounded-[24] bg-[#2a2a2a] items-center justify-center active:scale-96"}><Show when={danger} fallback={<Text class={prominent?"text-base leading-[20] font-bold text-white":"text-base leading-[20] text-[#f5f5f5]"}>{label}</Text>}><Text class="text-base leading-[20] text-[#ff5a5f]">{label}</Text></Show></View> };
 }
 function statusCard(title: string, detail: string): ScrollEntry[] {
   const wrapped = lines(detail, 165, 12), box = { x: 12, width: 173 };
@@ -137,7 +139,7 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
   const entries=createMemo<ScrollEntry[]>(()=>[
     header("腕上RSS · 抖音频道"),...statusCard("频道说明",auth()==='unknown'?"正在读取登录状态…":loggedIn()?"进入以获取推荐内容":"未登录，登录后获取推荐内容"),
     ...statusCard("URL","https://www.douyin.com"),header(loggedIn()?"更新：实时":"更新: --"),platformCardEntry(props.width-36,platformScope),
-    ...(auth()==='logged-out'?[button("登录",()=>douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({name:"login"})))]:[]),
+    ...(auth()==='logged-out'?[button("登录",()=>douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({name:"login"})),false,true)]:[]),
     button("设置",()=>props.onNavigate({name:"settings"})),button("播放历史",()=>props.onNavigate({name:"history"})),button("返回",props.onBack)
   ]);
   return <ScrollEntries height={props.height} entries={entries()} gap={8} ref={props.ref}/>;
@@ -278,9 +280,9 @@ function FeedScreen(props: DouyinScreenProps) {
   const articles = createMemo<Article[]>(() => auth() !== 'logged-in' ? [] : items().map(item => ({ id: item.awemeId, title: itemTitle(item), excerpt: itemSummary(item), content: "", read: true })));
   const withItem = (article: Article, run: (item: DouyinItem) => void) => { const item = byId().get(article.id); if (item) run(item); };
   const toggleSaved = (item: DouyinItem, kind: "favorite" | "watchLater") => void props.client.toggleSaved(item, kind).then(saved => toast(kind === "favorite" ? saved ? "已收藏" : "已取消收藏" : saved ? "已加入稍后再看" : "已从稍后再看移除"), error => toast(error instanceof Error ? error.message : String(error)));
-  const leading = createMemo<ScrollEntry[]>(() => (auth() === 'unknown' ? [feedEmptyStateEntry("读取登录状态…", "", props.width)] : loggedIn() === false
-    ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({ name: "login" })))]
-    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : []));
+  const leading = createMemo<ScrollEntry[]>(() => [platformNoticeEntry(props.width - 36, platformNotice("抖音", true)), ...(auth() === 'unknown' ? [feedEmptyStateEntry("读取登录状态…", "", props.width)] : loggedIn() === false
+    ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({ name: "login" })), true)]
+    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : [])]);
   const empty = createMemo<ScrollEntry[]>(() => auth() !== 'logged-in' || (loading() && !error()) ? [] : [feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width)]);
   return <RssFeedScreen width={props.width} height={props.height} title="抖音" active={props.active !== false} onInfo={() => props.onNavigate({ name: "channel-info" })}
     items={articles()} refreshing={auth()==='logged-in' && (refreshing() || (loading() && !items().length))} loadingMore={loading() && !refreshing() && items().length > 0} canNext={hasMore() && auth() === 'logged-in'}

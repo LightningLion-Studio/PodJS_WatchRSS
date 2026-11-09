@@ -13,6 +13,8 @@ import type { DouyinScreenProps } from "./index.tsx";
 import { isDouyinTemporaryFailure,isDouyinRetryableFailure,formatDouyinError } from "../../douyin/errors.ts";
 import { appLogger } from "../../logs/app-logger.ts";
 import type { DouyinItem } from "../../douyin/types.ts";
+import { platformNoticeEntry } from "../PlatformNotice.tsx";
+import { platformNotice } from "../../announcement/platform.ts";
 
 export const DOUYIN_ENTRY_SLOW_MS=1500;
 export const DOUYIN_ENTRY_LOCAL_WAIT_MS=200;
@@ -156,6 +158,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   // bodySmall 12/14 hint; 44dp circular arrow button 12dp above the bottom safe edge.
   const titleWidth=getOps().measureText("抖音",23),hintGap=7,hintBox=19.2,groupLeft=(props.width-(titleWidth+hintGap+16))/2;
   const hint=()=>auth()==='unknown'&&!items().length?"正在读取登录状态…":auth()==='logged-out'?"需要登录，请重新登录":(busy()&&!items().length)?(slow()?"内容加载较慢，请稍候":"刷新中..."):items().length?"下拉刷新，向上进入短视频流":"暂无内容，下拉刷新或点箭头重试";
+  const noticeEntry=platformNoticeEntry(props.width-36,platformNotice("抖音",true));
   // Submit no guest scene while restoring: frame zero is the first page content.
   return <Show when={(props.active??true)&&!stockPending()}><View class="absolute inset-0 bg-black">
    <View class="absolute inset-0">
@@ -164,13 +167,14 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       <Image src="../assets/icons/info-hint.svg" class="absolute top-[3.4]" style={{insetL:groupLeft-18+titleWidth+hintGap-3.6,width:hintBox,height:hintBox}}/>
       <Text class="absolute left-[0] right-[0] top-[28] text-xs leading-[14] text-center text-[#b6b6b6]">{hint()}</Text>
     </View>
+    <View class="absolute left-[18] right-[18]" style={{insetT:68,height:noticeEntry.height}}>{noticeEntry.render()}</View>
     <Show when={slow()&&items().length>0&&!error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#b6b6b6]">内容加载较慢，请稍候</Text></Show>
     <Show when={error()}><Text class="absolute left-[30] right-[30] top-[66] text-xs leading-[14] text-center text-[#ff5a5f]">{error()}</Text>
       <View class="absolute left-[65] right-[65] top-[92] h-[36] rounded-[18] items-center justify-center bg-[#2a2a2a] active:scale-96" onPress={()=>void (retryPlayback?enter():load(true,true))} focusable accessibilityRole="button" accessibilityLabel="重试"><Text class="text-sm text-[#f5f5f5]">重试</Text></View>
     </Show>
     {/* 44dp visual circle inside a 120×80 transparent hit area. */}
     <View class="absolute bottom-[12] w-[120] h-[80] rounded-full items-center justify-center active:scale-96" style={{insetL:(props.width-120)/2}} onPress={auth()==='unknown'&&!items().length?undefined:()=>void enter()} focusable={auth()!=='unknown'||items().length>0} accessibilityRole="button" accessibilityLabel={auth()==='unknown'&&!items().length?"正在读取登录状态…":(logged()||auth()==='unknown'&&items().length>0)?(items().length?"向上进入视频流":"刷新抖音内容"):"登录"}>
-      <View class="w-[44] h-[44] rounded-full items-center justify-center" style={{bgColor:"#2a2a2aeb"}}><Show when={logged()||auth()==='unknown'&&items().length>0} fallback={<Text class="text-base text-[#f5f5f5]">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
+      <View class={auth()==='logged-out'?"w-[50] h-[50] rounded-full items-center justify-center bg-[#fe2c55]":"w-[44] h-[44] rounded-full items-center justify-center"} style={auth()==='logged-out'?undefined:{bgColor:"#2a2a2aeb"}}><Show when={logged()||auth()==='unknown'&&items().length>0} fallback={<Text class="text-base font-bold text-white">{auth()==='unknown'?"…":"登录"}</Text>}><Image src="../assets/icons/arrow-upward.svg" class="w-[16] h-[16]"/></Show></View>
     </View>
   </View></View></Show>;
 }
