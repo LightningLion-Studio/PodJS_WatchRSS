@@ -247,8 +247,19 @@ test('DYUI RSS unknown state renders a non-actionable placeholder and cannot ref
  const client=new DouyinClient({secureStorage:{get:k=>k==='douyin.cookie'?new Promise(r=>finish=r):Promise.resolve(null),set:async()=>{},remove:async()=>{}},transport:{request:async()=>{requests++;throw Error('unexpected request');}}});
  createRoot(stop=>{stops.push(stop);return DouyinScreen({width:233,height:233,route:{name:'feed'},client,settings:{originalContentEnabled:false}} as unknown as DouyinScreenProps);});
  await settle();expect(rssProps.refreshing).toBe(false);expect(rssProps.canNext).toBe(false);expect(rssProps.items).toEqual([]);
- const placeholder=rssProps.leading[0].render();expect(placeholder.props.children).toBe('读取登录状态…');expect(placeholder.props.onPress).toBeUndefined();
- rssProps.onRefresh();rssProps.onNext();expect(requests).toBe(0);finish(null);await settle();expect(client.authState()).toBe('logged-out');expect(rssProps.leading).toHaveLength(2);
+ // 1eaaef44 prepends the persistent third-party platform notice to the feed leading row; the
+ // auth placeholder moved to index 1 but keeps its meaning: right after the notice, non-actionable.
+ expect(rssProps.leading).toHaveLength(2);
+ const notice=rssProps.leading[0].render();expect(notice.kind).toBe('View');expect(String(notice.props.accessibilityLabel)).toContain('腕上RSS提供的第三方平台功能');
+ const placeholder=rssProps.leading[1].render();expect(placeholder.props.children).toBe('读取登录状态…');expect(placeholder.props.onPress).toBeUndefined();
+ rssProps.onRefresh();rssProps.onNext();expect(requests).toBe(0);finish(null);await settle();expect(client.authState()).toBe('logged-out');
+ // Logged-out leading is exactly: notice, inert 未登录 text, actionable login pill.
+ expect(rssProps.leading).toHaveLength(3);
+ const [loggedOutNotice,loggedOutText,loginPill]=rssProps.leading.map((entry:any)=>entry.render());
+ expect(loggedOutNotice.props.accessibilityLabel).toBe(notice.props.accessibilityLabel);
+ expect(String(loggedOutText.props.children)).toContain('未登录');expect(loggedOutText.props.onPress).toBeUndefined();
+ expect(loginPill.kind).toBe('View');expect(loginPill.props.children.props.children).toBe('登录');expect(typeof loginPill.props.onPress).toBe('function');
+ rssProps.onRefresh();rssProps.onNext();expect(requests).toBe(0);
 });
 
 test('DYBENCH an older failed probe keeps its own attempt after a network retry',async()=>{
