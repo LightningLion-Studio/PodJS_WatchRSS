@@ -26,6 +26,7 @@ export type Page =
   | "phone-connection"
   | "account-status"
   | "cloud-sync"
+  | "sync-v2"
   | "speech-playback"
   | "settings-reader-presets"
   | "settings-llm-usage"

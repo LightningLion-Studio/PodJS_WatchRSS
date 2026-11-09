@@ -10,6 +10,9 @@ import { cloudRemediationActions } from "../cloud-sync-view.ts";
 import { clearLocalPrivateLibrary } from "../../services.ts";
 import { readCloudAccountStatus, subscribeCloudAccountStatus } from "../../cloud/status.ts";
 import { CloudSyncScreen } from "../CloudSyncScreen.tsx";
+import { SyncV2Screen } from "../SyncV2Screen.tsx";
+import type { SyncV2Target } from "../sync-v2-view.ts";
+import { applicationSyncV2Ui } from "../../cloud/application.ts";
 import { coalescedRequest } from "../cloud-sync-view.ts";
 import HomeScreen, { type HomeScreenProps } from "../HomeScreen.tsx";
 import { PhoneConnectionScreen } from "../PhoneConnectionScreen.tsx";
@@ -23,6 +26,7 @@ import { profileDestination } from "./meta.ts";
 import type { Page, RouteEntry } from "./types.ts";
 
 const cloudActions = cloudRemediationActions(applicationCloudActions);
+const [syncV2Target, setSyncV2Target] = createSignal<SyncV2Target>("choice");
 
 type ChannelAction = (
   id: string,
@@ -166,9 +170,25 @@ export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
           actions={cloudActions}
           clearLocal={clearLocalPrivateLibrary}
           onPhone={() => void props.go("phone-connection")}
+          syncV2={applicationSyncV2Ui()}
+          onSyncV2={(target) => { setSyncV2Target(target); void props.go("sync-v2"); }}
           onError={props.setError}
           ref={(value) => (props.entry.list = value)}
         />
+      </Show>
+      <Show when={props.page() === "sync-v2" && applicationSyncV2Ui()}>
+        {(port) => (
+          <SyncV2Screen
+            width={props.width}
+            height={props.height}
+            active={props.active}
+            target={syncV2Target}
+            port={port()}
+            onDone={() => void props.go("cloud-sync")}
+            onError={props.setError}
+            ref={(value) => (props.entry.list = value)}
+          />
+        )}
       </Show>
       <Show when={props.page() === "phone-connection"}>
         <PhoneConnectionScreen

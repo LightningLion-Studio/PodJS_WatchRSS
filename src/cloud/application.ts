@@ -65,3 +65,8 @@ export const applicationCloudActions={async logout(){owner?.resetApproval();awai
 
 /** UI hook: OS scheduling is best effort; queued does not claim worker completion. */
 export const applicationCloudHandoff={subscribe(fn:()=>void){handoffListeners.add(fn);return()=>{handoffListeners.delete(fn);};},get state(){return owner?.handoffState??{phase:'idle' as const};},async workerState(){cloudGate.require();return hostOperation<{state:string}>('cloud.workState',{}).result;}};
+
+/** Sync v2 UI port. Undefined until the runtime is wired (write gates closed today), so 云同步 shows no Sync v2 notices. */
+let syncV2Ui:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined;
+export function installApplicationSyncV2Ui(port:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined){syncV2Ui=port;}
+export function applicationSyncV2Ui(){return syncV2Ui;}

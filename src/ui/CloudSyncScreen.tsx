@@ -11,6 +11,8 @@ import {PHONE_PAGE} from './phone-connection-layout.ts';
 import {ScrollEntries, type ScrollEntry} from './ScrollEntries.tsx';
 import {centredBounds} from './round-bounds.ts';
 import {watchUiLines} from './text-layout.ts';
+import {syncV2Notices, type SyncV2Target, type SyncV2UiPort} from './sync-v2-view.ts';
+import type {SyncV2UiState} from '../sync-v2/ui-state.ts';
 
 const TONE: Record<CloudSyncTone, string> = {
   ok: PHONE_PAGE.primary, busy: PHONE_PAGE.primary, attention: '#ffc266', error: '#ff7777', muted: PHONE_PAGE.secondary,
@@ -35,9 +37,22 @@ export function CloudSyncScreen(props: {
   actions?: CloudRemediationControl;
   clearLocal?: () => Promise<void>;
   onPhone: () => void;
+  /** Sync v2 notices; absent or closed leaves this page exactly as before. */
+  syncV2?: SyncV2UiPort;
+  onSyncV2?: (target: SyncV2Target) => void;
   onError: (message: string) => void;
   ref: (value: {scroller: Scroller}) => void;
 }) {
+  const [v2, setV2] = createSignal<SyncV2UiState>();
+  const [v2Revision, setV2Revision] = createSignal(0);
+  if (props.syncV2) onCleanup(props.syncV2.subscribe(() => setV2Revision(value => value + 1)));
+  let v2Sequence = 0;
+  createEffect(() => {
+    v2Revision();
+    if (!props.syncV2 || !props.active()) return;
+    const request = ++v2Sequence;
+    void props.syncV2.snapshot().then(value => { if (request === v2Sequence) setV2(value); }, () => { if (request === v2Sequence) setV2(undefined); });
+  });
   const [status, setStatus] = createSignal<AccountStatusSnapshot | null>();
   const [handoff, setHandoff] = createSignal(props.handoff?.state.phase ?? 'idle');
   if (props.handoff) onCleanup(props.handoff.subscribe(() => setHandoff(props.handoff!.state.phase)));
@@ -188,6 +203,16 @@ export function CloudSyncScreen(props: {
           style={{insetL: (inner() - width) / 2, insetT: 0, width, height: PHONE_PAGE.touchHeight, bgColor: button.enabled ? PHONE_PAGE.primary : '#2a2a2a'}}>
           <Text style={{fontSlot: 22, lineHeight: 21, textColor: button.enabled ? PHONE_PAGE.onPrimary : PHONE_PAGE.secondary}}>{button.label}</Text>
         </View>});
+    }
+    for (const notice of syncV2Notices(v2())) {
+      const headline = Math.min(inner(), 16 + measure(notice.title, 1));
+      rows.push(gap(16), {height: 17, bounds: centredBounds(inner(), headline, 0, 17), render: () =>
+        <View class="absolute" accessibilityLabel={notice.title} style={{insetL: (inner() - headline) / 2, insetT: 0, width: headline, height: 17}}>
+          <View class="absolute left-[0] top-[4.5] w-[8] h-[8] rounded-full" style={{bgColor: TONE[notice.tone]}}/>
+          <Text class="absolute left-[16] top-[0]" style={{fontSlot: 1, lineHeight: 17, textColor: PHONE_PAGE.foreground}}>{notice.title}</Text>
+        </View>}, gap(4), centred(notice.detail, 0, 14, PHONE_PAGE.secondary, Math.min(inner(), DETAIL_WIDTH)));
+      if (notice.open && props.onSyncV2) { const target = notice.open.target; rows.push(gap(8), pill(notice.open.label, notice.key === 'choice', () => props.onSyncV2!(target))); }
+      else if (notice.retry && props.syncV2) rows.push(gap(8), pill(notice.retry, false, () => void props.syncV2!.syncNow().catch(() => {})));
     }
     actionRevision();
     const codeState=approval(),fix=cloudRemediationView(status(),codeState),actions=props.actions,busy=!!actions?.busy;
