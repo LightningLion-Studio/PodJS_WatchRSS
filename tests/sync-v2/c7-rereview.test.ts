@@ -186,7 +186,8 @@ for(const mode of ['local','merge'] as const)test(`R3 (probe B-${mode}): an expl
  * cloud-row/candidate read during follow, minus the heap before follow. */
 test('R4: the follow peak does not grow with the number of long notes',async()=>{
  const MiB=1024*1024,out:any[]=[];
- for(const n of [1,3]){
+ // The first run warms the JIT and lazy module state; it is discarded.
+ for(const n of [1,1,3,5]){
   const server=new C7P5Backend(),phone=await client(server),watch=await watchDevice(server,NOTE_TEXT_BUDGET);try{
    // About 650 KB of text per field, distinct per note (about 1.9 MiB of UTF-8 per note).
    const notes=Array.from({length:n},(_,i)=>{const t=String.fromCharCode(0x4e00+i).repeat(216666)+'x'.repeat(i);return pnote('n'+i,t,{plainText:t,baseMarkdown:t});});
@@ -199,6 +200,7 @@ test('R4: the follow peak does not grow with the number of long notes',async()=>
    out.push({n,peakMiB:+(peak/MiB).toFixed(2)});
   }finally{phone.close();watch.close();}
  }
- console.log('C7-R4',JSON.stringify(out));
- expect(out[1].peakMiB).toBeLessThan(out[0].peakMiB*1.5+2);
+ out.shift();console.log('C7-R4',JSON.stringify(out));
+ for(const o of out.slice(1))expect(o.peakMiB).toBeLessThan(out[0].peakMiB*1.5+2);
+ for(const o of out)expect(o.peakMiB).toBeLessThan(256);
 },900000);
