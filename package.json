@@ -23,5 +23,11 @@
   },
   "overrides": {
     "@pocketjs/framework": "file:../podjs-watch-framework-pinned/vendor/pocketjs"
+  },
+  "imports": {
+    "#sync-v2-build": {
+      "bun": "./tests/sync-v2/test-build.ts",
+      "default": "./src/sync-v2/release-build.ts"
+    }
   }
 }

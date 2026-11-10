@@ -1,3 +1,4 @@
+import {SYNC_V2_TEST_BUILD} from '#sync-v2-build';
 import {decodeObjectBatch} from '@podjs/framework/object-frame';
 /** Explicit isolated-backend adapter. No runtime registration or global fetch. */
 import {accountIdFromUserId} from './signing';
@@ -21,12 +22,13 @@ export function parseNetwork(input:Uint8Array){try{
 export type Session={accessToken:string;legacyDeviceId:string;userId:string;scope:Scope};
 /** 26.2 P6-2 origin rule. Production: exactly the https scheme+host+port of the
  * v1 account backendBaseUrl, no userinfo/path/query/fragment, no redirects.
- * Loopback http only when the caller is a debug/test build (`allowLoopback`). */
+ * Loopback http only in the test-host build. Runtime flags cannot enable it
+ * in watch/browser bundles. */
 const LOOPBACK=/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/;
 export type OriginPolicy={accountBaseUrl:string;allowLoopback:boolean};
 export function syncV2Origin(origin:string,policy:OriginPolicy){
  if(typeof origin!=='string'||typeof policy?.accountBaseUrl!=='string')throw Error('isolated_backend_required');
- if(LOOPBACK.test(origin)){if(policy.allowLoopback!==true)throw Error('isolated_backend_required');return origin;}
+ if(LOOPBACK.test(origin)){if(!SYNC_V2_TEST_BUILD||policy.allowLoopback!==true)throw Error('isolated_backend_required');return origin;}
  const parse=(value:string)=>{const m=/^https:\/\/([a-z0-9.-]+)(?::([0-9]{1,5}))?(\/[^?#@]*)?$/i.exec(value);if(!m||/[@?#\\]/.test(value)||/[A-Z]/.test(m[1]!))return null;return {host:m[1]!,port:m[2]??'',path:m[3]??''};};
  const own=parse(origin),base=parse(policy.accountBaseUrl.replace(/\/+$/,''));
  if(!own||!base||own.path!==''||own.host!==base.host||own.port!==base.port||base.path!=='')throw Error('isolated_backend_required');
@@ -35,7 +37,7 @@ export function syncV2Origin(origin:string,policy:OriginPolicy){
 export class SyncV2Http {
  readonly prefix:string;private flags:any;requestGuard?:()=>void|Promise<void>;
  constructor(private readonly transport:HttpTransport,origin:string,readonly scope:Scope,private readonly session:()=>Promise<Session>,readonly indexWrite=false,readonly servicePin?:WatchServiceKeyPin,readonly contentWrite=false,private readonly readOnlyLocal=false,readonly historyRestore=false,readonly choiceApply=false,private readonly originPolicy?:OriginPolicy){
-  validateScope(scope);if(originPolicy)syncV2Origin(origin,originPolicy);else if(!LOOPBACK.test(origin))throw Error('isolated_backend_required');this.prefix=origin+'/functions/v1/sync/v2';
+  validateScope(scope);if(originPolicy)syncV2Origin(origin,originPolicy);else if(!SYNC_V2_TEST_BUILD||!LOOPBACK.test(origin))throw Error('isolated_backend_required');this.prefix=origin+'/functions/v1/sync/v2';
  }
  /** Per-request view: cleanup cannot lazily persist a service-key pin.
   * Bounded HTTP scratch is infrastructure, not persistent application state.

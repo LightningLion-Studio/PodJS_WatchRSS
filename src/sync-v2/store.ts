@@ -83,8 +83,9 @@ export class WatchProjectionStore {
  /** Candidate options every builder (scan, follow, choice, recovery) must share. */
  segmentOptions(){return {noteSegments:this.options.noteSegments===true};}
  constructor(private readonly db:ProjectionSql,private readonly cipher:LocalCipher,readonly gate:ProjectionGate,private readonly scope:Scope,private readonly libraryId:string,private readonly key:Uint8Array,private readonly checkIdentity:()=>Promise<void>=async()=>{},readonly options:{noteSegments?:boolean}={}){
-  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(()=>stopExistingProjection(this.db));
+  validateScope(scope);this.scope=Object.freeze({...scope});this.key=new Uint8Array(key);this.scopeKey=canonical(scope);this.stateJournal=new SqlStateJournal(this.db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical);this.cloudCache=new SqlAuthenticatedCache(this.db,this.cipher,this.scopeKey,this.key,canonical,this.cipher.blocks?{chunks:this.chunks('cloud-row'),inlineBytes:INLINE_VALUE_BYTES}:undefined);hexId(libraryId,32);if(key.length!==32)throw Error('authentication_required');this.gate.onClose(async()=>{this.key.fill(0);await stopExistingProjection(this.db);});
  }
+ entityKeyFor(kind:Kind,logicalId:string){this.gate.require();return entityKey(this.key,this.scope.repoId,kind,logicalId);}
  equivalentLegacy(){this.gate.require();return this.legacyAdapter??=new WatchEquivalentLegacy(this,this.db,this.cipher,this.scopeKey,(kind,key)=>this.aad(kind,key));}
  private chunks(kind:'candidate'|'cloud-row'|'edit-base'){return chunkedValues(this.db,this.cipher,this.scopeKey+'#'+kind);}
  /** Seals one value; above INLINE_VALUE_BYTES its blocks are written first

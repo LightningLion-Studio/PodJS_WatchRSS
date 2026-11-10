@@ -13,43 +13,7 @@ import {sealV2,openV2} from '../../src/sync-v2/sealed';
 import {buildArticleBody,articleBodyRevision,articleBodyBytes,articleBodyResolver} from '../../src/sync-v2/article-body';
 import {WatchSyncV2UiState} from '../../src/sync-v2/ui-state';
 import {TrustedClock} from '../../src/sync-v2/trusted-time';
-const f=vector('identity-bootstrap'),scope=f.context.scope,legacy='00000000-0000-0000-0000-000000000002';
-const user=f.context.accountId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$2-$3-$4-$5');
-const account={userId:user,backendBaseUrl:'http://127.0.0.1:18991',watchDeviceToken:'synthetic-only'};
-class ProductBackend extends SyntheticIndexBackend {
- present=true;registrations:any[]=[];
- override window():any{const w:any=super.window();w.refs=this.device.commitOid?[{deviceId:this.device.ref.split('/')[2],commitOid:this.device.commitOid,refRevision:this.device.revision}]:[];return w;}
- override async request(r:any):Promise<any>{
-  const path=decodeURIComponent(new URL(r.url).pathname.replace('/functions/v1/sync/v2','')),json=(v:any)=>({status:200,headers:{},body:jsonBytes({version:2,scope,...v})});
-  if(path==='/repo/descriptor')return this.present?json({descriptorOid:descriptorOid(f.descriptor),descriptor:f.descriptor,recoveryOid:'id-key-recovery:sha256:'+sha256Hex(jsonBytes(f.capsule))}):{status:404,headers:{},body:jsonBytes({error:{code:'object_missing'}})};
-  if(path.startsWith('/repo/id-key-recovery/'))return {status:200,headers:{},body:jsonBytes(f.capsule)};
-  if(path==='/checkpoint'){const w=this.window(),cp=await signControl(crypto,'','wrss.sync.v2/checkpoint-sign',{scope,checkpointId:'c'.repeat(32),serverRevision:this.serverRevision,refs:w.refs,account:this.account,historyFloorRevision:'0',historyFloorMillis:0,windowId:w.windowId,issuedAtMillis:100,expiresAtMillis:300000});return json(cp);}
-  if(path==='/devices/signing-key'){const v=parseCanonicalJson(r.body);this.registrations=[v];return json({deviceId:v.body.deviceId,keyId:v.body.keyId,registered:true});}
-  if(path==='/devices/signing-keys'){const bindings=[];for(const v of this.registrations)bindings.push({...v,deviceMapping:await signControl(crypto,'','wrss.sync.v2/device-mapping',{scope,deviceId:v.body.deviceId,keyId:v.body.keyId,legacyDeviceId:legacy,approvalRevision:'0'})});return json({bindings,revocationRevision:'0'});}
-  const result=await super.request(r);
-  if(path==='/state-refs'){const v=parseCanonicalJson(r.body),t=this.tables.get(v.body.stateOid),registered=this.registrations[0];Object.assign(t,{authorDeviceId:registered.body.deviceId,keyId:registered.body.keyId});}
-  return result;
- }
-}
-async function fixture(){
- const db=new SqlFixture(),secrets=new Map<string,string>(),local=productCipherHost();await initializeMemoSchema(db);const n=noteValue();await db.execute('INSERT INTO memo_notes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[n.noteId,null,n.title,n.markdown,n.plainText,n.contentHash,n.baseContentHash,n.baseMarkdown,0,n.createdAt,n.updatedAt,n.modifiedBy,0,0]);
- const raw=(s:string)=>Buffer.from(s,'base64'),out=(b:Uint8Array)=>Buffer.from(b).toString('base64');
- const host:any=async(method:string,a:any)=>{
-  if(method==='secure.get'){const value=secrets.get(a.key);return value===undefined?{exists:false}:{exists:true,value,totalChars:value.length,offset:0,version:1};}
-  if(method==='secure.compareAndSet'){if((secrets.get(a.key)??null)!==a.expected)return {updated:false};secrets.set(a.key,a.value);return {updated:true};}
-  if(method==='sql.query')return db.query(a.sql,a.params);
-  if(method==='sql.transaction')return db.transaction(a.statements);
-  if(method==='crypto.v2.signingKey')return {publicKeySec1:out(publicBytes)};
-  if(method==='crypto.v2.sign')return {signatureBase64:out(await crypto.sign('',raw(a.dataBase64)))};
-  if(method==='crypto.v2.verify')return {valid:await crypto.verify(raw(a.publicKeySec1),raw(a.dataBase64),raw(a.signatureBase64))};
-  if(method==='crypto.hkdfSha256')return {keyBase64:out(await crypto.hkdf(raw(a.inputBase64),raw(a.saltBase64),raw(a.infoBase64)))};
-  if(method==='crypto.v2.encrypt')return {ciphertextBase64:out(await crypto.encrypt(raw(a.keyBase64),raw(a.nonceBase64),raw(a.dataBase64),raw(a.aadBase64)))};
-  if(method==='runtime.delay')return {};
-  return local.host(method,a);
- };
- const server=new ProductBackend(),options={host,transport:server,account,legacyDeviceId:legacy,allowLoopback:true,keys:{currentKeyVersion:async()=>f.descriptor.body.wrappingKeyVersion,accountKey:async()=>unhex(f.wrapKeyHex)},repository:{cloudRestoreMetadata:async()=>({articles:[],next:undefined}),cloudArticleBody:async()=>undefined},session:async()=>account,bootstrap:async()=>({accountId:f.context.accountId,syncV2:serviceInfo,devices:[{deviceId:legacy,revokedAt:null}]}),now:()=>100,clock:new TrustedClock(()=>100)};
- return {db,secrets,server,options};
-}
+import {fixture,account,scope,f,legacy} from './p6-fix-fixture';
 test('P6 product capsule receive → R0 → first snapshot → UI install → unload uses production adapters',async()=>{
  const f=await fixture();let ui:any;
  const listener=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){const response=await f.server.request({method:request.method,url:request.url,headers:{...Object.fromEntries(request.headers),'Content-Type':request.headers.get('content-type')??''},body:request.method==='GET'?undefined:new Uint8Array(await request.arrayBuffer())});return new Response(response.body,{status:response.status,headers:response.headers});}});

@@ -4,7 +4,7 @@
  * - on: open once after the v1 account and its keys are ready, then install
  *   the UI port;
  * - the only unmount point is stop() (logout, account switch, dispose). */
-export interface SyncV2ProductSession<Port> {ui:Port;close():Promise<void>}
+export interface SyncV2ProductSession<Port> {ui:Port;sync?():Promise<unknown>;close():Promise<void>}
 export interface SyncV2ProductOptions<Port> {
  /** SYNC_V2_PRODUCT.syncV2 (src/sync-v2/gate.ts). */
  enabled:boolean;
@@ -18,7 +18,7 @@ export interface SyncV2ProductOptions<Port> {
 export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
  let generation=0,identity:string|null=null,session:SyncV2ProductSession<Port>|null=null,opening:Promise<Port|null>|null=null;
  const stop=async()=>{generation++;identity=null;const closing=session,pending=opening;opening=null;session=null;options.install(undefined);await closing?.close();if(options.drainOnStop)await pending?.catch(()=>{});};
- return {
+ const product={
   /** Idempotent per account identity; a new identity first unmounts the old one. */
   async start(next:string):Promise<Port|null>{
    if(options.enabled!==true)return null;
@@ -34,14 +34,22 @@ export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
     }finally{if(ticket===generation)opening=null;}
    })();
   },
+  /** A scheduler tick opens once, then executes a fresh round on later ticks. */
+  async sync(next:string):Promise<Port|null>{
+   const existing=identity===next?session:null,ticket=generation;
+   const ui=await product.start(next);
+   if(existing&&ticket===generation&&session===existing)await existing.sync?.();
+   return ui;
+  },
   stop,
   get active(){return session!==null;},
  };
+ return product;
 }
 
 /** Product actions share the existing v1 cloud writer lease. Snapshots can purge
  * expired recovery metadata, so they use the same lease as mutations. */
 export function leasedSyncV2Session<Port extends object>(session:SyncV2ProductSession<Port>,exclusive:<T>(work:()=>Promise<T>)=>Promise<T>):SyncV2ProductSession<Port>{
  const ui=new Proxy(session.ui,{get(target,key){const value=Reflect.get(target,key,target);if(typeof value!=='function')return value;if(key==='subscribe')return value.bind(target);return (...args:unknown[])=>exclusive(async()=>value.apply(target,args));}});
- return {ui,close:()=>session.close()};
+ return {ui,sync:session.sync?()=>exclusive(()=>session.sync!()):undefined,close:()=>session.close()};
 }

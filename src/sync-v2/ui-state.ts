@@ -93,7 +93,9 @@ export class WatchSyncV2UiState {
  /** Publication identities carry no timestamp in the protocol; the trusted
   * clock is sampled once per distinct pending/detached identity. */
  private publicationSeen=new Map<string,number>();
- constructor(private readonly o:SyncV2UiStateOptions){}
+ constructor(private o:SyncV2UiStateOptions){}
+ /** Drop all owning runtime/control/projection references, including proofs. */
+ dispose(){this.o={runtime:null,control:null,projection:null as any};this.listeners.clear();this.previews=new WeakMap();this.active=undefined;this.mergeCache=undefined;this.publicationSeen.clear();}
  private get enabled(){return this.o.runtime!==null&&this.o.control!==null;}
  private notify(){for(const listener of[...this.listeners])try{listener();}catch{/* a listener failure never unwinds an action */}}
  private trusted(){return this.o.trustedNow?.()??null;}
