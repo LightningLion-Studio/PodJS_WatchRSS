@@ -28,6 +28,8 @@ export interface SyncV2UiState {
  keepDiscardedLocalChanges7Days:boolean;
  gates:{historyRestore:boolean;choiceApply:boolean;noteSegments:boolean};
  publication:null|{state:'pending'|'detached';since:number};
+ /** 26.1 P6-7: registered v2 signing deviceId of this watch; null when unregistered. */
+ ownDeviceId:string|null;
 }
 export interface ChoicePreview {
  local:{title:string|null;kind:'add'|'edit'|'delete'}[];
@@ -39,7 +41,7 @@ export interface ChoicePreview {
 }
 /** The object returned by `watchSyncV2(...).open()` (null when the feature is
  * closed). Only pull is consumed here; the rest stays runtime-private. */
-export interface SyncV2RuntimeHandle {pull():Promise<unknown>;publish():Promise<unknown>}
+export interface SyncV2RuntimeHandle {pull():Promise<unknown>;publish():Promise<unknown>;signingDeviceId?():Promise<string|null>}
 /** The read-only slice of WatchProjectionStore this adapter needs. Passing the
  * real store keeps the existing APIs as the single source of truth. */
 export interface SyncV2StateReader {
@@ -151,7 +153,7 @@ export class WatchSyncV2UiState {
  /** The read-only tri-platform snapshot. Every field is sampled through the
   * existing store/control APIs; nothing is fabricated. */
  async snapshot():Promise<SyncV2UiState>{
-  if(!this.enabled)return cleanSnapshot<SyncV2UiState>({enabled:false,phase:'idle',lastSyncedAtMillis:null,errorCode:null,choice:null,unopenableNotes:[],recoveryCopies:[],keepDiscardedLocalChanges7Days:false,gates:{historyRestore:false,choiceApply:false,noteSegments:false},publication:null});
+  if(!this.enabled)return cleanSnapshot<SyncV2UiState>({enabled:false,phase:'idle',lastSyncedAtMillis:null,errorCode:null,choice:null,unopenableNotes:[],recoveryCopies:[],keepDiscardedLocalChanges7Days:false,gates:{historyRestore:false,choiceApply:false,noteSegments:false},publication:null,ownDeviceId:null});
   const projection=this.o.projection,control=this.o.control!;
   const state=await projection.readState();
   const settings=await control.settings();
@@ -162,7 +164,7 @@ export class WatchSyncV2UiState {
   const recoveryCopies=(await control.recoveryCopies()).map(c=>({copyId:c.copyId,createdAtMillis:c.createdAtMillis,expiresAtMillis:c.expiresAtMillis}));
   const publication=this.publication(state);
   const phase:SyncV2UiStatePhase=this.inflightSyncs>0?'syncing':state.pendingChoice?'awaiting_choice':unopenableNotes.length||state.cloud?.blockedCommitOid||this.lastErrorCode==='storage_pressure'?'blocked':this.lastErrorCode?'error':'idle';
-  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:this.lastErrorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication});
+  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:this.lastErrorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
  }
  /** canMerge/reason only exist where the planner can answer: the open preview,
   * its fingerprint cache, or one fresh pendingChoice() pass. */

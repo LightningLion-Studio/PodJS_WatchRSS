@@ -14,6 +14,8 @@ export class WatchSigningIdentity {
   const deviceId=hex(await this.crypto.random(16)),keyId=hex(await this.crypto.random(16));hexId(deviceId,32);hexId(keyId,32);
   const record={deviceId,keyId,registration:null,registered:false};if(!await this.secure.compareAndSet(this.slot,null,canonical(record)))return this.ensure();return record;
  }
+ /** 26.1 P6-7 read-only: the registered v2 signing deviceId, or null. Never creates a record. */
+ async registeredDeviceId():Promise<string|null>{const old=await this.secure.get(this.slot);if(!old)return null;const record=JSON.parse(old);return record?.registered===true&&typeof record.deviceId==='string'&&/^[a-f0-9]{32}$/.test(record.deviceId)?record.deviceId:null;}
  async register(http:SyncV2Http,revocationRevision:string,now:number){
   if(!http.indexWrite||(await http.capabilities()).flags?.indexWrite!==true)throw Error('feature_disabled');let record=await this.ensure();
   const alias=signingAlias(this.accountId,this.scope,record.deviceId,record.keyId);

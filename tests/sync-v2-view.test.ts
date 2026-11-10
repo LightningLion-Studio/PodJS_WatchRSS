@@ -4,7 +4,7 @@ import {choiceOptions, historyLabel, previewLines, syncV2ErrorText, syncV2Notice
 
 const base = (over: Partial<SyncV2UiState> = {}): SyncV2UiState => ({
   enabled: true, phase: 'idle', lastSyncedAtMillis: null, errorCode: null, choice: null, unopenableNotes: [], recoveryCopies: [],
-  keepDiscardedLocalChanges7Days: true, gates: {historyRestore: false, choiceApply: true, noteSegments: true}, publication: null, ...over,
+  keepDiscardedLocalChanges7Days: true, gates: {historyRestore: false, choiceApply: true, noteSegments: true}, publication: null, ownDeviceId: null, ...over,
 });
 
 test('a closed or missing Sync v2 adds nothing to 云同步', () => {

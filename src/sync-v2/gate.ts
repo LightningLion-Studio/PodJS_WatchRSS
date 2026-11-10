@@ -9,3 +9,7 @@ export class ProjectionGate {
  get isEnabled(){return this.enabled;}
  require(){if(!this.enabled)throw Error('feature_disabled');}
 }
+/** 26.4 P6-10 product switch, same frozen-table home as the P1/P2 gates.
+ * Off (default) or no bootstrap announcement: no runtime, no v2 request,
+ * no local write, no UI port. */
+export const SYNC_V2_PRODUCT=Object.freeze({syncV2:false});

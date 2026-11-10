@@ -67,6 +67,8 @@ export const applicationCloudActions={async logout(){owner?.resetApproval();awai
 export const applicationCloudHandoff={subscribe(fn:()=>void){handoffListeners.add(fn);return()=>{handoffListeners.delete(fn);};},get state(){return owner?.handoffState??{phase:'idle' as const};},async workerState(){cloudGate.require();return hostOperation<{state:string}>('cloud.workState',{}).result;}};
 
 /** Sync v2 UI port. Undefined until the runtime is wired (write gates closed today), so 云同步 shows no Sync v2 notices. */
-let syncV2Ui:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined;
-export function installApplicationSyncV2Ui(port:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined){syncV2Ui=port;}
+let syncV2Ui:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined,syncV2OwnDeviceId:string|null=null;
+/** Every snapshot refreshes the cached v2 signing deviceId (26.1 P6-7). */
+export function installApplicationSyncV2Ui(port:import('../ui/sync-v2-view.ts').SyncV2UiPort|undefined){syncV2OwnDeviceId=null;if(!port){syncV2Ui=undefined;return;}const snapshot=port.snapshot.bind(port);syncV2Ui=Object.assign(Object.create(port),{async snapshot(){const value=await snapshot();if(syncV2Ui===wrapped)syncV2OwnDeviceId=value.ownDeviceId??null;return value;}});const wrapped=syncV2Ui!;void wrapped.snapshot().catch(()=>{});}
 export function applicationSyncV2Ui(){return syncV2Ui;}
+export function applicationSyncV2OwnDeviceId(){return syncV2OwnDeviceId;}

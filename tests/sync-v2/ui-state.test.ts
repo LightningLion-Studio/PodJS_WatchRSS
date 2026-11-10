@@ -57,7 +57,7 @@ test('write gates all closed: runtime not open gives enabled=false and an entire
  const {projection}=fakeProjection({state:initialState()});
  const ui=adapter({runtime:null,control:null,projection,trustedNow:()=>42});
  const s=await ui.snapshot();
- expect(s).toEqual({enabled:false,phase:'idle',lastSyncedAtMillis:null,errorCode:null,choice:null,unopenableNotes:[],recoveryCopies:[],keepDiscardedLocalChanges7Days:false,gates:{historyRestore:false,choiceApply:false,noteSegments:false},publication:null});
+ expect(s).toEqual({enabled:false,phase:'idle',lastSyncedAtMillis:null,errorCode:null,choice:null,unopenableNotes:[],recoveryCopies:[],keepDiscardedLocalChanges7Days:false,gates:{historyRestore:false,choiceApply:false,noteSegments:false},publication:null,ownDeviceId:null});
  for(const action of [()=>ui.syncNow(),()=>ui.openChoice(),()=>ui.history(null),()=>ui.rollback('commit:sha256:'+'c'.repeat(64)),()=>ui.restoreRecovery('x'),()=>ui.setKeepDiscarded(false),()=>ui.chooseLocal({} as ChoicePreview),()=>ui.chooseCloud({} as ChoicePreview),()=>ui.chooseMerge({} as ChoicePreview),()=>ui.closeChoice({} as ChoicePreview)])await expect(action()).rejects.toThrow('feature_disabled');
  expect(await ui.snapshot()).toEqual(s);// failures while closed keep the inert contract
 });

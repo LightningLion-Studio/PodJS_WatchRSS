@@ -19,16 +19,29 @@ export function parseNetwork(input:Uint8Array){try{
  }catch{throw Error('invalid_encoding');}}
 
 export type Session={accessToken:string;legacyDeviceId:string;userId:string;scope:Scope};
+/** 26.2 P6-2 origin rule. Production: exactly the https scheme+host+port of the
+ * v1 account backendBaseUrl, no userinfo/path/query/fragment, no redirects.
+ * Loopback http only when the caller is a debug/test build (`allowLoopback`). */
+const LOOPBACK=/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/;
+export type OriginPolicy={accountBaseUrl:string;allowLoopback:boolean};
+export function syncV2Origin(origin:string,policy:OriginPolicy){
+ if(typeof origin!=='string'||typeof policy?.accountBaseUrl!=='string')throw Error('isolated_backend_required');
+ if(LOOPBACK.test(origin)){if(policy.allowLoopback!==true)throw Error('isolated_backend_required');return origin;}
+ const parse=(value:string)=>{const m=/^https:\/\/([a-z0-9.-]+)(?::([0-9]{1,5}))?(\/[^?#@]*)?$/i.exec(value);if(!m||/[@?#\\]/.test(value)||/[A-Z]/.test(m[1]!))return null;return {host:m[1]!,port:m[2]??'',path:m[3]??''};};
+ const own=parse(origin),base=parse(policy.accountBaseUrl.replace(/\/+$/,''));
+ if(!own||!base||own.path!==''||own.host!==base.host||own.port!==base.port||base.path!=='')throw Error('isolated_backend_required');
+ return origin;
+}
 export class SyncV2Http {
  readonly prefix:string;private flags:any;requestGuard?:()=>void|Promise<void>;
- constructor(private readonly transport:HttpTransport,origin:string,readonly scope:Scope,private readonly session:()=>Promise<Session>,readonly indexWrite=false,readonly servicePin?:WatchServiceKeyPin,readonly contentWrite=false,private readonly readOnlyLocal=false,readonly historyRestore=false,readonly choiceApply=false){
-  validateScope(scope);if(!/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/.test(origin))throw Error('isolated_backend_required');this.prefix=origin+'/functions/v1/sync/v2';
+ constructor(private readonly transport:HttpTransport,origin:string,readonly scope:Scope,private readonly session:()=>Promise<Session>,readonly indexWrite=false,readonly servicePin?:WatchServiceKeyPin,readonly contentWrite=false,private readonly readOnlyLocal=false,readonly historyRestore=false,readonly choiceApply=false,private readonly originPolicy?:OriginPolicy){
+  validateScope(scope);if(originPolicy)syncV2Origin(origin,originPolicy);else if(!LOOPBACK.test(origin))throw Error('isolated_backend_required');this.prefix=origin+'/functions/v1/sync/v2';
  }
  /** Per-request view: cleanup cannot lazily persist a service-key pin.
   * Bounded HTTP scratch is infrastructure, not persistent application state.
   * The async guard also applies to recursive capabilities/ref requests.
   * No shared mutable mode can leak into a concurrent transfer. */
- readOnly(check?:()=>Promise<void>){const http=new SyncV2Http(this.transport,this.prefix.slice(0,-'/functions/v1/sync/v2'.length),this.scope,this.session,this.indexWrite,this.servicePin,this.contentWrite,true,this.historyRestore,this.choiceApply);http.flags=this.flags;const previous=this.requestGuard;http.requestGuard=check?async()=>{await previous?.call(http);await check();}:previous;return http;}
+ readOnly(check?:()=>Promise<void>){const http=new SyncV2Http(this.transport,this.prefix.slice(0,-'/functions/v1/sync/v2'.length),this.scope,this.session,this.indexWrite,this.servicePin,this.contentWrite,true,this.historyRestore,this.choiceApply,this.originPolicy);http.flags=this.flags;const previous=this.requestGuard;http.requestGuard=check?async()=>{await previous?.call(http);await check();}:previous;return http;}
  private async send(method:string,path:string,body?:any,extra:Record<string,string>={},raw?:Uint8Array):Promise<HttpResponse>{
   await this.requestGuard?.();if(!this.servicePin)throw Error('service_key_unpinned');await this.servicePin.assertBootstrap(this.readOnlyLocal);
   const s=await this.session();if(accountIdFromUserId(s.userId)!==this.servicePin.accountId)throw Error('cloud_account_busy');sameScope(s.scope,this.scope);

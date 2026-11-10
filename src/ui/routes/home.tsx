@@ -12,7 +12,7 @@ import { readCloudAccountStatus, subscribeCloudAccountStatus } from "../../cloud
 import { CloudSyncScreen } from "../CloudSyncScreen.tsx";
 import { SyncV2Screen } from "../SyncV2Screen.tsx";
 import type { SyncV2Target } from "../sync-v2-view.ts";
-import { applicationSyncV2Ui } from "../../cloud/application.ts";
+import { applicationSyncV2Ui, applicationSyncV2OwnDeviceId } from "../../cloud/application.ts";
 import { coalescedRequest } from "../cloud-sync-view.ts";
 import HomeScreen, { type HomeScreenProps } from "../HomeScreen.tsx";
 import { PhoneConnectionScreen } from "../PhoneConnectionScreen.tsx";
@@ -184,6 +184,7 @@ export function HomeRoutes(props: HomeRoutesProps) {idleHit(4);
             active={props.active}
             target={syncV2Target}
             port={port()}
+            ownDeviceId={applicationSyncV2OwnDeviceId()}
             onDone={() => void props.go("cloud-sync")}
             onError={props.setError}
             ref={(value) => (props.entry.list = value)}
