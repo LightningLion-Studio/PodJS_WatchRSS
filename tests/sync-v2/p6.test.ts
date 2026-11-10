@@ -33,3 +33,46 @@ test('P6-6 trusted time advances monotonically and rejects rollback beyond 5 min
  mono+=86_400_001;expect(clock.now()).toBeNull();expect(clock.observe(1)).toBe(true);expect(clock.now()).toBe(1);
  expect(new TrustedClock(()=>mono).now()).toBeNull();
 });
+
+import {sha256Hex} from '@podjs/framework/crypto';
+import {unhex} from '@podjs/framework/crypto';
+import {jsonBytes} from '../../src/sync-v2/protocol';
+import {vector,identityCrypto} from './fixture';
+import {accountContentKey,accountScopedStorage,accountKeyPrefix,fetchRepoIdentity,receiveRepoIdentity} from '../../src/sync-v2/product';
+const f=vector('identity-bootstrap'),root=unhex(f.wrapKeyHex);
+const member={authorized:true,accountId:f.context.accountId,deviceId:f.request.recipientDeviceId,platform:'watch' as const};
+function backend(over:{descriptor?:any;capsule?:Uint8Array;missing?:boolean}={}){
+ const capsule=over.capsule??jsonBytes(f.capsule),recoveryOid='id-key-recovery:sha256:'+sha256Hex(jsonBytes(f.capsule)),descriptor=over.descriptor??f.descriptor,{descriptorOid}=require('../../src/sync-v2/identity');const seen:string[]=[];
+ return {seen,transport:{request:async(r:any)=>{seen.push(r.method+' '+r.url);expect(r.headers.Authorization).toBe('Bearer t');
+  if(r.url.endsWith('/repo/descriptor'))return over.missing?{status:404,headers:{},body:jsonBytes({error:{code:'object_missing',retryable:false,retryAfterMillis:null,details:{}}})}:{status:200,headers:{},body:jsonBytes({version:2,scope:f.context.scope,descriptorOid:descriptorOid(descriptor),descriptor,recoveryOid})};
+  if(r.url.endsWith('/repo/id-key-recovery/'+encodeURIComponent(recoveryOid)))return {status:200,headers:{},body:capsule};throw Error('unexpected '+r.url);}} as any};
+}
+function memorySecure(){const map=new Map<string,string>();return {map,get:async(k:string)=>map.get(k)??null,compareAndSet:async(k:string,e:string|null,v:string)=>{if((map.get(k)??null)!==e)return false;map.set(k,v);return true;}};}
+const prefix=accountKeyPrefix('https://api.example.com/','user-1');
+const receive=(fetched:any,storage:any,rootFor=async()=>root)=>receiveRepoIdentity({fetched,storage,crypto:identityCrypto,random:async n=>new Uint8Array(n).fill(7),member:async()=>member,accountId:f.context.accountId,root:rootFor});
+
+test('P6-1 contentKey is the account key; missing version is key_unavailable',async()=>{
+ const keys={currentKeyVersion:async()=>2,accountKey:async(_u:string,v?:number)=>v===2?new Uint8Array(32).fill(2):undefined},ck=accountContentKey(keys,'u');
+ expect((await ck.current()).version).toBe(2);await expect(ck.at(1)).rejects.toThrow('key_unavailable');
+ await expect(accountContentKey({currentKeyVersion:async()=>0,accountKey:async()=>undefined},'u').current()).rejects.toThrow('key_unavailable');
+});
+test('P6-4 capsule receive installs K_id, pins it and reuses the pin',async()=>{
+ const b=backend(),fetched=await fetchRepoIdentity(b.transport,'https://api.example.com',{accessToken:'t',legacyDeviceId:'d'});expect(fetched!.scope).toEqual(f.context.scope);
+ const secure=memorySecure(),storage=accountScopedStorage(secure,prefix),installed=await receive(fetched,storage);expect(installed.idKeyHex).toBe(f.idKeyHex);
+ expect([...secure.map.keys()].every(k=>k.startsWith(prefix+'syncv2.'))).toBe(true);
+ expect(await receive(fetched,storage,async()=>{throw Error('root must not be needed');})).toEqual(installed);
+ expect(b.seen.map(s=>s.split(' ')[0])).toEqual(['GET','GET']);
+});
+test('P6-4 no descriptor yet: watch waits and never creates',async()=>{expect(await fetchRepoIdentity(backend({missing:true}).transport,'https://api.example.com',{accessToken:'t',legacyDeviceId:'d'})).toBeNull();});
+test('P6-4 tampered capsule, wrong root and mismatched descriptor are rejected without install',async()=>{
+ const bad=jsonBytes(f.capsule);bad[bad.length-5]^=1;await expect(fetchRepoIdentity(backend({capsule:bad}).transport,'https://api.example.com',{accessToken:'t',legacyDeviceId:'d'})).rejects.toThrow('hash_mismatch');
+ const fetched=(await fetchRepoIdentity(backend().transport,'https://api.example.com',{accessToken:'t',legacyDeviceId:'d'}))!,secure=memorySecure(),storage=accountScopedStorage(secure,prefix);
+ await expect(receive(fetched,storage,async()=>new Uint8Array(32).fill(9))).rejects.toThrow();expect(secure.map.size).toBe(0);
+ const forged={...fetched,capsule:{...f.capsule,header:{...f.capsule.header,wrappingKeyVersion:f.capsule.header.wrappingKeyVersion+1}}};await expect(receive(forged,storage)).rejects.toThrow();expect(secure.map.size).toBe(0);
+ await receive(fetched,storage);const other={...fetched,descriptor:{...f.descriptor,proof:f.descriptor.proof.slice(0,-2)+'AA'}};other.descriptorOid=require('../../src/sync-v2/identity').descriptorOid(other.descriptor);await expect(receive(other,storage)).rejects.toThrow();
+});
+test('P6-5 K_id slot sits under the account-key prefix cleared on logout',async()=>{
+ const secure=memorySecure(),storage=accountScopedStorage(secure,prefix);await receive((await fetchRepoIdentity(backend().transport,'https://api.example.com',{accessToken:'t',legacyDeviceId:'d'}))!,storage);
+ for(const k of [...secure.map.keys()])if(k.startsWith(prefix))secure.map.delete(k);expect(secure.map.size).toBe(0);
+ expect(()=>accountScopedStorage(secure,'watchrss.syncv2.')).toThrow('secure_store_corrupt');
+});
