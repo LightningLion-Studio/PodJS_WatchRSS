@@ -163,6 +163,7 @@ export class WatchIndexPublisher {
   await this.http.capabilities();const state=await this.store.readState(),queued=state.cloud?.pendingPublish;
   if(queued?.explicit){if(queued.phase==='confirmed')return queued.result;const saved=await this.http.requestResult(queued.requestId);if(saved.status==='succeeded')return this.accept(queued,saved.response);if(saved.status!=='unknown'||saved.response!==null)throw Error('invalid_schema');}
   const {plan}=await this.pending(),known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  if(plan.phase==='conflicted')throw new SyncV2Error('ref_conflict',true);
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');
   const window=await this.http.negotiate([],[]);if(plan.explicit&&(window.account.commitOid!==plan.request.account.body.expectedOid||window.account.revision!==plan.request.account.body.expectedRevision||window.account.rollbackGeneration!==(plan.kind==='rollback'?String(BigInt(plan.commit.body.rollbackGeneration)-1n):plan.commit.body.rollbackGeneration)))throw Error('choice_stale');let after='';for(;;){const page=await this.store.uploadBatch(plan.requestId,after);if(!page.length)break;const upload=page.filter(o=>!o.oid.startsWith('state-refs:'));
   if(!upload.length){after=page.at(-1)!.oid;continue;}
@@ -207,16 +208,18 @@ export class WatchIndexPublisher {
  /** Only a definitive CAS rejection permits retiring a journal. Authenticate the
   * new account before retiring it; never change expected refs on a signed request.
   * Candidate edits and reserved author sequences survive the retry. */
- async retryAfterConflict(refresh:()=>Promise<void>){
+ async retryAfterConflict(refresh:()=>Promise<void>,awaitChoice=false){
   if(this.flushing)throw Error('publication_pending');let before=await this.store.readState(),plan=before.cloud?.pendingPublish;
   if(!plan||plan.phase!=='conflicted')throw Error('publication_pending');
   let known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   await refresh();before=await this.store.readState();
-  if(before.cloud?.pendingPublish?.requestId!==plan.requestId||before.cloud.pendingPublish.phase!=='conflicted'||before.localChangeRevision!==plan.capturedLocalRevision||before.pendingChoice)throw Error('choice_stale');
+  if(before.cloud?.pendingPublish?.requestId!==plan.requestId||before.cloud.pendingPublish.phase!=='conflicted'||before.localChangeRevision!==plan.capturedLocalRevision||before.pendingChoice&&!awaitChoice)throw Error('choice_stale');
   if(!before.account||before.cloud.pins.accountOid!==before.account.oid||before.account.generation!==before.rollbackGeneration||before.editBase.generation!==before.rollbackGeneration)throw Error('rollback_conflict');
   if(before.account.oid===plan.request.account.body.expectedOid&&before.account.revision===plan.request.account.body.expectedRevision)throw Error('ref_conflict');
   known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')throw Error('choice_stale');if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
-  const next=copy(before);next.cloud.pendingPublish=null;await this.store.finishUpload(before,next,plan.requestId);
+  const next=copy(before);next.cloud.pendingPublish=null;
+  if(awaitChoice&&before.hasUnsentEdits)next.pendingChoice={generation:before.account.generation,inboxKeys:before.pendingChoice?.inboxKeys??[],accountOid:before.account.oid,accountRevision:before.account.revision,selectedLocalChangeRevision:before.localChangeRevision};
+  await this.store.finishUpload(before,next,plan.requestId);
  }
  /** An expired unknown outcome is not a response-loss acknowledgement. Resolve
   * the original request before and after refreshing, then retire only its journal.

@@ -41,7 +41,7 @@ export interface ChoicePreview {
 }
 /** The object returned by `watchSyncV2(...).open()` (null when the feature is
  * closed). Only pull is consumed here; the rest stays runtime-private. */
-export interface SyncV2RuntimeHandle {pull():Promise<unknown>;publish():Promise<unknown>;signingDeviceId?():Promise<string|null>}
+export interface SyncV2RuntimeHandle {pull():Promise<unknown>;publish():Promise<unknown>;signingStatus?():Promise<'ready'|'signing_state_unavailable'>;signingDeviceId?():Promise<string|null>}
 /** The read-only slice of WatchProjectionStore this adapter needs. Passing the
  * real store keeps the existing APIs as the single source of truth. */
 export interface SyncV2StateReader {
@@ -166,9 +166,9 @@ export class WatchSyncV2UiState {
   const unopenableNotes=await this.unopenable(state);
   const choice=state.pendingChoice?await this.choiceState(state,side):null;
   const recoveryCopies=(await control.recoveryCopies()).map(c=>({copyId:c.copyId,createdAtMillis:c.createdAtMillis,expiresAtMillis:c.expiresAtMillis}));
-  const publication=this.publication(state);
-  const phase:SyncV2UiStatePhase=this.inflightSyncs>0?'syncing':state.pendingChoice?'awaiting_choice':unopenableNotes.length||state.cloud?.blockedCommitOid||this.lastErrorCode==='storage_pressure'?'blocked':this.lastErrorCode?'error':'idle';
-  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:this.lastErrorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
+  const publication=this.publication(state),signingUnavailable=await this.o.runtime?.signingStatus?.()==='signing_state_unavailable';
+  const phase:SyncV2UiStatePhase=this.inflightSyncs>0?'syncing':state.pendingChoice?'awaiting_choice':signingUnavailable||unopenableNotes.length||state.cloud?.blockedCommitOid||this.lastErrorCode==='storage_pressure'?'blocked':this.lastErrorCode?'error':'idle';
+  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:signingUnavailable?'signing_state_unavailable':this.lastErrorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
  }
  /** canMerge/reason only exist where the planner can answer: the open preview,
   * its fingerprint cache, or one fresh pendingChoice() pass. */

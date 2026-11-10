@@ -1,3 +1,4 @@
+import {SyncV2Lifetime} from './lifetime';
 /** 26.4 P6-10 application opener. Runs only when SYNC_V2_PRODUCT.syncV2 is on,
  * the bootstrap announces syncV2 and the v1 account keys are ready. */
 import {createSyncV2Crypto} from '@podjs/framework/crypto';
@@ -45,14 +46,33 @@ import {watchSpaceV2} from './space-runtime';
 
 /** Product assembly over the original v1 library and authenticated account.
  * The caller serializes this opener after v1 releases its writer lease. */
-export async function openApplicationSyncV2(options:{host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[]}>;allowLoopback?:boolean;now?:()=>number;clock?:TrustedClock}){
- const {account,host,repository}=options;
+export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;host:CloudHostRequest;cleanupHost?:CloudHostRequest;transport:HttpTransport;account:ApplicationSyncV2Account;legacyDeviceId:string;keys:AccountKeyring;repository:Pick<SqlLibrarySessionRepository,'cloudRestoreMetadata'|'cloudArticleBody'>;session:()=>Promise<ApplicationSyncV2Account>;bootstrap:()=>Promise<{accountId:string;syncV2:unknown;devices:import('./signing-keys').ApprovedLegacyDevice[]}>;allowLoopback?:boolean;now?:()=>number;clock?:TrustedClock}){
+ const {account,repository}=options,lifetime=options.lifetime??new SyncV2Lifetime();
+ // Retain the writer lease through SQL. Read/crypto/network waits can unwind
+ // immediately; their late results cannot cross another guarded IO boundary.
+ const host:CloudHostRequest=async<T>(method:string,args:Record<string,unknown>)=>{
+  const cleanup=['file.delete','secure.release','cloud.release','crypto.closeSealedGzip'].includes(method);
+  if(cleanup)return options.host<T>(method,args);
+  lifetime.require();
+  const result=method.startsWith('sql.')||method.startsWith('secure.')?await options.host<T>(method,args):await lifetime.read(()=>options.host<T>(method,args));
+  lifetime.require();return result;
+ };
+ const transport:HttpTransport={request:r=>lifetime.read(()=>options.transport.request({...r,background:lifetime}))};
  const held=new Set<Uint8Array>(),keyring:AccountKeyring={currentKeyVersion:u=>options.keys.currentKeyVersion(u),accountKey:async(u,v)=>{const key=await options.keys.accountKey(u,v);if(closed){key?.fill(0);throw Error('feature_disabled');}if(key)held.add(key);return key;}};
  let localFactory:ReturnType<typeof watchLocalProjection>|undefined,runtimeFactory:ReturnType<typeof watchSyncV2>|undefined,ui:WatchSyncV2UiState|undefined,installedRecord:{idKeyHex:string}|undefined,closed=false,activeClock=options.clock,syncRound:(()=>Promise<void>)|undefined;
- const close=async()=>{if(closed)return;closed=true;ui?.dispose();ui=undefined;runtimeFactory?.destroy();runtimeFactory=undefined;for(const key of held)key.fill(0);held.clear();if(installedRecord)installedRecord.idKeyHex='';installedRecord=undefined;activeClock?.clear();syncRound=undefined;const closing=localFactory;localFactory=undefined;if(closing){try{await closing.gate.close().catch(()=>{});}finally{await stopExistingProjection(projectionSql(options.cleanupHost??host));}}};
+ let offClose=()=>{},closingPromise:Promise<void>|undefined;
+ const close=()=>{
+  if(closingPromise)return closingPromise;
+  closed=true;offClose();lifetime.cancel();ui?.dispose();ui=undefined;runtimeFactory?.destroy();runtimeFactory=undefined;
+  for(const key of held)key.fill(0);held.clear();if(installedRecord)installedRecord.idKeyHex='';installedRecord=undefined;activeClock?.clear();syncRound=undefined;
+  const closing=localFactory;localFactory=undefined;
+  return closingPromise=(async()=>{if(closing){try{await closing.gate.close().catch(()=>{});}finally{await stopExistingProjection(projectionSql(options.cleanupHost??options.host));}}})();
+ };
+ offClose=lifetime.onCancel(()=>{void close().catch(()=>{});});
  try{
- const received=await receiveApplicationIdentity({...options,keys:keyring});if(!received){for(const key of held)key.fill(0);held.clear();return null;}
- installedRecord=received.installed;
+ lifetime.require();
+ const received=await receiveApplicationIdentity({...options,host,transport,keys:keyring});if(!received){await close();return null;}
+ installedRecord=received.installed;if(closed){received.installed.idKeyHex='';installedRecord=undefined;throw Error('feature_disabled');}lifetime.require();
  const {fetched,installed,origin}=received,accountScope=canonical([account.backendBaseUrl.replace(/\/+$/,''),account.userId]),libraryId=accountIdFromUserId(options.legacyDeviceId),content=accountContentKey(keyring,account.userId),clock=activeClock=options.clock??new TrustedClock();
  const assertCurrent=async()=>{if(closed)throw Error('feature_disabled');const current=await options.session();if(canonical([current.backendBaseUrl.replace(/\/+$/,''),current.userId])!==accountScope)throw Error('cloud_account_busy');return current;};
  const guardedHost:CloudHostRequest=async<T>(method:string,args:Record<string,unknown>)=>{await assertCurrent();if(method==='secure.get'&&args.offset===undefined)return await readCloudSecure(host,String(args.key)) as T;return host<T>(method,args);};
@@ -65,7 +85,7 @@ export async function openApplicationSyncV2(options:{host:CloudHostRequest;clean
   const crypto=createSyncV2Crypto(guardedHost),current=await content.current(),keys={id:unhex(installed.idKeyHex),content:current.key,version:current.version,readContentKey:async(v:number)=>(await content.at(v)).key};
   held.add(keys.id);
   const resolveBody=articleBodyResolver({crypto,keys,scope:fetched.scope,read:id=>repository.cloudArticleBody(id)});
-  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport:options.transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now});
+  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');
   // Read/cache and recovery ports share the existing bounded P3 implementation.
@@ -75,9 +95,39 @@ export async function openApplicationSyncV2(options:{host:CloudHostRequest;clean
   const space=await watchSpaceV2({enabled:true,host:guardedHost,projection:local.store,content:engine,accountScope,trustedNow:()=>clock.now()});if(!space)throw Error('feature_disabled');
   const business=new WatchAccountBusinessSql(db,local.store,fetched.scope,keys.id,space.closures,accountBodyVerifier(runtime.http,crypto,keys,runtime.approved),space.recovery.ports.reserve);await business.initialize();
   const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now()});
-  const round=async()=>{await assertCurrent();await runtime.refreshTrustedTime();const pending=await local.store.readState();if(pending.cloud?.pendingPublish)await runtime.publisher.flush();await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);await runtime.pull();const state=await local.store.readState();if(state.cloud?.pendingPublish)await runtime.publisher.flush();else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication))await runtime.publish();};
+  const recoverConflict=async()=>{
+   // Confirm the same immutable request first. Only a recorded CAS rejection
+   // authorizes refreshing the winning identity/account and retiring its journal.
+   await runtime.publisher.retryAfterConflict(async()=>{
+    const winner=await receiveApplicationIdentity({...options,host,transport,keys:keyring});
+    if(!winner)throw Error('identity_not_installed');
+    try{if(digest(winner.fetched.descriptor)!==digest(fetched.descriptor)||winner.installed.idKeyHex!==installed.idKeyHex)throw Error('identity_conflict');}
+    finally{winner.installed.idKeyHex='';}
+    await runtime.refreshAccount();
+   },true);
+  };
+  const flush=async()=>{
+   const pending=(await local.store.readState()).cloud?.pendingPublish;if(!pending)return;
+   if(pending.phase==='conflicted'&&!pending.explicit){await recoverConflict();return;}
+   try{await runtime.publisher.flush();}catch(error){
+    if((error as Error).message!=='ref_conflict'||pending.explicit||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
+    await recoverConflict();
+   }
+  };
+  const round=async()=>{
+   await assertCurrent();await runtime.refreshTrustedTime();await flush();
+   await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);await runtime.pull();
+   const state=await local.store.readState();
+   if(state.cloud?.pendingPublish)await flush();
+   else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
+    try{await runtime.publish();}catch(error){
+     if((error as Error).message!=='ref_conflict'||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
+     await recoverConflict();
+    }
+   }
+  };
   await round();
-  ui=new WatchSyncV2UiState({runtime:{pull:round,publish:()=>runtime.publish(),signingDeviceId:runtime.signingDeviceId},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
+  ui=new WatchSyncV2UiState({runtime:{pull:round,publish:()=>runtime.publish(),signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
   syncRound=round;
   return {ui,sync:async()=>{if(!syncRound)throw Error('feature_disabled');return syncRound();},close};
  }catch(error){await close().catch(()=>{});throw productError(error);}

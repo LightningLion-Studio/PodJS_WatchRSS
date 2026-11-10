@@ -1,3 +1,4 @@
+import {SyncV2Lifetime} from './lifetime';
 /** 26.4 P6-10 product lifecycle. One owner per account identity:
  * - switch off, or bootstrap without a syncV2 announcement: no runtime, no v2
  *   request, no local write, no UI port;
@@ -12,12 +13,12 @@ export interface SyncV2ProductOptions<Port> {
  drainOnStop?:boolean;
  /** True only when the v1 bootstrap carries the syncV2 announcement (P6-11). */
  announced:()=>Promise<boolean>;
- open:()=>Promise<SyncV2ProductSession<Port>|null>;
+ open:(lifetime:SyncV2Lifetime)=>Promise<SyncV2ProductSession<Port>|null>;
  install:(port:Port|undefined)=>void;
 }
 export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
- let generation=0,identity:string|null=null,session:SyncV2ProductSession<Port>|null=null,opening:Promise<Port|null>|null=null;
- const stop=async()=>{generation++;identity=null;const closing=session,pending=opening;opening=null;session=null;options.install(undefined);await closing?.close();if(options.drainOnStop)await pending?.catch(()=>{});};
+ let generation=0,identity:string|null=null,session:SyncV2ProductSession<Port>|null=null,opening:Promise<Port|null>|null=null,lifetime:SyncV2Lifetime|undefined;
+ const stop=async()=>{generation++;lifetime?.cancel();lifetime=undefined;identity=null;const closing=session,pending=opening;opening=null;session=null;options.install(undefined);await closing?.close();if(options.drainOnStop)await pending?.catch(()=>{});};
  const product={
   /** Idempotent per account identity; a new identity first unmounts the old one. */
   async start(next:string):Promise<Port|null>{
@@ -26,9 +27,10 @@ export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
    if(session)return session.ui;
    const ticket=generation;
    return opening??=(async()=>{
+    const current=lifetime=new SyncV2Lifetime();
     try{
      if(!await options.announced()||ticket!==generation)return null;
-     const opened=await options.open();if(!opened)return null;
+     const opened=await options.open(current);if(!opened)return null;
      if(ticket!==generation){await opened.close();return null;}
      session=opened;options.install(opened.ui);return opened.ui;
     }finally{if(ticket===generation)opening=null;}

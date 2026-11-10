@@ -1,3 +1,4 @@
+import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
 import {conflictTexts} from './note-conflict-set';
 import {sameBusinessRevision} from './business-revision';
@@ -207,7 +208,7 @@ export class WatchAccountControl {
  async poll(){await this.o.reader.poll();return this.followCurrent();}
  private async followCurrent():Promise<any>{
   const before=await this.o.store.readState();if(before.pendingChoice||before.hasUnsentEdits)return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
-  if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){await this.flushApplied();return this.followCurrent();}
+  if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}
   if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
   try{await this.o.store.controlUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
  }
@@ -226,5 +227,5 @@ export class WatchAccountControl {
    return out;}};
  }
  /** Durable post-commit ACK. Failure retries the same request and never reapplies. */
- async flushApplied(){const before=await this.o.store.readState(),ack=before.cloud?.pendingApplied;if(!ack)return null;const author=await this.o.author(),reply=await this.request('/acks/applied',{scope:this.o.http.scope,...ack,deviceId:author.deviceId});if(reply.accepted!==true)throw Error('invalid_schema');const current=await this.o.store.readState();if(canonical(current.cloud?.pendingApplied)!==canonical(ack))throw Error('choice_stale');const next=clone(current);next.cloud.pendingApplied=null;await this.o.store.controlUpdate(current,next);return reply;}
+ async flushApplied(){const before=await this.o.store.readState(),ack=before.cloud?.pendingApplied;if(!ack)return null;let author;try{author=await this.o.author();}catch(error){if(error instanceof SigningStateUnavailable)return {signingUnavailable:true};throw error;}const reply=await this.request('/acks/applied',{scope:this.o.http.scope,...ack,deviceId:author.deviceId});if(reply.accepted!==true)throw Error('invalid_schema');const current=await this.o.store.readState();if(canonical(current.cloud?.pendingApplied)!==canonical(ack))throw Error('choice_stale');const next=clone(current);next.cloud.pendingApplied=null;await this.o.store.controlUpdate(current,next);return reply;}
 }
