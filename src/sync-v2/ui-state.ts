@@ -114,6 +114,9 @@ export class WatchSyncV2UiState {
   try{
    const pulled=await this.o.runtime!.pull();
    await this.o.control!.flushApplied();
+   // A signing-unavailable pass can still authenticate and apply a pull.
+   // Preserve the last successful pull+ACK time until its durable ACK clears.
+   if((await this.o.projection.readState()).cloud?.pendingApplied)return pulled;
    const now=this.trusted();if(now!==null)this.lastSyncedAtMillis=now;else if(this.o.productErrors)throw Error('trusted_time_unavailable');
    return pulled;
   }finally{this.inflightSyncs--;}

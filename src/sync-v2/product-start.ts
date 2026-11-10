@@ -18,12 +18,21 @@ export interface SyncV2ProductOptions<Port> {
 }
 export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
  let generation=0,identity:string|null=null,session:SyncV2ProductSession<Port>|null=null,opening:Promise<Port|null>|null=null,lifetime:SyncV2Lifetime|undefined;
- const stop=async()=>{generation++;lifetime?.cancel();lifetime=undefined;identity=null;const closing=session,pending=opening;opening=null;session=null;options.install(undefined);await closing?.close();if(options.drainOnStop)await pending?.catch(()=>{});};
+ let stopping:Promise<void>|undefined;
+ const stop=()=>{
+  generation++;
+  if(stopping)return stopping;
+  lifetime?.cancel();lifetime=undefined;identity=null;const closing=session,pending=opening;opening=null;session=null;options.install(undefined);
+  // Keep ownership until SQL teardown drains. All stop callers and the next
+  // start share this barrier, even after session/opening have been detached.
+  return stopping=(async()=>{try{await closing?.close();}finally{if(options.drainOnStop)await pending?.catch(()=>{});}})().finally(()=>{stopping=undefined;});
+ };
  const product={
   /** Idempotent per account identity; a new identity first unmounts the old one. */
   async start(next:string):Promise<Port|null>{
    if(options.enabled!==true)return null;
-   if(identity!==next){if(identity!==null||session)await stop();identity=next;}
+   if(stopping){const ticket=generation;await stopping;if(ticket!==generation)return null;}
+   if(identity!==next){if(identity!==null||session){const stopped=stop(),ticket=generation;await stopped;if(ticket!==generation)return null;}identity=next;}
    if(session)return session.ui;
    const ticket=generation;
    return opening??=(async()=>{

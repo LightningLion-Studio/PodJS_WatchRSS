@@ -15,7 +15,11 @@ export class WatchSigningIdentity {
    const old=await this.secure.get(this.slot);if(old===null||old===undefined)return null;
    const record=JSON.parse(old);exact(record,['deviceId','keyId','registration','registered']);hexId(record.deviceId,32);hexId(record.keyId,32);
    if(typeof record.registered!=='boolean'||record.registered&&record.registration===null)throw Error('secure_store_corrupt');
-   if(record.registration!==null){const r=record.registration;exact(r,['body','bindingProof','possessionSignature']);if(r.body.deviceId!==record.deviceId||r.body.keyId!==record.keyId)throw Error('secure_store_corrupt');await verifyBinding(this.crypto,this.idKey,this.scope,r,async()=>{});}
+   if(record.registration!==null){const r=record.registration;exact(r,['body','bindingProof','possessionSignature']);if(r.body.deviceId!==record.deviceId||r.body.keyId!==record.keyId)throw Error('secure_store_corrupt');await verifyBinding(this.crypto,this.idKey,this.scope,r,async()=>{});
+    // Persisted proof alone cannot establish native private-key availability.
+    // Read only: a missing registered key must never create a replacement.
+    const publicKey=await this.crypto.signingKey(signingAlias(this.accountId,this.scope,record.deviceId,record.keyId),false);if(b64(publicKey)!==r.body.publicKey)throw Error('signature_invalid');
+   }
    return record;
   }catch(error){if(['feature_disabled','cloud_account_busy','cloud_sync_suspended'].includes((error as Error).message))throw error;throw new SigningStateUnavailable();}
  }
@@ -28,11 +32,13 @@ export class WatchSigningIdentity {
  /** 26.1 P6-7 read-only: the registered v2 signing deviceId, or null. Never creates a record. */
  async registeredDeviceId():Promise<string|null>{try{const record=await this.load();return record?.registered===true?record.deviceId:null;}catch(error){if(error instanceof SigningStateUnavailable)return null;throw error;}}
  async register(http:SyncV2Http,revocationRevision:string,now:number){
+  try{
   if(!http.indexWrite||(await http.capabilities()).flags?.indexWrite!==true)throw Error('feature_disabled');let record=await this.ensure();
   const alias=signingAlias(this.accountId,this.scope,record.deviceId,record.keyId);
   if(!record.registration){const registration=await signingRegistration(this.crypto,this.idKey,this.accountId,this.scope,record.deviceId,record.keyId,now,revocationRevision,true),next={...record,registration};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
   // Retry exactly the persisted randomized signature, never generate a replacement proof.
   if(!record.registered){const result=await http.json('POST','/devices/signing-key',record.registration);if(result.deviceId!==record.deviceId||result.keyId!==record.keyId||result.registered!==true)throw Error('signature_invalid');const next={...record,registered:true};if(!await this.secure.compareAndSet(this.slot,canonical(record),canonical(next)))throw Error('choice_stale');record=next;}
   const publicKey=await this.crypto.signingKey(alias,false);if(b64(publicKey)!==record.registration.body.publicKey)throw Error('signature_invalid');return {...record,alias};
+  }catch(error){if((error as Error).message==='signing_key_missing')throw new SigningStateUnavailable();throw error;}
  }
 }
