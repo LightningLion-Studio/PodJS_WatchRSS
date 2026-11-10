@@ -76,3 +76,30 @@ test('P6-5 K_id slot sits under the account-key prefix cleared on logout',async(
  for(const k of [...secure.map.keys()])if(k.startsWith(prefix))secure.map.delete(k);expect(secure.map.size).toBe(0);
  expect(()=>accountScopedStorage(secure,'watchrss.syncv2.')).toThrow('secure_store_corrupt');
 });
+
+import {watchSyncV2Product} from '../../src/sync-v2/product-start';
+import {ensureR0Scan,placeholderBodyResolver} from '../../src/sync-v2/product';
+function lifecycle(enabled:boolean,announce:boolean){
+ const log:string[]=[];let installed:any;
+ const product=watchSyncV2Product<{id:string}>({enabled,announced:async()=>{log.push('bootstrap');return announce;},open:async()=>{log.push('open');return {ui:{id:'ui'+log.length},close:async()=>{log.push('close');}};},install:port=>{installed=port;log.push(port?'install':'uninstall');}});
+ return {product,log,get installed(){return installed;}};
+}
+test('P6-10 switch off: no bootstrap read, no runtime, no UI port',async()=>{const l=lifecycle(false,true);expect(await l.product.start('a')).toBeNull();expect(l.log).toEqual([]);expect(l.installed).toBeUndefined();});
+test('P6-10 switch on without announcement: no runtime, no UI port',async()=>{const l=lifecycle(true,false);expect(await l.product.start('a')).toBeNull();expect(l.log).toEqual(['bootstrap']);expect(l.installed).toBeUndefined();});
+test('P6-10 switch on with announcement opens once, installs, and unmounts on switch/logout',async()=>{
+ const l=lifecycle(true,true);const [a,b]=await Promise.all([l.product.start('a'),l.product.start('a')]);expect(a).toBe(b);expect(l.log).toEqual(['bootstrap','open','install']);
+ await l.product.start('b');expect(l.log).toEqual(['bootstrap','open','install','uninstall','close','bootstrap','open','install']);
+ await l.product.stop();expect(l.installed).toBeUndefined();expect(l.product.active).toBe(false);expect(l.log.slice(-2)).toEqual(['uninstall','close']);
+});
+test('P6-10 stop during open closes the late runtime and installs nothing',async()=>{
+ let release!:()=>void;const gate=new Promise<void>(r=>release=r),log:string[]=[];let installed:any;
+ const product=watchSyncV2Product<string>({enabled:true,announced:async()=>true,open:async()=>{await gate;return {ui:'ui',close:async()=>{log.push('close');}};},install:p=>{installed=p;}});
+ const pending=product.start('a');await new Promise(r=>setTimeout(r,0));await product.stop();release();expect(await pending).toBeNull();expect(installed).toBeUndefined();expect(log).toEqual(['close']);
+});
+test('P6-8 R0 scan: first enable rebuilds, unfinished scan resumes, complete is a no-op',async()=>{
+ const calls:string[]=[];let phase:string|null=null;const store={checkpoint:async()=>phase===null?null:{phase},scanPage:async()=>{calls.push('scan');phase='tail';},catchUpPage:async()=>{calls.push('tail');phase='complete';}};
+ expect(await ensureR0Scan({store,source:{},rebuild:async()=>{calls.push('rebuild');phase='complete';}})).toBe('scanned');
+ phase='scan';expect(await ensureR0Scan({store,source:{},rebuild:async()=>{throw Error('must resume');}})).toBe('resumed');expect(calls).toEqual(['rebuild','scan','tail']);
+ expect(await ensureR0Scan({store,source:{},rebuild:async()=>{throw Error('no');}})).toBe('complete');
+});
+test('P6-9 book/asset body resolver keeps the placeholder',async()=>{expect(await placeholderBodyResolver({},null)).toBeNull();});

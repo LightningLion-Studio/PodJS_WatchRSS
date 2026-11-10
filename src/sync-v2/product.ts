@@ -55,3 +55,16 @@ export async function receiveRepoIdentity(options:{fetched:RepoIdentityFetch;sto
  const root=await options.root(fetched.descriptor.body.wrappingKeyVersion);
  return store.installRecovery(fetched.capsule,fetched.descriptor,root,fetched.descriptorOid);
 }
+
+/** 26.3 P6-8: first enable runs the R0 full scan; an unfinished scan resumes
+ * page by page from its durable checkpoint (no restart, local data kept). */
+export async function ensureR0Scan(local:{store:{checkpoint():Promise<{phase:string}|null>;scanPage(source:any):Promise<unknown>;catchUpPage(source:any):Promise<unknown>};source:unknown;rebuild():Promise<void>}){
+ const first=await local.store.checkpoint();if(first?.phase==='complete')return 'complete' as const;
+ if(!first){await local.rebuild();return 'scanned' as const;}
+ for(;;){const cp=await local.store.checkpoint();if(!cp||cp.phase==='complete')break;if(cp.phase==='tail')await local.store.catchUpPage(local.source);else await local.store.scanPage(local.source);}
+ return 'resumed' as const;
+}
+/** 26.3 P6-9: book/asset bodies stay out of v2 in P6. Returning null keeps the
+ * publisher's placeholder body fields (no recipe); the reader shows
+ * 「正文暂未同步」 and keeps the local body. Article recipes: see report. */
+export const placeholderBodyResolver=async(_entry:unknown,_existing:unknown)=>null;
