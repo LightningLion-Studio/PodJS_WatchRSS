@@ -103,3 +103,15 @@ test('P6-8 R0 scan: first enable rebuilds, unfinished scan resumes, complete is 
  expect(await ensureR0Scan({store,source:{},rebuild:async()=>{throw Error('no');}})).toBe('complete');
 });
 test('P6-9 book/asset body resolver keeps the placeholder',async()=>{expect(await placeholderBodyResolver({},null)).toBeNull();});
+
+import {createHash} from 'node:crypto';
+test('P6-5 logout cleanup prefix covers the K_id slot',async()=>{
+ const {clearAccountCloud}=await import('../../src/account/cloud-cleanup');const removed:string[]=[];
+ const host:any=async(method:string,args:any)=>{if(method==='crypto.hash')return {digestBase64:createHash('sha256').update(Buffer.from(args.dataBase64,'base64')).digest('base64')};if(method==='secure.update'){removed.push(...args.removePrefixes);return {};}if(method==='file.list')return {entries:[]};return {};};
+ try{await clearAccountCloud(host,{userId:'user-1',backendBaseUrl:'https://api.example.com/'});}catch{}
+ const slot=accountKeyPrefix('https://api.example.com/','user-1')+'syncv2.watchrss.syncv2.identity.x';expect(removed.some(p=>slot.startsWith(p))).toBe(true);
+});
+test('P6-2 application opener refuses a non-https account backend before any request',async()=>{
+ const {receiveApplicationIdentity}=await import('../../src/sync-v2/application-open');let calls=0;
+ await expect(receiveApplicationIdentity({host:(async()=>{calls++;}) as any,transport:{request:async()=>{calls++;throw Error('no');}} as any,account:{userId:'u',backendBaseUrl:'http://api.example.com',watchDeviceToken:'t'},legacyDeviceId:'d',keys:{currentKeyVersion:async()=>1,accountKey:async()=>undefined}})).rejects.toThrow('isolated_backend_required');expect(calls).toBe(0);
+});
