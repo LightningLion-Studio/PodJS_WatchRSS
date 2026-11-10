@@ -9,8 +9,7 @@ export class TrustedClock {
  observe(issuedAtMillis:number){
   if(!Number.isSafeInteger(issuedAtMillis)||issuedAtMillis<0)return false;
   const current=this.now();if(current!==null&&issuedAtMillis<current-ROLLBACK_MILLIS)return false;
-  if(current!==null&&issuedAtMillis<current)return true;
-  this.base={issuedAt:issuedAtMillis,at:this.monotonic()};return true;
+  this.base={issuedAt:Math.max(issuedAtMillis,current??0),at:this.monotonic()};return true;
  }
  now():number|null{
   if(!this.base)return null;const elapsed=this.monotonic()-this.base.at;

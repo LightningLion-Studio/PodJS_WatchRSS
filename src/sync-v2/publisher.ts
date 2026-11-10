@@ -29,7 +29,7 @@ export class WatchIndexPublisher {
  private preparing?:string;
  /** Count of the last preparation's new and reused segment objects. */
  segmentStats={uploaded:0,reused:0};
- constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly now:()=>number=Date.now,private readonly resolveBody?:BodyResolver,private readonly options:PublisherOptions={}){}
+ constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:import('./sealed').ObjectKeys,private readonly now:()=>number=Date.now,private readonly resolveBody?:BodyResolver,private readonly options:PublisherOptions={}){}
  /** 25.8 write gate: local opt-in AND the backend's advertised feature. A
   * client without the opt-in cannot segment; that export is object_too_large. */
  private async segmentsWritable(){if(this.options.noteSegments!==true)throw Error('object_too_large');const caps=await this.http.capabilities();if(!Array.isArray(caps.features)||!caps.features.includes(NOTE_SEGMENTS_FEATURE))throw Error('feature_disabled');}
@@ -48,7 +48,7 @@ export class WatchIndexPublisher {
   const out=await sealSegmentedNote(c.state,revision,{
    seal:plain=>sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'state',this.keys.version,plain),
    signRefs:async(stateOid,segmentOids)=>jsonBytes(await signControl(this.crypto,alias,'wrss.sync.v2/state-refs-sign',{scope:this.http.scope,stateOid,segmentOids})),
-   open:async(id,sealed)=>{const opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,id,sealed);if(opened.header.keyVersion!==this.keys.version||opened.header.type!=='state')throw Error('unsupported_feature');return opened;},
+   open:async(id,sealed)=>{const opened=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.http.scope,id,sealed);if(!this.keys.readContentKey&&opened.header.keyVersion!==this.keys.version||opened.header.type!=='state')throw Error('unsupported_feature');return opened;},
   },prior,this.options.noteTextBudget??NOTE_TEXT_BUDGET);
   for(const [id,bytes]of out.objects)objects.set(id,bytes);this.segmentStats.uploaded+=out.uploadedSegments;this.segmentStats.reused+=out.reusedSegments;return out.stateOid;
  }

@@ -7,7 +7,8 @@ import {verifySigned} from './signing';
 import type {ApprovedKey} from './head-pins';
 /** Content-only methods on a separate HTTP instance/transport. */
 export class WatchContentHttp {
- constructor(readonly http:SyncV2Http,readonly crypto:SigningPort,readonly now:()=>number){if(!http.contentWrite)throw Error('feature_disabled');}
+ /** Cache-only assembly does not open the content write gate. HTTP methods still enforce it. */
+ constructor(readonly http:SyncV2Http,readonly crypto:SigningPort,readonly now:()=>number,cacheOnly=false){if(!cacheOnly&&!http.contentWrite)throw Error('feature_disabled');}
  private async custodySignature(value:any,approved:(id:string)=>Promise<ApprovedKey>){exact(value,['body','signature']);const b=custodyBody(value.body,this.http.scope),key=await approved(b.holderDeviceId);if(key.deviceId!==b.holderDeviceId)throw Error('member_unknown');await verifySigned(this.crypto,key.publicKey,'wrss.sync.v2/custody-pin-sign',b,value.signature);return b;}
  async custody(value:any,approved:(id:string)=>Promise<ApprovedKey>){
   const b=await this.custodySignature(value,approved),v=await this.http.json('POST','/availability/custody',value);exact(v,['version','scope','pinId','state','result']);if(v.pinId!==b.pinId||v.state!=='active')throw Error('invalid_schema');await this.custodySignature(v.result,approved);if(canonical(v.result.body)!==canonical(b))throw Error('idempotency_conflict');return v;

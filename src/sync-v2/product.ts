@@ -2,8 +2,10 @@
  * recovery capsule, and K_id custody next to the account keys. The watch only
  * receives; it never creates a repo or generates a replacement K_id. */
 import {sha256Hex} from '@podjs/framework/crypto';
+import type {CloudHostRequest} from '../cloud/host-ports';
+import {withAccountLease} from '../account/lease';
 import type {HttpTransport} from '../cloud/types';
-import {canonical,exact,oid,validateScope,type Scope} from './protocol';
+import {bytes,canonical,exact,oid,validateScope,type Scope} from './protocol';
 import {parseNetwork,SyncV2Error} from './http';
 import {descriptorOid,type IdentityCrypto,type WatchRecipient} from './identity';
 import {WatchIdentityStore,type IdentityStorage} from './identity-store';
@@ -23,7 +25,7 @@ export function accountScopedStorage(secure:IdentityStorage,accountKeyPrefix:str
  return {get:key=>secure.get(accountKeyPrefix+'syncv2.'+key),compareAndSet:(key,expected,value)=>secure.compareAndSet(accountKeyPrefix+'syncv2.'+key,expected,value)};
 }
 /** Same prefix WatchCloudKeyManager uses: sha256(JSON([backendBase,userId])). */
-export function accountKeyPrefix(backendBaseUrl:string,userId:string){if(!userId)throw Error('account_missing');return 'watchrss.cloud.keys.'+sha256Hex(new TextEncoder().encode(JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])))+'.';}
+export function accountKeyPrefix(backendBaseUrl:string,userId:string){if(!userId)throw Error('account_missing');return 'watchrss.cloud.keys.'+sha256Hex(bytes(JSON.stringify([backendBaseUrl.replace(/\/+$/,''),userId])))+'.';}
 
 /** Adapts the framework v2 crypto port (SEC1 keys, nonce-first AEAD) to 18.1. */
 export function identityCryptoPort(v2:{hkdf(key:Uint8Array,salt:Uint8Array,info:Uint8Array):Promise<Uint8Array>;decrypt(key:Uint8Array,nonce:Uint8Array,input:Uint8Array,aad:Uint8Array):Promise<Uint8Array>;verify(publicKey:Uint8Array,input:Uint8Array,signature:Uint8Array):Promise<boolean>}):IdentityCrypto{
@@ -68,3 +70,14 @@ export async function ensureR0Scan(local:{store:{checkpoint():Promise<{phase:str
  * publisher's placeholder body fields (no recipe); the reader shows
  * 「正文暂未同步」 and keeps the local body. Article recipes: see report. */
 export const placeholderBodyResolver=async(_entry:unknown,_existing:unknown)=>null;
+
+/** Serialize protected CAS publication with v1 logout/account replacement.
+ * Checking inside the native account lease prevents a late capsule decrypt
+ * from recreating K_id after clearAccountCloud has removed its prefix. */
+export function accountBoundCasHost(host:CloudHostRequest,expected:{userId:string;backendBaseUrl:string},read:()=>Promise<{userId:string;backendBaseUrl:string}|null>):CloudHostRequest{
+ const identity=(a:{userId:string;backendBaseUrl:string})=>canonical([a.userId,a.backendBaseUrl.replace(/\/+$/,'')]),wanted=identity(expected);
+ return async<T>(method:string,args:Record<string,unknown>)=>{
+  if(method!=='secure.compareAndSet')return host<T>(method,args);
+  return withAccountLease(host,async()=>{const current=await read();if(!current||identity(current)!==wanted)throw Error('cloud_account_busy');return host<T>(method,args);});
+ };
+}

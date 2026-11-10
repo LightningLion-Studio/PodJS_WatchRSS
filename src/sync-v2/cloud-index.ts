@@ -18,14 +18,14 @@ const missing=(error:unknown)=>error instanceof SyncV2Error&&error.code==='objec
 /** 25.5 closure ports over the authenticated window. Missing objects/tables are
  * null (closure_incomplete is decided by the caller's order). Malformed
  * mappings and tables are invalid_schema, never a host TypeError. */
-export function noteClosurePorts(http:Pick<SyncV2Http,'scope'|'stateRefs'>,read:(id:string)=>Promise<Uint8Array>,crypto:EnvelopeCrypto&SigningPort,keys:{id:Uint8Array;content:Uint8Array;version:number},approved:(deviceId:string)=>Promise<ApprovedKey>,windowId:string):ClosurePorts{
+export function noteClosurePorts(http:Pick<SyncV2Http,'scope'|'stateRefs'>,read:(id:string)=>Promise<Uint8Array>,crypto:EnvelopeCrypto&SigningPort,keys:import('./sealed').ObjectKeys,approved:(deviceId:string)=>Promise<ApprovedKey>,windowId:string):ClosurePorts{
  const scope=http.scope;
  return {
   async object(id){try{return await read(id);}catch(error){if(missing(error))return null;throw error;}},
   async refs(stateOid){let mapping:any;try{mapping=await http.stateRefs(windowId,stateOid);}catch(error){if(missing(error))return null;throw error;}
    const id=mapping?.refsOid;if(typeof id!=='string'||!/^state-refs:sha256:[a-f0-9]{64}$/.test(id))return {mapping,raw:new Uint8Array(0)};
    try{return {mapping,raw:await read(id)};}catch(error){if(missing(error))return {mapping,raw:null};throw error;}},
-  async open(id,raw){const opened=await openV2(crypto,keys.id,keys.content,scope,id,raw);if(opened.header.type!=='state')throw Error('invalid_schema');if(opened.header.keyVersion!==keys.version)throw Error('unsupported_feature');return opened.value;},
+  async open(id,raw){const opened=await openV2(crypto,keys.id,keys.readContentKey??keys.content,scope,id,raw);if(opened.header.type!=='state')throw Error('invalid_schema');if(!keys.readContentKey&&opened.header.keyVersion!==keys.version)throw Error('unsupported_feature');return opened.value;},
   async verifyRefs(stateOid,read){
    const m=read.mapping;try{exact(m,['version','scope','parentOid','refsOid','authorDeviceId','keyId','totalBytes']);validateScope(m.scope);}catch{throw Error('invalid_schema');}sameScope(m.scope,scope);
    try{if(m.version!==2||m.parentOid!==stateOid)throw Error();oid(m.refsOid,'state-refs');hexId(m.authorDeviceId,32);hexId(m.keyId,32);if(uint(m.totalBytes,262144)===0)throw Error();}catch{throw Error('invalid_schema');}
@@ -52,7 +52,7 @@ const uuid=(b:Uint8Array)=>{const h=hex(Uint8Array.from(b,(v,i)=>i===6?(v&0x0f)|
 const copyNoteId=(scope:Scope,key:Uint8Array,entity:string,baseline:string)=>uuid(Uint8Array.from(sha256Hex(bytes(canonical({domain:'wrss.sync.v2/quarantine-copy',scope,key:hex(key),entityKey:entity,baseline}))).match(/../g)!.slice(0,16).map(x=>parseInt(x,16))));
 /** P2 index coordinator. No body export, worker, history restore or local framing. */
 export class WatchCloudIndex {
- constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:{id:Uint8Array;content:Uint8Array;version:number},private readonly approved:(deviceId:string)=>Promise<ApprovedKey>,private readonly bootstrap:(window:any)=>Promise<void>,private readonly now:()=>number=Date.now,private readonly rebuild?:()=>Promise<void>,private readonly options:CloudIndexOptions={}){}
+ constructor(private readonly store:WatchProjectionStore,private readonly http:SyncV2Http,private readonly crypto:EnvelopeCrypto&SigningPort,private readonly keys:import('./sealed').ObjectKeys,private readonly approved:(deviceId:string)=>Promise<ApprovedKey>,private readonly bootstrap:(window:any)=>Promise<void>,private readonly now:()=>number=Date.now,private readonly rebuild?:()=>Promise<void>,private readonly options:CloudIndexOptions={}){}
  private get supported(){return this.options.noteSegments===true?['note-conflicts.v1',NOTE_SEGMENTS_FEATURE]:['note-conflicts.v1'];}
  private get scope(){return this.http.scope;}
  private current(state:SyncState){return {pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',current:null,deviceSequence:'0',pendingPublish:null,...state.cloud};}
@@ -173,8 +173,8 @@ export class WatchCloudIndex {
   const read=get??(id=>this.http.object(id,undefined,windowId)),direct=(id:string)=>this.http.object(id,undefined,windowId),rows=await readTree(this.scope,treeRoot,read),decoded:any[]=[],emit=async(r:any)=>{if(sink)await sink(r);else decoded.push(r);};
   for(const row of rows){
    const pair=batch?await batch([row.metaOid,row.stateOid]):!get?await this.http.objects(windowId,[row.metaOid,row.stateOid]):new Map([[row.metaOid,await read(row.metaOid)],[row.stateOid,await read(row.stateOid)]]);
-   const meta=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,row.metaOid,pair.get(row.metaOid)!),state=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,row.stateOid,pair.get(row.stateOid)!);
-   if(meta.header.keyVersion!==this.keys.version||state.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');
+   const meta=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.metaOid,pair.get(row.metaOid)!),state=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,row.stateOid,pair.get(row.stateOid)!);
+   if(!this.keys.readContentKey&&(meta.header.keyVersion!==this.keys.version||state.header.keyVersion!==this.keys.version))throw Error('unsupported_feature');
    const m=meta.value,s=state.value;exact(m,['version','entityKey','kind','logicalId','addedAtSource','requiredFeatures','payload']);exact(s,['version','entityKey','requiredFeatures','payload','noteSegments']);
    if(m.version!==2||s.version!==2||m.entityKey!==row.entityKey||s.entityKey!==row.entityKey||entityKey(this.keys.id,this.scope.repoId,m.kind,m.logicalId)!==row.entityKey||!['original','unknown'].includes(m.addedAtSource))throw Error('invalid_schema');features(m.requiredFeatures);features(s.requiredFeatures);features(row.requiredFeatures);if(m.requiredFeatures.length||row.requiredFeatures.some((f:string)=>f!==NOTE_SEGMENTS_FEATURE||!this.supported.includes(f)))throw Error('unsupported_feature');if(!Array.isArray(s.noteSegments))throw Error('invalid_schema');
    const segmented=s.noteSegments.length>0||s.requiredFeatures.includes(NOTE_SEGMENTS_FEATURE)||s.payload?.segmentedNote!==undefined;let segments:any=null,s0=s;
@@ -196,7 +196,7 @@ export class WatchCloudIndex {
   }
   return decoded;
  }
- async poll(){const state=await this.store.readState(),saved=this.current(state);try{const window=await this.http.events(saved.cursor);return await this.pull(window);}catch(error){if(error instanceof SyncV2Error&&error.code==='history_expired'){const checkpoint:any=error.details.checkpoint;if(!checkpoint)throw Error('ref_continuity_unavailable');await this.bootstrap({account:checkpoint.body?.account,serverRevision:checkpoint.body?.serverRevision});const window=await this.http.json('GET','/account');const result=await this.pull(window);if(!('rebuilt' in result&&result.rebuilt))await this.rebuild?.();return {...result,rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild};}throw error;}}
+ async poll(){const state=await this.store.readState(),saved=this.current(state);try{const window=await this.http.events(saved.cursor);return await this.pull(window);}catch(error){if(error instanceof SyncV2Error&&error.code==='history_expired'){const checkpoint:any=error.details.checkpoint;if(!checkpoint)throw Error('ref_continuity_unavailable');await this.bootstrap({checkpoint,account:checkpoint.body?.account,serverRevision:checkpoint.body?.serverRevision});const window=await this.http.json('GET','/account');const result=await this.pull(window);if(!('rebuilt' in result&&result.rebuilt))await this.rebuild?.();return {...result,rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild};}throw error;}}
  /** History is an OID-only directory; selecting/fetching/restoring is P5. */
  async history(pageToken:string|null=null){const v=await this.http.json('GET','/history'+(pageToken===null?'':'?pageToken='+encodeURIComponent(pageToken)));if(!Array.isArray(v.items)||v.items.length>100)throw Error('invalid_schema');for(const x of v.items){exact(x,['commitOid','retiredAtMillis','expiresAtMillis','authorDeviceId']);oid(x.commitOid,'commit');uint(x.retiredAtMillis);uint(x.expiresAtMillis);hexId(x.authorDeviceId,32);}return {items:v.items,pageToken:v.pageToken};}
 }

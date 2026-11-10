@@ -53,6 +53,8 @@ export interface SyncV2StateReader {
  segmentOptions():{noteSegments:boolean};
 }
 export interface SyncV2UiStateOptions {
+ /** Product boundary keeps the legacy core error contract intact. */
+ productErrors?:boolean;
  /** The opened runtime, or null when Sync v2 is not open on this device. */
  runtime:SyncV2RuntimeHandle|null;
  /** The WatchAccountControl created through runtime.accountControl(...). */
@@ -101,7 +103,7 @@ export class WatchSyncV2UiState {
  private async action<T>(work:()=>Promise<T>):Promise<T>{
   if(!this.enabled)throw Error('feature_disabled');
   try{const result=await work();this.lastErrorCode=null;return result;}
-  catch(error){this.lastErrorCode=codeOf(error);throw error;}
+  catch(error){const code=codeOf(error);this.lastErrorCode=this.o.productErrors&&code==='clock_unknown'?'trusted_time_unavailable':code;throw this.o.productErrors&&code==='clock_unknown'?Error('trusted_time_unavailable'):error;}
   finally{this.notify();}
  }
  /** Contract §1: one successful pull+ack pass; the moment is the trusted time. */
@@ -110,7 +112,7 @@ export class WatchSyncV2UiState {
   try{
    const pulled=await this.o.runtime!.pull();
    await this.o.control!.flushApplied();
-   const now=this.trusted();if(now!==null)this.lastSyncedAtMillis=now;
+   const now=this.trusted();if(now!==null)this.lastSyncedAtMillis=now;else if(this.o.productErrors)throw Error('trusted_time_unavailable');
    return pulled;
   }finally{this.inflightSyncs--;}
  });}

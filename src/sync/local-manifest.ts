@@ -134,6 +134,16 @@ export class LocalArticleManifestStore {
   if(await libraryRevision(this.db)!==revision)throw new Error("Local library changed during body lookup");
   return {itemId:num(row.id),available:actual.available,hasStoredBody:cached?(!blank(cached.contentHtml)||!blank(cached.contentText)):!blank(nullable(row.actual_content))||!blank(nullable(row.original_content)),body:actual.available?{contentHtml:actual.contentHtml,contentText:actual.contentText}:null};
  }
+ /** P6: read one native article, including ordinary unsaved RSS entries that
+  * are intentionally absent from the v1 private-body export inventory. */
+ async cloudArticleBody(article:ExportedArticle):Promise<PreparedArticle|undefined>{
+  const item=article.cloudReadingItemId;if(item===undefined||!Number.isSafeInteger(item)||item<=0)throw Error('source_identity_missing');
+  const revision=await libraryRevision(this.db),row=(await this.db.query(this.rowSelect()+' WHERE a.id=?',[item]))[0];if(!row)return;
+  const cached=this.cachedBody(row,true),body=await this.bodyForReencode(row);if(!body.available)return;
+  const prepared=await prepareArticle({...article,contentHtml:body.contentHtml,contentText:body.contentText},this.codecForRow(row),true),m=prepared.manifest;
+  if(cached&&(m.bodyHash!==cached.bodyHash||m.bodyByteCount!==cached.bodyByteCount||m.chunkSize!==cached.chunkSize||JSON.stringify(m.chunkHashes)!==JSON.stringify(cached.chunkHashes)))throw Error('body_revision_changed');
+  if(await libraryRevision(this.db)!==revision)throw Error('body_revision_changed');return prepared;
+ }
  async prepareReadingForSnapshot(urls?:readonly string[]):Promise<void> {
   if(urls?.length===0)return;
   const readingCandidates=await querySyncPages(this.db,`SELECT a.id,c.url AS channel_url,

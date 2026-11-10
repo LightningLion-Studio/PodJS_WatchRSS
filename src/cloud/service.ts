@@ -43,7 +43,7 @@ export interface CloudSession {
 export interface CloudSyncPorts {
  snapshotDiagnostic?:(value:string)=>void;
  /** 26.4 P6-10: v1 account and keys verified ready. Only set when the Sync v2 product switch is on. */
- keysReady?:(event:{userId:string;deviceId:string;keys:{currentKeyVersion(userId:string):Promise<number>;accountKey(userId:string,version?:number):Promise<Uint8Array|undefined>};syncV2:unknown})=>void;
+ keysReady?:(event:{userId:string;deviceId:string;keys:{currentKeyVersion(userId:string):Promise<number>;accountKey(userId:string,version?:number):Promise<Uint8Array|undefined>};syncV2:unknown;bootstrap:import('./types').CloudBootstrap})=>void|Promise<void>;
  recordDiagnostic?:(value:string)=>void;
  formatDiagnostic?:(value:string)=>void;
  open(check?:()=>void):Promise<CloudSession|undefined>;
@@ -101,6 +101,7 @@ export class WatchCloudSyncService {
   const current=async()=>{this.budget?.check();this.guard.require();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');await s.assertCurrent();this.budget?.check();};await current();
   this.failureStage='owner';if(s.assertOwnership){await s.assertOwnership();this.ownerResolved();}await current();this.set('registering','正在核对云空间');
   this.failureStage='bootstrap';let bootstrap=await s.client.bootstrap();await current();
+  if(this.ports.keysReady&&!bootstrap.syncV2)try{await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}catch{}
   this.failureStage='content';const content=parseContentState(bootstrap);
   s.client.setEpoch(bootstrap.libraryEpoch);s.client.setContentGeneration(content.contentGeneration);
   let changeRead:CloudChangeRead|undefined,changeContext='',checkedHeads:CloudSnapshotHead[]|undefined,checkedRecordsFormat:number|undefined,checkedRecordsRevision:string|undefined,remoteSame=false,remoteVerifiedAt:number|undefined;
@@ -114,7 +115,11 @@ export class WatchCloudSyncService {
     checkedRecordsFormat=page.formatVersion;checkedRecordsRevision=page.headRevision;
     remoteSame=!manual&&cloudRemoteUnchanged(changeRead,headsToken(checkedHeads,page.formatVersion),page.headRevision,(this.ports.now??Date.now)());
     if(remoteSame)remoteVerifiedAt=(changeRead.remote??changeRead.checkpoint)!.verifiedAt;
-    if(!manual&&cloudChangeUnchanged(changeRead,headsToken(checkedHeads,page.formatVersion),page.headRevision,(this.ports.now??Date.now)())){await current();idleHit(81);this.set('complete',full?'云同步完成':'阅读状态已同步；正文等待Wi-Fi',bootstrap.member);return true;}
+    if(!manual&&cloudChangeUnchanged(changeRead,headsToken(checkedHeads,page.formatVersion),page.headRevision,(this.ports.now??Date.now)())){await current();
+     // P6 also starts after an idle v1 round (including a fresh app process).
+     // The persisted idle witness never substitutes for account-key validation.
+     if(this.ports.keysReady&&bootstrap.syncV2&&probeDevice&&probeDevice.revokedAt===null){const ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,probeDevice.attestation&&probeDevice.attestationKeyVersion?{keyVersion:probeDevice.attestationKeyVersion,mac:probeDevice.attestation}:undefined);await current();if(ready==='ready')await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}
+     idleHit(81);this.set('complete',full?'云同步完成':'阅读状态已同步；正文等待Wi-Fi',bootstrap.member);return true;}
     idleHit(82);
    }catch{await current();idleHit(84);changeRead=undefined;checkedHeads=undefined;checkedRecordsFormat=undefined;remoteSame=false;remoteVerifiedAt=undefined;}
   }
@@ -139,7 +144,7 @@ export class WatchCloudSyncService {
   try{ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,device?.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);}
   catch(error){if(String(error).includes('library_epoch_mismatch'))await s.invalidate?.();throw error;}
   if(ready==='waiting-approval'){this.set('waiting-approval','请在已登录设备上批准此手表',bootstrap.member);return false;}
-  await current();if(this.ports.keysReady)try{this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2});}catch{}const member=bootstrap.member;
+  await current();if(this.ports.keysReady)try{await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}catch{}const member=bootstrap.member;
   this.failureStage='checkpoint';const restore=await new SnapshotRestoreCheckpoint(s,this.ports.hash,current,this.ports.now??Date.now,metric=>{try{this.ports.snapshotDiagnostic?.(JSON.stringify(metric));}catch{}}).open(bootstrap.libraryEpoch,content.contentGeneration);
   this.failureStage='run';const resumed=!remoteSame&&restore.active&&restore.phase!=='records';
   try{

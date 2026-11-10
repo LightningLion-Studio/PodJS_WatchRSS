@@ -42,3 +42,13 @@ test('publication cannot slide the remote daily safety check',async()=>{
  const {f,sql}=await ready();expect(await f.service.syncNow()).toBe(true);const before=sql.db.query('SELECT verified_at FROM sync_idle_remote_receipts').get();
  sql.db.run("INSERT INTO articles VALUES(1,'local edit',0)");f.setNow(1000);expect(await f.service.syncNow()).toBe(true);expect(sql.db.query('SELECT verified_at FROM sync_idle_remote_receipts').get()).toEqual(before);
 });
+
+test('P6 authenticates account keys before the ready hook on idle bootstrap and observes announcement withdrawal',async()=>{
+ const {f,counts}=await ready();let announced=true,accepts=0;const events:boolean[]=[],bootstrap=f.session.client.bootstrap.bind(f.session.client),accept=f.session.keys.acceptBootstrap.bind(f.session.keys);
+ f.session.client.bootstrap=async()=>({...await bootstrap(),syncV2:announced?{} as any:undefined});
+ f.session.keys.acceptBootstrap=async(...args)=>{accepts++;return accept(...args);};
+ (f.service as any).ports.keysReady=async(event:any)=>{events.push(!!event.syncV2);};
+ expect(await f.service.syncNow()).toBe(true);const before=counts();events.length=0;accepts=0;
+ f.setNow(11);expect(await f.service.syncNow()).toBe(true);expect(counts()).toEqual(before);expect(accepts).toBe(1);expect(events).toEqual([true]);
+ announced=false;events.length=0;f.setNow(12);expect(await f.service.syncNow()).toBe(true);expect(counts()).toEqual(before);expect(events).toEqual([false]);
+});

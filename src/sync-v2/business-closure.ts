@@ -79,7 +79,7 @@ export class WatchBusinessClosure {
   const refs=new Set<string>();let expiresAtMillis=Number.MAX_SAFE_INTEGER;
   for(const ref of delta.bodyRefs.filter(ref=>ref.startsWith('recipe:'))){
    const parts=await read(ref),size=parts.reduce((n,p)=>n+p.length,0);if(size>266264)throw Error('object_too_large');const raw=new Uint8Array(size);let at=0;for(const part of parts){raw.set(part,at);at+=part.length;}
-   const opened=await openV2(this.content.crypto,this.content.keys.id,this.content.keys.content,scope,ref,raw),body=recipe(opened.value),r=await this.record(body.entityKey,true,true),row=r.entry.row;
+   const opened=await openV2(this.content.crypto,this.content.keys.id,this.content.keys.readContentKey??this.content.keys.content,scope,ref,raw),body=recipe(opened.value),r=await this.record(body.entityKey,true,true),row=r.entry.row;
    if(!row||row.deleted||!['article','book','asset'].includes(r.kind)||opened.header.keyVersion!==this.content.keys.version||row.recipeOid!==ref||body.bodyRevision!==row.bodyRevision||body.opaqueContentId!==row.opaqueContentId||body.totalPlainBytes!==row.contentBytes)throw Error('body_revision_changed');
    const blobOids=body.blocks.map(b=>b.oid),expected={entityKey:body.entityKey,bodyRevision:row.bodyRevision,recipeOid:ref,blobOids};refs.add(ref);for(const oid of blobOids)refs.add(oid);
    await guard();const response=await this.content.remote.availability(expected,true,guard),time=now();if(time===null)throw Error('clock_unknown');

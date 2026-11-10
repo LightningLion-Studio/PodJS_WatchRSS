@@ -8,6 +8,8 @@ export interface SyncV2ProductSession<Port> {ui:Port;close():Promise<void>}
 export interface SyncV2ProductOptions<Port> {
  /** SYNC_V2_PRODUCT.syncV2 (src/sync-v2/gate.ts). */
  enabled:boolean;
+ /** Production SQL teardown must finish before the next owner opens. */
+ drainOnStop?:boolean;
  /** True only when the v1 bootstrap carries the syncV2 announcement (P6-11). */
  announced:()=>Promise<boolean>;
  open:()=>Promise<SyncV2ProductSession<Port>|null>;
@@ -15,7 +17,7 @@ export interface SyncV2ProductOptions<Port> {
 }
 export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
  let generation=0,identity:string|null=null,session:SyncV2ProductSession<Port>|null=null,opening:Promise<Port|null>|null=null;
- const stop=async()=>{generation++;identity=null;opening=null;const closing=session;session=null;options.install(undefined);await closing?.close();};
+ const stop=async()=>{generation++;identity=null;const closing=session,pending=opening;opening=null;session=null;options.install(undefined);await closing?.close();if(options.drainOnStop)await pending?.catch(()=>{});};
  return {
   /** Idempotent per account identity; a new identity first unmounts the old one. */
   async start(next:string):Promise<Port|null>{
@@ -35,4 +37,11 @@ export function watchSyncV2Product<Port>(options:SyncV2ProductOptions<Port>){
   stop,
   get active(){return session!==null;},
  };
+}
+
+/** Product actions share the existing v1 cloud writer lease. Snapshots can purge
+ * expired recovery metadata, so they use the same lease as mutations. */
+export function leasedSyncV2Session<Port extends object>(session:SyncV2ProductSession<Port>,exclusive:<T>(work:()=>Promise<T>)=>Promise<T>):SyncV2ProductSession<Port>{
+ const ui=new Proxy(session.ui,{get(target,key){const value=Reflect.get(target,key,target);if(typeof value!=='function')return value;if(key==='subscribe')return value.bind(target);return (...args:unknown[])=>exclusive(async()=>value.apply(target,args));}});
+ return {ui,close:()=>session.close()};
 }

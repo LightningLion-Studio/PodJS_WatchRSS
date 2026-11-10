@@ -16,7 +16,7 @@ import {digest,canonical} from './protocol';
 /** Host has a separate HTTP client. Requests are bounded; redirects stay off. */
 export function contentHttpTransport(host:CloudHostRequest):HttpTransport {return createContentTransport(host,url=>/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?\//.test(url));}
 export function watchContentV2(options:{enabled?:boolean;origin:string;originPolicy?:OriginPolicy;host:CloudHostRequest;session:()=>Promise<Session>;servicePin:WatchServiceKeyPin;
- keys:{id:Uint8Array;content:Uint8Array;version:number};authBinding:string;alias:string;source:(binding:string)=>Promise<ContentSource>;approved:(id:string)=>Promise<ApprovedKey>;
+ keys:import('./sealed').ObjectKeys;authBinding:string;alias:string;source:(binding:string)=>Promise<ContentSource>;approved:(id:string)=>Promise<ApprovedKey>;
  assertCurrent:()=>Promise<void>;refreshApproved:(windowId:string)=>Promise<void>;sessions?:AuthenticatedContentSessions;transport?:HttpTransport;allowChargingCellular?:()=>Promise<boolean>;now?:()=>number;metric?:(m:ContentMetric)=>void;}){
  let open:Promise<WatchContentEngine>|undefined;
  return {async open(){if(options.enabled!==true)return null;return open??=(async()=>{

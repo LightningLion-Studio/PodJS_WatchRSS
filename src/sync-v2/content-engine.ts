@@ -24,7 +24,7 @@ export class WatchContentEngine {
  private remoteStatuses=new Map<string,any>();private localStats=new Map<string,any>();private pendingObjects:ObjectPlan[]=[];
  private demands:any[]=[];private demandReadAt=-Infinity;private serverOffset=0;
  constructor(readonly store:WatchContentStore,readonly remote:WatchContentHttp,readonly crypto:EnvelopeCrypto&SigningPort,
-  readonly keys:{id:Uint8Array;content:Uint8Array;version:number},readonly options:{
+  readonly keys:import('./sealed').ObjectKeys,readonly options:{
    source:(binding:string)=>Promise<ContentSource>;approved:(id:string)=>Promise<ApprovedKey>;alias:string;
    signals:()=>Promise<ContentSignals>;yieldControl:()=>Promise<void>;assertCurrent:()=>Promise<void>;
    refreshApproved?:(windowId:string)=>Promise<void>;now?:()=>number;monotonic?:()=>number;metric?:(m:ContentMetric)=>void;
@@ -114,7 +114,7 @@ export class WatchContentEngine {
  }
  private async objectFor(id:string,windowId:string,epoch=''):Promise<ObjectPlan>{const have=await this.haveObject(id,windowId);if(have.status!=='present')throw Error('object_missing');return {oid:id,total:have.totalBytes,cache:'download:'+(epoch?epoch+':':'')+id,receipt:have.receipt};}
  private async authenticate(object:ObjectPlan,validate?:(opened:Awaited<ReturnType<typeof openV2>>)=>void){
-  let opened:Awaited<ReturnType<typeof openV2>>;try{opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,object.oid,await this.store.bytes(object.cache,object.total));}
+  let opened:Awaited<ReturnType<typeof openV2>>;try{opened=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,object.oid,await this.store.bytes(object.cache,object.total));}
   catch(error){if(['hash_mismatch','aead_invalid','fingerprint_mismatch','invalid_encoding','invalid_schema','scope_mismatch'].includes((error as Error).message)){
     // Only a corrupt envelope loses its durable prefix. A caller-specific
     // recipe mismatch must never discard valid shared ciphertext.
@@ -158,7 +158,7 @@ return unit();
   if(b.phase==='recipe'){
    if(!b.recipeObject){b.recipeObject=await this.objectFor(b.item.recipeOid!,windowId,b.sharedCiphertext?'':b.cacheEpoch);return unit();}
    const result=await this.download(b.recipeObject,windowId);if(!result.objectDone)return result;
-   const opened=await this.authenticate(b.recipeObject,o=>recipe(o.value));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');const r=recipe(opened.value);
+   const opened=await this.authenticate(b.recipeObject,o=>recipe(o.value));if(!this.keys.readContentKey&&opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');const r=recipe(opened.value);
    if(r.entityKey!==b.item.entityKey||r.bodyRevision!==b.item.bodyRevision||r.opaqueContentId!==b.item.opaqueContentId||r.totalPlainBytes!==b.item.contentBytes)throw Error('body_revision_changed');
    const refs=await readControlRefs(this.remote.http,this.crypto,this.options.approved,windowId,{type:'recipe',oid:b.recipeObject.oid,value:r});b.refs={...refs.refs,authorDeviceId:refs.mapping.authorDeviceId,keyId:refs.mapping.keyId};b.recipe=r;b.phase='availability';this.metric('authenticate',opened.plain.length,1);return result;
   }
@@ -169,7 +169,7 @@ return unit();
    const block=r.blocks[index]!;if(!b.object){b.object=await this.objectFor(block.oid,windowId,b.sharedCiphertext?'':b.cacheEpoch);return unit();}
    const cache='plain:'+(b.cacheEpoch?b.cacheEpoch+':':'')+key+':'+index,recovered=await this.store.recover(cache);if(recovered){const p=recovered.proof;if(p.oid!==block.oid||p.offset!==b.offset+block.plainBytes||recovered.size!==block.plainBytes)throw Error('content_checkpoint_corrupt');new ContentSha256(p.hash);b.offset=p.offset;b.hash=p.hash;b.object=null;return {...unit(0,1),blob:true};}
    const result=await this.download(b.object,windowId);if(!result.objectDone)return result;
-   await this.options.yieldControl();const opened=await this.authenticate(b.object,o=>recipeBlock(r,index,o.plain,this.keys.id,this.scope));if(opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');
+   await this.options.yieldControl();const opened=await this.authenticate(b.object,o=>recipeBlock(r,index,o.plain,this.keys.id,this.scope));if(!this.keys.readContentKey&&opened.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');
    const hash=new ContentSha256(b.hash).update(opened.plain);await this.store.verified(cache,opened.plain,{oid:block.oid,offset:b.offset+opened.plain.length,hash:hash.snapshot()});b.offset+=opened.plain.length;b.hash=hash.snapshot();b.object=null;this.metric('authenticate',opened.plain.length,1);return {...result,objects:1,blob:true};
   }return unit();
  }
@@ -199,15 +199,15 @@ return unit();
     if(b.direction==='download'){if(!stat.checkpoint||stat.durableOffset!==stat.size)throw Error('closure_incomplete');const checkpoint=JSON.parse(stat.checkpoint);if(checkpoint.oid!==object.oid||checkpoint.totalBytes!==stat.size||checkpoint.binding!==this.store.prefix)throw Error('closure_incomplete');}
     object.size=stat.size;}}
   const assertCurrent=async()=>{await this.options.assertCurrent();if(b.direction==='upload'){if(!b.item.sourceBinding)throw Error('source_identity_missing');const source=await this.options.source(b.item.sourceBinding);if(source.binding!==b.item.sourceBinding||source.size!==r.totalPlainBytes)throw Error('body_revision_changed');await source.assertCurrent();}const latest=await this.store.get('body:'+key);if(!latest||latest.revision!==saved.revision)throw Error('body_revision_changed');};
-  const rawRecipe=await this.store.bytes(ro.cache,ro.total),opened=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,ro.oid,rawRecipe);
-  if(opened.header.keyVersion!==this.keys.version||canonical(recipe(opened.value))!==canonical(r))throw Error('body_revision_changed');
+  const rawRecipe=await this.store.bytes(ro.cache,ro.total),opened=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,ro.oid,rawRecipe);
+  if(!this.keys.readContentKey&&opened.header.keyVersion!==this.keys.version||canonical(recipe(opened.value))!==canonical(r))throw Error('body_revision_changed');
   if(b.refs){const refs=b.refs,deviceId=refs.authorDeviceId;
    if(deviceId){const approved=await this.options.approved(deviceId);if(approved.keyId!==refs.keyId)throw Error('signature_invalid');await (await import('./signing')).verifySigned(this.crypto,approved.publicKey,'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
    else {const publicKey=await this.crypto.signingKey(this.options.alias,false);await (await import('./signing')).verifySigned(this.crypto,(await import('./wire')).b64(publicKey),'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
    if(canonical(refs.body)!==canonical({scope:this.scope,recipeOid:ro.oid,blobOids:r.blocks.map(block=>block.oid)}))throw Error('closure_incomplete');
   }else {const http=readOnly?this.remote.http.readOnly(check):this.remote.http,window=await http.negotiate([],[]);await readControlRefs(http,this.crypto,this.options.approved,window.windowId,{type:'recipe',oid:ro.oid,value:r});}
 
-  if(verifyBodies){const hash=new ContentSha256();for(let i=0;i<r.blocks.length;i++){const object=objects[i+1]!,block=r.blocks[i]!,raw=await this.store.bytes(object.cache,object.size),value=await openV2(this.crypto,this.keys.id,this.keys.content,this.scope,object.oid,raw);if(value.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');recipeBlock(r,i,value.plain,this.keys.id,this.scope);hash.update(value.plain);await this.options.yieldControl();}if(hash.finish()!==r.plaintextSha256)throw Error('hash_mismatch');}
+  if(verifyBodies){const hash=new ContentSha256();for(let i=0;i<r.blocks.length;i++){const object=objects[i+1]!,block=r.blocks[i]!,raw=await this.store.bytes(object.cache,object.size),value=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,object.oid,raw);if(!this.keys.readContentKey&&value.header.keyVersion!==this.keys.version)throw Error('unsupported_feature');recipeBlock(r,i,value.plain,this.keys.id,this.scope);hash.update(value.plain);await this.options.yieldControl();}if(hash.finish()!==r.plaintextSha256)throw Error('hash_mismatch');}
   await assertCurrent();
   return {item:b.item,recipe:r,recipeOid:ro.oid,objects:[...new Map(objects.map(object=>[object.oid,{oid:object.oid,size:object.size,read:async(offset:number,length:number)=>{uint(offset);uint(length,65536);if(offset>object.size-length)throw Error('invalid_range');await assertCurrent();const data=await this.store.bytes(object.cache,object.size,offset,length);await assertCurrent();return data;}}])).values()]};
  }

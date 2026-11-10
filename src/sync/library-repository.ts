@@ -288,6 +288,14 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  });}
  cloudSources(){return this.run(()=>this.work('cloudSources',async()=>{await this.cloudState();const id=await this.identity();const sources=await this.sources.export(id,undefined,true),books=await this.books?.sourceUrls();return this.cloudSourcesForExport(books?sources.filter(s=>!books.has(s.url)):sources,id,true);}));}
  cloudRestoreMetadata(request:{ids?:readonly string[];urls?:readonly string[];itemIds?:readonly number[];after?:number;limit?:number}={},check?:()=>void){return this.run(()=>this.work('cloudMetadata',async()=>{await this.cloudState();return this.local.cloudRestoreMetadata(request,check);}));}
+ /** P6 article bytes use the existing verified v1 cache and its native aliases. */
+ cloudArticleBody(id:string){return this.run(async()=>{
+  await this.cloudState();const itemIds=await this.local.cloudReadingItemIds([await this.ports.codec.sha256(utf8Encode(id))]);if(itemIds.length>100)throw Error('source_identity_missing');
+  const page=await this.local.cloudRestoreMetadata({ids:[id],itemIds,limit:100}),exact=page.articles.filter(a=>a.articleId===id||a.cloudLegacyArticleIds?.includes(id));
+  const matches=exact.length?exact:page.articles.filter(a=>a.cloudReadingItemId!==undefined&&itemIds.includes(a.cloudReadingItemId));if(matches.length>1)throw Error('source_identity_missing');
+  return matches[0]?this.local.cloudArticleBody(matches[0]):undefined;
+ });}
+
  cloudReadingRevision(){return this.run(()=>libraryRevision(this.db));}
  private readingStore?:CloudReadingStore;
  private readingIndex?:{revision:number;hashes:Map<string,number[]>};
