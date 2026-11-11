@@ -3,6 +3,7 @@ import {base64ToBytes} from '@podjs/framework/bytes';
 import {utf8Decode} from '../cloud/types';
 /** Watch-side pairing run for the WeChat mini program: one owned host session at a time.
  * Pairing uses the encrypted internet channel. Business validation stays in WatchSetupHandler. */
+export type PairingCloseReason='user_declined'|'user_back'|'background'|'timeout'|'error';
 export type PairingTransport='internet'|'bluetooth';
 export type PairingStep='scanned'|'confirmed'|'saving'|'cloud'|'releasing'|'clearing';
 export const PAIRING_STEPS:readonly {step:PairingStep;label:string}[]=[
@@ -63,6 +64,7 @@ export class MiniProgramPairing{
  private bound=false;private cloud=false;
  private handlingConfigure=false;private sessionCheck?:Promise<void>;
  private uxProtocol=false;private replacementStarted=false;private uxDeadlineStarted=false;private cancelUxDeadline:(()=>void)|undefined;
+ private runContext?:{reason:PairingCloseReason;stopped:boolean};
  private releaseActivity:(()=>void)|undefined;
  constructor(private readonly ports:PairingPorts,private readonly onState:(state:PairingState)=>void,transport:PairingTransport='internet'){this.transport='internet';}
  current(){return this.state;}
@@ -76,14 +78,15 @@ export class MiniProgramPairing{
   this.releaseActivity=this.ports.acquirePairingActivity?.();
   const epoch=this.epoch;this.bound=false;this.cloud=false;this.outcome='pending';this.uxProtocol=false;this.replacementStarted=false;this.uxDeadlineStarted=false;this.cancelUxDeadline=undefined;
   this.emit({kind:'starting',transport:this.transport});
-  void this.run(epoch);
+  const context={reason:'error' as PairingCloseReason,stopped:false};this.runContext=context;
+  void this.run(epoch,context);
  }
  /** The copied account-only button cannot assert SAS agreement. Lead's new SAS UI calls confirmSas. */
  confirm(){return false;}
  confirmSas(matches:boolean){
   if(this.state.kind!=='confirm')return false;
   const approve=this.approval;
-  if(!approve){if(!matches&&this.outcome==='approved'){this.outcome='declined';this.stop({kind:'cancelled'});return true;}return false;}
+  if(!approve){if(!matches&&this.outcome==='approved'){this.outcome='declined';this.stop({kind:'cancelled'},'user_declined');return true;}return false;}
   // Watch-first agreement keeps the SAS visible until configure actually arrives.
   if(matches&&this.handlingConfigure)this.emit({kind:'working',step:'saving'});
   approve(matches);return true;
@@ -91,30 +94,33 @@ export class MiniProgramPairing{
  decline(){this.confirmSas(false);}
  /** Returns true when the page should close (nothing happened yet). */
  cancel():boolean{
-  if(this.bound){this.stop({kind:'done',cloudReady:this.cloud});return false;}
+  if(this.bound){this.stop({kind:'done',cloudReady:this.cloud},'user_back');return false;}
   const kind=this.state.kind,live=isLivePairing(this.state);
-  this.stop(live&&kind!=='starting'&&kind!=='scan'?{kind:'cancelled'}:undefined);
+  this.stop(live&&kind!=='starting'&&kind!=='scan'?{kind:'cancelled'}:undefined,'user_back');
   return !live||kind==='starting'||kind==='scan';
  }
  setForeground(foreground:boolean){
   this.foreground=foreground;
   if(foreground)return;
-  if(this.bound)this.stop({kind:'done',cloudReady:this.cloud});
-  else if(isLivePairing(this.state))this.stop({kind:'paused'});
-  else this.stop();
+  if(this.bound)this.stop({kind:'done',cloudReady:this.cloud},'background');
+  else if(isLivePairing(this.state))this.stop({kind:'paused'},'background');
+  else this.stop(undefined,'background');
  }
- dispose(){this.disposed=true;this.stop();}
+ dispose(reason:PairingCloseReason='error'){this.disposed=true;this.stop(undefined,reason);}
 
  /** Ends the owned session and rejects a pending confirmation. */
- private stop(next?:PairingState){
+ private stop(next?:PairingState,reason:PairingCloseReason='error'){
+  if(this.runContext&&!this.runContext.stopped){this.runContext.reason=reason;this.runContext.stopped=true;}
   if(next&&this.replacementStarted&&(next.kind==='cancelled'||next.kind==='paused'||next.kind==='failed'))next={...next,replacementMayHaveChanged:true};
   this.releaseActivity?.();this.releaseActivity=undefined;
   this.epoch++;this.secret?.fill(0);this.secret=undefined;
   this.approval?.(false);
   for(const cancel of this.cancelTimers.splice(0))cancel();
-  this.pending?.cancel();this.pending=undefined;this.sessionCheck=undefined;this.handlingConfigure=false;
+  const pending=this.pending;this.pending=undefined;this.sessionCheck=undefined;this.handlingConfigure=false;
   const id=this.sessionId;this.sessionId='';
-  if(id)void this.ports.op('provision.close',{sessionId:id}).result.catch(()=>{});
+  // Native cancellation also closes the session. Deliver its reason first.
+  if(id)void this.ports.op('provision.close',{sessionId:id,reason}).result.catch(()=>{}).finally(()=>pending?.cancel());
+  else pending?.cancel();
   if(next)this.emit(next);
  }
  private async call<T>(method:string,args:Record<string,unknown>,active:()=>boolean):Promise<T>{
@@ -132,13 +138,14 @@ export class MiniProgramPairing{
     this.approval=undefined;expire();
     if(this.outcome==='pending')this.outcome=value?'approved':'declined';
     resolve(value);
-    if(!value&&!this.handlingConfigure&&active())this.stop(this.confirmationFailure());
+    if(!value&&!this.handlingConfigure&&active())this.stop(this.confirmationFailure(),this.confirmationCloseReason());
    };
    const expire=this.ports.after(PAIRING_CONFIRM_MS,()=>{if(this.approval===finish){this.outcome='timeout';finish(false);}});
    this.cancelTimers.push(expire);this.approval=finish;
    this.emit({kind:'confirm',account:label,sas,phoneMaskedTrusted:false});
   });
  }
+ private confirmationCloseReason():PairingCloseReason{return this.outcome==='timeout'?'timeout':this.outcome==='declined'?'user_declined':'error';}
  private confirmationFailure():PairingState{return this.outcome==='timeout'?{kind:'failed',title:'等待确认超时',detail:'请重新开始配对',suggestOther:false}:{kind:'cancelled'};}
  private verifySession(active:()=>boolean):Promise<void>{
   if(!this.sessionCheck){const check=this.call('provision.check',{},active).then(()=>{});this.sessionCheck=check;void check.finally(()=>{if(this.sessionCheck===check)this.sessionCheck=undefined;}).catch(()=>{});}
@@ -157,19 +164,23 @@ export class MiniProgramPairing{
  private monitorConfirmation(active:()=>boolean,throughCompletion=false){
   let stopped=false,cancel=()=>{};
   const arm=()=>{if(stopped||!active()||!throughCompletion&&this.outcome!=='pending')return;cancel=this.ports.after(1000,()=>{
-   void this.verifySession(active).then(arm,error=>{if(!stopped&&active())this.stop(pairingFailure(error,this.transport,true));});
+   void this.verifySession(active).then(arm,error=>{if(stopped||!active())return;
+    // A transient relay failure is not a cancellation. Keep the SAS and its
+    // existing deadline; the final pre-save check still has to succeed.
+    if((error as {code?:string})?.code==='provision_offline')arm();
+    else this.stop(pairingFailure(error,this.transport,true));});
   });};
   const stop=()=>{stopped=true;cancel();};this.cancelTimers.push(stop);arm();return stop;
  }
 
- private async run(epoch:number){
+ private async run(epoch:number,context:{reason:PairingCloseReason}){
   const transport:PairingTransport='internet',active=()=>!this.disposed&&this.foreground&&this.epoch===epoch;
   const show=(state:PairingState)=>{if(active())this.emit(state);};
   let qrShown=false;
   try{
    const {deviceId,installId}=await this.ports.identity();
    const opened=await this.call<{qr:string;sessionId:string;messageSequenceMax?:number;ownershipReleaseV1?:boolean}>('provision.start',{deviceId,installId,transport},active);
-   if(!active()){void this.ports.op('provision.close',{sessionId:opened.sessionId}).result.catch(()=>{});return;}
+   if(!active()){void this.ports.op('provision.close',{sessionId:opened.sessionId,reason:context.reason}).result.catch(()=>{});return;}
    this.sessionId=opened.sessionId;qrShown=true;
    show({kind:'scan',transport,qr:opened.qr,expiresAt:this.ports.now()+PAIRING_LIFETIME_MS});
    const pairing=pairingContext(opened.qr,opened.sessionId,deviceId,installId);this.secret=pairing.secret;
@@ -177,7 +188,7 @@ export class MiniProgramPairing{
     confirmationChanged:(confirmation,accountConflict)=>{
      if(!active())return;
      if(confirmation.phone==='confirmed'&&confirmation.watch==='confirmed'){this.cancelUxDeadline?.();this.cancelUxDeadline=undefined;}
-     else if(!this.uxDeadlineStarted){this.uxDeadlineStarted=true;const cancel=this.ports.after(PAIRING_CONFIRM_MS,()=>{if(active()&&!this.bound){this.outcome='timeout';this.stop(this.confirmationFailure());}});this.cancelUxDeadline=cancel;this.cancelTimers.push(cancel);}
+     else if(!this.uxDeadlineStarted){this.uxDeadlineStarted=true;const cancel=this.ports.after(PAIRING_CONFIRM_MS,()=>{if(active()&&!this.bound){this.outcome='timeout';this.stop(this.confirmationFailure(),this.confirmationCloseReason());}});this.cancelUxDeadline=cancel;this.cancelTimers.push(cancel);}
      if(this.state.kind==='confirm')show({...this.state,confirmation,accountConflict});
     },
     replacementProgress:step=>{if(active()){this.replacementStarted=true;show({kind:'working',step});}},checkSession:()=>this.checkBeforeSaving(active),pairing,confirm:(label,sas)=>this.ask(label,sas,active)});
@@ -211,12 +222,12 @@ export class MiniProgramPairing{
     // A rejection receipt is best effort; an offline relay must not keep a
     // declined/expired configure and its credentials alive until QR expiry.
     const rejectState=stopWith&&(this.bound?{kind:'done',cloudReady:this.cloud} as PairingState:stopWith);
-    const cancelReject=rejectState?this.ports.after(PAIRING_REJECT_GRACE_MS,()=>{if(active())this.stop(rejectState);}):()=>{};
+    const cancelReject=rejectState?this.ports.after(PAIRING_REJECT_GRACE_MS,()=>{if(active())this.stop(rejectState,this.confirmationCloseReason());}):()=>{};
     this.cancelTimers.push(cancelReject);
     try{await this.call('provision.respond',{sequence:message._sequence,result},active);}
-    catch(error){if(rejectState&&active()){this.stop(rejectState);return;}throw error;}
+    catch(error){if(rejectState&&active()){this.stop(rejectState,this.confirmationCloseReason());return;}throw error;}
     finally{cancelReject();}
-    if(stopWith){this.stop(this.bound?{kind:'done',cloudReady:this.cloud}:stopWith);return;}
+    if(stopWith){this.stop(this.bound?{kind:'done',cloudReady:this.cloud}:stopWith,this.confirmationCloseReason());return;}
     if(failed&&message.action==='replaceAccount'){if(this.state.kind==='working')show({kind:'working',step:'releasing',errorCode:String(result.errorCode),released:result.released===true,cleared:result.cleared===true,retryable:result.retryable===true});else if(this.state.kind==='confirm')show({...this.state,errorCode:String(result.errorCode)});continue;}
     if(failed){show(this.bound?{kind:'done',cloudReady:this.cloud}:{kind:'failed',title:'配对没有完成',detail:'请重新开始配对',suggestOther:false});continue;}
     if(message.action==='finish'){

@@ -74,7 +74,7 @@ test('internet pairing never asks for nearby permission and reaches cloud-ready 
  expect(h.calls.filter(c=>c.method==='provision.respond').map(c=>c.args.sessionId)).toEqual(['s1','s1','s1','s1']);
  expect(h.methods()).not.toContain('provision.close');
  h.fire(PAIRING_FINISH_GRACE_MS);await h.settle();
- expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1'});
+ expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1',reason:'error'});
  expect(last(h)).toEqual({kind:'done',cloudReady:true});
 });
 
@@ -92,7 +92,7 @@ test('declining on the watch answers the phone, closes the owned session and cha
  p.decline();await h.settle();
  expect(h.responses()).toEqual([{success:true}]);
  expect(last(h)).toEqual({kind:'cancelled'});
- expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1'});
+ expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1',reason:'user_declined'});
 });
 
 test('confirmation timeout is reported distinctly',async()=>{
@@ -125,7 +125,7 @@ test('leaving the page pauses, cancels the pending receive and closes the sessio
  p.setForeground(false);await h.settle();
  expect(last(h)).toEqual({kind:'paused'});
  expect(h.calls.find(c=>c.method==='provision.receive')!.cancelled).toBe(true);
- expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1'});
+ expect(h.calls.find(c=>c.method==='provision.close')!.args).toEqual({sessionId:'s1',reason:'background'});
  p.start();await h.settle();expect(last(h)).toEqual({kind:'paused'});
  p.setForeground(true);p.start();await h.settle();expect(last(h)).toMatchObject({kind:'scan'});
 });
@@ -155,4 +155,53 @@ test('finish uses fresh verified readiness rather than a stale earlier key recei
 });
 test('pairing exposes upgrade and own-key conflict states without leaking raw service errors',async()=>{
  const {pairingFailure}=await import('../src/ui/mini-program-pairing');expect(pairingFailure(Error('client_upgrade_required'),'internet',true)).toMatchObject({needsUpgrade:true,title:'请升级腕上RSS'});expect(pairingFailure(Error('device_key_conflict'),'internet',true)).toMatchObject({needsReregistration:true,title:'需要重新登记本机'});
+});
+
+for(const trigger of ['decline','back','background','timeout','error','dispose'] as const)test(`alert: close carries ${trigger} reason`,async()=>{
+ const h=host(),p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();
+ await h.deliver({action:'prepare',phoneMasked:'x',_sequence:0});
+ if(trigger==='decline')p.decline();
+ else if(trigger==='back')p.cancel();
+ else if(trigger==='background')p.setForeground(false);
+ else if(trigger==='timeout')h.fire(90_000);
+ else if(trigger==='error')await h.fail({code:'provision_closed'});
+ else p.dispose();
+ await h.settle();
+ expect(h.calls.filter(c=>c.method==='provision.close').map(c=>c.args.reason)).toEqual([
+  ({decline:'user_declined',back:'user_back',background:'background',timeout:'timeout',error:'error',dispose:'error'} as const)[trigger]
+ ]);
+});
+test('alert: a transient confirmation probe failure retries without closing or saving',async()=>{
+ const h=host(),base=h.ports.op;let probes=0;
+ h.ports.op=(method,args)=>method==='provision.check'?{result:++probes===1?Promise.reject({code:'provision_offline'}):Promise.resolve({active:true}) as any,cancel(){}}:base(method,args);
+ const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();
+ await h.deliver({action:'prepare',phoneMasked:'x',_sequence:0});
+ await h.deliver({action:'configure',_sequence:1});
+ h.fire(1000);await h.settle();
+ expect(last(h).kind).toBe('confirm');expect(h.methods()).not.toContain('provision.close');
+ h.fire(1000);await h.settle();expect(probes).toBe(2);
+ p.cancel();
+});
+
+test('alert: native close receives its reason before cancellation can close the relay',async()=>{
+ const h=host(),base=h.ports.op;let finishClose!:()=>void;
+ h.ports.op=(method,args)=>method==='provision.close'?{result:new Promise(resolve=>{finishClose=()=>resolve({} as any);}),cancel(){}}:base(method,args);
+ const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.settle();p.cancel();
+ const receive=h.calls.find(c=>c.method==='provision.receive')!;
+ expect(receive.cancelled).toBe(false);finishClose();await h.settle();expect(receive.cancelled).toBe(true);
+});
+test('alert: a late start result preserves the background close reason',async()=>{
+ const h=host(),base=h.ports.op;let opened!:(value:any)=>void;
+ h.ports.op=(method,args)=>method==='provision.start'?{result:new Promise(resolve=>{opened=resolve;}),cancel(){}}:base(method,args);
+ const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.settle();p.setForeground(false);
+ opened({qr,sessionId:'s1'});await h.settle();
+ expect(h.calls.filter(c=>c.method==='provision.close').map(c=>c.args)).toEqual([{sessionId:'s1',reason:'background'}]);
+});
+test('alert: repeated transient probes retain the original confirmation deadline',async()=>{
+ const h=host(),base=h.ports.op;
+ h.ports.op=(method,args)=>method==='provision.check'?{result:Promise.reject({code:'provision_offline'}),cancel(){}}:base(method,args);
+ const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.deliver({action:'prepare',phoneMasked:'x',_sequence:0});await h.deliver({action:'configure',_sequence:1});
+ for(let i=0;i<3;i++){h.fire(1000);await h.settle();expect(last(h).kind).toBe('confirm');}
+ h.fire(90_000);await h.settle();expect(last(h)).toMatchObject({kind:'failed',title:'等待确认超时'});
+ expect(h.calls.find(c=>c.method==='provision.close')!.args.reason).toBe('timeout');
 });

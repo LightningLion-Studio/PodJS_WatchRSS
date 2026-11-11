@@ -6,6 +6,7 @@ import fixture from './cloud/fixtures/setup-shape.json';
 const [prepare,configure]=fixture.exchanges.map(e=>e.request);
 const deferred=<T=void>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return{promise,resolve};};
 function setup(){
+ const closeReasons:unknown[]=[];
  const states:PairingState[]=[],events:string[]=[],responses:{sequence:number;result:any}[]=[],timers:{ms:number;fn:()=>void;live:boolean}[]=[];
  let receiver:{resolve(v:any):void;reject(e:unknown):void}|undefined,closed=false,phoneClosed=false,confirmationChecks=0,now=fixture.now,sessionSecret:Uint8Array|undefined;
  const qr='wrss-pair:'+Buffer.from(JSON.stringify({sessionId:fixture.pairing.sessionId,deviceId:fixture.deviceId,installId:fixture.installId,secret:fixture.pairing.secretBase64})).toString('base64url');
@@ -15,7 +16,7 @@ function setup(){
  const ports:PairingPorts={available:()=>true,identity:async()=>({deviceId:fixture.deviceId,installId:fixture.installId}),now:()=>now,after:(ms,fn)=>{const timer={ms,fn,live:true};timers.push(timer);return()=>{timer.live=false;};},op:<T>(method:string,args:Record<string,unknown>)=>{
   let reject:(e:unknown)=>void=()=>{};const result=(async()=>{
    if(method==='provision.start')return{qr,sessionId:fixture.pairing.sessionId};
-   if(method==='provision.close'){closed=true;receiver?.reject({code:'provision_closed'});receiver=undefined;return{};}
+   if(method==='provision.close'){closeReasons.push(args.reason);closed=true;receiver?.reject({code:'provision_closed'});receiver=undefined;return{};}
    if(method==='provision.check'){confirmationChecks++;const snapshot=captureNextProbe,wasClosed=phoneClosed||closed;captureNextProbe=false;await checkGate?.promise;if(snapshot?wasClosed:phoneClosed||closed)throw{code:'provision_closed'};return{active:true};}
    if(method==='provision.receive'){if(phoneClosed||closed)throw{code:'provision_closed'};return new Promise((resolve,no)=>{reject=no;receiver={resolve,reject:no};});}
    if(method==='provision.respond'){await responseGate?.promise;if(phoneClosed||closed)throw{code:'provision_closed'};responses.push({sequence:args.sequence as number,result:args.result});return{sent:true};}
@@ -28,7 +29,7 @@ function setup(){
  const fire=async(ms:number)=>{for(const timer of [...timers])if(timer.live&&timer.ms===ms){timer.live=false;timer.fn();}await settle();};
  const queuedTimeout=()=>timers.find(t=>t.ms===PAIRING_CONFIRM_MS)!.fn;
  const closePhone=()=>{phoneClosed=true;receiver?.reject({code:'provision_closed'});receiver=undefined;};
- return{pairing,states,events,responses,business,captureNextProbe:()=>{captureNextProbe=true;},settle,deliver,fire,closePhone,queuedTimeout,checkGate:()=>checkGate=deferred(),responseGate:()=>responseGate=deferred(),setNow:(n:number)=>{now=n;},closed:()=>closed,checks:()=>confirmationChecks,secretCleared:()=>sessionSecret?.every(b=>b===0),state:()=>states.at(-1)!};
+ return{pairing,states,events,responses,business,closeReasons,captureNextProbe:()=>{captureNextProbe=true;},settle,deliver,fire,closePhone,queuedTimeout,checkGate:()=>checkGate=deferred(),responseGate:()=>responseGate=deferred(),setNow:(n:number)=>{now=n;},closed:()=>closed,checks:()=>confirmationChecks,secretCleared:()=>sessionSecret?.every(b=>b===0),state:()=>states.at(-1)!};
 }
 async function prepared(){const f=setup();f.pairing.start();await f.deliver(prepare,0);expect(f.responses).toEqual([{sequence:0,result:fixture.exchanges[0].response}]);expect(f.state()).toMatchObject({kind:'confirm',phoneMaskedTrusted:false});expect(f.events).toEqual([]);return f;}
 test('R43 prepare replies with public identity immediately while SAS is still awaiting consent',async()=>{
@@ -43,10 +44,10 @@ test('R43 watch first: agreement keeps SAS visible and writes nothing until the 
  const f=await prepared();expect(f.pairing.confirmSas(true)).toBe(true);await f.settle();expect(f.state().kind).toBe('confirm');expect(f.events).toEqual([]);expect(f.responses).toHaveLength(1);await f.deliver(configure,1);expect(f.events).toEqual(['save','register']);expect(f.responses[1].result.bound).toBe(true);f.pairing.dispose();
 });
 for(const pending of [false,true])test(`R43 watch mismatch ${pending?'with held configure':'before configure'} closes without account/key writes`,async()=>{
- const f=await prepared();if(pending)await f.deliver(configure,1);expect(f.pairing.confirmSas(false)).toBe(true);await f.settle();expect(f.state().kind).toBe('cancelled');expect(f.closed()).toBe(true);expect(f.events).toEqual([]);expect(f.secretCleared()).toBe(true);if(pending)expect(f.responses[1]).toMatchObject({sequence:1,result:{success:false}});else expect(f.responses).toHaveLength(1);
+ const f=await prepared();if(pending)await f.deliver(configure,1);expect(f.pairing.confirmSas(false)).toBe(true);await f.settle();expect(f.state().kind).toBe('cancelled');expect(f.closed()).toBe(true);expect(f.closeReasons).toEqual(['user_declined']);expect(f.events).toEqual([]);expect(f.secretCleared()).toBe(true);if(pending)expect(f.responses[1]).toMatchObject({sequence:1,result:{success:false}});else expect(f.responses).toHaveLength(1);
 });
 for(const pending of [false,true])test(`R43 confirmation timeout ${pending?'with held configure':'before configure'} ends the session and late agreement does nothing`,async()=>{
- const f=await prepared();if(pending)await f.deliver(configure,1);await f.fire(PAIRING_CONFIRM_MS);expect(f.state()).toMatchObject({kind:'failed',title:'等待确认超时'});expect(f.events).toEqual([]);expect(f.closed()).toBe(true);expect(f.pairing.confirmSas(true)).toBe(false);if(pending)expect(f.responses[1].result.success).toBe(false);
+ const f=await prepared();if(pending)await f.deliver(configure,1);await f.fire(PAIRING_CONFIRM_MS);expect(f.state()).toMatchObject({kind:'failed',title:'等待确认超时'});expect(f.events).toEqual([]);expect(f.closed()).toBe(true);expect(f.pairing.confirmSas(true)).toBe(false);expect(f.closeReasons).toEqual(['timeout']);if(pending)expect(f.responses[1].result.success).toBe(false);
 });
 for(const pending of [false,true])test(`R43 phone mismatch/relay close ${pending?'while configure waits':'before configure'} prevents late watch agreement from binding`,async()=>{
  const f=await prepared();if(pending)await f.deliver(configure,1);f.closePhone();if(pending)await f.fire(1000);else await f.settle();expect(f.closed()).toBe(true);expect(f.events).toEqual([]);expect(f.pairing.confirmSas(true)).toBe(false);expect(f.secretCleared()).toBe(true);
@@ -68,7 +69,7 @@ for(const timeout of [false,true])test(`R43 ${timeout?'timeout':'mismatch'} stil
  const f=await prepared();await f.deliver(configure,1);const response=f.responseGate();
  if(timeout)await f.fire(PAIRING_CONFIRM_MS);else{f.pairing.confirmSas(false);await f.settle();}
  expect(f.closed()).toBe(false);expect(f.events).toEqual([]);await f.fire(PAIRING_REJECT_GRACE_MS);
- expect(f.closed()).toBe(true);expect(f.state().kind).toBe(timeout?'failed':'cancelled');expect(f.secretCleared()).toBe(true);
+ expect(f.closed()).toBe(true);expect(f.state().kind).toBe(timeout?'failed':'cancelled');expect(f.closeReasons).toEqual([timeout?'timeout':'user_declined']);expect(f.secretCleared()).toBe(true);
  response.resolve(undefined);await f.settle();expect(f.events).toEqual([]);expect(f.responses).toHaveLength(1);
 });
 

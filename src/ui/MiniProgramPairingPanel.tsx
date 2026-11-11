@@ -24,7 +24,7 @@ export function MiniProgramPairingPanel(props:{width:number;height:number;active
  const [transport,setTransport]=createSignal<PairingTransport>('internet');
  const pairing=new MiniProgramPairing(props.ports??miniProgramPairingHostPorts(),setState,transport());
  const act=(fn:()=>void)=>()=>{if(props.active())fn();};
- const close=()=>{pairing.dispose();props.onClose();};
+ const close=()=>{pairing.dispose('user_back');props.onClose();};
  const cancel=()=>{if(pairing.cancel())close();};
  const back=()=>{if(isLivePairing(state()))cancel();else close();return true;};
  onCleanup(()=>pairing.dispose());
