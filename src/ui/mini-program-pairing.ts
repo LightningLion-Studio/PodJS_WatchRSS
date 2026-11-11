@@ -23,7 +23,7 @@ export type PairingState=
  |{kind:'paused';replacementMayHaveChanged?:true};
 export const isLivePairing=(state:PairingState)=>state.kind==='starting'||state.kind==='scan'||state.kind==='confirm'||state.kind==='working';
 
-export interface PairingOperation<T>{result:Promise<T>;cancel():void}
+export interface PairingOperation<T>{result:Promise<T>;cancel(reason?:PairingCloseReason):void}
 export interface PairingHandler{handle(message:Record<string,any>):Promise<Record<string,unknown>>}
 export interface PairingPorts{
  acquirePairingActivity?():()=>void;
@@ -118,9 +118,10 @@ export class MiniProgramPairing{
   for(const cancel of this.cancelTimers.splice(0))cancel();
   const pending=this.pending;this.pending=undefined;this.sessionCheck=undefined;this.handlingConfigure=false;
   const id=this.sessionId;this.sessionId='';
-  // Native cancellation also closes the session. Deliver its reason first.
-  if(id)void this.ports.op('provision.close',{sessionId:id,reason}).result.catch(()=>{}).finally(()=>pending?.cancel());
-  else pending?.cancel();
+  // Cancellation carries its reason and reclaims native work synchronously.
+  // Also close a known session when the pending result already left the bridge.
+  pending?.cancel(reason);
+  if(id)void this.ports.op('provision.close',{sessionId:id,reason}).result.catch(()=>{});
   if(next)this.emit(next);
  }
  private async call<T>(method:string,args:Record<string,unknown>,active:()=>boolean):Promise<T>{

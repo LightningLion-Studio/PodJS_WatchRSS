@@ -183,12 +183,12 @@ test('alert: a transient confirmation probe failure retries without closing or s
  p.cancel();
 });
 
-test('alert: native close receives its reason before cancellation can close the relay',async()=>{
+test('alert: cancellation reclaims the relay before the explicit close result arrives',async()=>{
  const h=host(),base=h.ports.op;let finishClose!:()=>void;
  h.ports.op=(method,args)=>method==='provision.close'?{result:new Promise(resolve=>{finishClose=()=>resolve({} as any);}),cancel(){}}:base(method,args);
  const p=new MiniProgramPairing(h.ports,s=>h.states.push(s));p.start();await h.settle();p.cancel();
  const receive=h.calls.find(c=>c.method==='provision.receive')!;
- expect(receive.cancelled).toBe(false);finishClose();await h.settle();expect(receive.cancelled).toBe(true);
+ expect(receive.cancelled).toBe(true);finishClose();await h.settle();expect(receive.cancelled).toBe(true);
 });
 test('alert: a late start result preserves the background close reason',async()=>{
  const h=host(),base=h.ports.op;let opened!:(value:any)=>void;
