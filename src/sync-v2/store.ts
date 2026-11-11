@@ -60,7 +60,7 @@ export const PROJECTION_SCHEMA=[SQL_STATE_SCHEMA,...SQL_PROGRAM_SCHEMA,...SQL_AU
  `CREATE TABLE IF NOT EXISTS syncv2_control(id INTEGER PRIMARY KEY CHECK(id=1),scope TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)))`,
  `CREATE TABLE IF NOT EXISTS syncv2_legacy_inbox(scope TEXT NOT NULL,inbox_key TEXT NOT NULL,input_hash TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,inbox_key))`,
  `CREATE TABLE IF NOT EXISTS syncv2_note_bindings(scope TEXT NOT NULL,entity_key TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,entity_key))`,
- `CREATE TABLE IF NOT EXISTS syncv2_write_gates(scope TEXT PRIMARY KEY,history_restore INTEGER NOT NULL CHECK(history_restore IN (0,1)),choice_apply INTEGER NOT NULL CHECK(choice_apply IN (0,1)))`,
+ `CREATE TABLE IF NOT EXISTS syncv2_write_gates(scope TEXT PRIMARY KEY,history_restore INTEGER NOT NULL CHECK(history_restore IN (0,1)),choice_apply INTEGER NOT NULL CHECK(choice_apply IN (0,1)),control_revision TEXT NOT NULL DEFAULT '0')`,
  UNOPENABLE_NOTES_SCHEMA,
 ];
 /** rc7 25.3 local output binding of one note life. `revision:null` forces a
@@ -113,6 +113,7 @@ export class WatchProjectionStore {
  /** Reopening disabled must durably stop a previously enabled projection. */
  async initialize(){if(!this.gate.isEnabled){await stopExistingProjection(this.db);return {ddl:0,unchanged:0};}
   await this.checkIdentity();await this.db.transaction(PROJECTION_SCHEMA.filter(sql=>!sql.startsWith('CREATE TRIGGER')).map(sql=>({sql})));const infrastructureDdl=await stableSqlTriggers(this.db,PROJECTION_SCHEMA.filter(sql=>sql.startsWith('CREATE TRIGGER')));const markerDdl=await installBusinessRevision(this.db);
+  if(!(await this.db.query('PRAGMA table_info(syncv2_write_gates)')).some(row=>row.name==='control_revision'))await this.db.transaction([{sql:"ALTER TABLE syncv2_write_gates ADD COLUMN control_revision TEXT NOT NULL DEFAULT '0'"}]);
   if(!(await this.db.query('SELECT 1 FROM syncv2_state WHERE scope=?',[this.scopeKey])).length){
    const initial=initialState();initial.businessRevision=await businessRevision(this.db);const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(row=>String(row.name)));
    const witnesses=[['sync_change_log',"SELECT 1 FROM sync_change_log WHERE seq>COALESCE((SELECT MIN(last_local_seq_acked) FROM sync_peer_state),0) LIMIT 1"],['memo_notes','SELECT 1 FROM memo_notes WHERE content_hash!=base_content_hash LIMIT 1'],['article_register_state','SELECT 1 FROM article_register_state WHERE pending_json IS NOT NULL OR raw_conflict=1 LIMIT 1'],['sync_book_reading_dirty','SELECT 1 FROM sync_book_reading_dirty LIMIT 1']];
@@ -124,7 +125,19 @@ export class WatchProjectionStore {
   result.ddl+=markerDdl.ddl+infrastructureDdl.ddl;result.unchanged+=markerDdl.unchanged+infrastructureDdl.unchanged;
   // A local test/diagnostic entry must activate explicitly. No cloud transport,
   // worker, settings migration, or account registration is attached here.
-  this.gate.require();await this.db.transaction([{sql:'INSERT INTO syncv2_control VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,enabled=1 WHERE scope IS NOT excluded.scope OR enabled!=1',params:[this.scopeKey]}]);if(!this.gate.isEnabled){await stopExistingProjection(this.db);throw Error('feature_disabled');}return result;
+  this.gate.require();await this.db.transaction([{sql:'INSERT INTO syncv2_control VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,enabled=1 WHERE scope IS NOT excluded.scope OR enabled!=1',params:[this.scopeKey]}]);if(!this.gate.isEnabled){await stopExistingProjection(this.db);throw Error('feature_disabled');}await this.initializeWriteGates();return result;
+ }
+ private writeGatesStatement(state:SyncState):Statement {
+  return {sql:'INSERT INTO syncv2_write_gates(scope,history_restore,choice_apply,control_revision) VALUES(?,?,?,?) ON CONFLICT(scope) DO UPDATE SET history_restore=excluded.history_restore,choice_apply=excluded.choice_apply,control_revision=excluded.control_revision',params:[this.scopeKey,state.cloud?.p5Gates?.history_restore===false?0:1,state.cloud?.p5Gates?.choice_apply===false?0:1,state.choiceControlRevision??'0']};
+ }
+ private async initializeWriteGates(){
+  const controls=await this.persistedState();await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS podjs_sql_cas_guard(id INTEGER NOT NULL CHECK(id=1))'},{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,controls.stateVersion]},{sql:'DELETE FROM podjs_sql_cas_guard'},this.writeGatesStatement(controls)]);
+ }
+ /** Only setWriteGates may replace control fields. Every other prepared update
+  * uses its current authenticated CAS snapshot, including recovery input.next. */
+ private preserveWriteGates(state:SyncState,next:SyncState){
+  if(state.choiceControlRevision===undefined)delete next.choiceControlRevision;else next.choiceControlRevision=state.choiceControlRevision;
+  if(next.cloud||state.cloud?.p5Gates){next.cloud={...next.cloud};if(state.cloud?.p5Gates===undefined)delete next.cloud.p5Gates;else next.cloud.p5Gates=JSON.parse(canonical(state.cloud.p5Gates));}
  }
  async disable(){await this.gate.close();}
  private async persistedState(attempt=0):Promise<SyncState>{
@@ -156,30 +169,30 @@ export class WatchProjectionStore {
   if(!state.pendingChoice&&compareD64(state.editBase.generation,state.rollbackGeneration)<0&&(state.hasUnsentEdits||compareD64(state.localChangeRevision,state.acknowledgedLocalChangeRevision??'0')>0)){const next={...state,pendingChoice:{generation:state.rollbackGeneration,inboxKeys:[],accountOid:state.account!.oid,accountRevision:state.account!.revision,selectedLocalChangeRevision:state.localChangeRevision}};await this.commit(state,next);return next;}
   return state;
  }
- private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,observation=false){this.gate.require();const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation?this.observationSql(state):this.db,journal=observation&&state.cloud?.pendingPublish?.explicit?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
+ private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,observation=false,writeGate?:'choice_apply'|'history_restore',configuration=false){this.gate.require();if(!configuration)this.preserveWriteGates(state,next);const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation||writeGate?this.observationSql(state,writeGate):this.db,journal=(observation&&state.cloud?.pendingPublish?.explicit)||writeGate?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
   try{await commitSqlCas(db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** P2 control persistence uses the same stateVersion and business witness.
   * Preparation runs outside SQL; all prepared statements commit at this CAS. */
- async controlUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){
-  const current=await this.readState();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
-  await this.commit(expected,next,statements,hook);
+ async controlUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,writeGate?:'choice_apply'|'history_restore'){
+  const current=await this.readState();if(writeGate&&current.cloud?.p5Gates?.[writeGate]===false)throw new ObservationReadOnly();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
+  await this.commit(expected,next,statements,hook,false,writeGate);
  }
  /** Persist the control offset and its SQL gate mirror at one state CAS. */
  async setWriteGates(before:SyncState,flags:{history_restore:boolean;choice_apply:boolean}){
   const next=JSON.parse(canonical(before)) as SyncState;
   next.choiceControlRevision=nextD64(before.choiceControlRevision??'0');
   next.cloud={...next.cloud,p5Gates:{...flags}};
-  await this.controlUpdate(before,next,[{sql:'INSERT INTO syncv2_write_gates VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET history_restore=excluded.history_restore,choice_apply=excluded.choice_apply',params:[this.scopeKey,flags.history_restore?1:0,flags.choice_apply?1:0]}]);
+  if(canonical(await this.readStableState())!==canonical(before))throw Error('choice_stale');await this.commit(before,next,[this.writeGatesStatement(next)],undefined,false,undefined,true);
  }
  /** The same SQL gate read protects activation and large inactive chunks.
   * Gate changes update this mirror with their encrypted journal at one CAS. */
- private observationSql(expected:SyncState):ProjectionSql {
-  const plan=expected.cloud?.pendingPublish;if(!plan?.explicit)return this.db;
-  const flag=plan.kind==='rollback'?'history_restore':'choice_apply';
+ private observationSql(expected:SyncState,writeGate?:'choice_apply'|'history_restore'):ProjectionSql {
+  const plan=expected.cloud?.pendingPublish;if(!writeGate&&!plan?.explicit&&!expected.cloud?.pendingCloudChoice)return this.db;
+  const flag=writeGate??(plan?.kind==='rollback'?'history_restore':'choice_apply');
   return {query:(sql,params)=>this.db.query(sql,params),transaction:async statements=>{
-   try{await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS podjs_sql_cas_guard(id INTEGER NOT NULL CHECK(id=1))'},{sql:`INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) AND NOT EXISTS(SELECT 1 FROM syncv2_write_gates WHERE scope=? AND ${flag}=0) THEN 1 ELSE 0 END`,params:[this.scopeKey,expected.stateVersion,this.scopeKey]},{sql:'DELETE FROM podjs_sql_cas_guard'},...statements]);}
-   catch(error){if(/CHECK constraint failed: id=1/.test(String(error))&&queuedReadOnly(await this.readStableState()))throw new ObservationReadOnly();throw error;}
+   try{await this.db.transaction([{sql:'CREATE TABLE IF NOT EXISTS podjs_sql_cas_guard(id INTEGER NOT NULL CHECK(id=1))'},{sql:`INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) AND EXISTS(SELECT 1 FROM syncv2_write_gates WHERE scope=? AND ${flag}=1 AND control_revision=?) THEN 1 ELSE 0 END`,params:[this.scopeKey,expected.stateVersion,this.scopeKey,expected.choiceControlRevision??'0']},{sql:'DELETE FROM podjs_sql_cas_guard'},...statements]);}
+   catch(error){if(/CHECK constraint failed: id=1/.test(String(error))&&(await this.readStableState()).cloud?.p5Gates?.[flag]===false)throw new ObservationReadOnly();throw error;}
   }};
  }
  /** Every observation write re-reads gates inside the persistent transaction.
@@ -189,6 +202,11 @@ export class WatchProjectionStore {
   try{if(canonical(current)!==canonical(expected))throw Error('choice_stale');await this.commit(expected,next,statements,undefined,true);}catch(error){
    if((error as Error).message==='choice_stale'&&queuedReadOnly(await this.readStableState()))throw new ObservationReadOnly();throw error;
   }
+ }
+ /** Explicit choices, follow and recovery restore all use this final SQL gate.
+  * commit copies control fields from the current CAS snapshot, never input.next. */
+ async choiceUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],writeGate:'choice_apply'|'history_restore'='choice_apply'){
+  return this.controlUpdate(expected,next,statements,undefined,writeGate);
  }
  /** No preliminary coordination transaction. The supplied cleanup guards and
   * every persistent change commit together at the state/business CAS. */

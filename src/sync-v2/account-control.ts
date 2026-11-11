@@ -16,7 +16,7 @@ import type {ApprovedKey} from './head-pins';
 import {PAGE_BYTES,type WatchProjectionStore,type SourceRecord} from './store';
 import {recordFact,type RecordFact,type RecordFeed,type StatementFeed} from './record-feed';
 import type {WatchCloudIndex} from './cloud-index';
-import type {WatchIndexPublisher,BodyResolver} from './publisher';
+import {PublicationLookupUnavailable,type WatchIndexPublisher,type BodyResolver} from './publisher';
 import type {WatchRecovery,RecoveryValue} from './recovery';
 import type {SyncV2Http} from './http';
 import {parseNetwork} from './http';
@@ -94,7 +94,7 @@ export class WatchAccountControl {
   if(!this.o.preserveStalePublication||(await this.o.store.readState()).cloud?.preparingPublication)await this.o.publisher.detachPublication?.();let state=await this.o.store.readState();if(!state.pendingChoice)return null;
   // An audit-only cloud intent cannot authorize a newer local window. Reopening
   // retires only that stale intent, so every choice remains available again.
-  const intent=state.cloud?.pendingCloudChoice;if(intent){try{checkCapture(state,Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision}));}catch(error){if((error as Error).message!=='choice_stale')throw error;const next=clone(state);next.cloud.pendingCloudChoice=null;await this.o.store.controlUpdate(state,next);state=next;}}
+  if(await this.retireStaleCloudChoice())state=await this.o.store.readState();
   const cp=await this.o.store.checkpoint();if(cp?.phase!=='complete'||!sameBusinessRevision(cp.businessRevision,state.businessRevision))throw Error('projection_incomplete');
   const capture=captureChoice(state,currentAccount(state)),local=await this.local(),cloud=await this.cloud(state),cloudMap=new Map(cloud.map(r=>[r.entityKey,r]));
   for(const entry of local){const existing=cloudMap.get(entry.entityKey);if(this.o.resolveBody)entry.manifest=await this.o.resolveBody(entry,existing);else if(existing&&canonical(entry.candidate.meta.payload)===canonical(existing.candidate.meta.payload))entry.manifest=existing.manifest;}
@@ -142,7 +142,7 @@ export class WatchAccountControl {
   }for(const id of removed)out.delete(id);return [...out.values()];
  }
  private records(rows:RecordRow[]):SourceRecord[]{return rows.map(r=>({kind:r.candidate.meta.kind,logicalId:r.candidate.meta.logicalId,value:fromWire(r.candidate.meta.kind,r.candidate.meta.payload,r.candidate.state.payload),...(r.candidate.meta.addedAtSource==='original'?{addedAtMillis:r.candidate.addedAtMillis}:{})}));}
- private async request(path:string,body:any){const known=await this.o.http.requestResult(body.requestId);if(known.status==='succeeded')return known.response;if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');return this.o.http.json('POST',path,body);}
+ private async request(path:string,body:any){let known;try{known=await this.o.http.requestResult(body.requestId);}catch(error){throw new PublicationLookupUnavailable(error);}if(known.status==='succeeded')return known.response;if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');return this.o.http.json('POST',path,body);}
  async chooseCloud(proof:object,requestId:string,choiceId=requestId){
   await this.gate('choice');hexId(requestId,32);hexId(choiceId,32);const {p,s}=await this.checked(proof);if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(s.cloud?.pendingPublish)throw Error('publication_pending');
   const next=clone(s);next.cloud={...next.cloud,pendingCloudChoice:{requestId,choiceId,...(p.legacyKey?{legacyKey:p.legacyKey,legacyHash:p.legacyHash}:{}),accountOid:p.capture.accountOid,accountRevision:p.capture.accountRevision,generation:p.capture.generation,localChangeRevision:p.capture.localChangeRevision,guardVersion:nextD64(choiceVersion(s))}};
@@ -150,11 +150,45 @@ export class WatchAccountControl {
  }
  /** The request ID and capture fence survive process loss before/after audit.
   * A journal authorizes only its original window; it never captures new edits. */
+ /** Reopening already retired stale cloud audit intents. Product automatic
+  * resumption must leave that same escape path available without applying one.
+  * Preserve the original result and do not invalidate a newer signed journal. */
+ async retireStaleCloudChoice(){
+  const before=await this.o.store.readState(),intent=before.cloud?.pendingCloudChoice;if(!intent||!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return false;
+  try{checkCapture(before,this.cloudChoiceCapture(intent));return false;}catch(error){if((error as Error).message!=='choice_stale')throw error;}
+  const next=clone(before);next.cloud.pendingCloudChoice=null;next.cloud.retiredCloudChoices={...next.cloud.retiredCloudChoices,[intent.requestId]:intent};
+  const pending=before.cloud?.pendingPublish;if(pending?.explicit&&pending.guardVersion===choiceVersion(before))next.cloud.pendingPublish.guardVersion=nextD64(choiceVersion(before));
+  await this.o.store.choiceUpdate(before,next);return true;
+ }
+ private cloudChoiceCapture(intent:any):Capture{return Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision});}
+ /** Accepted audit results survive a closed apply gate. This transaction only
+  * records the original result; it never applies business rows or sends ACK. */
+ private async acceptCloudChoice(requestId:string,reply:any){
+  for(let attempt=0;;attempt++){
+   const before=await this.o.store.readState(),intent=before.cloud?.pendingCloudChoice;if(intent?.requestId!==requestId)throw Error('choice_stale');
+   if(intent.phase==='accepted'){if(canonical(intent.result)!==canonical(reply))throw Error('invalid_schema');return;}
+   let current=true;try{checkCapture(before,this.cloudChoiceCapture(intent));}catch(error){if((error as Error).message!=='choice_stale')throw error;current=false;}
+   const next=clone(before);next.cloud.pendingCloudChoice={...intent,phase:'accepted',result:reply,guardVersion:current?nextD64(choiceVersion(before)):intent.guardVersion};
+   try{await this.o.store.controlUpdate(before,next);return;}catch(error){if((error as Error).message!=='choice_stale'||attempt>=3)throw error;}
+  }
+ }
  async resumeCloudChoice(){
   await this.gate('choice');const s=await this.o.store.readState(),intent=s.cloud?.pendingCloudChoice;if(!intent){await this.flushApplied();return {applied:false,commit:null};}
-  const capture=Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision});checkCapture(s,capture);
-  const reply=await this.request('/choices/cloud',{scope:this.o.http.scope,requestId:intent.requestId,choiceId:intent.choiceId,expectedAccountRevision:capture.accountRevision,expectedRollbackGeneration:capture.generation,selectedLocalChangeRevision:capture.localChangeRevision});
+  const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
+  if(intent.phase==='accepted'){const window=await this.o.http.negotiate([],[]);if(canonical(window.account)!==canonical({commitOid:intent.accountOid,revision:intent.accountRevision,rollbackGeneration:intent.generation})){await this.o.reader.pull(window);throw Error('choice_stale');}}
+  const reply=intent.phase==='accepted'?intent.result:await this.request('/choices/cloud',{scope:this.o.http.scope,requestId:intent.requestId,choiceId:intent.choiceId,expectedAccountRevision:capture.accountRevision,expectedRollbackGeneration:capture.generation,selectedLocalChangeRevision:capture.localChangeRevision});
   if(reply.choiceId!==intent.choiceId||canonical(reply.confirmedAccount)!==canonical({commitOid:capture.accountOid,revision:capture.accountRevision,rollbackGeneration:capture.generation})||canonical(reply.account)!==canonical(reply.confirmedAccount))throw Error('choice_stale');
+  await this.acceptCloudChoice(intent.requestId,reply);
+  for(let attempt=0;;attempt++){
+   const before=await this.o.store.readState();
+   try{return await this.applyAcceptedCloudChoice();}catch(error){
+    const after=await this.o.store.readState();if((error as Error).message!=='choice_stale'||attempt>=3||before.choiceControlRevision===after.choiceControlRevision||choiceStateHash(before)!==choiceStateHash(after))throw error;
+   }
+  }
+ }
+ private async applyAcceptedCloudChoice(){
+  await this.gate('choice');const s=await this.o.store.readStableState(),intent=s.cloud?.pendingCloudChoice;if(intent?.phase!=='accepted')throw Error('choice_stale');
+  const capture=this.cloudChoiceCapture(intent);checkCapture(s,capture);
   checkCapture(await this.o.store.readState(),capture);let localRows=await this.local(),cloudRows=await this.cloud(s),applyRows=cloudRows,capturedKeys:string[]|undefined,decision:Awaited<ReturnType<WatchProjectionStore['prepareLegacyDecision']>>|undefined;
   if(intent.legacyKey){const incoming=await this.o.store.legacyChoiceEntry(intent.legacyKey);if(digest(incoming)!==intent.legacyHash)throw Error('choice_stale');localRows=await this.legacyOverlay(localRows,incoming.entry);capturedKeys=incoming.entry.entityKeys;const map=new Map((await this.local()).map(r=>[r.entityKey,r]));for(const id of capturedKeys!){const cloud=cloudRows.find(r=>r.entityKey===id);if(cloud)map.set(id,cloud);else map.delete(id);}applyRows=await this.local();decision=await this.o.store.prepareLegacyDecision(s,intent.legacyKey,'discarded-for-cloud');}
   const records=this.records(applyRows),business=decision?[]:await this.o.business.prepare(records,s),next=decision?decision.next:this.applied(s,capture.accountOid,capture.accountRevision,capture.generation,intent.requestId);next.cloud.pendingCloudChoice=null;
@@ -222,7 +256,7 @@ export class WatchAccountControl {
   const before=await this.o.store.readState();if(before.pendingChoice||before.hasUnsentEdits)return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}
   if(!before.account||before.activeGeneration===before.account.oid)return {applied:false};const statements=await this.followStatements(before),requestId=digest(['follow',before.account]).slice(0,32),next=this.applied(before,before.account.oid,before.account.revision,before.account.generation,requestId),release=await this.reserveProjection(statements);
-  try{await this.o.store.controlUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
+  try{await this.o.store.choiceUpdate(before,next,statements);}finally{await release();}await this.flushApplied();return {applied:true};
  }
  /** R4: follow reads the current tree one entity (or one bounded page) at a
   * time for every pass; the peak is one long note, whatever the row count. */

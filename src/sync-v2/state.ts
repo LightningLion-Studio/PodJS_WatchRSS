@@ -29,7 +29,7 @@ export function choiceStateHash(state:SyncState):string {
 }
 export function queuedReadOnly(state:SyncState):boolean {
  const plan=state.cloud?.pendingPublish;
- return !!plan?.explicit&&state.cloud?.p5Gates?.[plan.kind==='rollback'?'history_restore':'choice_apply']===false;
+ return (!!plan?.explicit||!!state.cloud?.pendingCloudChoice)&&state.cloud?.p5Gates?.[plan?.kind==='rollback'?'history_restore':'choice_apply']===false;
 }
 export function currentAccount(state:any):Account {
  try{exact(state.account,['oid','revision','generation']);oid(state.account.oid,'commit');if(checkD64(state.account.revision)==='0')throw Error();checkD64(state.account.generation);checkD64(state.rollbackGeneration);checkD64(state.localChangeRevision);checkD64(state.stateVersion);

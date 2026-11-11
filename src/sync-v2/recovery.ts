@@ -68,11 +68,11 @@ export class WatchRecovery {
   * changes, recovery reference and pins commit under the captured stateVersion.
   * This entry must be invoked only after explicit choices/cloud confirmation. */
  async applyCloud(input:{capture:Capture;local:Record<string,RecoveryValue>;cloud:Record<string,RecoveryValue>;capturedKeys?:string[];explicitCloudChoice:true;next:SyncState;statements:Statement[]}){
-  if(input.explicitCloudChoice!==true)throw Error('choice_pending');const before=await this.projection.readState();checkCapture(before,input.capture);await this.checkRecords(before);
+  if(input.explicitCloudChoice!==true)throw Error('choice_pending');const before=await this.projection.readState();checkCapture(before,input.capture);if(input.next.stateVersion!==before.stateVersion)throw Error('choice_stale');await this.checkRecords(before);
   const next={...input.next,recoveryCopies:[...before.recoveryCopies??[]],recoveryPins:[...before.recoveryPins??[]],recoveryClock:before.recoveryClock??0,recoveryEditPins:[...before.recoveryEditPins??[]]};
   // The caller cannot alter recovery references through next state.
   const delta=recoveryDelta(input.local,input.cloud,before.editBase,input.capturedKeys);
-  if(!before.keepDiscardedLocalChanges7Days||!delta.changes.length){await this.projection.controlUpdate(before,next,input.statements);return null;}
+  if(!before.keepDiscardedLocalChanges7Days||!delta.changes.length){await this.projection.choiceUpdate(before,next,input.statements);return null;}
   const now=this.ports.trustedNow();if(now===null||!Number.isSafeInteger(now)||now<(before.recoveryClock??0)||now>Number.MAX_SAFE_INTEGER-SEVEN_DAYS)throw Error('clock_unknown');
   const copyId=await this.ports.randomId();hexId(copyId,32);if(next.recoveryCopies.some(c=>c.copyId===copyId)||next.recoveryPins.some(p=>p.copyId===copyId))throw Error('idempotency_conflict');
   const sources=await this.ports.source(delta.bodyRefs,delta.changes);if(canonical(sources.map(s=>s.oid).sort())!==canonical(delta.bodyRefs))throw Error('closure_incomplete');
@@ -91,7 +91,7 @@ export class WatchRecovery {
    // Body files are durable before state CAS. Uncommitted files carry no pin.
    next.recoveryCopies.push(copy);next.recoveryPins.push({copyId,bodyRefs:delta.bodyRefs,expiresAtMillis:header.expiresAtMillis});next.recoveryClock=now;
    const bodyRecord=await this.cache.cipher.seal(this.cache.aad('recovery-files:'+copyId),files),statements=[...chunkGuards,this.cache.journal.insert('recovery:'+copyId,'z:'+copyId,bodyRecord),...this.cache.journal.attach('recovery:'+copyId,resources.map(r=>r.id)),...input.statements];
-   await this.projection.controlUpdate(before,next,statements);committed=true;return copy;
+   await this.projection.choiceUpdate(before,next,statements);committed=true;return copy;
   }finally{await this.cache.unstage(resources);await release();if(!committed)try{await this.cache.collect();}catch{}}
  }
  /** Trusted time watermark is durable. Expiry removes ciphertext references and
@@ -118,7 +118,7 @@ export class WatchRecovery {
    statements.push(...this.cache.journal.replace(row,row.value),this.cache.journal.insert('edit-recovery:'+editId,'z:edit:'+editId,row.value));
    for(let at=0;at<files.length;at+=32)statements.push(...this.cache.journal.attach('edit-recovery:'+editId,files.slice(at,at+32).map(f=>digest({copyId,oid:f.oid,offset:f.offset}))));
   }
-  await this.projection.controlUpdate(before,next,statements);return delta.changes.length;
+  await this.projection.choiceUpdate(before,next,statements);return delta.changes.length;
  }
  /** Explicit durable source for the restored edit, including after N07 expiry. */
  async readEditBody(editId:string,ref:string){const pin=(await this.projection.readStableState()).recoveryEditPins?.find(p=>p.editId===editId);if(!pin)throw Error('object_missing');return this.readPinnedBody(pin.copy,ref,'edit-recovery:'+editId);}

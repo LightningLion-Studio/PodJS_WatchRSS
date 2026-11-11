@@ -108,13 +108,14 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
    },true);
   };
   const reconcileStalePublication=async()=>{
+   if(await control.retireStaleCloudChoice())return true;
    if(!(await local.store.readState()).cloud?.pendingPublish?.explicit)return false;
    await runtime.refreshAccount();
    return (await runtime.publisher.reconcileStalePublication()).detached;
   };
   const flushPublication=async()=>{
    await control.recoverPreparation();
-   const pending=(await local.store.readState()).cloud?.pendingPublish;if(!pending)return false;
+   const state=await local.store.readState();if(state.cloud?.pendingCloudChoice){try{await runtime.authenticate();await control.resumeCloudChoice();}catch(error){if((error as Error).message==='choice_stale')await control.retireStaleCloudChoice();throw error;}return;}const pending=state.cloud?.pendingPublish;if(!pending)return false;
    if(pending.phase==='conflicted'&&!pending.explicit){await recoverConflict();return;}
    try{if(pending.explicit){await runtime.authenticate();await control.resumePublication();}else await runtime.publisher.flush();}catch(error){
     if(pending.explicit&&['choice_stale','ref_conflict'].includes((error as Error).message)){
@@ -129,16 +130,16 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
   // they do not prevent this round from authenticating a read.
   const flush=async()=>{
    try{return await flushPublication();}catch(error){
-    const pending=(await local.store.readState()).cloud?.pendingPublish;
-    if(pending?.explicit&&(error instanceof PublicationLookupUnavailable||(error as Error).message==='feature_disabled'))return true;
+    const state=await local.store.readState(),pending=state.cloud?.pendingPublish;
+    if((pending?.explicit||state.cloud?.pendingCloudChoice)&&(error instanceof PublicationLookupUnavailable||(error as Error).message==='feature_disabled'))return true;
     throw error;
    }
   };
   const round=async()=>{
    await assertCurrent();await runtime.refreshTrustedTime();const deferred=await flush();
    if(deferred){
-    const pending=(await local.store.readState()).cloud?.pendingPublish,settings=await control.settings();
-    if(pending?.explicit&&(pending.kind==='rollback'?!settings.history_restore:!settings.choice_apply)){await runtime.pullReadOnly();return {readOnly:true};}
+    const state=await local.store.readState(),pending=state.cloud?.pendingPublish,settings=await control.settings();
+    if(state.cloud?.pendingCloudChoice&&!settings.choice_apply||pending?.explicit&&(pending.kind==='rollback'?!settings.history_restore:!settings.choice_apply)){await runtime.pullReadOnly();return {readOnly:true};}
     await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);return runtime.refreshAccount();
    }
    await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);const pulled=await runtime.pull();if(pulled?.readOnly)return pulled;
