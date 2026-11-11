@@ -1,3 +1,4 @@
+import {choiceVersion} from './state';
 /** rc6a note-conflict wire and atomic resolution model. No product or network IO. */
 import {canonical,jsonBytes as jb,bytes as utf8} from './protocol';
 import {sha256Hex} from '@podjs/framework/crypto';
@@ -118,13 +119,13 @@ export class NoteConflictPlan {
    if(st.account.generation!==st.rollbackGeneration||st.editBase.generation!==st.account.generation)throw Error();s.objectOid(st.editBase.accountOid,'commit');
    for(const [key,value]of [['lastSeenAccountOid',st.account.oid],['lastSeenAccountRevision',st.account.revision],['lastSeen',st.account.generation]])if(Object.hasOwn(st,key)&&st[key]!==value)throw Error();
    if(token){s.capture(token);immutableData(token);
-    if(token.stateVersion!==st.stateVersion||token.accountOid!==st.account.oid||token.accountRevision!==st.account.revision||token.generation!==st.account.generation||token.localChangeRevision!==st.localChangeRevision)throw Error();}
+    if(token.stateVersion!==choiceVersion(st)||token.accountOid!==st.account.oid||token.accountRevision!==st.account.revision||token.generation!==st.account.generation||token.localChangeRevision!==st.localChangeRevision)throw Error();}
   }catch{fail('choice_stale');}
   if(st.pendingChoice!==null)fail('choice_pending');
  }
  capture(){
   this.guardSync();const st=this.state;validateSet(st.note.noteId,st.conflicts);s.uint(st.note.updatedAt);const open=openConflicts(st.conflicts);if(st.note.deleted||!open.length)fail('notes_stale');
-  return freeze({sync:{stateVersion:st.stateVersion,accountOid:st.account.oid,accountRevision:st.account.revision,generation:st.account.generation,localChangeRevision:st.localChangeRevision},noteId:st.note.noteId,expectedUpdatedAt:st.note.updatedAt,selectedConflictId:open[0]!.conflictId,openConflictIds:open.map(r=>r.conflictId).sort()});
+  return freeze({sync:{stateVersion:choiceVersion(st),accountOid:st.account.oid,accountRevision:st.account.revision,generation:st.account.generation,localChangeRevision:st.localChangeRevision},noteId:st.note.noteId,expectedUpdatedAt:st.note.updatedAt,selectedConflictId:open[0]!.conflictId,openConflictIds:open.map(r=>r.conflictId).sort()});
  }
  private guard(capture:any){
   try{s.exact(capture,['sync','noteId','expectedUpdatedAt','selectedConflictId','openConflictIds']);s.exact(capture.sync,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);immutableData(capture);}catch{fail('choice_stale');}

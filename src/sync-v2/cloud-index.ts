@@ -6,8 +6,8 @@ import {signCommit,signControl,verifySigned,type SigningPort} from './signing';
 import {readTree,buildTree} from './merkle';
 import {readConflicts,conflictNeutral,noteEditDigest} from './notes-conflict';
 import {fromWire} from './business';
-import {observeAccount,type SyncState} from './state';
-import {PAGE_BYTES,type WatchProjectionStore} from './store';
+import {observeAccount,queuedReadOnly,type SyncState} from './state';
+import {PAGE_BYTES,ObservationReadOnly,type WatchProjectionStore} from './store';
 import {SyncV2Http,SyncV2Error} from './http';
 import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,measureNote,readSegmentedNote,splitOrdinary,type ClosurePorts} from './note-segments';
 import {storedSegments} from './publisher';
@@ -42,7 +42,7 @@ interface ObservedRow {entityKey:string;note:boolean;noteId:string;deleted:boole
 export type UnopenableNotes=Record<string,{entityKey:string;code:string;deleted:boolean}>;
 const unopenableNotes=(seen:readonly ObservedRow[]):UnopenableNotes=>Object.fromEntries(seen.filter(r=>r.unopenable).map(r=>[r.noteId,{entityKey:r.entityKey,code:r.unopenable!,deleted:r.deleted}]));
 export interface CloudIndexOptions {noteSegments?:boolean;noteTextBudget?:number}
-export type CloudPullResult={empty:boolean;rows?:number;awaitingUser?:boolean;bodyReads?:number;checkpointHit?:boolean;rebuildRequired?:boolean;rebuilt?:boolean};
+export type CloudPullResult={empty:boolean;readOnly?:boolean;rows?:number;awaitingUser?:boolean;bodyReads?:number;checkpointHit?:boolean;rebuildRequired?:boolean;rebuilt?:boolean};
 export const placeholder=(row:any)=>row.bodyRevision===null?'no-body':row.recipeOid===null?'source-pending':'body-not-downloaded';
 export const placeholderText=(row:any)=>row.bodyRevision===null?null:row.recipeOid===null?'正文尚未就绪':'正文尚未下载';
 const copy=<T>(v:T):T=>JSON.parse(canonical(v));
@@ -57,17 +57,20 @@ export class WatchCloudIndex {
  private get scope(){return this.http.scope;}
  private current(state:SyncState){return {pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',current:null,deviceSequence:'0',pendingPublish:null,...state.cloud};}
  async pull(window:any,readOnly=false):Promise<CloudPullResult>{
+  try{return await this.pullOnce(window,readOnly);}catch(error){if(error instanceof ObservationReadOnly)return this.pullOnce(window,true);throw error;}
+ }
+ private async pullOnce(window:any,readOnly:boolean):Promise<CloudPullResult>{
   if((await this.store.readStableState()).cloud?.witnessConflict)throw Error('ref_continuity_unavailable');
   const capabilities=await this.http.capabilities();sameScope(window.scope,this.scope);if(window.version!==2)throw Error('upgrade_required');exact(window.account,['commitOid','revision','rollbackGeneration']);const a=window.account;checkD64(a.revision);checkD64(a.rollbackGeneration);checkD64(window.serverRevision);checkD64(window.historyFloorRevision);hexId(window.windowId,32);uint(window.expiresAtMillis);if(this.now()>window.expiresAtMillis)throw Error('window_expired');if(compareD64(window.historyFloorRevision,window.serverRevision)>0)throw Error('invalid_schema');
-  const before=await this.store.readState(),saved=this.current(before),auditBinding=digest({scope:this.scope,keyVersion:this.keys.version,features:capabilities.features,schema:'v2-rc6c-business-2'});if(compareD64(window.serverRevision,saved.cursor)<0)throw Error('replay_detected');if(compareD64(a.rollbackGeneration,before.rollbackGeneration)<0||compareD64(a.revision,before.lastSeenAccountRevision)<0)throw Error('replay_detected');
+  const before=await this.store.readState();readOnly ||= queuedReadOnly(before)||!!before.cloud?.pendingPublish?.explicit&&before.cloud.pendingPublish.kind==='rollback'&&!this.http.historyRestoreOpen();const saved=this.current(before),auditBinding=digest({scope:this.scope,keyVersion:this.keys.version,features:capabilities.features,schema:'v2-rc6c-business-2'});if(compareD64(window.serverRevision,saved.cursor)<0)throw Error('replay_detected');if(compareD64(a.rollbackGeneration,before.rollbackGeneration)<0||compareD64(a.revision,before.lastSeenAccountRevision)<0)throw Error('replay_detected');
   const historyGap=compareD64(saved.cursor,window.historyFloorRevision)<0;
   if(a.commitOid===null){if(a.revision!=='0'||a.rollbackGeneration!=='0'||saved.pins.accountOid!==null)throw Error('replay_detected');return {empty:true};}
   oid(a.commitOid,'commit');if(a.revision==='0')throw Error('invalid_schema');if(saved.pins.accountOid===null)await this.bootstrap(window);
   if(saved.current?.commitOid===a.commitOid){
    if(a.revision!==before.account?.revision||a.rollbackGeneration!==before.account?.generation)throw Error('replay_detected');
    if(saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
-    if(!readOnly&&window.serverRevision!==saved.cursor){const next=JSON.parse(canonical(before));next.cloud={...saved,cursor:window.serverRevision};await this.store.controlUpdate(before,next);}
-    if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+    if(!readOnly&&window.serverRevision!==saved.cursor){const next=JSON.parse(canonical(before));next.cloud={...saved,cursor:window.serverRevision};await this.store.observationUpdate(before,next);}
+    if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(readOnly?{readOnly:true}:{}),...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
   const objects=new Map<string,Uint8Array>(),get=async(id:string)=>{const existing=objects.get(id);if(existing)return existing;const raw=await this.http.object(id,undefined,window.windowId);objects.set(id,raw);return raw;};
@@ -85,16 +88,16 @@ export class WatchCloudIndex {
   if(!head||head.rollbackGeneration!==a.rollbackGeneration)throw Error('replay_detected');if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
   // A closed explicit-action gate permits authentication and decoding only.
   // Keep the original persistent version, pins and choice fence untouched.
-  if(readOnly){let count=0;await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},undefined,async()=>{count++;});if(this.now()>window.expiresAtMillis)throw Error('window_expired');return {empty:false,rows:count,awaitingUser:!!before.pendingChoice,bodyReads:0};}
+  if(readOnly){let count=0;await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},undefined,async()=>{count++;});if(this.now()>window.expiresAtMillis)throw Error('window_expired');return {empty:false,readOnly:true,rows:count,awaitingUser:!!before.pendingChoice,bodyReads:0};}
   // F2: rows stream into encrypted staging under the new root; only per-row OID,
   // binding and visibility metadata stay in memory. The active tree switches
   // only at the final CAS below.
   // Nothing is written before the first decoded batch, so an early failure
   // leaves the local state byte-identical.
   let staged:SyncState|null=null,count=0;const pending:any[]=[],seen:ObservedRow[]=[];
-  const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged);return staged;};
+  const flush=async()=>{staged??=await this.store.stageHeaders(path.path,before,true);if(pending.length)staged=await this.store.stageCloudRows(head.treeRoot,pending.splice(0),staged,true);return staged;};
   const sink=async(r:any)=>{count++;seen.push({entityKey:r.row.entityKey,note:r.meta.kind==='note',noteId:r.meta.logicalId,deleted:r.row.deleted,noteRevision:r.segments?.noteRevision??null,unopenable:r.unopenable?.code??null});pending.push(r);if(pending.length>=32||r.segments||r.unopenable)await flush();};
-  try{await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature');throw error;}
+  try{await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},saved.current?.treeRoot?id=>this.store.cloudRow(saved.current.treeRoot,id):undefined,sink);staged=await flush();}catch(error){if((error as Error).message==='unsupported_feature')await this.store.quarantineIncoming(staged??before,a.commitOid,objects,'unsupported_feature',true);throw error;}
   const editBases=copy(saved.editBases??{}),editCreates:string[]=[...saved.editCreates??[]],baseWrites:Statement[]=[];
   if(before.hasUnsentEdits&&saved.current?.commitOid===before.editBase.accountOid){let after='';for(;;){const page=await this.store.candidatePage(after,32,PAGE_BYTES);if(!page.length)break;for(const entry of page){const old=await this.store.cloudRow(saved.current.treeRoot,entry.entityKey);if(old?.unopenable)continue;const local={identity:entry.candidate.meta.logicalId,...entry.candidate.meta.payload,...conflictNeutral(entry.candidate.state).payload},base=old?{identity:old.meta.logicalId,...old.meta.payload,...old.state.payload}:null;if(canonical(local)!==canonical(old?{identity:old.meta.logicalId,...old.meta.payload,...conflictNeutral(old.state).payload}:null)){if(base){const kept=await this.store.editBaseEntry(entry.entityKey,base);editBases[entry.entityKey]=kept.value;baseWrites.push(...kept.statements);}else if(!editCreates.includes(entry.entityKey))editCreates.push(entry.entityKey);}}after=page.at(-1)!.entityKey;}}
   const next=observeAccount(staged,{oid:a.commitOid,revision:a.revision,generation:a.rollbackGeneration});path.pins.seenOids=[];
@@ -103,7 +106,7 @@ export class WatchCloudIndex {
   if(saved.lastPublication?.commitOid===a.commitOid&&saved.lastPublication.localRevision===staged.localChangeRevision){next.hasUnsentEdits=false;next.editBase={accountOid:a.commitOid,generation:a.rollbackGeneration};}
   next.knownAuthors=path.pins.authors;next.knownAccountParents={[a.commitOid]:head.accountParent};
   next.cloud.unopenableNotes=unopenableNotes(seen);const bindings=await this.observeBindings(seen,saved.current?.treeRoot??null),kept=await this.keepQuarantinedEdits(seen,staged,saved);next.cloud.unopenableBaselines=kept.baselines;
-  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.controlUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+  if(this.now()>window.expiresAtMillis)throw Error('window_expired');await this.store.observationUpdate(staged,next,[...baseWrites,...bindings,...kept.statements,...this.store.unopenableNotesStatements(Object.keys(next.cloud.unopenableNotes))]);await this.store.sweepEditBases(next);await this.store.dropInactiveCloudRows(head.treeRoot);if(historyGap)await this.rebuild?.();return {empty:false,rows:count,awaitingUser:!!next.pendingChoice,bodyReads:0,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
  }
  /** R2: a local note edit never stays only on a note this device cannot open.
   * An unsent edit when the note enters quarantine, or any later local change of

@@ -7,7 +7,7 @@ import {phoneNotePlainText} from '../notes/phone-text';
 /** Explicit account history/choice actions. No UI, scheduler or startup hook. */
 import type {Statement} from '@podjs/framework/sql-projection';
 import {canonical,digest,hexId,oid,exact,uint,nextD64,compareD64,bytes,type Kind} from './protocol';
-import {captureChoice,checkCapture,currentAccount,observeAccount,type Capture,type SyncState} from './state';
+import {choiceVersion,choiceStateHash,captureChoice,checkCapture,currentAccount,observeAccount,type Capture,type SyncState} from './state';
 import {fromWire,candidates,toWire} from './business';
 import {canMerge} from './merge-planner';
 import {verifyCommit,type SigningPort} from './signing';
@@ -58,7 +58,7 @@ export class WatchAccountControl {
  async settings(){const s=await this.o.store.readState();return {keepDiscardedLocalChanges7Days:s.keepDiscardedLocalChanges7Days,history_restore:this.o.historyRestore===true&&this.o.http.historyRestoreOpen()&&s.cloud?.p5Gates?.history_restore!==false,choice_apply:this.o.choiceApply===true&&s.cloud?.p5Gates?.choice_apply!==false,gc:false,key_rotation:false,custody_release:false};}
  async setWriteGates(flags:{history_restore:boolean;choice_apply:boolean}){
   exact(flags,['history_restore','choice_apply']);if(Object.values(flags).some(v=>typeof v!=='boolean'))throw Error('invalid_schema');if(flags.history_restore&&!this.o.http.historyRestore||flags.choice_apply&&!this.o.http.choiceApply)throw Error('feature_disabled');
-  const before=await this.o.store.readState(),next=clone(before);next.cloud={...next.cloud,p5Gates:{...flags}};await this.o.store.controlUpdate(before,next);
+  const before=await this.o.store.readState();await this.o.store.setWriteGates(before,flags);
  }
  async setKeepDiscardedLocalChanges7Days(value:boolean){if(typeof value!=='boolean')throw Error('invalid_schema');return this.o.recovery.setKeep(value);}
  async recoveryCopies(){await this.o.recovery.purgeRecovery(this.o.trustedNow());return (await this.o.store.readState()).recoveryCopies?.map(c=>({copyId:c.copyId,createdAtMillis:c.header.createdAtMillis,expiresAtMillis:c.header.expiresAtMillis}))??[];}
@@ -103,7 +103,7 @@ export class WatchAccountControl {
   if(merge.canMerge){try{mergedRows=this.mergedRows(merge.tree,local,cloud,await this.o.store.preparationClock(state,this.now()));const preflight=await this.prepareApply(state,mergedRows);release=preflight.release;applyPlan=preflight.plan;}catch(error){if(['choice_stale','projection_preparing'].includes((error as Error).message))throw error;const message=String(error);merge={canMerge:false,reason:/storage|quota/.test(message)?'storage_pressure':/content|closure|body_revision/.test(message)?'missing_content':'unsupported_feature'};}}
 
   if(canonical(await this.o.store.readStableState())!==canonical(state)){await release?.();throw Error('choice_stale');}
-  const proof=Object.freeze({capture,canMerge:merge.canMerge,reason:merge.canMerge?null:merge.reason});this.activePreview=proof;this.plans.set(proof,{stateHash:digest(state),capture,local,cloud,merge,mergedRows,release,applyPlan});return {...state.pendingChoice,accountOid:capture.accountOid,accountRevision:capture.accountRevision,selectedLocalChangeRevision:capture.localChangeRevision,...proof,proof};
+  const proof=Object.freeze({capture,canMerge:merge.canMerge,reason:merge.canMerge?null:merge.reason});this.activePreview=proof;this.plans.set(proof,{stateHash:choiceStateHash(state),capture,local,cloud,merge,mergedRows,release,applyPlan});return {...state.pendingChoice,accountOid:capture.accountOid,accountRevision:capture.accountRevision,selectedLocalChangeRevision:capture.localChangeRevision,...proof,proof};
  }
  async closePreview(proof:object){const p=this.plans.get(proof);if(p){this.plans.delete(proof);if(!p.applyPlan||!await this.o.store.planOwned(p.applyPlan.id))await p.release?.();}}
  private mergedRows(tree:any,local:RecordRow[],cloud:RecordRow[],now=this.now()){
@@ -124,7 +124,7 @@ export class WatchAccountControl {
  }
  private async reserveBytes(bytes:number){try{return await this.o.business.reserve(bytes);}catch(error){throw Object.assign(Error('storage_pressure'),{cause:error});}}
  private async reserveProjection(statements:import('@podjs/framework/sql-projection').Statement[]){const plan=(statements as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef|undefined;if(!plan)return this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements));const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(this.o.store.accountProjectionReservationBytes(statements)),reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let ref=plan;try{if(reservation)ref=await this.o.store.keepPlanReservation(plan,reservation);}catch(e){if(!await this.o.store.planOwned(plan.id))await release();throw e;}return async()=>{if(!await this.o.store.planOwned(plan.id)){if(reservation)await this.o.store.releasePlanReservation(ref);else await release();}};}
- private async checked(proof:object){const p=this.plans.get(proof);if(!p)throw Error('choice_stale');const s=await this.o.store.readState();checkCapture(s,p.capture);if(digest(s)!==p.stateHash)throw Error('choice_stale');if(p.legacyKey&&digest(await this.o.store.legacyChoiceEntry(p.legacyKey))!==p.legacyHash)throw Error('choice_stale');return {p,s};}
+ private async checked(proof:object){const p=this.plans.get(proof);if(!p)throw Error('choice_stale');const s=await this.o.store.readState();checkCapture(s,p.capture);if(choiceStateHash(s)!==p.stateHash)throw Error('choice_stale');if(p.legacyKey&&digest(await this.o.store.legacyChoiceEntry(p.legacyKey))!==p.legacyHash)throw Error('choice_stale');return {p,s};}
  async pendingLegacyChoice(key:string){
   const view=await this.pendingChoice();if(!view)throw Error('choice_stale');const p=this.plans.get(view.proof)!;checkCapture(await this.o.store.readState(),p.capture,key);
   const incoming=await this.o.store.legacyChoiceEntry(key);if(incoming.entry.route!=='pendingChoice')throw Error('choice_stale');p.local=await this.legacyOverlay(p.local,incoming.entry);p.legacyKey=key;p.legacyHash=digest(incoming);
@@ -145,7 +145,7 @@ export class WatchAccountControl {
  private async request(path:string,body:any){const known=await this.o.http.requestResult(body.requestId);if(known.status==='succeeded')return known.response;if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');return this.o.http.json('POST',path,body);}
  async chooseCloud(proof:object,requestId:string,choiceId=requestId){
   await this.gate('choice');hexId(requestId,32);hexId(choiceId,32);const {p,s}=await this.checked(proof);if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(s.cloud?.pendingPublish)throw Error('publication_pending');
-  const next=clone(s);next.cloud={...next.cloud,pendingCloudChoice:{requestId,choiceId,...(p.legacyKey?{legacyKey:p.legacyKey,legacyHash:p.legacyHash}:{}),accountOid:p.capture.accountOid,accountRevision:p.capture.accountRevision,generation:p.capture.generation,localChangeRevision:p.capture.localChangeRevision,guardVersion:nextD64(s.stateVersion)}};
+  const next=clone(s);next.cloud={...next.cloud,pendingCloudChoice:{requestId,choiceId,...(p.legacyKey?{legacyKey:p.legacyKey,legacyHash:p.legacyHash}:{}),accountOid:p.capture.accountOid,accountRevision:p.capture.accountRevision,generation:p.capture.generation,localChangeRevision:p.capture.localChangeRevision,guardVersion:nextD64(choiceVersion(s))}};
   await this.o.store.controlUpdate(s,next);await this.closePreview(proof);return this.resumeCloudChoice();
  }
  /** The request ID and capture fence survive process loss before/after audit.
@@ -188,32 +188,36 @@ export class WatchAccountControl {
   const records=decoded.map(r=>({entityKey:r.row.entityKey,rowSequence:r.row.rowSequence,row:r.row,manifest:this.manifest(r.row),candidate:{meta:r.meta,state:r.state,addedAtMillis:r.row.addedAtMillis}})),preflight=await this.prepareApply(before,records);try{const author=await this.o.author();this.checkWindow(await this.o.store.readState(),capture);if(this.now()>=lease.expiresAtMillis)throw Error('snapshot_expired');
   await this.o.publisher.prepareExplicit({kind:'rollback',expected:before,...author,requestId,records,applyPlan:preflight.plan,target:{oid:targetCommitOid,treeRoot:target.treeRoot}});return await this.resumePublication();}finally{if(!await this.o.store.planOwned(preflight.plan.id))await preflight.release();}
  }
- async captureAccount(){await this.recoverPreparation();const s=await this.o.store.readState(),a=currentAccount(s);return Object.freeze({stateVersion:s.stateVersion,accountOid:a.oid,accountRevision:a.revision,generation:a.generation,localChangeRevision:s.localChangeRevision});}
- private checkWindow(s:SyncState,c:Capture){try{frozenDataRecord(c,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);const a=currentAccount(s);if(c.stateVersion!==s.stateVersion||c.accountOid!==a.oid||c.accountRevision!==a.revision||c.generation!==a.generation||c.localChangeRevision!==s.localChangeRevision)throw Error();}catch{throw Error('choice_stale');}}
+ async captureAccount(){await this.recoverPreparation();const s=await this.o.store.readState(),a=currentAccount(s);return Object.freeze({stateVersion:choiceVersion(s),accountOid:a.oid,accountRevision:a.revision,generation:a.generation,localChangeRevision:s.localChangeRevision});}
+ private checkWindow(s:SyncState,c:Capture){try{frozenDataRecord(c,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);const a=currentAccount(s);if(c.stateVersion!==choiceVersion(s)||c.accountOid!==a.oid||c.accountRevision!==a.revision||c.generation!==a.generation||c.localChangeRevision!==s.localChangeRevision)throw Error();}catch{throw Error('choice_stale');}}
  /** Only the unsent preparation marker can be retired without a result query. */
  async recoverPreparation(){if((await this.o.store.readState()).cloud?.preparingPublication)await this.o.publisher.detachPublication();}
  async cancelPublication(){return this.o.publisher.detachPublication(true);}
  async reconcilePublications(){return this.o.publisher.reconcileDetached();}
  async resumePublication(){
   const initial=await this.o.store.readState(),original=initial.cloud?.pendingPublish;if(initial.cloud?.preparingPublication){await this.o.publisher.detachPublication();throw Error('choice_stale');}if(!original?.explicit)throw Error('publication_missing');await this.gate(original.kind==='rollback'?'history':'choice');
-  try{await this.o.publisher.flush();}catch(error){if((error as Error).message==='choice_stale'&&!this.o.preserveStalePublication)await this.o.publisher.detachPublication();throw error;}const before=await this.o.store.readStableState(),plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');
+  try{await this.o.publisher.flush();}catch(error){if((error as Error).message==='choice_stale'&&!this.o.preserveStalePublication)await this.o.publisher.detachPublication();throw error;}let before=await this.o.store.readStableState(),plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');
+  // Every success must authenticate the current head, even if this device
+  // previously observed the accepted head. A newer
+  // head or real edit still fences this original apply journal.
+  await this.o.reader.pull(await this.o.http.negotiate([],[]));await this.gate(plan.kind==='rollback'?'history':'choice');before=await this.o.store.readStableState();plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');
   // An authenticated read may have observed this very publication while its
   // result lookup was unavailable. It cannot invalidate unchanged local edits.
   const observedOwnPublication=before.account!==null&&before.account.oid===plan.commitOid&&before.account.revision===plan.result.account.revision&&before.account.generation===plan.result.account.rollbackGeneration;
-  if(plan.capturedLocalRevision!==before.localChangeRevision||plan.guardVersion!==before.stateVersion&&!observedOwnPublication){await this.o.reader.pull(await this.o.http.negotiate([],[]));const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
+  if(plan.capturedLocalRevision!==before.localChangeRevision||plan.guardVersion!==choiceVersion(before)&&!observedOwnPublication){await this.o.reader.pull(await this.o.http.negotiate([],[]));const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
   const result=plan.result,rows:any[]=[];let after='';for(;;){const page=await this.o.store.cloudRows(plan.treeRoot,after,32);if(!page.length)break;rows.push(...page);after=page.at(-1).row.entityKey;}if(rows.length!==plan.rowCount)throw Error('closure_incomplete');
   const selected:RecordRow[]=[];for(const r of rows){const row=await this.openable(r);if(row)selected.push(row);}const records=this.records(selected),statements=plan.applyPlan?await this.o.store.resumeAccountProjection(before,plan.applyPlan):await this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before)),next=observeAccount(before,{oid:plan.commitOid,revision:result.account.revision,generation:result.account.rollbackGeneration}),applied=this.applied(next,plan.commitOid,result.account.revision,result.account.rollbackGeneration,plan.requestId);
   applied.cloud={...applied.cloud,pendingPublish:null,current:{commitOid:plan.commitOid,treeRoot:plan.treeRoot,rowCount:plan.rowCount},lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result},pins:{...before.cloud.pins,accountOid:plan.commitOid,authors:{...before.cloud.pins.authors,[plan.commit.body.authorDeviceId]:{...await this.o.approved(plan.commit.body.authorDeviceId),sequence:plan.commit.body.deviceSequence,oid:plan.commitOid}}}};
   if(plan.legacyKey){const decision=await this.o.store.prepareLegacyDecision(before,plan.legacyKey,'resolve-local');applied.pendingChoice=decision.next.pendingChoice?.inboxKeys.length?decision.next.pendingChoice:null;applied.applied=decision.next.applied;statements.push(...decision.statements);}
-  statements.push(...await this.o.store.preparePublicationFinish(plan));const persistent=plan.applyPlan?await this.o.store.existingPlanReservation(plan.applyPlan):null,release=persistent??await this.reserveProjection(statements);try{await this.o.store.controlUpdate(before,applied,statements);}finally{if(!plan.applyPlan||!await this.o.store.planOwned(plan.applyPlan.id))await release();}
+  statements.push(...await this.o.store.preparePublicationFinish(plan));const persistent=plan.applyPlan?await this.o.store.existingPlanReservation(plan.applyPlan):null,release=persistent??await this.reserveProjection(statements);try{await this.o.store.observationUpdate(before,applied,statements);}finally{if(!plan.applyPlan||!await this.o.store.planOwned(plan.applyPlan.id))await release();}
   await this.flushApplied();await this.o.store.dropInactiveCloudRows(plan.treeRoot);return result;
  }
  /** A clean device follows the authenticated current account. A dirty device
   * retains its native DB and pending choice, including after event expiry. */
  async follow(window?:any){
-  await this.o.reader.pull(window??await this.o.http.negotiate([],[]));return this.followCurrent();
+  const pulled=await this.o.reader.pull(window??await this.o.http.negotiate([],[]));if(pulled.readOnly)return pulled;return this.followCurrent();
  }
- async poll(){await this.o.reader.poll();return this.followCurrent();}
+ async poll(){const pulled=await this.o.reader.poll();if(pulled.readOnly)return pulled;return this.followCurrent();}
  private async followCurrent():Promise<any>{
   const before=await this.o.store.readState();if(before.pendingChoice||before.hasUnsentEdits)return {awaitingUser:!!before.pendingChoice,localEditsRetained:true};
   if(!this.o.choiceApply||before.cloud?.p5Gates?.choice_apply===false)return {applyDisabled:true};if(before.cloud?.pendingPublish)throw Error('publication_pending');if(before.cloud?.pendingApplied){const reply=await this.flushApplied();return reply?.signingUnavailable?reply:this.followCurrent();}

@@ -139,9 +139,9 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
    if(deferred){
     const pending=(await local.store.readState()).cloud?.pendingPublish,settings=await control.settings();
     if(pending?.explicit&&(pending.kind==='rollback'?!settings.history_restore:!settings.choice_apply)){await runtime.pullReadOnly();return {readOnly:true};}
-    await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);await runtime.refreshAccount();return;
+    await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);return runtime.refreshAccount();
    }
-   await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);await runtime.pull();
+   await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);const pulled=await runtime.pull();if(pulled?.readOnly)return pulled;
    const state=await local.store.readState();
    if(state.cloud?.pendingPublish)await flush();
    else if(!state.pendingChoice&&(state.hasUnsentEdits||!state.account&&!state.cloud?.lastPublication)&&await runtime.signingStatus()==='ready'){
