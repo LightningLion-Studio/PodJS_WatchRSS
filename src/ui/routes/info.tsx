@@ -6,6 +6,7 @@ import {
 } from "../InformationScreens.tsx";
 import { RecommendationScreen } from "../RecommendationScreen.tsx";
 import { LogUploadScreen } from "../LogUploadScreen.tsx";
+import { LogUploadHistoryScreen } from "../LogUploadHistoryScreen.tsx";
 import { createHostLogUploadOptions } from "../../logs/host.ts";
 import type { Page, RouteEntry, SetPage } from "./types.ts";
 import {
@@ -33,6 +34,7 @@ interface InfoRoutesProps {
 }
 
 export function InfoRoutes(props: InfoRoutesProps) {
+  const logOptions = createHostLogUploadOptions();
   onCleanup(() => {
     checkpointInformationSnapshot(props.entry);
     props.entry.informationSnapshotReader = undefined;
@@ -61,7 +63,9 @@ export function InfoRoutes(props: InfoRoutesProps) {
           active={() => props.active() && props.foreground()}
           page={props.entry.informationPage ?? "about"}
           onNavigate={props.openInformation}
-          onUploadLogs={() => props.setPage("log-upload")}
+          onUploadLogs={() => props.setPage("log-upload", { logUploadConsent: true })}
+          onManageLogs={() => props.setPage("log-upload-history")}
+          onDeclineLogs={() => props.openInformation("contact-developer")}
           onOpenUrl={(url) => void props.openUrl(url)}
           legalBaseUrl="https://sly-data-plane.watchrss.cn"
           restoredState={props.entry.informationSnapshot}
@@ -77,7 +81,20 @@ export function InfoRoutes(props: InfoRoutesProps) {
       <Show when={props.page() === "log-upload"}>
         <LogUploadScreen
           height={props.height}
-          options={createHostLogUploadOptions()}
+          width={props.width}
+          options={logOptions}
+          autoStart={props.entry.logUploadConsent === true}
+          consumeConsent={() => { props.entry.logUploadConsent = false; }}
+          active={() => props.active() && props.foreground()}
+          onManage={() => props.setPage("log-upload-history")}
+        />
+      </Show>
+      <Show when={props.page() === "log-upload-history"}>
+        <LogUploadHistoryScreen
+          width={props.width}
+          height={props.height}
+          backend={logOptions.backend}
+          receipts={logOptions.receipts}
           active={() => props.active() && props.foreground()}
         />
       </Show>

@@ -1,7 +1,6 @@
-// Public encryption key and application ID from the native bundled uploader.
-export const LOG_APP_ID = "5565e1e7-5883-45b2-98b0-f3104e643bfc";
-export const LOG_API = "https://api.instantdb.com";
-export const LOG_SOCKET = "wss://api.instantdb.com/runtime/session";
+// Public encryption key used by the self-hosted diagnostic log receiver.
+export const LOG_UPLOAD_URL = "https://sly-data-plane.watchrss.cn/functions/v1/log-uploads";
+export const LOG_CONSENT_VERSION = "log-upload-2026-11";
 export const LOG_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArll0b+JkTEP1TR7Q0JMq
 mVW6OjxRH+EE4jsiNB1F5wFMCckKWsfiKFxob45vC0RIl8mc3pfh6cxG+nVlAbss

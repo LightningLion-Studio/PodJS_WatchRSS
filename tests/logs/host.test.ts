@@ -14,7 +14,7 @@ test('host crypto bridge uses empty AAD, real RSA method and bounded temporary g
     return {result:Promise.resolve({nonceBase64:Buffer.alloc(12).toString('base64'),ciphertextBase64:Buffer.alloc(Buffer.from(args.dataBase64,'base64').length+16).toString('base64')})};
    },
    rsaOaepSha256(pem,key){calls.push({method:'rsa',pem,key});return {result:Promise.resolve({ciphertextBase64:Buffer.alloc(256).toString('base64')})};},
-   webSockets:{},bytesToBase64:b=>Buffer.from(b).toString('base64'),base64ToBytes:s=>new Uint8Array(Buffer.from(s,'base64')),
+   secureStorage:{get:async()=>null,set:async()=>{},delete:async()=>{}},webSockets:{},bytesToBase64:b=>Buffer.from(b).toString('base64'),base64ToBytes:s=>new Uint8Array(Buffer.from(s,'base64')),
    fileChunks:{
     async gzipBytes(s){return {dataBase64:gzipSync(Buffer.from(s,'base64')).toString('base64')};},
     async createTemp(){input=Buffer.alloc(0);return {path:'log-upload/in'};},

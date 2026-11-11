@@ -1,9 +1,10 @@
-import {fileChunks,hostOperation,rsaOaepSha256,webSockets} from '@podjs/framework/services';
+import {fileChunks,hostOperation,rsaOaepSha256,secureStorage} from '@podjs/framework/services';
 import {base64ToBytes,bytesToBase64} from '@podjs/framework/bytes';
 import {hostAppLogger} from './logger-host.ts';
 import {createTtsTransport} from '../tts/transport.ts';
 import type {LogCrypto} from './encryption.ts';
-import {createInstantLogBackend} from './instant.ts';
+import {createHttpLogBackend} from './http-backend.ts';
+import {createLogReceiptStore} from './receipt-store.ts';
 import {diagnosticLogSource,type LogUploadOptions} from './upload.ts';
 
 export const hostLogCrypto:LogCrypto={
@@ -27,12 +28,14 @@ export const hostLogCrypto:LogCrypto={
   },
   async rsaOaepSha256(pem,key){return base64ToBytes((await rsaOaepSha256(pem,bytesToBase64(key)).result).ciphertextBase64);},
 };
-async function uuid(){const bytes=await hostLogCrypto.random(16);if(bytes.length!==16)throw Error('日志 ID 随机源无效');bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const h=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;}
+const hostReceiptStore=createLogReceiptStore({
+  get:async key=>(await secureStorage.get(key))??null,
+  set:(key,value)=>secureStorage.set(key,value),
+  remove:key=>secureStorage.delete(key),
+});
+export function createHostLogReceiptStore(){return hostReceiptStore;}
 /** Creating options does no I/O. Only an explicitly mounted screen starts upload. */
 export function createHostLogUploadOptions():LogUploadOptions {
-  return {source:diagnosticLogSource(hostAppLogger),crypto:hostLogCrypto,uuid,
-    backend:createInstantLogBackend({http:createTtsTransport(),uuid,async connect(url){
-      const {id}=await webSockets.connect(url,{timeoutMs:10000}).result;
-      return {async send(message){const result=await webSockets.writeText(id,JSON.stringify(message)).result;if(!result.sent)throw Error('日志服务发送失败');},async read(){return JSON.parse((await webSockets.readText(id,15000).result).text);},close:()=>webSockets.close(id)};
-    }})};
+  return {source:diagnosticLogSource(hostAppLogger),crypto:hostLogCrypto,receipts:hostReceiptStore,
+    backend:createHttpLogBackend(createTtsTransport())};
 }

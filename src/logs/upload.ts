@@ -1,73 +1,67 @@
-import type {AppLogger} from './app-logger.ts';
-import {encryptLog, type LogCrypto} from './encryption.ts';
+import type { AppLogger } from "./app-logger.ts";
+import { encryptLog, type LogCrypto } from "./encryption.ts";
+import type { LogReceiptStore, LogUploadReceipt } from "./receipt-store.ts";
 
-export type LogSource=()=>Promise<string|null>;
-/** Upload the complete redacted application log; wire pullDebugLog alone is capped. */
-export function diagnosticLogSource(log:Pick<AppLogger,'readLogs'>):LogSource {
-  return ()=>log.readLogs();
+export type LogSource = () => Promise<string | null>;
+export function diagnosticLogSource(log: Pick<AppLogger, "readLogs">): LogSource {
+  return () => log.readLogs();
 }
-export interface LogRecord {code:string;encryptedAesKey:string;fileSize:number;charCount:number;createdAt:string;userId:string}
+
 export interface LogBackend {
-  upload(path:string,bytes:Uint8Array):Promise<string>;
-  save(id:string,record:LogRecord,fileId:string):Promise<void>;
+  upload(bytes: Uint8Array, encryptedAesKey: string, charCount: number): Promise<LogUploadReceipt>;
+  delete(id: string, token: string): Promise<void>;
 }
+
 export type LogUploadState =
-  | {phase:'loading'|'empty'|'load-error'|'encrypting'|'uploading'|'saving'|'upload-error';message:string}
-  | {phase:'success';message:string;code:string;record:LogRecord};
-export function parsePickupCode(value:unknown):string|null {
-  if(typeof value!=='string')return null;
-  const match=/^(?:上传成功！取件码：)?([1-9][0-9]{5})$/.exec(value);
-  return match?.[1]??null;
-}
-// Avoid Intl/time-zone availability assumptions in QuickJS. Same Shanghai wall time
-// as native's en-US -> zh-CN conversion, including midnight as 00 rather than 24.
-export function shanghaiLogTime(epoch:number):string {
-  const d=new Date(epoch+8*60*60*1000),pad=(n:number)=>String(n).padStart(2,'0');
-  return `${d.getUTCFullYear()}/${pad(d.getUTCMonth()+1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-}
+  | { phase: "loading" | "empty" | "load-error" | "encrypting" | "uploading" | "upload-error"; message: string }
+  | { phase: "success"; message: string; receipt: LogUploadReceipt; receiptSaved: boolean };
+
 export interface LogUploadOptions {
-  source:LogSource;crypto:LogCrypto;backend:LogBackend;uuid:()=>Promise<string>;
-  userId?:string;now?:()=>number;random?:()=>number;
+  source: LogSource;
+  crypto: LogCrypto;
+  backend: LogBackend;
+  receipts: LogReceiptStore;
 }
-/** One attempt per mounted screen; no automatic retry after an ambiguous write.
- * dispose suppresses late UI delivery and prevents subsequent upload/save stages. */
+
+/** A single explicit-consent upload attempt; no retry after an ambiguous write. */
 export class LogUploadController {
-  private running=false;
-  private disposed=false;
-  private started=false;
-  private readonly now:()=>number;
-  private readonly random:()=>number;
-  private readonly userId:string;
-  constructor(private readonly options:LogUploadOptions,private readonly changed:(state:LogUploadState)=>void) {
-    this.now=options.now??Date.now;this.random=options.random??Math.random;
-    this.userId=options.userId??`test-user-${this.now()}`;
-  }
-  dispose(){this.disposed=true;}
-  async start():Promise<void> {
-    if(this.running||this.disposed||this.started)return;
-    this.running=true;this.started=true;
-    const emit=(state:LogUploadState)=>{if(!this.disposed)this.changed(state);};
-    let loaded=false;
+  private disposed = false;
+  private started = false;
+  constructor(private readonly options: LogUploadOptions, private readonly changed: (state: LogUploadState) => void) {}
+
+  dispose() { this.disposed = true; }
+
+  async start(consented: boolean): Promise<void> {
+    if (!consented || this.started || this.disposed) return;
+    this.started = true;
+    const emit = (state: LogUploadState) => { if (!this.disposed) this.changed(state); };
+    let loaded = false;
     try {
-      emit({phase:'loading',message:'加载中...'});
-      const text=await this.options.source();if(this.disposed)return;
-      if(text===null||text===''){emit({phase:'empty',message:'暂无日志'});return;}
-      loaded=true;
-      if(!text.trim()){emit({phase:'upload-error',message:'日志内容为空'});return;}
-      emit({phase:'encrypting',message:'正在加密和压缩...'});
-      const encrypted=await encryptLog(text,this.options.crypto);if(this.disposed)return;
-      emit({phase:'uploading',message:'正在上传文件...'});
-      const path=`${this.userId}/log_${this.now()}_${this.random().toString(36).substring(7)}.enc`;
-      const fileId=await this.options.backend.upload(path,encrypted.bytes);if(this.disposed)return;
-      emit({phase:'saving',message:'正在保存记录...'});
-      const code=parsePickupCode(String(Math.floor(1e5+this.random()*9e5)));
-      if(!code)throw Error('取件码无效');
-      const record:LogRecord={code,encryptedAesKey:encrypted.encryptedAesKey,fileSize:encrypted.bytes.length,charCount:text.length,createdAt:shanghaiLogTime(this.now()),userId:this.userId};
-      const id=await this.options.uuid();if(this.disposed)return;
-      await this.options.backend.save(id,record,fileId);if(this.disposed)return;
-      emit({phase:'success',message:`上传成功！取件码：${code}`,code,record});
-    } catch(error) {
-      emit({phase:loaded?'upload-error':'load-error',message:`${loaded?'上传失败：':'加载日志失败: '}${error instanceof Error?error.message:String(error)}`});
-    } finally {this.running=false;}
+      emit({ phase: "loading", message: "正在读取本机日志…" });
+      const text = await this.options.source();
+      if (this.disposed) return;
+      if (text === null || text === "") { emit({ phase: "empty", message: "暂无可上传的日志" }); return; }
+      loaded = true;
+      if (!text.trim()) { emit({ phase: "upload-error", message: "日志内容为空" }); return; }
+      if (text.length > 5 * 1024 * 1024) { emit({ phase: "upload-error", message: "日志超过 5 MiB 字符上限，请稍后重试" }); return; }
+      emit({ phase: "encrypting", message: "正在压缩并加密日志…" });
+      const encrypted = await encryptLog(text, this.options.crypto);
+      if (this.disposed) return;
+      emit({ phase: "uploading", message: "正在向腕上RSS自有服务器上传密文…" });
+      const receipt = await this.options.backend.upload(encrypted.bytes, encrypted.encryptedAesKey, text.length);
+      try {
+        await this.options.receipts.add(receipt);
+        emit({ phase: "success", message: "日志已加密上传。删除回执已安全保存在本机。", receipt, receiptSaved: true });
+      } catch {
+        try {
+          await this.options.backend.delete(receipt.id, receipt.deleteToken);
+          emit({ phase: "upload-error", message: "日志已上传，但本机无法保存删除回执；为避免您失去删除方式，服务器已撤销这次上传。" });
+        } catch {
+          emit({ phase: "success", message: "日志已上传，但本机无法保存删除回执。请留在此页立即删除；离开后无法通过本机回执管理。", receipt, receiptSaved: false });
+        }
+      }
+    } catch (error) {
+      emit({ phase: loaded ? "upload-error" : "load-error", message: `${loaded ? "上传失败：" : "读取日志失败："}${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 }

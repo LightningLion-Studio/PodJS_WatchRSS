@@ -28,6 +28,13 @@ test('activity snapshot excludes handles, payload bodies, signed media URLs and 
  expect(restoreActivityNavigation(snapshot)!.at(-1)!.videoTarget).toMatchObject({kind:'bili',aid:12,cid:34});
 });
 
+test('log upload consent is one-shot and never restored with the route',()=>{
+ const state=captureActivityNavigation(empty(),[{page:'home'},{page:'log-upload',logUploadConsent:true},{page:'log-upload-history'}]);
+ expect(JSON.stringify(state)).not.toContain('logUploadConsent');
+ expect(restoreActivityNavigation(state)?.map(entry=>entry.page)).toEqual(['home','log-upload','log-upload-history']);
+ expect(restoreActivityNavigation(state)?.[1]?.logUploadConsent).toBeUndefined();
+});
+
 test('invalid versions, duplicate identities, debug gate and malformed arguments safely trim/fallback',()=>{
  expect(restoreActivityNavigation({saved:{[KEY]:{version:99,entries:[]}},retained:{}})).toBeNull();
  const original=captureActivityNavigation(empty(),[{page:'home'},{page:'settings'},{page:'debug-tools'}]);

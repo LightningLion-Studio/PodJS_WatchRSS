@@ -19,6 +19,7 @@ export type Page =
   | "add-rss"
   | "remote-input"
   | "log-upload"
+  | "log-upload-history"
   | "bluetooth-connection"
   | "phone-connection-unavailable"
   | "tts-config"
@@ -70,6 +71,8 @@ export type RouteEntry = {
   readerArticle?: Article;
   readerFromWatchLater?: boolean;
   page: Page;
+  /** One-shot authorization set only by the explicit log consent button; omitted from navigation snapshots. */
+  logUploadConsent?: boolean;
   channelId?: string;
   biliRoute?: BiliRoute;
   douyinRoute?: DouyinRoute;
