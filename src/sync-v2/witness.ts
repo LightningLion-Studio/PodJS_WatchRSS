@@ -21,6 +21,6 @@ export class LocalWitnessStore {
   let continuity:string='extends-pin';try{await authenticatePath(this.crypto,this.scope,copy.head,pins,async id=>{const h=headers.get(id);if(h)return h;const saved=await this.projection.readHeader(id);if(saved)return saved;throw Error('ref_continuity_unavailable');},this.approved);}catch(e){const code=(e as Error).message;if(!['ref_continuity_unavailable','replay_detected'].includes(code))throw e;continuity=code;}
   if(!session.verified)throw Error('proof_invalid');const id='witness:'+session.peerDeviceId+':'+copy.head,prior=await this.records.get(id);if(prior){if(digest(prior.value.witness)!==digest(copy))throw Error('idempotency_conflict');return {accepted:true};}
   const next=JSON.parse(canonical(before));if(continuity!=='extends-pin')next.cloud={...next.cloud,witnessConflict:{head:copy.head,code:continuity}};
-  await this.projection.controlUpdateStable(before,next,await this.records.prepareMany([{id,value:{witness:copy,continuity},expected:null}]));return {accepted:true};
+  await this.projection.observationUpdate(before,next,await this.records.prepareMany([{id,value:{witness:copy,continuity},expected:null}]));return {accepted:true};
  }
 }

@@ -225,12 +225,12 @@ export class WatchIndexPublisher {
   if(!force&&!stale)return {detached:false};const known=await this.resumeResult(plan.requestId);if(!['succeeded','unknown'].includes(known.status)||known.status==='unknown'&&known.response!==null)throw Error('invalid_schema');
   const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');
   const next=copy(before);next.cloud.pendingPublish=null;next.cloud.detachedPublications={...next.cloud.detachedPublications,[plan.requestId]:{...plan,phase:'detached',outcome:known.status,...(known.status==='succeeded'?{result:known.response}:{})}};
-  await this.store.controlUpdate(before,next);if(plan.applyPlan)await this.store.releasePlanReservation(plan.applyPlan);return {detached:true,requestId:plan.requestId,outcome:known.status};
+  await this.store.observationUpdate(before,next);if(plan.applyPlan)await this.store.releasePlanReservation(plan.applyPlan);return {detached:true,requestId:plan.requestId,outcome:known.status};
  }
  async reconcileDetached(){
   const s=await this.store.readState(),out=[];for(const [id,plan]of Object.entries(s.cloud?.detachedPublications??{}) as [string,any][]){
    if(plan.outcome==='succeeded'||plan.outcome==='not-sent'){out.push({requestId:id,outcome:plan.outcome});continue;}const known=await this.http.requestResult(id);if(!['succeeded','unknown'].includes(known.status)||known.status==='unknown'&&known.response!==null)throw Error('invalid_schema');
-   if(known.status==='succeeded'){const before=await this.store.readState(),next=copy(before);if(next.cloud.detachedPublications?.[id]){next.cloud.detachedPublications[id]={...next.cloud.detachedPublications[id],outcome:'succeeded',result:known.response};await this.store.controlUpdate(before,next);}}out.push({requestId:id,outcome:known.status});
+   if(known.status==='succeeded'){const before=await this.store.readState(),next=copy(before);if(next.cloud.detachedPublications?.[id]){next.cloud.detachedPublications[id]={...next.cloud.detachedPublications[id],outcome:'succeeded',result:known.response};await this.store.observationUpdate(before,next);}}out.push({requestId:id,outcome:known.status});
   }return out;
  }
  /** Only a definitive CAS rejection permits retiring a journal. Authenticate the

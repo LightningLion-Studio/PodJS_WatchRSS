@@ -197,9 +197,9 @@ export class WatchProjectionStore {
  }
  /** Every observation write re-reads gates inside the persistent transaction.
   * The state CAS binds the queued kind and encrypted settings to this read. */
- async observationUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[]){
+ async observationUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void){
   const current=await this.readStableState();if(queuedReadOnly(current))throw new ObservationReadOnly();
-  try{if(canonical(current)!==canonical(expected))throw Error('choice_stale');await this.commit(expected,next,statements,undefined,true);}catch(error){
+  try{if(canonical(current)!==canonical(expected))throw Error('choice_stale');await this.commit(expected,next,statements,hook,true);}catch(error){
    if((error as Error).message==='choice_stale'&&queuedReadOnly(await this.readStableState()))throw new ObservationReadOnly();throw error;
   }
  }
@@ -329,7 +329,7 @@ export class WatchProjectionStore {
  }
  async publicationUpdate(before:SyncState,next:SyncState,statements:Statement[]=[]){
   const plan=before.cloud?.pendingPublish;if(plan&&!publicationCurrent(before,plan))throw Error('choice_stale');
-  if(plan?.explicit)await this.observationUpdate(before,next,statements);else await this.controlUpdate(before,next,statements);
+  await this.observationUpdate(before,next,statements);
  }
  async preparePublicationFinish(plan:any){
   const header=await this.cipher.seal(this.aad('commit-header',plan.commitOid),plan.commit);
@@ -412,28 +412,28 @@ export class WatchProjectionStore {
   const body=await this.cipher.seal(this.aad('upload-replay',id),{total,confirmed:high,attempted,bytes:next});
   await this.publicationUpdate(before,{...before},[{sql:'INSERT INTO syncv2_upload_replays VALUES(?,?,?) ON CONFLICT(scope,oid) DO UPDATE SET body=excluded.body',params:[this.scopeKey,id,body]}]);
  }
- async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string,observation=false){
-  this.gate.require();await (observation?this.observationSql(baseline):this.db).transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
-  let state=await this.readState();if(observation&&queuedReadOnly(state))throw new ObservationReadOnly();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
-  for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),encodeBase64(raw)),next={...state};await (observation?this.observationUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]):this.controlUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]));state=next;}
-  const next={...state,cloud:{...state.cloud,blockedCommitOid:root,blockedCode:code}};await (observation?this.observationUpdate(state,next):this.controlUpdate(state,next));
+ async quarantineIncoming(baseline:SyncState,root:string,objects:Map<string,Uint8Array>,code:string,_observation=true){
+  this.gate.require();await this.observationSql(baseline).transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_quarantine(scope TEXT NOT NULL,commit_oid TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,commit_oid,oid))'}]);
+  let state=await this.readState();if(queuedReadOnly(state))throw new ObservationReadOnly();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
+  for(const [id,raw]of objects){const body=await this.cipher.seal(this.aad('quarantine',root+id),encodeBase64(raw)),next={...state};await this.observationUpdate(state,next,[{sql:'INSERT OR IGNORE INTO syncv2_quarantine VALUES(?,?,?,?)',params:[this.scopeKey,root,id,body]}]);state=next;}
+  const next={...state,cloud:{...state.cloud,blockedCommitOid:root,blockedCode:code}};await this.observationUpdate(state,next);
  }
- async finishUpload(before:SyncState,next:SyncState,planId:string,plan?:any){await this.controlUpdate(before,next,plan?await this.preparePublicationFinish(plan):[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]},{sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
+ async finishUpload(before:SyncState,next:SyncState,planId:string,plan?:any){await this.observationUpdate(before,next,plan?await this.preparePublicationFinish(plan):[{sql:'DELETE FROM syncv2_upload_objects WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]},{sql:'DELETE FROM syncv2_upload_receipts WHERE scope=? AND plan_id=?',params:[this.scopeKey,planId]}]);}
  async readHeader(id:string){
   this.gate.require();if(!(await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='syncv2_commit_headers'")).length)return null;
   const row=(await this.db.query('SELECT body FROM syncv2_commit_headers WHERE scope=? AND oid=?',[this.scopeKey,id]))[0];return row?this.cipher.open(this.aad('commit-header',id),String(row.body)):null;
  }
- async stageHeaders(entries:{oid:string;body:any;signature:string}[],baseline:SyncState,observation=false){
-  this.gate.require();await (observation?this.observationSql(baseline):this.db).transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))'}]);
-  let state=await this.readState();if(observation&&queuedReadOnly(state))throw new ObservationReadOnly();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
-  for(let at=0;at<entries.length;at+=16){const statements:Statement[]=[];for(const entry of entries.slice(at,at+16)){const envelope={body:entry.body,signature:entry.signature},old=await this.readHeader(entry.oid);if(old){if(canonical(old)!==canonical(envelope))throw Error('idempotency_conflict');continue;}statements.push({sql:'INSERT INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,entry.oid,await this.cipher.seal(this.aad('commit-header',entry.oid),envelope)]});}if(statements.length){const next={...state};await (observation?this.observationUpdate(state,next,statements):this.controlUpdate(state,next,statements));state=next;}}return state;
+ async stageHeaders(entries:{oid:string;body:any;signature:string}[],baseline:SyncState,_observation=true){
+  this.gate.require();await this.observationSql(baseline).transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_commit_headers(scope TEXT NOT NULL,oid TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(scope,oid))'}]);
+  let state=await this.readState();if(queuedReadOnly(state))throw new ObservationReadOnly();if(canonical(state)!==canonical(baseline))throw Error('choice_stale');
+  for(let at=0;at<entries.length;at+=16){const statements:Statement[]=[];for(const entry of entries.slice(at,at+16)){const envelope={body:entry.body,signature:entry.signature},old=await this.readHeader(entry.oid);if(old){if(canonical(old)!==canonical(envelope))throw Error('idempotency_conflict');continue;}statements.push({sql:'INSERT INTO syncv2_commit_headers VALUES(?,?,?)',params:[this.scopeKey,entry.oid,await this.cipher.seal(this.aad('commit-header',entry.oid),envelope)]});}if(statements.length){const next={...state};await this.observationUpdate(state,next,statements);state=next;}}return state;
  }
  async dropInactiveCloudRows(root:string){
   for(;;){const before=await this.readState();if(before.pendingChoice||before.cloud?.pendingPublish||before.cloud?.preparingPublication)return;const rows=await this.db.query('SELECT rowid FROM syncv2_cloud_rows WHERE scope=? AND root!=? LIMIT 32',[this.scopeKey,root]);if(!rows.length){await this.controlUpdate(before,{...before},this.cloudCache.dropExcept(root));return;}await this.controlUpdate(before,{...before},rows.map(row=>({sql:'DELETE FROM syncv2_cloud_rows WHERE scope=? AND rowid=?',params:[this.scopeKey,row.rowid]})));}
  }
  /** The caller supplies an authenticated HeadPins observation. No network DTO
   * or unverified server checkpoint may be passed as an account observation. */
- async observe(account:Account,authenticate:(account:Account,state:SyncState)=>Promise<{authors:Record<string,unknown>;parents:Record<string,unknown>}>,hook?:()=>void){const state=await this.readState();nextD64(state.stateVersion);const pins=await authenticate(account,state),next=observeAccount(state,account);next.knownAuthors=pins.authors;next.knownAccountParents=pins.parents;await this.commit(state,next,[],hook);}
+ async observe(account:Account,authenticate:(account:Account,state:SyncState)=>Promise<{authors:Record<string,unknown>;parents:Record<string,unknown>}>,hook?:()=>void){const state=await this.readState();nextD64(state.stateVersion);const pins=await authenticate(account,state),next=observeAccount(state,account);next.knownAuthors=pins.authors;next.knownAccountParents=pins.parents;await this.observationUpdate(state,next,[],hook);}
  async capture(window:Account){return captureChoice(await this.readState(),window);}
  async checkpoint():Promise<Checkpoint|null>{this.gate.require();const row=(await this.db.query('SELECT body FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];if(!row)return null;const cp:Checkpoint=await this.cipher.open(this.aad('checkpoint'),String(row.body));if(cp.phase==='complete'&&cp.accountApplyVersion){const basis=(await this.db.query('SELECT epoch,revision FROM syncv2_business_basis WHERE scope=? AND state_version=?',[this.scopeKey,cp.accountApplyVersion]))[0];if(!basis)throw Error('projection_state_inconsistent');cp.businessRevision={epoch:String(basis.epoch),revision:String(basis.revision)};}return cp;}
  async beginScan(binding:ScanBinding){
