@@ -192,6 +192,25 @@ export class WatchIndexPublisher {
    if(error instanceof SyncV2Error&&error.code==='ref_conflict'){const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId===plan.requestId){const next=copy(before);next.cloud.pendingPublish.phase='conflicted';await this.store.publicationUpdate(before,next);}}throw error;
   }return this.accept(plan,result);
  }
+ /** Call only after the authenticated reader observes the latest head. An
+  * unknown result alone cannot retire a request: the original account CAS must
+  * also be superseded. Accepted requests finish through the original journal. */
+ async reconcileStalePublication(){
+  if(this.flushing)throw Error('publication_pending');
+  const original=await this.store.readState(),plan=original.cloud?.pendingPublish;
+  if(!plan?.explicit)return {detached:false};
+  const known=await this.http.requestResult(plan.requestId);
+  if(known.status==='succeeded'){await this.accept(plan,known.response);return {detached:false};}
+  if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');
+  if(!before.account||before.cloud?.pins?.accountOid!==before.account.oid)throw Error('ref_continuity_unavailable');
+  if(before.account.oid===plan.request.account.body.expectedOid&&before.account.revision===plan.request.account.body.expectedRevision)return {detached:false};
+  const next=copy(before);next.cloud.pendingPublish=null;
+  next.cloud.detachedPublications={...next.cloud.detachedPublications,[plan.requestId]:{...plan,phase:'detached',outcome:'unknown'}};
+  if(before.hasUnsentEdits||before.pendingChoice)next.pendingChoice={generation:before.account.generation,inboxKeys:before.pendingChoice?.inboxKeys??[],accountOid:before.account.oid,accountRevision:before.account.revision,selectedLocalChangeRevision:before.localChangeRevision};
+  await this.store.controlUpdate(before,next);if(plan.applyPlan)await this.store.releasePlanReservation(plan.applyPlan);
+  return {detached:true};
+ }
  /** Detach an obsolete user intent without deleting its signed request or
   * receipts. Unknown may still succeed: detached intents are queried, never sent.
   * A later observation remains fenced by the normal account/state CAS. */

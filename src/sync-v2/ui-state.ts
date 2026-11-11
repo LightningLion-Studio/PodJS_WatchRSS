@@ -41,7 +41,7 @@ export interface ChoicePreview {
 }
 /** The object returned by `watchSyncV2(...).open()` (null when the feature is
  * closed). Only pull is consumed here; the rest stays runtime-private. */
-export interface SyncV2RuntimeHandle {pull():Promise<unknown>;publish():Promise<unknown>;signingStatus?():Promise<'ready'|'signing_state_unavailable'>;signingDeviceId?():Promise<string|null>}
+export interface SyncV2RuntimeHandle {pull():Promise<unknown>;publish():Promise<unknown>;resumeChoice?():Promise<void>;reconcileStalePublication?():Promise<boolean>;signingStatus?():Promise<'ready'|'signing_state_unavailable'>;signingDeviceId?():Promise<string|null>}
 /** The read-only slice of WatchProjectionStore this adapter needs. Passing the
  * real store keeps the existing APIs as the single source of truth. */
 export interface SyncV2StateReader {
@@ -105,7 +105,7 @@ export class WatchSyncV2UiState {
  private async action<T>(work:()=>Promise<T>):Promise<T>{
   if(!this.enabled)throw Error('feature_disabled');
   try{const result=await work();this.lastErrorCode=null;return result;}
-  catch(error){const code=codeOf(error);this.lastErrorCode=this.o.productErrors&&code==='clock_unknown'?'trusted_time_unavailable':code;throw this.o.productErrors&&code==='clock_unknown'?Error('trusted_time_unavailable'):error;}
+  catch(error){const code=codeOf(error);if(code==='choice_stale')await this.o.runtime?.reconcileStalePublication?.();this.lastErrorCode=this.o.productErrors&&code==='clock_unknown'?'trusted_time_unavailable':code;throw this.o.productErrors&&code==='clock_unknown'?Error('trusted_time_unavailable'):error;}
   finally{this.notify();}
  }
  /** Contract §1: one successful pull+ack pass; the moment is the trusted time. */
@@ -131,6 +131,7 @@ export class WatchSyncV2UiState {
  /** Opens the selection preview. The proof handle stays process-local (WeakMap),
   * so a copied/replayed preview object can never drive an apply. */
  async openChoice(){return this.action(async()=>{
+  await this.o.runtime?.resumeChoice?.();
   const state=await this.o.projection.readState();
   if(!state.pendingChoice)throw Error('choice_stale');
   const view=await this.o.control!.pendingChoice();

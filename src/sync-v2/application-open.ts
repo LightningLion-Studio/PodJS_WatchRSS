@@ -85,7 +85,7 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
   const crypto=createSyncV2Crypto(guardedHost),current=await content.current(),keys={id:unhex(installed.idKeyHex),content:current.key,version:current.version,readContentKey:async(v:number)=>(await content.at(v)).key};
   held.add(keys.id);
   const resolveBody=articleBodyResolver({crypto,keys,scope:fetched.scope,read:id=>repository.cloudArticleBody(id)});
-  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now});
+  runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');
   // Read/cache and recovery ports share the existing bounded P3 implementation.
@@ -94,7 +94,7 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
   const engine=new WatchContentEngine(store,new WatchContentHttp(runtime.http,crypto,options.now??Date.now,true),crypto,keys,{source:async()=>{throw Error('feature_disabled');},approved:runtime.approved,alias:'',assertCurrent:async()=>{await assertCurrent();},signals:async()=>ports.signals(false),yieldControl:()=>guardedHost('runtime.delay',{milliseconds:1})});
   const space=await watchSpaceV2({enabled:true,host:guardedHost,projection:local.store,content:engine,accountScope,trustedNow:()=>clock.now()});if(!space)throw Error('feature_disabled');
   const business=new WatchAccountBusinessSql(db,local.store,fetched.scope,keys.id,space.closures,accountBodyVerifier(runtime.http,crypto,keys,runtime.approved),space.recovery.ports.reserve);await business.initialize();
-  const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now()});
+  const control=runtime.accountControl({business,recovery:space.recovery,trustedNow:()=>clock.now(),preserveStalePublication:true});
   const recoverConflict=async()=>{
    // Confirm the same immutable request first. Only a recorded CAS rejection
    // authorizes refreshing the winning identity/account and retiring its journal.
@@ -106,10 +106,19 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
     await runtime.refreshAccount();
    },true);
   };
+  const reconcileStalePublication=async()=>{
+   if(!(await local.store.readState()).cloud?.pendingPublish?.explicit)return false;
+   await runtime.refreshAccount();
+   return (await runtime.publisher.reconcileStalePublication()).detached;
+  };
   const flush=async()=>{
    const pending=(await local.store.readState()).cloud?.pendingPublish;if(!pending)return;
    if(pending.phase==='conflicted'&&!pending.explicit){await recoverConflict();return;}
-   try{await runtime.publisher.flush();}catch(error){
+   try{if(pending.explicit)await control.resumePublication();else await runtime.publisher.flush();}catch(error){
+    if(pending.explicit&&['choice_stale','ref_conflict'].includes((error as Error).message)){
+     if(!(await local.store.readState()).cloud?.pendingPublish||await reconcileStalePublication())return;
+     throw error;
+    }
     if((error as Error).message!=='ref_conflict'||pending.explicit||(await local.store.readState()).cloud?.pendingPublish?.phase!=='conflicted')throw error;
     await recoverConflict();
    }
@@ -127,7 +136,7 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
    }
   };
   await round();
-  ui=new WatchSyncV2UiState({runtime:{pull:round,publish:()=>runtime.publish(),signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
+  ui=new WatchSyncV2UiState({runtime:{pull:round,publish:()=>runtime.publish(),resumeChoice:flush,reconcileStalePublication,signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
   syncRound=round;
   return {ui,sync:async()=>{if(!syncRound)throw Error('feature_disabled');return syncRound();},close};
  }catch(error){await close().catch(()=>{});throw productError(error);}

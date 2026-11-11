@@ -36,6 +36,7 @@ export function syncV2Origin(origin:string,policy:OriginPolicy){
 }
 export class SyncV2Http {
  readonly prefix:string;private flags:any;requestGuard?:()=>void|Promise<void>;
+ historyRestoreOpen(){return this.historyRestore&&this.flags?.historyRestore===true;}
  constructor(private readonly transport:HttpTransport,origin:string,readonly scope:Scope,private readonly session:()=>Promise<Session>,readonly indexWrite=false,readonly servicePin?:WatchServiceKeyPin,readonly contentWrite=false,private readonly readOnlyLocal=false,readonly historyRestore=false,readonly choiceApply=false,private readonly originPolicy?:OriginPolicy){
   validateScope(scope);if(originPolicy)syncV2Origin(origin,originPolicy);else if(!SYNC_V2_TEST_BUILD||!LOOPBACK.test(origin))throw Error('isolated_backend_required');this.prefix=origin+'/functions/v1/sync/v2';
  }

@@ -43,17 +43,19 @@ export interface AccountControlOptions {
  business:AccountBusinessPort;recovery:WatchRecovery;resolveBody?:BodyResolver;
  /** Trusted server UTC only. Unknown/backwards time fails closed. */
  trustedNow:()=>number|null;rebuildProjection?:()=>Promise<void>;historyRestore?:boolean;choiceApply?:boolean;
+ /** Product entries authenticate the winning head before reconciling an intent. */
+ preserveStalePublication?:boolean;
 }
 export class WatchAccountControl {
  private plans=new WeakMap<object,{stateHash:string;capture:Capture;local:RecordRow[];cloud:RecordRow[];merge:any;mergedRows?:RecordRow[];release?:()=>Promise<void>;legacyKey?:string;legacyHash?:string;legacyMerge?:any;applyPlan?:import('@podjs/framework/sql-program').SqlProgramRef}>();
  private activePreview?:object;
  constructor(private readonly o:AccountControlOptions){}
  private now(){const n=this.o.trustedNow();if(n===null)throw Error('clock_unknown');uint(n);return n;}
- private async gate(kind:'history'|'choice'){if(kind==='history'?!this.o.historyRestore:!this.o.choiceApply)throw Error('feature_disabled');const s=await this.o.store.readStableState(),flag=kind==='history'?'history_restore':'choice_apply';if(s.cloud?.p5Gates?.[flag]===false)throw Error('feature_disabled');}
+ private async gate(kind:'history'|'choice'){if(kind==='history'?(!this.o.historyRestore||!this.o.http.historyRestoreOpen()):!this.o.choiceApply)throw Error('feature_disabled');const s=await this.o.store.readStableState(),flag=kind==='history'?'history_restore':'choice_apply';if(s.cloud?.p5Gates?.[flag]===false)throw Error('feature_disabled');}
  async rebuildProjection(){if(!this.o.rebuildProjection)throw Error('feature_disabled');await this.o.rebuildProjection();return this.status();}
  async status(){const s=await this.o.store.readState();return {accountOid:s.account?.oid??null,revision:s.account?.revision??'0',generation:s.rollbackGeneration,lastSeen:s.lastSeen,activeGeneration:s.activeGeneration,awaitingUser:!!s.pendingChoice};}
  history(pageToken:string|null=null){return this.o.reader.history(pageToken);}
- async settings(){const s=await this.o.store.readState();return {keepDiscardedLocalChanges7Days:s.keepDiscardedLocalChanges7Days,history_restore:this.o.historyRestore===true&&s.cloud?.p5Gates?.history_restore!==false,choice_apply:this.o.choiceApply===true&&s.cloud?.p5Gates?.choice_apply!==false,gc:false,key_rotation:false,custody_release:false};}
+ async settings(){const s=await this.o.store.readState();return {keepDiscardedLocalChanges7Days:s.keepDiscardedLocalChanges7Days,history_restore:this.o.historyRestore===true&&this.o.http.historyRestoreOpen()&&s.cloud?.p5Gates?.history_restore!==false,choice_apply:this.o.choiceApply===true&&s.cloud?.p5Gates?.choice_apply!==false,gc:false,key_rotation:false,custody_release:false};}
  async setWriteGates(flags:{history_restore:boolean;choice_apply:boolean}){
   exact(flags,['history_restore','choice_apply']);if(Object.values(flags).some(v=>typeof v!=='boolean'))throw Error('invalid_schema');if(flags.history_restore&&!this.o.http.historyRestore||flags.choice_apply&&!this.o.http.choiceApply)throw Error('feature_disabled');
   const before=await this.o.store.readState(),next=clone(before);next.cloud={...next.cloud,p5Gates:{...flags}};await this.o.store.controlUpdate(before,next);
@@ -89,7 +91,7 @@ export class WatchAccountControl {
  /** Private process-local handle; copied/replayed handles are never trusted. */
  async pendingChoice(){
   if(this.activePreview)await this.closePreview(this.activePreview);
-  await this.o.publisher.detachPublication?.();let state=await this.o.store.readState();if(!state.pendingChoice)return null;
+  if(!this.o.preserveStalePublication)await this.o.publisher.detachPublication?.();let state=await this.o.store.readState();if(!state.pendingChoice)return null;
   // An audit-only cloud intent cannot authorize a newer local window. Reopening
   // retires only that stale intent, so every choice remains available again.
   const intent=state.cloud?.pendingCloudChoice;if(intent){try{checkCapture(state,Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision}));}catch(error){if((error as Error).message!=='choice_stale')throw error;const next=clone(state);next.cloud.pendingCloudChoice=null;await this.o.store.controlUpdate(state,next);state=next;}}
@@ -192,7 +194,7 @@ export class WatchAccountControl {
  async reconcilePublications(){return this.o.publisher.reconcileDetached();}
  async resumePublication(){
   const initial=await this.o.store.readState(),original=initial.cloud?.pendingPublish;if(initial.cloud?.preparingPublication){await this.o.publisher.detachPublication();throw Error('choice_stale');}if(!original?.explicit)throw Error('publication_missing');await this.gate(original.kind==='rollback'?'history':'choice');
-  try{await this.o.publisher.flush();}catch(error){if((error as Error).message==='choice_stale')await this.o.publisher.detachPublication();throw error;}const before=await this.o.store.readStableState(),plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');if(plan.guardVersion!==before.stateVersion||plan.capturedLocalRevision!==before.localChangeRevision){await this.o.reader.pull(await this.o.http.negotiate([],[]));const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
+  try{await this.o.publisher.flush();}catch(error){if((error as Error).message==='choice_stale'&&!this.o.preserveStalePublication)await this.o.publisher.detachPublication();throw error;}const before=await this.o.store.readStableState(),plan=before.cloud?.pendingPublish;if(plan?.phase!=='confirmed')throw Error('choice_stale');if(plan.guardVersion!==before.stateVersion||plan.capturedLocalRevision!==before.localChangeRevision){await this.o.reader.pull(await this.o.http.negotiate([],[]));const latest=await this.o.store.readState();if(latest.cloud?.pendingPublish?.requestId===plan.requestId){await this.o.publisher.detachPublication(true);}throw Error('choice_stale');}
   const result=plan.result,rows:any[]=[];let after='';for(;;){const page=await this.o.store.cloudRows(plan.treeRoot,after,32);if(!page.length)break;rows.push(...page);after=page.at(-1).row.entityKey;}if(rows.length!==plan.rowCount)throw Error('closure_incomplete');
   const selected:RecordRow[]=[];for(const r of rows){const row=await this.openable(r);if(row)selected.push(row);}const records=this.records(selected),statements=plan.applyPlan?await this.o.store.resumeAccountProjection(before,plan.applyPlan):await this.o.store.prepareAccountProjection(before,records,await this.o.business.prepare(records,before)),next=observeAccount(before,{oid:plan.commitOid,revision:result.account.revision,generation:result.account.rollbackGeneration}),applied=this.applied(next,plan.commitOid,result.account.revision,result.account.rollbackGeneration,plan.requestId);
   applied.cloud={...applied.cloud,pendingPublish:null,current:{commitOid:plan.commitOid,treeRoot:plan.treeRoot,rowCount:plan.rowCount},lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result},pins:{...before.cloud.pins,accountOid:plan.commitOid,authors:{...before.cloud.pins.authors,[plan.commit.body.authorDeviceId]:{...await this.o.approved(plan.commit.body.authorDeviceId),sequence:plan.commit.body.deviceSequence,oid:plan.commitOid}}}};
