@@ -27,7 +27,7 @@ export class WatchEquivalentLegacy {
  async planLegacyMerge(key:string){const snap=await this.snapshot(),inner=snap.model.planLegacyMerge(key),proof=freeze({...inner,sourceHash:snap.sourceHash});this.plans.set(proof,{...snap,inner,key});return proof;}
  async resolveLegacyMerge(key:string,proof:any,hook?:()=>void){
   const saved=proof&&typeof proof==='object'?this.plans.get(proof):undefined;if(!saved||saved.key!==key)throw Error('choice_stale');
-  const check=(snap:Awaited<ReturnType<WatchEquivalentLegacy['snapshot']>>)=>{snap.model.checkCloudChoice(saved.inner.capture,key);if(snap.model.planLegacyMerge(key).snapshotsHash!==saved.inner.snapshotsHash)throw Error('choice_stale');};
+  const check=(snap:Awaited<ReturnType<WatchEquivalentLegacy['snapshot']>>)=>{if(snap.state.cloud?.pendingPublish||snap.state.cloud?.pendingCloudChoice)throw Error('publication_pending');snap.model.checkCloudChoice(saved.inner.capture,key);if(snap.model.planLegacyMerge(key).snapshotsHash!==saved.inner.snapshotsHash)throw Error('choice_stale');};
   const current=await this.snapshot();check(current);
   const result=saved.model.resolveLegacyMerge(key,saved.inner);if(canonical(saved.model.state.rows)!==canonical(current.model.state.rows))throw Error('merge_not_safe');
   const candidate=saved.model.state,entry={...current.raw[key],applied:true,route:'resolve-merge'},next={...current.state,applied:candidate.applied,pendingChoice:candidate.pendingChoice};

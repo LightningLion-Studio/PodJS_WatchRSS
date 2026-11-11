@@ -196,8 +196,8 @@ export class WatchIndexPublisher {
   }return this.accept(plan,result);
  }
  /** Call only after the authenticated reader observes the latest head. An
-  * unknown result alone cannot retire a request: the original account CAS must
-  * also be superseded. Accepted requests finish through the original journal. */
+  * unknown result alone cannot retire a request: its authenticated account
+  * CAS or its captured local business edits must also be superseded. Accepted requests finish through the original journal. */
  async reconcileStalePublication(){
   if(this.flushing)throw Error('publication_pending');
   const original=await this.store.readState(),plan=original.cloud?.pendingPublish;
@@ -205,13 +205,15 @@ export class WatchIndexPublisher {
   const known=await this.resumeResult(plan.requestId);
   if(known.status==='succeeded'){await this.accept(plan,known.response);return {detached:false};}
   if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
-  const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');
+  const before=await this.store.readState(),current=before.cloud?.pendingPublish;if(current?.requestId!==plan.requestId)throw Error('choice_stale');
+  // A success recorded while this lookup waited wins over its older unknown.
+  if(current.phase==='confirmed')return {detached:false};
   if(!before.account||before.cloud?.pins?.accountOid!==before.account.oid)throw Error('ref_continuity_unavailable');
-  if(before.account.oid===plan.request.account.body.expectedOid&&before.account.revision===plan.request.account.body.expectedRevision)return {detached:false};
+  if(publicationCurrent(before,current))return {detached:false};
   const next=copy(before);next.cloud.pendingPublish=null;
-  next.cloud.detachedPublications={...next.cloud.detachedPublications,[plan.requestId]:{...plan,phase:'detached',outcome:'unknown'}};
+  next.cloud.detachedPublications={...next.cloud.detachedPublications,[plan.requestId]:{...current,phase:'detached',outcome:'unknown'}};
   if(before.hasUnsentEdits||before.pendingChoice)next.pendingChoice={generation:before.account.generation,inboxKeys:before.pendingChoice?.inboxKeys??[],accountOid:before.account.oid,accountRevision:before.account.revision,selectedLocalChangeRevision:before.localChangeRevision};
-  await this.store.controlUpdate(before,next);if(plan.applyPlan)await this.store.releasePlanReservation(plan.applyPlan);
+  await this.store.observationUpdate(before,next);if(current.applyPlan)await this.store.releasePlanReservation(current.applyPlan);
   return {detached:true};
  }
  /** Detach an obsolete user intent without deleting its signed request or

@@ -145,7 +145,15 @@ export class NoteConflictPlan {
   next.stateVersion=s.nextD64(next.stateVersion);next.localChangeRevision=s.nextD64(next.localChangeRevision);
   next.outbox.push({kind:'note-resolution',noteId:note.noteId,resolvedConflictIds:[...capture.openConflictIds]});
   const budget=noteResolutionBudget(this.state,next); // Mandatory, after marker/hash/counter growth.
-  if(hook)hook(budget);this.guard(capture);this.state=next;
+  if(hook)hook(budget);this.guard(capture);
+  // The semantic choice can survive maintenance during the hook. Commit only
+  // its business delta onto the current state, never the prepared whole image.
+  const current=this.state,committed={...current,
+   note:{...current.note,markdown:note.markdown,baseMarkdown:note.baseMarkdown,contentHash:note.contentHash,baseContentHash:note.baseContentHash,updatedAt:note.updatedAt,modifiedBy:note.modifiedBy},
+   conflicts:{...current.conflicts,records:current.conflicts.records.map((r:Conflict)=>capture.openConflictIds.includes(r.conflictId)?{...r,resolvedAt:Math.max(1,now)}:r)},
+   stateVersion:s.nextD64(current.stateVersion),localChangeRevision:s.nextD64(current.localChangeRevision),
+   outbox:[...current.outbox,next.outbox[next.outbox.length-1]]};
+  noteResolutionBudget(current,committed);this.state=committed;
   return {choice,markdown:body,baseMarkdown:body,updatedAt:note.updatedAt,resolvedConflictIds:[...capture.openConflictIds]};
  }
 }

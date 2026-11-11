@@ -203,7 +203,7 @@ export class WatchAccountControl {
  async chooseLocal(proof:object,requestId:string){return this.choose(proof,requestId,false);}
  async chooseMerge(proof:object,requestId:string){return this.choose(proof,requestId,true);}
  private async choose(proof:object,requestId:string,merge:boolean){
-  await this.gate('choice');const {p,s}=await this.checked(proof);if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(merge&&p.legacyKey){if(!p.legacyMerge)throw Object.assign(Error('merge_unavailable'),{reason:'missing_base'});const result=await this.o.store.equivalentLegacy().resolveLegacyMerge(p.legacyKey,p.legacyMerge);await this.closePreview(proof);return result;}if(s.cloud?.pendingCloudChoice)throw Error('publication_pending');let rows=p.local;
+  await this.gate('choice');const {p,s}=await this.checked(proof);if(s.cloud?.pendingPublish||s.cloud?.pendingCloudChoice)throw Error('publication_pending');if(s.pendingChoice!.inboxKeys.length&&!p.legacyKey)throw Error('legacy_choice_required');if(merge&&p.legacyKey){if(!p.legacyMerge)throw Object.assign(Error('merge_unavailable'),{reason:'missing_base'});const result=await this.o.store.equivalentLegacy().resolveLegacyMerge(p.legacyKey,p.legacyMerge);await this.closePreview(proof);return result;}let rows=p.local;
   if(merge){if(!p.merge.canMerge)throw Object.assign(Error('merge_unavailable'),{reason:p.merge.reason});const checked=this.merge(s,p.local,p.cloud,await this.o.store.editBases(s));if(!checked.canMerge||canonical(checked)!==canonical(p.merge))throw Object.assign(Error('merge_unavailable'),{reason:checked.reason??'missing_base'});
    rows=p.mergedRows!;if(!rows)throw Error('merge_unavailable');
   }
