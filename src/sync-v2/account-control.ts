@@ -91,7 +91,7 @@ export class WatchAccountControl {
  /** Private process-local handle; copied/replayed handles are never trusted. */
  async pendingChoice(){
   if(this.activePreview)await this.closePreview(this.activePreview);
-  if(!this.o.preserveStalePublication)await this.o.publisher.detachPublication?.();let state=await this.o.store.readState();if(!state.pendingChoice)return null;
+  if(!this.o.preserveStalePublication||(await this.o.store.readState()).cloud?.preparingPublication)await this.o.publisher.detachPublication?.();let state=await this.o.store.readState();if(!state.pendingChoice)return null;
   // An audit-only cloud intent cannot authorize a newer local window. Reopening
   // retires only that stale intent, so every choice remains available again.
   const intent=state.cloud?.pendingCloudChoice;if(intent){try{checkCapture(state,Object.freeze({stateVersion:intent.guardVersion,accountOid:intent.accountOid,accountRevision:intent.accountRevision,generation:intent.generation,localChangeRevision:intent.localChangeRevision}));}catch(error){if((error as Error).message!=='choice_stale')throw error;const next=clone(state);next.cloud.pendingCloudChoice=null;await this.o.store.controlUpdate(state,next);state=next;}}

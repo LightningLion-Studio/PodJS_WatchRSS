@@ -118,3 +118,22 @@ for(const outcome of ['unknown','accepted'] as const)test(`P6J3-02 ${outcome} re
   expect((await a.db.query('SELECT title FROM memo_notes'))[0].title).toBe('local a');
  }finally{await opened?.close();await other?.close();a.db.close();b.db.close();}
 });
+
+test('P6J3-02 an interrupted unsent preparation still releases the choice slot',async()=>{
+ const a=await fixture(),b=await fixture();let opened:any,other:any,started=false,armed=false;
+ await a.db.execute("UPDATE memo_notes SET note_id='local-a',title='local a'");await b.db.execute("UPDATE memo_notes SET note_id='remote-b',title='remote b'");
+ historyService(a);const transport=a.options.transport;b.options.transport=transport;
+ a.options.transport={request:async(r:any)=>{if(!started&&r.url.endsWith('/objects/reserve')){started=true;other=await openApplicationSyncV2(b.options);}return transport.request(r);}};
+ const host=a.options.host;a.options.host=async(method:string,args:any)=>{
+  if(armed&&method==='sql.transaction'&&args.statements.some((s:any)=>s.sql.startsWith('CREATE TABLE IF NOT EXISTS syncv2_upload_objects'))){armed=false;throw Error('prepare_interrupted');}
+  return host(method,args);
+ };
+ try{
+  opened=await openApplicationSyncV2(a.options);const preview=await opened.ui.openChoice();armed=true;
+  await expect(opened.ui.chooseLocal(preview)).rejects.toThrow('prepare_interrupted');
+  const store=opened.ui.o.projection,building=(await store.readState()).cloud.preparingPublication;expect(building).toBeTruthy();
+  const fresh=await opened.ui.openChoice(),s=await store.readState();expect(s.cloud.preparingPublication).toBeNull();
+  expect(s.cloud.detachedPublications[building.requestId].outcome).toBe('not-sent');expect(s.hasUnsentEdits).toBe(true);
+  await opened.ui.chooseCloud(fresh);await opened.ui.syncNow();expect((await store.readState()).pendingChoice).toBeNull();
+ }finally{await opened?.close();await other?.close();a.db.close();b.db.close();}
+});
