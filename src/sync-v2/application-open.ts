@@ -27,6 +27,7 @@ export async function receiveApplicationIdentity(options:{host:CloudHostRequest;
 import type {SqlLibrarySessionRepository} from '../sync/library-repository';
 import {watchLocalProjection} from './index';
 import {watchSyncV2} from './runtime';
+import {PublicationLookupUnavailable} from './publisher';
 import {ensureR0Scan} from './product';
 import {stopExistingProjection} from './business-revision';
 import {digest,canonical} from './protocol';
@@ -111,10 +112,11 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
    await runtime.refreshAccount();
    return (await runtime.publisher.reconcileStalePublication()).detached;
   };
-  const flush=async()=>{
-   const pending=(await local.store.readState()).cloud?.pendingPublish;if(!pending)return;
+  const flushPublication=async()=>{
+   await control.recoverPreparation();
+   const pending=(await local.store.readState()).cloud?.pendingPublish;if(!pending)return false;
    if(pending.phase==='conflicted'&&!pending.explicit){await recoverConflict();return;}
-   try{if(pending.explicit)await control.resumePublication();else await runtime.publisher.flush();}catch(error){
+   try{if(pending.explicit){await runtime.authenticate();await control.resumePublication();}else await runtime.publisher.flush();}catch(error){
     if(pending.explicit&&['choice_stale','ref_conflict'].includes((error as Error).message)){
      if(!(await local.store.readState()).cloud?.pendingPublish||await reconcileStalePublication())return;
      throw error;
@@ -123,8 +125,22 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
     await recoverConflict();
    }
   };
+  // Query failure and closed action gates preserve the original publication;
+  // they do not prevent this round from authenticating a read.
+  const flush=async()=>{
+   try{return await flushPublication();}catch(error){
+    const pending=(await local.store.readState()).cloud?.pendingPublish;
+    if(pending?.explicit&&(error instanceof PublicationLookupUnavailable||(error as Error).message==='feature_disabled'))return true;
+    throw error;
+   }
+  };
   const round=async()=>{
-   await assertCurrent();await runtime.refreshTrustedTime();await flush();
+   await assertCurrent();await runtime.refreshTrustedTime();const deferred=await flush();
+   if(deferred){
+    const pending=(await local.store.readState()).cloud?.pendingPublish,settings=await control.settings();
+    if(pending?.explicit&&(pending.kind==='rollback'?!settings.history_restore:!settings.choice_apply)){await runtime.pullReadOnly();return {readOnly:true};}
+    await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);await runtime.refreshAccount();return;
+   }
    await ensureR0Scan(local);await local.store.beginTailWindow();await ensureR0Scan(local);await runtime.pull();
    const state=await local.store.readState();
    if(state.cloud?.pendingPublish)await flush();
@@ -136,8 +152,8 @@ export async function openApplicationSyncV2(options:{lifetime?:SyncV2Lifetime;ho
    }
   };
   await round();
-  ui=new WatchSyncV2UiState({runtime:{pull:round,publish:()=>runtime.publish(),resumeChoice:flush,reconcileStalePublication,signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
-  syncRound=round;
+  ui=new WatchSyncV2UiState({runtime:{pull:round,publish:()=>runtime.publish(),resumeChoice:async()=>{await flush();},reconcileStalePublication,signingDeviceId:runtime.signingDeviceId,signingStatus:runtime.signingStatus},control,projection:local.store,trustedNow:()=>clock.now(),productErrors:true});
+  syncRound=async()=>{await round();};
   return {ui,sync:async()=>{if(!syncRound)throw Error('feature_disabled');return syncRound();},close};
  }catch(error){await close().catch(()=>{});throw productError(error);}
 }

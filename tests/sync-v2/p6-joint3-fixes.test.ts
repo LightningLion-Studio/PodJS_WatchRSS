@@ -107,7 +107,7 @@ for(const outcome of ['unknown','accepted'] as const)test(`P6J3-02 ${outcome} re
   opened=await openApplicationSyncV2(a.options);armed=true;
   await expect(opened.ui.chooseLocal(await opened.ui.openChoice())).rejects.toThrow('response_lost');
   const projection=opened.ui.o.projection,plan=(await projection.readState()).cloud.pendingPublish,request=canonical(plan.request);
-  lookupBlocked=true;await expect(opened.ui.syncNow()).rejects.toThrow('request_result_unavailable');
+  lookupBlocked=true;await opened.ui.syncNow();
   expect(canonical((await projection.readState()).cloud.pendingPublish.request)).toBe(request);
   expect((await projection.readState()).cloud.detachedPublications?.[plan.requestId]).toBeUndefined();
   lookupBlocked=false;await opened.ui.syncNow();const state=await projection.readState();

@@ -56,7 +56,7 @@ export class WatchCloudIndex {
  private get supported(){return this.options.noteSegments===true?['note-conflicts.v1',NOTE_SEGMENTS_FEATURE]:['note-conflicts.v1'];}
  private get scope(){return this.http.scope;}
  private current(state:SyncState){return {pins:{accountOid:null,authors:{},seenOids:[]},headers:{},cursor:'0',current:null,deviceSequence:'0',pendingPublish:null,...state.cloud};}
- async pull(window:any):Promise<CloudPullResult>{
+ async pull(window:any,readOnly=false):Promise<CloudPullResult>{
   if((await this.store.readStableState()).cloud?.witnessConflict)throw Error('ref_continuity_unavailable');
   const capabilities=await this.http.capabilities();sameScope(window.scope,this.scope);if(window.version!==2)throw Error('upgrade_required');exact(window.account,['commitOid','revision','rollbackGeneration']);const a=window.account;checkD64(a.revision);checkD64(a.rollbackGeneration);checkD64(window.serverRevision);checkD64(window.historyFloorRevision);hexId(window.windowId,32);uint(window.expiresAtMillis);if(this.now()>window.expiresAtMillis)throw Error('window_expired');if(compareD64(window.historyFloorRevision,window.serverRevision)>0)throw Error('invalid_schema');
   const before=await this.store.readState(),saved=this.current(before),auditBinding=digest({scope:this.scope,keyVersion:this.keys.version,features:capabilities.features,schema:'v2-rc6c-business-2'});if(compareD64(window.serverRevision,saved.cursor)<0)throw Error('replay_detected');if(compareD64(a.rollbackGeneration,before.rollbackGeneration)<0||compareD64(a.revision,before.lastSeenAccountRevision)<0)throw Error('replay_detected');
@@ -66,8 +66,8 @@ export class WatchCloudIndex {
   if(saved.current?.commitOid===a.commitOid){
    if(a.revision!==before.account?.revision||a.rollbackGeneration!==before.account?.generation)throw Error('replay_detected');
    if(saved.auditBinding===auditBinding&&await this.store.cloudRowCount(saved.current.treeRoot)===saved.current.rowCount){
-    if(window.serverRevision!==saved.cursor){const next=JSON.parse(canonical(before));next.cloud={...saved,cursor:window.serverRevision};await this.store.controlUpdate(before,next);}
-    if(historyGap)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(historyGap?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
+    if(!readOnly&&window.serverRevision!==saved.cursor){const next=JSON.parse(canonical(before));next.cloud={...saved,cursor:window.serverRevision};await this.store.controlUpdate(before,next);}
+    if(historyGap&&!readOnly)await this.rebuild?.();return {empty:false,rows:saved.current.rowCount,awaitingUser:!!before.pendingChoice,bodyReads:0,checkpointHit:true,...(historyGap&&!readOnly?{rebuildRequired:!this.rebuild,rebuilt:!!this.rebuild}:{})};
    }
   }
   const objects=new Map<string,Uint8Array>(),get=async(id:string)=>{const existing=objects.get(id);if(existing)return existing;const raw=await this.http.object(id,undefined,window.windowId);objects.set(id,raw);return raw;};
@@ -83,6 +83,9 @@ export class WatchCloudIndex {
   const path=await authenticatePath(this.crypto,this.scope,a.commitOid,saved.pins,readHeader,this.approved),head=path.head??(await this.store.readHeader(a.commitOid))?.body??saved.headers?.[a.commitOid]?.body;
   for(const entry of path.path)objects.set(entry.oid,jsonBytes({body:entry.body,signature:entry.signature}));
   if(!head||head.rollbackGeneration!==a.rollbackGeneration)throw Error('replay_detected');if(head.requiredFeatures.some((f:string)=>!this.supported.includes(f)))throw Error('unsupported_feature');
+  // A closed explicit-action gate permits authentication and decoding only.
+  // Keep the original persistent version, pins and choice fence untouched.
+  if(readOnly){let count=0;await this.snapshot(head.treeRoot,window.windowId,get,async ids=>{const batch=await this.http.objects(window.windowId,ids);for(const [id,raw]of batch)objects.set(id,raw);return batch;},undefined,async()=>{count++;});if(this.now()>window.expiresAtMillis)throw Error('window_expired');return {empty:false,rows:count,awaitingUser:!!before.pendingChoice,bodyReads:0};}
   // F2: rows stream into encrypted staging under the new root; only per-row OID,
   // binding and visibility metadata stay in memory. The active tree switches
   // only at the final CAS below.

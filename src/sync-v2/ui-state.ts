@@ -113,6 +113,7 @@ export class WatchSyncV2UiState {
   this.inflightSyncs++;
   try{
    const pulled=await this.o.runtime!.pull();
+   if(pulled&&typeof pulled==='object'&&'readOnly' in pulled&&pulled.readOnly===true)return pulled;
    await this.o.control!.flushApplied();
    // A signing-unavailable pass can still authenticate and apply a pull.
    // Preserve the last successful pull+ACK time until its durable ACK clears.

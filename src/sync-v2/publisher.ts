@@ -24,6 +24,8 @@ export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:encodeBase64(o.sealed)}))});
 const priorSegments=(row:any):PriorSegments|null=>row?.segments?{noteRevision:row.segments.noteRevision,objects:row.segments.objects.map((o:any)=>({oid:o.oid,sealed:base64ToBytes(o.sealed)}))}:null;
 export interface PublisherOptions {noteSegments?:boolean;noteTextBudget?:number}
+/** A failed original-result lookup preserves the immutable pending request. */
+export class PublicationLookupUnavailable extends Error {constructor(readonly cause:unknown){super((cause as Error).message);}}
 export class WatchIndexPublisher {
  private flushing?:Promise<any>;
  private preparing?:string;
@@ -163,10 +165,11 @@ export class WatchIndexPublisher {
    if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');return null;};
   return this.flushing=poll().finally(()=>{this.flushing=undefined;});
  }
+ private async resumeResult(requestId:string){try{return await this.http.requestResult(requestId);}catch(error){throw new PublicationLookupUnavailable(error);}}
  private async flushOnce(){
   await this.http.capabilities();const state=await this.store.readState(),queued=state.cloud?.pendingPublish;
-  if(queued?.explicit){if(queued.phase==='confirmed')return queued.result;const saved=await this.http.requestResult(queued.requestId);if(saved.status==='succeeded')return this.accept(queued,saved.response);if(saved.status!=='unknown'||saved.response!==null)throw Error('invalid_schema');}
-  const {plan}=await this.pending(),known=await this.http.requestResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
+  if(queued?.explicit){if(queued.phase==='confirmed')return queued.result;const saved=await this.resumeResult(queued.requestId);if(saved.status==='succeeded')return this.accept(queued,saved.response);if(saved.status!=='unknown'||saved.response!==null)throw Error('invalid_schema');}
+  const {plan}=await this.pending(),known=await this.resumeResult(plan.requestId);if(known.status==='succeeded')return this.accept(plan,known.response);if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   if(plan.phase==='conflicted')throw new SyncV2Error('ref_conflict',true);
   if(this.now()>plan.request.account.body.expiresAtMillis+30000)throw Error('publication_expired');
   const window=await this.http.negotiate([],[]);if(plan.explicit&&(window.account.commitOid!==plan.request.account.body.expectedOid||window.account.revision!==plan.request.account.body.expectedRevision||window.account.rollbackGeneration!==(plan.kind==='rollback'?String(BigInt(plan.commit.body.rollbackGeneration)-1n):plan.commit.body.rollbackGeneration)))throw Error('choice_stale');let after='';for(;;){const page=await this.store.uploadBatch(plan.requestId,after);if(!page.length)break;const upload=page.filter(o=>!o.oid.startsWith('state-refs:'));
@@ -199,7 +202,7 @@ export class WatchIndexPublisher {
   if(this.flushing)throw Error('publication_pending');
   const original=await this.store.readState(),plan=original.cloud?.pendingPublish;
   if(!plan?.explicit)return {detached:false};
-  const known=await this.http.requestResult(plan.requestId);
+  const known=await this.resumeResult(plan.requestId);
   if(known.status==='succeeded'){await this.accept(plan,known.response);return {detached:false};}
   if(known.status!=='unknown'||known.response!==null)throw Error('invalid_schema');
   const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');
@@ -217,7 +220,7 @@ export class WatchIndexPublisher {
  async detachPublication(force=false){
   if(this.flushing)throw Error('publication_pending');const original=await this.store.readState(),building=original.cloud?.preparingPublication;if(building){if(!force&&this.preparing===building.requestId)return {detached:false};const next=copy(original);next.cloud.preparingPublication=null;next.cloud.detachedPublications={...next.cloud.detachedPublications,[building.requestId]:{...building,phase:'detached',outcome:'not-sent'}};await this.store.controlUpdate(original,next);if(building.applyPlan)await this.store.releasePlanReservation(building.applyPlan);return {detached:true,requestId:building.requestId,outcome:'not-sent'};}const plan=original.cloud?.pendingPublish;if(!plan?.explicit)return {detached:false};
   const stale=plan.guardVersion!==original.stateVersion||plan.capturedLocalRevision!==original.localChangeRevision||plan.request.account.body.expectedOid!==original.account?.oid||plan.request.account.body.expectedRevision!==original.account?.revision;
-  if(!force&&!stale)return {detached:false};const known=await this.http.requestResult(plan.requestId);if(!['succeeded','unknown'].includes(known.status)||known.status==='unknown'&&known.response!==null)throw Error('invalid_schema');
+  if(!force&&!stale)return {detached:false};const known=await this.resumeResult(plan.requestId);if(!['succeeded','unknown'].includes(known.status)||known.status==='unknown'&&known.response!==null)throw Error('invalid_schema');
   const before=await this.store.readState();if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');
   const next=copy(before);next.cloud.pendingPublish=null;next.cloud.detachedPublications={...next.cloud.detachedPublications,[plan.requestId]:{...plan,phase:'detached',outcome:known.status,...(known.status==='succeeded'?{result:known.response}:{})}};
   await this.store.controlUpdate(before,next);if(plan.applyPlan)await this.store.releasePlanReservation(plan.applyPlan);return {detached:true,requestId:plan.requestId,outcome:known.status};

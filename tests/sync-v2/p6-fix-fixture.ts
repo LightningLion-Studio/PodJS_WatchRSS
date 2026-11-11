@@ -5,6 +5,7 @@ import {jsonBytes,bytes,parseCanonicalJson,canonical} from '../../src/sync-v2/pr
 import {unhex,sha256Hex} from '@podjs/framework/crypto';
 import {descriptorOid} from '../../src/sync-v2/identity';
 import {signControl} from '../../src/sync-v2/signing';
+import type {HttpTransport} from '../../src/cloud/types';
 import {TrustedClock} from '../../src/sync-v2/trusted-time';
 export const f=vector('identity-bootstrap'),scope=f.context.scope,legacy='00000000-0000-0000-0000-000000000002';
 const user=f.context.accountId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$2-$3-$4-$5');
@@ -44,7 +45,7 @@ export async function fixture(optionsDb:{path?:string;mode?:string}={}){
   if(method==='file.stat')return {usableBytes:512*1024*1024};
   return local.host(method,a);
  };
- const server=new ProductBackend(),options={host,transport:server,account,legacyDeviceId:legacy,allowLoopback:true,keys:{currentKeyVersion:async()=>f.descriptor.body.wrappingKeyVersion,accountKey:async()=>unhex(f.wrapKeyHex)},repository:new SqlLibrarySessionRepository(db as any,{codec,text,uri:{parseUri:text.parseUri,parseAndroid:text.parseUri},files:{storeText:async(_k:string,v:string)=>v,hydrate:async(v:string)=>v},migrateReading:async()=>{},cleanupRemovedContent:async()=>{},now:()=>100}),session:async()=>account,bootstrap:async()=>({accountId:f.context.accountId,syncV2:serviceInfo,devices:[{deviceId:legacy,revokedAt:null}]}),now:()=>100,clock:new TrustedClock(()=>100)};
+ const server=new ProductBackend(),options={host,transport:server as HttpTransport,account,legacyDeviceId:legacy,allowLoopback:true,keys:{currentKeyVersion:async()=>f.descriptor.body.wrappingKeyVersion,accountKey:async()=>unhex(f.wrapKeyHex)},repository:new SqlLibrarySessionRepository(db as any,{codec,text,uri:{parseUri:text.parseUri,parseAndroid:text.parseUri},files:{storeText:async(_k:string,v:string)=>v,hydrate:async(v:string)=>v},migrateReading:async()=>{},cleanupRemovedContent:async()=>{},now:()=>100}),session:async()=>account,bootstrap:async()=>({accountId:f.context.accountId,syncV2:serviceInfo,devices:[{deviceId:legacy,revokedAt:null}]}),now:()=>100,clock:new TrustedClock(()=>100)};
  db.programCipher=localProjectionCipher(async(method,a)=>method==='secure.get'?readCloudSecure(host,String(a.key)):host(method,a),canonical([account.backendBaseUrl,account.userId]));
  return {db,secrets,server,options};
 }
