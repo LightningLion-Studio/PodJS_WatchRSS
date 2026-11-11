@@ -27,11 +27,12 @@ export class WatchEquivalentLegacy {
  async planLegacyMerge(key:string){const snap=await this.snapshot(),inner=snap.model.planLegacyMerge(key),proof=freeze({...inner,sourceHash:snap.sourceHash});this.plans.set(proof,{...snap,inner,key});return proof;}
  async resolveLegacyMerge(key:string,proof:any,hook?:()=>void){
   const saved=proof&&typeof proof==='object'?this.plans.get(proof):undefined;if(!saved||saved.key!==key)throw Error('choice_stale');
-  const current=await this.snapshot();if(current.sourceHash!==saved.sourceHash)throw Error('choice_stale');
+  const check=(snap:Awaited<ReturnType<WatchEquivalentLegacy['snapshot']>>)=>{snap.model.checkCloudChoice(saved.inner.capture,key);if(snap.model.planLegacyMerge(key).snapshotsHash!==saved.inner.snapshotsHash)throw Error('choice_stale');};
+  const current=await this.snapshot();check(current);
   const result=saved.model.resolveLegacyMerge(key,saved.inner);if(canonical(saved.model.state.rows)!==canonical(current.model.state.rows))throw Error('merge_not_safe');
   const candidate=saved.model.state,entry={...current.raw[key],applied:true,route:'resolve-merge'},next={...current.state,applied:candidate.applied,pendingChoice:candidate.pendingChoice};
-  const sealed=await this.cipher.seal(this.aad('legacy',key),entry);if(hook)hook();const final=await this.snapshot();if(final.sourceHash!==saved.sourceHash)throw Error('choice_stale');
-  await this.store.controlUpdate(current.state,next,[{sql:'UPDATE syncv2_legacy_inbox SET body=? WHERE scope=? AND inbox_key=?',params:[sealed,this.scopeKey,key]}]);this.plans.delete(proof);return result;
+  const sealed=await this.cipher.seal(this.aad('legacy',key),entry);if(hook)hook();const final=await this.snapshot();check(final);
+  await this.store.choiceUpdate(final.state,{...final.state,applied:next.applied,pendingChoice:next.pendingChoice},[{sql:'UPDATE syncv2_legacy_inbox SET body=? WHERE scope=? AND inbox_key=?',params:[sealed,this.scopeKey,key]}]);this.plans.delete(proof);return result;
  }
  async resolveLegacy(key:string,choice:string){if(choice!=='merge')throw Error('feature_disabled');return this.resolveLegacyMerge(key,await this.planLegacyMerge(key));}
 }

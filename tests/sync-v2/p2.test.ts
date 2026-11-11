@@ -55,7 +55,7 @@ test('P2 fixed rc6c private proof hashes, candidate and replay',async()=>{
 });
 
 test('P2 fixed rc6c stale planner inputs retain complete current state',async()=>{
- const {LegacyEquivalentPlanner}=await import('../../src/sync-v2/legacy-equivalent'),v=vector('rc6c-contracts');for(const x of v.stale){const p=new LegacyEquivalentPlanner(v.saved);p.receiveLegacy(v.message,null);const proof=p.planLegacyMerge(v.key);if(x.bump)p.txn((next:any)=>change(next,x.path,x.value));else change(p.state,x.path,x.value);const before=canonical(p.state);expect(()=>p.resolveLegacyMerge(v.key,proof)).toThrow('choice_stale');expect(canonical(p.state)).toBe(before);}
+ const {LegacyEquivalentPlanner}=await import('../../src/sync-v2/legacy-equivalent'),v=vector('rc6c-contracts');for(const x of v.stale){const p=new LegacyEquivalentPlanner(v.saved);p.receiveLegacy(v.message,null);const proof=p.planLegacyMerge(v.key);if(x.bump)p.txn((next:any)=>{change(next,x.path,x.value);if(x.path[0]==='rows')next.localChangeRevision=String(BigInt(next.localChangeRevision)+1n);});else change(p.state,x.path,x.value);const before=canonical(p.state);if(['shared-version','cursor'].includes(x.id)){expect(p.resolveLegacyMerge(v.key,proof)).toEqual(v.resultExpected);}else{expect(()=>p.resolveLegacyMerge(v.key,proof)).toThrow('choice_stale');expect(canonical(p.state)).toBe(before);}}
 });
 
 test('P2 fixed rollback detection retains pending choices after event expiry',async()=>{

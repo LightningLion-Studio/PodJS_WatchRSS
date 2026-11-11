@@ -1,5 +1,6 @@
 /** Instance-private rc6c equivalent-content capability. SQL owns persistence. */
 import * as s from './notes-strict';
+import {choiceCurrent} from './state';
 import {canonical,jsonBytes,entityKey as deriveEntityKey} from './protocol';
 import {unhex,sha256Hex} from '@podjs/framework/crypto';
 import {canMerge} from './merge-planner';
@@ -78,12 +79,12 @@ export class LegacyEquivalentPlanner {
   if(!plan.canMerge||c.canonical(plan.tree)!==c.canonical(input.local))throw Error('merge_not_safe');
   const sourceHash=digest(this.state),snapshotsHash=digest(input),candidateHash=digest(plan.tree);
   const proof=Object.freeze({kind:'legacy-merge.v1',inboxKey:key,capture,sourceHash,snapshotsHash,candidateHash});
-  this.#legacyMergePlans.set(proof,freezeData({key,capture,sourceHash,input:clone(input),candidate:clone(plan.tree),snapshotsHash,candidateHash}));return proof;
+  this.#legacyMergePlans.set(proof,freezeData({key,capture,sourceHash,integrityHash:digest({editBase:this.state.editBase,entry:this.state.legacyInbox[key]}),input:clone(input),candidate:clone(plan.tree),snapshotsHash,candidateHash}));return proof;
  }
  private checkLegacyMergePlan(key:string,proof:any){
   const record=proof&&typeof proof==='object'?this.#legacyMergePlans.get(proof):undefined;if(!record||record.key!==key)throw Error('choice_stale');
   this.checkCloudChoice(record.capture,key);
-  if(digest(this.state)!==record.sourceHash||digest(this.legacyMergeInput(key))!==record.snapshotsHash)throw Error('choice_stale');
+  if(digest({editBase:this.state.editBase,entry:this.state.legacyInbox[key]})!==record.integrityHash||digest(this.legacyMergeInput(key))!==record.snapshotsHash)throw Error('choice_stale');
   const checked=c.canMerge(record.input);if(!checked.canMerge||digest(checked.tree)!==record.candidateHash||digest(record.candidate)!==record.candidateHash)throw Error('merge_not_safe');return record;
  }
  resolveLegacyMerge(key:string,proof:any,hook?:()=>void){
@@ -99,8 +100,8 @@ export class LegacyEquivalentPlanner {
  checkCloudChoice(capture:any,key?:string){
   const state=this.state,account=currentAccount(state),p=state.pendingChoice;
   try{
-   s.capture(capture);
+   s.capture(capture);if(capture.generation!==account.generation)throw Error();
   }catch{throw Error('choice_stale');}
-  if(!p||capture.stateVersion!==state.stateVersion||capture.localChangeRevision!==state.localChangeRevision||capture.generation!==account.generation||capture.generation!==p.generation||capture.accountOid!==account.oid||capture.accountRevision!==account.revision||(key!==undefined&&(!p.inboxKeys.includes(key)||state.legacyInbox[key]?.route!=='pendingChoice')))throw Error('choice_stale');
+  if(!p||!choiceCurrent(state,capture)||(key!==undefined&&(!p.inboxKeys.includes(key)||state.legacyInbox[key]?.route!=='pendingChoice')))throw Error('choice_stale');
  }
 }

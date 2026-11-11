@@ -10,7 +10,6 @@ import {Database} from 'bun:sqlite';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-const choiceVersion=(s:any)=>(stateHelpers as any).choiceVersion?.(s)??s.stateVersion;
 
 // These probes change only SQL-host or synthetic transport scheduling.
 // They do not replace any product reader, publisher, guard or apply method.
@@ -61,7 +60,7 @@ test(`WRR2 independent close-open-close at ${boundary} preserves all persistent 
  const x=await setup('unknown',40);let closed:any=null,image='',pages=0,inside=false;
  try{
   await x.remoteEdit();x.blockLookup();
-  const toggle=async()=>{inside=true;const before=await x.store().readState();for(const open of [false,true,false])await x.toggle(open);closed=await x.store().readState();image=databaseImage(x);expect(choiceVersion(closed)).toBe(choiceVersion(before));expect(closed.stateVersion).toBe(String(BigInt(before.stateVersion)+3n));expect(canonical(closed.cloud.pendingPublish)).toBe(canonical(before.cloud.pendingPublish));inside=false;};
+  const toggle=async()=>{inside=true;const before=await x.store().readState();for(const open of [false,true,false])await x.toggle(open);closed=await x.store().readState();image=databaseImage(x);expect((stateHelpers as any).publicationCurrent(closed,before.cloud.pendingPublish)).toBe(true);expect(closed.stateVersion).toBe(String(BigInt(before.stateVersion)+3n));expect(canonical(closed.cloud.pendingPublish)).toBe(canonical(before.cloud.pendingPublish));inside=false;};
   x.hooks.network=async(r,stage)=>{if(!closed&&boundary==='page-35'&&stage==='after'&&r.url.endsWith('/objects/batch-get')&&++pages===35)await toggle();};
   x.hooks.sql=async(method,args,stage)=>{
    if(closed||inside||method!=='sql.transaction')return;
@@ -70,7 +69,7 @@ test(`WRR2 independent close-open-close at ${boundary} preserves all persistent 
   };
   const acks=x.a.server.applied.length,sends=x.a.server.publishedBodies.length;
   const pulled=await x.opened.ui.syncNow();expect(closed).toBeTruthy();expect(pulled.readOnly).toBe(true);expect(canonical(await x.store().readState())).toBe(canonical(closed));expect(databaseImage(x)).toBe(image);expect(x.a.server.applied.length).toBe(acks);expect(x.a.server.publishedBodies.length).toBe(sends);
-  console.log('WRR2_CLOSED',boundary,JSON.stringify({version:closed.stateVersion,choiceVersion:choiceVersion(closed),guard:closed.cloud.pendingPublish.guardVersion,pages,readOnly:pulled.readOnly}));
+  console.log('WRR2_CLOSED',boundary,JSON.stringify({version:closed.stateVersion,localChangeRevision:closed.localChangeRevision,guard:closed.cloud.pendingPublish.guardVersion,pages,readOnly:pulled.readOnly}));
  }finally{await x.close();}
 },60000);
 
@@ -124,7 +123,7 @@ test(`WRR2 ${outcome} real SQL edit at ${boundary} must not apply the old choice
   const sent=x.a.server.publishedBodies.length,acks=x.a.server.applied.length;
   await expect(x.control().resumePublication()).rejects.toThrow('choice_stale');expect(editReached).toBe(true);
   const s=await x.store().readState();expect(s.activeGeneration).not.toBe(x.plan.commitOid);expect(s.pendingChoice).toBeTruthy();expect(s.hasUnsentEdits).toBe(true);expect((await x.a.db.query("SELECT title FROM memo_notes WHERE note_id='local-a'"))[0].title).toBe('newer business edit');expect(x.a.server.applied.length).toBe(acks);if(boundary==='result')expect(x.a.server.publishedBodies.length).toBe(sent);expect(s.localChangeRevision).not.toBe(x.plan.capturedLocalRevision);
-  console.log('WRR2_REAL_EDIT',outcome,boundary,JSON.stringify({localChangeRevision:s.localChangeRevision,choiceVersion:choiceVersion(s),guard:x.plan.guardVersion}));
+  console.log('WRR2_REAL_EDIT',outcome,boundary,JSON.stringify({localChangeRevision:s.localChangeRevision,guard:x.plan.guardVersion}));
  }finally{await x.close();}
 });
 
@@ -158,7 +157,7 @@ test(`WRR2 cloud audit in flight ${toggle} preserves current gates and control o
    // The coordinator permits one accepted-result journal transaction while
    // closed. It must not apply rows, clear the choice or send an ACK.
    expect(error).toBe('feature_disabled');expect(after.stateVersion).toBe(nextD64(captured.stateVersion));expect(after.pendingChoice).toEqual(captured.pendingChoice);expect(x.a.server.applied).toHaveLength(0);expect(await x.a.db.query('SELECT * FROM memo_notes')).toEqual(native);
-   const intent=after.cloud.pendingCloudChoice;expect(intent.phase).toBe('accepted');expect(intent.requestId).toBe(captured.cloud.pendingCloudChoice.requestId);expect(intent.guardVersion).toBe(nextD64(choiceVersion(captured)));
+   const intent=after.cloud.pendingCloudChoice;expect(intent.phase).toBe('accepted');expect(intent.requestId).toBe(captured.cloud.pendingCloudChoice.requestId);expect(intent.guardVersion).toBe(captured.cloud.pendingCloudChoice.guardVersion);
    const expected=JSON.parse(canonical(captured));expected.stateVersion=after.stateVersion;expected.cloud.pendingCloudChoice=intent;expect(canonical(after)).toBe(canonical(expected));
    await x.toggle(true);await x.opened.ui.syncNow();const finished=await x.store().readState();expect(finished.cloud.pendingCloudChoice).toBeNull();expect(finished.pendingChoice).toBeNull();expect(finished.hasUnsentEdits).toBe(false);expect(x.a.server.applied).toHaveLength(1);
   }else{expect(error).toBeNull();expect(after.pendingChoice).toBeNull();expect(after.hasUnsentEdits).toBe(false);expect(x.a.server.applied).toHaveLength(1);}

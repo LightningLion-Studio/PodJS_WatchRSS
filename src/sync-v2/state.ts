@@ -1,13 +1,13 @@
 import {frozenDataRecord} from '@podjs/framework/frozen-data';
 import {checkD64,compareD64,nextD64} from '@podjs/framework/sql-projection';
-import {exact,oid,canonical,digest} from './protocol';
+import {exact,oid,canonical} from './protocol';
 export type Account={oid:string;revision:string;generation:string};
 export type Capture=Readonly<{stateVersion:string;accountOid:string;accountRevision:string;generation:string;localChangeRevision:string}>;
 export interface SyncState {
  recoveryEditPins?:import('./recovery').RecoveryEditPin[];
  recoveryCopies?:import('./recovery').RecoveryCopy[];recoveryPins?:import('./recovery').RecoveryPin[];recoveryClock?:number;
  cloud?:any;acknowledgedLocalChangeRevision?:string;
- /** Gate-only transactions advance SQL CAS, but not the choice fence. */
+ /** Retained control generation for persisted settings and SQL mirror compatibility. */
  choiceControlRevision?:string;
  stateVersion:string;localChangeRevision:string;rollbackGeneration:string;
  businessRevision?:import('./business-revision').BusinessRevision;
@@ -17,15 +17,19 @@ export interface SyncState {
  keepDiscardedLocalChanges7Days:boolean;hasUnsentEdits:boolean;
 }
 export function initialState():SyncState {return {stateVersion:'0',localChangeRevision:'0',rollbackGeneration:'0',account:null,lastSeenAccountOid:null,lastSeenAccountRevision:'0',lastSeen:'0',editBase:{accountOid:null,generation:'0'},pendingChoice:null,activeGeneration:null,applied:{},knownAuthors:{},knownAccountParents:{},keepDiscardedLocalChanges7Days:true,hasUnsentEdits:false};}
-/** Existing journals have no control offset and retain their original fence. */
-export function choiceVersion(state:Pick<SyncState,'stateVersion'|'choiceControlRevision'>):string {
- const version=BigInt(checkD64(state.stateVersion)),control=BigInt(checkD64(state.choiceControlRevision??'0'));
- if(control>version)throw Error('choice_stale');return String(version-control);
+/** Journal validity is independent of SQL CAS, maintenance and control revisions.
+ * Account heads here must come from the authenticated reader. An own head is
+ * allowed only after validating the original request's successful response. */
+export function choiceCurrent(state:{account:Account|null;localChangeRevision:string},capture:{accountOid:string|null;accountRevision:string;localChangeRevision:string},own?:{oid:string;revision:string}):boolean {
+ const a=state.account;
+ return state.localChangeRevision===capture.localChangeRevision&&
+  ((a?.oid??null)===capture.accountOid&&(a?.revision??'0')===capture.accountRevision||
+   !!own&&a?.oid===own.oid&&a?.revision===own.revision);
 }
-/** Preview identity excludes gate configuration but retains every business field. */
-export function choiceStateHash(state:SyncState):string {
- const next={...state,stateVersion:choiceVersion(state)};delete next.choiceControlRevision;
- if(next.cloud){next.cloud={...next.cloud};delete next.cloud.p5Gates;}return digest(next);
+export function publicationCurrent(state:SyncState,plan:any):boolean {
+ const body=plan.request.account.body;
+ const own=plan.phase==='confirmed'&&plan.result?{oid:plan.commitOid,revision:plan.result.account.revision}:undefined;
+ return choiceCurrent(state,{accountOid:body.expectedOid,accountRevision:body.expectedRevision,localChangeRevision:plan.capturedLocalRevision},own);
 }
 export function queuedReadOnly(state:SyncState):boolean {
  const plan=state.cloud?.pendingPublish;
@@ -37,13 +41,17 @@ export function currentAccount(state:any):Account {
   for(const [name,value]of [['lastSeenAccountOid',state.account.oid],['lastSeenAccountRevision',state.account.revision],['lastSeen',state.account.generation]])if(Object.hasOwn(state,name)&&state[name]!==value)throw Error();return state.account;
  }catch{throw Error('choice_stale');}
 }
+export function checkChoiceWindow(state:any,capture:any){
+ currentAccount(state);
+ try{frozenDataRecord(capture,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);for(const k of ['stateVersion','accountRevision','generation','localChangeRevision'])checkD64(capture[k]);oid(capture.accountOid,'commit');if(capture.generation!==state.account.generation)throw Error();}catch{throw Error('choice_stale');}
+ if(!choiceCurrent(state,capture))throw Error('choice_stale');
+}
 export function checkCapture(state:any,capture:any,key?:string){
- const account=currentAccount(state);
- try{frozenDataRecord(capture,['stateVersion','accountOid','accountRevision','generation','localChangeRevision']);for(const k of ['stateVersion','accountRevision','generation','localChangeRevision'])checkD64(capture[k]);oid(capture.accountOid,'commit');}catch{throw Error('choice_stale');}
- if(!state.pendingChoice||capture.stateVersion!==choiceVersion(state)||capture.localChangeRevision!==state.localChangeRevision||capture.accountOid!==account.oid||capture.accountRevision!==account.revision||capture.generation!==account.generation||capture.generation!==state.pendingChoice.generation||(key!==undefined&&!state.pendingChoice.inboxKeys.includes(key)))throw Error('choice_stale');
+ checkChoiceWindow(state,capture);
+ if(!state.pendingChoice||(key!==undefined&&!state.pendingChoice.inboxKeys.includes(key)))throw Error('choice_stale');
 }
 export function captureChoice(state:any,window:Account):Capture {
- currentAccount(state);const capture=Object.freeze({stateVersion:choiceVersion(state),accountOid:window.oid,accountRevision:window.revision,generation:window.generation,localChangeRevision:state.localChangeRevision});checkCapture(state,capture);return capture;
+ currentAccount(state);const capture=Object.freeze({stateVersion:state.stateVersion,accountOid:window.oid,accountRevision:window.revision,generation:window.generation,localChangeRevision:state.localChangeRevision});checkCapture(state,capture);return capture;
 }
 /** Only an authenticated/pinned account reader may call this reducer. The SQL
  * writer also fences the captured version; no cloud apply is exposed in P1. */

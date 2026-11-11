@@ -17,7 +17,7 @@ import {ProjectionGate} from './gate';
 import {UNOPENABLE_NOTES_SCHEMA,unopenableNotesStatements} from './note-rows';
 import {arrayRecordFeed,arrayStatementFeed,feedPages,type RecordFeed,type StatementFeed} from './record-feed';
 import {installBusinessRevision,businessRevision,sameBusinessRevision,stopExistingProjection,revisionDelta,addRevision,type BusinessRevision} from './business-revision';
-import {choiceVersion,queuedReadOnly,initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
+import {publicationCurrent,queuedReadOnly,initialState,observeAccount,legacyInputRoute,captureChoice,checkCapture,type Account,type Capture,type SyncState} from './state';
 /** open authenticates with an existing key; it must never persist a new key. */
 export interface LocalCipher {nativeKey?():Promise<{keyBase64:string;aadJson:boolean}>;seal(aad:string,value:unknown):Promise<string>;open(aad:string,sealed:string):Promise<any>;
  /** N1: bounded single-call AES-GCM under the same key, for values stored as
@@ -169,7 +169,7 @@ export class WatchProjectionStore {
   if(!state.pendingChoice&&compareD64(state.editBase.generation,state.rollbackGeneration)<0&&(state.hasUnsentEdits||compareD64(state.localChangeRevision,state.acknowledgedLocalChangeRevision??'0')>0)){const next={...state,pendingChoice:{generation:state.rollbackGeneration,inboxKeys:[],accountOid:state.account!.oid,accountRevision:state.account!.revision,selectedLocalChangeRevision:state.localChangeRevision}};await this.commit(state,next);return next;}
   return state;
  }
- private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,observation=false,writeGate?:'choice_apply'|'history_restore',configuration=false){this.gate.require();if(!configuration)this.preserveWriteGates(state,next);const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation||writeGate?this.observationSql(state,writeGate):this.db,journal=(observation&&state.cloud?.pendingPublish?.explicit)||writeGate?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
+ private async commit(state:SyncState,next:SyncState,statements:Statement[]=[],hook?:()=>void,observation=false,writeGate?:'choice_apply'|'history_restore',configuration=false){this.gate.require();if(!configuration)this.preserveWriteGates(state,next);const expectedVersion=state.stateVersion,following=nextD64(expectedVersion),marker=next.businessRevision;if(!marker)throw Error('choice_stale');next.stateVersion=following;const db=observation||writeGate?this.observationSql(state,writeGate):this.db,journal=(observation&&(state.cloud?.pendingPublish?.explicit||state.cloud?.pendingCloudChoice))||writeGate?new SqlStateJournal<SyncState>(db,this.cipher,this.scopeKey,(purpose,id)=>this.aad(purpose,id),canonical):this.stateJournal,encoded=await journal.prepare(state,next,following),body=encoded.body;await this.checkIdentity();this.gate.require();hook?.();this.gate.require();
   try{await commitSqlCas(db,{table:'syncv2_state',keyColumn:'scope',versionColumn:'state_version',key:this.scopeKey},expectedVersion,[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_control WHERE id=1 AND scope=? AND enabled=1) AND EXISTS(SELECT 1 FROM business_sync_revision WHERE id=1 AND epoch=? AND CAST(revision AS TEXT)=?) THEN 1 ELSE 0 END',params:[this.scopeKey,marker.epoch,marker.revision]},{sql:'DELETE FROM podjs_sql_cas_guard'},{sql:'UPDATE syncv2_state SET body=?,local_revision=?,account_generation=?,edit_generation=?,awaiting_user=? WHERE scope=?',params:[body,next.localChangeRevision,next.rollbackGeneration,next.editBase.generation,next.pendingChoice?1:0,this.scopeKey]},...encoded.statements,...statements]);encoded.accept();}catch(error){if(/NOT NULL constraint failed: syncv2_state.state_version|CHECK constraint failed: id=1/.test(String(error)))throw Error('choice_stale');throw error;}
  }
  /** P2 control persistence uses the same stateVersion and business witness.
@@ -178,7 +178,7 @@ export class WatchProjectionStore {
   const current=await this.readState();if(writeGate&&current.cloud?.p5Gates?.[writeGate]===false)throw new ObservationReadOnly();if(canonical(current)!==canonical(expected))throw Error('choice_stale');
   await this.commit(expected,next,statements,hook,false,writeGate);
  }
- /** Persist the control offset and its SQL gate mirror at one state CAS. */
+ /** Persist the control generation and its SQL gate mirror at one state CAS. */
  async setWriteGates(before:SyncState,flags:{history_restore:boolean;choice_apply:boolean}){
   const next=JSON.parse(canonical(before)) as SyncState;
   next.choiceControlRevision=nextD64(before.choiceControlRevision??'0');
@@ -205,8 +205,11 @@ export class WatchProjectionStore {
  }
  /** Explicit choices, follow and recovery restore all use this final SQL gate.
   * commit copies control fields from the current CAS snapshot, never input.next. */
- async choiceUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],writeGate:'choice_apply'|'history_restore'='choice_apply'){
-  return this.controlUpdate(expected,next,statements,undefined,writeGate);
+ async choiceUpdate(expected:SyncState,next:SyncState,statements:Statement[]=[],writeGate:'choice_apply'|'history_restore'='choice_apply',preparedVersion?:string){
+  // A prepared native program owns a SQL snapshot. A CAS miss requires
+  // re-preparation; it does not invalidate the semantic choice journal.
+  const preparedGuard:Statement[]=preparedVersion===undefined?[]:[{sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM syncv2_state WHERE scope=? AND state_version=?) THEN 1 ELSE 0 END',params:[this.scopeKey,nextD64(preparedVersion)]},{sql:'DELETE FROM podjs_sql_cas_guard'}];
+  return this.controlUpdate(expected,next,[...preparedGuard,...statements],undefined,writeGate);
  }
  /** No preliminary coordination transaction. The supplied cleanup guards and
   * every persistent change commit together at the state/business CAS. */
@@ -322,10 +325,10 @@ export class WatchProjectionStore {
  async restartScan(){
   const before=await this.readState(),row=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0];if(!row)throw Error('scan_not_started');
   const cp:Checkpoint={R0:before.localChangeRevision,R1:null,after:'',tail:'0',phase:'scan',rows:0,tailEnd:null,businessRevision:before.businessRevision!};
-  await this.controlUpdate(before,{...before},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),cp),this.scopeKey]}]);
+  await this.observationUpdate(before,{...before},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),cp),this.scopeKey]}]);
  }
  async publicationUpdate(before:SyncState,next:SyncState,statements:Statement[]=[]){
-  const plan=before.cloud?.pendingPublish;if(plan?.guardVersion!==undefined){if(plan.guardVersion!==choiceVersion(before))throw Error('choice_stale');next.cloud={...next.cloud,pendingPublish:{...next.cloud.pendingPublish,guardVersion:nextD64(choiceVersion(before))}};}
+  const plan=before.cloud?.pendingPublish;if(plan&&!publicationCurrent(before,plan))throw Error('choice_stale');
   if(plan?.explicit)await this.observationUpdate(before,next,statements);else await this.controlUpdate(before,next,statements);
  }
  async preparePublicationFinish(plan:any){
@@ -437,7 +440,7 @@ export class WatchProjectionStore {
   const state=await this.readState();nextD64(state.stateVersion);const bind=canonical(binding),prior=(await this.db.query('SELECT binding FROM syncv2_checkpoint WHERE scope=?',[this.scopeKey]))[0],old=await this.checkpoint();
   if(prior?.binding===bind&&old&&(sameBusinessRevision(old.businessRevision,state.businessRevision)||old.phase!=='complete'&&old.businessRevision?.epoch===state.businessRevision?.epoch))return {hit:true,reason:sameBusinessRevision(old.businessRevision,state.businessRevision)?'same-binding-and-revision':'resume-prefix-then-reconcile',checkpoint:old};
   const cp:Checkpoint={R0:state.localChangeRevision,R1:null,after:'',tail:'0',tailEnd:null,phase:'scan',rows:0,businessRevision:state.businessRevision!};
-  await this.commit(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-or-revision-changed':'first-scan',checkpoint:cp};
+  await this.observationUpdate(state,{...state},[{sql:'INSERT INTO syncv2_checkpoint VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET binding=excluded.binding,body=excluded.body',params:[this.scopeKey,bind,await this.cipher.seal(this.aad('checkpoint'),cp)]}]);return {hit:false,reason:prior?'binding-or-revision-changed':'first-scan',checkpoint:cp};
  }
  private async prepareRows(rows:SourceRecord[],revision:string,sequence:string,force=false,readTree?: (prefix:string)=>Promise<any>){
   const statements:Statement[]=[],treeChanges:RadixRow[]=[];let total=0;
@@ -465,7 +468,7 @@ export class WatchProjectionStore {
   * the next host/guest reads the committed checkpoint and resumes its prefix. */
  async scanPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'scan',hook);}
  private async projectPage(source:SourceReader,limit:number,phase:'scan'|'tail',hook?:()=>void){
-  const state=await this.readState(),revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp)throw Error('scan_not_started');if(cp.phase!==phase)return cp;
+  const state=await this.readState();if(queuedReadOnly(state))throw new ObservationReadOnly();const revision=nextD64(state.stateVersion),cp=await this.checkpoint();if(!cp)throw Error('scan_not_started');if(cp.phase!==phase)return cp;
   let page:SourcePage,prepared:Awaited<ReturnType<WatchProjectionStore['prepareRows']>>;
   for(;;){page=await source.page(cp.after,limit);if(page.rows.length>limit||!page.done&&page.after===cp.after)throw Error('scan_no_progress');try{prepared=await this.prepareRows(page.rows,state.localChangeRevision,revision);break;}catch(error){if(limit===1||(error as Error).message!=='page_too_large')throw error;limit=Math.max(1,Math.floor(limit/2));}}
   const nextCp:Checkpoint={...cp,after:page.after,rows:cp.rows+page.rows.length};
@@ -474,7 +477,7 @@ export class WatchProjectionStore {
    if(sameBusinessRevision(cp.businessRevision,state.businessRevision)){nextCp.phase='complete';nextCp.tailEnd=state.businessRevision!.revision;nextCp.tail=nextCp.tailEnd;}
    else {nextCp.phase='tail';nextCp.after='';nextCp.rows=0;nextCp.businessRevision=state.businessRevision!;nextCp.tailEnd=null;}
   }
-  await this.commit(state,{...state},[...prepared.statements,{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),nextCp),this.scopeKey]}],hook);return nextCp;
+  await this.commit(state,{...state},[...prepared.statements,{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),nextCp),this.scopeKey]}],hook,true);return nextCp;
  }
  /** A global tiny witness cannot identify changed rows. Conservatively rescan
   * in bounded pages; unchanged candidates and radix paths are not rewritten. */
@@ -482,7 +485,7 @@ export class WatchProjectionStore {
   const state=await this.readState();nextD64(state.stateVersion);const cp=await this.checkpoint();if(!cp||cp.phase!=='complete')throw Error('scan_not_complete');
   if(sameBusinessRevision(cp.businessRevision,state.businessRevision))return cp;
   const next:Checkpoint={...cp,R0:cp.R1!,R1:state.localChangeRevision,phase:'tail',after:'',rows:0,tailEnd:null,businessRevision:state.businessRevision!};
-  delete next.accountApplyVersion;await this.commit(state,{...state},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]}]);return next;
+  delete next.accountApplyVersion;await this.observationUpdate(state,{...state},[{sql:'UPDATE syncv2_checkpoint SET body=? WHERE scope=?',params:[await this.cipher.seal(this.aad('checkpoint'),next),this.scopeKey]}]);return next;
  }
  async catchUpPage(source:SourceReader,limit=32,hook?:()=>void){return this.projectPage(source,limit,'tail',hook);}
  async readCandidateBySource(table:string,locator:string){this.gate.require();const mapped=(await this.db.query('SELECT entity_key FROM syncv2_source_map WHERE scope=? AND source_table=? AND locator=?',[this.scopeKey,table,locator]))[0];return mapped?this.readCandidate(String(mapped.entity_key)):null;}
