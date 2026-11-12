@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <!-- Emulator migration only: production UI can start, but cannot open a network socket. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <application android:usesCleartextTraffic="true" />
+</manifest>

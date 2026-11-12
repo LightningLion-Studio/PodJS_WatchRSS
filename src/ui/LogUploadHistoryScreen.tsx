@@ -48,8 +48,8 @@ export function LogUploadHistoryScreen(props: {
 
   const row = (label: string, height = 50, onPress?: () => void): ScrollEntry => ({
     height,
-    render: () => <View onPress={onPress} focusable={!!onPress} class={`absolute inset-0 items-center justify-center${onPress ? " rounded-[30] bg-[#2a2a2a] active:scale-96" : ""}`}>
-      <Text class="text-[16px] leading-[22] text-[#f5f5f5]">{label}</Text>
+    render: () => <View onPress={onPress} focusable={!!onPress} class={onPress ? "absolute inset-0 items-center justify-center rounded-[30] bg-[#2a2a2a] active:scale-96" : "absolute inset-0 items-center justify-center"}>
+      <Text class="text-base leading-[22] text-[#f5f5f5]">{label}</Text>
     </View>,
   });
   const entries = (): ScrollEntry[] => [

@@ -1,3 +1,58 @@
+# 迁移退出恢复：本机模拟器演练
+
+本节补充 T-TAKEOVER-MIG 的可重复测试。只使用合成 Room18 数据与独立 debug appId。
+不使用正式包、真实账号或真机。脚本拒绝非模拟器、已有演练安装及带 INTERNET 权限的 APK。
+脚本只清理本次安装所创建的模拟器沙箱。结束后卸载演练包和测试包。
+
+夹具：6,006 条文章（含 12 本书、1,200 章）、400 条笔记、200 个有效图片资源、正文文件及 DataStore 设置。
+`--inline-bytes 262144` 为前 1,024 条文章增加大正文；`--large-note` 生成三个各 3 MiB 的笔记文本字段。
+这是按 Compose Room 契约生成的规模夹具，不是生产数据库副本。
+
+以下变量使用绝对路径。框架必须来自应用 pin 或相应修复提交。重型命令在同一时刻只运行一个。
+先完成 CLI 与 x86_64 runtime 构建，再构建离线演练 APK：
+
+```sh
+# WRSS_APP、WRSS_FRAMEWORK、WRSS_OUT 由执行者设置；WRSS_OUT 不在提交范围内。
+python "$WRSS_APP/scripts/migration/takeover_scale_fixture.py" \
+  --room-contract "$WRSS_FRAMEWORK/platforms/android/runtime/src/main/resources/dev/podjs/runtime/room-v18.json" --output "$WRSS_OUT/source"
+cd "$WRSS_FRAMEWORK/platforms/android"
+flock "/tmp/wrss-heavy-$(basename "$WRSS_FRAMEWORK").lock" capmem 16G ./gradlew \
+  :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest --offline \
+  --no-daemon -Dorg.gradle.workers.max=2 \
+  -PpodAbis=x86_64 -PpodAppId=com.lightningstudio.watchrss.podjs.rehearsal \
+  -PpodVersionCode=1000 -PpodTakeoverSourceVersionCode=40 -PpodCleartextTraffic=true \
+  -PpodTakeoverSourcePackage=com.lightningstudio.watchrss.podjs.rehearsal \
+  -PpodDistDir="$WRSS_FRAMEWORK/dist/projects/com.lightningstudio.watchrss.podjs/android-watch" \
+  -PpodResDir="$WRSS_APP/android/res" \
+  -PpodTestSourceDir="$WRSS_APP/scripts/migration/rehearsal-migration" \
+  -PpodDebugExternalDir="$WRSS_APP/scripts/migration/rehearsal-offline"
+```
+
+Gradle 结束并释放锁后，用同一重型锁启动本机 x86_64 模拟器。模拟器运行期间不得并行构建。
+在另一终端运行轻量主机控制脚本：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python "$WRSS_APP/scripts/device/takeover_migration_rehearsal.py" \
+  --serial emulator-5580 \
+  --apk "$WRSS_FRAMEWORK/platforms/android/app/build/outputs/apk/debug/androidApp-debug.apk" \
+  --test-apk "$WRSS_FRAMEWORK/platforms/android/app/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk" \
+  --fixture "$WRSS_OUT/source" --output "$WRSS_OUT/matrix"
+```
+
+默认矩阵：7 个持久阶段 × 退出进程、返回桌面、强停、重建 Activity，共 28 项。
+增加 `--phases COPYING --work-step room` 或 `--work-step roomVerify`，测试已提交批次的中途退出。
+脚本检查：代际不变、百分比单调、源备份逐字节保留、核心表独立核对、全部笔记/媒体读回、设置、
+首次原生帧、ACTIVE 后新编辑保留。首次原生帧不等于全部 JS 业务初始化通过。
+单项增加 `--settle-seconds 15`，会等待首帧后的初始化，并要求目标库的应用 schema 为 9。
+通用 CursorWindow、解码分页和 SQL 取消回归在框架 `PodMigrationAdapterTest` 中。
+
+热回滚日志回归使用测试类 `PodTakeoverMigrationTest`：先运行 `prepareKilledActiveWriter`，
+等待私有 `cache/admission-recovery/writer-ready`，再强停该演练包；
+运行 `activeColdAdmissionRecoversTheKilledWriter`，检查 SQLite 恢复未提交事务并保留已提交数据。
+测试类只进入 androidTest APK。生产宿主没有退出注入接口。
+
+---
+
 # T5 固定基线与 T6 同 UID 合成账号链（2026-10-07）
 
 本节替代下文 T2 的 source39 基线及“跨 UID 导入后账号不可用”的合成夹具流程。

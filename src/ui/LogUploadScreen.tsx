@@ -14,7 +14,7 @@ export function LogUploadScreen(props:{height:number;width:number;options:LogUpl
   const controller=new LogUploadController(props.options,setState);
   onMount(()=>{const consented=props.autoStart;props.consumeConsent();if(!consented)setState({phase:'empty',message:'请先阅读日志说明并再次同意，本页不会自动重新上传。'});void controller.start(consented);});
   onCleanup(()=>controller.dispose());
-  const row=(text:string,height=52,onPress?:()=>void):ScrollEntry=>({height,render:()=> <View onPress={onPress} focusable={!!onPress} class={`absolute inset-0 items-center justify-center${onPress?' rounded-[30] bg-[#2a2a2a] active:scale-96':''}`}><Text class="text-[16px] leading-[22] text-[#f5f5f5]">{text}</Text></View>});
+  const row=(text:string,height=52,onPress?:()=>void):ScrollEntry=>({height,render:()=> <View onPress={onPress} focusable={!!onPress} class={onPress?'absolute inset-0 items-center justify-center rounded-[30] bg-[#2a2a2a] active:scale-96':'absolute inset-0 items-center justify-center'}><Text class="text-base leading-[22] text-[#f5f5f5]">{text}</Text></View>});
   const removeCurrent=async()=>{
     const current=state();if(current.phase!=='success'||deleting())return;
     setDeleting(true);setDeleteError('');
