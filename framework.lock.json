@@ -1,6 +1,6 @@
 {
   "path": "/home/wilf/data/PodJS/podjs-watch",
-  "revision": "7749d896e0af7bba1cca705485aca115f254ae83",
+  "revision": "4faf5e2d7a2ee35bd19146f2fd20d3bdfab0f232",
   "requiresLocalChanges": false,
   "pocketjsRevision": "214fd8c1e7450c21c5052fb060b4cb9540fba907",
   "branch": "fix-takeover-migration"
