@@ -44,7 +44,7 @@ test('capability rejection before service initialization is diagnosed and never 
  for(const denied of ['app.buildInfo','secure.get']){
   const lines:string[]=[],calls:string[]=[];
   const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:null,isCancelled:()=>false,request:async(route,args:any)=>{
-   if(route==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
+   if(route==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:2}};
    expect(route).toBe('cloud.host');calls.push(args.method);if(args.method===denied)throw Error('permission_denied');if(args.method==='log.append'){lines.push(args.args.text);return {};}
    if(args.method==='app.buildInfo')return {debugBuild:false};throw Error('unexpected preflight call');
   }});

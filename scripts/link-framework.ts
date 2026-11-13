@@ -1,3 +1,4 @@
+import './apply-watch-device-info.ts';
 // Bun's file: install copies a snapshot. Link the package roots so relative SDK
 // imports, exports and newly added files always use the same source tree.
 import {existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync} from 'node:fs';
