@@ -3,7 +3,13 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import { openBrowserUrl } from "../browser/open.ts";
 import { QRCode } from "./QRCode.tsx";
 
-export const PHONE_APP_DOWNLOAD_URL = "https://m.malink.cn/s/U7zQBr";
+export const PHONE_APP_DOWNLOAD_URL = "https://sly-data-plane.watchrss.cn/downloads";
+
+function downloadOpenError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("no_browser_handler")) return "未找到可用的浏览器，无法打开下载页面";
+  return message;
+}
 
 /** Native DownloadPhoneAppDialog dimensions, scaled from its 466 dp circle. */
 export function DownloadPhoneAppDialog(props: { width: number; height: number; operation: string; onDismiss: () => void; onError: (message: string) => void }) {
@@ -22,7 +28,7 @@ export function DownloadPhoneAppDialog(props: { width: number; height: number; o
         </Show>
       </View>
       <View onPress={props.onDismiss} focusable class="absolute rounded-[9999] bg-[#23272a] items-center justify-center active:scale-96" style={{ insetL: 57 * scale(), insetT: buttonsTop(), width: 104 * scale(), height: 104 * scale() }}><Image src="../assets/icons/close.svg" style={{ width: 48 * scale(), height: 48 * scale() }} /></View>
-      <View onPress={() => { void openBrowserUrl(PHONE_APP_DOWNLOAD_URL, "phone-download").catch(error => props.onError(String(error))); }} focusable class="absolute rounded-[9999] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{ insetL: 177 * scale(), insetT: buttonsTop(), width: 232 * scale(), height: 104 * scale() }}><Text class="text-[#f5f5f5]" style={{ fontSlot: 0, scale: 22 / 12 * scale() }}>浏览器打开下载页</Text></View>
+      <View onPress={() => { void openBrowserUrl(PHONE_APP_DOWNLOAD_URL, "phone-download").catch(error => props.onError(downloadOpenError(error))); }} focusable class="absolute rounded-[9999] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{ insetL: 177 * scale(), insetT: buttonsTop(), width: 232 * scale(), height: 104 * scale() }}><Text class="text-[#f5f5f5]" style={{ fontSlot: 0, scale: 22 / 12 * scale() }}>浏览器打开下载页</Text></View>
     </View>
   </View>;
 }
