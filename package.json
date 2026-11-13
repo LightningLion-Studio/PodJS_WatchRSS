@@ -6,8 +6,8 @@
   "scripts": {
     "test": "bun test --path-ignore-patterns='artifacts/**'",
     "typecheck": "tsc --noEmit",
-    "build": "bun ../podjs-watch-framework-pinned/packages/cli/src/cli.ts build --target=android-watch --project=\"$PWD\"",
-    "package:android": "bun ../podjs-watch-framework-pinned/packages/cli/src/cli.ts package --target=android-watch --project=\"$PWD\"",
+    "build": "bun scripts/apply-watch-device-info.ts && bun ../podjs-watch-framework-pinned/packages/cli/src/cli.ts build --target=android-watch --project=\"$PWD\"",
+    "package:android": "bun scripts/apply-watch-device-info.ts && bun ../podjs-watch-framework-pinned/packages/cli/src/cli.ts package --target=android-watch --project=\"$PWD\"",
     "postinstall": "bun scripts/link-framework.ts"
   },
   "dependencies": {

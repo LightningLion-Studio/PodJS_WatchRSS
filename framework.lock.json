@@ -1,7 +1,13 @@
 {
   "path": "/home/wilf/data/PodJS/podjs-watch",
-  "revision": "394c57be946219257a8fcdc8f1005bb4d49ff72d",
-  "requiresLocalChanges": false,
+  "revision": "d99b4a0bc51793b4e4b972447067d519cf7bd578",
+  "requiresLocalChanges": true,
   "pocketjsRevision": "214fd8c1e7450c21c5052fb060b4cb9540fba907",
-  "branch": "watchrss-migration"
+  "branch": "watchrss-migration",
+  "patches": [
+    {
+      "manifest": "patches/framework/watch-device-info-v1.json",
+      "sha256": "ab4049de07cda4537653cf566b96eb562aa2288a82acb5fdf1c8b99701541d08"
+    }
+  ]
 }

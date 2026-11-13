@@ -1,0 +1,128 @@
+diff --git a/docs/device-services.md b/docs/device-services.md
+index ccdd1a8..961d76d 100644
+--- a/docs/device-services.md
++++ b/docs/device-services.md
+@@ -70,3 +70,7 @@ integer (0..100), including zero. Missing or out-of-range system values return
+ No synthetic capacity or additional permission is used. This is a point sample,
+ not an energy measurement. `ActiveBatterySession` can group actual active-playback
+ segments; applications own endpoint, validation, and reporting policy.
++
++## Product metadata
++
++`device.info()` requires `device.info` and returns only Android Build brand, manufacturer, model, device and product strings. It never reads serial numbers, Android ID, IMEI or network hardware identifiers. Android-watch and Wear OS expose this capability; other/older hosts reject with `unsupported`. Applications own consent and reporting policy.
+diff --git a/packages/framework/src/services.ts b/packages/framework/src/services.ts
+index 70b8b18..a9c4bec 100644
+--- a/packages/framework/src/services.ts
++++ b/packages/framework/src/services.ts
+@@ -101,6 +101,7 @@ const methods: Record<string, PodCapabilityId> = {
+   "input.time": "input.time",
+   "location.current": "device.location",
+   "battery.percent": "device.battery",
++  "device.info": "device.info",
+   "crypto.verifyP256": "crypto.basic", "crypto.ecdhPublicKey": "crypto.basic", "crypto.ecdhUnwrap": "crypto.basic", "crypto.ecdhPossessionProof": "crypto.basic", "crypto.hkdfSha256": "crypto.basic",
+   "crypto.gunzipSealedParts": "crypto.basic", "crypto.closeSealedGzip": "crypto.basic", "crypto.openSealedParts": "crypto.basic", "crypto.largeAesGcmEncrypt": "crypto.basic", "crypto.largeAesGcmDecrypt": "crypto.basic", "crypto.gzip": "crypto.basic", "crypto.gunzip": "crypto.basic",
+   "crypto.rsaOaepSha256": "crypto.basic", "crypto.random": "crypto.basic", "crypto.hash": "crypto.basic", "crypto.hmacSha256": "crypto.basic", "crypto.aesGcmEncrypt": "crypto.basic", "crypto.aesGcmDecrypt": "crypto.basic", "crypto.encrypt": "crypto.basic", "crypto.decrypt": "crypto.basic",
+@@ -909,3 +910,7 @@ export function onVideoAudioChanged(listener:(state:VideoState & {sessionId?:str
+ /** Explicit post-commit invalidation across foreground/background VMs. No timer
+  * or payload polling; reopen views from persistent storage when notified. */
+ export function onSqlChanged(topic:string,listener:()=>void){return __onHostEvent(event=>{if(event.t==='sql.changed'&&event.topic===topic)listener();});}
++
++/** Public product metadata only; contains no hardware identifiers. */
++export interface DeviceInfo {brand:string;manufacturer:string;model:string;device:string;product:string}
++export const device=Object.freeze({info:():Promise<DeviceInfo>=>hostOperation<DeviceInfo>("device.info",{}).result});
+diff --git a/packages/framework/src/targets.ts b/packages/framework/src/targets.ts
+index cc7d4fb..3a3eaed 100644
+--- a/packages/framework/src/targets.ts
++++ b/packages/framework/src/targets.ts
+@@ -39,6 +39,7 @@ export const PodCapability = Object.freeze({
+   TimeInput: "input.time",
+   Location: "device.location",
+   Battery: "device.battery",
++  DeviceInfo: "device.info",
+   Secure: "data.secure",
+   Crypto: "crypto.basic",
+   FileChunks: "data.files.chunks",
+@@ -89,14 +90,14 @@ export const POD_TARGETS: Readonly<Record<PodTargetProfile["id"], PodTargetProfi
+     hostAbi: POD_HOST_ABI,
+     logicalViewport: POD_LOGICAL_VIEWPORT,
+     renderer: "vulkan-1.1",
+-capabilities: [...common, PodCapability.Back, PodCapability.Network, PodCapability.Files, PodCapability.Sqlite, PodCapability.TextLayout, PodCapability.TextRaster, PodCapability.TextEnvironment, PodCapability.TextInput, PodCapability.TextInputState, PodCapability.TimeInput, PodCapability.Location, PodCapability.Battery, PodCapability.Secure, PodCapability.Crypto, PodCapability.FileChunks, PodCapability.Uri, PodCapability.Audio, PodCapability.DebugAcoustic, PodCapability.Tts, PodCapability.TtsSpectrum, PodCapability.Video, PodCapability.VideoSessions, PodCapability.Timer, PodCapability.DisplayPower, PodCapability.Toast, PodCapability.Images, PodCapability.BrowserChallenge, PodCapability.BrowserAuth, PodCapability.BrowserAuthStatus, PodCapability.HttpDownload, PodCapability.Rfcomm, PodCapability.Tcp, PodCapability.ByteStream, PodCapability.WebSocket, PodCapability.Discovery, PodCapability.BleProvision, PodCapability.Browser, PodCapability.BrowserSiteData, PodCapability.BrowserAvailability, PodCapability.BrowserInApp, PodCapability.BrowserInAppState, PodCapability.BrowserInAppTheme, PodCapability.Share, PodCapability.ScheduledBackground, PodCapability.LocalNotification, PodCapability.SyncState, PodCapability.SyncMessage, PodCapability.SyncFile, PodCapability.Takeover],
++capabilities: [...common, PodCapability.Back, PodCapability.Network, PodCapability.Files, PodCapability.Sqlite, PodCapability.TextLayout, PodCapability.TextRaster, PodCapability.TextEnvironment, PodCapability.TextInput, PodCapability.TextInputState, PodCapability.TimeInput, PodCapability.Location, PodCapability.Battery, PodCapability.DeviceInfo, PodCapability.Secure, PodCapability.Crypto, PodCapability.FileChunks, PodCapability.Uri, PodCapability.Audio, PodCapability.DebugAcoustic, PodCapability.Tts, PodCapability.TtsSpectrum, PodCapability.Video, PodCapability.VideoSessions, PodCapability.Timer, PodCapability.DisplayPower, PodCapability.Toast, PodCapability.Images, PodCapability.BrowserChallenge, PodCapability.BrowserAuth, PodCapability.BrowserAuthStatus, PodCapability.HttpDownload, PodCapability.Rfcomm, PodCapability.Tcp, PodCapability.ByteStream, PodCapability.WebSocket, PodCapability.Discovery, PodCapability.BleProvision, PodCapability.Browser, PodCapability.BrowserSiteData, PodCapability.BrowserAvailability, PodCapability.BrowserInApp, PodCapability.BrowserInAppState, PodCapability.BrowserInAppTheme, PodCapability.Share, PodCapability.ScheduledBackground, PodCapability.LocalNotification, PodCapability.SyncState, PodCapability.SyncMessage, PodCapability.SyncFile, PodCapability.Takeover],
+   },
+   "wearos-watch": {
+     id: "wearos-watch",
+     hostAbi: POD_HOST_ABI,
+     logicalViewport: POD_LOGICAL_VIEWPORT,
+     renderer: "vulkan-1.1",
+-    capabilities: [...common, PodCapability.Back, PodCapability.Network, PodCapability.Files, PodCapability.Sqlite, PodCapability.TextLayout, PodCapability.TextRaster, PodCapability.TextEnvironment, PodCapability.TextInput, PodCapability.TextInputState, PodCapability.TimeInput, PodCapability.Location, PodCapability.Battery, PodCapability.Secure, PodCapability.Crypto, PodCapability.FileChunks, PodCapability.Uri, PodCapability.Audio, PodCapability.DebugAcoustic, PodCapability.Tts, PodCapability.TtsSpectrum, PodCapability.Video, PodCapability.VideoSessions, PodCapability.Timer, PodCapability.DisplayPower, PodCapability.Toast, PodCapability.Images, PodCapability.BrowserChallenge, PodCapability.BrowserAuth, PodCapability.BrowserAuthStatus, PodCapability.HttpDownload, PodCapability.Rfcomm, PodCapability.Tcp, PodCapability.ByteStream, PodCapability.WebSocket, PodCapability.Discovery, PodCapability.BleProvision, PodCapability.Browser, PodCapability.BrowserSiteData, PodCapability.BrowserAvailability, PodCapability.BrowserInApp, PodCapability.BrowserInAppState, PodCapability.BrowserInAppTheme, PodCapability.Share, PodCapability.ScheduledBackground, PodCapability.LocalNotification, PodCapability.SyncState, PodCapability.SyncMessage, PodCapability.SyncFile, PodCapability.Takeover],
++    capabilities: [...common, PodCapability.Back, PodCapability.Network, PodCapability.Files, PodCapability.Sqlite, PodCapability.TextLayout, PodCapability.TextRaster, PodCapability.TextEnvironment, PodCapability.TextInput, PodCapability.TextInputState, PodCapability.TimeInput, PodCapability.Location, PodCapability.Battery, PodCapability.DeviceInfo, PodCapability.Secure, PodCapability.Crypto, PodCapability.FileChunks, PodCapability.Uri, PodCapability.Audio, PodCapability.DebugAcoustic, PodCapability.Tts, PodCapability.TtsSpectrum, PodCapability.Video, PodCapability.VideoSessions, PodCapability.Timer, PodCapability.DisplayPower, PodCapability.Toast, PodCapability.Images, PodCapability.BrowserChallenge, PodCapability.BrowserAuth, PodCapability.BrowserAuthStatus, PodCapability.HttpDownload, PodCapability.Rfcomm, PodCapability.Tcp, PodCapability.ByteStream, PodCapability.WebSocket, PodCapability.Discovery, PodCapability.BleProvision, PodCapability.Browser, PodCapability.BrowserSiteData, PodCapability.BrowserAvailability, PodCapability.BrowserInApp, PodCapability.BrowserInAppState, PodCapability.BrowserInAppTheme, PodCapability.Share, PodCapability.ScheduledBackground, PodCapability.LocalNotification, PodCapability.SyncState, PodCapability.SyncMessage, PodCapability.SyncFile, PodCapability.Takeover],
+   },
+   "watchos-watch": {
+     id: "watchos-watch",
+diff --git a/packages/framework/tests/services.test.ts b/packages/framework/tests/services.test.ts
+index 3ad840f..3f7804d 100644
+--- a/packages/framework/tests/services.test.ts
++++ b/packages/framework/tests/services.test.ts
+@@ -10,7 +10,7 @@ const emitted: Record<string, unknown>[] = [];
+ };
+ 
+ const api = await import("../src/watch.ts");
+-const { secureStorage, battery, debugPerformance, application, sharing, displayPower, silencePlayback, HostServiceError, hostOperation, sqlite, browser, browserAuth, mediaVolume, speech, timeInput, textInput, textLayout, fileChunks, uri, rfcomm, tcp, byteStreams, webSockets, discovery, onNetworkChange } = await import("../src/services.ts");
++const { secureStorage, device, battery, debugPerformance, application, sharing, displayPower, silencePlayback, HostServiceError, hostOperation, sqlite, browser, browserAuth, mediaVolume, speech, timeInput, textInput, textLayout, fileChunks, uri, rfcomm, tcp, byteStreams, webSockets, discovery, onNetworkChange } = await import("../src/services.ts");
+ const host = (globalThis as unknown as { pod: { capabilities: () => string } }).pod;
+ 
+ beforeEach(() => {
+@@ -19,6 +19,16 @@ beforeEach(() => {
+ afterEach(() => { events.length = 0; emitted.length = 0; });
+ 
+ describe("host services", () => {
++ test('device metadata is gated and exposes only public Build fields',async()=>{
++  await expect(device.info()).rejects.toMatchObject({code:'unsupported'});expect(emitted).toHaveLength(0);
++  host.capabilities=()=>JSON.stringify(['device.info']);
++  const result=device.info(),request=emitted.at(-1)!;
++  expect(request).toMatchObject({method:'device.info',args:{}});
++  const value={brand:'OnePlus',manufacturer:'OPLUS',model:'OPWWE231',device:'OPWWE231',product:'OPWWE231'};
++  events.push({t:'service.result',id:request.id,ok:true,value});api.__pumpPodEvents();
++  expect(await result).toEqual(value);
++ });
++
+  test('diagnostic controls stay private and real status callbacks retain settlement/order with slow labels',async()=>{
+   const realClock=Date.now;let now=0;const seen:string[]=[];
+   const remove=api.__onHostEvent(event=>seen.push(String(event.t)));
+diff --git a/platforms/android/runtime/src/main/cpp/jni_bridge.cpp b/platforms/android/runtime/src/main/cpp/jni_bridge.cpp
+index 379f9a0..5eeb9e0 100644
+--- a/platforms/android/runtime/src/main/cpp/jni_bridge.cpp
++++ b/platforms/android/runtime/src/main/cpp/jni_bridge.cpp
+@@ -338,7 +338,7 @@ extern "C" JNIEXPORT jlong JNICALL Java_dev_podjs_runtime_PodRuntimeView_nativeC
+   const char* t = env->GetStringUTFChars(target, nullptr); const char* d = env->GetStringUTFChars(dataDir, nullptr);
+   if (std::string(t) != "android-watch" && std::string(t) != "wearos-watch") { fail(env, "PodJS target mismatch"); return 0; }
+   ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+-const char* capabilities = "[\"input.touch\",\"input.rotary\",\"data.kv\",\"device.haptics\",\"host.lifecycle\",\"host.theme\",\"display.round\",\"input.back\",\"net.http\",\"data.fs\",\"data.sqlite\",\"text.layout\",\"text.raster\",\"text.environment\",\"input.text\",\"input.text.state\",\"input.time\",\"device.location\",\"device.battery\",\"data.secure\",\"crypto.basic\",\"data.files.chunks\",\"data.uri\",\"media.audio\",\"debug.acoustic\",\"media.tts\",\"media.tts.spectrum\",\"media.video\",\"media.video.sessions\",\"runtime.timer\",\"display.power\",\"system.toast\",\"data.images\",\"system.browser.challenge\",\"system.browser.auth\",\"system.browser.auth.status\",\"net.download\",\"net.rfcomm\",\"net.tcp\",\"net.stream\",\"net.websocket\",\"net.discovery\",\"net.ble.provision\",\"system.browser\",\"system.browser.siteData\",\"system.browser.availability\",\"system.browser.inApp\",\"system.browser.inApp.state\",\"system.browser.inApp.theme\",\"system.share\",\"background.scheduled\",\"notification.local\",\"companion.sync.state\",\"companion.sync.message\",\"companion.sync.file\",\"host.takeover\"]";
++const char* capabilities = "[\"input.touch\",\"input.rotary\",\"data.kv\",\"device.haptics\",\"host.lifecycle\",\"host.theme\",\"display.round\",\"input.back\",\"net.http\",\"data.fs\",\"data.sqlite\",\"text.layout\",\"text.raster\",\"text.environment\",\"input.text\",\"input.text.state\",\"input.time\",\"device.location\",\"device.battery\",\"device.info\",\"data.secure\",\"crypto.basic\",\"data.files.chunks\",\"data.uri\",\"media.audio\",\"debug.acoustic\",\"media.tts\",\"media.tts.spectrum\",\"media.video\",\"media.video.sessions\",\"runtime.timer\",\"display.power\",\"system.toast\",\"data.images\",\"system.browser.challenge\",\"system.browser.auth\",\"system.browser.auth.status\",\"net.download\",\"net.rfcomm\",\"net.tcp\",\"net.stream\",\"net.websocket\",\"net.discovery\",\"net.ble.provision\",\"system.browser\",\"system.browser.siteData\",\"system.browser.availability\",\"system.browser.inApp\",\"system.browser.inApp.state\",\"system.browser.inApp.theme\",\"system.share\",\"background.scheduled\",\"notification.local\",\"companion.sync.state\",\"companion.sync.message\",\"companion.sync.file\",\"host.takeover\"]";
+   // Positional fields: struct_size, target_id, host_abi, raster_density, ... raster_density must
+   // match the CLI build density (packages/cli/src/cli.ts); host ABI lives in the macro, not here.
+   constexpr uint32_t kRasterDensity = 2;
+diff --git a/platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java b/platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java
+index 7890533..fbd5ceb 100644
+--- a/platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java
++++ b/platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java
+@@ -517,6 +517,19 @@ final class PodServices implements Closeable {
+             } catch(Exception error) { failure(id,"unavailable","Debug external interface unavailable"); }
+             return;
+         }
++        if ("device.info".equals(method)) {
++            if (!requests.remove(id, request)) return;
++            try {
++                request.cancellation.throwIfCanceled();
++                reply(id, true, new JSONObject()
++                    .put("brand", android.os.Build.BRAND)
++                    .put("manufacturer", android.os.Build.MANUFACTURER)
++                    .put("model", android.os.Build.MODEL)
++                    .put("device", android.os.Build.DEVICE)
++                    .put("product", android.os.Build.PRODUCT), null, null);
++            } catch (Exception error) { failure(id, "device_info_error", "Device information unavailable"); }
++            return;
++        }
+         if ("battery.percent".equals(method)) {
+             try {
+                 android.os.BatteryManager manager = (android.os.BatteryManager)context.getSystemService(Context.BATTERY_SERVICE);

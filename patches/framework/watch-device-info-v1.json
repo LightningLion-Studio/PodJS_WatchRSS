@@ -1,0 +1,38 @@
+{
+  "version": "watch-device-info-v1",
+  "baseRevision": "d99b4a0bc51793b4e4b972447067d519cf7bd578",
+  "patch": "watch-device-info-v1.patch",
+  "sha256": "953cf3254e44a582a5060328181bf9b9bb1b00448369e9c636be7ce8f3983dc6",
+  "files": [
+    {
+      "path": "docs/device-services.md",
+      "beforeSha256": "6cab92d5a990b771c97a53beafe97fe017cbea6630c68dd464eff8c20c3599dd",
+      "afterSha256": "12cc12ac43fc9a33ef13ae3b7d5380546cef7792df9a3b003e12bb04dd365f7b"
+    },
+    {
+      "path": "packages/framework/src/services.ts",
+      "beforeSha256": "574120551c363ceead2ee90a1f30ecbaf3bb6cebacc4533612d5a0635939628d",
+      "afterSha256": "18089544f8ffdba3f9a2b3fca575fe23753ca2ae2ff47b1029378ce32a54ac7a"
+    },
+    {
+      "path": "packages/framework/src/targets.ts",
+      "beforeSha256": "c6a0fe64114b15c9759db71b340f16241979caf0f5a05505fbe122cfa1d0afe6",
+      "afterSha256": "e14916f2f9ec2b95af55c66c432e5bc0f8af3656de240f16111b0e25b054d2f6"
+    },
+    {
+      "path": "packages/framework/tests/services.test.ts",
+      "beforeSha256": "4738517a158c525c6d3f5cab9b3b3285113acdf7fd21bbb8b74645f9f482f23f",
+      "afterSha256": "910ca540fe8ae14bcb53167830f55dc817dd9956efffc19a6e542de0a1ae9229"
+    },
+    {
+      "path": "platforms/android/runtime/src/main/cpp/jni_bridge.cpp",
+      "beforeSha256": "4b02e58aa24772b3537b97dd72452bd5a01b79f3a2c932c01495ee13a9d610bb",
+      "afterSha256": "68f1b62952dfebe125ac74fc7bef9c644dbfa57450ec5eee3bb173b8209cf67f"
+    },
+    {
+      "path": "platforms/android/runtime/src/main/java/dev/podjs/runtime/PodServices.java",
+      "beforeSha256": "76b65f246e22b23155918aeb2d78e01589564fc323a16e433aa178d5bc59f307",
+      "afterSha256": "470a147809c4aaa001e0a1f31b21739c005a1850da0d27f72cbac60e945195f0"
+    }
+  ]
+}
