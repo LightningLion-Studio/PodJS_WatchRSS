@@ -4,7 +4,7 @@ import type {SqlDatabase} from '../core/types.ts';
 import {querySyncKeysetPages} from '../sync/sql-pages.ts';
 
 export interface NovelChapter extends Article {readingPositionChangedAt:number}
-const sourcePattern=/^(https:\/\/watchrss\.local\/import-(?:epub|txt-novel)\/[^/]+)(?:\/chapter\/(\d+)(?:-[^/]+)?)?$/i;
+const sourcePattern=/^(https:\/\/watchrss\.local\/import-(?:epub|txt-novel)\/[^/]+|watchrss:\/\/import\/instance-v1\/[a-f0-9]{32})(?:\/chapter\/(\d+)(?:-[^/]+)?)?$/i;
 /** A source URL and its chapter URLs share one directory identity. */
 export function novelBookSource(url:string|null|undefined):string|undefined {
  return sourcePattern.exec(url?.trim()??'')?.[1];
