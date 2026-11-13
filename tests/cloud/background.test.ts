@@ -30,7 +30,7 @@ test('release and debug workers require explicit persisted consent, then skip un
  for(const debug of [false,true])for(const consent of [false,true]){
   const calls:string[]=[];
   const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:null,isCancelled:()=>false,request:async(m,a:any)=>{
-   if(m==='kv.get'){expect(a.key).toBe('watchrss.onboarding');calls.push('consent');return {exists:consent,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};}
+   if(m==='kv.get'){expect(a.key).toBe('watchrss.onboarding');calls.push('consent');return {exists:consent,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:2}};}
    expect(m).toBe('cloud.host');calls.push(a.method);if(a.method==='app.buildInfo')return {debugBuild:debug};if(a.method==='secure.get')return {exists:false};throw Error('unexpected '+a.method);
   }};
   expect(await handler(context)).toBe('success');expect(calls).toEqual(consent?['app.buildInfo','consent','secure.get']:['app.buildInfo','consent']);
@@ -159,7 +159,7 @@ test('automatic and manual headless handlers use actual SQLite/codec/coordinator
    for(let n=0;n<docs.length;n++){const recordId=await codec.id(key,'user',docs[n]);recordRows.push({recordId,revision:String(n+1),envelope:await codec.encode(key,'user',recordId,1,docs[n]),tombstone:false});}
   }
   if(entry==='manual-rss-fast')secure.set('watchrss.cloud.state.["https://backend.invalid","inactive","legacy"].restore-v1.0',JSON.stringify({units:{},padding:'x'.repeat(1024*1024)}));
-  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');if(entry==='manual-rss-fast'&&Buffer.byteLength(JSON.stringify(a))>1024*1024)throw 'request_too_large';return request(a.method,a.args);}};
+  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:2}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');if(entry==='manual-rss-fast'&&Buffer.byteLength(JSON.stringify(a))>1024*1024)throw 'request_too_large';return request(a.method,a.args);}};
   if(entry==='manual-rss-fast-epoch'){const grant=JSON.parse(secure.get(MANUAL_INTENT_KEY)!);secure.set(MANUAL_INTENT_KEY,JSON.stringify({...grant,version:2,epoch:'revoked-epoch'}));expect(await headless(context)).toBe('success');expect(calls).not.toContain('cloud.acquire');expect(calls.some(m=>m==='http.download')).toBe(false);expect(secure.has(MANUAL_INTENT_KEY)).toBe(false);continue;}
   if(largeWindow){
    let done=false,lastWork=0;for(;windowCount<12&&!done;windowCount++){
@@ -203,7 +203,7 @@ test('manual headless grant is bound to durable token and backend/account scope 
  const account={userId:'user',watchDeviceToken:'fixture-token',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true}};
  for(const mismatch of ['token','scope','epoch']){const stateSql=stateSqlFixture();const methods:string[]=[];const intent={version:2,token:'opaque_1',scope:mismatch==='scope'?'other':cloudAccountIdentity(account),mode:'recent128',createdAt:1,epoch:'old-epoch'};
  const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+300000,payload:{manual:true,token:mismatch==='token'?'stale':'opaque_1'},isCancelled:()=>false,request:async(method,args:any)=>{
-  if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
+  if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:2}};
   methods.push(args.method);if(args.method.startsWith('sql.'))return stateSql.host(args.method,args.args);if(args.method==='secure.update')return {};if(args.method==='app.buildInfo')return {debugBuild:false};
   if(args.method==='secure.compareAndSet'){expect(args.args.key).toBe(MANUAL_INTENT_KEY);expect(args.args.value).toBeNull();return {updated:true};}if(args.method==='secure.get')return {exists:true,value:args.args.key===manualEpochKey(account)?'new-epoch':JSON.stringify(args.args.key===MANUAL_INTENT_KEY?intent:account)};throw Error('unauthorized side effect: '+args.method);
  }});expect(result).toBe('success');expect(methods.slice(0,3)).toEqual(['app.buildInfo','secure.get','secure.get']);expect(methods.every(m=>['app.buildInfo','secure.get','secure.compareAndSet','secure.update','sql.query','sql.transaction','sql.execute'].includes(m))).toBe(true);stateSql.db.close();
@@ -214,7 +214,7 @@ test('background cooperative deadline leaves checkpoint cleanup time before the 
  const account={userId:'user',watchDeviceToken:'fixture',backendBaseUrl:'https://backend.invalid',tokenExpiresAtMillis:9e15,watchRefreshToken:'',entitlement:{plan:'member',active:true}};
  const methods:string[]=[];
  const result=await handler({appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:Date.now()+5000,payload:null,isCancelled:()=>false,request:async(method,args:any)=>{
-  if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
+  if(method==='kv.get')return {exists:true,value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:2}};
   methods.push(args.method);
   if(args.method==='app.buildInfo')return {debugBuild:false};
   if(args.method==='secure.get')return {exists:args.args.key==='state_json',value:args.args.key==='state_json'?JSON.stringify(account):undefined};

@@ -97,6 +97,7 @@
     "system.toast",
     "input.time",
     "device.location",
+    "device.info",
     "text.raster",
     "net.rfcomm",
     "net.tcp",

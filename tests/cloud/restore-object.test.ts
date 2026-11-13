@@ -157,7 +157,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    }
    for(let n=0;n<docs.length;n++){const recordId=await codec.id(key,'user',docs[n]);recordRows.push({recordId,revision:String(n+1),envelope:await codec.encode(key,'user',recordId,1,docs[n]),tombstone:false});}
   }
-  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
+  const context:BackgroundContext={appId:'fixture',taskId:'watchrss-cloud-sync',deadlineMs:guestDeadline,payload:entry==='manual'||withManifest?{manual:true,token:'manual_fixture'}:null,isCancelled:()=>false,request:async(m,a:any)=>{if(m==='kv.get')return {exists:true,value:a.key==='watchrss.onboarding'?{oobeSeenVersion:3,privacyPolicyAgreedVersion:2}:JSON.stringify({progress:.5,offset:3,updatedAt:7})};expect(m).toBe('cloud.host');return request(a.method,a.args);}};
   if(entry==='yield-stall'){
    // Scheduling itself has no source/offset identity. A prior zero-progress
    // streak cannot prove that the CPU preparation is a repeated completed part.
