@@ -3,7 +3,7 @@ const logConsole=createLogConsole('InformationScreens');
 import { Text, View } from "@pocketjs/framework/components";
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import {getDisplayMetrics, hasCapability} from '@podjs/framework/watch';
-import {textLayout, type TextLayoutOptions} from '@podjs/framework/services';
+import {hostOperation,systemSettings,textLayout, type TextLayoutOptions} from '@podjs/framework/services';
 import {SystemTextLine, type SystemTextLineOptions} from '@podjs/framework/text';
 import {fetchLegalDocument} from "../onboarding/legal-document.ts";
 import {createScroller, type Scroller} from "@pocketjs/framework/kinetics";
@@ -170,7 +170,7 @@ interface ErrorTextLayout {widthPx:number;heightPx:number;rows:Array<{topPx:numb
  * default body/label typography uses the bundled watch font at 14sp/17sp. */
 function InformationError(props:{width:number;height:number;message:string;active?:()=>boolean;onRetry:()=>void}) {
   const metrics = getDisplayMetrics(), pixelScale = metrics.physicalWidth / metrics.logicalWidth;
-  const [layout, setLayout] = createSignal<{message:ErrorTextLayout;button:ErrorTextLayout}>();
+  const [layout, setLayout] = createSignal<{message:ErrorTextLayout;button:ErrorTextLayout;network:ErrorTextLayout}>();
   const availablePx = () => Math.max(1, Math.round(props.width * pixelScale) - Math.round(48 * pixelScale));
   const labelWidthPx = () => Math.max(1, availablePx() - Math.round(48 * pixelScale));
   createEffect(() => {
@@ -191,13 +191,16 @@ function InformationError(props:{width:number;height:number;message:string;activ
         lineHeightPx:composeLineHeightPx(17, fontSizePx, 2, environment.fontScale),
         lineHeightMode:'span', fallbackLineSpacing:true, lineBreak:'simple', align:'center', textMotion:'static', colorArgb:0xfff5f5f5,
       });
-      measure = textLayout.measure({text:'重新加载',  fontWeight:400, fontSizePx, textMotion:'static'});
-      const intrinsic = await measure.result;
-      if (!current) return;
-      if (!Number.isFinite(intrinsic.widthPx) || intrinsic.widthPx < 0) throw Error('Invalid retry label width');
-      // Button centers the natural Text box; wrapped lines retain Start alignment.
-      const naturalWidth = Math.max(1, Math.min(buttonWidth, Math.ceil(intrinsic.widthPx)));
-      const sources = [paragraph(message, width), {...paragraph('重新加载', naturalWidth), align:'left' as const}];
+      // Each label keeps its own natural text box and the same native typography.
+      const sources:TextLayoutOptions[] = [paragraph(message,width)];
+      for(const label of ['重新加载','检查网络']){
+        measure = textLayout.measure({text:label,fontWeight:400,fontSizePx,textMotion:'static'});
+        const intrinsic = await measure.result;
+        if(!current)return;
+        if(!Number.isFinite(intrinsic.widthPx)||intrinsic.widthPx<0)throw Error('Invalid action label width');
+        const naturalWidth=Math.max(1,Math.min(buttonWidth,Math.ceil(intrinsic.widthPx)));
+        sources.push({...paragraph(label,naturalWidth),align:'left',colorArgb:label==='检查网络'?0xff000000:0xfff5f5f5});
+      }
       const measured = await Promise.all(sources.map(source => {
         const request = textLayout.layout(source); requests.push(request);
         return request.result.then(result => {
@@ -211,17 +214,39 @@ function InformationError(props:{width:number;height:number;message:string;activ
           return {widthPx:source.widthPx,heightPx:result.lines.at(-1)!.bottomPx-origin, rows};
         });
       }));
-      if (current) setLayout({message:measured[0]!, button:measured[1]!});
+      if (current) setLayout({message:measured[0]!, button:measured[1]!,network:measured[2]!});
     })().catch(error => { if (current) logConsole.warn('Information error text layout', String(error)); });
   });
   const messageHeightPx = () => layout()?.message.heightPx ?? Math.round(34 * pixelScale);
   const labelHeightPx = () => layout()?.button.heightPx ?? Math.round(17 * pixelScale);
   const renderedLabelWidthPx = () => layout()?.button.widthPx ?? labelWidthPx();
-  const buttonHeightPx = () => Math.max(Math.round(40 * pixelScale), labelHeightPx() + Math.round(16 * pixelScale));
+  const networkLabelHeightPx = () => layout()?.network.heightPx ?? Math.round(17 * pixelScale);
+  const networkLabelWidthPx = () => layout()?.network.widthPx ?? labelWidthPx();
+  const buttonHeightPx = () => Math.max(Math.round(40 * pixelScale), Math.max(labelHeightPx(),networkLabelHeightPx()) + Math.round(16 * pixelScale));
   const touchHeightPx = () => Math.max(Math.round(48 * pixelScale), buttonHeightPx());
-  const topPx = () => Math.max(Math.round(24 * pixelScale), Math.round((props.height * pixelScale - messageHeightPx() - Math.round(16 * pixelScale) - touchHeightPx()) / 2));
-  const text = (value:() => ErrorTextLayout|undefined, fallback:string) => <View accessibilityHidden class="absolute inset-0">
-    <Show when={value()} fallback={<Text class="absolute inset-0 text-sm leading-[17] text-center text-[#f5f5f5]">{fallback}</Text>}>{measured =>
+  const gapPx = () => Math.round(6 * pixelScale);
+  const topPx = () => {
+    const height=props.height*pixelScale,radius=Math.min(props.width,props.height)*pixelScale/2-2*pixelScale;
+    const safeTop=Math.ceil(height/2-Math.sqrt(Math.max(0,radius*radius-(availablePx()/2)**2)));
+    const block=messageHeightPx()+Math.round(16*pixelScale)+2*touchHeightPx()+gapPx();
+    return Math.max(Math.round(24*pixelScale),safeTop,Math.round((height-block)/2));
+  };
+  const primaryTopPx = () => topPx()+messageHeightPx()+Math.round(16*pixelScale);
+  const secondaryTopPx = () => primaryTopPx()+touchHeightPx()+gapPx();
+  const secondaryWidthPx = () => {
+    const center=props.height*pixelScale/2,radius=Math.min(props.width,props.height)*pixelScale/2-2*pixelScale;
+    const edge=Math.max(Math.abs(secondaryTopPx()-center),Math.abs(secondaryTopPx()+touchHeightPx()-center));
+    return Math.max(1,Math.floor(Math.min(148*pixelScale,2*Math.sqrt(Math.max(0,radius*radius-edge*edge)))));
+  };
+  const [opening,setOpening]=createSignal(false);
+  const checkNetwork=async()=>{
+    if(opening()||props.active?.()===false)return;setOpening(true);
+    try{await systemSettings.openWifi();}
+    catch{await hostOperation<void>('ui.toast',{message:'无法打开网络设置，请从系统设置中打开 Wi-Fi'}).result.catch(()=>{});}
+    finally{setOpening(false);}
+  };
+  const text = (value:() => ErrorTextLayout|undefined, fallback:string,color='#f5f5f5') => <View accessibilityHidden class="absolute inset-0">
+    <Show when={value()} fallback={<Text class="absolute inset-0 text-sm leading-[17] text-center" style={{textColor:color}}>{fallback}</Text>}>{measured =>
       <For each={measured().rows}>{row => <View class="absolute left-[0] right-[0]" style={{insetT:row.topPx/pixelScale,height:row.options.heightPx/pixelScale}}>
         <SystemTextLine options={row.options} pixelScale={pixelScale} />
       </View>}</For>
@@ -229,9 +254,13 @@ function InformationError(props:{width:number;height:number;message:string;activ
   </View>;
   return <View class="absolute inset-0 bg-black" accessibilityHidden={!(props.active?.() ?? true)}>
     <View accessibilityLabel={props.message} class="absolute" style={{insetL:24,insetT:topPx()/pixelScale,width:availablePx()/pixelScale,height:messageHeightPx()/pixelScale}}>{text(() => layout()?.message, props.message)}</View>
-    <View focusable={props.active?.() ?? true} accessibilityRole="button" accessibilityLabel="重新加载" onPress={() => { if (props.active?.() ?? true) props.onRetry(); }} class="absolute active:scale-96" style={{insetL:24,insetT:(topPx()+messageHeightPx()+Math.round(16*pixelScale))/pixelScale,width:availablePx()/pixelScale,height:touchHeightPx()/pixelScale}}>
+    <View focusable={(props.active?.() ?? true)&&!opening()} accessibilityRole="button" accessibilityLabel="检查网络" accessibilityState={{disabled:props.active?.()===false||opening()}} onPress={()=>void checkNetwork()} class="absolute active:scale-96" style={{insetL:24,insetT:primaryTopPx()/pixelScale,width:availablePx()/pixelScale,height:touchHeightPx()/pixelScale}}>
+      <View accessibilityHidden class="absolute left-[0] right-[0] rounded-[47] bg-[#ff6026]" style={{insetT:Math.round((touchHeightPx()-buttonHeightPx())/2)/pixelScale,height:buttonHeightPx()/pixelScale}} />
+      <View accessibilityHidden class="absolute" style={{insetL:Math.round((availablePx()-networkLabelWidthPx())/2)/pixelScale,insetT:Math.round((touchHeightPx()-networkLabelHeightPx())/2)/pixelScale,width:networkLabelWidthPx()/pixelScale,height:networkLabelHeightPx()/pixelScale}}>{text(() => layout()?.network, '检查网络','#000000')}</View>
+    </View>
+    <View focusable={props.active?.() ?? true} accessibilityRole="button" accessibilityLabel="重新加载" onPress={() => { if (props.active?.() ?? true) props.onRetry(); }} class="absolute active:scale-96" style={{insetL:(props.width*pixelScale-secondaryWidthPx())/2/pixelScale,insetT:secondaryTopPx()/pixelScale,width:secondaryWidthPx()/pixelScale,height:touchHeightPx()/pixelScale}}>
       <View accessibilityHidden class="absolute left-[0] right-[0] rounded-[47] bg-[#23272a]" style={{insetT:Math.round((touchHeightPx()-buttonHeightPx())/2)/pixelScale,height:buttonHeightPx()/pixelScale}} />
-      <View accessibilityHidden class="absolute" style={{insetL:Math.round((availablePx()-renderedLabelWidthPx())/2)/pixelScale,insetT:Math.round((touchHeightPx()-labelHeightPx())/2)/pixelScale,width:renderedLabelWidthPx()/pixelScale,height:labelHeightPx()/pixelScale}}>{text(() => layout()?.button, '重新加载')}</View>
+      <View accessibilityHidden class="absolute" style={{insetL:Math.round((secondaryWidthPx()-renderedLabelWidthPx())/2)/pixelScale,insetT:Math.round((touchHeightPx()-labelHeightPx())/2)/pixelScale,width:renderedLabelWidthPx()/pixelScale,height:labelHeightPx()/pixelScale}}>{text(() => layout()?.button, '重新加载')}</View>
     </View>
   </View>;
 }

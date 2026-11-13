@@ -58,11 +58,17 @@ const microtasks = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 const nativeRequests: TextLayoutOptions[] = [];
 const nativeMeasurements: Array<{text: string; fontSizePx: number; fontAsset?: string; fontWeight?: number; textMotion?: string}> = [];
 const retryIntrinsicWidthPx = 150.25;
-mock.module("@podjs/framework/services", () => ({textLayout: {
+const networkIntrinsicWidthPx = 146.75;
+let settingsCalls=0,settingsPending:Promise<void>|undefined,settingsFailure:Error|undefined;
+const hostRequests:Array<{method:string;args:Record<string,unknown>}>=[];
+mock.module("@podjs/framework/services", () => ({
+ systemSettings:{openWifi:()=>{settingsCalls++;return settingsPending??(settingsFailure?Promise.reject(settingsFailure):Promise.resolve());}},
+ hostOperation:(method:string,args:Record<string,unknown>)=>{hostRequests.push({method,args});return {result:Promise.resolve(),cancel(){}};},
+ textLayout: {
   environment: async () => ({density: 1.75, fontScale: 1.3, spValuesPx: []}),
   measure: (options: (typeof nativeMeasurements)[number]) => {
     nativeMeasurements.push({...options});
-    return {result: Promise.resolve({widthPx: retryIntrinsicWidthPx}), cancel() {}};
+    return {result: Promise.resolve({widthPx: options.text==="检查网络"?networkIntrinsicWidthPx:retryIntrinsicWidthPx}), cancel() {}};
   },
   layout: (options: TextLayoutOptions) => {
     nativeRequests.push({...options});
@@ -112,7 +118,7 @@ const {InformationScreen} = await import("../src/ui/InformationScreens.tsx");
 const disposers: Array<() => void> = [];
 afterEach(() => {
   while (disposers.length) disposers.pop()!();
-  documents.length = 0; requests.length = 0; nativeRequests.length = 0; nativeMeasurements.length = 0;
+  documents.length = 0; requests.length = 0; nativeRequests.length = 0; nativeMeasurements.length = 0; settingsCalls=0;settingsPending=undefined;settingsFailure=undefined;hostRequests.length=0;
 });
 const settle = async () => {await microtasks();frame();await microtasks();};
 const state = (content:string|null,error:string|null,scrollOffset=0,isLoading=content===null&&error===null,reloadKey=0,listAnchor:InformationListAnchor|null=content===null?null:{index:Math.floor(scrollOffset/100),offsetPx:scrollOffset%100}):InformationSnapshot => ({content,error,scrollOffset,isLoading,reloadKey,listAnchor});
@@ -183,26 +189,32 @@ test("failure uses native typography and centered natural geometry before retry 
   const labelRequest = nativeRequests.find(options => options.text === "重新加载")!;
   const nativeFontSize = Math.fround(37.6); // Compose 14sp at fixed Info density 2 and fontScale 1.3.
   expect(messageRequest).toMatchObject({widthPx: 370, align: "center", fontWeight: 400, fontSizePx: nativeFontSize});
-  expect(nativeMeasurements).toEqual([{text: "重新加载", fontWeight: 400, fontSizePx: nativeFontSize, textMotion: "static"}]);
+  expect(nativeMeasurements).toEqual(["重新加载","检查网络"].map(text=>({text,fontWeight:400,fontSizePx:nativeFontSize,textMotion:"static"})));
   expect(labelRequest).toMatchObject({widthPx: 151, align: "left", fontSizePx: nativeFontSize});
   const message = nodes.find(node => node.props.accessibilityLabel === failure)!;
   const control = nodes.find(node => node.props.accessibilityRole === "button" && node.props.accessibilityLabel === "重新加载")!;
-  // Native host replies: two message lines total 69px, one label line 35px.
-  // Coordinates are logical units; multiplying by renderScale 2 gives the
-  // independent 466px reference column: top135, gap32, touchTop236, touch96.
-  expect(message.props.style).toEqual({insetL: 24, insetT: 67.5, width: 185, height: 34.5});
-  expect(control.props.style).toEqual({insetL: 24, insetT: 118, width: 185, height: 48});
+  // Native text metrics remain unchanged. The 466px round page now has a
+  // primary network action and a narrower retry control below it.
+  expect(message.props.style).toEqual({insetL:24,insetT:49.5,width:185,height:34.5});
+  expect(control.props.style).toEqual({insetL:42.5,insetT:154,width:148,height:48});
+  const network=nodes.find(node=>node.props.accessibilityRole==='button'&&node.props.accessibilityLabel==='检查网络')!;
+  expect(network.props.style).toEqual({insetL:24,insetT:100,width:185,height:48});
+  for(const item of [message,control,network]){
+    const box=item.props.style as {insetL:number;insetT:number;width:number;height:number};
+    for(const x of [box.insetL,box.insetL+box.width])for(const y of [box.insetT,box.insetT+box.height])
+      expect(Math.hypot(x-116.5,y-116.5)).toBeLessThanOrEqual(114.5);
+  }
   const controlNodes = runWithOwner(mounted.owner, () => visit(control))!;
   const buttonBackground = controlNodes.find(node => String(node.props.class).includes("bg-[#23272a]"))!;
   expect(buttonBackground.props.style).toEqual({insetT: 4, height: 40});
   const labelBox = controlNodes.find(node => node.props.style?.width === 75.5)!;
-  expect(labelBox.props.style).toEqual({insetL: 55, insetT: 15.5, width: 75.5, height: 17.5});
+  expect(labelBox.props.style).toEqual({insetL:36.5,insetT:15.5,width:75.5,height:17.5});
   const lines = nodes.filter(node => node.kind === "SystemTextLine");
-  expect(lines).toHaveLength(3);
-  expect(lines.map(node => (node.props.options as SystemTextLineOptions).text)).toEqual([failure.slice(0, 16), failure.slice(16), "重新加载"]);
-  expect(lines.map(node => (node.props.options as SystemTextLineOptions).heightPx)).toEqual([35, 34, 35]);
-  expect(lines.map(node => (node.props.options as SystemTextLineOptions).baselinePx)).toEqual([28, 26, 28]);
-  expect(lines.map(node => (node.props.options as SystemTextLineOptions).paragraph!.lineIndex)).toEqual([0, 1, 0]);
+  expect(lines).toHaveLength(4);
+  expect(lines.map(node => (node.props.options as SystemTextLineOptions).text)).toEqual([failure.slice(0, 16), failure.slice(16), "检查网络", "重新加载"]);
+  expect(lines.map(node => (node.props.options as SystemTextLineOptions).heightPx)).toEqual([35, 34, 35, 35]);
+  expect(lines.map(node => (node.props.options as SystemTextLineOptions).baselinePx)).toEqual([28, 26, 28, 28]);
+  expect(lines.map(node => (node.props.options as SystemTextLineOptions).paragraph!.lineIndex)).toEqual([0, 1, 0, 0]);
   expect(lines.every(node => node.props.pixelScale === 2)).toBe(true);
   expect(mounted.snapshot()).toEqual(state(null,failure));
   retry(mounted);
@@ -216,6 +228,28 @@ test("failure uses native typography and centered natural geometry before retry 
   const document = renderedDocument(mounted);
   expect(document.props.content).toBe("重试成功正文");
   expect(document.props.title).toBe("隐私政策");
+});
+
+test('checking network opens settings once without retrying or changing the error snapshot',async()=>{
+  const mounted=mount();requests[0]!.reject(Error('offline fixture'));await settle();await settle();
+  let release!:()=>void;settingsPending=new Promise<void>(resolve=>{release=resolve;});
+  const before=mounted.snapshot();
+  const control=mounted.nodes().find(node=>node.props.accessibilityLabel==='检查网络')!;
+  (control.props.onPress as ()=>void)();(control.props.onPress as ()=>void)();
+  expect(settingsCalls).toBe(1);expect(control.props.focusable).toBe(false);
+  expect(requests).toHaveLength(1);expect(mounted.snapshot()).toEqual(before);
+  release();await settle();expect(control.props.focusable).toBe(true);
+  expect(nativeRequests.find(options=>options.text==='检查网络')).toMatchObject({widthPx:147,colorArgb:0xff000000});
+});
+
+test('settings failure gives feedback and leaves reload available',async()=>{
+  const mounted=mount();requests[0]!.reject(Error('offline fixture'));await settle();await settle();
+  settingsFailure=Error('settings unavailable');
+  const control=mounted.nodes().find(node=>node.props.accessibilityLabel==='检查网络')!;
+  (control.props.onPress as ()=>void)();await settle();
+  expect(hostRequests).toEqual([{method:'ui.toast',args:{message:'无法打开网络设置，请从系统设置中打开 Wi-Fi'}}]);
+  expect(mounted.snapshot().error).toBe(failure);expect(requests).toHaveLength(1);
+  retry(mounted);await settle();expect(requests).toHaveLength(2);
 });
 
 test("inactive status stays hidden and ignores retry until its owner resumes", async () => {
@@ -232,6 +266,8 @@ test("inactive status stays hidden and ignores retry until its owner resumes", a
   const control = failureNodes.find(node => node.props.accessibilityRole === "button")!;
   expect(control.props.focusable).toBe(false);
   expect(failureNodes.find(node => node.kind === "View" && String(node.props.class).includes("bg-black"))!.props.accessibilityHidden).toBe(true);
+  (failureNodes.find(node=>node.props.accessibilityLabel==='检查网络')!.props.onPress as ()=>void)();
+  expect(settingsCalls).toBe(0);
   retry(mounted);
   await settle();
   expect(requests).toHaveLength(1);
