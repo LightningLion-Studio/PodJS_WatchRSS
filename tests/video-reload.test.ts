@@ -52,3 +52,9 @@ test('strict Bili reload does not join an abandoned resolution still pending at 
  const a=retry({manual:true,freshOnly:true}),b=retry({manual:true,freshOnly:true});const count=releases.length;
  releases.forEach((yes,index)=>yes({...initial,durl:[{url:`fresh-${index}`,backupUrl:[]}]}));await Promise.all([a,b]);expect(count).toBe(2);
 });
+test('wake bounces before the resolver starts do not consume request budget',()=>{
+ const p=new VideoReloadPolicy();p.select({title:'fixture'});
+ for(let i=0;i<5;i++){const t=p.begin(false)!;expect(t.waitMs).toBe(350);p.cancel();}
+ for(let i=0;i<2;i++){const t=p.begin(false)!;p.markRequest(t);p.cancel();}
+ expect(p.begin(false)).toBeUndefined();
+});

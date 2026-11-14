@@ -233,7 +233,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(props.onReload||Number.isFinite(source.recoveryDeadlineMs)&&!recoveredSources.has(props.source))recoveryDeadline.arm(props.onReload?20_000:source.recoveryDeadlineMs!-Date.now(),delay,
       ()=>!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner&&!state()?.hasRenderedFirstFrame,
       ()=>{generation++;prepareOp?.cancel();pollTimer?.cancel();autoAdvance.cancel();void (usingSessions()?sessionPool!.releaseAll():media.stop()).catch(()=>{});failed({code:'timeout'});});
-    if(handoff())setHandoff(false);void watchFirstFrame(ownGeneration);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!saveablePlayer||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(saveablePlayer)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);void warmForward();captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
+    if(handoff())setHandoff(false);void watchFirstFrame(ownGeneration);void op.result.then(async next=>{if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;let prepared:ExtendedVideoState=next;if((source.resumePositionMs??0)>0){prepared=await media.seek(source.resumePositionMs!) as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;}if(!saveablePlayer||!startLimitConsumed()){prepared=await enforceStartVolume(prepared,source.startVolumeLimit);if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(saveablePlayer)setStartLimitConsumed(true);}if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;if(autoplayAllowed&&!networkPrompt()&&!prepareAutoplay)prepared=await media.play() as ExtendedVideoState;if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;appLogger.i('VideoPlayer',`ready durationMs=${prepared.durationMs}`);resumeAfterLifecycle=false;setReady(true);if(prepared.hasRenderedFirstFrame||prepared.hasCachedFirstFrame){setFirstFrame(true);}setState(prepared);void warmForward();captureFrame();virtualVolume=prepared.volume;observedVolume=prepared.volume;checkpointPosition=prepared.positionMs;checkpointDuration=prepared.durationMs;emitCheckpoint("ready",prepared.positionMs,prepared.durationMs);await requestTransform();if(disposed||ownGeneration!==generation||videoSessionOwner!==sessionOwner)return;void poll(ownGeneration);}).catch(value=>{if(!disposed&&props.active&&ownGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions()&&!douyinNetworkFailure(value))void degradeSessions(value,'prepare');else{failed(value,false,'prepare');recoverPlaybackFailure(value);}}});
   };
   const reload=async(manual:boolean,cause:unknown={code:'source_expired'})=>{
     if(disposed||!props.active||lifecycle()!=='active')return;
@@ -253,6 +253,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       if(!current())return;
       if(ticket.waitMs){reloadWait=delay(ticket.waitMs);await reloadWait.result;reloadWait=undefined;}
       if(!current())return;
+      reloadPolicy.markRequest(ticket);
       resolutionTimeout=delay(20_000);reloadTimeout=resolutionTimeout;
       await Promise.race([Promise.resolve(props.onReload?.(position,current)),resolutionTimeout.result.then(()=>{throw Object.assign(new Error('Video resolution timed out'),{code:'timeout'});})]);
       resolutionTimeout.cancel();if(reloadTimeout===resolutionTimeout)reloadTimeout=undefined;
@@ -308,7 +309,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
           reloadResume=checkpointPosition;
           if(!ready()){freshPrepare=true;prepare(true);return;}
           setState(value);
-          if(resumeAfterLifecycle){resumeAfterLifecycle=false;autoplayAllowed=true;void media.play().then(next=>{if(!disposed&&own===generation){setState(next);void poll(own);}}).catch(value=>failed(value,false,'play'));}
+          if(resumeAfterLifecycle){autoplayAllowed=true;void media.play().then(next=>{if(!disposed&&own===generation){resumeAfterLifecycle=false;setState(next);void poll(own);}}).catch(value=>failed(value,false,'play'));}
           else void poll(own);
         }).catch(value=>{if(!disposed&&own===generation)void reload(false,value);});
         return;
@@ -324,7 +325,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(lifecycleSuspended)return;lifecycleSuspended=true;
     if((!usingSessions()&&props.source.backgroundPlayback)||videoSessionOwner!==sessionOwner)return;
     if(props.onReload){cancelReload();reloadResume=checkpointPosition;}
-    captureFrame();resumeAfterLifecycle=autoplayAllowed&&(!ready()||['playing','buffering','preparing'].includes(state()?.state??''));autoplayAllowed=false;autoAdvance.cancel();
+    captureFrame();resumeAfterLifecycle=resumeAutoplay??(resumeAfterLifecycle||autoplayAllowed&&(!ready()||['playing','buffering','preparing'].includes(state()?.state??'')));autoplayAllowed=false;autoAdvance.cancel();
     // A lifecycle release invalidates control replies just like route exit.
     generation++;prepareOp?.cancel();pollTimer?.cancel();recoveryDeadline.cancel();
     if(usingSessions()){
@@ -359,7 +360,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const stripOwnsBounds=()=>usingSessions()&&nativeDrag()&&props.active&&props.offset===0&&!handoff();
   const syncBounds = async () => { if(stripOwnsBounds())return; if (updating) { dirty = true; return; } updating = true; const requestGeneration=generation; try { do { dirty = false; if(stripOwnsBounds())break; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'bounds');else failed(value,false,'bounds');} } finally { updating = false; } };
   createEffect(() => { props.offset; props.active; dragOffsetY(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner&&!stripOwnsBounds()) void syncBounds(); });
-  const toggle = async () => { try { const pausing = state()?.state === "playing", next = await (pausing ? media.pause() : media.play()); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) emitCheckpoint("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
+  const toggle = async () => { try { const pausing = state()?.state === "playing",own=generation;if(props.onReload){autoplayAllowed=!pausing;resumeAfterLifecycle=false;}const next = await (pausing ? media.pause() : media.play());if(disposed||own!==generation||videoSessionOwner!==sessionOwner)return;setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) emitCheckpoint("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
   let seekSource: PlaybackSource | undefined, seekGeneration = -1;
   const seekTo = async (delta: number) => {
     const current = state();

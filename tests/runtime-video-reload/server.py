@@ -50,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
             path=f'/video/{token}'+('-rejected' if rejected else '')
             record(event='resolve',scene=scene,count=count,token=token)
             time.sleep(3.5 if scene in ('manual','slow') else 1.5)
-            self.reply(200,json.dumps(dict(url=f'http://{args.emulator_host}:{args.port}{path}',expiresAtMs=int(expiry*1000))).encode());return
+            self.reply(200,json.dumps(dict(url=f'http://{args.emulator_host}:{args.port}{path}',expiresAtMs=int(expiry*1000),ttlMs=max(0,int((expiry-time.time())*1000)))).encode());return
         if url.path.startswith('/video/'):
             token=url.path.split('/')[-1]
             if token.endswith('-rejected') or expires.get(token,0)<time.time():

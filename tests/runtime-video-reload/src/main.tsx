@@ -24,7 +24,7 @@ function App(){
    await http.download(`${base}/resolve?scene=${scene()}`,path,65536).result;
    const result=JSON.parse(utf8ToString(base64ToBytes((await fileChunks.read(path,0)).dataBase64)));
    if(!current())return;
-   const next=freshVideoSource(source()!,{url:result.url,expiresAtMs:result.expiresAtMs},positionMs);
+   const next=freshVideoSource(source()!,{url:result.url,expiresAtMs:Date.now()+result.ttlMs},positionMs);
    console.log(`RELOAD_FIXTURE resolution=${sequence} position=${positionMs} scene=${scene()}`);
    record('resolve',positionMs);setSource(next);
   }finally{void fileChunks.remove(path).catch(()=>{});}

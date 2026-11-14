@@ -66,7 +66,7 @@ function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
  onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
- return {publish,firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
+ return {publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();};
@@ -167,4 +167,17 @@ test('RELOAD an address first published in background prepares when foreground r
  const f=reloadMount({platform:'bili',previewOnly:true,title:'fetching'});await flush();lifecycleTo('background');await flush();
  f.publish({platform:'bili',url:'https://fixture/new',title:'fetching'});await flush();expect(prepares).toHaveLength(0);
  lifecycleTo('active');await flush();expect(prepares).toHaveLength(1);expect(current.state).toBe('playing');
+});
+test('RELOAD wake foreground bounce preserves intent while the first reconnect is cancelled',async()=>{
+ const f=reloadMount({platform:'bili',url:'https://fixture/old?deadline=1700000000',title:'fixture'});await flush();
+ lifecycleTo('inactive');await flush();lifecycleTo('background');await flush();
+ lifecycleTo('active');await flush();lifecycleTo('inactive');await flush();lifecycleTo('background');await flush();
+ lifecycleTo('active');await flush();await tick(800);
+ expect(retries).toBe(1);expect(current.state).toBe('playing');expect(current.positionMs).toBe(321);
+});
+
+test('RELOAD explicit pause stays paused after an expired source reconnects',async()=>{
+ const f=reloadMount({platform:'bili',url:'https://fixture/old?deadline=1700000000',title:'fixture'});await flush();f.toggle();await flush();expect(current.state).toBe('paused');
+ lifecycleTo('inactive');await flush();lifecycleTo('background');await flush();lifecycleTo('active');await flush();await tick(800);
+ expect(retries).toBe(1);expect(current.state).toBe('ready');expect(plays).toBe(1);
 });
