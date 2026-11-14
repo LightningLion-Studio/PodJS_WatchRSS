@@ -17,7 +17,7 @@ type Node={kind:string;props:Record<string,any>};
 const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>({View:(p:Node['props'])=>element('View',p),Text:(p:Node['props'])=>element('Text',p),Image:(p:Node['props'])=>element('Image',p),FocusScope:(p:Node['props'])=>element('FocusScope',p)}));
-const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string)=>text.length*21})}));
+const realHost=await import('@pocketjs/framework/host');mock.module('@pocketjs/framework/host',()=>({...realHost,getOps:()=>({measureText:(text:string,slot:number)=>Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:0.55)*(slot===23?21:slot===24?9:12),0)})}));
 let debugAllowed=false;
 mock.module('../src/debug/host.ts',()=>({debugGate:{get allowed(){return debugAllowed;}}}));
 let gesture:any;
@@ -29,7 +29,7 @@ mock.module('@podjs/framework/services',()=>({...realServices,delay:(ms:number)=
  let fire!:()=>void;const result=new Promise<void>(r=>fire=r),entry={ms,cancelled:false,fire};retryTimers.push(entry);
  return {result,cancel(){entry.cancelled=true;}};
 }}));
-const {ImmersiveEntry}=await import('../src/ui/douyin/ImmersiveEntry.tsx');
+const {ImmersiveEntry,ImmersiveEntryContent}=await import('../src/ui/douyin/ImmersiveEntry.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{retryTimers.length=0;debugAllowed=false;for(const stop of stops.splice(0))stop();});
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props' in value))return [];return [value,...nodes(value.props.children)];}
 // Event-loop turn only drains component promise chains; no elapsed-time assertions.
@@ -67,10 +67,10 @@ for(const [label,dy,vy] of [['short swipe',-35,0],['quick flick',-15,-600]] as c
   const f=mount();await requestReady(f);f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);
   f.swipe(dy,vy);await settle();expect(f.plays).toMatchObject([{item:{awemeId:'fresh'},immersive:true}]);
 });
-test('cover ignores a tiny drag and keeps a large hit area around the 44dp arrow',async()=>{
+test('cover ignores a tiny drag and keeps a round-safe hit area around the 44dp arrow',async()=>{
   const f=mount();await requestReady(f);f.requests[0]!.reply.resolve(response(['fresh']));await settled(f);
   f.swipe(-10,0);await settle();expect(f.plays).toHaveLength(0);
-  expect(f.button()!.props.class).toContain('w-[120]');expect(f.button()!.props.class).toContain('h-[80]');
+  expect(f.button()!.props.style.width).toBeGreaterThanOrEqual(50);expect(f.button()!.props.style.height).toBe(50);
   f.press();await settle();expect(f.plays).toHaveLength(1);
 });
 
@@ -249,7 +249,7 @@ test('DYERR accepted refresh pairs native presentation with its own sequence and
   expect(f.text()).not.toContain('刷新中');const start=events.find(e=>e.code==='refresh_start');expect(start).toBeDefined();
   expect(events.some(e=>e.code==='refresh_done')).toBe(false);
   const deadline=[...retryTimers].reverse().find(t=>t.ms===DOUYIN_NETWORK_TIMEOUT_MS&&!t.cancelled)!;deadline.fire();await settle();
-  expect(f.text()).toContain('内容加载较慢，请稍候');expect(events.filter(e=>e.code==='refresh_done'&&e.presented)).toEqual([{code:'refresh_done',seq:start.seq,presented:true}]);
+  expect(f.text()).toContain('内容加载超时');expect(events.filter(e=>e.code==='refresh_done'&&e.presented)).toEqual([{code:'refresh_done',seq:start.seq,presented:true}]);
   expect(events.some(e=>e.code==='error'&&e.seq===start.seq)).toBe(true);
   expect(events.some(e=>e.code==='first_card')).toBe(false);
   f.setActive(false);expect(events.some(e=>e.code==='refresh_done'&&e.cancel_presented&&e.seq===start.seq)).toBe(true);
@@ -391,6 +391,67 @@ test('DYWAIT-C late large verified stock takes priority while its cached cover i
  await settle();await settle();expect(f.plays[0]?.item.playUrl).toBe('file:///verified/large.mp4');expect(f.requests).toHaveLength(0);
 });
 
+// T-DOUYIN-ENTRY-LAYOUT: regressions against the reported overlapping status rows.
+test('entry slow refresh replaces the subtitle even with cached items',async()=>{
+ const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c'});await cachedReady(f);f.swipe(80);await requestReady(f);
+ [...retryTimers].reverse().find(t=>t.ms===1500&&!t.cancelled)!.fire();await settle();
+ expect(f.text()).toContain('内容加载较慢，请稍候');
+ expect(f.text()).not.toContain('下拉刷新，向上进入短视频流');
+ expect(f.text()).not.toContain('重试');
+});
+test('entry deadline shows a timeout error and retry without loading copy',async()=>{
+ const f=mount();await requestReady(f);
+ retryTimers.find(t=>t.ms===DOUYIN_NETWORK_TIMEOUT_MS&&!t.cancelled)!.fire();await settle();
+ expect(f.text()).toContain('内容加载超时');expect(f.text()).toContain('重试');
+ expect(f.text()).not.toContain('请稍候');expect(f.text()).not.toContain('刷新中...');
+});
+
+for(const size of [466,454,390])for(const shape of ['round','square'])test(`entry layout ${size}px ${shape}: every state has one bounded subtitle and a non-overlapping column`,async()=>{
+ const {rectInsideCircle}=await import('@podjs/framework/watch-ui');
+ const {douyinEntrySubtitle}=await import('../src/ui/douyin/entry-layout.ts');
+ for(const showNotice of [true,false])for(const auth of ['unknown','logged-in','logged-out'] as const)
+ for(const hasItems of [true,false])for(const busy of [true,false])for(const slow of [true,false])
+ for(const error of ['', '内容加载超时','网络请求失败，请稍后重试','需要登录，请重新登录']){
+  const state={auth,hasItems,busy,slow,error};let dispose!:()=>void;
+  const view=createRoot(stop=>{dispose=stop;return ImmersiveEntryContent({...state,width:size/2,height:size/2,showNotice,onInfo(){},onRetry(){},onEnter(){}});});
+  try{
+   const all=nodes(view),subtitle=all.filter(n=>n.kind==='Text'&&n.props.accessibilityLabel===douyinEntrySubtitle(state));
+   expect(subtitle).toHaveLength(1);expect(String(subtitle[0].props.children)).not.toContain('\n');
+   const measure=(text:string)=>Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?12:6.6),0);
+   expect(measure(subtitle[0].props.children)).toBeLessThanOrEqual(subtitle[0].props.style.width+0.001);
+   expect(subtitle[0].props.style.textColor).toBe(error?'#ff5a5f':'#b6b6b6');
+   expect(all.filter(n=>n.props.accessibilityLabel==='重试')).toHaveLength(error?1:0);
+   const viewport=all.find(n=>n.props.style?.scale!==undefined)!.props.style;
+   expect(viewport.originX).toBe(-0.5);expect(viewport.originY).toBe(-0.5);
+   const column=all.filter(n=>n.props.style?.insetT!==undefined&&n.props.style.width>40&&n.props.style.scale===undefined)
+    .map(n=>({x:n.props.style.insetL,y:n.props.style.insetT,width:n.props.style.width,height:n.props.style.height})).sort((a,b)=>a.y-b.y);
+   expect(column).toHaveLength(3+Number(showNotice)+Number(!!error));
+   let bottom=0;for(const rect of column){
+    expect(rect.y).toBeGreaterThanOrEqual(bottom);bottom=rect.y+rect.height;
+    const scaled={x:2*(viewport.insetL+233*(0.5+viewport.originX)+(rect.x-233*(0.5+viewport.originX))*viewport.scale),y:2*(viewport.insetT+233*(0.5+viewport.originY)+(rect.y-233*(0.5+viewport.originY))*viewport.scale),width:2*rect.width*viewport.scale,height:2*rect.height*viewport.scale};
+    expect(rectInsideCircle(scaled,{cx:size/2,cy:size/2,radius:size/2},size/233)).toBe(true);
+   }
+   if(error){const index=column.findIndex(rect=>rect.width===103),retry=column[index];
+    expect(retry.width*size/233).toBeCloseTo(206*size/466);
+    expect((column[index+1].y-retry.y-retry.height)*size/233).toBeGreaterThanOrEqual(12);
+    if(showNotice)expect((retry.y-column[index-1].y-column[index-1].height)*size/233).toBeGreaterThanOrEqual(12);
+   }
+  }finally{dispose();}
+ }
+});
+test('entry subtitle truncates every login-state message with the painted font in one line',async()=>{
+ const {entrySubtitleLine}=await import('../src/ui/douyin/entry-layout.ts');
+ const {loginGate,loginError,loginStatusMessage,DOUYIN_QR_WAIT}=await import('../src/ui/douyin/login-state.ts');
+ const messages=[DOUYIN_QR_WAIT.message,...['checking','unavailable','bluetooth','wifi'].flatMap(status=>[false,true].flatMap(available=>{const gate=loginGate(status as any,available);return gate?[gate.title,gate.detail]:[];})),
+ ...['webview_unavailable','browser_qr_timeout','browser_auth_timeout','browser_script_error','webview_renderer_gone','webview_http_403','webview_http_500','busy','cancelled','other',...Array.from({length:16},(_,i)=>`webview_load_-${i+1}`)].map(code=>loginError({code}).message)];
+ for(const loading of [true,false])for(const verifying of [true,false])for(const cancelled of [true,false])for(const loginPanelVisible of [true,false])
+ for(const qr of [undefined,{type:'qr',kind:'login'},{type:'qr',kind:'secondVerify'}])messages.push(loginStatusMessage({loading,verifying,cancelled,loginPanelVisible,qr} as any));
+ for(const width of [150,170,190])for(const message of messages){
+  const measure=(text:string)=>Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?12:6.6),0),line=entrySubtitleLine(message,width,measure);
+  expect(line).not.toContain('\n');expect(measure(line)).toBeLessThanOrEqual(width);
+  if(measure(message.replace(/\s*\n\s*/g,' '))>width)expect(line.endsWith('…')).toBe(true);
+ }
+});
 
 test('ISSUEA1 restored Douyin parent reconstructs data and permits refresh and explicit playback',async()=>{
  const first=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'old-cursor'});
