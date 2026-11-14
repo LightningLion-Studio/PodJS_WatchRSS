@@ -844,3 +844,18 @@ for(const useSessions of [false,true])test(`DYZOOM rotation sends destination ge
   }
  }finally {Date.now=realNow;video.setTransform=saved;sessionPort.setTransform=sessionSaved;}
 });
+
+for(const useSessions of [false,true])test(`RVDYZOOM settled scaled playback never prepares or transforms on idle guest frames sessions=${useSessions}`,async()=>{
+ sessionsCapable=useSessions;decoderLimit=3;initial='available';prepares=[];sessionCalls.length=0;sessionStates.clear();
+ const saved=video.setTransform,sessionSaved=sessionPort.setTransform;let transforms=0;
+ video.setTransform=async()=>{transforms++;};sessionPort.setTransform=async(id:string)=>{transforms++;return sessionValue(id);};
+ try {
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/review.mp4',title:'local'},width:233,height:200,active:true,offset:0,round:true});});await flush();
+  for(const icon of ['fullscreen','panorama','fullscreen-exit']) {
+   const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src===`../assets/icons/player-${icon}.svg`));expect(button).toBeDefined();button!.props.onPress();await flush();
+   const prepared=prepares.length+sessionCalls.filter(c=>c.method==='prepare').length,before=transforms;
+   for(let frame=0;frame<120;frame++){frames.forEach(fn=>fn());await flush();}
+   expect(transforms).toBe(before);expect(prepares.length+sessionCalls.filter(c=>c.method==='prepare').length).toBe(prepared);
+  }
+ } finally {video.setTransform=saved;sessionPort.setTransform=sessionSaved;}
+});
