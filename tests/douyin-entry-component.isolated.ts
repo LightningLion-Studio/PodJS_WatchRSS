@@ -3,6 +3,8 @@ import {plugin} from 'bun';
 import {createRequire} from 'node:module';
 import {createComponent,createMemo,createRenderEffect,createRoot,createSignal,mergeProps} from 'solid-js';
 import {DouyinClient,DOUYIN_NETWORK_TIMEOUT_MS} from '../src/douyin/client.ts';
+import {captureActivityNavigation} from '../src/navigation/activity-navigation.ts';
+import {startupActivityNavigation} from '../src/navigation/startup-navigation.ts';
 import {FEED_KEY,QUEUE_KEY} from '../src/douyin/feed-store.ts';
 import {utf8Encode} from '../src/cloud/types.ts';
 import type {HttpRequest,HttpResponse} from '../src/cloud/types.ts';
@@ -40,12 +42,12 @@ async function requestReady(f:{requests:unknown[]},count=1){const end=Date.now()
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 const wire=(id:string)=>({aweme_id:id,desc:'video '+id,video:{play_addr:{url_list:['https://video.test/'+id]}}});
 const response=(ids:string[],status=200):HttpResponse=>({status,headers:{},body:utf8Encode(JSON.stringify({aweme_list:ids.map(wire),has_more:0}))});
-function mount(options:{cacheCount?:number;freshCache?:boolean;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean;stock?:boolean;stockGate?:Promise<any[]>;feedGate?:Promise<any>;historySeparate?:boolean}={}){
+function mount(options:{storage?:Map<string,string>;cacheCount?:number;freshCache?:boolean;hasMore?:boolean;cursor?:string|null;logged?:boolean;resolveDetail?:boolean;autoEnter?:boolean;resume?:string;auth403?:Douyin403Options;secureGate?:Promise<void>;logoutBeforeMount?:boolean;stock?:boolean;stockGate?:Promise<any[]>;feedGate?:Promise<any>;historySeparate?:boolean}={}){
   let now=1_000_000;
-  const data=new Map<string,string>();if(options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
+  const data=options.storage??new Map<string,string>();if(!options.storage&&options.logged!==false)data.set('douyin.cookie','sessionid=fixture');
   const items=Array.from({length:options.cacheCount??0},(_,i)=>({awemeId:String(i+1),description:'cached',playUrl:`https://old.test/${i+1}`,authorId:'',authorName:'',createdAtSeconds:0,likeCount:0,commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}));
   const cached={items,anchorAwemeId:items[0]?.awemeId??null,cursor:options.cursor??null,hasMore:options.hasMore??false,savedAtMillis:1,resolved:options.freshCache?Object.fromEntries(items.map(item=>[item.awemeId,now])):{}};
-  data.set(FEED_KEY,JSON.stringify(cached));data.set(QUEUE_KEY,JSON.stringify(cached));
+  if(!options.storage){data.set(FEED_KEY,JSON.stringify(cached));data.set(QUEUE_KEY,JSON.stringify(cached));}
   const requests:{request:HttpRequest;reply:ReturnType<typeof deferred<HttpResponse>>}[]=[],plays:any[]=[],routes:any[]=[];
   const historyStorage=options.historySeparate?{get:async(k:string)=>data.get(k)??null,set:async(k:string,v:string)=>{data.set(k,v);},remove:async(k:string)=>{data.delete(k);}}:undefined;
   const client=new DouyinClient({historyStorage,auth403:options.auth403,secureStorage:{get:async k=>{await options.secureGate;return data.get(k)??null;},set:async(k,v)=>{data.set(k,v);},remove:async k=>{data.delete(k);}},now:()=>now,signer:{sign:()=> 'fixture-signature'},transport:{request:request=>{const reply=deferred<HttpResponse>();requests.push({request,reply});return reply.promise;}}});
@@ -387,4 +389,38 @@ test('DYWAIT-C late large verified stock takes priority while its cached cover i
  await f.client.restorePlaybackQueue();await f.client.restoreFeed();retryTimers.find(t=>t.ms===200&&!t.cancelled)!.fire();await cachedReady(f);expect(f.plays).toHaveLength(0);
  stock.resolve([{awemeId:'large-local',playUrl:'file:///verified/large.mp4',variants:[],description:'offline',authorName:'fixture',durationMs:60000}]);
  await settle();await settle();expect(f.plays[0]?.item.playUrl).toBe('file:///verified/large.mp4');expect(f.requests).toHaveLength(0);
+});
+
+
+test('ISSUEA1 restored Douyin parent reconstructs data and permits refresh and explicit playback',async()=>{
+ const first=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'old-cursor'});
+ await cachedReady(first);first.press();await settle();
+ expect(first.plays).toHaveLength(1);
+ const task=captureActivityNavigation({saved:{},retained:{}},[
+  {page:'home'},{page:'douyin',douyinRoute:{name:'entry'}},
+  {page:'video',videoTarget:{kind:'douyin',awemeId:'1',immersive:true}},
+ ]);
+ first.dispose();
+ const restored=startupActivityNavigation({saved:JSON.parse(JSON.stringify(task.saved)),retained:{}})!;
+ expect(restored.map(entry=>entry.page)).toEqual(['home','douyin']);
+ expect(restored.at(-1)?.douyinRoute).toEqual({name:'entry'});
+ const second=mount({storage:first.data});
+ await cachedReady(second);
+ expect(second.client).not.toBe(first.client);
+ expect(second.plays).toHaveLength(0);
+ expect(second.requests).toHaveLength(0);
+ expect(second.text()).toContain('下拉刷新，向上进入短视频流');
+ second.swipe(80);await requestReady(second);
+ expect(second.requests).toHaveLength(1);
+ const deadline=retryTimers.find(timer=>timer.ms===DOUYIN_NETWORK_TIMEOUT_MS&&!timer.cancelled)!;
+ expect(deadline).toBeDefined();
+ second.requests[0]!.reply.resolve(response(['after-restart']));
+ const end=Date.now()+2000;while(!deadline.cancelled&&Date.now()<end)await settle();
+ expect(deadline.cancelled).toBe(true);
+ expect(second.text()).not.toContain('刷新中...');
+ second.press();await settle();
+ expect(second.plays).toHaveLength(1);
+ expect(second.plays[0].item.awemeId).toBe('after-restart');
+ expect(second.plays[0]).not.toBe(first.plays[0]);
+ expect(first.plays).toHaveLength(1);
 });
