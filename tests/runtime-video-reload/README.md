@@ -2,8 +2,8 @@
 
 Uses the production VideoPlayerScreen with synthetic Bili/RSS-like or immersive
 Douyin-like metadata. It never constructs a platform client. The local resolver
-and CDN are provided by server.py on 127.0.0.1:18764. The emulator reaches the
-host as 10.0.2.2. No reverse tunnel, account or physical device is required.
+and CDN are provided by server.py on 127.0.0.1:18764. Use `adb -s <owned-emulator-serial> reverse tcp:18764 tcp:18764` to keep all
+fixture requests on loopback. No account or physical device is required.
 
 Generate a local H.264 MP4 (90 seconds, 320x240, 15 fps), then run:
 
@@ -19,7 +19,8 @@ Assemble the debug APK using the generated dist directory, app ID
 16 GiB cap and `--no-daemon -Dorg.gradle.workers.max=2`.
 
 Run only on a newly owned 466x466 circular emulator. Every adb command must name
-its verified emulator serial. Stop the owned server and emulator by recorded
+its verified emulator serial. The fixture writes bounded position evidence to its private media path
+`reload/evidence.json`. Stop the owned server and emulator by recorded
 PID after collecting screenshots and logs. Never use adb without a serial.
 
 - `manual`: first three resolved URLs return 403. After two automatic reloads,

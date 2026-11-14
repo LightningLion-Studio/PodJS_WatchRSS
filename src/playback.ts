@@ -78,6 +78,7 @@ export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:(options?:{
   current=policy.enabled?{...next,recoveryDeadlineMs:now()+budget.remaining()}:next;return current;
  };
  return (options:BiliPlaybackRetryOptions={}):Promise<PlaybackSource>=>{
+  if(options.freshOnly)return choose(options);
   if(!pending)pending=choose(options).finally(()=>{pending=undefined;});
   return pending;
  };

@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--media', required=True)
 parser.add_argument('--log', required=True)
 parser.add_argument('--port', type=int, default=18764)
+parser.add_argument('--emulator-host', default='127.0.0.1')
 args = parser.parse_args()
 media = Path(args.media).read_bytes()
 lock = threading.Lock()
@@ -34,6 +35,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url=urlparse(self.path); q=parse_qs(url.query); scene=q.get('scene', ['manual'])[0]
         if url.path == '/control':
+            record(event='control',action=q.get('action', ['expire'])[0])
             if q.get('action') == ['reset']:
                 counts.clear(); expires.clear()
             else:
@@ -48,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
             path=f'/video/{token}'+('-rejected' if rejected else '')
             record(event='resolve',scene=scene,count=count,token=token)
             time.sleep(3.5 if scene in ('manual','slow') else 1.5)
-            self.reply(200,json.dumps(dict(url=f'http://10.0.2.2:{args.port}{path}',expiresAtMs=int(expiry*1000))).encode());return
+            self.reply(200,json.dumps(dict(url=f'http://{args.emulator_host}:{args.port}{path}',expiresAtMs=int(expiry*1000))).encode());return
         if url.path.startswith('/video/'):
             token=url.path.split('/')[-1]
             if token.endswith('-rejected') or expires.get(token,0)<time.time():

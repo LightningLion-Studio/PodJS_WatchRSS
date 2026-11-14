@@ -62,11 +62,11 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
 
 function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean)=>Promise<void>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
- let publish!:(v:any)=>void;
+ let publish!:(v:any)=>void,firstFrames=0;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
- return {publish,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
+ return {publish,firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();};
@@ -144,4 +144,27 @@ test('RELOAD spinner makes a uniform 900ms turn and owns no visible frames after
  fakeNow+=225;frames.filter(fn=>frameNeeds.get(fn)?.()).forEach(fn=>fn());expect(rotation()).toBe(90);
  fakeNow+=675;frames.filter(fn=>frameNeeds.get(fn)?.()).forEach(fn=>fn());expect(rotation()).toBe(0);
  lifecycleTo('background');await flush();expect(frames.filter(fn=>frameNeeds.get(fn)?.())).toHaveLength(0);
+});
+test('RELOAD a background-playing expired stream uses the current native position',async()=>{
+ const f=reloadMount({platform:'bili',url:'https://fixture/old?deadline=1700000000',title:'fixture',backgroundPlayback:true});await flush();
+ lifecycleTo('background');await flush();current={...state('playing'),positionMs:789};
+ lifecycleTo('active');await flush();await tick();
+ expect(retries).toBe(1);expect(prepares.at(-1)?.resumePositionMs).toBe(789);expect(current.positionMs).toBe(789);expect(current.state).toBe('playing');
+});
+
+test('RELOAD a queued frame from a retired legacy generation cannot complete the new source',async()=>{
+ const f=reloadMount();await flush();current={...state('playing'),sourceGeneration:1};await tick();expect(f.firstFrames()).toBe(1);
+ current={...state('error'),errorCode:'restricted',sourceGeneration:1};await tick();heldPrepare=new Promise(()=>{});f.retry();await flush();
+ frameEvents.forEach(fn=>fn({...state('playing'),sourceGeneration:1,hasRenderedFirstFrame:true}));await flush();
+ expect(f.firstFrames()).toBe(1);expect(f.images()).toHaveLength(2);
+});
+test('RELOAD inactive then background retains the original playback intent',async()=>{
+ const f=reloadMount({platform:'bili',url:'https://fixture/old?deadline=1700000000',title:'fixture'});await flush();
+ lifecycleTo('inactive');await flush();lifecycleTo('background');await flush();lifecycleTo('active');await flush();await tick();
+ expect(retries).toBe(1);expect(current.state).toBe('playing');expect(current.positionMs).toBe(321);
+});
+test('RELOAD an address first published in background prepares when foreground returns',async()=>{
+ const f=reloadMount({platform:'bili',previewOnly:true,title:'fetching'});await flush();lifecycleTo('background');await flush();
+ f.publish({platform:'bili',url:'https://fixture/new',title:'fetching'});await flush();expect(prepares).toHaveLength(0);
+ lifecycleTo('active');await flush();expect(prepares).toHaveLength(1);expect(current.state).toBe('playing');
 });

@@ -109,6 +109,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   createEffect(()=>{if(reloadPolicy.select(props.source)){reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;}});
   const cancelReload=()=>{reloadPolicy.cancel();reloadWait?.cancel();reloadWait=undefined;reloadTimeout?.cancel();reloadTimeout=undefined;setReconnecting(false);};
   onCleanup(cancelReload);
+  let retiredNativeGeneration=-1;
   let preparedSource:PlaybackSource|undefined;
   let firstFrameSource:PlaybackSource|undefined;
   createEffect(()=>{if(firstFrame()&&(state()?.hasRenderedFirstFrame||state()?.hasCachedFirstFrame)&&preparedSource===props.source){
@@ -119,6 +120,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   onCleanup(onVideoFirstFrame(value=>{
     if(disposed||videoSessionOwner!==sessionOwner||!props.active||handoff()||props.source.previewOnly||preparedSource!==props.source)return;
     if(usingSessions()?!value.sessionId||!sessionPool!.ownsActiveSession(value.sessionId):!!value.sessionId)return;
+    if(props.onReload&&!usingSessions()&&(value.sourceGeneration??-1)<=retiredNativeGeneration)return;
     if(state()?.sourceGeneration!==undefined&&state()!.sourceGeneration!==value.sourceGeneration)return;
     if(!value.hasRenderedFirstFrame&&!value.hasCachedFirstFrame)return;
     batch(()=>{setFirstFrame(true);setState(previous=>({...previous,...value}));setSpinnerDue(false);});
@@ -223,6 +225,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return;
     }
     if(sessionPool&&sessionCapacity==="checking")return;
+    if(props.onReload&&!usingSessions())retiredNativeGeneration=Math.max(retiredNativeGeneration,state()?.sourceGeneration??-1);
     networkPaused=false;resetViewing(props.source);const previous=state(),sameSource=preparedSource===props.source;const source=props.onReload&&reloadResume!==undefined?{...props.source,resumePositionMs:reloadResume,bypassCache:true}:sameSource&&videoSessionOwner!==sessionOwner&&previous?{...props.source,resumePositionMs:previous.positionMs}:props.source;reloadResume=undefined;if(!sameSource){neighborRevision++;forwardTarget=undefined;backwardTarget=undefined;backwardWarm=undefined;forwardResolved=false;forwardWarm=undefined;}preparedSource=props.source;videoSessionOwner=sessionOwner;autoplayAllowed=props.active&&resumeAutoplay!==false&&(usingSessions()?lifecycle()==="active":source.backgroundPlayback===true||lifecycle()==="active");resumeAutoplay=undefined;props.onError?.("");if(ready()&&previous)emitCheckpoint("pause_or_exit",previous.positionMs,previous.durationMs);const ownGeneration=++generation;prepareStarted=Date.now();recoveryDeadline.cancel();playbackTrace?.event('exit');playbackTrace=takeVideoResolution(source.url??source.videoUrl??'',source.platform??'rss');playbackTrace.event('prepare');failedMove=undefined;prepareOp?.cancel();pollTimer?.cancel();if(!saveablePlayer)setMode("standard");setRotation(0);setDisplayRotation(0);setPan(0);rotationStarted=0;panVelocity=0;crownGuard={lastEventMs:Number.NEGATIVE_INFINITY};virtualVolume=undefined;observedVolume=undefined;setError("");setReady(false);setFirstFrame(false);if(!handoff())frameWait.reset();setSpinnerDue(frameWait.visible());setState(null);lastPlaybackState="";checkpointPosition=source.resumePositionMs??0;checkpointDuration=0;if(source.platform==='douyin'&&source.videoMime==='video/hevc')douyinCodecRuntimePolicy.recordAutoHevcAttempt();const prepareAutoplay=usingSessions()&&autoplayAllowed&&!networkPrompt()&&(source.resumePositionMs??0)===0;const op=media.prepare({...source,...(freshPrepare?{bypassCache:true}:{}),...(pendingBenchmark?{benchmark:pendingBenchmark}:{}),loop:loopMode()==="single",bounds:{...bounds(),visible:props.active,translateY:0},autoplay:prepareAutoplay} as VideoPrepare);freshPrepare=false;prepareOp=op;void Promise.resolve().then(()=>{if(!disposed&&ownGeneration===generation)warmEarly();});
     if(props.onReload||Number.isFinite(source.recoveryDeadlineMs)&&!recoveredSources.has(props.source))recoveryDeadline.arm(props.onReload?20_000:source.recoveryDeadlineMs!-Date.now(),delay,
       ()=>!disposed&&ownGeneration===generation&&videoSessionOwner===sessionOwner&&!state()?.hasRenderedFirstFrame,
@@ -278,18 +281,27 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const source=props.source,own=generation;setError("");
     try { await props.onRetry?.(checkpointPosition);if(!disposed&&props.active&&source===props.source&&own===generation)prepare(true); } catch (value) { if (!disposed) failed(value); } finally { retrying = false; }
   };
-  let resumeAfterLifecycle=false;
+  // Android emits inactive and background for the same suspension.
+  let resumeAfterLifecycle=false,lifecycleSuspended=false;
   const removeLifecycle=onLifecycleChange(next=>{
     if(next==="active"){
-      if(!props.active||videoSessionOwner!==sessionOwner)return;
+      lifecycleSuspended=false;
+      if(!props.active)return;
+      if(props.onReload&&videoSessionOwner!==sessionOwner){videoSessionOwner=sessionOwner;resumeAfterLifecycle=true;}
+      if(videoSessionOwner!==sessionOwner)return;
       if(props.onReload){
         generation++;pollTimer?.cancel();
-        if(videoSourceExpired(props.source)){resumeAutoplay=resumeAfterLifecycle;void reload(false,{code:'source_expired'});return;}
-        if(!ready()&&!error()){resumeAutoplay=resumeAfterLifecycle;reloadResume=checkpointPosition;freshPrepare=true;prepare(true);return;}
+        const desiredResume=resumeAfterLifecycle||['playing','buffering'].includes(state()?.state??'');
+        if(!ready()){
+          resumeAutoplay=desiredResume;
+          if(videoSourceExpired(props.source)){void reload(false,{code:'source_expired'});return;}
+          if(!error()){reloadResume=checkpointPosition;freshPrepare=true;prepare(true);return;}
+        }
         const own=generation;
         void media.state().then(value=>{
           if(disposed||own!==generation||!props.active||videoSessionOwner!==sessionOwner)return;
-          if(value.state==='error'||videoSourceExpired(props.source)){resumeAutoplay=resumeAfterLifecycle;void reload(false,{code:value.errorCode??'source_expired'});return;}
+          if(['playing','paused','ready','buffering'].includes(value.state)&&Number.isFinite(value.positionMs)&&value.durationMs>0){checkpointPosition=value.positionMs;checkpointDuration=value.durationMs;}
+          if(['error','stopped','idle'].includes(value.state)||videoSourceExpired(props.source)){resumeAutoplay=desiredResume;void reload(false,{code:value.errorCode??'source_expired'});return;}
           reloadResume=checkpointPosition;
           if(!ready()){freshPrepare=true;prepare(true);return;}
           setState(value);
@@ -306,6 +318,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       }
       return;
     }
+    if(lifecycleSuspended)return;lifecycleSuspended=true;
     if((!usingSessions()&&props.source.backgroundPlayback)||videoSessionOwner!==sessionOwner)return;
     if(props.onReload){cancelReload();reloadResume=checkpointPosition;}
     captureFrame();resumeAfterLifecycle=autoplayAllowed&&(!ready()||['playing','buffering','preparing'].includes(state()?.state??''));autoplayAllowed=false;autoAdvance.cancel();

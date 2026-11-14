@@ -46,3 +46,9 @@ test('immersive reload force resolves the same ID using detail and rejects a sta
  expect((await reloadDouyinPlayback(client,'selected',()=>true))?.item.playUrl).toBe('new-url');
  expect(await reloadDouyinPlayback(client,'selected',()=>false)).toBeUndefined();expect(calls).toBe(2);
 });
+test('strict Bili reload does not join an abandoned resolution still pending at the retry boundary',async()=>{
+ const initial={acceptQuality:[],acceptDescription:[],durl:[{url:'old',backupUrl:[]}]};const releases:Array<(v:any)=>void>=[];
+ const retry=createBiliPlaybackRetry(initial,()=>new Promise(yes=>releases.push(yes)),'video',{});
+ const a=retry({manual:true,freshOnly:true}),b=retry({manual:true,freshOnly:true});const count=releases.length;
+ releases.forEach((yes,index)=>yes({...initial,durl:[{url:`fresh-${index}`,backupUrl:[]}]}));await Promise.all([a,b]);expect(count).toBe(2);
+});
