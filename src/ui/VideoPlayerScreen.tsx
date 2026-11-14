@@ -413,8 +413,8 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
     finally { seekRunning = false; }
   };
-  const rotate = () => { animationDiagnostics.begin('rotation',mode(),rotation()+90); rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now();setMotion(true);void requestTransform(); };
-  const changeMode = () => { animationDiagnostics.begin('scale',nextScaleMode(mode()),rotation()); panVelocity = 0;setMotion(true); setMode(nextScaleMode(mode())); setPan(0); void requestTransform(); };
+  const rotate = () => { animationDiagnostics.begin('rotation',mode(),rotation()+90); rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now();setMotion(true); void requestTransform(); };
+  const changeMode = () => { animationDiagnostics.begin('scale',nextScaleMode(mode()),rotation()); panVelocity = 0; setMode(nextScaleMode(mode())); setPan(0);setMotion(true); void requestTransform(); };
   const backgroundTap = () => { if (tapTimer) { tapTimer.cancel(); tapTimer = undefined; void toggle(); return; } tapTimer = delay(280); void tapTimer.result.then(() => { tapTimer = undefined; setControlsVisible(value => !value); }).catch(() => {}); };
   let backwardTarget:DouyinPreparedSource|undefined,backwardWarm:Promise<DouyinPreparedSource|undefined>|undefined;
   let degradingSessions=false,neighborRevision=0,forwardResolved=false,forwardWarm:Promise<DouyinPreparedSource|undefined>|undefined,forwardTarget:DouyinPreparedSource|undefined;
