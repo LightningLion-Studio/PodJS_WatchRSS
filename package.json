@@ -6,13 +6,13 @@
   "scripts": {
     "test": "bun test --path-ignore-patterns='artifacts/**'",
     "typecheck": "bun scripts/link-framework.ts --check && tsc --noEmit",
-    "build": "bun ../../PodJS/podjs-watch.wt-review-toast-speed/packages/cli/src/cli.ts build --target=android-watch --project=\"$PWD\"",
-    "package:android": "bun ../../PodJS/podjs-watch.wt-review-toast-speed/packages/cli/src/cli.ts package --target=android-watch --project=\"$PWD\"",
+    "build": "bun ../../PodJS/podjs-watch.wt-dyzoom/packages/cli/src/cli.ts build --target=android-watch --project=\"$PWD\"",
+    "package:android": "bun ../../PodJS/podjs-watch.wt-dyzoom/packages/cli/src/cli.ts package --target=android-watch --project=\"$PWD\"",
     "postinstall": "bun scripts/link-framework.ts"
   },
   "dependencies": {
-    "@pocketjs/framework": "file:../../PodJS/podjs-watch.wt-review-toast-speed/vendor/pocketjs",
-    "@podjs/framework": "file:../../PodJS/podjs-watch.wt-review-toast-speed/packages/framework",
+    "@pocketjs/framework": "file:../../PodJS/podjs-watch.wt-dyzoom/vendor/pocketjs",
+    "@podjs/framework": "file:../../PodJS/podjs-watch.wt-dyzoom/packages/framework",
     "entities": "7.0.1",
     "qrcode-generator": "1.4.4",
     "solid-js": "1.9.9"
@@ -22,7 +22,7 @@
     "@types/bun": "1.3.10"
   },
   "overrides": {
-    "@pocketjs/framework": "file:../../PodJS/podjs-watch.wt-review-toast-speed/vendor/pocketjs"
+    "@pocketjs/framework": "file:../../PodJS/podjs-watch.wt-dyzoom/vendor/pocketjs"
   },
   "imports": {
     "#sync-v2-build": {
