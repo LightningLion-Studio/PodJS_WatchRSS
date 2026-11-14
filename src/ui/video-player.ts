@@ -17,6 +17,11 @@ export function seekHoldStep(elapsedMs: number, direction: -1 | 1): number {
   return Math.min(60_000, Math.round(4_000 * multiplier)) * direction;
 }
 
+/** Discrete steps for one hold tick: 1 at first, growing exactly like seekHoldStep (×1.35 per second). */
+export function holdStepCount(elapsedMs: number): number {
+  return Math.max(1, Math.round(seekHoldStep(elapsedMs, 1) / seekHoldStep(0, 1)));
+}
+
 export function progressWidth(positionMs: number, durationMs: number, width: number): number {
   if (durationMs <= 0 || width <= 0) return 0;
   return width * Math.max(0, Math.min(1, positionMs / durationMs));
