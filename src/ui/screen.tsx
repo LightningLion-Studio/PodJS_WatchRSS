@@ -1,4 +1,5 @@
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
+import {playerGesture} from "./player-gestures.ts";
 import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
 import {backStackSize,usesImmersiveBackObserver} from '../navigation/back-target.ts';
 import {idleHit} from '../diagnostics/idle-counters';
@@ -275,7 +276,9 @@ export default function WatchRSS(props: {
     return true;
   }
   let sideSwipe: NonNullable<NonNullable<Entry["player"]>["sideSwipe"]> | undefined;
-  createGesture({
+  const playerRotation=()=>current().player?.gestureRotation?.()??0;
+  const playerViewport=()=>({x:0,y:0,w:width,h:height});
+  createGesture(playerGesture({
     region: {
       rect: () =>
         stack().length > 1 &&
@@ -311,8 +314,8 @@ export default function WatchRSS(props: {
       if (sideSwipe) { const side = sideSwipe; sideSwipe = undefined; if (side.cancel) side.cancel(); else side.end(0); return; }
       if (motion.phase === "dragging") motion.release(0, Date.now(), true);
     },
-  });
-  createGesture(rightSwipeBack({rect:()=>
+  },playerRotation,playerViewport));
+  createGesture(playerGesture(rightSwipeBack({rect:()=>
     stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && motion.phase!=="settling"
       ? {x:0,y:0,w:width,h:height} : null,
   },{
@@ -320,7 +323,7 @@ export default function WatchRSS(props: {
     move(dx){motion.move(dx);setBackOffset(motion.offset);},
     end(velocity){if(motion.phase==="dragging")motion.release(velocity,Date.now());},
     cancel(){if(motion.phase==="dragging")motion.release(0,Date.now(),true);},
-  }));
+  }),playerRotation,playerViewport));
   onFrame(() => {
     if (motion.phase !== "settling") return;
     const result = motion.tick(Date.now());
