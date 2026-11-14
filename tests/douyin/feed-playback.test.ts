@@ -99,3 +99,16 @@ test('pager publishes authorized feed metadata while its queued durable write is
  expect(f.values.has('douyin.cookie')).toBe(false);expect([...f.values.keys()].filter(key=>key.startsWith('douyin.playback-item.v2.'))).toEqual([]);
  expect(detailCount(f)).toBe(0);
 });
+
+test('RELOAD forced detail resolution does not join an older unforced request',async()=>{
+ const f=fixture();let release!:(v:HttpResponse)=>void;
+ f.replies.push(new Promise<HttpResponse>(yes=>release=yes),response({aweme_detail:{...wire('same'),video:{play_addr:{url_list:['https://fixture.invalid/fresh']}}}}));
+ const normal=f.client.resolvePlayback('same');
+ for(let n=0;n<60;n++)await Promise.resolve();
+ const forced=f.client.resolvePlayback('same',{forceRefresh:true,allowDetail:true,freshRequest:true});
+ for(let n=0;n<60;n++)await Promise.resolve();
+ const count=detailCount(f);release(response({aweme_detail:wire('same')}));
+ const [old,fresh]=await Promise.all([normal,forced]);
+ expect(count).toBe(2);expect(old.ok).toBe(true);expect(fresh).toMatchObject({ok:true,data:{playUrl:'https://fixture.invalid/fresh'}});
+ expect(await f.client.resolvePlayback('same')).toMatchObject({ok:true,data:{playUrl:'https://fixture.invalid/fresh'}});
+});

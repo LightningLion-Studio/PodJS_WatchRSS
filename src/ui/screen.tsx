@@ -1,3 +1,4 @@
+import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playerGesture} from "./player-gestures.ts";
 import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
 import {backStackSize,usesImmersiveBackObserver} from '../navigation/back-target.ts';
@@ -1389,6 +1390,8 @@ export default function WatchRSS(props: {
     douyinOriginal,
     setDouyinOriginal,
     recoverRssDouyinVideo,
+    reloadVideo,
+    videoLoading,
     deleteBuiltin,
   } = createMediaRouteController({
     initialVideoBounds:()=>hasCapability("media.video.sessions")?{x:0,y:0,width,height,visible:false}:undefined,
@@ -1658,6 +1661,7 @@ export default function WatchRSS(props: {
               setError={setError}
               recoverDouyinVideo={recoverDouyinVideo}
               recoverRssDouyinVideo={recoverRssDouyinVideo}
+              reloadVideo={reloadVideo}
               douyinReady={douyinReady}
               douyinActions={douyinActions}
               changeDouyinVideo={changeDouyinVideo}
@@ -1793,6 +1797,7 @@ export default function WatchRSS(props: {
       style={{ width, height }}
     >
       <For each={stack()}>{renderPage}</For>
+      <PlayerLoadingIndicator width={width} height={height} visible={foreground()&&videoLoading()} phase="fetching"/>
       <ReadAloudFloatingBubble
         width={width}
         height={height}

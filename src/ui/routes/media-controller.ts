@@ -1,3 +1,5 @@
+import {reloadDouyinPlayback} from '../../douyin/reload-playback.ts';
+import {freshVideoSource} from '../../media/reload-source.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
 import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
 import {playerFailureFields} from '../../media/player-errors.ts';
@@ -66,6 +68,7 @@ interface MediaControllerDependencies {
 export function createMediaRouteController(
   dependencies: MediaControllerDependencies,
 ) {
+  const [videoLoading,setVideoLoading]=createSignal(false);
   const [biliBackground, setBiliBackground] = createSignal(
     kv.get<boolean>("watchrss.bili.background-playback") ?? false,
   );
@@ -89,6 +92,7 @@ export function createMediaRouteController(
     canOpen:()=>boolean=()=>true,
   ) => {
     const origin = dependencies.current();
+    setVideoLoading(false);
     dependencies.setBusy(false);
     dependencies.setError("");
     benchmark.mark('startup_stage',source.startupSeq??0,{startup_stage:'backdrop_start'});
@@ -109,7 +113,7 @@ export function createMediaRouteController(
   async function openRssVideo(article: Article, rawUrl: string,memory?:RouteEntry["memory"]) {
     if (dependencies.busy()) return;
     const origin = dependencies.current();
-    dependencies.setBusy(true);
+    dependencies.setBusy(true);setVideoLoading(true);
     dependencies.setError("");
     try {
       const bili = biliVideoTarget(rawUrl) ?? biliVideoTarget(article.link);
@@ -179,7 +183,7 @@ export function createMediaRouteController(
         },
       );
     } finally {
-      dependencies.setBusy(false);
+      dependencies.setBusy(false);setVideoLoading(false);
     }
   }
 
@@ -197,7 +201,7 @@ export function createMediaRouteController(
       return;
     }
     const origin = dependencies.current();
-    dependencies.setBusy(true);
+    dependencies.setBusy(true);setVideoLoading(true);
     try {
       const session = await biliClient.getSession();
       const headers: Record<string, string> = {
@@ -258,7 +262,7 @@ export function createMediaRouteController(
         const entry = dependencies.current();
         if (entry.retryPlayback !== retryPlayback) return;
         const next = await resolveRetry(options);
-        if (dependencies.current() !== entry) return;
+        if (dependencies.current() !== entry || options?.isCurrent?.()===false) return;
         if(source.apiSource==='watch')trace.setBiliRoute(next.url?.startsWith('managed-cache/bili-preview/')?undefined:'web');
         trace.event('candidate');registerVideoResolution(next.url??next.videoUrl??'',trace);
         const previous = dependencies.playingSource() ?? entry.playback!;
@@ -270,6 +274,7 @@ export function createMediaRouteController(
           biliApiSource: undefined,
           ...next,
           resumePositionMs: next.url?.startsWith("managed-cache/bili-preview/") ? 0 : positionMs,
+          ...(options?.freshOnly?{bypassCache:true,recoveryDeadlineMs:undefined}:{}),
         };
         entry.playback = updated;
         dependencies.setPlayingSource(updated);
@@ -293,7 +298,7 @@ export function createMediaRouteController(
     } catch (error) {
       dependencies.setError(String(error));
     } finally {
-      dependencies.setBusy(false);
+      dependencies.setBusy(false);setVideoLoading(false);
     }
   };
 
@@ -361,6 +366,7 @@ export function createMediaRouteController(
   let pendingDouyinQueue: DouyinPlaybackQueue | undefined;
   let pendingDouyinRequest: DouyinPlayRequest | undefined;
   const douyinPlay = (input: DouyinPlayRequest) => {
+    setVideoLoading(true);
     const request={...input,item:applyPreferredDouyinPlayback(input.item),playback:applyPreferredDouyinPlayback(input.playback)};
     pendingDouyinRequest=request;
     pendingDouyinQueue = new DouyinPlaybackQueue(douyinClient, {
@@ -465,6 +471,7 @@ export function createMediaRouteController(
           else dependencies.setError(error instanceof Error?error.message:String(error));
         }
       } finally {
+        setVideoLoading(false);
         if(!opened)request?.releaseStartupPreview?.();
         if(initialPool){if(pendingInitialPool?.pool===initialPool)pendingInitialPool=undefined;void initialPool.releaseAll().catch(()=>{});}
         if(pendingDouyinPlayback===pending){pendingDouyinPlayback = undefined;pendingDouyinQueue = undefined;pendingDouyinRequest=undefined;}
@@ -893,6 +900,36 @@ export function createMediaRouteController(
     }
   };
 
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true)=>{
+    const current=()=>dependencies.current()===entry&&stillCurrent();
+    if(!entry.playback||!current())return;
+    if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
+    const previous=entry.playback;
+    let next:PlaybackSource;
+    if(entry.queue){
+      const item=entry.queue.snapshot().item;
+      if(!item)throw new Error('Missing Douyin playback item');
+      const queueGeneration=entry.queue.diagnostics().generation;
+      const selected=()=>current()&&entry.queue?.snapshot().item?.awemeId===item.awemeId&&entry.queue.diagnostics().generation===queueGeneration;
+      await douyinPreload.invalidate(item.awemeId);
+      if(!selected())return;
+      const resolved=await reloadDouyinPlayback(douyinClient,item.awemeId,selected);
+      if(!resolved)return;
+      next=freshVideoSource(previous,{url:resolved.item.playUrl,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
+      entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
+      entry.queue.updateCurrentUrl(resolved.item.playUrl);
+      await entry.queue.persist();
+      if(!selected())return;
+    }else if(entry.rssDouyinRecovery){
+      const resolved=await entry.rssDouyinRecovery.reload(previous,current);
+      if(!resolved||!current())return;
+      next=freshVideoSource(previous,resolved,positionMs);
+    }else next=freshVideoSource(previous,{url:previous.url,videoUrl:previous.videoUrl,audioUrl:previous.audioUrl,headers:previous.headers},positionMs);
+    if(!current())return;
+    entry.playback=next;dependencies.setPlayingSource(next);dependencies.setError('');
+    dependencies.onActivityStateChange?.();
+  };
+
   const recoverRssDouyinVideo = async (entry: RouteEntry, manual = false,positionMs?:number,error?:unknown) => {
     if (!entry.rssDouyinRecovery || !entry.playback) return;
     try {
@@ -949,6 +986,7 @@ export function createMediaRouteController(
     setBiliBackground,
     douyinBackground,
     setDouyinBackground,
+    videoLoading,
     openRssVideo,
     biliNavigate,
     douyinLogin,
@@ -968,6 +1006,7 @@ export function createMediaRouteController(
     douyinOriginal,
     setDouyinOriginal,
     recoverRssDouyinVideo,
+    reloadVideo,
     deleteBuiltin,
   };
 }

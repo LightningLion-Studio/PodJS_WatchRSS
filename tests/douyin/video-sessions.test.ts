@@ -154,3 +154,12 @@ test('session diagnostics follow real slot roles, host states, promotion and own
   expect(port.calls.filter(c=>c.method==="setLoop"&&c.sessionId===id).map(c=>c.loop)).toEqual([true,false]);
   expect(pool.hasStandby("2")).toBe(true);
  });
+
+test('RELOAD release creates a distinct native session identity even when the URL is unchanged',async()=>{
+ const port=fakePort(),pool=new DouyinVideoSessionPool(port as any),item=source('reload');
+ await pool.prepare(item,{...item.source,bounds}).result;
+ const previous=port.calls.find(c=>c.method==='prepare')!.sessionId!;
+ await pool.releaseAll();await pool.prepare(item,{...item.source,bounds,bypassCache:true}).result;
+ const next=port.calls.filter(c=>c.method==='prepare').at(-1)!.sessionId!;
+ expect(next).not.toBe(previous);expect(pool.ownsActiveSession(previous)).toBe(false);expect(pool.ownsActiveSession(next)).toBe(true);
+});

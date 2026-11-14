@@ -29,7 +29,7 @@ export function biliPlaybackSource(source:BiliPlayUrl,title:string,headers:Recor
  const candidate=biliPlaybackCandidates(source,title,headers)[0];
  if(!candidate)throw new Error("未取得播放地址");return candidate;
 }
-export interface BiliPlaybackRetryOptions { manual?: boolean; error?:unknown }
+export interface BiliPlaybackRetryOptions { manual?: boolean; freshOnly?:boolean; isCurrent?:()=>boolean; error?:unknown }
 /** Automatic recovery is bounded; an explicit retry starts a fresh attempt, including unchanged URLs. */
 export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:(options?:{forceWeb?:boolean})=>Promise<BiliPlayUrl>, title:string, headers:Record<string,string>, local?:()=>Promise<PlaybackSource|undefined>, initialSource?:PlaybackSource, policy:{enabled?:boolean;networkEpoch?:()=>number;now?:()=>number}={}) {
  const now=policy.now??Date.now,budget=new PlaybackRecoveryBudget(now);let epoch=policy.networkEpoch?.();
@@ -39,7 +39,13 @@ export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:(options?:{
  const failed=new Set<string>();
  const key=(source:PlaybackSource)=>JSON.stringify([source.url,source.videoUrl,source.audioUrl,source.biliApiSource]);
  let pending:Promise<PlaybackSource>|undefined;
- const choose=async({manual=false,error}:BiliPlaybackRetryOptions):Promise<PlaybackSource>=>{
+ const choose=async({manual=false,error,freshOnly=false}:BiliPlaybackRetryOptions):Promise<PlaybackSource>=>{
+  if(freshOnly){
+   const refreshedSource=await resolve(initial.apiSource==='watch'?{forceWeb:true}:undefined);
+   const next=biliPlaybackCandidates(refreshedSource,title,headers).find(candidate=>mediaSourceExpiry([candidate.url??candidate.videoUrl??'',candidate.audioUrl??''],now())>now());
+   if(!next)throw new Error('未取得新的可播放地址，请稍后重试');
+   return next;
+  }
   let resolutionError:unknown;
   const switchToWeb=initial.apiSource==='watch'&&!watchFallbackAttempted;
   if(policy.enabled){
@@ -72,6 +78,7 @@ export function createBiliPlaybackRetry(initial:BiliPlayUrl, resolve:(options?:{
   current=policy.enabled?{...next,recoveryDeadlineMs:now()+budget.remaining()}:next;return current;
  };
  return (options:BiliPlaybackRetryOptions={}):Promise<PlaybackSource>=>{
+  if(options.freshOnly)return choose(options);
   if(!pending)pending=choose(options).finally(()=>{pending=undefined;});
   return pending;
  };
