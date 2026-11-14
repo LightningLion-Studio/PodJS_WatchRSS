@@ -14,13 +14,13 @@ mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:(props:any)=>props}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{allowed:false}}));
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(set:any)=>{set('online');return()=>{};}}));
 mock.module('../src/ui/route-activity.tsx',()=>({restoredSignal:(_kind:any,_key:any,value:any)=>createSignal(value),booleanState:(v:any)=>typeof v==='boolean'}));
-let panelProps:any;
+let panelProps:any,arrowProps:any;
 mock.module('../src/ui/PlayerDetailPanel.tsx',()=>({
- PlayerDetailArrow:()=>null,
+ PlayerDetailArrow:(props:any)=>{arrowProps=props;return null;},
  PlayerDetailPanel:(props:any)=>{panelProps=props;props.ref?.({crown(){}});return null;},
  createDetailSlide:()=>{const [shown,set]=createSignal(false);return {shown,x:()=>shown()?0:233,begin(){},move(){set(true);},end(){},reset(){set(false);},open(){set(true);},close(){set(false);}};},
 }));
-let phase='active',listener:(phase:string)=>void=()=>{},prepared=0,stateCalls=0,rejectOld!:(e:unknown)=>void,oldPending=false;
+let phase='active',listener:(phase:string)=>void=()=>{},prepared=0;
 mock.module('@podjs/framework/watch',()=>({kv:{get(){},set(){}},hasCapability:()=>true,lifecycle:()=>phase,onLifecycleChange:(fn:any)=>{listener=fn;return()=>{};},normalizedRelativeAxisStep:(delta:number)=>Math.sign(delta)}));
 let audioChanged:(v:any)=>void=()=>{};let actual=.5;const writes:number[]=[],polls:(()=>void)[]=[];
 let sourceGeneration=1,sourcePosition=0,speed=1,speedGate:Promise<void>|undefined;const speeds:number[]=[];
@@ -31,8 +31,8 @@ mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,host
 port.setSpeed=async(v:number)=>{speeds.push(v);const reply={...value(),speed:v};const wait=speedGate;speedGate=undefined;await wait;speed=v;return reply;};
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
-let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;prepared=0;speeds.length=0;polls.length=0;speedGate=undefined;gestures.length=0;});
-function mount(){let handle:any,setSource:any;const tree=createRoot(stop=>{dispose=stop;const [source,set]=createSignal({url:'file:///a.mp4',title:'a',startVolumeLimit:0,digitalCrownVolume:true});setSource=set;return VideoPlayerScreen({get source(){return source();},width:233,height:233,offset:0,round:true,active:true,ref:v=>handle=v});});function visit(v:any):void{if(typeof v==='function'){visit(v());return;}if(Array.isArray(v)){v.forEach(visit);return;}if(v?.props)visit(v.props.children);}const open=()=>{handle.sideSwipe.begin();handle.sideSwipe.move(-100);visit(tree);};return{open,handle,visit:()=>visit(tree),replace:()=>setSource({url:`file:///${prepared+1}.mp4`,title:'new',startVolumeLimit:0,digitalCrownVolume:true})};}
+let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;prepared=0;actual=.5;writes.length=0;speeds.length=0;polls.length=0;speedGate=undefined;gestures.length=0;});
+function mount(width=233,height=233){let handle:any,setSource:any;const tree=createRoot(stop=>{dispose=stop;const [source,set]=createSignal({url:'file:///a.mp4',title:'a',startVolumeLimit:0,digitalCrownVolume:true,volumeGuard:true});setSource=set;return VideoPlayerScreen({get source(){return source();},width,height,offset:0,round:true,active:true,ref:v=>handle=v});});function visit(v:any):void{if(typeof v==='function'){visit(v());return;}if(Array.isArray(v)){v.forEach(visit);return;}if(v?.props)visit(v.props.children);}const open=()=>{handle.sideSwipe.begin();handle.sideSwipe.move(-100);visit(tree);};return{open,handle,visit:()=>visit(tree),replace:()=>setSource({url:`file:///${prepared+1}.mp4`,title:'new',startVolumeLimit:0,digitalCrownVolume:true})};}
 
 test('speed follows successive source replacements with the same native generation',async()=>{
  const f=mount();await flush();f.open();panelProps.onSpeed(1.5);await flush();
@@ -44,4 +44,14 @@ test('late speed reply cannot replace the new source position',async()=>{
  const f=mount();await flush();f.open();let release!:()=>void;speedGate=new Promise<void>(r=>release=r);panelProps.onSpeed(1.5);await flush();
  f.replace();await flush();const position=sourcePosition;release();await flush();f.visit();
  expect(panelProps.positionMs()).toBe(position);expect(speeds.length).toBeGreaterThanOrEqual(2);
+});
+
+test('the detail crown retains the low-volume cap and returns to the player on close',async()=>{
+ actual=0;const f=mount();await flush();f.open();expect(f.handle.canSwipeBack()).toBe(false);
+ for(let i=0;i<60;i++){panelProps.onVolume(1,true);await flush();}
+ expect(Math.max(...writes)).toBeLessThanOrEqual(.21);const count=writes.length;
+ panelProps.slide.close();expect(f.handle.canSwipeBack()).toBe(true);expect(f.handle.onCrown(1)).toBe(true);await flush();expect(writes.length).toBe(count+1);
+});
+test('the entry arrow is centred on scaled round screens',async()=>{
+ const f=mount(466,466);await flush();f.visit();expect(arrowProps.scale).toBe(2);expect(arrowProps.left).toBe(0);expect(arrowProps.top).toBe(0);
 });

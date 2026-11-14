@@ -12,10 +12,10 @@ mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:()=>null}));
 const {PlayerDetailPanel,createDetailSlide}=await import('../src/ui/PlayerDetailPanel.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());expect(frames).toHaveLength(0);expect(gestures).toHaveLength(0);expect(backs.size).toBe(0);Date.now=clock;});
 function nodes(v:any):any[]{if(typeof v==='function')return nodes(v());if(Array.isArray(v))return v.flatMap(nodes);if(!v?.props)return[];return[v,...nodes(v.props.children)];}
-function mount(){Date.now=()=>time;let slide:any,handle:any,tree:any,canSeek=true;const seeks:number[]=[],volumes:any[]=[],speeds:number[]=[];
- createRoot(stop=>{stops.push(stop);slide=createDetailSlide(()=>233);slide.open();time+=300;frames.forEach(f=>f.fn());tree=PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>undefined,cover:()=>undefined,positionMs:()=>1000,durationMs:()=>10000,seekable:()=>canSeek,onSeek:d=>seeks.push(d),volumePercent:()=>20,muted:()=>false,onVolume:(...args)=>volumes.push(args),speed:()=>1,onSpeed:s=>speeds.push(s),ref:h=>handle=h});});
+function mount(description='',supported=true){Date.now=()=>time;let slide:any,handle:any,tree:any,canSeek=true,setSupported!:(value:boolean)=>void;const seeks:number[]=[],volumes:any[]=[],speeds:number[]=[];
+ createRoot(stop=>{stops.push(stop);const [hasSpeed,set]=createSignal(supported);setSupported=set;slide=createDetailSlide(()=>233);slide.open();time+=300;frames.forEach(f=>f.fn());tree=PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>description,cover:()=>undefined,positionMs:()=>1000,durationMs:()=>10000,seekable:()=>canSeek,onSeek:d=>seeks.push(d),volumePercent:()=>20,muted:()=>false,onVolume:(...args)=>volumes.push(args),speed:()=>hasSpeed()?1:undefined,onSpeed:s=>speeds.push(s),ref:h=>handle=h});});
  const find=(name:string)=>nodes(tree).find(n=>n.props.debugName===name);
- return{slide,handle,find,seeks,volumes,speeds,disable:()=>canSeek=false,tick(){time+=300;frames.slice().forEach(f=>f.fn());nodes(tree);},nodes:()=>nodes(tree)};
+ return{slide,handle,find,setSupported,seeks,volumes,speeds,disable:()=>canSeek=false,tick(){time+=300;frames.slice().forEach(f=>f.fn());nodes(tree);},nodes:()=>nodes(tree)};
 }
 test('crown selection returns to paging on deselect and vertical pan',()=>{
  const f=mount();f.handle.crown(15000);f.tick();f.find('PlayerDetail-progress-value').props.onPress();f.handle.crown(4000);expect(f.seeks).toEqual([1000]);
@@ -34,4 +34,20 @@ test('cancelled open stays closed and a new open remains usable',()=>{
 });
 test('panel steppers repeat only until disabled or scope disposal',()=>{
  const f=mount();f.handle.crown(15000);f.tick();const plus=f.find('PlayerDetail-progress-plus'),hold=gestures.find(g=>g.region?.node?.()===plus);hold.onLongPress();frames.slice().forEach(f=>f.fn());expect(f.seeks).toEqual([4000]);f.disable();f.tick();expect(f.seeks).toEqual([4000]);stops.pop()!();expect(frames).toHaveLength(0);
+});
+
+test('all description continuation pages precede the controls',()=>{
+ const description='完整简介内容'.repeat(100)+'最终末尾',f=mount(description);let read='';
+ for(let i=0;i<100;i++){f.handle.crown(15000);f.tick();const page=f.nodes().find(n=>n.props.debugName?.startsWith('PlayerDetailPage-about:'));if(!page)break;read+=nodes(page).filter(n=>n.kind==='Text'&&n.props.children!=='简介').map(n=>n.props.children).join('');}
+ expect(read).toBe(description);expect(f.find('PlayerDetail-progress-value')).toBeDefined();expect(frames.length).toBeLessThanOrEqual(6);
+});
+test('losing speed support returns the crown to an existing page',()=>{
+ const f=mount();for(let i=0;i<3;i++){f.handle.crown(15000);f.tick();}f.find('PlayerDetail-speed-value').props.onPress();f.setSupported(false);f.tick();expect(f.find('PlayerDetail-volume-value')).toBeDefined();f.handle.crown(-15000);f.tick();expect(f.find('PlayerDetail-progress-value')).toBeDefined();
+});
+
+test('disposing a dragged panel cannot reopen its surviving parent slide',()=>{
+ Date.now=()=>time;let slide:any,stopPanel!:()=>void;
+ createRoot(stop=>{stops.push(stop);slide=createDetailSlide(()=>233);});slide.open();time+=300;frames.slice().forEach(f=>f.fn());
+ createRoot(stop=>{stopPanel=stop;PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>undefined,cover:()=>undefined,positionMs:()=>0,durationMs:()=>1000,seekable:()=>true,onSeek(){},volumePercent:()=>20,muted:()=>false,onVolume(){},speed:()=>1,onSpeed(){}});});
+ const dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({dx:100});slide.reset();stopPanel();time+=300;frames.slice().forEach(f=>f.fn());expect(slide.shown()).toBe(false);
 });

@@ -685,7 +685,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const portraitVideo = createMemo(() => { const w = state()?.width ?? props.source.videoWidth ?? 0, h = state()?.height ?? props.source.videoHeight ?? 0; return w > 0 && h > 0 ? h > w : props.source.platform === "douyin"; });
   const detailCover = createMemo(() => props.source.posterUrl ? { url: props.source.posterUrl, bucket: props.source.platform === "bili" ? "bili-preview" as const : undefined, portrait: portraitVideo() } : undefined, undefined, { equals: (a, b) => a?.url === b?.url && a?.portrait === b?.portrait && a?.bucket === b?.bucket });
   const volumePercent = () => systemVolumePercent(state()?.volumeIndex ?? Math.round((state()?.volume??0)*(state()?.volumeMax??1)),state()?.volumeMax??1);
-  const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233) / 2, uiTop = () => (props.height - 233) / 2;
+  const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233 * uiScale()) / 2, uiTop = () => (props.height - 233 * uiScale()) / 2;
   const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
   const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));
   const barWidth = () => Math.max(20, 181 - startWidth() - endWidth() - 11);

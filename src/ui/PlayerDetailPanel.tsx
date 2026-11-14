@@ -108,8 +108,15 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     if (next !== undefined && !aboutStarts().includes(next)) setAboutStarts(starts => [...starts, next]);
   });
 
+  // Capabilities may disappear while a source is being replaced. Keep the
+  // pager on an existing page and return the crown to paging in that case.
+  createEffect(() => {
+    const count = pages().length;
+    if (page() >= count) { setPage(count - 1); setDrag(0); setSettle(); setSelected(); }
+  });
   // Crown: the selected control, otherwise page by page.
   let pageCrown = 0, speedCrown = 0;
+  createEffect(() => { selected(); pageCrown = 0; speedCrown = 0; });
   props.ref?.({ crown(delta) {
     const degrees = delta / PER_DEGREE, control = selected();
     if (control === "progress") { if (props.seekable()) props.onSeek(Math.round(degrees * 250)); return; }
@@ -143,7 +150,7 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   });
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
-  onCleanup(() => { pager.dispose(); dismiss.dispose(); removeBack?.(); });
+  onCleanup(() => { closing = false; pager.dispose(); dismiss.dispose(); removeBack?.(); });
 
 
   const InfoPage = () => <>
