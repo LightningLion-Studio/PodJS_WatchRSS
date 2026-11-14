@@ -49,7 +49,7 @@ export type BiliRoute =
   | { name: "actions"; aid?: Id; bvid?: string; cid?: Id; title?: string; owner?:string; cover?:string }
   | { name: "share"; aid?: Id; bvid?: string; title?: string }
   | { name: "settings" }
-  | { name: "player"; aid?: Id; bvid?: string; cid: Id; source?: BiliPlayUrl; title?: string };
+  | { name: "player"; aid?: Id; bvid?: string; cid: Id; source?: BiliPlayUrl; title?: string; cover?: string; author?: string; description?: string };
 
 export type BiliInput = ModalInput;
 export interface BiliScreenRef { scroller?: Scroller; onRootBack?: () => boolean }
@@ -427,7 +427,7 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       // Reuse a warm C07 source if one exists; otherwise the playback controller resolves remotely
       // and falls back to the cached offline preview (M3). Never start a fresh resolve here.
       const source = await own.warmPlayback()?.catch(() => undefined);
-      if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+      if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title, cover: data?.item.cover, author: data?.item.owner?.name, description: data?.desc });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }
   function share() {
@@ -538,7 +538,7 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
       // Reuse a warm C07 source if one exists; otherwise the playback controller resolves remotely
       // and falls back to the cached offline preview (M3). Never start a fresh resolve here.
       const source = await own.warmPlayback()?.catch(() => undefined);
-      if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title });
+      if (!disposed && controller === own && own.selectedCid() === actual) props.onNavigate({ name: "player", cid: actual, aid: data?.item.aid, bvid: data?.item.bvid, source, title: data?.item.title, cover: data?.item.cover, author: data?.item.owner?.name, description: data?.desc });
     } catch (error) { if (!disposed) fail(props, error); } finally { if (!disposed) setBusy(""); }
   }
   const preset = () => props.preset ?? defaultReaderPreset();

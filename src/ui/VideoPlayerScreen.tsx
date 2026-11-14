@@ -18,7 +18,7 @@ import {appLogger} from '../logs/app-logger.ts';
 import { observeHostInternet } from "../onboarding/network-host.ts";
 import type { InternetStatus } from "../onboarding/state.ts";
 import { douyinPlayerNetwork, douyinSourceNeedsInternet, douyinNetworkFailure } from "./douyin/player-network.ts";
-import { batch, createEffect, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { getOps } from "@pocketjs/framework/host";
@@ -26,9 +26,13 @@ import { hitNode, pressNode } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { hasCapability, lifecycle, onLifecycleChange, normalizedRelativeAxisStep } from "@podjs/framework/watch";
 import { video, onVideoStateChanged, onVideoAudioChanged, onVideoFirstFrame, delay, type HostOperation, type VideoPrepare, type VideoBounds, type VideoState } from "@podjs/framework/services";
-import { formatPlayerTime, systemVolumePercent, guardedCrownVolume, nextScaleMode, playerPanRange, progressWidth, seekHoldStep, type CrownVolumeGuardState, type PlayerScaleMode } from "./video-player.ts";
+import { formatPlayerTime, systemVolumePercent, holdStepCount, guardedCrownVolume, nextScaleMode, playerPanRange, progressWidth, seekHoldStep, type CrownVolumeGuardState, type PlayerScaleMode } from "./video-player.ts";
 import { DouyinVideoSessionPool, douyinPagerDelta, douyinPagerProgress, douyinPagerSettleDuration, douyinPagerSettleProgress, shouldFallbackFromVideoSessions, shouldSettleDouyinPager, shouldUseDouyinVideoSessions, type DouyinPagerDirection, type DouyinPreparedSource } from "./douyin/video-sessions.ts";
 import { RemoteImage } from "./RemoteImage.tsx";
+import { createHoldPress } from "./hold-press.ts";
+import { createDetailSlide, PlayerDetailArrow, PlayerDetailPanel, type PlayerDetailHandle } from "./PlayerDetailPanel.tsx";
+import { VOLUME_ARC, VolumeArcCapsule } from "./VolumeArcCapsule.tsx";
+import { avoidVolumeArc, type RowIcon } from "./volume-arc.ts";
 
 // The host exposes one session, even when navigation retains several screens.
 let videoSessionOwner:symbol|undefined;
@@ -36,23 +40,16 @@ const recoveredSources=new WeakSet<object>();
 
 type ExtendedVideoState = VideoState & { volume?: number; buffered?: boolean; isBuffering?: boolean };
 
-export interface PlaybackSource { preparationError?:unknown; releaseStartupPreview?:()=>void; startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
-export interface VideoPlayerHandle { invalidatePrefetch(id:string):void; previewKind():"actual_frame"|"cover"|undefined; loopMode():VideoLoopMode; availableLoopModes():readonly VideoLoopMode[]; setLoopMode(mode:VideoLoopMode):void; cycleLoopMode():void; onCrown(delta: number): boolean; canSwipeBack(): boolean }
+export interface PlaybackSource { preparationError?:unknown; releaseStartupPreview?:()=>void; startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; /** Detail panel metadata already held by the source; omitted fields are not shown. */ author?: string; description?: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
+export interface VideoPlayerHandle { invalidatePrefetch(id:string):void; previewKind():"actual_frame"|"cover"|undefined; loopMode():VideoLoopMode; availableLoopModes():readonly VideoLoopMode[]; setLoopMode(mode:VideoLoopMode):void; cycleLoopMode():void; onCrown(delta: number): boolean; canSwipeBack(): boolean; /** Right-to-left drag that opens the detail panel; begin() returns false when it cannot open. */ sideSwipe: { begin(): boolean; move(dx: number): void; end(vx: number): void; cancel(): void } }
 
 const LOOP_LABELS: Record<VideoLoopMode, string> = { off: "不循环", single: "单视频循环", next: "自动下一个" };
-function PlayerButton(props: { left: number; top: number; size: number; icon: "fullscreen" | "panorama" | "fullscreen-exit" | "rotate" | "rewind" | "forward" | "play" | "pause" | "loop-off" | "loop-single" | "loop-next"; accessibilityLabel?: string; iconSize: number; enabled?: boolean; onPress: () => void; onHold?: (elapsedMs: number) => void }) {
-  const [holding,setHolding]=createSignal(false);
-  let node: NodeMirror | undefined, holdStart = 0, nextSeek = 0;
-  const gesture = createGesture({ region: { node: () => node }, longPressSeconds: .5,
-    onTap: () => { if (props.enabled !== false) props.onPress(); },
-    onLongPress: () => { if (props.enabled === false || !props.onHold) return; setHolding(true); holdStart = Date.now(); nextSeek = 0; },
-    onUp: () => { setHolding(false); }, onCancel: () => { setHolding(false); }
-  });
-  createEffect(()=>{if(!holding()||!props.onHold)return;onFrame(() => { const elapsed = Date.now() - holdStart; if (elapsed >= nextSeek) { props.onHold(elapsed); nextSeek = elapsed + 200; } });});
-  onCleanup(() => gesture.dispose());
-  return <View ref={value => node = value} onPress={() => { if (props.enabled !== false) props.onPress(); }} focusable={props.enabled !== false} accessibilityLabel={props.accessibilityLabel} accessibilityRole={props.accessibilityLabel ? "button" : undefined} style={{ insetL: props.left, insetT: props.top, width: props.size, height: props.size, opacity: props.enabled === false ? .5 : 1 }} class="absolute items-center justify-center active:scale-96">
+function PlayerButton(props: { hidden?: boolean; left: number; top: number; size: number; icon: "fullscreen" | "panorama" | "fullscreen-exit" | "rotate" | "rewind" | "forward" | "play" | "pause" | "loop-off" | "loop-single" | "loop-next"; accessibilityLabel?: string; iconSize: number; enabled?: boolean; onPress: () => void; onHold?: (elapsedMs: number) => void }) {
+  let node: NodeMirror | undefined;
+  createHoldPress(() => node, { enabled: () => !props.hidden && props.enabled !== false, onPress: () => props.onPress(), onHold: props.onHold && (elapsed => props.onHold?.(elapsed)) });
+  return <Show when={!props.hidden}><View ref={value => node = value} onPress={() => { if (props.enabled !== false) props.onPress(); }} focusable={props.enabled !== false} accessibilityLabel={props.accessibilityLabel} accessibilityRole={props.accessibilityLabel ? "button" : undefined} style={{ insetL: props.left, insetT: props.top, width: props.size, height: props.size, opacity: props.enabled === false ? .5 : 1 }} class="absolute items-center justify-center active:scale-96">
     <Show when={props.icon === "fullscreen"}><Image src="../assets/icons/player-fullscreen.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "panorama"}><Image src="../assets/icons/player-panorama.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "fullscreen-exit"}><Image src="../assets/icons/player-fullscreen-exit.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "rotate"}><Image src="../assets/icons/player-rotate.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "rewind"}><Image src="../assets/icons/player-rewind.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "forward"}><Image src="../assets/icons/player-forward.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "play"}><Image src="../assets/icons/player-play.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "pause"}><Image src="../assets/icons/player-pause.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-off"}><Image src="../assets/icons/player-loop-off.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-single"}><Image src="../assets/icons/player-loop-single.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-next"}><Image src="../assets/icons/player-loop-next.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show>
-  </View>;
+  </View></Show>;
 }
 
 export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; offset: number; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onAdjacentKey?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>Promise<DouyinPreparedSource|undefined>; canSelectTarget?:(direction:"next"|"previous")=>boolean; onSelectTarget?:(direction:"next"|"previous",distance:1|2,prepared?:DouyinPreparedSource)=>void; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
@@ -143,6 +140,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     setVolume:(value:number)=>usingSessions()?sessionPool!.setVolume(value,crownDirection):video.setVolume(value,crownDirection),
     setMuted:(muted:boolean)=>usingSessions()?sessionPool!.setMuted(muted):video.setMuted(muted),
     setLoop:(value:boolean)=>usingSessions()?sessionPool!.setLoop(value):video.setLoop(value),
+    setSpeed:(value:number)=>usingSessions()?sessionPool!.setSpeed(value):video.setSpeed(value),
   };
   onCleanup(onVideoAudioChanged(value=>{
     if(disposed||!props.active||videoSessionOwner!==sessionOwner)return;
@@ -292,7 +290,36 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const syncBounds = async () => { if(stripOwnsBounds())return; if (updating) { dirty = true; return; } updating = true; const requestGeneration=generation; try { do { dirty = false; if(stripOwnsBounds())break; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'bounds');else failed(value,false,'bounds');} } finally { updating = false; } };
   createEffect(() => { props.offset; props.active; dragOffsetY(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner&&!stripOwnsBounds()) void syncBounds(); });
   const toggle = async () => { try { const pausing = state()?.state === "playing", next = await (pausing ? media.pause() : media.play()); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) emitCheckpoint("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
-  const seekTo = async (delta: number) => { const current = state(); if (!current) return; if (!seekRunning) desiredSeek = current.positionMs; desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta)); if (seekRunning) return; seekRunning = true; try { do { const target = desiredSeek, next = await media.seek(target); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (target === desiredSeek) break; } while (!disposed); } catch (value) { failed(value); } finally { seekRunning = false; } };
+  let seekSource: PlaybackSource | undefined, seekGeneration = -1;
+  const seekTo = async (delta: number) => {
+    const current = state();
+    if (!props.active || !current || videoSessionOwner !== sessionOwner) return;
+    if (!seekRunning || seekSource !== props.source || seekGeneration !== generation) {
+      desiredSeek = current.positionMs; seekSource = props.source; seekGeneration = generation;
+    }
+    desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta));
+    if (seekRunning) return;
+    seekRunning = true;
+    let requestSource: PlaybackSource | undefined, requestGeneration = -1;
+    try {
+      do {
+        const source: PlaybackSource | undefined = seekSource;
+        const ownGeneration = seekGeneration, target = desiredSeek;
+        if (disposed || !props.active || source !== props.source || ownGeneration !== generation || videoSessionOwner !== sessionOwner) return;
+        requestSource = source; requestGeneration = ownGeneration;
+        const next = await media.seek(target);
+        if (disposed || !props.active || videoSessionOwner !== sessionOwner) return;
+        if (source !== props.source || ownGeneration !== generation) {
+          if (source !== seekSource || ownGeneration !== seekGeneration) continue;
+          return;
+        }
+        setState(previous => previous ? { ...previous, positionMs: next.positionMs, durationMs: next.durationMs } : previous);
+        checkpointPosition = next.positionMs; checkpointDuration = next.durationMs;
+        if (target === desiredSeek) break;
+      } while (!disposed);
+    } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
+    finally { seekRunning = false; }
+  };
   const rotate = () => { rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now();setMotion(true); };
   const changeMode = () => { panVelocity = 0; setMode(nextScaleMode(mode())); setPan(0); void requestTransform(); };
   const backgroundTap = () => { if (tapTimer) { tapTimer.cancel(); tapTimer = undefined; void toggle(); return; } tapTimer = delay(280); void tapTimer.result.then(() => { tapTimer = undefined; setControlsVisible(value => !value); }).catch(() => {}); };
@@ -622,14 +649,14 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     forwardTarget=undefined;clearDrag();setReady(false);setFirstFrame(false);
     untrack(releaseOwnedPlayback);return;
   }resumeAfterOverlay=autoplayAllowed&&untrack(()=>!ready()||state()?.state==="playing");autoplayAllowed=false;if(usingSessions()){const value=untrack(state);if(value)emitCheckpoint("pause_or_exit",value.positionMs,value.durationMs);preparedSource=undefined;neighborRevision++;dragRevision++;forwardTarget=undefined;clearDrag();setReady(false);void sessionPool!.releaseAll().catch(()=>{});}else if(untrack(ready)&&videoSessionOwner===sessionOwner)void media.pause().catch(()=>{});}else if(videoSessionOwner!==sessionOwner||usingSessions()&&!untrack(ready)){untrack(prepare);}else if(resumeAfterOverlay){resumeAfterOverlay=false;autoplayAllowed=lifecycle()==="active"||props.source.backgroundPlayback===true;if(autoplayAllowed&&untrack(ready))void media.play().then(setState).catch(failed);}});
-  const surfaceGesture = createGesture({ region: { node: () => surface, rect: () => props.active && props.offset === 0 ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
+  const surfaceGesture = createGesture({ region: { node: () => detailShown() ? undefined : surface, rect: () => props.active && props.offset === 0 && !detailShown() ? { x: 0, y: top(), w: props.width, h: props.height } : null }, axis: "y", panSlop: 8,
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else backgroundTap(); },
     onLongPress:()=>{if(props.active && !networkPrompt())props.onActions?.();},
     onDown: () => { panVelocity = 0; }, onPanStart: contact => { panningStart = pan();if(props.source.platform==="douyin")beginDouyinDrag(contact.dy,true); }, onPanMove: contact => { if(props.source.platform==="douyin"){moveDouyinDrag(contact.dy);return;}const r = range(); if(r.axis !== "y" || r.range <= 0) return; setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dy))); void requestTransform(); },
     onPanEnd: contact => { if(props.source.platform==="douyin"){void finishDouyinDrag(contact.vy,!!networkPrompt(),undefined,"network_prompt");return;} if (networkPrompt()) return; if(range().axis === "y") { panVelocity = contact.vy; panFrameAt = Date.now();setMotion(true); } props.onPanStateChange?.(pan(), range().range); },
     onCancel:()=>{if(props.source.platform==="douyin")void finishDouyinDrag(0,true);}
   });
-  const horizontalPanGesture = createGesture({ region: { rect: () => { const r = range(); return props.active && props.source.platform !== "douyin" && r.axis === "x" && r.range > 0 && pan() < r.range - 1 ? { x: 0, y: top(), w: props.width, h: props.height } : null; } }, axis: "x", panSlop: 8,
+  const horizontalPanGesture = createGesture({ region: { rect: () => { const r = range(); return props.active && !detailShown() && props.source.platform !== "douyin" && r.axis === "x" && r.range > 0 && pan() < r.range - 1 ? { x: 0, y: top(), w: props.width, h: props.height } : null; } }, axis: "x", panSlop: 8,
     onDown: () => { panVelocity = 0; }, onPanStart: () => { panningStart = pan(); }, onPanMove: contact => { const r = range(); setPan(Math.max(-r.range, Math.min(r.range, panningStart + contact.dx))); void requestTransform(); }, onPanEnd: contact => { panVelocity = contact.vx; panFrameAt = Date.now();setMotion(true); props.onPanStateChange?.(pan(), range().range); }
   });
   createEffect(()=>{state();props.active;props.offset;error();networkPrompt();const now=Date.now();if(props.source.platform==='douyin'&&props.source.immersive&&props.active&&now-lastBenchmarkHeartbeat>=1000){lastBenchmarkHeartbeat=now;benchmark.begin('player_visible',{...(state()?.volumeIndex!==undefined?{system_index:state()!.volumeIndex,system_max:state()!.volumeMax,system_muted:state()!.muted===true,ringer_mode:state()!.ringerMode??'unknown',silenced:state()!.silenced===true}:{}),...(state()?.appliedVolume!==undefined?{audio_gain_milli:Math.round(state()!.appliedVolume!*1000)}:{}),...(state()?.audioTrackSelected!==undefined?{audio_track:state()!.audioTrackSelected}:{}),state:props.active&&props.offset===0&&lifecycle()==='active'&&!error()&&!networkPrompt()?'present':'absent',visibility_reason:!props.active?'inactive':props.offset!==0?'route_offset':lifecycle()!=='active'?'lifecycle':error()?'player_error':networkPrompt()?'network_prompt':'ready',player_state:closedPlayerState(state()?.state),has_frame:state()?.hasRenderedFirstFrame===true,offset_abs_milli:Math.min(1000000000,Math.round(Math.abs(props.offset)*1000))});} });
@@ -639,11 +666,85 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     setVolumeVisible(true);volumeTimer?.cancel();volumeTimer=delay(900);
     void volumeTimer.result.then(()=>setVolumeVisible(false)).catch(()=>{});
   };
-  const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await media.setVolume(target); observedVolume = next.volume; if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
-  const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; crownDirection=direction>0?1:-1; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; showVolumeOverlay(); void submitVolume(); return true; };
-  props.ref?.({ invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,onCrown: adjustVolume, canSwipeBack: () => { const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; } });
+  const submitVolume = async () => {
+    if (volumeRunning) { volumeDirty = true; return; }
+    volumeRunning = true;
+    let requestSource: PlaybackSource | undefined, requestGeneration = -1;
+    try {
+      do {
+        volumeDirty = false;
+        const source = props.source, ownGeneration = generation, target = virtualVolume ?? .5;
+        requestSource = source; requestGeneration = ownGeneration;
+        const next = await media.setVolume(target);
+        if (disposed || videoSessionOwner !== sessionOwner) return;
+        if (source !== props.source || ownGeneration !== generation) { if (volumeDirty) continue; return; }
+        observedVolume = next.volume;
+        if (target === virtualVolume) setState(previous => previous ? { ...previous, volume: next.volume, volumeMax: next.volumeMax,
+          volumeIndex: next.volumeIndex, muted: next.muted, appliedVolume: next.appliedVolume, ringerMode: next.ringerMode, silenced: next.silenced } : previous);
+        else volumeDirty = true;
+      } while (volumeDirty && !disposed);
+    } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
+    finally { volumeRunning = false; }
+  };
+  const crownVolume = (direction: -1 | 1) => { const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; crownDirection=direction; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; void submitVolume(); };
+  const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; crownVolume(direction); showVolumeOverlay(); return true; };
+  // Detail panel steppers: whole system volume steps, deliberate taps, so no crown guard.
+  const stepVolume = (steps: number) => { if (!props.active || !steps) return; const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; crownDirection = steps > 0 ? 1 : -1; crownGuard = { lastEventMs: Number.NEGATIVE_INFINITY }; virtualVolume = Math.max(0, Math.min(maxSteps, Math.round(current * maxSteps) + steps)) / maxSteps; void submitVolume(); };
+  // Playback speed (hosts that report state.speed). The chosen speed follows page changes
+  // and re-prepares: a state that disagrees is corrected once per source generation.
+  const [speedTarget, setSpeedTarget] = createSignal(1);
+  const speedSupported = () => typeof state()?.speed === "number";
+  let speedRunning = false, speedDirty = false;
+  let speedCorrected: { source: PlaybackSource; generation: number; nativeGeneration?: number; target: number } | undefined;
+  const submitSpeed = async () => {
+    if (speedRunning) { speedDirty = true; return; }
+    speedRunning = true;
+    try {
+      let target: number;
+      do {
+        speedDirty = false;
+        const source = props.source, ownGeneration = generation, nativeGeneration = state()?.sourceGeneration;
+        if (disposed || !props.active || !ready() || !speedSupported() || videoSessionOwner !== sessionOwner) return;
+        target = speedTarget();
+        const next = await media.setSpeed(target);
+        if (disposed || videoSessionOwner !== sessionOwner) return;
+        // A retained session can have the same native generation as its neighbour.
+        // Source identity and the application generation must also still match.
+        if (source !== props.source || ownGeneration !== generation || nativeGeneration !== state()?.sourceGeneration) { speedDirty = true; continue; }
+        // Speed replies can arrive after a seek/poll: never roll those fields back.
+        setState(previous => previous ? { ...previous, speed: next.speed } : previous);
+      } while (speedDirty || target !== speedTarget());
+    } catch (value) { appLogger.w('VideoPlayer', `setSpeed failed ${playerFailureCode(value)}`); }
+    finally { speedRunning = false; }
+  };
+  const changeSpeed = (value: number) => { setSpeedTarget(value); void submitSpeed(); };
+  createEffect(() => {
+    const value = state(), target = speedTarget(), source = props.source;
+    if (typeof value?.speed !== "number" || Math.abs(value.speed - target) < .001 || !ready() || !props.active || videoSessionOwner !== sessionOwner) return;
+    if (speedCorrected?.source === source && speedCorrected.generation === generation && speedCorrected.nativeGeneration === value.sourceGeneration && speedCorrected.target === target) return;
+    speedCorrected = { source, generation, nativeGeneration: value.sourceGeneration, target };
+    untrack(() => void submitSpeed());
+  });
+  // Detail & playback-control panel: opened by the edge arrow or a right-to-left drag.
+  let detail: PlayerDetailHandle | undefined;
+  const slide = createDetailSlide(() => props.width);
+  const detailShown = slide.shown;
+  const canOpenDetail = () => props.active && props.offset === 0 && !error() && !networkPrompt() && !dragAxis() && !handoff();
+  createEffect(() => { if (!props.active) slide.reset(); });
+  props.ref?.({ invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,onCrown: delta => { if (detailShown()) { detail?.crown(delta); return true; } return adjustVolume(delta); }, canSwipeBack: () => { if (detailShown()) return false; if (props.source.platform === "douyin") return true; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; },
+    sideSwipe: { begin: () => { if (!canOpenDetail()) return false; slide.begin(); return true; }, move: dx => slide.move(dx), end: vx => slide.end(vx), cancel: () => slide.cancel() } });
   onCleanup(() => { recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
-  const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233) / 2, uiTop = () => (props.height - 233) / 2;
+  // Round screens: while the crown capsule shows, control rows in the (rotatable) layer move off it or leave it blank.
+  const layerQuarter = () => ((Math.round(displayRotation() / 90) * 90) % 360 + 360) % 360;
+  const avoidRow = (icons: RowIcon[], top: number, height: number) => createMemo(() => props.round && volumeVisible() && controlsVisible() ? avoidVolumeArc(VOLUME_ARC, icons, top, height, -layerQuarter()) : undefined);
+  const topPair = avoidRow([{ left: 79.5, width: 24 }, { left: 129.5, width: 24 }], 16, 24);
+  const topTriple = avoidRow([{ left: 57.5, width: 24 }, { left: 104.5, width: 24 }, { left: 151.5, width: 24 }], 18, 24);
+  const bottomRow = avoidRow([{ left: 57.5, width: 24 }, { left: 102.5, width: 28 }, { left: 151.5, width: 24 }], 194, 28);
+  const dx = (row: () => { dx: number[] } | undefined, i: number) => row()?.dx[i] ?? 0, hidden = (row: () => { hidden: boolean[] } | undefined, i: number) => row()?.hidden[i] ?? false;
+  const portraitVideo = createMemo(() => { const w = state()?.width ?? props.source.videoWidth ?? 0, h = state()?.height ?? props.source.videoHeight ?? 0; return w > 0 && h > 0 ? h > w : props.source.platform === "douyin"; });
+  const detailCover = createMemo(() => props.source.posterUrl ? { url: props.source.posterUrl, bucket: props.source.platform === "bili" ? "bili-preview" as const : undefined, portrait: portraitVideo() } : undefined, undefined, { equals: (a, b) => a?.url === b?.url && a?.portrait === b?.portrait && a?.bucket === b?.bucket });
+  const volumePercent = () => systemVolumePercent(state()?.volumeIndex ?? Math.round((state()?.volume??0)*(state()?.volumeMax??1)),state()?.volumeMax??1);
+  const uiScale = () => Math.min(props.width / 233, props.height / 233), uiLeft = () => (props.width - 233 * uiScale()) / 2, uiTop = () => (props.height - 233 * uiScale()) / 2;
   const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
   const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));
   const barWidth = () => Math.max(20, 181 - startWidth() - endWidth() - 11);
@@ -669,12 +770,12 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     <Show when={props.active && error() && !networkPrompt()}><View class="absolute left-[31] right-[31] top-[72] h-[90] rounded-[24] bg-[#000000cc] items-center"><Text class="absolute left-[8] right-[8] top-[10] text-xs leading-[14] text-[#b6b6b6] text-center">播放失败</Text><View class="absolute left-[4] top-[42] w-[72] h-[32] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96" onPress={() => void retry()} focusable><Text class="text-xs text-white">重试</Text></View><Show when={props.onOpenWeb}><View class="absolute right-[4] top-[42] w-[86] h-[32] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96" onPress={props.onOpenWeb} focusable><Text class="text-xs text-white">浏览器打开</Text></View></Show></View></Show>
     <Show when={!error() && !networkPrompt() && controlsVisible()}><View class="absolute" style={{ insetL: uiLeft(), insetT: uiTop(), width: 233, height: 233, scale: uiScale(), rotate: displayRotation(), originX: 0, originY: 0 }}>
       <View class="absolute left-[0] right-[0] top-[0] h-[62] bg-gradient-to-b from-[#000000cc] to-transparent" />
-      <Show when={loopModes().length > 1} fallback={<><PlayerButton left={69.5} top={6} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={119.5} top={6} size={44} icon="rotate" iconSize={24} onPress={rotate} /></>}>
+      <Show when={loopModes().length > 1} fallback={<><PlayerButton left={69.5 + dx(topPair, 0)} hidden={hidden(topPair, 0)} top={6} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={119.5 + dx(topPair, 1)} hidden={hidden(topPair, 1)} top={6} size={44} icon="rotate" iconSize={24} onPress={rotate} /></>}>
         {/* Three across: icon corners stay inside the 233 circle at this height. */}
-        <PlayerButton left={47.5} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
+        <PlayerButton left={47.5 + dx(topTriple, 0)} hidden={hidden(topTriple, 0)} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5 + dx(topTriple, 1)} hidden={hidden(topTriple, 1)} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5 + dx(topTriple, 2)} hidden={hidden(topTriple, 2)} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
       </Show>
       <Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{ width: progressWidth(state()?.positionMs ?? 0, state()?.durationMs ?? 0, barWidth()) }} /><View class="absolute right-[0] top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text>
-      <PlayerButton left={47.5} top={186} size={44} icon="rewind" iconSize={24} enabled={prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5} top={186} size={44} icon="forward" iconSize={24} enabled={prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
+      <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={props.active && !detailShown() && prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
     <Show when={networkPrompt()}>{prompt => <View class="absolute inset-0 bg-[#000000ee]">
       <View class="absolute" style={{insetL:uiLeft(),insetT:uiTop(),width:233,height:233,scale:uiScale(),originX:0,originY:0}}>
@@ -689,7 +790,16 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       }}><Text class="text-sm text-white">{prompt().action}</Text></View>
       </View>
     </View>}</Show>
-    <Show when={volumeVisible()}><View class="absolute left-[72] right-[72] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-[21px] leading-[26] text-white">{systemVolumePercent(state()?.volumeIndex ?? Math.round((state()?.volume??0)*(state()?.volumeMax??1)),state()?.volumeMax??1)}%</Text></View></Show>
-    <Show when={!volumeVisible() && loopHint()}>{hint => <View class="absolute left-[52] right-[52] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-base leading-[20] text-white">{hint()}</Text></View>}</Show>
+    <Show when={props.active && controlsVisible() && !error() && !networkPrompt() && !detailShown() && !(props.round && volumeVisible())}><PlayerDetailArrow left={uiLeft()} top={uiTop()} scale={uiScale()} onOpen={() => { if (canOpenDetail()) slide.open(); }} /></Show>
+    <Show when={volumeVisible() && props.round && !detailShown()}><VolumeArcCapsule width={props.width} height={props.height} percent={volumePercent()} muted={state()?.muted === true} /></Show>
+    <Show when={volumeVisible() && !props.round}><View class="absolute left-[72] right-[72] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-[21px] leading-[26] text-white">{volumePercent()}%</Text></View></Show>
+    <Show when={(props.round || !volumeVisible()) && loopHint()}>{hint => <View class="absolute left-[52] right-[52] top-[91] h-[50] rounded-[25] bg-[#111111dd] items-center justify-center"><Text class="text-base leading-[20] text-white">{hint()}</Text></View>}</Show>
+    <Show when={detailShown()}><View class="absolute left-[0]" style={{ insetT: -top(), width: props.width, height: screenHeight() }}>
+      <PlayerDetailPanel width={props.width} height={screenHeight()} slide={slide} ref={value => detail = value}
+        title={() => props.source.title} author={() => props.source.author} description={() => props.source.description} cover={detailCover}
+        positionMs={() => state()?.positionMs ?? 0} durationMs={() => state()?.durationMs ?? 0} seekable={prepared} onSeek={delta => void seekTo(delta)}
+        volumePercent={volumePercent} muted={() => state()?.muted === true} onVolume={(steps, crown) => { if (crown) { const direction = normalizedRelativeAxisStep(steps); if (direction && props.active) crownVolume(direction); } else stepVolume(steps); }}
+        speed={() => speedSupported() ? speedTarget() : undefined} onSpeed={changeSpeed} />
+    </View></Show>
   </View>;
 }
