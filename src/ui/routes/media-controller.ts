@@ -31,7 +31,7 @@ import { resolveUrl } from "../../core/parser.ts";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_QR_WAIT } from "../douyin/login-state.ts";
 import { biliClient, biliPreviewCache, douyinClient, douyinPreload, douyinStock } from "../../media-services.ts";
-import { resolveBiliPlaybackWithPreview, createBiliPlaybackRetry } from "../../playback.ts";
+import { resolveBiliPlaybackWithPreview, createBiliPlaybackRetry, douyinDetail } from "../../playback.ts";
 import { biliVideoTarget, douyinVideoTarget } from "../../reader/media.ts";
 import type { SettingsState } from "../../settings/index.ts";
 import type { BiliRoute } from "../bili/index.tsx";
@@ -130,6 +130,9 @@ export function createMediaRouteController(
           ...bili,
           cid,
           title: article.title,
+          cover: article.imageUrl || undefined,
+          author: article.channelTitle || undefined,
+          description: article.excerpt || undefined,
         },memory);
         return;
       }
@@ -161,6 +164,9 @@ export function createMediaRouteController(
           headers,
           webUrl: douyin?.webUrl ?? resolved,
           title: article.title,
+          posterUrl: douyinItem?.coverUrl ?? (article.imageUrl || article.enclosureImageUrl || undefined),
+          author: douyinItem?.authorName || article.channelTitle || undefined,
+          description: (douyinItem?.description || article.excerpt)?.trim() || undefined,
           platform: "rss",
           backgroundPlayback: preferences.continuePlaybackInBackground,
           ...playbackPreferences(),
@@ -274,6 +280,9 @@ export function createMediaRouteController(
           ...playbackPreferences(),
           resumePositionMs: initialSource.url?.startsWith("managed-cache/bili-preview/") ? 0 : resume?.positionMs,
           platform: "bili",
+          posterUrl: route.cover,
+          author: route.author,
+          description: route.description,
           backgroundPlayback: biliBackground(),
           webUrl: route.bvid
             ? `https://www.bilibili.com/video/${route.bvid}`
@@ -339,7 +348,7 @@ export function createMediaRouteController(
       const bundle=await douyinPreload.readySource?.(item);
       if(entryInitial!==own||dependencies.current()!==entry||lifecycle()!=='active'||!bundle?.previewFrame||! /^(?:podjs-media-cache:|file:)/.test(bundle.url))return;
       own.version=douyinClient.playbackAuthorizationVersion();
-      const source:PlaybackSource={startupSeq:seq,immersive:true,awemeId:item.awemeId,posterUrl:item.coverUrl,previewFrame:bundle.previewFrame,url:bundle.url,...douyinDecoderProfile(bundle.item??item),title:item.description,headers:{},...playbackPreferences(),platform:'douyin',webUrl:`https://www.douyin.com/video/${item.awemeId}`,backgroundPlayback:douyinBackground()};
+      const source:PlaybackSource={startupSeq:seq,immersive:true,awemeId:item.awemeId,posterUrl:item.coverUrl,previewFrame:bundle.previewFrame,url:bundle.url,...douyinDecoderProfile(bundle.item??item),...douyinDetail(item),headers:{},...playbackPreferences(),platform:'douyin',webUrl:`https://www.douyin.com/video/${item.awemeId}`,backgroundPlayback:douyinBackground()};
       own.source=source;own.pool=dependencies.createInitialVideoPool?.()??new DouyinVideoSessionPool();
       void own.pool.prime({key:item.awemeId,source},{...source,bounds,autoplay:false}).result.catch(()=>{});
     })().catch(()=>{});
@@ -381,7 +390,7 @@ export function createMediaRouteController(
         previewFrame,
         url: bundle?.url ?? await douyinPreload.lookup(request.item.awemeId) ?? await douyinPlaybackUrl(request.playback,headers),
         ...douyinDecoderProfile(bundle?.item??request.playback),
-        title: request.item.description,
+        ...douyinDetail(request.item),
         headers,
         ...playbackPreferences(),
         platform: "douyin" as const,
@@ -409,7 +418,7 @@ export function createMediaRouteController(
           // Local queue metadata can enter even while cookie IO is blocked.
           // A preview-only source cannot open a network connection or decoder.
           stopDouyinEntry();
-          const waiting:PlaybackSource={platform:'douyin',immersive:true,previewOnly:true,startupSeq:request.entrySeq,awemeId:request.item.awemeId,title:request.item.description,
+          const waiting:PlaybackSource={platform:'douyin',immersive:true,previewOnly:true,startupSeq:request.entrySeq,awemeId:request.item.awemeId,...douyinDetail(request.item),
             releaseStartupPreview:request.releaseStartupPreview,posterUrl:request.item.coverUrl,...playbackPreferences(),backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${request.item.awemeId}`};
           void queue?.persist().catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
           stage='backdrop';await openVideo(waiting,{queue,memory,douyinEntrySeq:request.entrySeq,videoTarget:{kind:'douyin',awemeId:route.awemeId,immersive:true}},current);
@@ -480,7 +489,7 @@ export function createMediaRouteController(
       platform:"douyin",immersive,detailPlayback,awemeId:item.awemeId,
       url:frame?.available?item.playUrl:localUrl??await douyinPlaybackUrl(item,headers),
       previewOnly:frame?.available===true,previewFrame:frame?.available?{entryId:item.awemeId,frame}:undefined,
-      posterUrl:item.coverUrl,title:item.description,...douyinDecoderProfile(item),...playbackPreferences(),headers,
+      posterUrl:item.coverUrl,...douyinDetail(item),...douyinDecoderProfile(item),...playbackPreferences(),headers,
       backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${item.awemeId}`,
     };
     if(dependencies.current()!==origin)return false;
@@ -535,7 +544,7 @@ export function createMediaRouteController(
       posterUrl: result.data.item.coverUrl,
       url: localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==="next"),
       ...douyinDecoderProfile(result.data.item),
-      title: result.data.item.description,
+      ...douyinDetail(result.data.item),
       headers,
       webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
     };
@@ -583,7 +592,7 @@ export function createMediaRouteController(
     if(!stillAdjacent())return;
     return {key:result.data.item.awemeId,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
-      url,previewOnly:false,previewFrame:undefined,resumePositionMs:0,title:result.data.item.description,headers,
+      url,previewOnly:false,previewFrame:undefined,resumePositionMs:0,...douyinDetail(result.data.item),headers,
       ...douyinDecoderProfile(result.data.item),
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
     }};
@@ -610,7 +619,7 @@ export function createMediaRouteController(
     }
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
-    let selected:PlaybackSource={...old,awemeId:item.awemeId,title:item.description,posterUrl:item.coverUrl,
+    let selected:PlaybackSource={...old,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
       previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
@@ -778,7 +787,7 @@ export function createMediaRouteController(
         posterUrl: result.data.item.coverUrl,
         url: await douyinPlaybackUrl(result.data.item,headers),
         ...douyinDecoderProfile(result.data.item),
-        title: result.data.item.description,
+        ...douyinDetail(result.data.item),
         headers,
         webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
       };

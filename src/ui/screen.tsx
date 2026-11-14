@@ -271,6 +271,7 @@ export default function WatchRSS(props: {
     );
     return true;
   }
+  let sideSwipe: NonNullable<NonNullable<Entry["player"]>["sideSwipe"]> | undefined;
   createGesture({
     region: {
       rect: () =>
@@ -285,18 +286,25 @@ export default function WatchRSS(props: {
     axis: "x",
     panSlop: 8,
     onPanStart: (c) => {
+      // A right-to-left drag can belong to the page (the player's detail panel);
+      // left-to-right is always Back and never reaches sideSwipe.
+      const side = c.dx < 0 ? current().player?.sideSwipe : undefined;
+      if (side?.begin()) { sideSwipe = side; side.move(c.dx); return; }
       current().list?.scroller.stop();
       motion.begin(c.dx);
       setBackOffset(motion.offset);
     },
     onPanMove: (c) => {
+      if (sideSwipe) { sideSwipe.move(c.dx); return; }
       motion.move(c.dx);
       setBackOffset(motion.offset);
     },
     onPanEnd: (c) => {
+      if (sideSwipe) { const side = sideSwipe; sideSwipe = undefined; side.end(c.vx); return; }
       if (motion.phase === "dragging") motion.release(c.vx, Date.now());
     },
     onCancel: () => {
+      if (sideSwipe) { const side = sideSwipe; sideSwipe = undefined; side.end(0); return; }
       if (motion.phase === "dragging") motion.release(0, Date.now(), true);
     },
   });
