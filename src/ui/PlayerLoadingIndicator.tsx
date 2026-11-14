@@ -14,7 +14,7 @@ export function PlayerLoadingIndicator(props:{visible:boolean;phase:VideoLoading
     let live=true;
     const started=Date.now();
     onFrame(()=>setAngle(((Date.now()-started)%900)/900*360));
-    const timer=phase==='buffering'?delay(3000):undefined;
+    const timer=(phase==='buffering'||phase==='preparing')?delay(3000):undefined;
     void timer?.result.then(()=>{if(live)setSlow(true);}).catch(()=>{});
     onCleanup(()=>{live=false;timer?.cancel();});
   });

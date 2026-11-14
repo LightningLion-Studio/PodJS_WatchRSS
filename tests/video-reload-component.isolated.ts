@@ -221,3 +221,7 @@ test('REVIEW retired first-frame events cannot complete a reconnect still resolv
  nextError={code:'restricted'};const f=reloadMount(undefined,()=>new Promise(()=>{}));await flush();f.retry();await flush();expect(f.firstFrames()).toBe(0);
  frameEvents.forEach(fn=>fn({...state('playing'),sourceGeneration:5,hasRenderedFirstFrame:true}));await flush();expect(f.firstFrames()).toBe(0);expect(f.images()).toHaveLength(2);
 });
+test('REVIEW slow preparation reports a stalled load without publishing transient READY state',async()=>{
+ heldPrepare=new Promise(()=>{});const f=reloadMount();await flush();expect(f.text()).not.toContain('网络较慢');await tick(3001);
+ expect(f.images()).toHaveLength(2);expect(f.text()).toContain('网络较慢');expect(f.firstFrames()).toBe(0);
+});
