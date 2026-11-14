@@ -11,3 +11,7 @@ test('video and speech route owners defer local reconstruction until every route
 test('deferred reconstruction rechecks cancellation without advancing work',async()=>{
  const gate=new PlaybackWork(),release=gate.hold();let cancelled=false,commits=0;const task=gate.wait(()=>{if(cancelled)throw Error('cancelled');}).then(()=>{commits++;});cancelled=true;release();await expect(task).rejects.toThrow('cancelled');expect(commits).toBe(0);
 });
+test('a throwing observer cannot leak an owner or prevent another observer from resuming',async()=>{
+ const gate=new PlaybackWork(),events:boolean[]=[];const off=gate.subscribe(()=>{throw Error('disposed cloud guard');});gate.subscribe(active=>events.push(active));
+ let release:()=>void=()=>{};expect(()=>{release=gate.hold();}).not.toThrow();expect(gate.active).toBe(true);const waiting=gate.wait();expect(()=>release()).not.toThrow();await waiting;off();expect(gate.active).toBe(false);expect(events).toEqual([true,false]);
+});

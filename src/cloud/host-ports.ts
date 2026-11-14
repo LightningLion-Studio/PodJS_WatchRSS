@@ -22,7 +22,7 @@ export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuar
  const request:CloudHostRequest=invoke;
  const hostOperation=<T>(method:string,args:Record<string,unknown>)=>({result:request<T>(method,args)});
  const fileChunks={
-  openText:(path:string)=>request<{id:string}>('file.openText',{path}),
+  openText:(path:string)=>request<{id:string}>('file.openText',{path,strictUtf8:true}),
   readTextChunk:(id:string,maxChars:number)=>request<{text:string;eof:boolean}>('file.readTextChunk',{id,maxChars}),
   closeText:(id:string)=>request('file.closeText',{id}),
   createTemp:(directory:string)=>request<{path:string}>('file.createTemp',{directory}),

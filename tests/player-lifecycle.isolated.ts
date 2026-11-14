@@ -21,6 +21,7 @@ const value=(id='active')=>({ok:true,sessionId:id,state:'playing',positionMs:0,d
 const port:any={prepare:(p:any)=>{prepared++;return {result:Promise.resolve(value(p.sessionId)),cancel(){}};},state:(id:string)=>{stateCalls++;if(stateCalls===1){oldPending=true;return new Promise((_yes,no)=>rejectOld=no);}return Promise.resolve(value(id));},release:async()=>({released:true}),captureFrame:async()=>({available:false})};
 for(const method of ['play','pause','retire','seek','stop','setBounds','setTransform','setVolume','setLoop','promote','transition'])port[method]=async(id:string)=>value(id);
 mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:3,maxSessions:3,surfacePromotion:true,verticalTransition:true}),cancel(){}}),onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
+const {playbackWork}=await import('../src/core/playback-work');
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
 let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;});
@@ -29,9 +30,9 @@ test('a state reply rejected after lifecycle release cannot fail the newly prepa
  (globalThis as any).pod={benchmark:(line:string)=>{const e=JSON.parse(line);events.push(e);return e.seq??++seq;}};
  try{
   createRoot(stop=>{dispose=stop;VideoPlayerScreen({source:{platform:'douyin',immersive:true,awemeId:'fixture',url:'https://fixture.invalid/video',title:'fixture'},width:233,height:233,offset:0,round:true,active:true,onError:e=>{if(e)failures.push(e);},onPlaybackFailure:async(...args:any[])=>{recoveries.push(args);}});});
-  await flush();expect(oldPending).toBe(true);expect(prepared).toBe(1);
-  phase='inactive';listener(phase);await flush();phase='active';listener(phase);await flush();expect(prepared).toBe(2);
+  await flush();expect(playbackWork.active).toBe(true);expect(oldPending).toBe(true);expect(prepared).toBe(1);
+  phase='inactive';listener(phase);await flush();expect(playbackWork.active).toBe(false);phase='active';listener(phase);await flush();expect(prepared).toBe(2);expect(playbackWork.active).toBe(true);
   rejectOld(Object.assign(Error('unknown_video_session PRIVATE'),{name:'HostServiceError',code:'invalid_argument'}));await flush();
   expect(failures).toEqual([]);expect(recoveries).toEqual([]);expect(events.filter(e=>e.code==='error_page'||e.code==='error')).toEqual([]);expect(prepared).toBe(2);
- }finally{dispose?.();dispose=undefined;(globalThis as any).pod=prior;}
+ }finally{dispose?.();dispose=undefined;expect(playbackWork.active).toBe(false);(globalThis as any).pod=prior;}
 });

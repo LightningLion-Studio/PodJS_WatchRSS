@@ -53,7 +53,7 @@ function PlayerButton(props: { hidden?: boolean; left: number; top: number; size
 }
 
 export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; source: PlaybackSource; width: number; height: number; /** Screen y of the player area; height is the area below it. */ top?: number; active: boolean; offset: number; round: boolean; onBluetoothAllowed?:(value:boolean)=>void; onPlaybackActiveChanged?:(source:string|undefined,active:boolean)=>void; onFirstFrame?:()=>void; onError?: (message: string) => void; onOpenWeb?: () => void; onProgress?: (positionMs: number, durationMs: number) => void; onCheckpoint?: (kind: "ready" | "pause_or_exit" | "error" | "ended", positionMs: number, durationMs: number) => void; onNext?: () => void | Promise<void>; onPrevious?: () => void | Promise<void>; onAdjacentPoster?:(direction:"next"|"previous")=>string|undefined; onAdjacentKey?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>string|undefined; onPrepareAdjacent?:(direction:"next"|"previous",distance?:1|2|3|4|5)=>Promise<DouyinPreparedSource|undefined>; canSelectTarget?:(direction:"next"|"previous")=>boolean; onSelectTarget?:(direction:"next"|"previous",distance:1|2,prepared?:DouyinPreparedSource)=>void; onPromoteAdjacent?:(prepared:DouyinPreparedSource)=>Promise<boolean>; onActions?:()=>void; onRetry?:(positionMs:number)=>void|Promise<void>; onPlaybackFailure?:(positionMs:number,error?:unknown)=>void|Promise<void>; onPanStateChange?: (offset: number, range: number) => void; ref?: (handle: VideoPlayerHandle) => void }) {
-  createEffect(()=>{if(props.active){const release=playbackWork.hold();onCleanup(release);}});
+  const [workForeground,setWorkForeground]=createSignal(lifecycle()==='active');
   benchmark.mark('startup_stage',props.source.startupSeq??0,{startup_stage:'player_mounted'});
   onCleanup(()=>props.onPlaybackActiveChanged?.(undefined,false));
   const loopPreferences=new VideoLoopPreferences(kv);
@@ -71,6 +71,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const emitCheckpoint=(kind:"ready"|"pause_or_exit"|"error"|"ended",positionMs:number,durationMs:number)=>{const value=viewing.checkpoint(positionMs,durationMs);props.onCheckpoint?.(kind,value.positionMs,value.durationMs);};
   const saveablePlayer=props.source.platform==='douyin'&&props.source.immersive===true;
   const [state, setState] = createSignal<ExtendedVideoState | null>(null), [error, setError] = createSignal("");
+  createEffect(()=>{if(props.active&&workForeground()&&!error()){const release=playbackWork.hold();onCleanup(release);}});
   createEffect(()=>{
     const source=props.source.platform==='bili'?'bilibili':props.source.platform==='douyin'?'douyin':undefined;
     props.onPlaybackActiveChanged?.(source,!!source&&props.active&&state()?.state==='playing'&&!state()?.isBuffering&&!error());
@@ -248,6 +249,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   };
   let resumeAfterLifecycle=false;
   const removeLifecycle=onLifecycleChange(next=>{
+    setWorkForeground(next==='active');
     if(next==="active"){
       if(!props.active||videoSessionOwner!==sessionOwner)return;
       if(ready()){const own=generation;void media.state().then(value=>{if(!disposed&&own===generation&&props.active&&videoSessionOwner===sessionOwner)setState(value);}).catch(()=>{});}
