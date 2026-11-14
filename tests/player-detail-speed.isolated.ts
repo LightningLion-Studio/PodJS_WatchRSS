@@ -23,15 +23,16 @@ mock.module('../src/ui/PlayerDetailPanel.tsx',()=>({
 let phase='active',listener:(phase:string)=>void=()=>{},prepared=0;
 mock.module('@podjs/framework/watch',()=>({kv:{get(){},set(){}},hasCapability:()=>true,lifecycle:()=>phase,onLifecycleChange:(fn:any)=>{listener=fn;return()=>{};},normalizedRelativeAxisStep:(delta:number)=>Math.sign(delta)}));
 let audioChanged:(v:any)=>void=()=>{};let actual=.5;const writes:number[]=[],polls:(()=>void)[]=[];
-let sourceGeneration=1,sourcePosition=0,speed=1,speedGate:Promise<void>|undefined;const speeds:number[]=[];
+let sourceGeneration=1,sourcePosition=0,speed=1,speedGate:Promise<void>|undefined,volumeGate:Promise<void>|undefined,seekGate:Promise<void>|undefined;const speeds:number[]=[];
 const value=()=>({speed,ok:true,state:'playing',positionMs:sourcePosition,durationMs:10000,width:540,height:960,volume:actual,volumeMax:16,hasRenderedFirstFrame:true,sourceGeneration,presented:true});
-const port:any={prepare:()=>{prepared++;speed=1;sourcePosition=prepared*1000;return {result:Promise.resolve(value()),cancel(){}};},state:async()=>value(),setVolume:async(v:number)=>{writes.push(v);actual=Math.round(v*16)/16;return value();}};
+const port:any={prepare:()=>{prepared++;speed=1;sourcePosition=prepared*1000;return {result:Promise.resolve(value()),cancel(){}};},state:async()=>value(),setVolume:async(v:number)=>{writes.push(v);actual=Math.round(v*16)/16;const reply=value(),wait=volumeGate;volumeGate=undefined;await wait;return reply;}};
 for(const method of ['play','pause','retire','seek','stop','setBounds','setTransform','setLoop'])port[method]=async()=>value();
 mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:1,maxSessions:1,surfacePromotion:false,verticalTransition:false}),cancel(){}}),onVideoAudioChanged:(fn:any)=>{audioChanged=fn;return()=>{};},onVideoFirstFrame:()=>()=>{},delay:(ms:number)=>({result:new Promise<void>(yes=>{if(ms===400)polls.push(yes);}),cancel(){}})}));
 port.setSpeed=async(v:number)=>{speeds.push(v);const reply={...value(),speed:v};const wait=speedGate;speedGate=undefined;await wait;speed=v;return reply;};
+port.seek=async(positionMs:number)=>{const reply={...value(),positionMs},wait=seekGate;seekGate=undefined;await wait;return reply;};
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
-let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;prepared=0;actual=.5;writes.length=0;speeds.length=0;polls.length=0;speedGate=undefined;gestures.length=0;});
+let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;prepared=0;actual=.5;writes.length=0;speeds.length=0;polls.length=0;speedGate=undefined;volumeGate=undefined;seekGate=undefined;gestures.length=0;});
 function mount(width=233,height=233){let handle:any,setSource:any;const tree=createRoot(stop=>{dispose=stop;const [source,set]=createSignal({url:'file:///a.mp4',title:'a',startVolumeLimit:0,digitalCrownVolume:true,volumeGuard:true});setSource=set;return VideoPlayerScreen({get source(){return source();},width,height,offset:0,round:true,active:true,ref:v=>handle=v});});function visit(v:any):void{if(typeof v==='function'){visit(v());return;}if(Array.isArray(v)){v.forEach(visit);return;}if(v?.props)visit(v.props.children);}const open=()=>{handle.sideSwipe.begin();handle.sideSwipe.move(-100);visit(tree);};return{open,handle,visit:()=>visit(tree),replace:()=>setSource({url:`file:///${prepared+1}.mp4`,title:'new',startVolumeLimit:0,digitalCrownVolume:true})};}
 
 test('speed follows successive source replacements with the same native generation',async()=>{
@@ -54,4 +55,18 @@ test('the detail crown retains the low-volume cap and returns to the player on c
 });
 test('the entry arrow is centred on scaled round screens',async()=>{
  const f=mount(466,466);await flush();f.visit();expect(arrowProps.scale).toBe(2);expect(arrowProps.left).toBe(0);expect(arrowProps.top).toBe(0);
+});
+
+test('late volume reply cannot replace a new source or its progress',async()=>{
+ const f=mount();await flush();f.open();let release!:()=>void;volumeGate=new Promise<void>(r=>release=r);panelProps.onVolume(1,false);await flush();f.replace();await flush();const position=sourcePosition;release();await flush();f.visit();expect(panelProps.positionMs()).toBe(position);
+});
+test('late progress reply cannot replace a new source',async()=>{
+ const f=mount();await flush();f.open();let release!:()=>void;seekGate=new Promise<void>(r=>release=r);panelProps.onSeek(4000);await flush();f.replace();await flush();const position=sourcePosition;release();await flush();f.visit();expect(panelProps.positionMs()).toBe(position);
+});
+
+test('volume replies preserve progress observed while the write was pending',async()=>{
+ const f=mount();await flush();f.open();let release!:()=>void;volumeGate=new Promise<void>(r=>release=r);panelProps.onVolume(1,false);await flush();sourcePosition=7000;polls.shift()!();await flush();release();await flush();expect(panelProps.positionMs()).toBe(7000);
+});
+test('a queued seek after source replacement starts from the new source position',async()=>{
+ const f=mount();await flush();f.open();let release!:()=>void;seekGate=new Promise<void>(r=>release=r);panelProps.onSeek(4000);await flush();f.replace();await flush();const target=sourcePosition+4000;panelProps.onSeek(4000);release();await flush();expect(panelProps.positionMs()).toBe(target);
 });

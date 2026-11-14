@@ -281,7 +281,36 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const syncBounds = async () => { if(stripOwnsBounds())return; if (updating) { dirty = true; return; } updating = true; const requestGeneration=generation; try { do { dirty = false; if(stripOwnsBounds())break; await media.setBounds(bounds()); } while (dirty && !disposed); } catch (value) { if(!disposed&&props.active&&requestGeneration===generation&&videoSessionOwner===sessionOwner){if(usingSessions())void degradeSessions(value,'bounds');else failed(value,false,'bounds');} } finally { updating = false; } };
   createEffect(() => { props.offset; props.active; dragOffsetY(); handoff(); if (props.offset !== 0 || !props.active) panVelocity = 0; if (ready()&&videoSessionOwner===sessionOwner&&!stripOwnsBounds()) void syncBounds(); });
   const toggle = async () => { try { const pausing = state()?.state === "playing", next = await (pausing ? media.pause() : media.play()); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (pausing) emitCheckpoint("pause_or_exit", next.positionMs, next.durationMs); } catch (value) { failed(value); } };
-  const seekTo = async (delta: number) => { const current = state(); if (!current) return; if (!seekRunning) desiredSeek = current.positionMs; desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta)); if (seekRunning) return; seekRunning = true; try { do { const target = desiredSeek, next = await media.seek(target); setState(next); checkpointPosition = next.positionMs; checkpointDuration = next.durationMs; if (target === desiredSeek) break; } while (!disposed); } catch (value) { failed(value); } finally { seekRunning = false; } };
+  let seekSource: PlaybackSource | undefined, seekGeneration = -1;
+  const seekTo = async (delta: number) => {
+    const current = state();
+    if (!props.active || !current || videoSessionOwner !== sessionOwner) return;
+    if (!seekRunning || seekSource !== props.source || seekGeneration !== generation) {
+      desiredSeek = current.positionMs; seekSource = props.source; seekGeneration = generation;
+    }
+    desiredSeek = Math.max(0, Math.min(current.durationMs || Number.MAX_SAFE_INTEGER, desiredSeek + delta));
+    if (seekRunning) return;
+    seekRunning = true;
+    let requestSource: PlaybackSource | undefined, requestGeneration = -1;
+    try {
+      do {
+        const source: PlaybackSource | undefined = seekSource;
+        const ownGeneration = seekGeneration, target = desiredSeek;
+        if (disposed || !props.active || source !== props.source || ownGeneration !== generation || videoSessionOwner !== sessionOwner) return;
+        requestSource = source; requestGeneration = ownGeneration;
+        const next = await media.seek(target);
+        if (disposed || !props.active || videoSessionOwner !== sessionOwner) return;
+        if (source !== props.source || ownGeneration !== generation) {
+          if (source !== seekSource || ownGeneration !== seekGeneration) continue;
+          return;
+        }
+        setState(previous => previous ? { ...previous, positionMs: next.positionMs, durationMs: next.durationMs } : previous);
+        checkpointPosition = next.positionMs; checkpointDuration = next.durationMs;
+        if (target === desiredSeek) break;
+      } while (!disposed);
+    } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
+    finally { seekRunning = false; }
+  };
   const rotate = () => { rotationFrom = displayRotation(); rotationTo = rotation() + 90; setRotation(rotationTo); rotationStarted = Date.now(); };
   const changeMode = () => { panVelocity = 0; setMode(nextScaleMode(mode())); setPan(0); void requestTransform(); };
   const backgroundTap = () => { if (tapTimer) { tapTimer.cancel(); tapTimer = undefined; void toggle(); return; } tapTimer = delay(280); void tapTimer.result.then(() => { tapTimer = undefined; setControlsVisible(value => !value); }).catch(() => {}); };
@@ -626,7 +655,26 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     setVolumeVisible(true);volumeTimer?.cancel();volumeTimer=delay(900);
     void volumeTimer.result.then(()=>setVolumeVisible(false)).catch(()=>{});
   };
-  const submitVolume = async () => { if (volumeRunning) { volumeDirty = true; return; } volumeRunning = true; try { do { volumeDirty = false; const target = virtualVolume ?? .5, next = await media.setVolume(target); observedVolume = next.volume; if (target === virtualVolume) setState(next); else volumeDirty = true; } while (volumeDirty && !disposed); } catch (value) { failed(value); } finally { volumeRunning = false; } };
+  const submitVolume = async () => {
+    if (volumeRunning) { volumeDirty = true; return; }
+    volumeRunning = true;
+    let requestSource: PlaybackSource | undefined, requestGeneration = -1;
+    try {
+      do {
+        volumeDirty = false;
+        const source = props.source, ownGeneration = generation, target = virtualVolume ?? .5;
+        requestSource = source; requestGeneration = ownGeneration;
+        const next = await media.setVolume(target);
+        if (disposed || videoSessionOwner !== sessionOwner) return;
+        if (source !== props.source || ownGeneration !== generation) { if (volumeDirty) continue; return; }
+        observedVolume = next.volume;
+        if (target === virtualVolume) setState(previous => previous ? { ...previous, volume: next.volume, volumeMax: next.volumeMax,
+          volumeIndex: next.volumeIndex, muted: next.muted, appliedVolume: next.appliedVolume, ringerMode: next.ringerMode, silenced: next.silenced } : previous);
+        else volumeDirty = true;
+      } while (volumeDirty && !disposed);
+    } catch (value) { if (!disposed && props.active && requestSource === props.source && requestGeneration === generation) failed(value); }
+    finally { volumeRunning = false; }
+  };
   const crownVolume = (direction: -1 | 1) => { const maxSteps = Math.max(1, state()?.volumeMax ?? 15), current = virtualVolume ?? state()?.volume ?? .5; crownDirection=direction; const guarded = guardedCrownVolume(current, direction / maxSteps, maxSteps, props.source.volumeGuard === true, crownGuard, Date.now()); crownGuard = guarded.state; virtualVolume = guarded.volume; void submitVolume(); };
   const adjustVolume = (delta: number) => { const direction = normalizedRelativeAxisStep(delta); if (!props.active || !props.source.digitalCrownVolume || direction === 0) return false; crownVolume(direction); showVolumeOverlay(); return true; };
   // Detail panel steppers: whole system volume steps, deliberate taps, so no crown guard.
