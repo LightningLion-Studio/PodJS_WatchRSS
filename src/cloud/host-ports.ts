@@ -14,7 +14,7 @@ import {WatchCloudKeyManager,type CloudStringStore} from './keys';
 import {WatchCloudCache,type CloudBlobStore} from './cache';
 import {WatchCloudStateStore} from './state';
 import {WatchCloudClient} from './client';
-import {utf8Encode,type CloudClientOptions,type HttpTransport,type CloudUploadObject} from './types';
+import {utf8Encode,utf8Decode,type CloudClientOptions,type HttpTransport,type CloudUploadObject} from './types';
 export type CloudHostRequest=<T>(method:string,args:Record<string,unknown>)=>Promise<T>;
 export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuard,site:RestoreCallsite='runtime'){
  const metadata=restoreRequestMetadata(site);
@@ -87,6 +87,23 @@ const crypto:SnapshotCrypto={
 };
 const files:CloudBlobStore={
  yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),
+ async *legacyJournalLines(path){
+  // Raw LF boundaries preserve the exact bytes of the candidate frame. Do not
+  // run the historical decoder over text already replaced by the Java reader.
+  guard.require();const stat=await fileChunks.stat(path);
+  if(!stat.exists)return;
+  if(!stat.file||!Number.isSafeInteger(stat.size)||stat.size<0||stat.size>64*1024*1024)throw Error('cloud_record_journal_invalid');
+  let parts:Uint8Array[]=[],length=0;
+  const line=()=>{const raw=new Uint8Array(length);let at=0;for(const part of parts){raw.set(part,at);at+=part.length;}parts=[];length=0;return utf8Decode(raw);};
+  for(let offset=0;offset<stat.size;){
+   guard.require();const chunk=await fileChunks.read(path,offset,Math.min(131072,stat.size-offset));guard.require();const raw=bytes(chunk.dataBase64);
+   if(chunk.offset!==offset||chunk.size!==stat.size||!raw.length||raw.length>stat.size-offset)throw Error('cloud_record_journal_incomplete');
+   let start=0;for(let at=0;at<raw.length;at++)if(raw[at]===10){parts.push(raw.subarray(start,at));length+=at-start;yield line();start=at+1;}
+   if(start<raw.length){parts.push(raw.subarray(start));length+=raw.length-start;}
+   offset+=raw.length;await operation<void>('runtime.delay',{milliseconds:1});
+  }
+  if(length)yield line();
+ },
  async *textChunks(path){
   guard.require();const stat=await fileChunks.stat(path);if(!stat.exists)return;
   if(!stat.file||stat.size<0||stat.size>64*1024*1024)throw Error('cloud_record_journal_invalid');
