@@ -263,7 +263,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       // End the policy before preparing: another native failure consumes the
       // next budget slot even when resolution published a new source object.
       reloadPolicy.finish(ticket);setReconnecting(false);prepare(true);
-    }catch(value){if(current()){reloadPolicy.finish(ticket);setReconnecting(false);failed(value,true,'recovery');}}
+    }catch(value){if(current()){reloadPolicy.finish(ticket);setReconnecting(false);const fault=playerFailureCode(value);failed(fault==='cancelled'||fault==='stale'?{code:'prepare_failed'}:value,true,'recovery');}}
     finally{resolutionTimeout?.cancel();if(reloadTimeout===resolutionTimeout)reloadTimeout=undefined;if(reloadPolicy.current(ticket)){reloadPolicy.finish(ticket);setReconnecting(false);}}
   };
   let retrying = false, failedMove:(()=>void|Promise<void>)|undefined;

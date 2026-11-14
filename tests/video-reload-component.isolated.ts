@@ -187,3 +187,7 @@ test('RELOAD preserves the HEVC decoder failure signal before resolving a replac
  const failure=spyOn(douyinCodecRuntimePolicy,'recordAutoHevcFailure');
  try{nextError={code:'decode_error'};reloadMount({platform:'douyin',url:'https://fixture/hevc',title:'fixture',videoMime:'video/hevc'});await flush();expect(failure).toHaveBeenCalledTimes(1);await tick();expect(retries).toBe(1);}finally{failure.mockRestore();}
 });
+test('RELOAD a cancelled resolver for the still-active video ends in retryable error',async()=>{
+ nextError={code:'restricted'};const f=reloadMount(undefined,async()=>{throw {code:'CANCELLED'};});await flush();f.retry();await flush();
+ expect(f.text()).toContain('播放失败');expect(f.images()).toHaveLength(0);
+});
