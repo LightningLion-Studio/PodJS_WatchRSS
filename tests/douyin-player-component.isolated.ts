@@ -793,3 +793,18 @@ test('DYSILENT all platforms opt in and crown carries explicit up/down intent',a
   }finally{stops.pop()!();video.setVolume=previous;}
  }
 });
+
+for(const platform of ['douyin','bili','rss'] as const)test(`DYBACK ${platform} expanded landscape back gate matches horizontal pan ownership`,async()=>{
+ initial='available';sessionsCapable=false;gestures.length=0;
+ const savedPlay=video.play;video.play=async()=>current={...state('playing'),width:1920,height:1080};
+ try{
+  let handle:any;const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform,immersive:platform==='douyin',title:'local',url:'file:///fixture.mp4'},width:233,height:233,active:true,offset:0,round:true,ref:h=>handle=h});});
+  await flush();expect(handle.canSwipeBack()).toBe(true);
+  const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-fullscreen.svg'));
+  expect(button).toBeDefined();button!.props.onPress();await flush();
+  const panGesture=gestures.find(g=>g.axis==='x');
+  expect(!!panGesture.region.rect()).toBe(platform!=='douyin');
+  expect(handle.canSwipeBack()).toBe(platform==='douyin');
+  if(platform!=='douyin'){panGesture.onPanStart();panGesture.onPanMove({dx:10000});expect(handle.canSwipeBack()).toBe(true);}
+ }finally{video.play=savedPlay;}
+});

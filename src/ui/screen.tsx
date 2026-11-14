@@ -1,3 +1,5 @@
+import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
+import {backStackSize,usesImmersiveBackObserver} from '../navigation/back-target.ts';
 import {idleHit} from '../diagnostics/idle-counters';
 import {douyinBench} from '../douyin/bench.ts';
 import {startExternalDebug} from '../debug/external-host.ts';
@@ -231,14 +233,14 @@ export default function WatchRSS(props: {
     if (leaving.page === "reader" && telemetryReaders.has(leaving)) {
       telemetryReaders.delete(leaving); usageTelemetry.recordArticleReadFinished();
     }
-    current().queue?.cancel();
+    for(const entry of stack().slice(backStackSize(stack()))) entry.queue?.cancel();
     if (leaving.page === "saved" || leaving.page === "watch-later")
       clearSavedUndo();
     if (current().page === "note-detail" || current().page === "note-actions")
       setNotesRefreshKey((value) => value + 1);
     batch(() => {
-      setStack((entries) => entries.slice(0, -1));
-      if (current().playback) setPlayingSource(current().playback);
+      setStack((entries) => entries.slice(0, backStackSize(entries)));
+      setPlayingSource(current().playback);
       setError("");
       setBackOffset(0);
     });
@@ -278,7 +280,8 @@ export default function WatchRSS(props: {
         !disclosurePending() &&
         motion.phase !== "settling" &&
         (current().player?.canSwipeBack?.() ?? true) &&
-        current().page !== "reader-image"
+        current().page !== "reader-image" &&
+        !usesImmersiveBackObserver(current())
           ? { x: 0, y: 0, w: width, h: height }
           : null,
     },
@@ -300,6 +303,15 @@ export default function WatchRSS(props: {
       if (motion.phase === "dragging") motion.release(0, Date.now(), true);
     },
   });
+  createGesture(rightSwipeBack({rect:()=>
+    stack().length>1 && usesImmersiveBackObserver(current()) && !disclosurePending() && motion.phase!=="settling"
+      ? {x:0,y:0,w:width,h:height} : null,
+  },{
+    start(dx){motion.begin(dx);setBackOffset(motion.offset);},
+    move(dx){motion.move(dx);setBackOffset(motion.offset);},
+    end(velocity){if(motion.phase==="dragging")motion.release(velocity,Date.now());},
+    cancel(){if(motion.phase==="dragging")motion.release(0,Date.now(),true);},
+  }));
   onFrame(() => {
     if (motion.phase !== "settling") return;
     const result = motion.tick(Date.now());
