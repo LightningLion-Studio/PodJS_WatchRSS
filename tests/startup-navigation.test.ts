@@ -60,6 +60,28 @@ test('same-task speech playback resumes the reader without starting a speech ses
  expect(pages(startupActivityNavigation(task))).toEqual(['home','reader']);
 });
 
+test('legacy queue-backed Douyin controls cannot restore without a live media session',()=>{
+ const task=captureActivityNavigation(empty(),[
+  {page:'home'},
+  {page:'douyin',douyinRoute:{name:'player',awemeId:'last-video',savedQueue:true} as ActivityRoute['douyinRoute']},
+  {page:'settings'},
+ ]);
+ const state={saved:task.saved,retained:{}};
+ const before=structuredClone(state);
+ // The legacy descriptor is valid, but the controls alone own neither a
+ // playback queue nor a native player. Discard it and its descendants.
+ expect(pages(startupActivityNavigation(state))).toEqual(['home']);
+ expect(state).toEqual(before);
+});
+
+test('a Douyin parent survives when only its nested legacy player is discarded',()=>{
+ const task=captureActivityNavigation(empty(),[
+  {page:'home'},{page:'douyin',douyinRoute:{name:'entry'}},
+  {page:'douyin',douyinRoute:{name:'player',awemeId:'last-video',savedQueue:true} as ActivityRoute['douyinRoute']},
+ ]);
+ expect(pages(startupActivityNavigation({saved:task.saved,retained:{}}))).toEqual(['home','douyin']);
+});
+
 test('malformed content state falls back to home, without a durable last-screen fallback',()=>{
  for(const state of [empty(),{saved:{'watchrss.content-activity':{version:99,entries:[]}},retained:{}},
   {saved:{'watchrss.content-activity':{version:1,entries:[{page:'video'}]}},retained:{}}]){
