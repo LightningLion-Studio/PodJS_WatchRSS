@@ -32,8 +32,10 @@ export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
 export type DouyinAuthState='unknown'|'logged-in'|'logged-out';
-export interface DouyinPlaybackOptions {forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean}
+export interface DouyinPlaybackOptions {/** A reload owns a new request even if an abandoned resolution is still pending. */freshRequest?:boolean;forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean}
 export class DouyinClient {
+  private reloadSequence=0;
+  private detailCacheTokens=new Map<string,object>();
   private authentication:DouyinAuthState='unknown';
   private readonly authListeners=new Set<(state:DouyinAuthState)=>void>();
   authState():DouyinAuthState{return this.authentication;}
@@ -120,7 +122,7 @@ export class DouyinClient {
     try{return await result;}finally{if(this.cookieRead?.result===result)this.cookieRead=undefined;}
   }
   async isLoggedIn(){return this.authentication==='unknown'?(await this.readCookie())!==null:this.authentication==='logged-in';}
-  private clearFeedCache(){this.detailRequests.clear();this.feedRequests.clear();this.prefetchFailures.clear();this.detailTimes=[];this.playbackResolutions.clear();this.feedCache.clear();this.feedCursor=null;this.feedHasMore=false;}
+  private clearFeedCache(){this.detailCacheTokens.clear();this.detailRequests.clear();this.feedRequests.clear();this.prefetchFailures.clear();this.detailTimes=[];this.playbackResolutions.clear();this.feedCache.clear();this.feedCursor=null;this.feedHasMore=false;}
   async applyCookie(raw:string,commitCookie:(value:string)=>Promise<void>=value=>this.options.secureStorage.set(COOKIE_KEY,value)){
     const value=raw.trim();if(!value)return fail<void>('NOT_LOGGED_IN','缺少有效 Cookie');
     const benchAttempt=douyinBench.attempt(this);
@@ -292,25 +294,27 @@ export class DouyinClient {
     }catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
   }
   feedSnapshot(){const items:DouyinItem[]=[];for(const id of [...this.feedCache.keys()]){const item=this.freshFeedItem(id);if(item)items.push(item);}return {items:items.slice(-40),cursor:this.feedCursor,hasMore:this.feedHasMore};}
-  async fetchDetail(awemeId:string,options:{forceRefresh?:boolean}={}):Promise<DouyinResult<DouyinContent>>{
+  async fetchDetail(awemeId:string,options:{forceRefresh?:boolean;freshRequest?:boolean}={}):Promise<DouyinResult<DouyinContent>>{
     const id=awemeId.trim();if(!id)return fail('PARSE_FAILED','缺少 awemeId');
-    const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh)return {ok:true,data:{kind:'video',item:cached},source:'feed-cache'};
-    const pending=this.detailRequests.get(id);if(pending)return pending;
+    const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh&&!options.freshRequest)return {ok:true,data:{kind:'video',item:cached},source:'feed-cache'};
+    const key=options.freshRequest?JSON.stringify([id,++this.reloadSequence]):id;
+    const pending=this.detailRequests.get(key);if(pending)return pending;
+    const cacheToken={};this.detailCacheTokens.set(id,cacheToken);
     const generation=this.authGeneration;
     const work=(async():Promise<DouyinResult<DouyinContent>>=>{
       const r=await this.get('/aweme/v1/web/aweme/detail/',{aweme_id:id},'GET');
       if(!r.ok&&r.code==='NOT_LOGGED_IN')return r;
       if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
       if(!r.ok)return r;
-      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(data.kind==='video')this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
+      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
       catch{return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
-    })();this.detailRequests.set(id,work);
-    try{return await work;}finally{if(this.detailRequests.get(id)===work)this.detailRequests.delete(id);}
+    })();this.detailRequests.set(key,work);
+    try{return await work;}finally{if(this.detailRequests.get(key)===work)this.detailRequests.delete(key);if(this.detailCacheTokens.get(id)===cacheToken)this.detailCacheTokens.delete(id);}
   }
   private async resolvePlaybackInner(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
     if(this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');
     const id=awemeId.trim();
-    const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh)return {ok:true,data:cached,source:'feed-cache'};
+    const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh&&!options.freshRequest)return {ok:true,data:cached,source:'feed-cache'};
     if(options.allowDetail===false){
       // The live queue owns its feed metadata independently of the process LRU
       // and its soft five-minute TTL. Neither can turn a swipe into a detail API.
@@ -328,7 +332,7 @@ export class DouyinClient {
     return !r.ok?r:r.data.kind==='video'?{ok:true,data:r.data.item,source:r.source}:fail('UNSUPPORTED','此内容没有视频播放流');
   }
   async resolvePlayback(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
-    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true,options.allowDetail!==false]);const cached=!options.forceRefresh?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
+    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true,options.allowDetail!==false,...(options.freshRequest?[++this.reloadSequence]:[])]);const cached=!options.forceRefresh&&!options.freshRequest?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
     if(result.ok){const item=await decodableDouyinItem(applyPreferredDouyinPlayback(result.data));if(!item.playUrl.trim()){const unavailable=fail<DouyinItem>('UNSUPPORTED','没有可用的视频播放流');if(options.prefetch)this.cachePrefetchFailure(id,unavailable);return unavailable;}const v=item.variants?.find(v=>v.playUrl===item.playUrl);const trace=new VideoPlaybackTrace('douyin',start);trace.event('api',{apiMs:Date.now()-start,cacheHit:result.source==='feed-cache'?1:0});trace.event('candidate',{width:v?.width,height:v?.height,bitrate:v?.bitrate});for(const url of [item.playUrl,...(item.variants?.find(v=>v.playUrl===item.playUrl)?.playUrls??[]).slice(0,8)])registerVideoResolution(url,trace);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);return {...result,data:item};}
     if(options.prefetch)this.cachePrefetchFailure(id,result);
     appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=${result.code}`);return result;

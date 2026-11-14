@@ -11,6 +11,14 @@ export class DouyinRssRecovery {
   private running=false;
   private attempted=false;
   constructor(private client:Pick<DouyinClient,"resolvePlayback"|"buildPlaybackHeaders">,private awemeId:string,private initial?:DouyinItem) {}
+  async reload(source:PlaybackSource,isCurrent:()=>boolean):Promise<PlaybackSource|undefined>{
+    const result=await this.client.resolvePlayback(this.awemeId,{forceRefresh:true,freshRequest:true});
+    if(!isCurrent())return;
+    if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code});
+    const headers=await this.client.buildPlaybackHeaders();
+    if(!isCurrent())return;
+    return {...source,url:result.data.playUrl,videoUrl:undefined,audioUrl:douyinPlaybackAudio(result.data),headers};
+  }
   async recover(source:PlaybackSource,isCurrent:()=>boolean,manual=false,error?:unknown):Promise<PlaybackSource|undefined> {
     if(videoOptEnabled('recovery')){
       this.policy??=new DouyinPlaybackRecovery(this.initial??{awemeId:this.awemeId,playUrl:source.url??'',variants:[]},async()=>{const result=await this.client.resolvePlayback(this.awemeId,{forceRefresh:true});if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code,retryAfterMs:result.retryAfterMs});return result.data;});
