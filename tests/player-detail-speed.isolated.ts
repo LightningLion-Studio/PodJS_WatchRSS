@@ -6,7 +6,9 @@ const require=createRequire(import.meta.url),{transformSync}=require('@babel/cor
 plugin({name:'player-detail-review-test',setup(b){b.onLoad({filter:/\/ui\/VideoPlayerScreen\.tsx$/},async args=>({contents:transformSync(await Bun.file(args.path).text(),{filename:args.path,babelrc:false,configFile:false,presets:[[require('babel-preset-solid'),{generate:'universal',moduleName:'@pocketjs/framework/renderer'}],[require('@babel/preset-typescript'),{isTSX:true,allExtensions:true}]]}).code,loader:'js'}));}});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 mock.module('@pocketjs/framework/components',()=>Object.fromEntries(['View','Text','Image'].map(kind=>[kind,(props:any)=>({kind,props})])));
-const gestures:any[]=[];mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gestures.push(options);return {dispose(){options.onCancel?.();}};}}));
+// These button/source-race tests never start a touch. Disposing an idle real
+// recognizer has no active contact to cancel.
+const gestures:any[]=[];mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gestures.push(options);return {dispose(){}};}}));
 const frames:{fn:()=>void;needs?:()=>boolean}[]=[];mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:()=>void,needs?:()=>boolean){const item={fn,needs};frames.push(item);onCleanup(()=>frames.splice(frames.indexOf(item),1));}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:()=>20})}));
 mock.module('@pocketjs/framework/input',()=>({hitNode(){},pressNode(){}}));
