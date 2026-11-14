@@ -1,3 +1,4 @@
+import {measuredLines} from '../reader/measured-text.ts';
 import {VideoReloadPolicy,videoSourceExpired} from './video-reload.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playerFailureCode,playerFailureFields,formatPlayerFailure,closedPlayerState} from '../media/player-errors.ts';
@@ -105,9 +106,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   let reloadWait:HostOperation<void>|undefined;
   let reloadTimeout:HostOperation<void>|undefined;
   let reloadResume:number|undefined;
-  let freshPrepare=false;
+  let freshPrepare=false,needsFreshResolution=false;
   let resumeAutoplay:boolean|undefined;
-  createEffect(()=>{if(reloadPolicy.select(props.source)){reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;}});
+  createEffect(()=>{if(reloadPolicy.select(props.source)){reloadWait?.cancel();reloadTimeout?.cancel();setReconnecting(false);reloadResume=undefined;needsFreshResolution=false;}});
   const cancelReload=()=>{reloadPolicy.cancel();reloadWait?.cancel();reloadWait=undefined;reloadTimeout?.cancel();reloadTimeout=undefined;setReconnecting(false);};
   onCleanup(cancelReload);
   let retiredNativeGeneration=-1;
@@ -241,6 +242,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(videoSessionOwner!==sessionOwner)return;
     const ticket=reloadPolicy.begin(manual);
     if(!ticket){if(!reloadPolicy.busy)failed(cause,true,'recovery');return;}
+    needsFreshResolution=true;
     if(manual)resumeAutoplay=true;
     const position=checkpointPosition,from=props.source;
     generation++;const own=generation;prepareOp?.cancel();pollTimer?.cancel();recoveryDeadline.cancel();autoAdvance.cancel();
@@ -259,7 +261,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       resolutionTimeout.cancel();if(reloadTimeout===resolutionTimeout)reloadTimeout=undefined;
       if(!current())return;
       if(props.source===from)throw Object.assign(new Error('Video resolution did not publish a source'),{code:'prepare_failed'});
-      reloadResume=position;freshPrepare=true;preparedSource=props.source;
+      needsFreshResolution=false;reloadResume=position;freshPrepare=true;preparedSource=props.source;
       // End the policy before preparing: another native failure consumes the
       // next budget slot even when resolution published a new source object.
       reloadPolicy.finish(ticket);setReconnecting(false);prepare(true);
@@ -298,7 +300,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         const desiredResume=resumeAfterLifecycle||['playing','buffering'].includes(state()?.state??'');
         if(!ready()){
           resumeAutoplay=desiredResume;
-          if(videoSourceExpired(props.source)){void reload(false,{code:'source_expired'});return;}
+          if(needsFreshResolution||videoSourceExpired(props.source)){void reload(false,{code:'source_expired'});return;}
           if(!error()){reloadResume=checkpointPosition;freshPrepare=true;prepare(true);return;}
         }
         const own=generation;
@@ -819,6 +821,11 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const startWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.positionMs ?? 0), 19)));
   const endWidth = () => Math.max(16, Math.ceil(getOps().measureText(formatPlayerTime(state()?.durationMs ?? 0), 19)));
   const barWidth = () => Math.max(20, 181 - startWidth() - endWidth() - 11);
+  const timelineProgress=()=>progressWidth(state()?.positionMs??0,state()?.durationMs??0,barWidth());
+  const errorWidth=()=>Math.max(170,props.width-62);
+  const errorLines=createMemo(()=>measuredLines(props.onReload?error():'播放失败',errorWidth()-16,text=>getOps().measureText(text,0),3));
+  const errorTextHeight=()=>Math.max(1,errorLines().length)*14;
+  const errorHeight=()=>errorTextHeight()+14+32;
   const buffering = () => state()?.state === "buffering" || state()?.buffered === false || state()?.isBuffering === true;
   const prepared = () => ready() && !!state()?.durationMs;
   const dragPosterOffset=()=>{const poster=dragPoster();if(!poster)return 0;const remaining=(1-dragProgress())*props.height;return poster.direction==="up"?remaining:-remaining;};
@@ -838,14 +845,18 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     else if(coverWasVisible){coverWasVisible=false;const checkpoint=renderCheckpoint({sampleAlpha:true});appLogger.i('DouyinTiming',`coverRemoved prepareMs=${Date.now()-prepareStarted} generation=${coverGeneration} reason=${error()?'error':firstFrame()?'first-frame':'ready'} checkpoint=${checkpoint??0}`);}
   });
   return <View ref={value => surface = value} class="absolute left-[0] right-[0]" style={{ insetT: top(), height: props.height }}><Show when={props.source.platform==="douyin"&&(props.source.immersive||previewPath())&&!handoff()&&!firstFrame()&&(previewPath()||!props.source.immersive&&props.source.posterUrl)}><RemoteImage url={props.source.posterUrl??""} filePath={previewPath()} onError={()=>{const path=previewPath();if(path)setBadFrame(path);}} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></Show><Show when={dragPoster()}>{poster=><View class="absolute inset-0" style={{translateY:dragPosterOffset()}}><RemoteImage url={poster().url} width={props.width} height={props.height} fit={mode()==="expanded"?"cover":"contain"} class="absolute inset-0" /></View>}</Show><Show when={!!props.onReload} fallback={<Show when={(props.source.platform==="douyin"&&props.source.immersive?spinnerDue()&&state()?.bufferedMs===0&&state()?.networkStalled===true&&(!firstFrame()||handoff())&&(!dragAxis()||handoff()):(!state()||buffering())) && !error() && !networkPrompt()}><View class="absolute left-[96.5] top-[96.5] w-[40] h-[40] rounded-[20] bg-[#00000099] items-center justify-center"><Image src="../assets/icons/player-loading.svg" class="w-[28] h-[28]" style={{ rotate: loadingRotation() }} /></View></Show>}><PlayerLoadingIndicator width={props.width} height={props.height} visible={props.active&&lifecycle()==='active'&&props.offset===0&&!error()&&!networkPrompt()&&(reconnecting()||!ready()||buffering()||handoff())} phase={reconnecting()?'reconnecting':props.source.previewOnly?'fetching':buffering()?'buffering':'preparing'}/></Show>
-    <Show when={props.active && error() && !networkPrompt()}><View class="absolute left-[31] right-[31] top-[72] h-[90] rounded-[24] bg-[#000000cc] items-center"><Text class="absolute left-[8] right-[8] top-[10] text-xs leading-[14] text-[#b6b6b6] text-center">{props.onReload?error():"播放失败"}</Text><View class="absolute left-[4] top-[42] w-[72] h-[32] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96" onPress={() => void retry()} focusable><Text class="text-xs text-white">重试</Text></View><Show when={props.onOpenWeb}><View class="absolute right-[4] top-[42] w-[86] h-[32] rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96" onPress={props.onOpenWeb} focusable><Text class="text-xs text-white">浏览器打开</Text></View></Show></View></Show>
+    <Show when={props.active && error() && !networkPrompt()}><View class="absolute rounded-[24] bg-[#000000cc]" style={{insetL:(props.width-errorWidth())/2,insetT:(props.height-errorHeight())/2,width:errorWidth(),height:errorHeight()}}>
+      <Text class="absolute text-xs text-[#b6b6b6] text-center" style={{insetL:8,insetT:0,width:errorWidth()-16,height:errorTextHeight(),lineHeight:14}}>{errorLines().join('\n')}</Text>
+      <View class="absolute rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{insetL:(errorWidth()-(props.onOpenWeb?170:72))/2,insetT:errorTextHeight()+14,width:72,height:32}} onPress={() => void retry()} focusable><Text class="text-xs text-white">重试</Text></View>
+      <Show when={props.onOpenWeb}><View class="absolute rounded-[16] bg-[#2a2a2a] items-center justify-center active:scale-96" style={{insetL:(errorWidth()-170)/2+84,insetT:errorTextHeight()+14,width:86,height:32}} onPress={props.onOpenWeb} focusable><Text class="text-xs text-white">浏览器打开</Text></View></Show>
+    </View></Show>
     <Show when={!error() && !networkPrompt() && controlsVisible()}><View class="absolute" style={{ insetL: uiLeft(), insetT: uiTop(), width: 233, height: 233, scale: uiScale(), rotate: displayRotation(), originX: 0, originY: 0 }}>
       <View class="absolute left-[0] right-[0] top-[0] h-[62] bg-gradient-to-b from-[#000000cc] to-transparent" />
       <Show when={loopModes().length > 1} fallback={<><PlayerButton left={69.5 + dx(topPair, 0)} hidden={hidden(topPair, 0)} top={6} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={119.5 + dx(topPair, 1)} hidden={hidden(topPair, 1)} top={6} size={44} icon="rotate" iconSize={24} onPress={rotate} /></>}>
         {/* Three across: icon corners stay inside the 233 circle at this height. */}
         <PlayerButton left={47.5 + dx(topTriple, 0)} hidden={hidden(topTriple, 0)} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5 + dx(topTriple, 1)} hidden={hidden(topTriple, 1)} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5 + dx(topTriple, 2)} hidden={hidden(topTriple, 2)} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
       </Show>
-      <Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{ width: progressWidth(state()?.positionMs ?? 0, state()?.durationMs ?? 0, barWidth()) }} /><View class="absolute right-[0] top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text>
+      <Show when={Number.isFinite(state()?.durationMs)&&(state()?.durationMs??0)>0}><Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><Show when={timelineProgress()>0}><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{width:timelineProgress()}} /></Show><View class="absolute top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" style={{insetL:Math.max(0,Math.min(barWidth()-4,timelineProgress()-2))}} /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text></Show>
       <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={props.active && !detailShown() && prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
     <Show when={networkPrompt()}>{prompt => <View class="absolute inset-0 bg-[#000000ee]">

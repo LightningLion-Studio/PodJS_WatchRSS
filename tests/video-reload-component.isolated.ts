@@ -44,7 +44,7 @@ let heldPrepare:Promise<any>|undefined;
 let retires=0;let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any[]=[];
 const originalNow=Date.now;let fakeNow=originalNow();Date.now=()=>fakeNow;afterAll(()=>{Date.now=originalNow;});
 const due=new Map<()=>void,number>();let ticks:(()=>void)[]=[];
-const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
+const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:['idle','stopped'].includes(name)?0:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
 const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current={...state('playing'),positionMs:current?.positionMs??0};},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async(positionMs:number)=>current={...current,positionMs},stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
@@ -66,7 +66,7 @@ function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
  onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
- return {publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
+ return {nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();};
@@ -190,4 +190,29 @@ test('RELOAD preserves the HEVC decoder failure signal before resolving a replac
 test('RELOAD a cancelled resolver for the still-active video ends in retryable error',async()=>{
  nextError={code:'restricted'};const f=reloadMount(undefined,async()=>{throw {code:'CANCELLED'};});await flush();f.retry();await flush();
  expect(f.text()).toContain('播放失败');expect(f.images()).toHaveLength(0);
+});
+
+test('REVIEW error retry and its message form a centered group on the round viewport',async()=>{
+ nextError={code:'restricted'};const f=reloadMount();await flush();
+ const retry=f.nodes().find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'))!;
+ const group=f.nodes().find(n=>n.kind==='View'&&n!==retry&&nodes(n.props.children).includes(retry)&&n.props.class?.includes('rounded-[24]'))!;
+ const px=(n:Node,style:string,css:string,fallback=0)=>n.props.style?.[style]??Number(n.props.class?.match(new RegExp(css+'-\\[(-?[0-9.]+)\\]'))?.[1]??fallback);
+ const groupWidth=px(group,'width','w',233-px(group,'insetL','left')-px(group,'insetR','right'));
+ const buttonLeft=px(group,'insetL','left')+px(retry,'insetL','left');
+ expect(buttonLeft+px(retry,'width','w')/2).toBeCloseTo(233/2);
+ const message=nodes(group.props.children).find(n=>n.kind==='Text'&&String(n.props.children).includes('视频播放失败'))!;
+ const contentTop=px(group,'insetT','top')+px(message,'insetT','top');
+ const contentBottom=px(group,'insetT','top')+px(retry,'insetT','top')+px(retry,'height','h');
+ expect((contentTop+contentBottom)/2).toBeCloseTo(233/2);expect(groupWidth).toBeLessThan(233);
+});
+test('REVIEW unknown duration never mounts timeline or placeholder time during reconnect',async()=>{
+ heldPrepare=new Promise(()=>{});const f=reloadMount();await flush();
+ expect(f.text()).not.toContain('--:--');
+ expect(f.nodes().filter(n=>n.kind==='View'&&n.props.class?.includes('bg-[#ff6700]')&&n.props.class?.includes('h-[4]'))).toHaveLength(0);
+});
+test('REVIEW cancelled reconnect resumes with fresh resolution instead of reusing the rejected URL',async()=>{
+ nextError={code:'restricted'};let finish!:()=>void;let f:ReturnType<typeof reloadMount>;
+ f=reloadMount(undefined,async(p,current)=>{if(retries===1)await new Promise<void>(yes=>finish=yes);if(current())f.publish({platform:'bili',title:'fixture',url:'https://fixture/fresh-'+retries,resumePositionMs:p});});await flush();f.retry();await flush();expect(retries).toBe(1);
+ lifecycleTo('background');await flush();finish();await flush();lifecycleTo('active');await flush();await tick(800);
+ expect(retries).toBe(2);expect(prepares.at(-1)?.url).toBe('https://fixture/fresh-2');
 });
