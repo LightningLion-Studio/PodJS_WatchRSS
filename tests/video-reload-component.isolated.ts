@@ -1,4 +1,4 @@
-import { afterEach, afterAll, expect, mock, test } from 'bun:test';
+import { afterEach, afterAll, expect, mock, test, spyOn } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps, onCleanup } from 'solid-js';
@@ -180,4 +180,10 @@ test('RELOAD explicit pause stays paused after an expired source reconnects',asy
  const f=reloadMount({platform:'bili',url:'https://fixture/old?deadline=1700000000',title:'fixture'});await flush();f.toggle();await flush();expect(current.state).toBe('paused');
  lifecycleTo('inactive');await flush();lifecycleTo('background');await flush();lifecycleTo('active');await flush();await tick(800);
  expect(retries).toBe(1);expect(current.state).toBe('ready');expect(plays).toBe(1);
+});
+
+test('RELOAD preserves the HEVC decoder failure signal before resolving a replacement',async()=>{
+ const {douyinCodecRuntimePolicy}=await import('../src/douyin/playback-selector.ts');
+ const failure=spyOn(douyinCodecRuntimePolicy,'recordAutoHevcFailure');
+ try{nextError={code:'decode_error'};reloadMount({platform:'douyin',url:'https://fixture/hevc',title:'fixture',videoMime:'video/hevc'});await flush();expect(failure).toHaveBeenCalledTimes(1);await tick();expect(retries).toBe(1);}finally{failure.mockRestore();}
 });

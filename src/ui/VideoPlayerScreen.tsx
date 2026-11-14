@@ -181,7 +181,6 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(!terminal&&props.source.platform==='douyin'&&props.source.immersive&&props.onPlaybackFailure&&['network','expired'].includes(playbackFailure(value))){benchmark.begin('error_page',{reason:'candidate_retry',...detail});return;}
     benchmark.begin('error_page',{reason:'exhausted',...detail}); if(benchmarkSeq)benchmark.mark("error",benchmarkSeq,{generation:pendingBenchmark?.generation??benchmarkGeneration,...detail}); appLogger.e('VideoPlayer','Playback failed'); setHandoff(false); if (!disposed) { const message = formatPlayerFailure(fault); setNetworkFailure(douyinNetworkFailure(value)); setError(message); emitCheckpoint("error", checkpointPosition, checkpointDuration); props.onError?.(message); } };
   const recoverPlaybackFailure = (value: unknown) => {
-    if(props.onReload)return;
     if(disposed||!props.active||lifecycle()!=='active'||videoSessionOwner!==sessionOwner)return;
     const failure=playbackFailure(value);
     // A rejected watch CDN source still gets its one Web resolution. API login
@@ -190,6 +189,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const immersiveDouyin=props.source.platform==='douyin'&&props.source.immersive;
     if(immersiveDouyin&&playbackFailure(value)==='other')return;
     if(props.source.platform==='douyin'&&props.source.videoMime==='video/hevc'&&failure==='decode')douyinCodecRuntimePolicy.recordAutoHevcFailure();
+    if(props.onReload)return;
     if((failure==='decode'||failure==='restricted'&&!watchFallback)&&!immersiveDouyin)return;
     if(props.source.platform==='douyin'&&douyinNetworkFailure(value)&&!immersiveDouyin)return;
     // Network loss does not invalidate a Bili URL or consume its automatic backups.
