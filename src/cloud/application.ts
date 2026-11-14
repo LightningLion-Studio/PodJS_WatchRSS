@@ -43,7 +43,7 @@ function start(){
  const ready=(async()=>{
   if(!await initializeCloudHost()||disposed)return;
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
-  const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
+  const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete'&&method!=='file.closeText'&&method!=='crypto.closeSealedGzip')guard.require();return hostOperation<T>(method,args).result;};
   // 26.4 P6-10: off by default. Off => no keysReady hook, no v2 request, no UI port.
   let heldKeys=new Map<number,Uint8Array>(),v2Tail:Promise<unknown>=Promise.resolve(),v2Current:(()=>void)|undefined;
   const v2Guard={require(){guard.require();if(!v2Current)throw Error('feature_disabled');v2Current();}};
@@ -51,7 +51,7 @@ function start(){
   const clearV2Keys=()=>{for(const key of heldKeys.values())key.fill(0);heldKeys.clear();};cleanups.push(clearV2Keys);
   syncV2=watchSyncV2Product({enabled:SYNC_V2_PRODUCT.syncV2,drainOnStop:true,announced:async()=>!!syncV2Ready?.syncV2,install:installApplicationSyncV2Ui,open:async lifetime=>{
    const v2Host=cloudRunHost((async<T>(method:string,args:Record<string,unknown>)=>{
-    const cleanup=['file.delete','secure.release','cloud.release','crypto.closeSealedGzip'].includes(method);
+    const cleanup=['file.delete','file.closeText','secure.release','cloud.release','crypto.closeSealedGzip'].includes(method);
     if(!cleanup)guard.require();
     // Native cancellation for read/crypto/HTTP waits. SQL and secure mutations
     // settle under their original lease before another account can open.

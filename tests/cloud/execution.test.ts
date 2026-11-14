@@ -75,3 +75,16 @@ test('pausing a streamed journal chunk closes its host reader without decoding o
  await expect((async()=>{for await(const text of ports.files.textChunks!('cache.delta'))consumed+=text.length;})()).rejects.toThrow(CLOUD_SYNC_SUSPENDED);
  expect(consumed).toBe(0);expect(calls).toEqual(['file.stat','file.openText','file.readTextChunk','file.closeText']);
 });
+
+test('production application host permits reader cleanup after disposal while keeping business calls fenced',async()=>{
+ // Execute the application's actual host closure with synthetic dependencies.
+ const source=await Bun.file(new URL('../../src/cloud/application.ts',import.meta.url)).text();
+ const line=source.split('\n').find(line=>line.trim().startsWith('const host='))!;
+ const body=new Bun.Transpiler({loader:'ts'}).transformSync('function fixture(){'+line+'\nreturn host;}');let disposed=false;const calls:string[]=[];
+ const guard={require(){if(disposed)throw Error('disposed');}};
+ const host=new Function('guard','hostOperation',body+'\nreturn fixture();')(guard,(method:string)=>({result:Promise.resolve(calls.push(method))}));
+ await host('file.openText',{path:'synthetic'});disposed=true;
+ await host('file.closeText',{id:'reader'});await host('crypto.closeSealedGzip',{id:'stream'});
+ expect(calls).toEqual(['file.openText','file.closeText','crypto.closeSealedGzip']);
+ expect(()=>host('file.readTextChunk',{id:'reader'})).toThrow('disposed');expect(()=>host('sql.transaction',{})).toThrow('disposed');
+});

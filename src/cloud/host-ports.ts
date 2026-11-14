@@ -14,7 +14,7 @@ import {WatchCloudKeyManager,type CloudStringStore} from './keys';
 import {WatchCloudCache,type CloudBlobStore} from './cache';
 import {WatchCloudStateStore} from './state';
 import {WatchCloudClient} from './client';
-import type {CloudClientOptions,HttpTransport,CloudUploadObject} from './types';
+import {utf8Encode,type CloudClientOptions,type HttpTransport,type CloudUploadObject} from './types';
 export type CloudHostRequest=<T>(method:string,args:Record<string,unknown>)=>Promise<T>;
 export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuard,site:RestoreCallsite='runtime'){
  const metadata=restoreRequestMetadata(site);
@@ -22,7 +22,7 @@ export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuar
  const request:CloudHostRequest=invoke;
  const hostOperation=<T>(method:string,args:Record<string,unknown>)=>({result:request<T>(method,args)});
  const fileChunks={
-  openText:(path:string)=>request<{id:string}>('file.openText',{path,strictUtf8:true}),
+  openText:(path:string)=>request<{id:string}>('file.openText',{path}),
   readTextChunk:(id:string,maxChars:number)=>request<{text:string;eof:boolean}>('file.readTextChunk',{id,maxChars}),
   closeText:(id:string)=>request('file.closeText',{id}),
   createTemp:(directory:string)=>request<{path:string}>('file.createTemp',{directory}),
@@ -96,7 +96,15 @@ const files:CloudBlobStore={
  },
  async repairJournal(path,length,newline){
   guard.require();const temporary=await fileChunks.createTemp('watch-cloud-cache');
-  try{let at=0;for(;at<length;){guard.require();const part=await fileChunks.read(path,at,Math.min(65536,length-at)),data=bytes(part.dataBase64);if(part.offset!==at||!data.length||data.length>length-at)throw Error('cloud_record_journal_incomplete');await fileChunks.append(temporary.path,part.dataBase64,at);at+=data.length;}
+  // The verified length is measured after UTF-8 decoding. Re-encode that
+  // prefix: malformed input can expand to U+FFFD, so raw byte offsets differ.
+  try{let at=0;
+   if(length>0)for await(const text of files.textChunks!(path)){
+    guard.require();const data=utf8Encode(text).subarray(0,length-at);
+    if(data.length){const written=await fileChunks.append(temporary.path,b64(data),at);if(written.size!==at+data.length)throw Error('cloud_record_journal_incomplete');at+=data.length;}
+    if(at===length)break;
+   }
+   if(at!==length)throw Error('cloud_record_journal_incomplete');
    if(newline){await fileChunks.append(temporary.path,b64(new Uint8Array([10])),at);at++;}
    const digest=await fileChunks.hash(temporary.path);guard.require();await fileChunks.commit(temporary.path,path,at,digest.sha256);
   }finally{await fileChunks.remove(temporary.path).catch(()=>{});}

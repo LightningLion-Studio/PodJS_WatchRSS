@@ -15,3 +15,19 @@ test('a throwing observer cannot leak an owner or prevent another observer from 
  const gate=new PlaybackWork(),events:boolean[]=[];const off=gate.subscribe(()=>{throw Error('disposed cloud guard');});gate.subscribe(active=>events.push(active));
  let release:()=>void=()=>{};expect(()=>{release=gate.hold();}).not.toThrow();expect(gate.active).toBe(true);const waiting=gate.wait();expect(()=>release()).not.toThrow();await waiting;off();expect(gate.active).toBe(false);expect(events).toEqual([true,false]);
 });
+test('playback and background interleavings fence the old run, release its lease, and resume one queued run',async()=>{
+ const {CloudForegroundExecution,cloudRunHost}=await import('../../src/cloud/execution');const {WatchCloudScheduler}=await import('../../src/cloud/scheduler');
+ const gate=new PlaybackWork(),execution=new CloudForegroundExecution(true);let foreground=true,runs=0,acks=0,releases=0,finish!:()=>void;
+ const pending=new Promise<void>(r=>{finish=r;});
+ const scheduler=new WatchCloudScheduler({now:()=>0,delay:()=>()=>{},scheduleWorker:async()=>{},cancelWorker:async()=>{},sync:async()=>{
+  runs++;const current=execution.begin(),host=cloudRunHost(async<T>(method:string)=>{if(method==='test.ack')acks++;if(method==='cloud.release')releases++;return {} as T;},current);
+  try{if(runs===1)await pending;await host('test.ack',{});return true;}catch{return false;}finally{await host('cloud.release',{});}
+ }},{require(){}});
+ const off=gate.subscribe(active=>{execution.foreground(foreground&&!active);scheduler.hold(active);});
+ try{
+  scheduler.foreground(true);expect(runs).toBe(1);const video=gate.hold(),speech=gate.hold();scheduler.trigger();
+  finish();for(let i=0;i<15;i++)await Promise.resolve();expect(acks).toBe(0);expect(releases).toBe(1);expect(runs).toBe(1);
+  foreground=false;execution.foreground(false);scheduler.foreground(false);video();speech();for(let i=0;i<15;i++)await Promise.resolve();expect(runs).toBe(1);
+  foreground=true;execution.foreground(true);scheduler.foreground(true);for(let i=0;i<15;i++)await Promise.resolve();expect(runs).toBe(2);expect(acks).toBe(1);expect(releases).toBe(2);
+ }finally{off();scheduler.dispose();}
+});
