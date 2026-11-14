@@ -1,4 +1,4 @@
-preload = ["../podjs-watch-framework-pinned/packages/framework/testing/solid-preload.ts", "./tests/solid-preload.ts"]
+preload = ["../podjs-watch-framework.wt-systemsettings/packages/framework/testing/solid-preload.ts", "./tests/solid-preload.ts"]
 [test]
 root = "./tests"
-preload = ["../podjs-watch-framework-pinned/packages/framework/testing/solid-preload.ts", "./tests/solid-preload.ts"]
+preload = ["../podjs-watch-framework.wt-systemsettings/packages/framework/testing/solid-preload.ts", "./tests/solid-preload.ts"]
