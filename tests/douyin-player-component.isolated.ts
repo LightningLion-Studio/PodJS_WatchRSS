@@ -10,7 +10,14 @@ const element=(kind:string,props:Node['props']):Node=>({kind,props});
 mock.module('@pocketjs/framework/renderer',()=>({createComponent,mergeProps,memo:createMemo,effect:createRenderEffect}));
 let spinnerMounts=0;mock.module('@pocketjs/framework/components',()=>({View:(p:any)=>element('View',p),Text:(p:any)=>element('Text',p),Image:(p:any)=>{if(p.src?.includes('player-loading'))spinnerMounts++;return element('Image',p);}}));
 const gestures:any[]=[];
-mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{gestures.push(options);return {dispose(){}};}}));
+const contact=(value:Record<string,unknown>={})=>({id:1,surface:'primary',x:100,y:100,startX:100,startY:100,dx:0,dy:0,fdx:0,fdy:0,vx:0,vy:0,downFrame:0,frames:0,...value});
+mock.module('@pocketjs/framework/gesture',()=>({createGesture:(options:any)=>{
+ // The real recognizer always supplies a full contact, including on cancel.
+ // Preserve option getters while filling the older body-test shorthand.
+ const handle=Object.create(options);
+ for(const key of ['onDown','onMove','onUp','onCancel','onTap','onLongPress','onPanStart','onPanMove','onPanEnd'])if(options[key])handle[key]=(c?:Record<string,unknown>)=>options[key](contact(c));
+ gestures.push(handle);return {dispose(){}};
+}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string)=>text.length*8})}));
 mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,pressNode(){}}));
 const frames:Array<()=>void>=[];mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:()=>void){frames.push(fn);}}));
