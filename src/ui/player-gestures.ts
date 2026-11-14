@@ -21,16 +21,41 @@ export function playerCoordinates<T extends GestureContact>(contact:T,degrees:nu
  * Sample the same display angle used by rendering at down, and retain it until
  * release (paging can replace the source and reset its render angle mid-drag).
  * Tap hit tests stay in screen coordinates. The unrotated detail panel does not
- * use this adapter. Axis locks follow the nearest rendered quarter during tweening. */
+ * use this adapter. During a tween, gate ownership and slop in picture axes,
+ * rather than rounding the recognizer to a neighbouring screen axis. */
 export function playerGesture(options:GestureOptions,rotation:()=>number,viewport:()=>PlayerViewport):GestureOptions {
- let degrees:number|undefined;
- const angle=()=>degrees??rotation();
- const convert=(c:GestureContact)=>playerCoordinates(c,angle(),viewport());
- const result:GestureOptions={...options,get axis(){const axis=options.axis;if(axis!=='x'&&axis!=='y')return axis;return Math.abs(Math.round(angle()/90)%2)===1?(axis==='x'?'y':'x'):axis;},
-  onDown(c){degrees=rotation();options.onDown?.(convert(c));},
+ const contacts=new Map<number,{degrees:number;viewport:PlayerViewport;panning:boolean}>();
+ let active:number|undefined,screenTravel=0,pictureTravel=0,crossTravel=0;
+ const angle=()=>active===undefined?rotation():contacts.get(active)?.degrees??rotation();
+ const convert=(c:GestureContact)=>{const state=contacts.get(c.id);return playerCoordinates(c,state?.degrees??rotation(),state?.viewport??viewport());};
+ const observe=(c:GestureContact)=>{
+  active=c.id;const local=convert(c),horizontal=options.axis==='x';
+  screenTravel=Math.max(Math.abs(c.dx),Math.abs(c.dy));
+  pictureTravel=Math.abs(horizontal?local.dx:local.dy);crossTravel=Math.abs(horizontal?local.dy:local.dx);
+  return local;
  };
- for(const key of ['onMove','onUp','onCancel','onPanStart','onPanMove','onPanEnd'] as const){
-  const handler=options[key];if(handler)result[key]=c=>handler(convert(c));
+ const release=(c:GestureContact)=>{contacts.delete(c.id);if(active===c.id)active=undefined;};
+ const result:GestureOptions={...options,
+  get axis(){const axis=options.axis;if(axis!=='x'&&axis!=='y')return axis;const degrees=angle();if(degrees%90!==0)return 'any';return Math.abs(Math.round(degrees/90)%2)===1?(axis==='x'?'y':'x'):axis;},
+  get panSlop(){
+   if(active===undefined||angle()%90===0||(options.axis!=='x'&&options.axis!=='y'))return options.panSlop;
+   // Trigonometry must not break the recognizer's registration-order tie.
+   if(pictureTravel===0||pictureTravel+1e-9<crossTravel)return Infinity;
+   // The framework consumes slop along max(screen dx,dy) for axis:any.
+   // Player recognizers specify panSlop, so scale it to consume the same
+   // number of picture pixels and preserve the first frame's fdx/fdy.
+   return options.panSlop===undefined?undefined:options.panSlop*screenTravel/pictureTravel;
+  },
+  onDown(c){contacts.set(c.id,{degrees:rotation(),viewport:{...viewport()},panning:false});const local=observe(c);options.onDown?.(local);},
+  onMove(c){const local=observe(c);options.onMove?.(local);},
+  onUp(c){try{options.onUp?.(observe(c));}finally{if(!contacts.get(c.id)?.panning)release(c);}},
+  onCancel(c){try{options.onCancel?.(observe(c));}finally{release(c);}},
+ };
+ if(options.onPanStart||options.onPanMove||options.onPanEnd){
+  result.onPanStart=c=>{const state=contacts.get(c.id);if(state)state.panning=true;options.onPanStart?.(observe(c));};
+  if(options.onPanMove)result.onPanMove=c=>options.onPanMove!(observe(c));
+  // The framework delivers onUp before onPanEnd. Keep the angle through both.
+  result.onPanEnd=c=>{try{options.onPanEnd?.(observe(c));}finally{release(c);}};
  }
  return result;
 }
