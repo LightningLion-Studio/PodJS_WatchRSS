@@ -106,6 +106,7 @@ export type RouteEntry = {
     previewKind?: ()=>"actual_frame"|"cover"|undefined;
     onCrown: (delta: number) => boolean;
     canSwipeBack?: () => boolean;
+    gestureRotation?: () => number;
     /** Claims right-to-left drags only (the player's detail panel); left-to-right stays Back. */
     sideSwipe?: { begin(): boolean; move(dx: number): void; end(vx: number): void; cancel?(): void };
   };
