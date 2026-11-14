@@ -58,3 +58,11 @@ test('wake bounces before the resolver starts do not consume request budget',()=
  for(let i=0;i<2;i++){const t=p.begin(false)!;p.markRequest(t);p.cancel();}
  expect(p.begin(false)).toBeUndefined();
 });
+
+test('REVIEW RSS refresh drops the former explicit expiry and decoder metadata',async()=>{
+ const r=new DouyinRssRecovery({resolvePlayback:async()=>({ok:true,data:{awemeId:'fixture',playUrl:'new',variants:[]}} as any),buildPlaybackHeaders:async()=>({})},'fixture');
+ const result=await r.reload({title:'RSS',url:'old',expiresAtMs:1,videoMime:'video/hevc',videoWidth:1920,videoHeight:1080},()=>true);
+ expect(result?.url).toBe('new');expect(result?.expiresAtMs).toBeUndefined();
+ const fresh=freshVideoSource({title:'RSS',url:'old',videoMime:'video/hevc',videoWidth:1920,videoHeight:1080},result!,321);
+ expect(fresh.videoMime).toBeUndefined();expect(fresh.videoWidth).toBeUndefined();expect(fresh.resumePositionMs).toBe(321);
+});

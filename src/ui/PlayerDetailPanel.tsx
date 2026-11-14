@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { getOps } from "@pocketjs/framework/host";
@@ -18,22 +18,22 @@ const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): void; move(dx: number): void; end(vx: number): void; cancel(): void; reset(): void }
 export function createDetailSlide(width: () => number, onSettled?: (open: boolean) => void): DetailSlide {
   const [x, setX] = createSignal(width());
-  let from = 0, to = 0, started = 0, animating = false, base = 0;
-  const animate = (target: number) => { from = x(); to = target; started = Date.now(); animating = from !== to; if (!animating) onSettled?.(target === 0); };
-  onFrame(() => {
-    if (!animating) return;
+  const [animating,setAnimating]=createSignal(false);
+  let from = 0, to = 0, started = 0, base = 0;
+  const animate = (target: number) => { from = x(); to = target; started = Date.now(); setAnimating(from !== to); if (!animating()) onSettled?.(target === 0); };
+  createRenderEffect(()=>{if(!animating())return;onFrame(() => {
     const t = (Date.now() - started) / SLIDE_MS;
     setX(from + (to - from) * ease(t));
-    if (t >= 1) { animating = false; setX(to); onSettled?.(to === 0); }
-  }, () => animating);
+    if (t >= 1) { setAnimating(false); setX(to); onSettled?.(to === 0); }
+  });});
   return {
     x, shown: () => x() < width(),
     open: () => animate(0), close: () => animate(width()),
-    begin: () => { animating = false; base = x(); },
+    begin: () => { setAnimating(false); base = x(); },
     move: dx => setX(Math.max(0, Math.min(width(), base + dx))),
     end: vx => { const w = width(), opening = base >= w; animate(vx < -400 ? 0 : vx > 400 ? w : opening ? (x() < w * .65 ? 0 : w) : (x() > w * .35 ? w : 0)); },
     cancel: () => animate(base >= width() ? width() : 0),
-    reset: () => { animating = false; setX(width()); },
+    reset: () => { setAnimating(false); setX(width()); },
   };
 }
 
@@ -89,11 +89,10 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     if (selected() && pages()[target] !== selected()) setSelected();
     settleFrom = offset(); settleStarted = Date.now(); setPage(target); setDrag(0); setSettle(settleFrom);
   };
-  onFrame(() => {
-    if (settle() === undefined) return;
+  createRenderEffect(()=>{if(settle()===undefined)return;onFrame(() => {
     const t = (Date.now() - settleStarted) / PAGE_MS, to = -page() * CANVAS;
     if (t >= 1) setSettle(); else setSettle(settleFrom + (to - settleFrom) * ease(t));
-  }, () => settle() !== undefined);
+  });});
 
   // Discover one continuation ahead, rather than laying out/retaining the whole
   // description. Control pages remain after the last description page.

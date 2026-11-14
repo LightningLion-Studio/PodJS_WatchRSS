@@ -13,7 +13,8 @@ const {PlayerDetailPanel,createDetailSlide}=await import('../src/ui/PlayerDetail
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());expect(frames).toHaveLength(0);expect(gestures).toHaveLength(0);expect(backs.size).toBe(0);Date.now=clock;});
 function nodes(v:any):any[]{if(typeof v==='function')return nodes(v());if(Array.isArray(v))return v.flatMap(nodes);if(!v?.props)return[];return[v,...nodes(v.props.children)];}
 function mount(description='',supported=true){Date.now=()=>time;let slide:any,handle:any,tree:any,canSeek=true,setSupported!:(value:boolean)=>void;const seeks:number[]=[],volumes:any[]=[],speeds:number[]=[];
- createRoot(stop=>{stops.push(stop);const [hasSpeed,set]=createSignal(supported);setSupported=set;slide=createDetailSlide(()=>233);slide.open();time+=300;frames.forEach(f=>f.fn());tree=PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>description,cover:()=>undefined,positionMs:()=>1000,durationMs:()=>10000,seekable:()=>canSeek,onSeek:d=>seeks.push(d),volumePercent:()=>20,muted:()=>false,onVolume:(...args)=>volumes.push(args),speed:()=>hasSpeed()?1:undefined,onSpeed:s=>speeds.push(s),ref:h=>handle=h});});
+ createRoot(stop=>{stops.push(stop);const [hasSpeed,set]=createSignal(supported);setSupported=set;slide=createDetailSlide(()=>233);tree=PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>description,cover:()=>undefined,positionMs:()=>1000,durationMs:()=>10000,seekable:()=>canSeek,onSeek:d=>seeks.push(d),volumePercent:()=>20,muted:()=>false,onVolume:(...args)=>volumes.push(args),speed:()=>hasSpeed()?1:undefined,onSpeed:s=>speeds.push(s),ref:h=>handle=h});});
+ slide.open();time+=300;frames.slice().forEach(f=>f.fn());
  const find=(name:string)=>nodes(tree).find(n=>n.props.debugName===name);
  return{slide,handle,find,setSupported,seeks,volumes,speeds,disable:()=>canSeek=false,tick(){time+=300;frames.slice().forEach(f=>f.fn());nodes(tree);},nodes:()=>nodes(tree)};
 }
@@ -50,4 +51,7 @@ test('disposing a dragged panel cannot reopen its surviving parent slide',()=>{
  createRoot(stop=>{stops.push(stop);slide=createDetailSlide(()=>233);});slide.open();time+=300;frames.slice().forEach(f=>f.fn());
  createRoot(stop=>{stopPanel=stop;PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>undefined,cover:()=>undefined,positionMs:()=>0,durationMs:()=>1000,seekable:()=>true,onSeek(){},volumePercent:()=>20,muted:()=>false,onVolume(){},speed:()=>1,onSpeed(){}});});
  const dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({dx:100});slide.reset();stopPanel();time+=300;frames.slice().forEach(f=>f.fn());expect(slide.shown()).toBe(false);
+});
+test('settled detail panels unregister animation callbacks',()=>{
+ const f=mount();expect(frames).toHaveLength(0);f.handle.crown(15000);expect(frames.length).toBeGreaterThan(0);f.tick();expect(frames).toHaveLength(0);
 });

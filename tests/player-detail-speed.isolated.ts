@@ -24,12 +24,13 @@ mock.module('../src/ui/PlayerDetailPanel.tsx',()=>({
 }));
 let phase='active',listener:(phase:string)=>void=()=>{},prepared=0;
 mock.module('@podjs/framework/watch',()=>({kv:{get(){},set(){}},hasCapability:()=>true,lifecycle:()=>phase,onLifecycleChange:(fn:any)=>{listener=fn;return()=>{};},normalizedRelativeAxisStep:(delta:number)=>Math.sign(delta)}));
-let audioChanged:(v:any)=>void=()=>{};let actual=.5;const writes:number[]=[],polls:(()=>void)[]=[];
+let stateChanged:(v:any)=>void=()=>{};let audioChanged:(v:any)=>void=()=>{};let actual=.5;const writes:number[]=[],polls:(()=>void)[]=[];
+let prepareGate:Promise<void>|undefined;
 let sourceGeneration=1,sourcePosition=0,speed=1,speedGate:Promise<void>|undefined,volumeGate:Promise<void>|undefined,seekGate:Promise<void>|undefined;const speeds:number[]=[];
 const value=()=>({speed,ok:true,state:'playing',positionMs:sourcePosition,durationMs:10000,width:540,height:960,volume:actual,volumeMax:16,hasRenderedFirstFrame:true,sourceGeneration,presented:true});
-const port:any={prepare:()=>{prepared++;speed=1;sourcePosition=prepared*1000;return {result:Promise.resolve(value()),cancel(){}};},state:async()=>value(),setVolume:async(v:number)=>{writes.push(v);actual=Math.round(v*16)/16;const reply=value(),wait=volumeGate;volumeGate=undefined;await wait;return reply;}};
+const port:any={prepare:()=>{prepared++;speed=1;sourcePosition=prepared*1000;const wait=prepareGate;prepareGate=undefined;return {result:wait?wait.then(()=>value()):Promise.resolve(value()),cancel(){}};},state:async()=>value(),setVolume:async(v:number)=>{writes.push(v);actual=Math.round(v*16)/16;const reply=value(),wait=volumeGate;volumeGate=undefined;await wait;return reply;}};
 for(const method of ['play','pause','retire','seek','stop','setBounds','setTransform','setLoop'])port[method]=async()=>value();
-mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:1,maxSessions:1,surfacePromotion:false,verticalTransition:false}),cancel(){}}),onVideoAudioChanged:(fn:any)=>{audioChanged=fn;return()=>{};},onVideoFirstFrame:()=>()=>{},delay:(ms:number)=>({result:new Promise<void>(yes=>{if(ms===400)polls.push(yes);}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:1,maxSessions:1,surfacePromotion:false,verticalTransition:false}),cancel(){}}),onVideoAudioChanged:(fn:any)=>{audioChanged=fn;return()=>{};},onVideoStateChanged:(fn:any)=>{stateChanged=fn;return()=>{};},onVideoFirstFrame:()=>()=>{},delay:(ms:number)=>({result:new Promise<void>(yes=>{if(ms===400)polls.push(yes);}),cancel(){}})}));
 port.setSpeed=async(v:number)=>{speeds.push(v);const reply={...value(),speed:v};const wait=speedGate;speedGate=undefined;await wait;speed=v;return reply;};
 port.seek=async(positionMs:number)=>{const reply={...value(),positionMs},wait=seekGate;seekGate=undefined;await wait;return reply;};
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
@@ -67,8 +68,20 @@ test('late progress reply cannot replace a new source',async()=>{
 });
 
 test('volume replies preserve progress observed while the write was pending',async()=>{
- const f=mount();await flush();f.open();let release!:()=>void;volumeGate=new Promise<void>(r=>release=r);panelProps.onVolume(1,false);await flush();sourcePosition=7000;polls.shift()!();await flush();release();await flush();expect(panelProps.positionMs()).toBe(7000);
+ const f=mount();await flush();f.open();let release!:()=>void;volumeGate=new Promise<void>(r=>release=r);panelProps.onVolume(1,false);await flush();sourcePosition=7000;stateChanged(value());await flush();release();await flush();expect(panelProps.positionMs()).toBe(7000);
 });
 test('a queued seek after source replacement starts from the new source position',async()=>{
  const f=mount();await flush();f.open();let release!:()=>void;seekGate=new Promise<void>(r=>release=r);panelProps.onSeek(4000);await flush();f.replace();await flush();const target=sourcePosition+4000;panelProps.onSeek(4000);release();await flush();expect(panelProps.positionMs()).toBe(target);
+});
+
+test('stable playback consumes pushed progress without guest polling or frame callbacks',async()=>{
+ const f=mount();await flush();f.open();await flush();expect(frames).toHaveLength(0);expect(polls).toHaveLength(0);
+ const before=panelProps.positionMs();stateChanged({...value(),sourceGeneration:999,positionMs:8888});await flush();expect(panelProps.positionMs()).toBe(before);
+ sourcePosition=7500;stateChanged(value());await flush();expect(panelProps.positionMs()).toBe(7500);expect(frames).toHaveLength(0);
+});
+
+test('preparation snapshots keep the visible loading animation until prepare settles',async()=>{
+ let release!:()=>void;prepareGate=new Promise<void>(resolve=>release=resolve);mount();await flush();expect(frames).toHaveLength(1);
+ stateChanged({...value(),state:'ready',hasRenderedFirstFrame:false});await flush();expect(frames).toHaveLength(1);
+ release();await flush();expect(frames).toHaveLength(0);
 });

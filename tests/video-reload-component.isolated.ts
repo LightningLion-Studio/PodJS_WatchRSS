@@ -17,7 +17,7 @@ const frames:Array<()=>void>=[];const frameNeeds=new Map<()=>void,()=>boolean>()
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:()=>void,needs=()=>true){frames.push(fn);frameNeeds.set(fn,needs);onCleanup(()=>{const i=frames.indexOf(fn);if(i>=0)frames.splice(i,1);frameNeeds.delete(fn);});}}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:(props:any)=>element('Poster',props)}));
 mock.module('../src/logs/app-logger.ts',()=>({appLogger:{d(){},i(){},w(){},e(){}}}));
-const frameEvents=new Set<(value:any)=>void>();
+const frameEvents=new Set<(value:any)=>void>(),stateEvents=new Set<(value:any)=>void>();
 let sessionPrepareError:unknown;
 let pressureLimit:number|undefined;
 let replacementPrepareGate:Promise<void>|undefined;
@@ -39,18 +39,18 @@ let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticRead
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
 let network:(s:InternetStatus)=>void,initial:InternetStatus='available';
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(fn:typeof network)=>{network=fn;fn(initial);return()=>{};}}));
-let prepares:any[]=[],plays=0,retries=0,failures=0,nextError:unknown,current:any;
+let nativeSequence=0;let prepares:any[]=[],plays=0,retries=0,failures=0,nextError:unknown,current:any;
 let heldPrepare:Promise<any>|undefined;
 let retires=0;let pauses=0,legacyStops=0,sessionReleases=0;const boundsCalls:any[]=[];
 const originalNow=Date.now;let fakeNow=originalNow();Date.now=()=>fakeNow;afterAll(()=>{Date.now=originalNow;});
 const due=new Map<()=>void,number>();let ticks:(()=>void)[]=[];
-const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:['idle','stopped'].includes(name)?0:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
-const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
+const state=(name:string)=>({ok:true,sourceGeneration:nativeSequence,state:name,positionMs:321,durationMs:['idle','stopped'].includes(name)?0:1000,width:100,height:100,volume:.2,volumeMax:15,hasRenderedFirstFrame:name==='ready'||name==='playing'});
+const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);nativeSequence++;prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current={...state('playing'),positionMs:current?.positionMs??0};},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async(positionMs:number)=>current={...current,positionMs},stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:(ms:number)=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);due.set(release,fakeNow+ms);return{result,cancel(){ticks=ticks.filter(t=>t!==release);due.delete(release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onVideoStateChanged:(fn:any)=>{stateEvents.add(fn);return()=>stateEvents.delete(fn);},onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:(ms:number)=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);due.set(release,fakeNow+ms);return{result,cancel(){ticks=ticks.filter(t=>t!==release);due.delete(release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
-const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';setHostLifecycle('active');due.clear();});
+const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());nativeSequence=0;ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';setHostLifecycle('active');due.clear();});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
 function mount(status:InternetStatus,url='https://video/current',immersive=false,platform:'douyin'|'bili'='douyin',recoveryDeadlineMs?:number){
@@ -69,7 +69,7 @@ function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title
  return {nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
-const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();};
+const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();stateEvents.forEach(fn=>fn(current));await flush();};
 test('RELOAD manual failure forces new resolution, releases native state and restores position',async()=>{
  nextError={code:'restricted'};const f=reloadMount();await flush();f.retry();await flush();
  expect(retries).toBe(1);expect(legacyStops).toBeGreaterThan(0);expect(prepares.at(-1)).toMatchObject({url:'https://fixture/new',resumePositionMs:0,bypassCache:true});
@@ -215,4 +215,9 @@ test('REVIEW cancelled reconnect resumes with fresh resolution instead of reusin
  f=reloadMount(undefined,async(p,current)=>{if(retries===1)await new Promise<void>(yes=>finish=yes);if(current())f.publish({platform:'bili',title:'fixture',url:'https://fixture/fresh-'+retries,resumePositionMs:p});});await flush();f.retry();await flush();expect(retries).toBe(1);
  lifecycleTo('background');await flush();finish();await flush();lifecycleTo('active');await flush();await tick(800);
  expect(retries).toBe(2);expect(prepares.at(-1)?.url).toBe('https://fixture/fresh-2');
+});
+
+test('REVIEW retired first-frame events cannot complete a reconnect still resolving its address',async()=>{
+ nextError={code:'restricted'};const f=reloadMount(undefined,()=>new Promise(()=>{}));await flush();f.retry();await flush();expect(f.firstFrames()).toBe(0);
+ frameEvents.forEach(fn=>fn({...state('playing'),sourceGeneration:5,hasRenderedFirstFrame:true}));await flush();expect(f.firstFrames()).toBe(0);expect(f.images()).toHaveLength(2);
 });

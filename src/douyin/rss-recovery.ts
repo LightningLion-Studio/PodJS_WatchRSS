@@ -1,3 +1,4 @@
+import {douyinDecoderProfile} from '../ui/douyin/video-sessions.ts';
 import {videoOptEnabled} from '../media/video-opt.ts';
 import {DouyinPlaybackRecovery} from './playback-recovery.ts';
 import {douyinPlaybackAudio} from './playback-selector.ts';
@@ -17,7 +18,7 @@ export class DouyinRssRecovery {
     if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code});
     const headers=await this.client.buildPlaybackHeaders();
     if(!isCurrent())return;
-    return {...source,url:result.data.playUrl,videoUrl:undefined,audioUrl:douyinPlaybackAudio(result.data),headers};
+    return {...source,expiresAtMs:undefined,videoMime:undefined,videoWidth:undefined,videoHeight:undefined,...douyinDecoderProfile(result.data),url:result.data.playUrl,videoUrl:undefined,audioUrl:douyinPlaybackAudio(result.data),headers};
   }
   async recover(source:PlaybackSource,isCurrent:()=>boolean,manual=false,error?:unknown):Promise<PlaybackSource|undefined> {
     if(videoOptEnabled('recovery')){

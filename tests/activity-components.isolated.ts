@@ -1,3 +1,4 @@
+let jankStateChanged:(v:any)=>void=()=>{};
 import {bindPocketModules} from '@podjs/framework/testing/bun-runtime';
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
@@ -132,14 +133,14 @@ const videoState=()=>({state:'playing',positionMs:0,durationMs:100000,width:466,
 const frameCaptures:any[]=[];
 const loopCalls:boolean[]=[],prepareLoops:boolean[]=[],loopKv=new Map<string,unknown>();
 const videoTimers=new Set<{milliseconds:number;fire:()=>void}>();
-const fireVideoPoll=()=>{for(const timer of [...videoTimers])if(timer.milliseconds===400){videoTimers.delete(timer);timer.fire();}};
+const fireVideoPoll=()=>jankStateChanged(videoState());
 mock.module('@podjs/framework/watch',()=>({getDisplayMetrics:()=>({physicalWidth:466,logicalWidth:233,logicalHeight:233,shape:'round',density:2,safeInsets:{left:0,right:0,top:0,bottom:0}}),hasCapability:()=>false,lifecycle:()=>playerLifecycle,onLifecycleChange:(fn:(state:string)=>void)=>{playerLifecycleListeners.add(fn);return ()=>playerLifecycleListeners.delete(fn);},normalizedRelativeAxisStep:(n:number)=>n,kv:{get:(key:string)=>loopKv.get(key),set(key:string,value:unknown){loopKv.set(key,value);},delete(key:string){loopKv.delete(key);}}}));
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(t:string)=>t.length*6})}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:element('RemoteImage')}));
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(listener:any)=>{listener(internet);return ()=>{};}}));
 mock.module('../src/logs/app-logger.ts',()=>({createLogConsole:()=>({warn(){},error(){}}),appLogger:{d(){},i(){},w(){},e(){}}}));
 let inlineCalls=0;
-mock.module('@podjs/framework/services',()=>({onNetworkChange:()=>()=>{},onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:()=>()=>{},textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
+mock.module('@podjs/framework/services',()=>({onNetworkChange:()=>()=>{},onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:()=>()=>{},textInput:{openInline:async()=>{inlineCalls++;throw Error('fixture inline unavailable');}},textLayout:{},video:{
  captureFrame:async(options:any)=>{frameCaptures.push(options);return {available:true,kind:"actual_frame",path:"video-frames/test.jpg"};},captureBackdrop:async()=>{},prepare:(options:any)=>{prepareLoops.push(options.loop);return {result:Promise.resolve(videoState()),cancel(){}};},setLoop:async(loop:boolean)=>{loopCalls.push(loop);return videoState();},
  retire:async()=>({...videoState(),state:'paused'}),play:async()=>videoState(),pause:async()=>({...videoState(),state:'paused'}),stop:async()=>{},state:async()=>videoState(),seek:async()=>videoState(),
  setBounds:async()=>{},setTransform:async(value:any)=>{transforms.push(value);},setVolume:async(value:number)=>{volumes.push(value);return {...videoState(),volume:value};},

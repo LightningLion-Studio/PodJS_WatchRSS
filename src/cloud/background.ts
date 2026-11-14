@@ -54,7 +54,7 @@ export default defineBackgroundHandler(async context=>{
  const onboarding=new OnboardingStore({get:()=>consent.exists?consent.value:undefined,set:()=>{throw Error('Worker cannot accept consent');}});
  if(startupDestination(onboarding.load())!=='content')return 'success';
  const guard={require(){gate.require();if(context.isCancelled())throw Error('Cloud worker cancelled');}};
- const host:CloudHostRequest=(method,args)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete'&&method!=='crypto.closeSealedGzip')guard.require();return raw(method,args);};
+ const host:CloudHostRequest=(method,args)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete'&&method!=='file.closeText'&&method!=='crypto.closeSealedGzip')guard.require();return raw(method,args);};
  yieldHosts.set(context,host);
  let library:ReturnType<typeof createBackgroundLibrary>|undefined;
  // The host deadline is absolute Unix ms. Leave time for the normal

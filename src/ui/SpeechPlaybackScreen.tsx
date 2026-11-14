@@ -1,3 +1,4 @@
+import {playbackWork} from '../core/playback-work';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('SpeechPlaybackScreen');
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
@@ -19,12 +20,14 @@ export function SpeechPlaybackScreen(props: {
   onAutoAdvance: () => void; onRate: (step: -1 | 1) => void;
   currentArticleActionText: "返回文章" | "查看当前文章"; onOpenCurrentArticle: () => void;
 }) {
+  const [workForeground,setWorkForeground]=createSignal(lifecycle()==='active');
+  createEffect(()=>{if(props.active&&workForeground()&&!props.state.error){const release=playbackWork.hold();onCleanup(release);}});
   const [volume,setVolume]=createSignal({visible:false,percent:0});
   const volumeController=new CrownVolumeController(mediaVolume,{after:(ms,callback)=>{const timer=delay(ms);void timer.result.then(callback,()=>{});return()=>timer.cancel();}},setVolume,
     ()=>{void hostOperation("ui.toast",{message:"音量调节防干扰触发，先停下以继续调整音量"}).result.catch(()=>{});},
     error=>logConsole.warn("朗读音量调节失败",error));
   const removeRaw=onRawScrollInput(event=>{if(props.active&&props.volumeEnabled&&lifecycle()==="active")volumeController.adjust(event.vertical,event.uptimeMs,props.volumeGuard);});
-  const removeLifecycle=onLifecycleChange(state=>{if(state!=="active")volumeController.reset();});
+  const removeLifecycle=onLifecycleChange(state=>{setWorkForeground(state==='active');if(state!=="active")volumeController.reset();});
   createEffect(()=>{props.active;props.volumeEnabled;props.volumeGuard;volumeController.reset();});
   onCleanup(()=>{removeRaw();removeLifecycle();volumeController.reset();});
   const volumeText=()=>`：${volume().percent}%`;

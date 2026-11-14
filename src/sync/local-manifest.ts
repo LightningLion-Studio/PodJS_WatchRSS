@@ -1,3 +1,4 @@
+import {playbackWork} from '../core/playback-work';
 import {idleHit} from '../diagnostics/idle-counters';
 import {cpuWorkAsyncIterable} from '@podjs/framework/cpu-work';
 import {repositoryWork} from './repository-work';
@@ -158,7 +159,7 @@ export class LocalArticleManifestStore {
  }
  /** Native hash/cache hits can settle synchronously. Budget the whole caller,
   * rather than assuming an await necessarily gives Android's looper a turn. */
- private workCheckpoint(check?:()=>void){let work=0,slice=Date.now();return async(weight=1)=>{check?.();work+=weight;if(work>=32||Date.now()-slice>=8){await (this.text.yieldTurn?.()??this.db.query('SELECT 1'));check?.();work=0;slice=Date.now();}};}
+ private workCheckpoint(check?:()=>void){let work=0,slice=Date.now();return async(weight=1)=>{check?.();work+=weight;if(work>=32||Date.now()-slice>=8){await playbackWork.wait(check);await (this.text.yieldTurn?.()??this.db.query('SELECT 1'));check?.();work=0;slice=Date.now();}};}
  /** Cloud identities remain separate from native-wire bindings. Pool IDs are authoritative. */
  private async cloudIdentity(r:Row,metadataOnly=false):Promise<CloudRssIdentity|undefined>{
   try{
@@ -238,6 +239,7 @@ export class LocalArticleManifestStore {
  }
  async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls));}
  private async snapshotValue(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]> {
+  await playbackWork.wait(check);
   if(urls?.length===0)return [];
   await new ArticleKeepStore(this.db).initialize();
   const marks=urls?.map(()=>'?').join(',');

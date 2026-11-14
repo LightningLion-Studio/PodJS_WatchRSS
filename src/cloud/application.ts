@@ -1,3 +1,4 @@
+import {playbackWork} from '../core/playback-work';
 import {cloudStatePort} from './state-sql';
 import {appLogger} from '../logs/app-logger';
 import {CloudVisibility} from './visibility';
@@ -27,21 +28,22 @@ const notifyApproval=()=>{for(const fn of approvalListeners)try{fn();}catch{}};
 function start(){
  let handoff:CloudManualHandoff|undefined;
  const visibility=new CloudVisibility(lifecycle());
- const execution=new CloudForegroundExecution(lifecycle()==='active'&&!localTransferActivity.active);
+ const execution=new CloudForegroundExecution(lifecycle()==='active'&&!localTransferActivity.active&&!playbackWork.active);
  let disposed=false,initialized=false,scheduler:WatchCloudScheduler|undefined,runtime:ReturnType<typeof createCloudRuntime>|undefined,approvals:CloudApprovalController|undefined,pageActive=approvalPageActive,polling=false,cancelPoll=()=>{};
  let approver:CloudApproverController|undefined,cancelApproverPoll=()=>{};
  let syncV2:ReturnType<typeof watchSyncV2Product<import('../ui/sync-v2-view.ts').SyncV2UiPort>>|undefined,syncV2Ready:Parameters<NonNullable<import('./service').CloudSyncPorts['keysReady']>>[0]|undefined;
  const cleanups:(()=>void)[]=[onSqlChanged('watchrss-library',()=>{notifyLibraryChanged('remote');notifyNotesChanged();})];
  function armApprover(){cancelApproverPoll();cancelApproverPoll=()=>{};if(disposed||!pageActive||!approver?.active)return;const timer=delay(5000);cancelApproverPoll=()=>timer.cancel();void timer.result.then(async()=>{if(disposed||!pageActive||!approver?.active)return;await approver.poll();armApprover();}).catch(()=>{});}
- const updateExecution=()=>execution.foreground(visibility.active&&!localTransferActivity.active);
+ const updateExecution=()=>execution.foreground(visibility.active&&!localTransferActivity.active&&!playbackWork.active);
  const updateVisibility=()=>{updateExecution();approver?.setForeground(visibility.active&&!localTransferActivity.active);armApprover();scheduler?.foreground(initialized&&visibility.active);handoff?.foregroundChanged(visibility.active);};
- cleanups.push(onLifecycleChange(state=>{visibility.lifecycle(state);updateVisibility();}),localTransferActivity.subscribe(active=>{updateExecution();approver?.setForeground(visibility.active&&!active);armApprover();scheduler?.hold(active);handoff?.localTransferChanged(active);}));
+ cleanups.push(onLifecycleChange(state=>{visibility.lifecycle(state);updateVisibility();}),localTransferActivity.subscribe(active=>{updateExecution();approver?.setForeground(visibility.active&&!active);armApprover();scheduler?.hold(active||playbackWork.active);handoff?.localTransferChanged(active);}));
+ cleanups.push(playbackWork.subscribe(active=>{updateExecution();scheduler?.hold(active||localTransferActivity.active);}));
  const arm=()=>{cancelPoll();cancelPoll=()=>{};if(disposed||!approvals?.active||!['pending','code'].includes(approvals.state.phase))return;const timer=delay(1500);cancelPoll=()=>timer.cancel();void timer.result.then(async()=>{if(polling||disposed||!approvals?.active)return;polling=true;try{await approvals.poll();}finally{polling=false;arm();}}).catch(()=>{});};
  const foreground=()=>{approvals?.setForeground(pageActive&&lifecycle()==='active');approver?.setForeground(visibility.active&&!localTransferActivity.active);arm();armApprover();};
  const ready=(async()=>{
   if(!await initializeCloudHost()||disposed)return;
   const guard={require(){cloudGate.require();if(disposed)throw Error('Cloud runtime disposed');}};
-  const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete')guard.require();return hostOperation<T>(method,args).result;};
+  const host=<T>(method:string,args:Record<string,unknown>)=>{if(method!=='cloud.release'&&method!=='secure.release'&&method!=='file.delete'&&method!=='file.closeText'&&method!=='crypto.closeSealedGzip')guard.require();return hostOperation<T>(method,args).result;};
   // 26.4 P6-10: off by default. Off => no keysReady hook, no v2 request, no UI port.
   let heldKeys=new Map<number,Uint8Array>(),v2Tail:Promise<unknown>=Promise.resolve(),v2Current:(()=>void)|undefined;
   const v2Guard={require(){guard.require();if(!v2Current)throw Error('feature_disabled');v2Current();}};
@@ -49,7 +51,7 @@ function start(){
   const clearV2Keys=()=>{for(const key of heldKeys.values())key.fill(0);heldKeys.clear();};cleanups.push(clearV2Keys);
   syncV2=watchSyncV2Product({enabled:SYNC_V2_PRODUCT.syncV2,drainOnStop:true,announced:async()=>!!syncV2Ready?.syncV2,install:installApplicationSyncV2Ui,open:async lifetime=>{
    const v2Host=cloudRunHost((async<T>(method:string,args:Record<string,unknown>)=>{
-    const cleanup=['file.delete','secure.release','cloud.release','crypto.closeSealedGzip'].includes(method);
+    const cleanup=['file.delete','file.closeText','secure.release','cloud.release','crypto.closeSealedGzip'].includes(method);
     if(!cleanup)guard.require();
     // Native cancellation for read/crypto/HTTP waits. SQL and secure mutations
     // settle under their original lease before another account can open.
@@ -74,7 +76,7 @@ function start(){
   handoff=new CloudManualHandoff(host,async()=>{const account=await summaryAccountStore.read();return account?cloudAccountIdentity(account):undefined;},(mode,restored)=>scheduler!.manual(mode,restored),Date.now,async()=>{const account=await summaryAccountStore.read();if(!account)return;return epochStore.get(manualEpochKey(account));});
   cleanups.push(handoff.subscribe(()=>{for(const fn of handoffListeners)try{fn();}catch{}}));
   handoff.foregroundChanged(visibility.active);handoff.localTransferChanged(localTransferActivity.active);
-  scheduler.hold(localTransferActivity.active);
+  scheduler.hold(localTransferActivity.active||playbackWork.active);
   let identity='',accountId='',accountScope='';
   cleanups.push(connectCloudAccountStatus(()=>cloudGate.allowed&&!disposed?{...runtime!.service.status,accountId,accountScope}:undefined),runtime.service.subscribe(notifyCloudAccountStatus));
   const account=async()=>{const state=await summaryAccountStore.read(),next=cloudAccountIdentity(state);if(disposed||next===identity)return;handoff?.accountChanged();identity=next;syncV2Ready=undefined;clearV2Keys();await syncV2?.stop();accountId=state?.userId??'';accountScope=JSON.stringify([state?.backendBaseUrl.replace(/\/+$/,''),state?.userId]);runtime!.service.reset();approvals?.reset();approver?.reset();await runtime!.inspectOwner();if(disposed||identity!==next)return;await handoff?.restore(false);if(disposed||identity!==next)return;scheduler?.accountChanged();if(visibility.active)void handoff?.restore().catch(()=>{});};
