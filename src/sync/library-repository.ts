@@ -1,3 +1,4 @@
+import {playbackWork} from '../core/playback-work';
 import {idleHit} from '../diagnostics/idle-counters';
 import {MemoRepository} from '../notes/repository';
 import type {MemoNote} from '../notes/types';
@@ -112,6 +113,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  private async identity():Promise<string>{const row=(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1'))[0];if(!row||!String(row.device_id).trim())throw new Error('Initialize sync identity first');return String(row.device_id);}
  private async migrate(){idleHit(30);const id=await this.identity();await migrateLocalDeletionJournal(this.db,id,this.ports.text,this.ports.codec);return id;}
  private async legacySnapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
+  await playbackWork.wait(check);
   idleHit(49);return this.work('legacySnapshot',async()=>{
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   this.local.restoreReusableBodies([]);check?.();
@@ -153,6 +155,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   });
  }
  private async snapshot<T>(action:(articles:readonly PreparedArticle[],sources:readonly SyncedSource[],id:string)=>Promise<T>,canonical=false,bookMode=false,check?:()=>void):Promise<T>{
+  await playbackWork.wait(check);
   idleHit(48);if(!canonical)return this.legacySnapshot(action,canonical,bookMode,check);check?.();
   await this.prepareFastProjection();const generation=this.projectionGeneration!;
   const started=Date.now(),trace=(stage:string)=>this.report({stage,elapsedMs:Date.now()-started});
@@ -203,7 +206,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   throw new LibrarySnapshotBusyError();
  }
  private async needsProjectionSeed(){return !Number((await this.db.query("SELECT seeded FROM sync_fast_definitions WHERE domain='library'"))[0]?.seeded);}
- async prepareFastProjection(){idleHit(33);return this.work('prepareFastProjection',async()=>{
+ async prepareFastProjection(){await playbackWork.wait();idleHit(33);return this.work('prepareFastProjection',async()=>{
   await this.projection.initialize();await this.definitions.ensure();await this.projection.initialize();
   const generation=await this.definitions.libraryGeneration();
   if(this.projectionGeneration!==generation){this.projectionGeneration=generation;this.snapshotCache=undefined;this.local.setEncodingGeneration(generation);}

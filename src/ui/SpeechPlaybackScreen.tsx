@@ -1,3 +1,4 @@
+import {playbackWork} from '../core/playback-work';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('SpeechPlaybackScreen');
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
@@ -18,6 +19,7 @@ export function SpeechPlaybackScreen(props: {
   onAutoAdvance: () => void; onRate: (step: -1 | 1) => void;
   currentArticleActionText: "返回文章" | "查看当前文章"; onOpenCurrentArticle: () => void;
 }) {
+  createEffect(()=>{if(props.active){const release=playbackWork.hold();onCleanup(release);}});
   const [volume,setVolume]=createSignal({visible:false,percent:0});
   const volumeController=new CrownVolumeController(mediaVolume,{after:(ms,callback)=>{const timer=delay(ms);void timer.result.then(callback,()=>{});return()=>timer.cancel();}},setVolume,
     ()=>{void hostOperation("ui.toast",{message:"音量调节防干扰触发，先停下以继续调整音量"}).result.catch(()=>{});},

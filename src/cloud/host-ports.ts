@@ -83,6 +83,21 @@ const crypto:SnapshotCrypto={
  gunzip:async(input,maxBytes)=>cpuWorkAsync('gunzip','bytes',Math.max(input.length,maxBytes),async()=>{guard.require();const native=gunzipBytes(input);if(native){if(native.length>maxBytes)throw Error('cloud_snapshot_inflate_limit');return native;}return transcode(input,'file.gunzip',maxBytes);}),
 };
 const files:CloudBlobStore={
+ yieldTurn:()=>operation<void>('runtime.delay',{milliseconds:1}),
+ async *textChunks(path){
+  guard.require();const stat=await fileChunks.stat(path);if(!stat.exists)return;
+  if(!stat.file||stat.size<0||stat.size>64*1024*1024)throw Error('cloud_record_journal_invalid');
+  const {id}=await fileChunks.openText(path);
+  try{for(;;){guard.require();const part=await fileChunks.readTextChunk(id,16384);guard.require();if(part.text)yield part.text;if(part.eof)break;if(!part.text)throw Error('cloud_record_journal_incomplete');}}
+  finally{await fileChunks.closeText(id).catch(()=>{});}
+ },
+ async repairJournal(path,length,newline){
+  guard.require();const temporary=await fileChunks.createTemp('watch-cloud-cache');
+  try{let at=0;for(;at<length;){guard.require();const part=await fileChunks.read(path,at,Math.min(65536,length-at)),data=bytes(part.dataBase64);if(part.offset!==at||!data.length||data.length>length-at)throw Error('cloud_record_journal_incomplete');await fileChunks.append(temporary.path,part.dataBase64,at);at+=data.length;}
+   if(newline){await fileChunks.append(temporary.path,b64(new Uint8Array([10])),at);at++;}
+   const digest=await fileChunks.hash(temporary.path);guard.require();await fileChunks.commit(temporary.path,path,at,digest.sha256);
+  }finally{await fileChunks.remove(temporary.path).catch(()=>{});}
+ },
  hash:async path=>(await fileChunks.hash(path)).sha256,
  async append(path,input,offset){guard.require();for(let at=0;at<input.length;at+=262144){const data=input.subarray(at,at+262144),written=await invoke<{size:number}>("file.write",{path,dataBase64:b64(data),append:offset+at!==0,expectedOffset:offset+at,atomicReplace:offset+at===0},12);if(written.size!==offset+at+data.length)throw Error("cloud_record_journal_incomplete");}},
  async read(path){guard.require();const stat=await fileChunks.stat(path);guard.require();if(!stat.exists)return undefined;if(!stat.file||!Number.isSafeInteger(stat.size)||stat.size<0||stat.size>64*1024*1024)throw Error('无效云缓存文件');const out=new Uint8Array(stat.size);for(let offset=0;offset<out.length;){guard.require();const part=await fileChunks.read(path,offset,Math.min(262144,out.length-offset));guard.require();const value=bytes(part.dataBase64);if(part.offset!==offset||part.size!==out.length||!value.length||value.length>out.length-offset)throw Error('云缓存读取不完整');out.set(value,offset);offset+=value.length;}return out;},
