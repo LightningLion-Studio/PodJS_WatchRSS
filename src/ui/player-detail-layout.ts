@@ -130,13 +130,27 @@ export const infoRects = (layout: InfoLayout): Rect[] => [
 
 /** The full description, when it does not fit the info page: a caption and circle-flowing lines. */
 export const ABOUT = { caption: centred(120, 24, 16), slot: 1, size: 14, lineHeight: 20, maxWidth: 200, top: 46, bottom: 204 } as const;
-export function aboutLayout(description: string, measure: (text: string, slot: number) => number): TextLine[] {
-  const text = detailText({ title: "", description }).description || clean(description);
+export interface AboutPage { lines: TextLine[]; nextOffset?: number }
+/** One bounded page of the complete description. Offsets are UTF-16 indices in
+ * the already-normalized description; only the visible page is measured. */
+export function aboutPage(text: string, measure: (text: string, slot: number) => number, start = 0): AboutPage {
   const count = Math.floor((ABOUT.bottom - ABOUT.top) / ABOUT.lineHeight);
-  const needed = Math.min(count, measuredLines(text, ABOUT.maxWidth, value => measure(value, ABOUT.slot), count).length);
-  const y = ABOUT.top + (ABOUT.bottom - ABOUT.top - needed * ABOUT.lineHeight) / 2;
-  const rects = lineRects(y, needed, ABOUT.lineHeight, ABOUT.maxWidth);
-  return flowLines(text, rects.map(r => r.width), value => measure(value, ABOUT.slot)).map((line, i) => ({ text: line, rect: rects[i]! }));
+  const rects = lineRects(ABOUT.top, count, ABOUT.lineHeight, ABOUT.maxWidth);
+  const lines: TextLine[] = [];
+  let offset = start;
+  for (const rect of rects) {
+    // The bounded prefix exceeds the capacity of a line at this font size.
+    const line = measuredLines(text.slice(offset, offset + 400), rect.width, value => measure(value, ABOUT.slot))[0] ?? "";
+    if (!line) break;
+    lines.push({ text: line, rect });
+    offset += line.length;
+    while (offset < text.length && /\s/.test(text[offset]!)) offset++;
+    if (offset >= text.length) break;
+  }
+  return { lines, ...(offset < text.length && offset > start ? { nextOffset: offset } : {}) };
+}
+export function aboutLayout(description: string, measure: (text: string, slot: number) => number): TextLine[] {
+  return aboutPage(clean(description), measure).lines;
 }
 
 // ---- control pages -----------------------------------------------------------------------
@@ -171,10 +185,11 @@ export function gaugeArc(fraction: number, width: number): { insetL: number; ins
 
 /** Horizontal page dots in the gauge's open bottom. */
 export function pageDots(count: number, active: number): (Rect & { active: boolean })[] {
+  const shown = Math.min(7, count), start = Math.max(0, Math.min(count - shown, active - Math.floor(shown / 2)));
   const size = 5, activeWidth = 12, gap = 5, y = 214;
-  const total = (count - 1) * (size + gap) + activeWidth;
+  const total = (shown - 1) * (size + gap) + activeWidth;
   let x = C - total / 2;
-  return Array.from({ length: count }, (_, i) => { const width = i === active ? activeWidth : size, dot = { x, y, width, height: size, active: i === active }; x += width + gap; return dot; });
+  return Array.from({ length: shown }, (_, i) => { const width = start + i === active ? activeWidth : size, dot = { x, y, width, height: size, active: start + i === active }; x += width + gap; return dot; });
 }
 
 /** The inward-pointing tab at the right edge of the player, and its larger touch target. */

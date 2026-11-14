@@ -40,12 +40,12 @@ const recoveredSources=new WeakSet<object>();
 type ExtendedVideoState = VideoState & { volume?: number; buffered?: boolean; isBuffering?: boolean };
 
 export interface PlaybackSource { preparationError?:unknown; releaseStartupPreview?:()=>void; startupSeq?:number; biliApiSource?:'watch'|'web'; recoveryDeadlineMs?:number; previewOnly?:boolean;previewFrame?:DouyinFramePreview; detailPlayback?:boolean; immersive?:boolean; awemeId?:string; posterUrl?:string; backgroundPlayback?: boolean; url?: string; videoUrl?: string; audioUrl?: string; webUrl?: string; headers?: Record<string, string>; type?: string; videoMime?:string; videoWidth?:number; videoHeight?:number; title: string; /** Detail panel metadata already held by the source; omitted fields are not shown. */ author?: string; description?: string; resumePositionMs?: number; volumeGuard?: boolean; startVolumeLimit?: number | null; digitalCrownVolume?: boolean; platform?: "bili" | "douyin" | "rss" }
-export interface VideoPlayerHandle { invalidatePrefetch(id:string):void; previewKind():"actual_frame"|"cover"|undefined; loopMode():VideoLoopMode; availableLoopModes():readonly VideoLoopMode[]; setLoopMode(mode:VideoLoopMode):void; cycleLoopMode():void; onCrown(delta: number): boolean; canSwipeBack(): boolean; /** Right-to-left drag that opens the detail panel; begin() returns false when it cannot open. */ sideSwipe: { begin(): boolean; move(dx: number): void; end(vx: number): void } }
+export interface VideoPlayerHandle { invalidatePrefetch(id:string):void; previewKind():"actual_frame"|"cover"|undefined; loopMode():VideoLoopMode; availableLoopModes():readonly VideoLoopMode[]; setLoopMode(mode:VideoLoopMode):void; cycleLoopMode():void; onCrown(delta: number): boolean; canSwipeBack(): boolean; /** Right-to-left drag that opens the detail panel; begin() returns false when it cannot open. */ sideSwipe: { begin(): boolean; move(dx: number): void; end(vx: number): void; cancel(): void } }
 
 const LOOP_LABELS: Record<VideoLoopMode, string> = { off: "不循环", single: "单视频循环", next: "自动下一个" };
 function PlayerButton(props: { hidden?: boolean; left: number; top: number; size: number; icon: "fullscreen" | "panorama" | "fullscreen-exit" | "rotate" | "rewind" | "forward" | "play" | "pause" | "loop-off" | "loop-single" | "loop-next"; accessibilityLabel?: string; iconSize: number; enabled?: boolean; onPress: () => void; onHold?: (elapsedMs: number) => void }) {
   let node: NodeMirror | undefined;
-  createHoldPress(() => node, { enabled: () => props.enabled !== false, onPress: () => props.onPress(), onHold: props.onHold && (elapsed => props.onHold?.(elapsed)) });
+  createHoldPress(() => node, { enabled: () => !props.hidden && props.enabled !== false, onPress: () => props.onPress(), onHold: props.onHold && (elapsed => props.onHold?.(elapsed)) });
   return <Show when={!props.hidden}><View ref={value => node = value} onPress={() => { if (props.enabled !== false) props.onPress(); }} focusable={props.enabled !== false} accessibilityLabel={props.accessibilityLabel} accessibilityRole={props.accessibilityLabel ? "button" : undefined} style={{ insetL: props.left, insetT: props.top, width: props.size, height: props.size, opacity: props.enabled === false ? .5 : 1 }} class="absolute items-center justify-center active:scale-96">
     <Show when={props.icon === "fullscreen"}><Image src="../assets/icons/player-fullscreen.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "panorama"}><Image src="../assets/icons/player-panorama.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "fullscreen-exit"}><Image src="../assets/icons/player-fullscreen-exit.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "rotate"}><Image src="../assets/icons/player-rotate.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "rewind"}><Image src="../assets/icons/player-rewind.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "forward"}><Image src="../assets/icons/player-forward.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "play"}><Image src="../assets/icons/player-play.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "pause"}><Image src="../assets/icons/player-pause.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-off"}><Image src="../assets/icons/player-loop-off.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-single"}><Image src="../assets/icons/player-loop-single.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show><Show when={props.icon === "loop-next"}><Image src="../assets/icons/player-loop-next.svg" style={{ width: props.iconSize, height: props.iconSize }} /></Show>
   </View></Show>;
@@ -635,18 +635,45 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   // and re-prepares: a state that disagrees is corrected once per source generation.
   const [speedTarget, setSpeedTarget] = createSignal(1);
   const speedSupported = () => typeof state()?.speed === "number";
-  let speedRunning = false, speedCorrected: string | undefined;
-  const submitSpeed = async () => { if (speedRunning) return; speedRunning = true; try { let target: number; do { target = speedTarget(); const next = await media.setSpeed(target); if (disposed || videoSessionOwner !== sessionOwner) return; setState(previous => ({ ...previous, ...next })); } while (target !== speedTarget() && !disposed); } catch (value) { appLogger.w('VideoPlayer', `setSpeed failed ${playerFailureCode(value)}`); } finally { speedRunning = false; } };
+  let speedRunning = false, speedDirty = false;
+  let speedCorrected: { source: PlaybackSource; generation: number; nativeGeneration?: number; target: number } | undefined;
+  const submitSpeed = async () => {
+    if (speedRunning) { speedDirty = true; return; }
+    speedRunning = true;
+    try {
+      let target: number;
+      do {
+        speedDirty = false;
+        const source = props.source, ownGeneration = generation, nativeGeneration = state()?.sourceGeneration;
+        if (disposed || !props.active || !ready() || !speedSupported() || videoSessionOwner !== sessionOwner) return;
+        target = speedTarget();
+        const next = await media.setSpeed(target);
+        if (disposed || videoSessionOwner !== sessionOwner) return;
+        // A retained session can have the same native generation as its neighbour.
+        // Source identity and the application generation must also still match.
+        if (source !== props.source || ownGeneration !== generation || nativeGeneration !== state()?.sourceGeneration) { speedDirty = true; continue; }
+        // Speed replies can arrive after a seek/poll: never roll those fields back.
+        setState(previous => previous ? { ...previous, speed: next.speed } : previous);
+      } while (speedDirty || target !== speedTarget());
+    } catch (value) { appLogger.w('VideoPlayer', `setSpeed failed ${playerFailureCode(value)}`); }
+    finally { speedRunning = false; }
+  };
   const changeSpeed = (value: number) => { setSpeedTarget(value); void submitSpeed(); };
-  createEffect(() => { const value = state(); if (typeof value?.speed !== "number" || Math.abs(value.speed - speedTarget()) < .001 || !ready() || videoSessionOwner !== sessionOwner) return; const key = `${value.sourceGeneration}:${speedTarget()}`; if (speedCorrected === key) return; speedCorrected = key; void submitSpeed(); });
+  createEffect(() => {
+    const value = state(), target = speedTarget(), source = props.source;
+    if (typeof value?.speed !== "number" || Math.abs(value.speed - target) < .001 || !ready() || !props.active || videoSessionOwner !== sessionOwner) return;
+    if (speedCorrected?.source === source && speedCorrected.generation === generation && speedCorrected.nativeGeneration === value.sourceGeneration && speedCorrected.target === target) return;
+    speedCorrected = { source, generation, nativeGeneration: value.sourceGeneration, target };
+    untrack(() => void submitSpeed());
+  });
   // Detail & playback-control panel: opened by the edge arrow or a right-to-left drag.
   let detail: PlayerDetailHandle | undefined;
   const slide = createDetailSlide(() => props.width);
   const detailShown = slide.shown;
   const canOpenDetail = () => props.active && props.offset === 0 && !error() && !networkPrompt() && !dragAxis() && !handoff();
   createEffect(() => { if (!props.active) slide.reset(); });
-  props.ref?.({ invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,onCrown: delta => { if (detailShown()) { detail?.crown(delta); return true; } return adjustVolume(delta); }, canSwipeBack: () => { if (detailShown()) return false; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; },
-    sideSwipe: { begin: () => { if (!canOpenDetail()) return false; slide.begin(); return true; }, move: dx => slide.move(dx), end: vx => slide.end(vx) } });
+  props.ref?.({ invalidatePrefetch(id){neighborRevision++;forwardResolved=false;forwardTarget=undefined;sessionPool?.invalidateStandby(id);if(props.active&&ready())void warmForward();},previewKind:()=>previewPath()?'actual_frame':!props.source.immersive&&props.source.posterUrl?'cover':undefined,loopMode,availableLoopModes:loopModes,setLoopMode,cycleLoopMode,onCrown: delta => { if (detailShown()) { detail?.crown(delta); return true; } return adjustVolume(delta); }, canSwipeBack: () => { if (detailShown()) return false; if (props.source.platform === "douyin") return true; const r = range(); return r.axis !== "x" || r.range <= 0 || pan() >= r.range - 1; },
+    sideSwipe: { begin: () => { if (!canOpenDetail()) return false; slide.begin(); return true; }, move: dx => slide.move(dx), end: vx => slide.end(vx), cancel: () => slide.cancel() } });
   onCleanup(() => { recoveryDeadline.cancel();removeLifecycle();autoAdvance.cancel();playbackTrace?.event('exit');disposed = true; deferredDrags.length=0;deferredPan=undefined; generation++;neighborRevision++;dragRevision++;autoplayAllowed=false; const current = state(); if (ready() && current) emitCheckpoint("pause_or_exit", current.positionMs, current.durationMs); surfaceGesture.dispose(); horizontalPanGesture.dispose(); prepareOp?.cancel(); pollTimer?.cancel(); tapTimer?.cancel(); volumeTimer?.cancel(); releaseOwnedPlayback(); });
   // Round screens: while the crown capsule shows, control rows in the (rotatable) layer move off it or leave it blank.
   const layerQuarter = () => ((Math.round(displayRotation() / 90) * 90) % 360 + 360) % 360;
@@ -689,7 +716,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
         <PlayerButton left={47.5 + dx(topTriple, 0)} hidden={hidden(topTriple, 0)} top={8} size={44} icon={mode() === "standard" ? "fullscreen" : mode() === "expanded" ? "panorama" : "fullscreen-exit"} iconSize={24} onPress={changeMode} /><PlayerButton left={94.5 + dx(topTriple, 1)} hidden={hidden(topTriple, 1)} top={8} size={44} icon={`loop-${loopMode()}`} iconSize={24} accessibilityLabel={LOOP_LABELS[loopMode()]} onPress={tapLoopMode} /><PlayerButton left={141.5 + dx(topTriple, 2)} hidden={hidden(topTriple, 2)} top={8} size={44} icon="rotate" iconSize={24} onPress={rotate} />
       </Show>
       <Text style={{ width: startWidth() }} class="absolute left-[26] top-[181] text-[9px] leading-[13] text-white text-right">{formatPlayerTime(state()?.positionMs ?? 0)}</Text><View style={{ insetL: 31.5 + startWidth(), width: barWidth() }} class="absolute top-[183] h-[4] rounded-[2] bg-[#b6b6b659]"><View class="absolute left-[0] top-[0] h-[4] rounded-[2] bg-[#ff6700]" style={{ width: progressWidth(state()?.positionMs ?? 0, state()?.durationMs ?? 0, barWidth()) }} /><View class="absolute right-[0] top-[0] w-[4] h-[4] rounded-[2] bg-[#ff6700]" /></View><Text style={{ width: endWidth() }} class="absolute right-[26] top-[181] text-[9px] leading-[13] text-[#b6b6b6]">{formatPlayerTime(state()?.durationMs ?? 0)}</Text>
-      <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
+      <PlayerButton left={47.5 + dx(bottomRow, 0)} hidden={hidden(bottomRow, 0)} top={186} size={44} icon="rewind" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(-4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, -1))} /><PlayerButton left={91.5 + dx(bottomRow, 1)} hidden={hidden(bottomRow, 1)} top={183} size={50} icon={state()?.state === "playing" ? "pause" : "play"} iconSize={28} enabled={props.active && !detailShown() && prepared()} onPress={() => void toggle()} /><PlayerButton left={141.5 + dx(bottomRow, 2)} hidden={hidden(bottomRow, 2)} top={186} size={44} icon="forward" iconSize={24} enabled={props.active && !detailShown() && prepared()} onPress={() => void seekTo(4000)} onHold={elapsed => void seekTo(seekHoldStep(elapsed, 1))} />
     </View></Show>
     <Show when={networkPrompt()}>{prompt => <View class="absolute inset-0 bg-[#000000ee]">
       <View class="absolute" style={{insetL:uiLeft(),insetT:uiTop(),width:233,height:233,scale:uiScale(),originX:0,originY:0}}>

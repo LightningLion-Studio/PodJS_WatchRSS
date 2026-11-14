@@ -107,7 +107,7 @@ export type RouteEntry = {
     onCrown: (delta: number) => boolean;
     canSwipeBack?: () => boolean;
     /** Claims right-to-left drags only (the player's detail panel); left-to-right stays Back. */
-    sideSwipe?: { begin(): boolean; move(dx: number): void; end(vx: number): void };
+    sideSwipe?: { begin(): boolean; move(dx: number): void; end(vx: number): void; cancel?(): void };
   };
 };
 

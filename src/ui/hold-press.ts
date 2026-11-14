@@ -20,6 +20,6 @@ export function createHoldPress(node: () => NodeMirror | undefined, options: { e
     onLongPress: () => { if (!enabled() || !options.onHold) return; holding = true; holdStart = Date.now(); nextHold = 0; },
     onUp: end, onCancel: end,
   });
-  onFrame(() => { if (!holding || !options.onHold) return; const elapsed = Date.now() - holdStart; if (elapsed >= nextHold) { options.onHold(elapsed); nextHold = elapsed + HOLD_REPEAT_MS; } });
-  onCleanup(() => gesture.dispose());
+  onFrame(() => { if (!enabled() || !node()) { end(); return; } if (!holding || !options.onHold) return; const elapsed = Date.now() - holdStart; if (elapsed >= nextHold) { options.onHold(elapsed); nextHold = elapsed + HOLD_REPEAT_MS; } }, () => holding);
+  onCleanup(() => { end(); gesture.dispose(); });
 }

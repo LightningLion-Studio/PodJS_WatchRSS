@@ -304,7 +304,7 @@ export default function WatchRSS(props: {
       if (motion.phase === "dragging") motion.release(c.vx, Date.now());
     },
     onCancel: () => {
-      if (sideSwipe) { const side = sideSwipe; sideSwipe = undefined; side.end(0); return; }
+      if (sideSwipe) { const side = sideSwipe; sideSwipe = undefined; if (side.cancel) side.cancel(); else side.end(0); return; }
       if (motion.phase === "dragging") motion.release(0, Date.now(), true);
     },
   });

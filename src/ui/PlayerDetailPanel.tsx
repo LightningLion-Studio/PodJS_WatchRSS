@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, For, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { getOps } from "@pocketjs/framework/host";
@@ -8,14 +8,14 @@ import * as watch from "@podjs/framework/watch";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
-import { ABOUT, aboutLayout, CANVAS, CONTROL, controlButtons, detailText, ENTRY_ARROW, formatSpeed, gaugeArc, INFO, infoLayout, pageDots, settlePage, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
+import { ABOUT, aboutPage, CANVAS, CONTROL, controlButtons, detailText, ENTRY_ARROW, formatSpeed, gaugeArc, INFO, infoLayout, pageDots, settlePage, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
 
 const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
 const SLIDE_MS = 220, PAGE_MS = 260;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
-export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): void; move(dx: number): void; end(vx: number): void; reset(): void }
+export interface DetailSlide { x: Accessor<number>; shown: Accessor<boolean>; open(): void; close(): void; begin(): void; move(dx: number): void; end(vx: number): void; cancel(): void; reset(): void }
 export function createDetailSlide(width: () => number, onSettled?: (open: boolean) => void): DetailSlide {
   const [x, setX] = createSignal(width());
   let from = 0, to = 0, started = 0, animating = false, base = 0;
@@ -32,6 +32,7 @@ export function createDetailSlide(width: () => number, onSettled?: (open: boolea
     begin: () => { animating = false; base = x(); },
     move: dx => setX(Math.max(0, Math.min(width(), base + dx))),
     end: vx => { const w = width(), opening = base >= w; animate(vx < -400 ? 0 : vx > 400 ? w : opening ? (x() < w * .65 ? 0 : w) : (x() > w * .35 ? w : 0)); },
+    cancel: () => animate(base >= width() ? width() : 0),
     reset: () => { animating = false; setX(width()); },
   };
 }
@@ -73,9 +74,11 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     const value = cover();
     return infoLayout({ title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait }, (text, slot) => getOps().measureText(text, slot));
   });
-  const about = createMemo(() => info().descriptionMore ? aboutLayout(detailText({ title: props.title(), description: props.description() }).description, (text, slot) => getOps().measureText(text, slot)) : []);
-  type Page = "info" | "about" | Control;
-  const pages = createMemo<Page[]>(() => ["info", ...(about().length ? ["about" as const] : []), "progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
+  const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
+  const [aboutStarts, setAboutStarts] = createSignal([0]);
+  const firstAbout = createMemo(() => info().descriptionMore ? aboutPage(description(), (text, slot) => getOps().measureText(text, slot)) : undefined);
+  type Page = "info" | `about:${number}` | Control;
+  const pages = createMemo<Page[]>(() => ["info", ...(firstAbout()?.lines.length ? aboutStarts().map(start => `about:${start}` as const) : []), "progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
   const [page, setPage] = createSignal(0), [drag, setDrag] = createSignal(0), [selected, setSelected] = createSignal<Control>();
   // Page settle animation, in canvas units.
   const [settle, setSettle] = createSignal<number>();
@@ -91,6 +94,19 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     const t = (Date.now() - settleStarted) / PAGE_MS, to = -page() * CANVAS;
     if (t >= 1) setSettle(); else setSettle(settleFrom + (to - settleFrom) * ease(t));
   }, () => settle() !== undefined);
+
+  // Discover one continuation ahead, rather than laying out/retaining the whole
+  // description. Control pages remain after the last description page.
+  createEffect(() => {
+    description();
+    untrack(() => { setAboutStarts([0]); setPage(0); setDrag(0); setSettle(); setSelected(); });
+  });
+  createEffect(() => {
+    const kind = pages()[page()];
+    if (!kind?.startsWith("about:")) return;
+    const next = aboutPage(description(), (text, slot) => getOps().measureText(text, slot), Number(kind.slice(6))).nextOffset;
+    if (next !== undefined && !aboutStarts().includes(next)) setAboutStarts(starts => [...starts, next]);
+  });
 
   // Crown: the selected control, otherwise page by page.
   let pageCrown = 0, speedCrown = 0;
@@ -123,7 +139,7 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     onPanStart: contact => { closing = contact.dx > 0; if (closing) { props.slide.begin(); props.slide.move(contact.dx); } },
     onPanMove: contact => { if (closing) props.slide.move(contact.dx); },
     onPanEnd: contact => { if (closing) props.slide.end(contact.vx); closing = false; },
-    onCancel: () => { if (closing) props.slide.end(0); closing = false; },
+    onCancel: () => { if (closing) props.slide.cancel(); closing = false; },
   });
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
@@ -170,13 +186,15 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     </>;
   };
 
-  const AboutPage = () => <>
+  const AboutPage = (p: { start: number }) => {
+    const lines = createMemo(() => aboutPage(description(), (text, slot) => getOps().measureText(text, slot), p.start).lines);
+    return <>
     <Text class="absolute text-xs leading-[16] text-[#ff6026] text-center" style={box(ABOUT.caption)}>简介</Text>
-    <For each={about()}>{line => <Text class="absolute text-sm leading-[20] text-[#d0d0d0] text-center" style={box(line.rect)}>{line.text}</Text>}</For>
-  </>;
+    <For each={lines()}>{line => <Text class="absolute text-sm leading-[20] text-[#d0d0d0] text-center" style={box(line.rect)}>{line.text}</Text>}</For>
+  </>; };
   const page$ = (kind: Page): (() => JSX.Element) => {
     if (kind === "info") return InfoPage;
-    if (kind === "about") return AboutPage;
+    if (kind.startsWith("about:")) return () => <AboutPage start={Number(kind.slice(6))} />;
     if (kind === "progress") return () => <ControlPage kind="progress" caption="播放进度" minus="../assets/icons/player-rewind.svg" plus="../assets/icons/player-forward.svg" enabled={props.seekable}
       value={() => formatPlayerTime(props.positionMs())} detail={() => `共 ${formatPlayerTime(props.durationMs())}`}
       fraction={() => props.durationMs() > 0 ? props.positionMs() / props.durationMs() : 0}

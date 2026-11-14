@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ABOUT, aboutLayout, CANVAS, CONTROL, chordWidth, controlButtons, controlRects, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, gaugeOuterRadius, INFO, infoLayout, infoRects, insideCanvasCircle, pageDots, settlePage, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
+import { ABOUT, aboutLayout, aboutPage, CANVAS, CONTROL, chordWidth, controlButtons, controlRects, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, gaugeOuterRadius, INFO, infoLayout, infoRects, insideCanvasCircle, pageDots, settlePage, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
 import { holdStepCount, seekHoldStep } from "../src/ui/video-player.ts";
 import { volumeArcLayout, volumeArcOutline } from "../src/ui/volume-arc.ts";
 
@@ -61,7 +61,7 @@ describe("player detail layout stays inside the round screen", () => {
         expect(measure(line.text, ABOUT.slot)).toBeLessThanOrEqual(line.rect.width + 1e-6);
       }
     }
-    expect(aboutLayout(longCjk, measure).at(-1)!.text.endsWith("…")).toBe(true);
+    expect(aboutLayout(longCjk, measure).at(-1)!.text.endsWith("…")).toBe(false);
   });
   test("lines taper with the circle", () => {
     const layout = infoLayout({ title: "短", description: longCjk, hasCover: true }, measure);
@@ -123,4 +123,15 @@ describe("player detail values", () => {
     expect(settlePage(1, 10, 900, CANVAS, 4)).toBe(0);
     expect(settlePage(3, -100, -900, CANVAS, 4)).toBe(3);
   });
+});
+
+test('the complete description remains readable past 400 characters with bounded pages',()=>{
+ const text='简介👩‍👧‍👦与拉丁text'.repeat(160)+'末尾验证';
+ let offset=0,read='',pages=0;
+ do {const result=aboutPage(text,measure,offset);expect(result.lines.length).toBeGreaterThan(0);
+  for(const line of result.lines){expect(insideCanvasCircle(line.rect)).toBe(true);expect(measure(line.text,ABOUT.slot)).toBeLessThanOrEqual(line.rect.width);read+=line.text;}
+  pages++;if(result.nextOffset===undefined)break;expect(result.nextOffset).toBeGreaterThan(offset);offset=result.nextOffset;
+ }while(pages<200);
+ expect(read).toBe(text);expect(pages).toBeGreaterThan(4);
+ for(const count of [5,7,20,200])for(const active of [0,Math.floor(count/2),count-1]){const dots=pageDots(count,active);expect(dots.filter(d=>d.active)).toHaveLength(1);for(const dot of dots)expect(insideCanvasCircle(dot)).toBe(true);}
 });
