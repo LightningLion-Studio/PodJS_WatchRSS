@@ -1,3 +1,4 @@
+const journalTextReaders=new Map<string,{text:string;at:number}>();let journalTextReaderId=0;
 import {plainPart,openLocalPart} from './plain-parts-fixture';
 import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {test,expect} from 'bun:test';
@@ -65,6 +66,9 @@ for(const mode of ['entry-ref','pending'])test('RESTOREPATH production bundle '+
    case 'file.createTemp':return resultFile(new Uint8Array(),a.directory);
    case 'file.delete':files.delete(a.path);return {};
    case 'file.stat':return {exists:files.has(a.path),file:files.has(a.path),size:files.get(a.path)?.length??0};
+   case 'file.openText':{const id='journal-reader-'+(++journalTextReaderId);journalTextReaders.set(id,{text:Buffer.from(files.get(a.path)!).toString('utf8'),at:0});return {id};}
+   case 'file.readTextChunk':{const reader=journalTextReaders.get(a.id)!;let end=Math.min(reader.text.length,reader.at+a.maxChars);if(end<reader.text.length&&reader.text.charCodeAt(end-1)>=0xd800&&reader.text.charCodeAt(end-1)<=0xdbff)end++;const text=reader.text.slice(reader.at,end);reader.at=end;return {text,eof:end===reader.text.length};}
+   case 'file.closeText':return {closed:journalTextReaders.delete(a.id)};
    case 'file.read':{const b=files.get(a.path)!;return {offset:a.offset,size:b.length,dataBase64:b64(b.subarray(a.offset,a.offset+a.maxBytes))};}
    case 'file.write':{const before=a.append?files.get(a.path)!:new Uint8Array(),part=unb64(a.dataBase64);if(a.append)expect(a.expectedOffset).toBe(before.length);files.set(a.path,new Uint8Array(Buffer.concat([before,part])));return {size:before.length+part.length};}
    case 'file.hash':return {sha256:await crypto.sha256(files.get(a.path)!)};

@@ -1,3 +1,4 @@
+let jankStateChanged:(v:any)=>void=()=>{};
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
@@ -27,7 +28,7 @@ const nativeState=(name:string,positionMs=12345)=>({ok:true,state:name,positionM
 const video={prepare:(options:any)=>{prepares.push(options);const error=nativeErrors.shift();return{result:error?Promise.reject(error):Promise.resolve(current=nativeState('ready',0)),cancel(){}};},
  play:async()=>{plays++;return current={...current,state:'playing'};},seek:async(position:number)=>{seeks.push(position);return current={...current,positionMs:position};},state:async()=>{const error=stateError;stateError=undefined;if(error)throw error;return current;},
  pause:async()=>current={...current,state:'paused'},stop:async()=>current=nativeState('stopped'),setBounds:async()=>{},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current,captureBackdrop:async()=>{}};
-mock.module('@podjs/framework/services',()=>({onNetworkChange:()=>()=>{},onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:()=>()=>{},video,videoSessions:{},browserAuth:{},secureStorage:{},hostOperation(){throw Error('Unexpected host call');},delay:()=>{let release!:()=>void;const result=new Promise<void>(yes=>release=yes);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({onNetworkChange:()=>()=>{},onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:()=>()=>{},video,videoSessions:{},browserAuth:{},secureStorage:{},hostOperation(){throw Error('Unexpected host call');},delay:()=>{let release!:()=>void;const result=new Promise<void>(yes=>release=yes);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 let client:any;
 mock.module('../src/media-services.ts',()=>({biliClient:{getSession:()=>client.getSession(),resolvePlayback:(x:any)=>client.resolvePlayback(x),watchApiEnabled:()=>client.watchApiEnabled(),reportHistory:async()=>{}},biliPreviewCache:{lookup:async()=>undefined},douyinStock:{resume:async()=>{},suspend(){},networkChanged:async()=>{}},douyinClient:{},douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},loadLocalBiliDetail:async()=>undefined}));
 const {createBiliClient}=await import('../src/bili/client.ts');
@@ -60,8 +61,8 @@ for(const [status,code] of [[401,'restricted'],[403,'restricted'],[410,'source_e
  expect(JSON.parse(values.get('watchrss.bili.playback-progress.v1'))[0].positionMs).toBe(12345);
 });
 test('native terminal HTTP error after playback retains last known position even when native error state reports zero',async()=>{
- const f=await fixture([]);current=nativeState('playing',45678);ticks.shift()!();await flush();
- current={...nativeState('error',0),errorCode:'restricted'};ticks.shift()!();await flush();
+ const f=await fixture([]);current=nativeState('playing',45678);jankStateChanged(current);await flush();
+ current={...nativeState('error',0),errorCode:'restricted'};jankStateChanged(current);await flush();
  expect(f.requests.map(r=>new URL(r.url).pathname)).toEqual(['/x/watch/player/playurl','/x/player/wbi/playurl']);
  expect(f.entry.playback?.resumePositionMs).toBe(45678);expect(seeks.at(-1)).toBe(45678);expect(plays).toBe(2);
 });
@@ -74,13 +75,13 @@ test('an actual network failure does not consume the one-shot watch-to-Web fallb
  const f=await fixture([{code:'network_error'}]);expect(f.requests).toHaveLength(1);expect(prepares).toHaveLength(1);expect(plays).toBe(0);
 });
 
-test('native state operation rejection reaches the same one-shot recovery path',async()=>{
- const f=await fixture([]);stateError={code:'restricted'};ticks.shift()!();await flush();
+test('native error event reaches the same one-shot recovery path',async()=>{
+ const f=await fixture([]);current={...current,state:'error',errorCode:'restricted'};jankStateChanged(current);await flush();
  expect(f.requests).toHaveLength(2);expect(prepares).toHaveLength(2);expect(f.entry.playback).toMatchObject({biliApiSource:'web',resumePositionMs:12345});expect(plays).toBe(2);
 });
 
-test('failed Web API authorization after a native state error stops polling and never changes login credentials',async()=>{
+test('failed Web API authorization after a native state error stops retrying and never changes login credentials',async()=>{
  const f=await fixture([],true),session=f.secure.get('watchrss.bili.session.v1');
- stateError={code:'restricted'};ticks.shift()!();await flush();
+ current={...current,state:'error',errorCode:'restricted'};jankStateChanged(current);await flush();
  expect(f.requests).toHaveLength(2);expect(prepares).toHaveLength(1);expect(ticks).toHaveLength(0);expect(f.secure.get('watchrss.bili.session.v1')).toBe(session);
 });

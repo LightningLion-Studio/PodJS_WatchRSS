@@ -1,3 +1,4 @@
+const journalTextReaders=new Map<string,{text:string;at:number}>();let journalTextReaderId=0;
 import {plainPart,openLocalPart} from './plain-parts-fixture';
 import {cloudStateValues} from './state-sql-fixture';
 import {CloudRecordCodec} from '../../src/cloud/records';
@@ -88,6 +89,9 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
    case 'secure.delete':secure.delete(a.key);return {};
    case 'file.createTemp':return resultFile(new Uint8Array(),a.directory);
    case 'file.write':{if(largeWindow){try{const data=unb64(a.dataBase64);if(Buffer.from(data.subarray(0,4)).toString()==='PLN4'){const shape=JSON.parse(utf8Decode(data.subarray(28)));if(shape.length>7*1024*1024&&Array.isArray(shape.parts))armProjection=true;}}catch{}}const old=a.append?files.get(a.path)!:new Uint8Array(),part=unb64(a.dataBase64);if(a.append)expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
+   case 'file.openText':{const id='journal-reader-'+(++journalTextReaderId);journalTextReaders.set(id,{text:Buffer.from(files.get(a.path)!).toString('utf8'),at:0});return {id};}
+   case 'file.readTextChunk':{const reader=journalTextReaders.get(a.id)!;let end=Math.min(reader.text.length,reader.at+a.maxChars);if(end<reader.text.length&&reader.text.charCodeAt(end-1)>=0xd800&&reader.text.charCodeAt(end-1)<=0xdbff)end++;const text=reader.text.slice(reader.at,end);reader.at=end;return {text,eof:end===reader.text.length};}
+   case 'file.closeText':return {closed:journalTextReaders.delete(a.id)};
    case 'file.read':{const b=files.get(a.path)!;return {size:b.length,offset:a.offset,dataBase64:b64(b.slice(a.offset,a.offset+a.maxBytes))};}
    case 'file.delete':files.delete(a.path);return {};
    case 'file.stat':return {exists:files.has(a.path),file:files.has(a.path),size:files.get(a.path)?.length??0};
