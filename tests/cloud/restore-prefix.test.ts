@@ -1,3 +1,4 @@
+const journalTextReaders=new Map<string,{text:string;at:number}>();let journalTextReaderId=0;
 import {plainPart,openLocalPart} from './plain-parts-fixture';
 import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
 import {test,expect} from 'bun:test';
@@ -43,7 +44,10 @@ for(const encoding of ['identity','gzip-chunks-v1'] as const)test('RESTORE1197 '
     case 'file.createTemp':return resultFile(new Uint8Array(),a.directory);
     case 'file.delete':files.delete(a.path);return {};
     case 'file.stat':return {exists:files.has(a.path),file:files.has(a.path),size:files.get(a.path)?.length??0};
-    case 'file.read':{const b=files.get(a.path)!;return {offset:a.offset,size:b.length,dataBase64:b64(b.subarray(a.offset,a.offset+a.maxBytes))};}
+    case 'file.openText':{const id='journal-reader-'+(++journalTextReaderId);journalTextReaders.set(id,{text:Buffer.from(files.get(a.path)!).toString('utf8'),at:0});return {id};}
+   case 'file.readTextChunk':{const reader=journalTextReaders.get(a.id)!;let end=Math.min(reader.text.length,reader.at+a.maxChars);if(end<reader.text.length&&reader.text.charCodeAt(end-1)>=0xd800&&reader.text.charCodeAt(end-1)<=0xdbff)end++;const text=reader.text.slice(reader.at,end);reader.at=end;return {text,eof:end===reader.text.length};}
+   case 'file.closeText':return {closed:journalTextReaders.delete(a.id)};
+   case 'file.read':{const b=files.get(a.path)!;return {offset:a.offset,size:b.length,dataBase64:b64(b.subarray(a.offset,a.offset+a.maxBytes))};}
     case 'file.write':{const before=a.append?files.get(a.path)!:new Uint8Array(),part=unb64(a.dataBase64);if(a.append)expect(a.expectedOffset).toBe(before.length);files.set(a.path,new Uint8Array(Buffer.concat([before,part])));return {size:before.length+part.length};}
     case 'file.hash':return {size:files.get(a.path)!.length,sha256:await crypto.sha256(files.get(a.path)!)};
     case 'file.commit':{const b=files.get(a.path)!;expect(b.length).toBe(a.expectedSize);expect(await crypto.sha256(b)).toBe(a.expectedSha256);files.set(a.target,b);files.delete(a.path);writes.set(a.target,(writes.get(a.target)??0)+1);return {path:a.target,size:b.length,sha256:a.expectedSha256};}

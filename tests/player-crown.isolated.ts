@@ -1,3 +1,4 @@
+let jankStateChanged:(v:any)=>void=()=>{};
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
@@ -20,15 +21,15 @@ let audioChanged:(v:any)=>void=()=>{};let actual=.5;const writes:number[]=[],pol
 const value=()=>({ok:true,state:'playing',positionMs:0,durationMs:10000,width:540,height:960,volume:actual,volumeMax:16,hasRenderedFirstFrame:true,sourceGeneration:prepared,presented:true});
 const port:any={prepare:()=>{prepared++;return {result:Promise.resolve(value()),cancel(){}};},state:async()=>value(),setVolume:async(v:number)=>{writes.push(v);actual=Math.round(v*16)/16;return value();}};
 for(const method of ['play','pause','retire','seek','stop','setBounds','setTransform','setLoop'])port[method]=async()=>value();
-mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:1,maxSessions:1,surfacePromotion:false,verticalTransition:false}),cancel(){}}),onVideoAudioChanged:(fn:any)=>{audioChanged=fn;return()=>{};},onVideoFirstFrame:()=>()=>{},delay:(ms:number)=>({result:new Promise<void>(yes=>{if(ms===400)polls.push(yes);}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:1,maxSessions:1,surfacePromotion:false,verticalTransition:false}),cancel(){}}),onVideoAudioChanged:(fn:any)=>{audioChanged=fn;return()=>{};},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:()=>()=>{},delay:(ms:number)=>({result:new Promise<void>(yes=>{if(ms===400)polls.push(yes);}),cancel(){}})}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
 let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;});
-test('slow player detents survive quantized native replies and intervening polls',async()=>{
+test('slow player detents survive quantized native replies and intervening native state events',async()=>{
  let handle:any;
  createRoot(stop=>{dispose=stop;VideoPlayerScreen({source:{url:'https://fixture.invalid/video',title:'fixture',startVolumeLimit:0,digitalCrownVolume:true},width:233,height:233,offset:0,round:true,active:true,ref:value=>handle=value});});
  await flush();expect(prepared).toBe(1);expect(actual).toBe(.5);expect(writes).toEqual([]);
- for(let i=0;i<3;i++){expect(handle.onCrown(1)).toBe(true);await flush();const poll=polls.shift();expect(poll).toBeDefined();poll!();await flush();}
+ for(let i=0;i<3;i++){expect(handle.onCrown(1)).toBe(true);await flush();jankStateChanged(value());await flush();}
  expect(writes).toHaveLength(3);expect(writes[0]).toBeCloseTo(.5+1/48);expect(writes[2]).toBeCloseTo(.5+1/16);expect(actual).toBe(.5625);
  actual=.25;audioChanged(value());await flush();handle.onCrown(1);await flush();expect(writes.at(-1)).toBeCloseTo(.25+1/48);
 });

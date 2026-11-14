@@ -1,4 +1,4 @@
-import { onCleanup } from "solid-js";
+import { createRenderEffect, createEffect, createSignal, onCleanup } from "solid-js";
 import type { NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/lifecycle";
@@ -12,14 +12,15 @@ export const HOLD_REPEAT_MS = 200;
  * detail panel's steppers, so both accelerate identically (see seekHoldStep/holdStepCount).
  */
 export function createHoldPress(node: () => NodeMirror | undefined, options: { enabled?: () => boolean; onPress: () => void; onHold?: (elapsedMs: number) => void; onHoldEnd?: () => void }) {
-  let holding = false, holdStart = 0, nextHold = 0;
+  const [holding,setHolding]=createSignal(false);
+  let holdStart = 0, nextHold = 0;
   const enabled = () => options.enabled?.() !== false;
-  const end = () => { if (holding) { holding = false; options.onHoldEnd?.(); } };
+  const end = () => { if (holding()) { setHolding(false); options.onHoldEnd?.(); } };
   const gesture = createGesture({ region: { node }, longPressSeconds: .5,
     onTap: () => { if (enabled()) options.onPress(); },
-    onLongPress: () => { if (!enabled() || !options.onHold) return; holding = true; holdStart = Date.now(); nextHold = 0; },
+    onLongPress: () => { if (!enabled() || !options.onHold) return; setHolding(true); holdStart = Date.now(); nextHold = 0; },
     onUp: end, onCancel: end,
   });
-  onFrame(() => { if (!enabled() || !node()) { end(); return; } if (!holding || !options.onHold) return; const elapsed = Date.now() - holdStart; if (elapsed >= nextHold) { options.onHold(elapsed); nextHold = elapsed + HOLD_REPEAT_MS; } }, () => holding);
+  createRenderEffect(()=>{if(!holding())return;onFrame(() => { if (!enabled() || !node()) { end(); return; } if (!holding() || !options.onHold) return; const elapsed = Date.now() - holdStart; if (elapsed >= nextHold) { options.onHold(elapsed); nextHold = elapsed + HOLD_REPEAT_MS; } });});
   onCleanup(() => { end(); gesture.dispose(); });
 }

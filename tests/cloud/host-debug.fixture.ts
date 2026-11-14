@@ -1,3 +1,4 @@
+const journalTextReaders=new Map<string,{text:string;at:number}>();let journalTextReaderId=0;
 import {stateSqlFixture} from './state-sql-fixture';
 // Isolated fake bridge: no Android/device and no network. Exercise the actual host adapter.
 import {expect} from 'bun:test';
@@ -19,7 +20,10 @@ async function execute(method:string,a:any):Promise<any>{
   case 'app.buildInfo':return {debugBuild:process.env.CLOUD_RELEASE!=='1'};
   case 'file.createTemp':{const path=`${a.directory}/.pod-write-${++next}.part`;files.set(path,new Uint8Array());return {path};}
   case 'file.write':{const old=a.append?files.get(a.path)!:new Uint8Array(),part=decode(a.dataBase64);expect(part.length).toBeLessThanOrEqual(262144);expect(a.expectedOffset).toBe(old.length);const out=new Uint8Array(old.length+part.length);out.set(old);out.set(part,old.length);files.set(a.path,out);return {size:out.length};}
-  case 'file.read':{const file=files.get(a.path)!;return {dataBase64:encode(file.slice(a.offset,a.offset+a.maxBytes)),offset:a.offset,size:file.length,eof:a.offset+a.maxBytes>=file.length};}
+  case 'file.openText':{const id='journal-reader-'+(++journalTextReaderId);journalTextReaders.set(id,{text:Buffer.from(files.get(a.path)!).toString('utf8'),at:0});return {id};}
+   case 'file.readTextChunk':{const reader=journalTextReaders.get(a.id)!;let end=Math.min(reader.text.length,reader.at+a.maxChars);if(end<reader.text.length&&reader.text.charCodeAt(end-1)>=0xd800&&reader.text.charCodeAt(end-1)<=0xdbff)end++;const text=reader.text.slice(reader.at,end);reader.at=end;return {text,eof:end===reader.text.length};}
+   case 'file.closeText':return {closed:journalTextReaders.delete(a.id)};
+   case 'file.read':{const file=files.get(a.path)!;return {dataBase64:encode(file.slice(a.offset,a.offset+a.maxBytes)),offset:a.offset,size:file.length,eof:a.offset+a.maxBytes>=file.length};}
   case 'file.stat':{const file=files.get(a.path);return {exists:!!file,file:!!file,directory:false,size:file?.length??0,modified:0};}
   case 'file.hash':{const file=files.get(a.path)!;return {size:file.length,sha256:hash(file)};}
   case 'file.delete':files.delete(a.path);return {deleted:true};

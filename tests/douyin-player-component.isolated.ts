@@ -1,3 +1,4 @@
+let jankStateChanged:(v:any)=>void=()=>{};
 import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
@@ -46,10 +47,11 @@ const state=(name:string)=>({ok:true,state:name,positionMs:321,durationMs:1000,w
 const video={retire:async()=>{retires++;return current=state("paused");},prepare:(options:any)=>{expect(options.respectSilentMode).toBe(true);prepares.push(options);const error=nextError;nextError=undefined;const held=heldPrepare;heldPrepare=undefined;return {result:error?Promise.reject(error):held??Promise.resolve(current=state('ready')),cancel(){}};},
  play:async()=>{plays++;return current=state('playing');},pause:async()=>{pauses++;return current=state('paused');},state:async()=>current,seek:async()=>current,stop:async()=>{legacyStops++;current=state('stopped');},setBounds:async(b:any)=>{boundsCalls.push(b);},setTransform:async()=>{},setVolume:async()=>current,setLoop:async()=>current};
 const sessionFacade=Object.fromEntries(Object.keys(sessionPort).map(method=>[method,(...args:any[])=>(sessionPort as any)[method](...args)]));
-mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
+mock.module('@podjs/framework/services',()=>({video,onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:(fn:any)=>{frameEvents.add(fn);return()=>frameEvents.delete(fn);},videoSessions:sessionFacade,hostOperation:(method:string)=>{if(method==='runtime.afterPaint')return {result:Promise.resolve({committed:true}),cancel(){}};if(method!=='video.session.capabilities')throw Error('unexpected session operation');return {result:Promise.resolve({decoderLimit,maxSessions:decoderLimit,surfacePromotion:true,verticalTransition:true}),cancel(){}};},delay:()=>{let release!:()=>void;const result=new Promise<void>(resolve=>release=resolve);ticks.push(release);return{result,cancel(){ticks=ticks.filter(t=>t!==release);}};}}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());ticks=[];frames.length=0;sessionPrepareError=undefined;replacementPrepareGate=undefined;sessionsCapable=false;decoderLimit=1;lifecycleState='active';});
-const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
+let deliveredNativeState:any;
+const flush=async()=>{if(current!==deliveredNativeState){deliveredNativeState=current;jankStateChanged(current);}for(let n=0;n<30;n++)await Promise.resolve();};
 function nodes(value:any):Node[]{if(typeof value==='function')return nodes(value());if(Array.isArray(value))return value.flatMap(nodes);if(!value||typeof value!=='object'||!('props'in value))return[];return[value,...nodes(value.props.children)];}
 function mount(status:InternetStatus,url='https://video/current',immersive=false,platform:'douyin'|'bili'='douyin',recoveryDeadlineMs?:number){
  initial=status;prepares=[];plays=0;retries=0;failures=0;ticks=[];current=state('idle');
@@ -65,7 +67,7 @@ test('D2 initial network gate clears on WiFi without fetching or replacing queue
 test('D2 Bluetooth continue prepares once and resumes existing ready player without route retry',async()=>{
  const f=mount('bluetooth');await flush();expect(prepares).toHaveLength(0);f.press('继续');await flush();expect(prepares).toHaveLength(1);expect(plays).toBe(1);expect(retries).toBe(0);
  // A new page requires a fresh confirmation. Mount separately with an already prepared WiFi stream.
- stops.pop()!();const ready=mount('available');await flush();current=state('paused');ticks.shift()!();await flush();network('bluetooth');await flush();ready.press('继续');await flush();
+ stops.pop()!();const ready=mount('available');await flush();current=state('paused');jankStateChanged(current);await flush();network('bluetooth');await flush();ready.press('继续');await flush();
  expect(prepares).toHaveLength(1);expect(plays).toBe(2);expect(retries).toBe(0);
 });
 test('D2 typed network prepare error on available WiFi shows native overlay and retries same source',async()=>{
@@ -73,7 +75,7 @@ test('D2 typed network prepare error on available WiFi shows native overlay and 
  f.press('重试');await flush();expect(prepares).toHaveLength(2);expect(prepares[1].url).toBe('https://video/current');expect(retries).toBe(0);expect(plays).toBe(1);
 });
 test('D2 actual terminal network state masks failure and keeps selected source',async()=>{
- const f=mount('available');await flush();current={...state('error'),errorCode:'network_error'};ticks.shift()!();await flush();expect(f.text()).toContain('未检测到可用互联网');expect(failures).toBe(0);
+ const f=mount('available');await flush();current={...state('error'),errorCode:'network_error'};jankStateChanged(current);await flush();expect(f.text()).toContain('未检测到可用互联网');expect(failures).toBe(0);
  f.press('重试');await flush();expect(prepares).toHaveLength(2);expect(retries).toBe(0);
 });
 test('D2 local video remains playable while offline',async()=>{
@@ -87,7 +89,7 @@ test('Bili network prepare failure waits for manual retry without invalidating t
 });
 test('Bili terminal network failure preserves source while actual source failure advances recovery',async()=>{
  const f=mount('available','https://video/current',false,'bili');await flush();
- current={...state('error'),errorCode:'network_error'};ticks.shift()!();await flush();expect(failures).toBe(0);
+ current={...state('error'),errorCode:'network_error'};jankStateChanged(current);await flush();expect(failures).toBe(0);
  f.press('重试');await flush();expect(retries).toBe(1);
  stops.pop()!();nextError={code:'prepare_failed'};mount('available','https://video/current',false,'bili');await flush();expect(failures).toBe(1);
 });
@@ -97,7 +99,7 @@ test('D2 immersive paused rendered frame stays visible; buffering network pause 
  expect(f.activeEvents.at(-1)).toEqual({source:'douyin',active:true});
  current={...state('paused'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();network('unavailable');await flush();
  expect(f.text()).not.toContain('未检测到可用互联网');expect(plays).toBe(1);expect(f.activeEvents.at(-1)?.active).toBe(false);
- network('available');await flush();current={...state('buffering'),hasRenderedFirstFrame:true};ticks.shift()!();await flush();
+ network('available');await flush();current={...state('buffering'),hasRenderedFirstFrame:true};jankStateChanged(current);await flush();
  network('unavailable');await flush();expect(current.state).toBe('paused');expect(plays).toBe(1);
  network('available');await flush();expect(plays).toBe(2);expect(prepares).toHaveLength(1);expect(retries).toBe(0);expect(f.activeEvents.at(-1)?.active).toBe(true);
  stops.pop()!();expect(f.activeEvents.at(-1)).toEqual({source:undefined,active:false});
@@ -336,7 +338,7 @@ test('SWIPEFEED spinner waits from settle and decoded frame event removes it wit
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'managed/late',posterUrl:'cover/late',title:'late'},width:233,height:233,active:true,offset:0,round:true});});
   await flush();const spinner=()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length;
   time+=999;frames.forEach(f=>f());expect(spinner()).toBe(0);
-  time++;frames.forEach(f=>f());expect(spinner()).toBe(1);
+  time++;ticks.splice(0).forEach(t=>t());await flush();frames.forEach(f=>f());expect(spinner()).toBe(1);
   frameEvents.forEach(f=>f({...current,hasRenderedFirstFrame:true}));expect(spinner()).toBe(0);expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
   console.log('SWIPEFEED_SPINNER',JSON.stringify({before1000ms:0,at1000ms:1,afterFrameEvent:0}));
  }finally{Date.now=realNow;}
@@ -414,7 +416,7 @@ test('PREWARM no ring for CPU wait, unknown buffer, positive buffer, or healthy 
   for(const [bufferedMs,networkStalled] of [[undefined,true],[1,true],[0,false],[0,true]] as const){
    initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,bufferedMs,networkStalled};heldPrepare=new Promise(()=>{});ticks=[];
    const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/wait',title:'wait'},width:233,height:233,active:true,offset:0,round:true});});await flush();
-   time+=1000;frames.forEach(f=>f());expect(nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length).toBe(bufferedMs===0&&networkStalled?1:0);
+   time+=1000;ticks.splice(0).forEach(t=>t());await flush();frames.forEach(f=>f());expect(nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length).toBe(bufferedMs===0&&networkStalled?1:0);
    stops.pop()!();await flush();
   }
  }finally{Date.now=realNow;}
@@ -532,7 +534,7 @@ test('DYSWIPE loading ring requires empty buffer and measured network stall, nev
   for(const c of cases){
    initial='available';current={...state('buffering'),hasRenderedFirstFrame:false,bufferedMs:c.bufferedMs,networkStalled:c.networkStalled,metrics:{throughputBps:c.throughputBps}};heldPrepare=new Promise(()=>{});ticks=[];
    const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/stall',title:'stall'},width:233,height:233,active:true,offset:0,round:true});});await flush();
-   time+=1000;frames.forEach(f=>f());expect(nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length,c.name).toBe(c.ring);
+   time+=1000;ticks.splice(0).forEach(t=>t());await flush();frames.forEach(f=>f());expect(nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('player-loading')).length,c.name).toBe(c.ring);
    console.log('DYSWIPE_STALL_MODEL '+JSON.stringify({scenario:c.name,ring:c.ring,bufferedMs:c.bufferedMs,throughputBps:c.throughputBps,networkStalled:c.networkStalled,deviceProof:false}));stops.pop()!();await flush();
   }
  }finally{Date.now=realNow;}

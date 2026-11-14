@@ -67,3 +67,11 @@ test('pause after server token rotation still commits the new pair, then cancels
  const runtime=createCloudRuntime(host,async()=>{throw Error('repository must stay closed');},{require(){}},accounts,undefined,gate);
  expect(await runtime.service.syncNow()).toBe(false);expect(runtime.service.status.phase).toBe('waiting');expect((await accounts.read())?.watchRefreshToken).toBe('new-refresh');expect((await accounts.read())?.watchDeviceToken).toBe('new-access');expect(files.size).toBe(0);expect(calls.at(-1)).toBe('cloud.release');
 });
+
+test('pausing a streamed journal chunk closes its host reader without decoding or repairing data',async()=>{
+ const {createCloudHostPorts}=await import('../../src/cloud/host-ports');const gate=new CloudForegroundExecution(true),check=gate.begin(),calls:string[]=[];
+ const host=cloudRunHost(async<T>(method:string,args:Record<string,unknown>)=>{calls.push(method);if(method==='file.stat')return {exists:true,file:true,size:100000} as T;if(method==='file.openText')return {id:'reader'} as T;if(method==='file.readTextChunk'){expect(args.maxChars).toBe(32768);gate.foreground(false);return {text:'never consumed',eof:false} as T;}if(method==='file.closeText')return {} as T;throw Error(method);},check);
+ const ports=createCloudHostPorts(host,{require:check});let consumed=0;
+ await expect((async()=>{for await(const text of ports.files.textChunks!('cache.delta'))consumed+=text.length;})()).rejects.toThrow(CLOUD_SYNC_SUSPENDED);
+ expect(consumed).toBe(0);expect(calls).toEqual(['file.stat','file.openText','file.readTextChunk','file.closeText']);
+});

@@ -1,3 +1,4 @@
+let jankStateChanged:(v:any)=>void=()=>{};
 import {afterEach,expect,mock,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
@@ -17,9 +18,9 @@ mock.module('../src/ui/route-activity.tsx',()=>({restoredSignal:(_kind:any,_key:
 let phase='active',listener:(phase:string)=>void=()=>{},prepared=0,stateCalls=0,rejectOld!:(e:unknown)=>void,oldPending=false;
 mock.module('@podjs/framework/watch',()=>({kv:{get(){},set(){}},hasCapability:()=>true,lifecycle:()=>phase,onLifecycleChange:(fn:any)=>{listener=fn;return()=>{};},normalizedRelativeAxisStep:()=>0}));
 const value=(id='active')=>({ok:true,sessionId:id,state:'playing',positionMs:0,durationMs:10000,width:540,height:960,volume:1,hasRenderedFirstFrame:true,sourceGeneration:prepared,presented:true});
-const port:any={prepare:(p:any)=>{prepared++;return {result:Promise.resolve(value(p.sessionId)),cancel(){}};},state:(id:string)=>{stateCalls++;if(stateCalls===2){oldPending=true;return new Promise((_yes,no)=>rejectOld=no);}return Promise.resolve(value(id));},release:async()=>({released:true}),captureFrame:async()=>({available:false})};
+const port:any={prepare:(p:any)=>{prepared++;return {result:Promise.resolve(value(p.sessionId)),cancel(){}};},state:(id:string)=>{stateCalls++;if(stateCalls===1){oldPending=true;return new Promise((_yes,no)=>rejectOld=no);}return Promise.resolve(value(id));},release:async()=>({released:true}),captureFrame:async()=>({available:false})};
 for(const method of ['play','pause','retire','seek','stop','setBounds','setTransform','setVolume','setLoop','promote','transition'])port[method]=async(id:string)=>value(id);
-mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:3,maxSessions:3,surfacePromotion:true,verticalTransition:true}),cancel(){}}),onVideoAudioChanged:()=>()=>{},onVideoFirstFrame:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
+mock.module('@podjs/framework/services',()=>({videoSessions:port,video:port,hostOperation:()=>({result:Promise.resolve({decoderLimit:3,maxSessions:3,surfacePromotion:true,verticalTransition:true}),cancel(){}}),onVideoAudioChanged:()=>()=>{},onVideoStateChanged:(fn:any)=>{jankStateChanged=fn;return()=>{if(jankStateChanged===fn)jankStateChanged=()=>{};};},onVideoFirstFrame:()=>()=>{},delay:()=>({result:new Promise(()=>{}),cancel(){}})}));
 const {VideoPlayerScreen}=await import('../src/ui/VideoPlayerScreen.tsx');
 const flush=async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
 let dispose:undefined|(()=>void);afterEach(()=>{dispose?.();dispose=undefined;});

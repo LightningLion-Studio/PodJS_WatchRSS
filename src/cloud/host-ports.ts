@@ -22,6 +22,9 @@ export function createCloudHostPorts(rawRequest:CloudHostRequest,guard:CloudGuar
  const request:CloudHostRequest=invoke;
  const hostOperation=<T>(method:string,args:Record<string,unknown>)=>({result:request<T>(method,args)});
  const fileChunks={
+  openText:(path:string)=>request<{id:string}>('file.openText',{path}),
+  readTextChunk:(id:string,maxChars:number)=>request<{text:string;eof:boolean}>('file.readTextChunk',{id,maxChars}),
+  closeText:(id:string)=>request('file.closeText',{id}),
   createTemp:(directory:string)=>request<{path:string}>('file.createTemp',{directory}),
   append:(path:string,dataBase64:string,offset:number,operation?:number)=>rawWrite(path,dataBase64,offset,operation),
   remove:(path:string)=>request('file.delete',{path}),
@@ -88,7 +91,7 @@ const files:CloudBlobStore={
   guard.require();const stat=await fileChunks.stat(path);if(!stat.exists)return;
   if(!stat.file||stat.size<0||stat.size>64*1024*1024)throw Error('cloud_record_journal_invalid');
   const {id}=await fileChunks.openText(path);
-  try{for(;;){guard.require();const part=await fileChunks.readTextChunk(id,16384);guard.require();if(part.text)yield part.text;if(part.eof)break;if(!part.text)throw Error('cloud_record_journal_incomplete');}}
+  try{for(;;){guard.require();const part=await fileChunks.readTextChunk(id,32768);guard.require();if(part.text)yield part.text;if(part.eof)break;if(!part.text)throw Error('cloud_record_journal_incomplete');}}
   finally{await fileChunks.closeText(id).catch(()=>{});}
  },
  async repairJournal(path,length,newline){
