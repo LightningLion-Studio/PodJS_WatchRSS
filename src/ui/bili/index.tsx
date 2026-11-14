@@ -118,7 +118,7 @@ function FeedScreen(props: BiliScreenProps) {
   const [toast, setToast] = createSignal("");
   let sideMenu: { isEdge: (x: number) => boolean; edgeSwipe: (dx: number) => void } | undefined;
   let toastGeneration = 0;
-  const showToast = (text: string) => { const own = ++toastGeneration; setToast(text); void delay(2000).result.then(() => { if (own === toastGeneration) setToast(""); }, () => {}); };
+  const showToast = (text: string) => { const own = ++toastGeneration; setToast(text); void delay(3000).result.then(() => { if (own === toastGeneration) setToast(""); }, () => {}); };
   const itemKey = (item: BiliItem) => String(item.bvid ?? item.aid ?? item.title ?? "");
   async function favorite(item: BiliItem) {
     try {
