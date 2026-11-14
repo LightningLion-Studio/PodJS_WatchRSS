@@ -815,3 +815,32 @@ for(const platform of ['douyin','bili','rss'] as const)test(`DYBACK ${platform} 
   if(platform!=='douyin'){panGesture.onPanStart();panGesture.onPanMove({dx:10000});expect(handle.canSwipeBack()).toBe(true);}
  }finally{video.play=savedPlay;}
 });
+
+for(const useSessions of [false,true])test(`DYZOOM mode survives source replacement sessions=${useSessions}`,async()=>{
+ sessionsCapable=useSessions;decoderLimit=3;initial='available';sessionCalls.length=0;sessionStates.clear();
+ const transforms:any[]=[];const saved=video.setTransform,sessionSaved=sessionPort.setTransform;
+ video.setTransform=async(v?:any)=>{transforms.push(v);};sessionPort.setTransform=async(id:string,v?:any)=>{transforms.push(v);return sessionValue(id);};
+ try {
+  let select!:(v:any)=>void;
+  const root=createRoot(stop=>{stops.push(stop);const [source,set]=createSignal({platform:'douyin' as const,immersive:true,url:'local/a.mp4',title:'a'});select=set;return VideoPlayerScreen({get source(){return source();},width:233,height:233,active:true,offset:0,round:true});});
+  await flush();
+  const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-fullscreen.svg'));expect(button).toBeDefined();button!.props.onPress();await flush();
+  expect(transforms.at(-1).scaleMode).toBe('expanded');
+  select({platform:'douyin',immersive:true,url:'local/b.mp4',title:'b'});await flush();await flush();expect(transforms.at(-1).scaleMode).toBe('expanded');
+ } finally {video.setTransform=saved;sessionPort.setTransform=sessionSaved;}
+});
+
+for(const useSessions of [false,true])test(`DYZOOM rotation sends destination geometry before the first angle frame sessions=${useSessions}`,async()=>{
+ sessionsCapable=useSessions;decoderLimit=3;initial='available';const saved=video.setTransform,sessionSaved=sessionPort.setTransform;const transforms:any[]=[];video.setTransform=async(v?:any)=>{transforms.push(v);};sessionPort.setTransform=async(id:string,v?:any)=>{transforms.push(v);return sessionValue(id);};
+ const realNow=Date.now;let now=1000;Date.now=()=>now;
+ try {
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'local/a.mp4',title:'a'},width:233,height:200,active:true,offset:0,round:true});});await flush();
+  for(const target of [90,180,270,360]) {
+   transforms.length=0;
+   const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src==='../assets/icons/player-rotate.svg'));button!.props.onPress();await flush();
+   expect(transforms[0]?.scaleRotationDeg).toBe(target);expect(transforms[0]?.rotationDeg).toBe(target-90);
+   for(let i=0;i<21;i++){now+=15;frames.forEach(fn=>fn());await flush();}
+   expect(transforms.length).toBeGreaterThan(2);expect(transforms.every(v=>v.scaleRotationDeg===target)).toBe(true);expect(transforms.at(-1).rotationDeg).toBe(target);
+  }
+ }finally {Date.now=realNow;video.setTransform=saved;sessionPort.setTransform=sessionSaved;}
+});
