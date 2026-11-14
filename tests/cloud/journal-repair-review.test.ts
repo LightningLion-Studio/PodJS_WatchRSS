@@ -8,15 +8,15 @@ import {createCloudHostPorts} from '../../src/cloud/host-ports';
 const hash=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex');
 const encoder=new TextEncoder();
 function fixture(stop='',maxRead=262144){
- const original=encoder.encode('汉😀verified\n{torn'),files=new Map<string,Uint8Array>([['journal.delta',original]]);let next=0;const readers=new Map<string,string>();
+ const original=encoder.encode('汉😀verified\n{torn'),files=new Map<string,Uint8Array>([['journal.delta',original]]);let next=0;const readers=new Map<string,{text:string;invalidUtf8:boolean}>();
  const request=async<T>(method:string,a:any):Promise<T>=>{
   let value:any;
   switch(method){
    case 'runtime.delay':value={};break;
    case 'crypto.hash':value={digestBase64:createHash('sha256').update(Buffer.from(a.dataBase64,'base64')).digest('base64')};break;
    case 'file.stat':{const body=files.get(a.path);value={exists:!!body,file:!!body,size:body?.length??0};break;}
-   case 'file.openText':{const text=new TextDecoder('utf-8',{fatal:a.strictUtf8===true}).decode(files.get(a.path)!);const id=String(++next);readers.set(id,text);value={id};break;}
-   case 'file.readTextChunk':{const text=readers.get(a.id)!;readers.set(a.id,'');value={text,eof:true};break;}
+   case 'file.openText':{const text=new TextDecoder('utf-8',{fatal:a.strictUtf8===true}).decode(files.get(a.path)!);const id=String(++next);let invalidUtf8=false;try{new TextDecoder('utf-8',{fatal:true}).decode(files.get(a.path)!);}catch{invalidUtf8=true;}readers.set(id,{text,invalidUtf8});value={id};break;}
+   case 'file.readTextChunk':{const {text,invalidUtf8}=readers.get(a.id)!;readers.delete(a.id);value={text,eof:true,invalidUtf8};break;}
    case 'file.closeText':readers.delete(a.id);value={closed:true};break;
    case 'file.createTemp':{const path='watch-cloud-cache/.pod-write-'+(++next)+'.part';files.set(path,new Uint8Array());value={path};break;}
    case 'file.read':{const body=files.get(a.path)!;value={offset:a.offset,size:body.length,dataBase64:Buffer.from(body.subarray(a.offset,a.offset+Math.min(a.maxBytes,maxRead))).toString('base64')};break;}
@@ -145,3 +145,36 @@ test('1000 random byte corruptions: new accepted frames contain every legacy acc
  }
  expect(acceptedAll).toBeGreaterThanOrEqual(200);expect(acceptedSome).toBeGreaterThan(acceptedAll);expect(fallbacks+rejected).toBeGreaterThanOrEqual(800);console.log(JSON.stringify({samples:1000,acceptedAll,acceptedSome,fallbacks,rejected,seed:'0x31f00d'}));
 },30000);
+
+for(const marker of ['base','delta'] as const)test('R4-1 literal U+FFFD in large '+marker+' keeps cold loads streaming and small commits incremental',async()=>{
+ const f=fixture(),user='synthetic-large',counts={baseReads:0,deltaReads:0,baseWrites:0,appends:0};let path='';
+ const files={...f.ports.files,read:async(p:string)=>{if(p===path)counts.baseReads++;if(p===path+'.delta')counts.deltaReads++;return f.ports.files.read(p);},
+  writeAtomic:async(p:string,b:Uint8Array)=>{if(p===path)counts.baseWrites++;return f.ports.files.writeAtomic(p,b);},
+  append:async(p:string,b:Uint8Array,n:number)=>{counts.appends++;return f.ports.files.append!(p,b,n);}};
+ const make=()=>new WatchCloudCache(files,async b=>hash(b),{require(){}});
+ path=(await make().scope(user))+'/records.json';
+ const seed=(marker==='base'?'合法 � 文本':'合法 汉😀 文本')+'x'.repeat(15*1024*1024),raw=JSON.stringify({rows:{seed}}),base=hash(encoder.encode(raw)),frames=[];
+ for(let sequence=1;sequence<=1024;sequence++){
+  const edits=[{field:'rows',key:'frame-'+sequence,value:(marker==='delta'?'合法 � 文本':'合法 汉😀 文本')+'x'.repeat(17*1024)}];
+  frames.push(JSON.stringify({base,sequence,edits,digest:hash(encoder.encode(JSON.stringify([base,sequence,edits])))})+'\n');
+ }
+ const beforeBase=encoder.encode(raw),beforeDelta=encoder.encode(frames.join(''));f.files.set(path,beforeBase);f.files.set(path+'.delta',beforeDelta);
+ expect(beforeBase.length).toBeGreaterThan(15*1024*1024);expect(beforeDelta.length).toBeGreaterThan(17*1024*1024);expect(beforeDelta.length).toBeLessThan(32*1024*1024);
+ for(let cold=1;cold<=3;cold++){
+  const cache=make(),value=await cache.recordsValue(user);expect(value.rows.seed).toBe(seed);expect(Object.keys(value.rows).length).toBe(1025);
+  await cache.storeRecordsValue(user,{...value,cold});expect(f.files.get(path)).toBe(beforeBase);expect(f.readers.size).toBe(0);
+ }
+ expect(counts).toEqual({baseReads:3,deltaReads:0,baseWrites:0,appends:3});
+ const written=f.files.get(path+'.delta')!.length-beforeDelta.length;expect(written).toBeGreaterThan(0);expect(written).toBeLessThan(2048);
+ console.log(JSON.stringify({marker,baseBytes:beforeBase.length,deltaBytes:beforeDelta.length,...counts,written}));
+},60000);
+
+test('R4-1 actual invalid bytes outside the digest payload still trigger historical replay',async()=>{
+ const f=fixture(),raw=JSON.stringify({rows:{}}),base=hash(encoder.encode(raw)),edits=[{field:'rows',key:'kept',value:'authenticated'}];
+ const frame=JSON.stringify({base,sequence:1,edits,digest:hash(encoder.encode(JSON.stringify([base,1,edits]))),extra:'/'})+'\n',bytes=Buffer.from(frame),at=bytes.indexOf('"extra":"/"')+9;
+ expect(bytes[at]).toBe(47);f.files.set('journal',encoder.encode(raw));f.files.set('journal.delta',Buffer.concat([bytes.subarray(0,at),Buffer.from([0xc0,0xaf]),bytes.subarray(at+1)]));let reads=0;
+ const io={chunks:f.ports.files.textChunks!.bind(f.ports.files),read:async(p:string)=>{if(p.endsWith('.delta'))reads++;const b=f.files.get(p);return b?utf8Decode(b):undefined;},replace:async(p:string,s:string)=>{f.files.set(p,encoder.encode(s));},append:async()=>{throw Error('unexpected append');},yieldTurn:async()=>{}};
+ const journal=new JsonDeltaJournal(io,'journal',['rows']);expect(await journal.load()).toEqual({rows:{kept:'authenticated'}});expect(reads).toBe(1);expect(f.readers.size).toBe(0);
+ await journal.commit({rows:{kept:'authenticated',after:'canonical'}});expect(f.files.get('journal.delta')!.length).toBe(0);
+ expect(await new JsonDeltaJournal(io,'journal',['rows']).load()).toEqual({rows:{kept:'authenticated',after:'canonical'}});
+});
