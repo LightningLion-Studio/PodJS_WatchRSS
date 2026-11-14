@@ -1,0 +1,88 @@
+{
+  "entry": "src/main.tsx",
+  "appId": "dev.podjs.tests.playerdetail",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "name": "Player Detail Verification",
+  "android": {
+    "resources": "../../android/res",
+    "theme": "@style/Theme.WatchRSS.PodJS",
+    "bleProvisioning": false,
+    "cleartextTraffic": true
+  },
+  "capabilities": [
+    "input.touch",
+    "input.rotary",
+    "input.text",
+    "text.layout",
+    "text.environment",
+    "data.sqlite",
+    "data.uri",
+    "data.kv",
+    "net.http",
+    "net.download",
+    "data.files.chunks",
+    "system.browser",
+    "system.browser.inApp",
+    "system.browser.inApp.theme",
+    "data.secure",
+    "media.video",
+    "media.tts",
+    "media.audio",
+    "data.images",
+    "system.browser.auth",
+    "runtime.timer",
+    "crypto.basic",
+    "system.toast",
+    "input.time",
+    "device.location",
+    "text.raster",
+    "net.rfcomm",
+    "net.tcp",
+    "net.stream",
+    "net.websocket",
+    "net.discovery",
+    "net.ble.provision",
+    "display.power",
+    "system.share",
+    "host.lifecycle",
+    "media.video.sessions"
+  ],
+  "resources": {
+    "preloadFontSlots": [
+      2,
+      1,
+      19,
+      22
+    ],
+    "fontSlots": [
+      {
+        "slot": 33,
+        "px": 12,
+        "rasterAdvances": true
+      },
+      {
+        "slot": 34,
+        "px": 14,
+        "rasterAdvances": true
+      },
+      {
+        "slot": 35,
+        "px": 16,
+        "rasterAdvances": true
+      },
+      {
+        "slot": 36,
+        "px": 18,
+        "rasterAdvances": true
+      },
+      {
+        "slot": 37,
+        "px": 21.7,
+        "bold": true,
+        "rasterAdvances": true
+      }
+    ],
+    "fontSource": "system"
+  }
+}

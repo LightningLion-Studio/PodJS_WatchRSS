@@ -4,6 +4,10 @@ import * as services from '@podjs/framework/services';
 import type { BiliPlayUrl } from "./bili/types.ts";
 import {biliCdnHeaders} from './bili/cdn.ts';
 import type { PlaybackSource } from "./ui/VideoPlayerScreen.tsx";
+/** Detail-panel metadata from a Douyin item: its description doubles as the title. */
+export function douyinDetail(item:{description:string;authorName?:string}):Pick<PlaybackSource,'title'|'author'|'description'> {
+ return {title:item.description,author:item.authorName?.trim()||undefined,description:item.description?.trim()||undefined};
+}
 const urls = (primary: string | undefined, backups: string[]) => [...new Set([primary, ...backups].map(url => url?.trim()).filter((url): url is string => !!url))];
 export function biliPlaybackCandidates(source:BiliPlayUrl,title:string,headers:Record<string,string>):PlaybackSource[] {
  headers=biliCdnHeaders(source,headers);
