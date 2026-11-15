@@ -43,6 +43,7 @@ import type {ReceivedArticle,RequestedArticleBody} from './article-batches.ts';
 import type {SyncedSource} from './library-wire.ts';
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
+ noteAssetReader?:(key:string,check?:()=>void)=>Promise<Uint8Array>;
  noteAssetWriter?:(key:string,bytes:Uint8Array)=>Promise<number>;
  noteAssetCollector?:(references:()=>Promise<ReadonlySet<string>>,check:()=>void)=>Promise<number>;
  reencodeStoredBodies?:(ids:readonly number[])=>Promise<readonly ReencodedBody[]>;
@@ -90,6 +91,14 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   const repository=await (this.cloudMemo??=(async()=>{const value=new MemoRepository(this.db,await this.deviceId(),undefined,this.now);await value.initialize();return value;})().catch(error=>{this.cloudMemo=undefined;throw error;}));let changed=0;
   for(const note of notes){check();changed+=await repository.applyRemote(note);check();}return changed;
  }
+ async cloudNotes(check:()=>void=()=>{}){
+  await this.mergeCloudNotes([],check);check();
+  const notes=await new MemoRepository(this.db,await this.deviceId()).allIncludingDeleted();
+  const texts=notes.filter(n=>!n.deleted).flatMap(n=>[n.markdown,n.baseMarkdown]);
+  if((await this.db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='note_merge_conflicts'")).length)for(const row of await this.db.query('SELECT base_markdown,local_markdown,remote_markdown FROM note_merge_conflicts'))texts.push(String(row.base_markdown),String(row.local_markdown),String(row.remote_markdown));
+  check();return {notes,assetKeys:[...new Set(texts.flatMap(t=>[...noteAssetKeys(t)]))].sort()};
+ }
+ async cloudNoteAsset(key:string,check?:()=>void){if(!this.ports.noteAssetReader)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetReader(key,check);}
  async mergeCloudNoteAsset(key:string,bytes:Uint8Array){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes);}
  async collectCloudNoteAssets(check:()=>void){
   if(!this.ports.noteAssetCollector)return 0;

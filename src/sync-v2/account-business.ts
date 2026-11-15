@@ -1,3 +1,4 @@
+import {NOTE_ASSET_SCHEMA} from './note-assets';
 /** Prepared replacement of the authenticated account projection in the original
  * watch database. No LWW merge: explicit account choices can select older clocks.
  * Body files are retained; N07 and content pins own physical reclamation. */
@@ -24,7 +25,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
  /** Additive metadata table for interaction records which have no local article
   * yet. No body materialization or identity replacement occurs. */
  async initialize(){return WatchAccountBusinessSql.initializeSchema(this.db);}
- static async initializeSchema(db:ProjectionSql){await db.transaction([{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);}
+ static async initializeSchema(db:ProjectionSql){await db.transaction([{sql:NOTE_ASSET_SCHEMA},{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);}
  async prepare(records:SourceRecord[],before:SyncState){const out:Statement[]=[];for await(const page of this.prepareFeed(arrayRecordFeed(records,r=>entityKey(this.idKey,this.scope.repoId,r.kind,r.logicalId)),before).run())out.push(...page);return out;}
  /** R4: the same statements as `prepare`, produced page by page. Each run reads
   * the records twice and the candidates once; across records it keeps only
@@ -47,6 +48,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
   if(tables.has('sync_book_context'))statements.push({sql:'UPDATE sync_book_context SET remote=1 WHERE id=1'});if(tables.has('sync_book_reading_projection'))statements.push({sql:'UPDATE sync_book_reading_projection SET active=1 WHERE id=1'});
   for(const r of removed){
    if(r.kind==='note'){requireTable('memo_notes');statements.push({sql:'DELETE FROM memo_notes WHERE note_id=?',params:[r.logicalId]});if(tables.has('note_merge_conflicts'))statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[r.logicalId]});}
+   else if(r.kind==='asset'){requireTable('memo_assets');statements.push({sql:'DELETE FROM memo_assets WHERE asset_id=?',params:[r.logicalId]});}
    else if(r.kind==='folder'){requireTable('memo_folders');statements.push({sql:'DELETE FROM memo_folders WHERE folder_id=?',params:[r.logicalId]});}
    else if(r.kind==='source'){requireTable('sync_source_states');statements.push({sql:'DELETE FROM sync_source_states WHERE url=?',params:[r.logicalId]},{sql:'DELETE FROM channels WHERE url=?',params:[r.logicalId]});}
    else if(r.kind==='article'){requireTable('article_register_state');statements.push({sql:'DELETE FROM articles WHERE id=COALESCE((SELECT item_id FROM article_register_state WHERE article_id=?),(SELECT item_id FROM sync_article_ids WHERE article_id=?))',params:[r.logicalId,r.logicalId]},{sql:'DELETE FROM article_register_state WHERE article_id=?',params:[r.logicalId]});}
@@ -94,7 +96,8 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
     requireTable('syncv2_rss_states');statements.push(upsert('syncv2_rss_states',['id','state_json'],[r.logicalId,JSON.stringify(v)],['id']));
     const sha=async(b:Uint8Array)=>sha256Hex(b);let afterId=0;
     for(;;){const page=await this.db.query('SELECT a.id,a.link,a.guid,a.dedup_key,c.url FROM articles a JOIN channels c ON c.id=a.channel_id WHERE a.id>? ORDER BY a.id LIMIT 32',[afterId]);if(!page.length)break;for(const a of page){const source=await rssSourceKey(String(a.url),sha);if(source!==v.sourceId&&!sources.some(s=>s.value.url===a.url&&s.value.sourceId===v.sourceId))continue;const article=await rssArticleId({link:String(a.link??''),guid:a.guid===null?null:String(a.guid),dedupKey:/^[a-f0-9]{64}$/.test(String(a.dedup_key))?String(a.dedup_key):undefined},sha);if(sha256Hex(bytes(article))===v.articleIdHash)statements.push(...this.reading(Number(a.id),v));}afterId=Number(page.at(-1)!.id);}
-   }else if(r.kind!=='asset')throw Error('unsupported_feature');
+   }else if(r.kind==='asset'){requireTable('memo_assets');statements.push(upsert('memo_assets','asset_id mime original_filename updated_at source_device_id deleted deleted_at'.split(' '),[v.assetId,v.mime,v.originalFilename,v.updatedAt,v.sourceDeviceId,+v.deleted,v.deletedAt],['asset_id']));}
+   else throw Error('unsupported_feature');
   }if(statements.length)yield statements.splice(0);}
   if(tables.has('sync_book_reading_dirty'))for(const r of readings)statements.push({sql:'DELETE FROM sync_book_reading_dirty WHERE item_id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND chapter_index=?)',params:[r.bookId,r.chapterIndex]});if(tables.has('sync_book_reading_projection'))statements.push({sql:'UPDATE sync_book_reading_projection SET active=0 WHERE id=1'});if(tables.has('sync_book_context'))statements.push({sql:'UPDATE sync_book_context SET remote=0 WHERE id=1'});
   if(statements.length)yield statements;

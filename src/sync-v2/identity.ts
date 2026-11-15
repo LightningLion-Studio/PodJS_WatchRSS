@@ -2,7 +2,7 @@
  * account root authenticates this bootstrap; no repo-init or key generation. */
 import {encodeBase64,decodeBase64} from '@podjs/framework/bytes';
 import {hex,unhex,hmacSha256Bytes,sha256Hex,lengthPrefixFields} from '@podjs/framework/crypto';
-import {validateP256PublicKey} from '@podjs/framework/p256';
+import {validateP256PublicKey} from '@podjs/framework/p256-public-key';
 import {checkD64} from '@podjs/framework/sql-projection';
 import {canonical,jsonBytes,parseCanonicalJson,bytes,exact,hexId,uint,oid,type Scope} from './protocol';
 export interface IdentityCrypto {

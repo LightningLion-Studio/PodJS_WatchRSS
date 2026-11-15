@@ -43,6 +43,7 @@ export interface CloudSession {
 export interface CloudSyncPorts {
  snapshotDiagnostic?:(value:string)=>void;
  /** 26.4 P6-10: v1 account and keys verified ready. Only set when the Sync v2 product switch is on. */
+ primaryV2?:boolean;
  keysReady?:(event:{userId:string;deviceId:string;keys:{currentKeyVersion(userId:string):Promise<number>;accountKey(userId:string,version?:number):Promise<Uint8Array|undefined>};syncV2:unknown;bootstrap:import('./types').CloudBootstrap})=>void|Promise<void>;
  recordDiagnostic?:(value:string)=>void;
  formatDiagnostic?:(value:string)=>void;
@@ -102,11 +103,12 @@ export class WatchCloudSyncService {
   this.failureStage='owner';if(s.assertOwnership){await s.assertOwnership();this.ownerResolved();}await current();this.set('registering','正在核对云空间');
   this.failureStage='bootstrap';let bootstrap=await s.client.bootstrap();await current();
   if(this.ports.keysReady&&!bootstrap.syncV2)try{await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}catch{}
+  if(this.ports.primaryV2&&!bootstrap.syncV2){this.set('idle','Sync v2 服务暂不可用，本机资料已保留',bootstrap.member);return false;}
   this.failureStage='content';const content=parseContentState(bootstrap);
   s.client.setEpoch(bootstrap.libraryEpoch);s.client.setContentGeneration(content.contentGeneration);
   let changeRead:CloudChangeRead|undefined,changeContext='',checkedHeads:CloudSnapshotHead[]|undefined,checkedRecordsFormat:number|undefined,checkedRecordsRevision:string|undefined,remoteSame=false,remoteVerifiedAt:number|undefined;
   const probeDevice=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
-  if(s.changes&&s.client.recordsHead&&probeDevice&&!probeDevice.revokedAt&&!forceContentReset&&!freshPlan){
+  if(!(this.ports.primaryV2&&bootstrap.syncV2)&&s.changes&&s.client.recordsHead&&probeDevice&&!probeDevice.revokedAt&&!forceContentReset&&!freshPlan){
    try{
     idleHit(80);changeContext=JSON.stringify([bootstrap.libraryEpoch,content.contentGeneration,content.contentEmpty,content.contentClearedAt,full,mode,bootstrap.keyVersionFloor,bootstrap.keyCommitments,bootstrap.keyEnvelopes.map(e=>[e.id,e.envelope.keyVersion]),probeDevice.attestationKeyVersion??null,probeDevice.publicKeySpki,probeDevice.attestation,bootstrap.member.plan,bootstrap.member.readable,bootstrap.member.writable,bootstrap.member.active]);
     changeRead=await s.changes.read(changeContext);checkedHeads=await s.client.snapshotHeads();checkedHeads.forEach(headValid);
@@ -123,11 +125,13 @@ export class WatchCloudSyncService {
     idleHit(82);
    }catch{await current();idleHit(84);changeRead=undefined;checkedHeads=undefined;checkedRecordsFormat=undefined;remoteSame=false;remoteVerifiedAt=undefined;}
   }
+  if(!(this.ports.primaryV2&&bootstrap.syncV2)){
   await s.prepareRestore?.();
   const changedEpoch=await s.state.acceptEpoch(bootstrap.libraryEpoch);if(changedEpoch){await s.invalidate?.();this.set('waiting-approval','资料库已重置，请重新批准',bootstrap.member);return false;}
   const previousGeneration=await s.state.contentGeneration();
   if(forceContentReset||previousGeneration!==undefined&&previousGeneration!==content.contentGeneration||content.contentEmpty){await current();await s.cache.clear(s.userId);await s.state.clearContent();await current();this.set('registering','云端内容已清理，正在从本机重建同步',bootstrap.member);}
   await s.state.rememberContentGeneration(content.contentGeneration);s.client.setContentGeneration(content.contentGeneration);
+  }
   this.usageRefresh=async()=>{const latest=await s.client.bootstrap();await current();if(latest.libraryEpoch!==bootstrap.libraryEpoch)throw Error('library_epoch_mismatch');if(parseContentState(latest).contentGeneration!==content.contentGeneration)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});this.value={...this.value,member:latest.member,usedBytes:latest.member.usedBytes,reservedBytes:latest.member.reservedBytes,quotaBytes:latest.member.quotaBytes};this.emit();};
   this.failureStage='device';let device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
   if(device?.revokedAt){await s.invalidate?.();this.set('waiting-approval','云设备已撤销，请重新批准',bootstrap.member);return false;}
@@ -145,6 +149,7 @@ export class WatchCloudSyncService {
   catch(error){if(String(error).includes('library_epoch_mismatch'))await s.invalidate?.();throw error;}
   if(ready==='waiting-approval'){this.set('waiting-approval','请在已登录设备上批准此手表',bootstrap.member);return false;}
   await current();if(this.ports.keysReady)try{await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}catch{}const member=bootstrap.member;
+  if(this.ports.primaryV2&&bootstrap.syncV2){this.set('complete','Sync v2 已接管云同步',bootstrap.member);return true;}
   this.failureStage='checkpoint';const restore=await new SnapshotRestoreCheckpoint(s,this.ports.hash,current,this.ports.now??Date.now,metric=>{try{this.ports.snapshotDiagnostic?.(JSON.stringify(metric));}catch{}}).open(bootstrap.libraryEpoch,content.contentGeneration);
   this.failureStage='run';const resumed=!remoteSame&&restore.active&&restore.phase!=='records';
   try{
@@ -220,7 +225,7 @@ export class WatchCloudSyncService {
   if(own&&full){let cached=await s.cache.manifest(s.userId,own.id);if(cached&&(cached.length!==own.manifestSizeBytes||await this.ports.hash(cached)!==own.manifestSha256))cached=undefined;
    if(!cached){const remote=await s.client.snapshot(own.id);cached=await s.client.download(remote.manifestUrl,own.manifestSizeBytes,own.manifestSha256);}
    previous=snapshots.find(v=>v.h.id===own.id)?.manifest??await this.manifest(s,own,cached);await s.cache.storeManifest(s.userId,own.id,cached);
-   if(own.keyVersion!==version&&(cloudHasUnknownData(previous)||previous.objects.some(o=>cloudCompatibility(o).readOnly||cloudHasUnknownData(o)||o.name==='notes-state.json'||o.name==='notes-assets.zip'||!supported(o)))){formatBlocked=true;compatibility.opaque++;}
+   if(own.keyVersion!==version&&(cloudHasUnknownData(previous)||previous.objects.some(o=>cloudCompatibility(o).readOnly||cloudHasUnknownData(o)||!supported(o)))){formatBlocked=true;compatibility.opaque++;}
   }
   const verifiedSequences=new Map(await Promise.all(snapshots.map(async v=>[v.h.sourceDeviceId,await s.state.applied(v.h.sourceDeviceId,true)] as const)));
   const verifiedParents=snapshots.filter(v=>v.h.deviceSequence<=(verifiedSequences.get(v.h.sourceDeviceId)??0));
@@ -281,7 +286,7 @@ export class WatchCloudSyncService {
   const recordCompat=records?.compatibility??emptyCompatibilityStatus();compatibility.opaque+=recordCompat.opaque;compatibility.readOnly+=recordCompat.readOnly;compatibility.editPending+=recordCompat.editPending;if(formatBlocked&&!sameContent)compatibility.editPending++;if(s.client.requiredFeatures?.length)compatibility.requiredFeatures=s.client.requiredFeatures;compatibility.upgradeRequired=!!(compatibility.requiredFeatures?.length||compatibility.opaque||compatibility.readOnly||compatibility.editPending&&!writeBlockedByGate);
   this.value={...this.value,formatCompatibility:compatibility,...(compatibility.upgradeRequired?{retryable:false}:{}),...(compatibility.requiredFeatures?.length?{errorCode:'cloud_format_upgrade_required' as const}:{})};
   const deferred=!!(full&&!sameContent&&throttled);
-  pendingItems+=payload.pendingPrivateArticles??0;
+  pendingItems+=(payload.pendingPrivateArticles??0)+(payload.pendingNotes??0);
   this.value={...this.value,pendingItems,abandonedItems,...(deferred?{retryAtMillis:previous!.createdAtMillis+10*60*1000}:{})};
   const abandonedMessage=abandonedItems?`已放弃 ${abandonedItems} 个结构不完整、无法恢复的私有条目`:'';
   const messages=[recordFailure,...(writeBlockedByGate&&compatibility.editPending?['新格式写入暂未开放，本机编辑已保留']:[]),...(compatibility.upgradeRequired?['部分云资料需升级后使用，未应用的原数据和本机编辑已保留']:[]),...(deferred?['稍后合并备份']:[]),...(pendingItems?[`部分私有条目缺少元数据或正文（${pendingItems}），等待重试`]:[])].filter(Boolean);
