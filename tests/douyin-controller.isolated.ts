@@ -545,3 +545,36 @@ for(const late of [false,true])test(`R08 cold selected target exposes a terminal
  if(late){expect(f.source().awemeId).toBe('three');expect(f.source().preparationError).toBeUndefined();}
  else {expect(f.source()).toMatchObject({awemeId:'two',previewOnly:true,preparationError:{code:'network_error'}});expect(entry.playback).toBe(f.source());}
 });
+
+for(const direction of ['next','previous'] as const)for(const distance of [1,2] as const)for(const stage of ['headers','lookup','registration'] as const)test(`DECAP R08 ${direction} ${distance} ${stage} failure belongs to the cold selected source`,async()=>{
+ const f=fixture(),items=Array.from({length:5},(_,i)=>item(String(i))),failure={code:'network_error'};
+ f.controller.douyinPlay({item:items[2]!,playback:items[2]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'2'});
+ const entry=f.stack().at(-1)!;
+ if(stage==='headers'){await f.controller.prepareDouyinAdjacent(entry,'next');const version=client.playbackAuthorizationVersion();client.playbackAuthorizationVersion=()=>version+1;client.buildPlaybackHeaders=async()=>{throw failure;};}
+ if(stage==='lookup')lookupOverride=async()=>{throw failure;};
+ if(stage==='registration')proxyOverride=async()=>{throw failure;};
+ f.controller.selectDouyinTarget(entry,direction,distance);for(let i=0;i<40;i++)await Promise.resolve();
+ const key=String(2+(direction==='next'?distance:-distance));
+ expect(f.stack().at(-1)).toBe(entry);expect(f.source()).toMatchObject({awemeId:key,previewOnly:true,preparationError:failure});expect(f.source().url).toBeUndefined();expect(f.requests()).toBe(0);
+});
+for(const stale of ['new-selection','route-exit','queue-replaced'] as const)test(`DECAP R08 stale failure cannot overwrite ${stale}`,async()=>{
+ const f=fixture(),items=[item('a'),item('b'),item('c')];
+ f.controller.douyinPlay({item:items[0]!,playback:items[0]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;let reject!:(v:unknown)=>void;proxyOverride=async()=>new Promise((_yes,no)=>reject=no);
+ f.controller.selectDouyinTarget(entry,'next',1);for(let i=0;i<30;i++)await Promise.resolve();expect(reject).toBeDefined();
+ if(stale==='new-selection'){proxyOverride=async value=>value.playUrl;f.controller.selectDouyinTarget(entry,'next',1);for(let i=0;i<30;i++)await Promise.resolve();}
+ else if(stale==='route-exit')await f.controller.douyinNavigate({name:'history'});
+ else entry.queue={snapshot:()=>({item:items[1]})} as any;
+ const selected=f.source();reject({code:'network_error'});for(let i=0;i<40;i++)await Promise.resolve();
+ expect(f.source()).toBe(selected);expect(f.source()?.preparationError).toBeUndefined();expect(f.error()).toBe('');expect(f.requests()).toBe(0);
+});
+test('DECAP R08 retry replaces the failed cold source and a subsequent selection clears its error',async()=>{
+ const f=fixture(),items=[item('a'),item('b'),item('c')];
+ f.controller.douyinPlay({item:items[0]!,playback:items[0]!,playlist:items,immersive:true,hasMore:false});await f.controller.douyinNavigate({name:'player',awemeId:'a'});
+ const entry=f.stack().at(-1)!;proxyOverride=async()=>{throw {code:'network_error'};};
+ f.controller.selectDouyinTarget(entry,'next',1);for(let i=0;i<40;i++)await Promise.resolve();expect(f.source().preparationError).toBeDefined();
+ client.resolvePlayback=async()=>({ok:true,data:items[1]!});proxyOverride=async value=>value.playUrl;
+ await f.controller.recoverDouyinVideo(entry,true);expect(f.source()).toMatchObject({awemeId:'b',previewOnly:false,url:items[1]!.playUrl});
+ f.controller.selectDouyinTarget(entry,'next',1);expect(f.source()).toMatchObject({awemeId:'c',previewOnly:true});expect(f.source().preparationError).toBeUndefined();
+ for(let i=0;i<40;i++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'c',previewOnly:false});expect(f.requests()).toBe(0);
+});

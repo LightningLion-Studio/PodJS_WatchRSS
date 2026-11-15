@@ -636,7 +636,7 @@ export function createMediaRouteController(
       previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,preparationError:undefined,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
-    const current=()=>dependencies.current()===entry&&entry.playback===selected&&queue.snapshot().item?.awemeId===item.awemeId;
+    const current=()=>dependencies.current()===entry&&entry.queue===queue&&entry.playback===selected&&queue.snapshot().item?.awemeId===item.awemeId;
     void (async()=>{
       const headers=await adjacentHeaders(entry);if(!current())return;
       const local=await douyinPreload.lookup(item.awemeId);if(!current())return;
@@ -645,9 +645,16 @@ export function createMediaRouteController(
         selected={...selected,previewFrame:{entryId:item.awemeId,frame}};entry.playback=selected;dependencies.setPlayingSource(selected);
       }).catch(()=>{});
       const url=local??await douyinPlaybackUrl(item,headers,direction==='next');if(!current())return;
-      entry.playback={...selected,headers,url,previewOnly:false};dependencies.setPlayingSource(entry.playback);
+      entry.playback={...selected,headers,url,previewOnly:false,preparationError:undefined};dependencies.setPlayingSource(entry.playback);
       void queue.persist().catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
-    })().catch(error=>{if(!current())return;selected={...selected,preparationError:error};entry.playback=selected;dependencies.setPlayingSource(selected);dependencies.setError(String(error));});
+    })().catch(error=>{
+      if(!current())return;
+      // The selected source object is this intent's generation token. Keep
+      // that target visible with its own retry state; old failures cannot
+      // replace a newer selection, a replaced queue, or another route.
+      selected={...selected,preparationError:error};entry.playback=selected;
+      dependencies.setPlayingSource(selected);dependencies.setError(String(error));
+    });
   };
 
   const promoteDouyinAdjacent = async (
