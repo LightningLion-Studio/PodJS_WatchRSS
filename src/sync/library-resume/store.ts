@@ -1,8 +1,9 @@
 import type {SqlDatabase,SqlParams} from '../../core/types';
+import {frameBytes} from '../wire-frame-size';
 import {D,appliedReceipt,completion,descriptor,objectsRoot,pageDigest,receiptsRoot} from './digests';
 import {fail,RETENTION,utf8,sorted,exact,hex,type Envelope,type BeginPayload,type ObjectDescriptor,type AppliedReceipt,type Outcome,type Completion,type Snapshot,type Row} from './wire';
 export type Statement={sql:string;params?:SqlParams};
-export interface ReceiptBoundary {before:Statement[];after(outcome:Outcome):Statement[]}
+export interface ReceiptBoundary {check?():void;before:Statement[];after(outcome:Outcome):Statement[]}
 export type JobState='PLANNING'|'READY'|'TRANSFERRING'|'APPLIED'|'COMPLETE'|'CANCELLED';
 export interface Job {scope:string;jobId:string;planDigest:string;description:BeginPayload;state:JobState;connectionId:string;epoch:number;expiresAt:number;nextPage:number;completion:Completion|null;lease:Row|null;role:'receiver'|'source'}
 const lanes=new WeakMap<SqlDatabase,Promise<unknown>>();
@@ -20,9 +21,11 @@ export class ResumeStore {
  initialize(){return this.ready??=(async()=>{
   await this.db.transaction([
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_assets(storage_key TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(storage_key,sha256))'},
+   {sql:'CREATE TABLE IF NOT EXISTS library_resume_connections(connection_id TEXT PRIMARY KEY,revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),expires_at INTEGER NOT NULL)'},
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_guard(id INTEGER PRIMARY KEY CHECK(id=1),ok INTEGER NOT NULL CHECK(ok=1))'},
    {sql:'INSERT OR IGNORE INTO library_resume_guard VALUES(1,1)'},
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_clock(id INTEGER PRIMARY KEY CHECK(id=1),logical INTEGER NOT NULL,elapsed INTEGER NOT NULL)'},
+   {sql:'CREATE TABLE IF NOT EXISTS library_resume_reservations(scope TEXT NOT NULL,job_id TEXT NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(scope,job_id))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_resume_jobs(scope TEXT NOT NULL,job_id TEXT NOT NULL,plan_digest TEXT NOT NULL,description TEXT NOT NULL,state TEXT NOT NULL,connection_id TEXT NOT NULL,epoch INTEGER NOT NULL,expires_at INTEGER NOT NULL,next_page INTEGER NOT NULL DEFAULT 0,completion TEXT,lease TEXT,role TEXT NOT NULL,PRIMARY KEY(scope,job_id))"},
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_objects(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,ordinal INTEGER NOT NULL,description TEXT NOT NULL,receipt TEXT,PRIMARY KEY(scope,job_id,object_id),UNIQUE(scope,job_id,ordinal))'},
    {sql:'CREATE TABLE IF NOT EXISTS library_resume_requests(scope TEXT NOT NULL,job_id TEXT NOT NULL,peer TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,result TEXT,PRIMARY KEY(scope,job_id,peer,request_id))'},
@@ -38,17 +41,19 @@ export class ResumeStore {
   * sample conservatively proves zero elapsed time and never expires early. */
  async observeClock(elapsed:number){if(this.injectedClock)return;if(!Number.isSafeInteger(elapsed)||elapsed<0)fail('LOCAL_IO');await this.initialize();const old=(await this.db.query('SELECT logical,elapsed FROM library_resume_clock WHERE id=1'))[0];this.logical=old?Number(old.logical)+Math.max(0,elapsed-Number(old.elapsed)):this.logical;await this.db.execute('INSERT OR REPLACE INTO library_resume_clock VALUES(1,?,?)',[this.logical,elapsed]);}
  async job(scope:string,id:string):Promise<Job|null>{await this.initialize();const r=(await this.db.query('SELECT * FROM library_resume_jobs WHERE scope=? AND job_id=?',[scope,id]))[0];if(!r)return null;return {scope,jobId:id,planDigest:String(r.plan_digest),description:parse(r.description),state:String(r.state) as JobState,connectionId:String(r.connection_id),epoch:Number(r.epoch),expiresAt:Number(r.expires_at),nextPage:Number(r.next_page),completion:r.completion===null?null:parse(r.completion),lease:r.lease===null?null:parse(r.lease),role:String(r.role) as Job['role']};}
- guard(job:Job):Statement{return {sql:'UPDATE library_resume_guard SET ok=CASE WHEN EXISTS(SELECT 1 FROM library_resume_jobs WHERE scope=? AND job_id=? AND epoch=? AND connection_id=? AND state!=\'CANCELLED\') THEN 1 ELSE 0 END WHERE id=1',params:[job.scope,job.jobId,job.epoch,job.connectionId]};}
+ async openConnection(id:string){await this.initialize();await this.budget(512);await this.db.execute('INSERT OR IGNORE INTO library_resume_connections VALUES(?,0,?)',[id,this.now()+RETENTION]);}
+ async revokeConnection(id:string){await this.initialize();await this.db.execute('UPDATE library_resume_connections SET revoked=1,expires_at=max(expires_at,?) WHERE connection_id=?',[this.now()+RETENTION,id]);}
+ guard(job:Job,allowCancelled=false):Statement{return {sql:'UPDATE library_resume_guard SET ok=CASE WHEN EXISTS(SELECT 1 FROM library_resume_jobs WHERE scope=? AND job_id=? AND epoch=? AND connection_id=? AND (?=1 OR state!=\'CANCELLED\') AND EXISTS(SELECT 1 FROM library_resume_connections c WHERE c.connection_id=library_resume_jobs.connection_id AND c.revoked=0)) THEN 1 ELSE 0 END WHERE id=1',params:[job.scope,job.jobId,job.epoch,job.connectionId,allowCancelled?1:0]};}
  bind(job:Job,peer:string,request:Envelope,result:Row|null=null):Statement[]{return [
   {sql:'UPDATE library_resume_guard SET ok=CASE WHEN NOT EXISTS(SELECT 1 FROM library_resume_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=? AND digest!=?) THEN 1 ELSE 0 END WHERE id=1',params:[job.scope,job.jobId,peer,request.requestId,request.requestDigest]},
   {sql:'INSERT OR IGNORE INTO library_resume_requests(scope,job_id,peer,request_id,digest,result) VALUES(?,?,?,?,?,?)',params:[job.scope,job.jobId,peer,request.requestId,request.requestDigest,result===null?null:JSON.stringify(result)]},
  ];}
- async checkBinding(job:Job,peer:string,r:Envelope):Promise<Row|null>{const row=(await this.db.query('SELECT digest,result FROM library_resume_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?',[job.scope,job.jobId,peer,r.requestId]))[0];if(row&&row.digest!==r.requestDigest)fail('REQUEST_CONFLICT');if(!row)await this.budget(768);return row?.result?parse(row.result):null;}
+ async checkBinding(job:Job,peer:string,r:Envelope):Promise<Row|null>{const row=(await this.db.query('SELECT digest,result FROM library_resume_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?',[job.scope,job.jobId,peer,r.requestId]))[0];if(row&&row.digest!==r.requestDigest)fail('REQUEST_CONFLICT');if(!row)await this.budget(1024,job.description.selection.limits.maxJournalBytes);return row?.result?parse(row.result):null;}
  async collect(scope:string,cleanup:(job:Job)=>Promise<void>):Promise<void>{
   // The caller holds the shared writer lane. No begin/apply can cross collection.
   const expired=await this.db.query('SELECT job_id FROM library_resume_jobs WHERE scope=? AND expires_at<?',[scope,this.now()]);
-  for(const r of expired){const job=await this.job(scope,String(r.job_id));if(!job)continue;await cleanup(job);await this.db.transaction(['library_resume_requests','library_resume_pages','library_resume_objects','library_resume_peer_ack','library_resume_jobs'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:[scope,job.jobId]})));}
-  await this.db.transaction([{sql:'DELETE FROM library_resume_prepare_requests WHERE scope=? AND expires_at<?',params:[scope,this.now()]},{sql:'DELETE FROM library_resume_snapshots WHERE scope=? AND expires_at<? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=library_resume_snapshots.scope)',params:[scope,this.now()]},{sql:'DELETE FROM library_resume_preparations WHERE scope=? AND expires_at<? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=library_resume_preparations.scope)',params:[scope,this.now()]}]);
+  for(const r of expired){const job=await this.job(scope,String(r.job_id));if(!job)continue;await cleanup(job);await this.db.transaction(['library_resume_reservations','library_resume_requests','library_resume_pages','library_resume_objects','library_resume_peer_ack','library_resume_jobs'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:[scope,job.jobId]})));}
+  await this.db.transaction([{sql:'DELETE FROM library_resume_connections WHERE expires_at<? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.connection_id=library_resume_connections.connection_id AND j.expires_at>=?)',params:[this.now(),this.now()]},{sql:'DELETE FROM library_resume_prepare_requests WHERE scope=? AND expires_at<?',params:[scope,this.now()]},{sql:'DELETE FROM library_resume_snapshots WHERE scope=? AND expires_at<? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=library_resume_snapshots.scope)',params:[scope,this.now()]},{sql:'DELETE FROM library_resume_preparations WHERE scope=? AND expires_at<? AND NOT EXISTS(SELECT 1 FROM library_resume_jobs j WHERE j.scope=library_resume_preparations.scope)',params:[scope,this.now()]}]);
  }
  async bindPreparation(scope:string,connectionId:string,id:string,digest:string):Promise<void>{
   const old=(await this.db.query('SELECT digest FROM library_resume_prepare_requests WHERE scope=? AND connection_id=? AND request_id=?',[scope,connectionId,id]))[0];if(old){if(old.digest!==digest)fail('REQUEST_CONFLICT');await this.db.execute('UPDATE library_resume_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',[this.now()+RETENTION,scope,connectionId]);return;}await this.budget(1024);await this.db.execute('INSERT INTO library_resume_prepare_requests VALUES(?,?,?,?,?)',[scope,connectionId,id,digest,this.now()+RETENTION]);
@@ -56,17 +61,35 @@ export class ResumeStore {
  async saveSnapshot(scope:string,witness:Snapshot,inventory:unknown):Promise<void>{const encoded=JSON.stringify(inventory);if(utf8(encoded).length>16777216)fail('LIMIT_EXCEEDED');const old=(await this.db.query('SELECT witness,inventory FROM library_resume_snapshots WHERE scope=? AND snapshot_id=?',[scope,witness.snapshotId]))[0];if(old&&(JSON.stringify(parse(old.witness))!==JSON.stringify(witness)||String(old.inventory)!==encoded))fail('PLAN_CONFLICT');await this.budget(utf8(encoded).length+1024);await this.db.execute('INSERT OR IGNORE INTO library_resume_snapshots VALUES(?,?,?,?,?)',[scope,witness.snapshotId,JSON.stringify(witness),encoded,this.now()+RETENTION]);}
  async snapshot(scope:string,id:string):Promise<{witness:Snapshot;inventory:unknown}|null>{const r=(await this.db.query('SELECT witness,inventory,expires_at FROM library_resume_snapshots WHERE scope=? AND snapshot_id=?',[scope,id]))[0];if(!r||Number(r.expires_at)<this.now())return null;return {witness:parse(r.witness),inventory:parse(r.inventory)};}
  async preparation(scope:string,digest:string,body:Row):Promise<void>{await this.budget(utf8(JSON.stringify(body)).length+1024);await this.db.execute('INSERT OR IGNORE INTO library_resume_preparations VALUES(?,?,?,?)',[scope,digest,JSON.stringify(body),this.now()+RETENTION]);}
- async budget(extra:number):Promise<void>{
-  // A conservative per-record allowance includes keys, indexes and receipts.
-  // The native receiver's journal is independently capped at 16 MiB; the app's
-  // 32 MiB logical maximum additionally reserves 16 MiB for SQL page/index overhead; native journal/rollback files use at most 16 MiB.
-  const r=(await this.db.query(`SELECT
-   (SELECT COALESCE(SUM(length(CAST(description AS BLOB))+4096),0) FROM library_resume_jobs)+
-   (SELECT COALESCE(SUM(length(CAST(description AS BLOB))+4096),0) FROM library_resume_objects)+
-   (SELECT COUNT(*)*1024 FROM library_resume_requests)+(SELECT COUNT(*)*1024 FROM library_resume_prepare_requests)+
+ /** All scopes share a single journal budget. Reserve the native journal's
+  * full 16 MiB bound once, and account outstanding per-job reservations. A
+  * smaller negotiated limit cannot borrow space from another job or scope. */
+ async budget(extra:number,limit=67108864,reservation?:{scope:string;jobId:string;bytes:number}):Promise<void>{
+  const jobs=await this.db.query(`SELECT j.scope,j.job_id,j.description,j.state,j.expires_at,
+   length(CAST(j.description AS BLOB))+4096+
+   (SELECT COALESCE(SUM(length(CAST(o.description AS BLOB))+4096),0) FROM library_resume_objects o WHERE o.scope=j.scope AND o.job_id=j.job_id)+
+   (SELECT COUNT(*)*1024 FROM library_resume_requests r WHERE r.scope=j.scope AND r.job_id=j.job_id)+
+   (SELECT COALESCE(SUM(length(CAST(p.result AS BLOB))+512),0) FROM library_resume_pages p WHERE p.scope=j.scope AND p.job_id=j.job_id) AS actual,
+   COALESCE((SELECT bytes FROM library_resume_reservations r WHERE r.scope=j.scope AND r.job_id=j.job_id),0) AS reserved
+   FROM library_resume_jobs j`);
+  let used=0,found=false;
+  for(const j of jobs){const p=parse<BeginPayload>(j.description);if(Number(j.expires_at)>=this.now()&&!['COMPLETE','CANCELLED'].includes(String(j.state)))limit=Math.min(limit,p.selection.limits.maxJournalBytes);
+   const replacing=reservation!==undefined&&reservation.scope===j.scope&&reservation.jobId===j.job_id;found||=!!replacing;used+=Math.max(Number(j.actual),replacing?reservation!.bytes:Number(j.reserved));}
+  if(reservation&&!found)used+=reservation.bytes;
+  const shared=(await this.db.query(`SELECT
+   (SELECT COUNT(*)*512 FROM library_resume_connections)+
+   (SELECT COUNT(*)*1024 FROM library_resume_prepare_requests)+
    (SELECT COALESCE(SUM(length(CAST(inventory AS BLOB))+2048),0) FROM library_resume_snapshots)+
    (SELECT COALESCE(SUM(length(CAST(body AS BLOB))+2048),0) FROM library_resume_preparations) AS bytes`))[0];
-  if(Number(r?.bytes??0)+extra>32*1024*1024)fail('STORAGE_PRESSURE');
+  if(used+Number(shared?.bytes??0)+extra>Math.min(32*1024*1024,limit-16*1024*1024))fail('STORAGE_PRESSURE');
+ }
+ private planReservation(p:BeginPayload):number{
+  const descriptorBound=p.selection.limits.maxMetadataBytes*4/3+256*68+6144;
+  return utf8(JSON.stringify(p)).length+4096+p.objectCount*4096+Math.min(p.selection.limits.maxManifestBytes,Math.ceil(p.objectCount*descriptorBound))+p.pageObjectCounts.length*1024;
+ }
+ async preflightBegin(scope:string,id:string,p:BeginPayload):Promise<void>{
+  if(!await this.job(scope,id))await this.budget(0,p.selection.limits.maxJournalBytes,{scope,jobId:id,bytes:this.planReservation(p)});
+  else await this.budget(0,p.selection.limits.maxJournalBytes);
  }
  async begin(scope:string,r:Envelope,p:BeginPayload,connectionId:string,epoch:number,lease:Row|null,role:Job['role']='receiver'):Promise<Job>{
   const old=await this.job(scope,r.jobId!);
@@ -81,12 +104,12 @@ export class ResumeStore {
    const count=(await this.db.query("SELECT COUNT(*) AS n FROM library_resume_jobs WHERE state NOT IN ('COMPLETE','CANCELLED') AND expires_at>=?",[this.now()]))[0];
    if(Number(count?.n)>=p.selection.limits.maxActiveJobs)fail('WINDOW_FULL');
    // Reserve all descriptor, per-chunk bind and application-receipt overhead.
-   await this.budget(utf8(JSON.stringify(p)).length+2048+p.objectCount*4096);
+   await this.preflightBegin(scope,r.jobId!,p);
   }
   const state=old?.state??(p.objectCount===0?'READY':'PLANNING'),expiration=Math.max(old?.expiresAt??0,this.now()+RETENTION);
-  await this.db.execute(`INSERT INTO library_resume_jobs(scope,job_id,plan_digest,description,state,connection_id,epoch,expires_at,next_page,completion,lease,role) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-   ON CONFLICT(scope,job_id) DO UPDATE SET connection_id=excluded.connection_id,epoch=excluded.epoch,lease=excluded.lease,expires_at=excluded.expires_at`,[scope,r.jobId,r.planDigest,JSON.stringify(p),state,connectionId,epoch,expiration,old?.nextPage??0,old?.completion?JSON.stringify(old.completion):null,lease?JSON.stringify(lease):null,role]);
-  const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
+  const statement={sql:`INSERT INTO library_resume_jobs(scope,job_id,plan_digest,description,state,connection_id,epoch,expires_at,next_page,completion,lease,role) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+   ON CONFLICT(scope,job_id) DO UPDATE SET connection_id=excluded.connection_id,epoch=excluded.epoch,lease=excluded.lease,expires_at=excluded.expires_at`,params:[scope,r.jobId,r.planDigest,JSON.stringify(p),state,connectionId,epoch,expiration,old?.nextPage??0,old?.completion?JSON.stringify(old.completion):null,lease?JSON.stringify(lease):null,role]};
+  await this.db.transaction([statement,...(!old?[{sql:'INSERT INTO library_resume_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
  }
  async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{return (await this.db.query('SELECT object_id,description,receipt,ordinal FROM library_resume_objects WHERE scope=? AND job_id=? ORDER BY ordinal',[job.scope,job.jobId])).map(r=>({descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,String(r.object_id),r.receipt),ordinal:Number(r.ordinal)}));}
  async object(job:Job,id:string){const r=(await this.db.query('SELECT object_id,description,receipt FROM library_resume_objects WHERE scope=? AND job_id=? AND object_id=?',[job.scope,job.jobId,id]))[0];if(!r)fail();return {descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,id,r.receipt)};}
@@ -98,7 +121,7 @@ export class ResumeStore {
  }
  async manifest(job:Job,r:Envelope,peer:string,p:Row):Promise<Row>{
   const index=Number(p.pageIndex),start=Number(p.startIndex),entries=(p.entries as unknown[]).map(e=>descriptor(e,job.description.selection.limits));
-  if(entries.length!==job.description.pageObjectCounts[index]||start!==job.description.pageObjectCounts.slice(0,index).reduce((a,b)=>a+b,0)||utf8(JSON.stringify(r)).length>job.description.selection.limits.maxManifestPageBytes)fail('PLAN_CONFLICT');
+  if(entries.length!==job.description.pageObjectCounts[index]||start!==job.description.pageObjectCounts.slice(0,index).reduce((a,b)=>a+b,0)||frameBytes(r)>job.description.selection.limits.maxManifestPageBytes)fail('PLAN_CONFLICT');
   if(entries.some(e=>!job.description.selection.kinds.some(k=>k.kind===e.kind)))fail('UNSUPPORTED_KIND');
   const digest=pageDigest(job.planDigest,index,start,entries,String(p.previousPageDigest));if(digest!==p.pageDigest)fail('PLAN_CONFLICT');
   const old=(await this.db.query('SELECT digest,result FROM library_resume_pages WHERE scope=? AND job_id=? AND page_index=?',[job.scope,job.jobId,index]))[0];
@@ -111,12 +134,13 @@ export class ResumeStore {
   if(all.reduce((n,o)=>n+utf8(JSON.stringify(o)).length,0)>job.description.selection.limits.maxManifestBytes)fail('LIMIT_EXCEEDED');
   if(full){if(all.length!==job.description.objectCount||objectsRoot(all.map(e=>e.objectId))!==job.description.objectsRoot)fail('PLAN_CONFLICT');validateGraph(all);}
   const result={pageIndex:index,pageDigest:digest,nextManifestPage:index+1,manifestVerified:full,state:full?'READY':'PLANNING'};
-  await this.budget(entries.reduce((n,e)=>n+utf8(JSON.stringify(e)).length+2048+e.chunkHashes.length*768,0));
-  await this.db.transaction([this.guard(job),...this.bind(job,peer,r,result),...entries.map((o,i)=>({sql:'INSERT INTO library_resume_objects(scope,job_id,object_id,ordinal,description) VALUES(?,?,?,?,?)',params:[job.scope,job.jobId,o.objectId,start+i,JSON.stringify(o)]})),{sql:'INSERT INTO library_resume_pages VALUES(?,?,?,?,?)',params:[job.scope,job.jobId,index,digest,JSON.stringify(result)]},{sql:'UPDATE library_resume_jobs SET next_page=?,state=? WHERE scope=? AND job_id=?',params:[index+1,result.state,job.scope,job.jobId]}]);return result;
+  const reserve=full?utf8(JSON.stringify(job.description)).length+4096+all.reduce((n,e)=>n+utf8(JSON.stringify(e)).length+4096+e.chunkHashes.length*1024,0)+job.description.pageObjectCounts.length*2048:undefined;
+  await this.budget(entries.reduce((n,e)=>n+utf8(JSON.stringify(e)).length+4096,0),job.description.selection.limits.maxJournalBytes,reserve===undefined?undefined:{scope:job.scope,jobId:job.jobId,bytes:reserve});
+  await this.db.transaction([this.guard(job),...this.bind(job,peer,r,result),...(reserve===undefined?[]:[{sql:'UPDATE library_resume_reservations SET bytes=? WHERE scope=? AND job_id=?',params:[reserve,job.scope,job.jobId]}]),...entries.map((o,i)=>({sql:'INSERT INTO library_resume_objects(scope,job_id,object_id,ordinal,description) VALUES(?,?,?,?,?)',params:[job.scope,job.jobId,o.objectId,start+i,JSON.stringify(o)]})),{sql:'INSERT INTO library_resume_pages VALUES(?,?,?,?,?)',params:[job.scope,job.jobId,index,digest,JSON.stringify(result)]},{sql:'UPDATE library_resume_jobs SET next_page=?,state=? WHERE scope=? AND job_id=?',params:[index+1,result.state,job.scope,job.jobId]}]);return result;
  }
- boundary(job:Job,r:Envelope,peer:string,oid:string,receiver:string):ReceiptBoundary{return {before:[this.guard(job),...this.bind(job,peer,r)],after:outcome=>{const receipt=appliedReceipt(r,oid,receiver,outcome);return [this.guard(job),{sql:'UPDATE library_resume_objects SET receipt=? WHERE scope=? AND job_id=? AND object_id=? AND receipt IS NULL',params:[JSON.stringify(receipt),job.scope,job.jobId,oid]},{sql:"UPDATE library_resume_jobs SET state=CASE WHEN NOT EXISTS(SELECT 1 FROM library_resume_objects WHERE scope=? AND job_id=? AND receipt IS NULL) THEN 'APPLIED' ELSE 'TRANSFERRING' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[job.scope,job.jobId,this.now()+RETENTION,job.scope,job.jobId]}];}};}
+ boundary(job:Job,r:Envelope,peer:string,oid:string,receiver:string,check:()=>void=()=>{}):ReceiptBoundary{return {check,before:[this.guard(job),...this.bind(job,peer,r)],after:outcome=>{const receipt=appliedReceipt(r,oid,receiver,outcome);return [this.guard(job),{sql:'UPDATE library_resume_objects SET receipt=? WHERE scope=? AND job_id=? AND object_id=? AND receipt IS NULL',params:[JSON.stringify(receipt),job.scope,job.jobId,oid]},{sql:"UPDATE library_resume_jobs SET state=CASE WHEN NOT EXISTS(SELECT 1 FROM library_resume_objects WHERE scope=? AND job_id=? AND receipt IS NULL) THEN 'APPLIED' ELSE 'TRANSFERRING' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[job.scope,job.jobId,this.now()+RETENTION,job.scope,job.jobId]}];}};}
  async complete(job:Job,r:Envelope,peer:string,p:Row):Promise<Completion>{
-  if(job.completion){if(p.receiptsRoot!==job.completion.receiptsRoot||p.objectCount!==job.completion.objectCount||p.ackToInclusive!==job.completion.ackToInclusive)fail('RECEIPT_CONFLICT');return job.completion;}
+  if(job.completion){if(p.receiptsRoot!==job.completion.receiptsRoot||p.objectCount!==job.completion.objectCount||p.ackToInclusive!==job.completion.ackToInclusive)fail('RECEIPT_CONFLICT');await this.db.transaction([this.guard(job),...this.bind(job,peer,r,job.completion as unknown as Row)]);return job.completion;}
   const objects=await this.objects(job);if(objects.length!==job.description.objectCount||objects.some(o=>!o.receipt))fail('DEPENDENCIES_PENDING');
   const root=receiptsRoot(objects.map(o=>o.receipt!)),ack=(job.description.direction==='phoneToWatch'?job.description.phoneSnapshot:job.description.watchSnapshot).toInclusive;
   if(p.receiptsRoot!==root||p.objectCount!==objects.length||p.ackToInclusive!==ack)fail('RECEIPT_CONFLICT');
@@ -124,10 +148,13 @@ export class ResumeStore {
   // attested by the repository's full-range port before any such job is accepted.
   const result=completion(job.jobId,job.planDigest,objects.length,root,ack);
   const cursor:Statement[]=ack===0?[]:[{sql:'UPDATE library_resume_guard SET ok=CASE WHEN COALESCE((SELECT last_remote_seq_applied FROM sync_peer_state WHERE peer_device_id=?),0)>=? THEN 1 ELSE 0 END WHERE id=1',params:[peer,(job.description.direction==='phoneToWatch'?job.description.phoneSnapshot:job.description.watchSnapshot).fromExclusive]},{sql:'INSERT INTO sync_peer_state(peer_device_id,last_local_seq_acked,last_remote_seq_applied,last_full_sync_at,last_protocol_version,updated_at) VALUES(?,0,?,0,14,?) ON CONFLICT(peer_device_id) DO UPDATE SET last_remote_seq_applied=max(last_remote_seq_applied,excluded.last_remote_seq_applied),updated_at=excluded.updated_at',params:[peer,ack,this.now()]}];
-  await this.db.transaction([this.guard(job),...this.bind(job,peer,r,result as unknown as Row),...cursor,{sql:"UPDATE library_resume_jobs SET state='COMPLETE',completion=?,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[JSON.stringify(result),this.now()+RETENTION,job.scope,job.jobId]}]);return result;
+  await this.db.transaction([this.guard(job),...this.bind(job,peer,r,result as unknown as Row),{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[job.scope,job.jobId]},...cursor,{sql:"UPDATE library_resume_jobs SET state='COMPLETE',completion=?,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[JSON.stringify(result),this.now()+RETENTION,job.scope,job.jobId]}]);return result;
  }
- async cancel(job:Job):Promise<Row>{if(job.state==='COMPLETE')return {state:'COMPLETE',alreadyComplete:true};await this.db.execute("UPDATE library_resume_jobs SET state='CANCELLED',expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",[this.now()+RETENTION,job.scope,job.jobId]);return {state:'CANCELLED',alreadyComplete:false};}
- async touch(job:Job){const until=this.now()+RETENTION;await this.db.transaction([{sql:'UPDATE library_resume_jobs SET expires_at=max(expires_at,?) WHERE scope=? AND job_id=?',params:[until,job.scope,job.jobId]},{sql:'UPDATE library_resume_snapshots SET expires_at=max(expires_at,?) WHERE scope=? AND snapshot_id IN (?,?)',params:[until,job.scope,job.description.phoneSnapshot.snapshotId,job.description.watchSnapshot.snapshotId]},{sql:'UPDATE library_resume_preparations SET expires_at=max(expires_at,?) WHERE scope=?',params:[until,job.scope]},{sql:'UPDATE library_resume_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',params:[until,job.scope,job.connectionId]}]);}
+ async cancel(job:Job,r?:Envelope,peer?:string):Promise<Row>{
+  const result={state:job.state==='COMPLETE'?'COMPLETE':'CANCELLED',alreadyComplete:job.state==='COMPLETE'};
+  await this.db.transaction([this.guard(job,true),...(r?this.bind(job,peer!,r,result):[]),{sql:'DELETE FROM library_resume_reservations WHERE scope=? AND job_id=?',params:[job.scope,job.jobId]},{sql:"UPDATE library_resume_jobs SET state=CASE WHEN state='COMPLETE' THEN state ELSE 'CANCELLED' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[this.now()+RETENTION,job.scope,job.jobId]}]);return result;
+ }
+ async touch(job:Job){const until=this.now()+RETENTION;await this.db.transaction([{sql:'UPDATE library_resume_jobs SET expires_at=max(expires_at,?) WHERE scope=? AND job_id=?',params:[until,job.scope,job.jobId]},{sql:'UPDATE library_resume_snapshots SET expires_at=max(expires_at,?) WHERE scope=? AND snapshot_id IN (?,?)',params:[until,job.scope,job.description.phoneSnapshot.snapshotId,job.description.watchSnapshot.snapshotId]},{sql:'UPDATE library_resume_connections SET expires_at=max(expires_at,?) WHERE connection_id=?',params:[until,job.connectionId]},{sql:'UPDATE library_resume_preparations SET expires_at=max(expires_at,?) WHERE scope=?',params:[until,job.scope]},{sql:'UPDATE library_resume_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',params:[until,job.scope,job.connectionId]}]);}
  async savePeerAck(job:Job,result:Completion){await this.db.execute('INSERT INTO library_resume_peer_ack VALUES(?,?,?) ON CONFLICT(scope,job_id) DO UPDATE SET completion=excluded.completion',[job.scope,job.jobId,JSON.stringify(result)]);}
 }
 export function validateGraph(all:readonly ObjectDescriptor[]):void{

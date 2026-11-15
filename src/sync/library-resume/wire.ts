@@ -78,6 +78,42 @@ export function envelope(v:unknown):Envelope {
  const o=row(v),response=o.type==='response';exact(o,response?['action','version','phase','type','jobId','requestId','requestDigest','epoch','planDigest','success','result',...(o.success===false?['error']:[])]:['action','version','phase','type','jobId','requestId','requestDigest','epoch','planDigest','payload']);
  if(o.action!==ACTION||o.version!==1||!PHASES.includes(o.phase as Phase)||!['request','response'].includes(String(o.type)))fail();
  hex(o.requestId,32);hex(o.requestDigest);const prepare=o.phase==='prepare';if(prepare){if(o.jobId!==null||o.planDigest!==null||o.epoch!==null)fail();}else{hex(o.jobId,32);hex(o.planDigest);if(o.phase==='begin'&&!response){if(o.epoch!==null)fail();}else if(o.epoch!==null){if(integer(o.epoch)<1)fail();}else if(!response||o.success!==false)fail();}
- if(response){bool(o.success);if(o.success===false){if(o.result!==null)fail();const e=exact(o.error,['code','class','retryable','recovery','retryAfterMillis']);text(e.code,40);const expected=new ResumeError(String(e.code)).wire();if(!['ACCOUNT_REQUIRED','ACCOUNT_MISMATCH','PEER_MISMATCH','AUTH_REVOKED','INVALID_FRAME','UNSUPPORTED_VERSION','UNSUPPORTED_PHASE','CAPABILITY_MISMATCH','REQUEST_CONFLICT','JOB_CONFLICT','OBJECT_CONFLICT','PLAN_CONFLICT','RECEIPT_CONFLICT','HASH_MISMATCH','STALE_EPOCH','BUSINESS_REJECTED','UNSUPPORTED_KIND','LIMIT_EXCEEDED','STORAGE_PRESSURE','LOCAL_IO','JOURNAL_CORRUPT','NOT_FOUND','EXPIRED','SOURCE_CHANGED','LEASE_EXPIRED','MANIFEST_INCOMPLETE','CHUNKS_MISSING','DEPENDENCIES_PENDING','WINDOW_FULL','BUSY','USER_CANCELLED','JOB_CANCELLED'].includes(String(e.code))||['class','retryable','recovery'].some(k=>e[k]!==expected[k])||integer(e.retryAfterMillis,1000)<(e.recovery==='WAIT'?1:0)||e.recovery!=='WAIT'&&e.retryAfterMillis!==0)fail();}else row(o.result);}else row(o.payload);
+ if(response){bool(o.success);if(o.success===false){if(o.result!==null)fail();const e=exact(o.error,['code','class','retryable','recovery','retryAfterMillis']);text(e.code,40);const expected=new ResumeError(String(e.code)).wire();if(!['ACCOUNT_REQUIRED','ACCOUNT_MISMATCH','PEER_MISMATCH','AUTH_REVOKED','INVALID_FRAME','UNSUPPORTED_VERSION','UNSUPPORTED_PHASE','CAPABILITY_MISMATCH','REQUEST_CONFLICT','JOB_CONFLICT','OBJECT_CONFLICT','PLAN_CONFLICT','RECEIPT_CONFLICT','HASH_MISMATCH','STALE_EPOCH','BUSINESS_REJECTED','UNSUPPORTED_KIND','LIMIT_EXCEEDED','STORAGE_PRESSURE','LOCAL_IO','JOURNAL_CORRUPT','NOT_FOUND','EXPIRED','SOURCE_CHANGED','LEASE_EXPIRED','MANIFEST_INCOMPLETE','CHUNKS_MISSING','DEPENDENCIES_PENDING','WINDOW_FULL','BUSY','USER_CANCELLED','JOB_CANCELLED'].includes(String(e.code))||['class','retryable','recovery'].some(k=>e[k]!==expected[k])||integer(e.retryAfterMillis,1000)<(e.recovery==='WAIT'?1:0)||e.recovery!=='WAIT'&&e.retryAfterMillis!==0)fail();}else successResult(o.phase as Phase,o.result);}else row(o.payload);
  return o as unknown as Envelope;
+}
+
+const JOB_STATES=['PLANNING','READY','TRANSFERRING','APPLIED','COMPLETE','CANCELLED'];
+export function completionResult(value:unknown):Completion {
+ const o=exact(value,['state','objectCount','receiptsRoot','ackToInclusive','completionDigest']);
+ if(o.state!=='COMPLETE')fail();integer(o.objectCount,4096);hex(o.receiptsRoot);integer(o.ackToInclusive);hex(o.completionDigest);return o as unknown as Completion;
+}
+export function receiptResult(value:unknown):AppliedReceipt {
+ const o=exact(value,['jobId','planDigest','objectId','applyRequestId','applyRequestDigest','receiverDeviceId','resultDigest','outcome']);
+ hex(o.jobId,32);hex(o.planDigest);hex(o.objectId);hex(o.applyRequestId,32);hex(o.applyRequestDigest);text(o.receiverDeviceId,128);hex(o.resultDigest);if(typeof o.outcome!=='string'||!['merged','retainedLocal','alreadyPresent'].includes(o.outcome))fail();return o as unknown as AppliedReceipt;
+}
+/** Frozen phase schemas apply to every success, before a pending request can
+ * observe it. Digest self-consistency is checked separately from schema. */
+export function successResult(phase:Phase,value:unknown):Row {
+ const o=row(value);
+ const oneOf=(value:unknown,choices:readonly string[])=>{if(typeof value!=='string'||!choices.includes(value))fail();};
+ const state=()=>oneOf(o.state,JOB_STATES);
+ const completed=()=>{if(o.state==='COMPLETE')completionResult(o.completion);else if(o.completion!==null)fail();};
+ switch(phase){
+  case 'prepare':if(o.step==='offer'){exact(o,['step','watchCapabilities','watchSnapshot','offerDigest']);capability(o.watchCapabilities);snapshot(o.watchSnapshot);hex(o.offerDigest);}else{exact(o,['step','preparationDigest']);if(o.step!=='confirm')fail();hex(o.preparationDigest);}break;
+  case 'begin':exact(o,['disposition','selectionDigest','state','expiresAtMillis','nextManifestPage','completion']);oneOf(o.disposition,['CREATED','RESUMED']);hex(o.selectionDigest);state();integer(o.expiresAtMillis);integer(o.nextManifestPage,4096);completed();break;
+  case 'manifestPage':exact(o,['pageIndex','pageDigest','nextManifestPage','manifestVerified','state']);integer(o.pageIndex,4095);hex(o.pageDigest);if(integer(o.nextManifestPage,4096)<1||bool(o.manifestVerified)!==(o.state==='READY')||!['PLANNING','READY'].includes(o.state as string))fail();break;
+  case 'missing':{
+   exact(o,['state','nextManifestPage','expiresAtMillis','items','next','done','completion']);state();integer(o.nextManifestPage,4096);integer(o.expiresAtMillis);completed();let ranges=0;const ids:string[]=[];
+   for(const raw of array(o.items,16)){const item=exact(raw,['objectId','state','missingRanges','receipt']);ids.push(hex(item.objectId));oneOf(item.state,['PENDING','PARTIAL','STAGED','APPLIED']);let last=-1;
+    const rs=array(item.missingRanges,128);ranges+=rs.length;for(const raw of rs){const r=array(raw,2);if(r.length!==2)fail();const a=integer(r[0],255),b=integer(r[1],256);if(a>=b||a<last)fail();last=b;}
+    if(['STAGED','APPLIED'].includes(String(item.state))&&rs.length)fail();if(item.state==='APPLIED'){if(receiptResult(item.receipt).objectId!==item.objectId)fail();}else if(item.receipt!==null)fail();
+   }if(ids.some((id,i)=>i>0&&ids[i-1]!>=id)||ranges>128)fail();
+   if(o.next!==null){const n=exact(o.next,['afterObjectId','afterChunkIndex']);hex(n.afterObjectId);if(n.afterChunkIndex!==null)integer(n.afterChunkIndex,256);}if(bool(o.done)!==(o.next===null))fail();if(o.state==='CANCELLED'&&((o.items as unknown[]).length||o.next!==null||!o.done))fail();break;
+  }
+  case 'putChunk':exact(o,['objectId','chunkIndex','chunkState','objectState','receipt']);hex(o.objectId);integer(o.chunkIndex,255);if(o.objectState==='APPLIED'){if(o.chunkState!==null||receiptResult(o.receipt).objectId!==o.objectId)fail();}else if(!['PARTIAL','STAGED'].includes(o.objectState as string)||o.chunkState!=='STAGED'||o.receipt!==null)fail();break;
+  case 'apply':exact(o,['state','receipt']);if(o.state!=='APPLIED')fail();receiptResult(o.receipt);break;
+  case 'complete':completionResult(o);break;
+  case 'cancel':exact(o,['state','alreadyComplete']);if(!['COMPLETE','CANCELLED'].includes(o.state as string)||bool(o.alreadyComplete)!==(o.state==='COMPLETE'))fail();break;
+ }
+ return o;
 }

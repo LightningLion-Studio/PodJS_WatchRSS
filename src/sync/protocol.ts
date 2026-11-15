@@ -55,9 +55,9 @@ export function decodeSyncUtf8(bytes: Uint8Array): string {
 const frames=createFrameFacade<JsonObject,CodecWorkOptions>({
  maxFrameBytes:MAX_FRAME_BYTES,prefix:'signed',
  encodeBody:payload=>utf8Encode(JSON.stringify(payload)),
- decodeBody:bytes=>parseWireJson(decodeSyncUtf8(bytes)),
+ decodeBody:bytes=>parseWireJson(decodeSyncUtf8(bytes),bytes.length),
  encodeBodyAsync:(payload,options)=>encodeUtf8Async(JSON.stringify(payload),'strict',options),
- decodeBodyAsync:async(bytes,options)=>{const text=await decodeUtf8Async(bytes,options);return text.length<16384?parseWireJson(text):parseWireJsonAsync(text,options);},
+ decodeBodyAsync:async(bytes,options)=>{const text=await decodeUtf8Async(bytes,options);return text.length<16384?parseWireJson(text,bytes.length):parseWireJsonAsync(text,options,bytes.length);},
  errors:{length:length=>new RangeError(`sync frame length out of range: ${length}`),
   prefix:()=>new Error('truncated sync frame prefix'),size:()=>new Error('truncated or trailing sync frame bytes'),
   failed:()=>new Error('sync stream already failed'),truncated:()=>new Error('truncated sync stream')},
