@@ -21,15 +21,11 @@ import {douyinEntryLayout,douyinEntrySubtitle,entrySubtitleLine,entryRectStyle,t
 export const DOUYIN_ENTRY_SLOW_MS=1500;
 export const DOUYIN_ENTRY_LOCAL_WAIT_MS=200;
 
-/** Verified stock may prepare one hidden first-frame session; only entering starts playback. */
+/** Entry restores local data; only an explicit user action starts playback. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const guestEntryMs=Date.now();
   traceServiceWork('douyin.entry.guest',()=>{},guestEntryMs);
-  const [stockPending,setStockPending]=createSignal(!!props.presentStock);
-  let stockEntryClaimed=false,previewToken=0,previewHandedOff=false;
-  let preview:ReturnType<NonNullable<DouyinScreenProps['presentStock']>>|undefined;
-  const hidePreview=()=>{preview?.cancel();preview=undefined;if(previewToken)props.hideStock?.(previewToken);previewToken=0;};
-  const claimStockEntry=()=>{if(stockEntryClaimed)return false;stockEntryClaimed=true;return props.claimStockEntry?.()??true;};
+  const [stockPending,setStockPending]=createSignal(!!props.restoreStock);
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[slow,setSlow]=createSignal(false);
   const auth=observeDouyinAuth(props.client),logged=()=>auth()==='logged-in';
@@ -89,15 +85,9 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
         const showStock=async(stock:DouyinItem[])=>{
           if(!current())return;
           stockChosen=true;choseStock=true;
-          const automatic=stock[0].playUrl.startsWith('file:')&&claimStockEntry();
-          if(automatic&&props.presentStock){
-            preview=props.presentStock(stock[0],guestEntryMs);
-            try{const shown=await preview.result;previewToken=shown.token;if(!current()){hidePreview();return;}}
-            catch{if(!current())return;}
-          }
-          // Prewarm starts only after the stored frame reaches the window.
+          // A complete offline file is data availability, not playback intent.
+          // Live-session lifecycle resume belongs to VideoPlayerScreen.
           setStockPending(false);setItems(stock);anchor=stock[0].awemeId;cursor=null;hasMore=true;
-          if(automatic){previewHandedOff=true;void enter();}
         };
         const stock=await Promise.race([stockWork,localDeadline.result.then(()=>[] as DouyinItem[])]);
         stockDecided=true;if(!current()){localDeadline.cancel();return;}
@@ -129,7 +119,6 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const enter=async()=>{
     if(!active()||auth()==='unknown'&&!items().length)return;if(auth()==='logged-out'){douyinBench.loginTap(props.client,logged,()=>props.onNavigate({name:'login'}));return;}if(opening())return;
     if(!items().length){await load(true);return;}
-    claimStockEntry();
     // Keep failures on this entry until a source opens. Cached navigation never
     // waits for the feed refresh; the controller returns closed retry metadata.
     const requested=props.route.name==='entry'?props.route.resumeAwemeId:undefined;
@@ -139,9 +128,9 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     generation++;loadTimer?.cancel();loadTimer=undefined;setBusy(false);
     cancelRetry();setError("");setOpening(true);retryPlayback=true;
     const revision=generation,current=()=>active()&&revision===generation;
-    props.onPlay({...(previewToken?{releaseStartupPreview:hidePreview}:{}),item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true,entrySeq,
+    props.onPlay({item,playback:item,playlist:items(),cursor:cursor??undefined,hasMore,immersive:true,entrySeq,
       isCurrent:current,
-      onFailure:failure=>{hidePreview();if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq,failure);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
+      onFailure:failure=>{if(!current())return;setOpening(false);playbackFailed=true;douyinBench.entryError(entrySeq,failure);setError(formatDouyinError(failure.code));scheduleRetry(failure,current);},
     });
     props.onNavigate({name:"player",awemeId:item.awemeId});
   };
@@ -149,13 +138,13 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
   const preloadOwner={};
   createEffect(()=>{const list=items(),enabled=props.active??true;if(enabled&&logged()&&list.length)props.onPreloadWindow?.(preloadOwner,list,anchor,entrySeq);else props.onPreloadStop?.(preloadOwner);});
   onCleanup(()=>props.onPreloadStop?.(preloadOwner));
-  // Verified complete stock may enter immediately; other external intents only select an anchor. A tap/swipe enters
-  // the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
+  // Local inventory and external intents only select an anchor. A tap/swipe
+  // enters the player. Ignore legacy debugAutoEnterFlow, including in debug builds.
   createEffect(()=>{const enabled=props.active??true;if(auth()==='logged-out')setStockPending(false);if(enabled&&!lastActive)entrySeq=douyinBench.entry(props.client);lastActive=enabled;const code=auth()==='logged-out'?'needs_login':auth()==='logged-in'&&busy()&&!items().length?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
   const gesture=createGesture({region:{rect:()=>active()?{x:0,y:0,w:props.width,h:props.height}:null},axis:"y",panSlop:8,onPanEnd:c=>{if(c.dy< -30||c.dy< -12&&(c.vy??0)< -400)void enter();else if(c.dy>50)void load(true,true);}});
   // Back on the cover after the stream: a stale opening flag must never swallow the next enter.
   createEffect(()=>{if(props.route.name==='entry'&&(props.active??true))untrack(()=>setOpening(false));});
-  createEffect(()=>{if((props.active??true)&&auth()!=='logged-out')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);}});onCleanup(()=>{if(!previewHandedOff)hidePreview();disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
+  createEffect(()=>{if((props.active??true)&&auth()!=='logged-out')void untrack(()=>load());else{generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;setBusy(false);setOpening(false);}});onCleanup(()=>{disposed=true;if(refreshSeq||presentedRefresh)douyinBench.cancelPresented('refresh_done',refreshSeq||presentedRefresh);refreshSeq=0;presentedRefresh=0;generation++;loadTimer?.cancel();loadTimer=undefined;cancelRetry();gesture.dispose();});
   // Submit no guest scene while restoring: frame zero is the first page content.
   return <Show when={(props.active??true)&&!stockPending()}><ImmersiveEntryContent width={props.width} height={props.height}
    auth={auth()} hasItems={items().length>0} busy={busy()} slow={slow()} error={error()}

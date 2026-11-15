@@ -18,7 +18,6 @@ for(const method of ['configure','prepare','list','watched','cancel'] as const){
 const stock=createHostDouyinStock(client),offer=stock.offer!;stock.offer=(items,anchor)=>{traceServiceWork('dystore.offer',()=>{},items.length);offer(items,anchor);};
 const preload=createHostDouyinPreload(client,stock),owner={};
 function App(){
- let entryClaimed=false;
  const [playlist,setPlaylist]=createSignal(items),[index,select]=createSignal(0),[source,setSource]=createSignal<PlaybackSource>(),[inPlayer,setInPlayer]=createSignal(false);
  const cover=()=>{traceServiceWork('dystore.return.cover',()=>{});setInPlayer(false);};
  const open=async(item:DouyinItem,releaseStartupPreview?:()=>void)=>{
@@ -31,9 +30,7 @@ function App(){
  const advance=async(n:number)=>{n=Math.max(0,Math.min(playlist().length-1,n));select(n);await open(playlist()[n]);};
  const adjacent=async(direction:'next'|'previous',distance=1)=>{const item=playlist()[index()+(direction==='next'?distance:-distance)];if(!item)return;const ready=await preload.readySource(item);return {key:item.awemeId,source:{url:ready?.url??await preload.playback(item,{}),title:item.description,awemeId:item.awemeId,platform:'douyin' as const,immersive:true,previewFrame:ready?.previewFrame,...douyinDecoderProfile(ready?.item??item)}};};
  return <><Show when={!inPlayer()}><ImmersiveEntry route={{name:'entry'}} client={client} width={metrics.logicalWidth} height={metrics.logicalHeight} active
- restoreStock={()=>stock.restore()} claimStockEntry={()=>{if(entryClaimed)return false;entryClaimed=true;return true;}}
- presentStock={(item,guestEntryMs)=>localMediaStore.present(item.playUrl,{x:0,y:0,width:metrics.logicalWidth,height:metrics.logicalHeight},guestEntryMs)}
- hideStock={token=>{void localMediaStore.hide(token).result;}}
+ restoreStock={()=>stock.restore()}
  onPreloadWindow={(owner,list,anchor)=>preload.start(owner,list,anchor??undefined,'entry')} onPreloadStop={owner=>preload.stop(owner)}
  onPlay={request=>{setPlaylist(request.playlist??[request.item]);select(Math.max(0,(request.playlist??[]).findIndex(i=>i.awemeId===request.item.awemeId)));void open(request.item,request.releaseStartupPreview);}}
  onNavigate={()=>{}} onBack={()=>{}} onRequestQrLogin={()=>{}} input={async()=>null} onUnsupported={()=>{}}

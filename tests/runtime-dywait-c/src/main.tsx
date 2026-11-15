@@ -21,7 +21,7 @@ const snapshot={items,anchorAwemeId:items[0].awemeId,cursor:'fixture',hasMore:tr
 const client={authState:()=> 'logged-in',subscribeAuth:()=>()=>{},isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({}),freshPlaybackSnapshot:(v:any)=>v,restorePlaybackQueue:async()=>snapshot,restoreFeed:async()=>snapshot,fetchFeedPage:()=>{mark('unexpected_feed');return new Promise(()=>{});}} as any;
 const stock=createHostDouyinStock(client),preload=createHostDouyinPreload(client,stock);
 const [ready,setReady]=createSignal(false),[cover,setCover]=createSignal(false),[source,setSource]=createSignal<PlaybackSource>(),[failed,setFailed]=createSignal(false);
-let playlist:DouyinItem[]=[],index=0,claimed=false;
+let playlist:DouyinItem[]=[],index=0;
 const played=new Set<string>();
 async function open(item:DouyinItem,releaseStartupPreview?:()=>void){
  const bundle=await preload.readySource(item);if(!bundle?.url.startsWith('file:'))throw Error('verified local source missing');
@@ -33,8 +33,7 @@ function App(){return <>
  <Show when={failed()}><Text class="absolute left-[45] top-[100] text-sm text-white">Fixture failed</Text></Show>
  <Show when={ready()&&!cover()&&!source()}><View focusable accessibilityRole="button" accessibilityLabel="OPEN COVER" class="absolute left-[55] top-[90] w-[130] h-[45] bg-[#333333] rounded-[20] items-center justify-center" onPress={()=>{mark('cover_open');setCover(true);}}><Text class="text-xs text-white">OPEN COVER</Text></View></Show>
  <Show when={cover()&&!source()}><ImmersiveEntry client={client} route={{name:'entry'}} width={metrics.logicalWidth} height={metrics.logicalHeight} active
- restoreStock={async()=>{await delay(300).result;return stock.restore();}} claimStockEntry={()=>{if(claimed)return false;claimed=true;return true;}}
- presentStock={(item,ms)=>stock.present!(item.playUrl,{x:0,y:0,width:metrics.logicalWidth,height:metrics.logicalHeight},ms)} hideStock={n=>{void stock.hide?.(n).result;}}
+ restoreStock={async()=>{await delay(300).result;return stock.restore();}}
  onPlay={request=>{playlist=request.playlist??[request.item];index=0;void open(request.item,request.releaseStartupPreview).catch(()=>setFailed(true));}} onNavigate={()=>{}} onBack={()=>{}} onRequestQrLogin={()=>{}} onUnsupported={()=>{}} input={async()=>null}
  settings={{originalContentEnabled:false,onOriginalContentChange(){},continuePlaybackInBackgroundEnabled:false,onContinuePlaybackInBackgroundChange(){},onDeleteChannel(){}}}/></Show>
  <Show when={source()}>{value=><VideoPlayerScreen source={value()} width={metrics.logicalWidth} height={metrics.logicalHeight} active offset={0} round ref={h=>h.setLoopMode('single')}

@@ -28,6 +28,7 @@ const sessionPort={
  play:async(id:string)=>{const v={...sessionValue(id),state:"playing"};sessionStates.set(id,v);return v;},
  retire:async(id:string)=>{const v={...sessionValue(id),state:"prewarmed",muted:true};sessionStates.set(id,v);return v;},
  pause:async(id:string)=>{const v={...sessionValue(id),state:"paused"};sessionStates.set(id,v);return v;},
+ seek:async(id:string,positionMs:number)=>{const v={...sessionValue(id),positionMs};sessionStates.set(id,v);return v;},
  state:async(id:string)=>sessionValue(id),setTransform:async(id:string)=>sessionValue(id),setBounds:async(id:string)=>sessionValue(id),setLoop:async(id:string)=>sessionValue(id),
  promote:async(id:string,options:any)=>{sessionCalls.push({method:"promote",id,...options});const old=sessionValue(options.replaceSessionId);sessionStates.set(options.replaceSessionId,{...old,state:"prewarmed",muted:true});const v={...sessionValue(id),state:"playing",presented:true};sessionStates.set(id,v);return v;},
  transition:async(options:any)=>{sessionCalls.push({method:"transition",...options});return {...options,composited:true};},
@@ -224,4 +225,22 @@ test('REVIEW retired first-frame events cannot complete a reconnect still resolv
 test('REVIEW slow preparation reports a stalled load without publishing transient READY state',async()=>{
  heldPrepare=new Promise(()=>{});const f=reloadMount();await flush();expect(f.text()).not.toContain('网络较慢');await tick(3001);
  expect(f.images()).toHaveLength(2);expect(f.text()).toContain('网络较慢');expect(f.firstFrames()).toBe(0);
+});
+
+for(const suspension of [['inactive'],['inactive','background']] as const)test(`DYENTRY same Douyin session resumes after ${suspension.join(' then ')}`,async()=>{
+ sessionsCapable=true;decoderLimit=3;
+ const f=reloadMount({platform:'douyin',immersive:true,awemeId:'dyentry-current',url:'file:///fixture/current.mp4',title:'fixture'});await flush();
+ const foreground=sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm).at(-1)!;
+ expect(foreground.url).toBe('file:///fixture/current.mp4');
+ const id=foreground.sessionId;expect(sessionValue(id).state).toBe('playing');
+ current={...sessionValue(id),positionMs:678};sessionStates.set(id,current);await tick();
+ const prepareCount=sessionCalls.filter(c=>c.method==='prepare').length;
+ for(const state of suspension){lifecycleTo(state);await flush();}
+ expect(sessionReleases).toBeGreaterThan(0);
+ lifecycleTo('active');await flush();await tick();
+ expect(retries).toBe(0);expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(prepareCount+1);
+ const resumed=sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm).at(-1)!;
+ expect(resumed.url).toBe(foreground.url);
+ expect(sessionValue(resumed.sessionId)).toMatchObject({state:'playing',positionMs:678});
+ expect(f.text()).not.toContain('播放失败');
 });

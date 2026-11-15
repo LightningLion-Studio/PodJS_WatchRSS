@@ -275,7 +275,7 @@ test('DYERR temporary failures without a cooldown hint back off from thirty to s
 
 
 test('persisted ready stock enters with zero feed or detail requests',async()=>{
- const f=mount({cacheCount:3,stock:true});await settled(f);expect(f.requests).toHaveLength(0);f.press();await settle();
+ const f=mount({cacheCount:3,stock:true});await cachedReady(f);expect(f.plays).toHaveLength(0);expect(f.requests).toHaveLength(0);f.press();await settle();
  expect(f.plays[0].item.awemeId).toBe('1');expect(f.plays[0].playlist).toHaveLength(3);expect(f.requests).toHaveLength(0);
 });
 
@@ -327,7 +327,7 @@ test('DYLOSS only the full 10 second refresh deadline emits entry timeout once',
  }finally{(globalThis as any).pod=original;}
 });
 
-test('verified complete inventory enters immediately without a feed request',async()=>{
+test('DYENTRY verified complete inventory stays on the cover until a tap without a feed request',async()=>{
  const f=mount({cacheCount:3,freshCache:true,hasMore:true,cursor:'c',stock:true});
  // This fixture intentionally uses remote items for old prefix stock above;
  // exercise the complete-only branch with a separate local stock adapter.
@@ -335,20 +335,29 @@ test('verified complete inventory enters immediately without a feed request',asy
  const item={awemeId:'local',description:'offline',authorName:'fixture',playUrl:'file:///complete/local.mp4',durationMs:12000,variants:[]} as any;
  const data=new Map([['douyin.cookie','fixture']]);let requests=0,plays:any[]=[];
  const client=new DouyinClient({secureStorage:{get:async k=>data.get(k)??null,set:async()=>{},remove:async()=>{}},signer:{sign:()=> 'fixture'},transport:{request:async()=>{requests++;throw Error('offline');}}});
- let dispose!:()=>void;createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:'entry'},width:233,height:233,active:true,client,restoreStock:async()=>[item],onPlay:(value:any)=>plays.push(value),onNavigate(){}} as any);});
- await settle();expect(requests).toBe(0);expect(plays).toHaveLength(1);expect(plays[0].playback.playUrl).toBe(item.playUrl);dispose();
+ let dispose!:()=>void;const view=createRoot(stop=>{dispose=stop;stops.push(stop);return ImmersiveEntry({route:{name:'entry'},width:233,height:233,active:true,client,restoreStock:async()=>[item],onPlay:(value:any)=>plays.push(value),onNavigate(){}} as any);});
+ await settle();expect(requests).toBe(0);expect(plays).toHaveLength(0);
+ expect(nodes(view).some(n=>n.kind==='Text'&&n.props.children==='抖音')).toBe(true);
+ nodes(view).find(n=>n.props.accessibilityLabel==='向上进入视频流')!.props.onPress();await settle();
+ expect(plays).toHaveLength(1);expect(plays[0].playback.playUrl).toBe(item.playUrl);dispose();
 });
 
-test('stored image commits before prewarm and playback; cover reactivation does not auto-enter',async()=>{
- const gate=deferred<{presented:boolean;token:number}>(),events:string[]=[],item={awemeId:'disk',playUrl:'file:///complete.mp4',variants:[],description:'stored',authorName:'author',durationMs:1000} as any;
- const client=new DouyinClient({secureStorage:{get:async()=> 'sessionid=fixture',set:async()=>{},remove:async()=>{}},signer:{sign:()=>''},transport:{request:async()=>{throw Error('feed forbidden before stored frame');}}});
- let claimed=false;const [active,setActive]=createSignal(true);
- const props={route:{name:'entry'},client,width:240,height:240,get active(){return active();},restoreStock:async()=>[item],claimStockEntry:()=>{if(claimed)return false;claimed=true;return true;},presentStock:()=>{events.push('image');return {result:gate.promise,cancel(){}};},hideStock(){},onPreloadWindow:()=>events.push('prewarm'),onPreloadStop(){},onPlay:()=>events.push('play'),onNavigate(){},onBack(){},onRequestQrLogin(){},input:async()=>null,onUnsupported(){},settings:{originalContentEnabled:false,onOriginalContentChange(){},continuePlaybackInBackgroundEnabled:false,onContinuePlaybackInBackgroundChange(){},onDeleteChannel(){}}} as DouyinScreenProps;
- let dispose!:()=>void;const view=createRoot(stop=>{dispose=stop;return ImmersiveEntry(props);});
- await settle();await settle();expect(events).toEqual(['image']);expect(nodes(view).filter(n=>n.kind==='Text')).toHaveLength(0);
- gate.resolve({presented:true,token:1});await settle();expect(events).toEqual(['image','prewarm','play']);
- setActive(false);await settle();setActive(true);await settle();await settle();expect(events.filter(v=>v==='play')).toHaveLength(1);
- dispose();createRoot(stop=>{stops.push(stop);return ImmersiveEntry(props);});await settle();await settle();expect(events.filter(v=>v==='play')).toHaveLength(1);
+test('DYENTRY stock entry, reactivation and remount require an explicit play action',async()=>{
+ const events:string[]=[],item={awemeId:'disk',playUrl:'file:///complete.mp4',variants:[],description:'stored',authorName:'author',durationMs:1000} as any;
+ const client=new DouyinClient({secureStorage:{get:async()=> 'sessionid=fixture',set:async()=>{},remove:async()=>{}},signer:{sign:()=>''},transport:{request:async()=>{throw Error('network forbidden');}}});
+ const [active,setActive]=createSignal(true);
+ const props={route:{name:'entry'},client,width:240,height:240,get active(){return active();},restoreStock:async()=>[item],
+  // Legacy native preview must never cover the title page or authorize playback.
+  presentStock:()=>{events.push('image');return {result:Promise.resolve({presented:true,token:1}),cancel(){}};},
+  onPlay:()=>events.push('play'),onNavigate(){},onPreloadStop(){}} as unknown as DouyinScreenProps;
+ let dispose!:()=>void;let view=createRoot(stop=>{dispose=stop;return ImmersiveEntry(props);});
+ const press=()=>nodes(view).find(n=>n.props.accessibilityLabel==='向上进入视频流')!.props.onPress();
+ await settle();await settle();expect(events).toEqual([]);
+ expect(nodes(view).some(n=>n.kind==='Text'&&n.props.children==='抖音')).toBe(true);
+ press();expect(events).toEqual(['play']);
+ setActive(false);await settle();setActive(true);await settle();await settle();expect(events).toEqual(['play']);
+ dispose();view=createRoot(stop=>{stops.push(stop);return ImmersiveEntry(props);});await settle();await settle();expect(events).toEqual(['play']);
+ press();expect(events).toEqual(['play','play']);
 });
 
 for(const label of ['cloud worker secure lock','slow cookie read'])test(`DYWAIT ${label} cannot block an independent cached queue`,async()=>{
@@ -375,7 +384,7 @@ test('DYWAIT late verified stock remains available after the short local deadlin
  const stock=deferred<any[]>(),secure=deferred<void>();const f=mount({stockGate:stock.promise,secureGate:secure.promise,historySeparate:true});
  await settle();retryTimers.find(t=>t.ms===200&&!t.cancelled)!.fire();await settle();
  stock.resolve([{awemeId:'offline',playUrl:'file:///verified/offline.mp4',variants:[],description:'offline',authorName:'fixture',durationMs:1000}]);
- await settle();expect(f.plays).toHaveLength(1);expect(f.plays[0].item.playUrl).toBe('file:///verified/offline.mp4');expect(f.requests).toHaveLength(0);secure.resolve();await settle();
+ await settle();expect(f.plays).toHaveLength(0);f.press();expect(f.plays[0].item.playUrl).toBe('file:///verified/offline.mp4');expect(f.requests).toHaveLength(0);secure.resolve();await settle();
 });
 
 
@@ -388,7 +397,7 @@ test('DYWAIT-C late large verified stock takes priority while its cached cover i
  const stock=deferred<any[]>();const f=mount({cacheCount:4,freshCache:true,hasMore:true,cursor:'c',stockGate:stock.promise});
  await f.client.restorePlaybackQueue();await f.client.restoreFeed();retryTimers.find(t=>t.ms===200&&!t.cancelled)!.fire();await cachedReady(f);expect(f.plays).toHaveLength(0);
  stock.resolve([{awemeId:'large-local',playUrl:'file:///verified/large.mp4',variants:[],description:'offline',authorName:'fixture',durationMs:60000}]);
- await settle();await settle();expect(f.plays[0]?.item.playUrl).toBe('file:///verified/large.mp4');expect(f.requests).toHaveLength(0);
+ await settle();await settle();expect(f.plays).toHaveLength(0);f.press();expect(f.plays[0]?.item.playUrl).toBe('file:///verified/large.mp4');expect(f.requests).toHaveLength(0);
 });
 
 // T-DOUYIN-ENTRY-LAYOUT: regressions against the reported overlapping status rows.

@@ -84,10 +84,6 @@ export interface DouyinScreenProps {
   onBack: () => void;
   onPlay: (request: DouyinPlayRequest) => void;
   restoreStock?:()=>Promise<DouyinItem[]>;
-  /** Route-owned flag survives component remounts after returning to the cover. */
-  claimStockEntry?:()=>boolean;
-  presentStock?:(item:DouyinItem,guestEntryMs:number)=>{result:Promise<{presented:boolean;token:number}>;cancel():void};
-  hideStock?:(token:number)=>void;
   onPreloadWindow?:(owner:unknown,items:DouyinItem[],anchor:string|null,entrySeq?:number)=>void;
   onPreloadStop?:(owner:unknown)=>void;
   onPlaybackCommand?: (command: DouyinPlaybackCommand) => void;
