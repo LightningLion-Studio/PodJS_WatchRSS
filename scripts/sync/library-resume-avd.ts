@@ -56,7 +56,7 @@ async function reverse(){
  await delay(200);p.close();const state=await control('inspect');assert.equal((state.jobs as Row[]).find(r=>r.job_id===job)?.state,'COMPLETE');passed('watch-to-phone source push validates bytes and saves peer ACK',{objects:objects.length,bytes});
 }
 function rawHash(bytes:Uint8Array){return createHash('sha256').update(bytes).digest('hex');}
-async function run(){let runtime:Row|undefined;for(let i=0;i<60&&!runtime;i++){try{runtime=await control('runtime');}catch{await delay(1000);}}assert.equal(runtime?.version,1);
+async function run(){assert.equal(command('emu','avd','name').trim().split(/\r?\n/)[0],'RESUMEC_Watch_API35');let runtime:Row|undefined;for(let i=0;i<60&&!runtime;i++){try{runtime=await control('runtime');}catch{await delay(1000);}}assert.equal(runtime?.version,1);
  let p=await connect(),plan=await p.prepare();await p.begin(plan);await p.manifest(plan);const id=nonce();await control('drop',{phase:'putChunk'});await assert.rejects(p.put(plan,0,id).then(r=>{if(!r.success)throw Error('unexpected '+JSON.stringify(r));return r;}),/EOF/);p.close();({p,plan}=await resume(plan));let m=await p.missing(plan);assert.deepEqual((m.items as Row[])[0]!.missingRanges,[[1,object.chunkHashes.length]]);assert.ok((await p.put(plan,0,id)).success);passed('ACK lost: durable block reused',{epoch:p.epoch});
  for(let i=1;i<object.chunkHashes.length;i++)assert.ok((await p.put(plan,i)).success);m=await p.missing(plan);assert.deepEqual((m.items as Row[])[0]!.missingRanges,[]);
  const pid=await crashRestart();p.close();({p,plan}=await resume(plan));m=await p.missing(plan);assert.deepEqual((m.items as Row[])[0]!.missingRanges,[]);passed('STAGED blocks survive process kill',{killedPid:pid,epoch:p.epoch});

@@ -31,7 +31,6 @@ type Offer={request:Envelope;payload:Row;watchSnapshot:Snapshot;digest:string;re
 export class LibraryResumeConnection {
  readonly scope:string;
  private readonly offers=new Map<string,Offer>();
- private readonly preparationIds=new Map<string,string>();
  private bindings:Binding[]=[];
  private selectedOffer?:Offer;
  private readonly begun=new Set<string>();
@@ -86,7 +85,7 @@ export class LibraryResumeConnection {
   await this.ports.store.touch(j);return {result,epoch:j.epoch};
  }
  private async prepare(r:Envelope):Promise<{result:Row;epoch:null;after?:()=>void}>{
-  const p=r.payload!,bound=this.preparationIds.get(r.requestId);if(bound&&bound!==r.requestDigest)fail('REQUEST_CONFLICT');this.preparationIds.set(r.requestId,r.requestDigest);
+  const p=r.payload!;await this.ports.store.bindPreparation(this.scope,this.ports.connectionId,r.requestId,r.requestDigest);
   if(p.step==='offer'){
    const cached=this.offers.get(r.requestId);if(cached)return {result:cached.result,epoch:null};
    if(this.offers.size>=4)fail('LIMIT_EXCEEDED');
