@@ -1,6 +1,7 @@
 # DYSWIPE ghost regression
 
-This isolated route mounts the production `VideoPlayerScreen` immediately.
+This isolated route mounts the production `VideoPlayerScreen` immediately,
+with `round=true` so native video/keyframe clipping uses the production circle.
 It uses generated local H.264 files in landscape (320x180), portrait (180x320),
 and square (240x240) format. A 48x48 white fiducial detects unequal pixel scale.
 It never constructs DouyinClient, imports credentials, or selects network media.
