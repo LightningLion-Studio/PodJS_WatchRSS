@@ -141,6 +141,19 @@ def paired(events, start, end, *, where=None, require=None):
     return quantiles(values) | {'missing': missing}
 
 
+def explicit_play_first_frame(events):
+    """Accepted play_tap -> native presented first_card, excluding cover dwell.
+
+    Filter other startup stages before pairing: they share the same sequence.
+    Missing/duplicate/reversed endpoints remain missing, never zero-ms samples.
+    This consumes native proof; it does not upgrade a JS callback into a commit.
+    """
+    selected = [e for e in events if e.get('tag') == 'DYBENCH' and (
+        e.get('code') == 'first_card' or
+        e.get('code') == 'startup_stage' and e.get('startup_stage') == 'play_tap')]
+    return paired(selected, 'startup_stage', 'first_card')
+
+
 def framestats(raw, budget_ms=1000/60, bounds_ns=None):
     """Deduplicate accumulated gfxinfo snapshots by IntendedVsync/FrameCompleted."""
     frames = {}

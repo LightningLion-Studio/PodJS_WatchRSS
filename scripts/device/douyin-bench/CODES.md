@@ -301,3 +301,31 @@ DND suppressing media applies `audio_gain_milli=0` without writing system volume
 A crown-up at an audible index overrides policy silence for this app process;
 crown-down to zero revokes it. Speculative audio-track holds remain separate.
 These player readbacks do not establish mixer/PCM or physical speaker output.
+
+
+## T-PODJS-DOUYIN-ENTRY: explicit playback first-frame baseline
+
+Entry now stays on the cover even when complete local stock is available.
+`entry_start` and `home_entry` measure navigation, not playback authorization.
+Cover paint, inventory restore, `preview_ready`, hidden decoder completion and
+`onFirstFrame` alone are not native presented-video endpoints.
+
+The playback baseline is `play_to_first_frame_ms`: native monotonic
+`startup_stage=play_tap` to native `first_card` on the same seq/attempt. The start
+means an accepted explicit tap or upward gesture; automatic retries do not create
+a new explicit user action. The endpoint still requires decoded active-source
+ownership and the native window commit. The existing source/generation checks
+and route cancellation must remain. Retired or hidden targets cannot finish it.
+
+Use `analyzers.explicit_play_first_frame(parsed_events)` on parsed DYBENCH logs.
+It reports n/p50/p95/max/missing. It filters other startup stages before pairing,
+rejects duplicate, mismatched and reversed endpoints, and returns no sample for a
+cover-only visit. Missing first_card remains missing; never substitute cover
+paint, a decoder callback or zero milliseconds. This helper adds no timing limit
+and does not change approved legacy thresholds or collector device actions.
+
+The historical cold_open/home_entry `first_card_ms` metrics include user dwell
+on the cover. Keep them as end-to-end navigation records, not as playback startup
+latency or a like-for-like comparison with the removed automatic-stock path.
+Report the explicit-play metric separately. A fixture JS first_frame callback
+proves only that callback; it cannot by itself prove the native first_card commit.

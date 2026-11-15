@@ -43,7 +43,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     const backoff=Math.min(30000,1000*2**Math.min(5,failures++));
     const wait=Number.isFinite(result.retryAfterMs)?Math.max(1000,Math.min(DOUYIN_AUTH403_MAX_COOLDOWN_MS,result.retryAfterMs!)):isDouyinTemporaryFailure(result.code)?Math.min(DOUYIN_AUTH403_MAX_COOLDOWN_MS,30000*2**Math.min(5,failures-1)):backoff;
     const timer=hostServices.delay(wait);retryTimer=timer;
-    void timer.result.then(()=>{if(retryTimer!==timer)return;retryTimer=undefined;if(current())void (retryPlayback?enter():load(true));},()=>{});
+    void timer.result.then(()=>{if(retryTimer!==timer)return;retryTimer=undefined;if(current())void (retryPlayback?enter('retry'):load(true));},()=>{});
   };
   const active=()=>!disposed&&(props.active??true);
   const requireLogin=async(current:()=>boolean)=>{
@@ -116,7 +116,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     }catch{if(current()&&!choseStock){setError(formatDouyinError('REQUEST_FAILED'));scheduleRetry({code:'REQUEST_FAILED'},current);}}
     finally{if(current())setStockPending(false);timer.cancel();if(loadTimer===timer)loadTimer=undefined;if(current()){setBusy(false);setSlow(false);finishRefresh(!!error());appLogger.d('DouyinEntry',`feed settled items=${items().length} login=${logged()?'present':'required'}`);}}
   };
-  const enter=async()=>{
+  const enter=async(trigger:'user'|'retry'='user')=>{
     if(!active()||auth()==='unknown'&&!items().length)return;if(auth()==='logged-out'){douyinBench.loginTap(props.client,logged,()=>props.onNavigate({name:'login'}));return;}if(opening())return;
     if(!items().length){await load(true);return;}
     // Keep failures on this entry until a source opens. Cached navigation never
@@ -124,7 +124,8 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
     const requested=props.route.name==='entry'?props.route.resumeAwemeId:undefined;
     const index=Math.max(0,items().findIndex(item=>item.awemeId===(requested??anchor))),item=items()[index];
     if(playbackFailed){entrySeq=douyinBench.entry(props.client);playbackFailed=false;}
-    benchmark.mark('startup_stage',entrySeq,{startup_stage:'play_tap'});
+    // Retry retains playback intent, but must not impersonate a fresh input.
+    if(trigger==='user')benchmark.mark('startup_stage',entrySeq,{startup_stage:'play_tap'});
     generation++;loadTimer?.cancel();loadTimer=undefined;setBusy(false);
     cancelRetry();setError("");setOpening(true);retryPlayback=true;
     const revision=generation,current=()=>active()&&revision===generation;

@@ -494,3 +494,30 @@ test('ISSUEA1 restored Douyin parent reconstructs data and permits refresh and e
  expect(second.plays[0]).not.toBe(first.plays[0]);
  expect(first.plays).toHaveLength(1);
 });
+
+
+test('DYENTRY review: cover and prewarm emit no video endpoint and preserve credentials and stopped traffic',async()=>{
+ const before=(globalThis as any).pod,marks:any[]=[],mutations:string[]=[],plays:any[]=[];let seq=5000,prewarms=0,requests=0;
+ (globalThis as any).pod={benchmark:(raw:string)=>{const row=JSON.parse(raw);if(!row.seq)row.seq=++seq;marks.push(row);return row.seq;}};
+ try{
+  const item={awemeId:'review-local',playUrl:'file:///review.mp4',variants:[],description:'offline',authorName:'fixture',durationMs:1000} as any;
+  const client=new DouyinClient({secureStorage:{get:async()=> 'sessionid=fixture',set:async()=>{mutations.push('write');},remove:async()=>{mutations.push('remove');}},
+   signer:{sign:()=>''},transport:{request:async()=>{requests++;throw Error('offline');}}});
+  client.stopMediaTraffic();
+  const [active,setActive]=createSignal(true);let view:any;
+  createRoot(stop=>{stops.push(stop);view=ImmersiveEntry({route:{name:'entry'},client,width:233,height:233,get active(){return active();},restoreStock:async()=>[item],
+   onPreloadWindow:()=>{prewarms++;},onPreloadStop(){},onPlay:(request:any)=>plays.push(request),onNavigate(){}} as any);});
+  await cachedReady({text:()=>nodes(view).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n')});
+  expect(prewarms).toBeGreaterThan(0);expect(plays).toHaveLength(0);expect(marks.some(m=>m.code==='first_card'||m.code==='incoming_first_frame')).toBe(false);
+  expect(marks.some(m=>m.code==='startup_stage'&&m.startup_stage==='play_tap')).toBe(false);
+  nodes(view).find(n=>n.props.accessibilityLabel==='向上进入视频流')!.props.onPress();
+  expect(plays).toHaveLength(1);expect(marks.filter(m=>m.code==='startup_stage'&&m.startup_stage==='play_tap')).toHaveLength(1);
+  expect(marks.some(m=>m.code==='first_card'||m.code==='incoming_first_frame')).toBe(false);
+  plays[0].onFailure({code:'REQUEST_FAILED'});
+  retryTimers.find(timer=>timer.ms===1000&&!timer.cancelled)!.fire();await settle();
+  expect(plays).toHaveLength(2);expect(marks.filter(m=>m.code==='startup_stage'&&m.startup_stage==='play_tap')).toHaveLength(1);
+  setActive(false);await settle();setActive(true);await cachedReady({text:()=>''});
+  expect(plays).toHaveLength(2);expect(client.authState()).toBe('logged-in');expect(mutations).toEqual([]);
+  expect(await client.fetchFeedPage({count:1})).toMatchObject({ok:false,code:'TEMPORARILY_UNAVAILABLE'});expect(requests).toBe(0);
+ }finally{(globalThis as any).pod=before;}
+});
