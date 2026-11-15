@@ -382,7 +382,7 @@ test('SWIPEFEED DYBENCH action correlation reaches the native promotion without 
 });
 
 
-test('PREWARM production component resolves both neighbours, strips background preference, and promotes five forward/backward swipes without a prepare at settle',async()=>{
+test('PREWARM production component resolves both neighbours, propagates active background preference, and promotes five forward/backward swipes without a prepare at settle',async()=>{
  sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
  const realNow=Date.now;let time=1000;Date.now=()=>time;
  try{
@@ -395,7 +395,7 @@ test('PREWARM production component resolves both neighbours, strips background p
   });await flush();await flush();
   expect(requests).toContain('9');expect(requests).toContain('11');
   expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(3);
-  expect(sessionCalls.filter(c=>c.method==='prepare').every(c=>c.backgroundPlayback===undefined)).toBe(true);
+  expect(sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm)?.backgroundPlayback).toBe(true);
   const gesture=gestures[0];
   for(const sign of [1,1,1,1,1,-1,-1,-1,-1,-1]){
    const from=selected,before=sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm).length;
@@ -860,4 +860,13 @@ for(const useSessions of [false,true])test(`RVDYZOOM settled scaled playback nev
    expect(transforms).toBe(before);expect(prepares.length+sessionCalls.filter(c=>c.method==='prepare').length).toBe(prepared);
   }
  } finally {video.setTransform=saved;sessionPort.setTransform=sessionSaved;}
+});
+
+for(const allowed of [false,true])test(`R09 sessions honor background permission ${allowed} and release only disallowed active playback`,async()=>{
+ sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();initial='available';
+ mountRetained('douyin',allowed);await flush();await flush();
+ const active=sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm);expect(active?.backgroundPlayback).toBe(allowed);
+ const releases=sessionReleases;
+ lifecycleState='background';lifecycleListeners.forEach(fn=>fn('background'));await flush();
+ if(allowed)expect(sessionReleases).toBe(releases);else expect(sessionReleases).toBeGreaterThan(releases);
 });

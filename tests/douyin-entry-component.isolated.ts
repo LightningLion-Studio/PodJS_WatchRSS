@@ -496,7 +496,7 @@ test('ISSUEA1 restored Douyin parent reconstructs data and permits refresh and e
 });
 
 
-test('DYENTRY review: cover and prewarm emit no video endpoint and preserve credentials and stopped traffic',async()=>{
+test('DYENTRY review: cover and prewarm emit no video endpoint and preserve credentials and stopped background traffic',async()=>{
  const before=(globalThis as any).pod,marks:any[]=[],mutations:string[]=[],plays:any[]=[];let seq=5000,prewarms=0,requests=0;
  (globalThis as any).pod={benchmark:(raw:string)=>{const row=JSON.parse(raw);if(!row.seq)row.seq=++seq;marks.push(row);return row.seq;}};
  try{
@@ -518,6 +518,6 @@ test('DYENTRY review: cover and prewarm emit no video endpoint and preserve cred
   expect(plays).toHaveLength(2);expect(marks.filter(m=>m.code==='startup_stage'&&m.startup_stage==='play_tap')).toHaveLength(1);
   setActive(false);await settle();setActive(true);await cachedReady({text:()=>''});
   expect(plays).toHaveLength(2);expect(client.authState()).toBe('logged-in');expect(mutations).toEqual([]);
-  expect(await client.fetchFeedPage({count:1})).toMatchObject({ok:false,code:'TEMPORARILY_UNAVAILABLE'});expect(requests).toBe(0);
+  expect(requests).toBe(0);expect(await client.fetchFeedPage({count:1,background:{isCurrent:()=>true,onCancel:()=>()=>{}}})).toMatchObject({ok:false,code:'TEMPORARILY_UNAVAILABLE'});expect(requests).toBe(0);
  }finally{(globalThis as any).pod=before;}
 });

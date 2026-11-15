@@ -13,11 +13,6 @@ test('stored render metadata excludes credentials, remote covers and expired sou
  const item={awemeId:'42',description:'title',authorName:'author',authorAvatar:'https://avatar.invalid',coverUrl:'https://cover.invalid',playUrl:'https://media.invalid?expires=1000000000',durationMs:5000,variants:[]} as unknown as DouyinItem;
  const metadata=storedDouyinMetadata(item);expect(JSON.stringify(metadata)).not.toContain('https:');expect(restoredDouyinItem(metadata,'file:///movie.mp4')).toMatchObject({awemeId:'42',playUrl:'file:///movie.mp4',description:'title'});expect(restoredDouyinItem(metadata,item.playUrl)).toBeUndefined();
 });
-test('strict pre-store traffic policy stops after one 403 and prevents detail request',async()=>{
- let requests=0;const client=()=>new DouyinClient({secureStorage:{get:async()=> 'fixture',set:async()=>{},remove:async()=>{throw Error('credentials must survive');}},signer:{sign:()=> 'fixture'},transport:{request:async()=>{requests++;return {status:403,headers:{},body:new Uint8Array()};}}});
- const feed=client();feed.usePrestoreTrafficPolicy();expect((await feed.fetchFeedPage()).ok).toBe(false);expect((await feed.fetchFeedPage()).ok).toBe(false);expect(requests).toBe(1);
- const detail=client();detail.usePrestoreTrafficPolicy();expect((await detail.fetchDetail('42')).ok).toBe(false);expect((await detail.fetchFeedPage()).ok).toBe(false);expect(requests).toBe(1);
-});
 
 test('complete storage selects the smallest acceptable rendition with its audio companion',()=>{
  const v=(format:'mp4'|'dash',width:number,bitrate:number)=>({format,playUrl:`https://media.invalid/${format}/${width}`,audioUrl:format==='dash'?'https://media.invalid/audio':undefined,width,height:width,bitrate,codec:'h264' as const});

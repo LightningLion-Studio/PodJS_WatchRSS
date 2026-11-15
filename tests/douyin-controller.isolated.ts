@@ -533,3 +533,15 @@ for(const leave of [false,true])test(`DYWAIT-B late cookie failure belongs only 
  if(leave){expect(f.stack().at(-1)?.douyinRoute?.name).toBe('history');expect(entry.playback?.preparationError).toBeUndefined();}
  else {expect(f.stack().at(-1)).toBe(entry);expect(f.source().preparationError).toMatchObject({code:'network_error'});}
 });
+
+for(const late of [false,true])test(`R08 cold selected target exposes a terminal failure; stale=${late}`,async()=>{
+ const f=fixture(),items=[item('one'),item('two'),item('three')];
+ f.controller.douyinPlay({item:items[0],playback:items[0],playlist:items,hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:'one'});
+ let reject!:(error:any)=>void;proxyOverride=async i=>i.awemeId==='two'?new Promise((_resolve,fail)=>reject=fail):i.playUrl;
+ const entry=f.stack().at(-1)!;f.controller.selectDouyinTarget(entry,'next',1);
+ for(let n=0;!reject&&n<100;n++)await Promise.resolve();expect(reject).toBeDefined();expect(f.source()).toMatchObject({awemeId:'two',previewOnly:true});
+ if(late){f.controller.selectDouyinTarget(entry,'next',1);for(let n=0;n<100;n++)await Promise.resolve();}
+ reject(Object.assign(Error('offline fixture'),{code:'network_error'}));for(let n=0;n<100;n++)await Promise.resolve();
+ if(late){expect(f.source().awemeId).toBe('three');expect(f.source().preparationError).toBeUndefined();}
+ else {expect(f.source()).toMatchObject({awemeId:'two',previewOnly:true,preparationError:{code:'network_error'}});expect(entry.playback).toBe(f.source());}
+});

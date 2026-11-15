@@ -627,7 +627,7 @@ export function createMediaRouteController(
     // Publish metadata synchronously. A cached decoded frame can be shown;
     // otherwise the selected page is black while its URL is registered.
     let selected:PlaybackSource={...old,awemeId:item.awemeId,...douyinDetail(item),posterUrl:item.coverUrl,
-      previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,
+      previewFrame:undefined,url:undefined,videoUrl:undefined,previewOnly:true,preparationError:undefined,
       ...douyinDecoderProfile(item),webUrl:`https://www.douyin.com/video/${item.awemeId}`};
     entry.playback=selected;dependencies.setError('');dependencies.setPlayingSource(selected);
     const current=()=>dependencies.current()===entry&&entry.playback===selected&&queue.snapshot().item?.awemeId===item.awemeId;
@@ -641,7 +641,7 @@ export function createMediaRouteController(
       const url=local??await douyinPlaybackUrl(item,headers,direction==='next');if(!current())return;
       entry.playback={...selected,headers,url,previewOnly:false};dependencies.setPlayingSource(entry.playback);
       void queue.persist().catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
-    })().catch(error=>{if(current())dependencies.setError(String(error));});
+    })().catch(error=>{if(!current())return;selected={...selected,preparationError:error};entry.playback=selected;dependencies.setPlayingSource(selected);dependencies.setError(String(error));});
   };
 
   const promoteDouyinAdjacent = async (

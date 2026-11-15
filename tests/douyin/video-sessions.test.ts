@@ -163,3 +163,13 @@ test('RELOAD release creates a distinct native session identity even when the UR
  const next=port.calls.filter(c=>c.method==='prepare').at(-1)!.sessionId!;
  expect(next).not.toBe(previous);expect(pool.ownsActiveSession(previous)).toBe(false);expect(pool.ownsActiveSession(next)).toBe(true);
 });
+
+test('R09 active prepare, retained promotion and later play carry the background preference',async()=>{
+ const port=fakePort(),pool=new DouyinVideoSessionPool(port as any),prepared:any[]=[],promoted:any[]=[],played:any[]=[];
+ const prepare=port.prepare.bind(port);port.prepare=(options:any)=>{prepared.push(options);return prepare(options);};
+ (port as any).promote=async(id:string,options:any)=>{promoted.push(options);return sessionState(id);};(port as any).play=async(id:string,options:any)=>{played.push(options);return sessionState(id);};
+ await pool.prepare(source('1'),{...source('1').source,bounds,backgroundPlayback:true,autoplay:false}).result;
+ await pool.prewarm(source('2'),{...source('2').source,bounds,backgroundPlayback:true});await pool.transition(.5,'up',bounds);
+ await pool.promote('up',bounds,false);await pool.play();
+ expect(prepared[0].backgroundPlayback).toBe(true);expect(prepared[1].backgroundPlayback).toBeUndefined();expect(promoted[0]).toMatchObject({backgroundPlayback:true,autoplay:false});expect(played[0]).toEqual({backgroundPlayback:true});
+});

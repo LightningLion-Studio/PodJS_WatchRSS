@@ -30,12 +30,12 @@ test('route exit empties proxy window and late resolution cannot restart prefetc
  expect(windows).toHaveLength(stopped);expect(registrations).toHaveLength(0);
 });
 
-test('403 stops prefetch traffic without bootstrap refresh or retries',async()=>{
+test('403 cools prefetch without poisoning explicit playback or retrying',async()=>{
  windows=[];registrations=[];let forced=0,stops=0;
  const client={stopMediaTraffic:()=>{stops++;},buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string,options?:{forceRefresh?:boolean})=>{if(options?.forceRefresh)forced++;return {ok:true,data:items.find(i=>i.awemeId===id)};}};
  const host=createHostDouyinPreload(client as any),owner={};host.allowBluetooth(true,owner);host.start(owner,items as any,'a','active');await flush();
- const old=windows.at(-1).items[1];resultListener({...old,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(forced).toBe(0);expect(stops).toBe(1);expect(windows.at(-1).items).toEqual([]);
- const before=registrations.length;host.start(owner,items as any,'a','active');await flush();expect(registrations.length).toBe(before);host.stop(owner);
+ const old=windows.at(-1).items[1];resultListener({...old,result:'failure',httpStatus:403,category:'http_403'});await flush();expect(forced).toBe(0);expect(stops).toBe(0);expect(windows.at(-1).items).toEqual([]);
+ const before=registrations.length;host.start(owner,items as any,'a','active');await flush();expect(registrations.length).toBe(before);expect(await host.playback(items[0] as any,{})).toContain('podjs-media-cache:');host.stop(owner);
 });
 
 test('backward entries fetch bounded prefixes without detail resolution',async()=>{

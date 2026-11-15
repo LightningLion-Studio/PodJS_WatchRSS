@@ -1,5 +1,5 @@
 import {afterEach,expect,test} from 'bun:test';
-import {DouyinClient} from '../../src/douyin/client.ts';
+import {DouyinClient,DOUYIN_PUBLIC_MEDIA_HEADERS} from '../../src/douyin/client.ts';
 import {createDouyinLoginProbe,DOUYIN_LOGIN_PROBE_PATH} from '../../src/douyin/login-probe.ts';
 import {DOUYIN_AUTH403_COOLDOWN_KEY} from '../../src/douyin/auth403.ts';
 import {douyinFeedSeenKey} from '../../src/douyin/recommendations.ts';
@@ -61,8 +61,8 @@ test('cancelling while config/signature awaits suppresses the notice request',as
   const operation=probe({cookie:'synthetic',timeoutMs:5000}) as {result:Promise<unknown>;cancel():void};await Promise.resolve();operation.cancel();gate.resolve(stage==='config'?{}:'sig');expect(await operation.result).toBe('unknown');expect(calls).toBe(0);
  }
 });
-test('request config refreshes on the next API call and is shared by headers, params and signing',async()=>{
- let ua='Chrome/155.0.0.0',version='170400';const f=fixture({requestConfig:()=>({userAgent:ua,versionCode:version,browserVersion:'155.0.0.0',fp:'synthetic-fp'})});f.replies.push(page(['1']),page(['2']));await f.client.fetchFeedPage();ua='rollback-UA';version='290100';await f.client.fetchFeedPage({cursor:'1'});expect(f.requests.map(r=>r.headers['User-Agent'])).toEqual(['Chrome/155.0.0.0','rollback-UA']);expect(f.signed.map(p=>p.version_code)).toEqual(['170400','290100']);expect(await f.client.buildPlaybackHeaders()).toMatchObject({'User-Agent':'rollback-UA'});expect(f.signed[1]).toMatchObject({cursor:'1',max_cursor:'1',verifyFp:'synthetic-fp',fp:'synthetic-fp'});
+test('request config refreshes on the next API call and is shared by API headers, params and signing while media stays public',async()=>{
+ let ua='Chrome/155.0.0.0',version='170400';const f=fixture({requestConfig:()=>({userAgent:ua,versionCode:version,browserVersion:'155.0.0.0',fp:'synthetic-fp'})});f.replies.push(page(['1']),page(['2']));await f.client.fetchFeedPage();ua='rollback-UA';version='290100';await f.client.fetchFeedPage({cursor:'1'});expect(f.requests.map(r=>r.headers['User-Agent'])).toEqual(['Chrome/155.0.0.0','rollback-UA']);expect(f.signed.map(p=>p.version_code)).toEqual(['170400','290100']);expect(await f.client.buildPlaybackHeaders()).toEqual({...DOUYIN_PUBLIC_MEDIA_HEADERS});expect(f.signed[1]).toMatchObject({cursor:'1',max_cursor:'1',verifyFp:'synthetic-fp',fp:'synthetic-fp'});
 });
 test('only first-frame history commits enter the 512 seen IDs across pages and restart',async()=>{
  const f=fixture();f.replies.push(page(['1','1','2']),page(['2','3'],2),page(['1','3'],3));

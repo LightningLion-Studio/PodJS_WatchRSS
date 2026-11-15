@@ -24,6 +24,7 @@ import type { DouyinClientOptions, DouyinErrorCode, DouyinContent, DouyinFeedPag
 export {DOUYIN_USER_AGENT,DOUYIN_REFERER};
 export const DOUYIN_PUBLIC_MEDIA_HEADERS:Readonly<Record<string,string>>=Object.freeze({"User-Agent":DOUYIN_USER_AGENT,Referer:DOUYIN_REFERER});
 const COOKIE_KEY="douyin.cookie";
+const STOCK_AUTHORIZATION_KEY="douyin.stock.authorization.v1";
 export const DOUYIN_DETAIL_WINDOW_MS=10_000;
 export const DOUYIN_DETAIL_MAX_REQUESTS=4;
 const FEED_CACHE_LIMIT=60;
@@ -95,6 +96,7 @@ export class DouyinClient {
   private readonly feedRequests=new Map<string,Promise<DouyinResult<DouyinFeedPage>>>();
   private detailTimes:number[]=[];
   private mediaTrafficStopped=false;private strictMediaTraffic=false;
+  /** Background policy only; foreground operations retain their own API policy. */
   usePrestoreTrafficPolicy(){this.strictMediaTraffic=true;}
   stopMediaTraffic(){this.mediaTrafficStopped=true;}
   private readonly prefetchFailures=new Map<string,{result:Extract<DouyinResult<DouyinItem>,{ok:false}>;until:number}>();
@@ -126,26 +128,41 @@ export class DouyinClient {
   async applyCookie(raw:string,commitCookie:(value:string)=>Promise<void>=value=>this.options.secureStorage.set(COOKIE_KEY,value)){
     const value=raw.trim();if(!value)return fail<void>('NOT_LOGGED_IN','缺少有效 Cookie');
     const benchAttempt=douyinBench.attempt(this);
-    const generation=++this.authGeneration;this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
-    const result=this.enqueueCookie(async()=>{await commitCookie(value);await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();if(generation===this.authGeneration){this.cookieApplication=undefined;this.setAuth('logged-in');if(benchAttempt)douyinBench.persisted(this,benchAttempt);}return {ok:true,data:undefined} as DouyinResult<void>;});
+    const generation=++this.authGeneration;this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();this.mediaTrafficStopped=false;
+    const result=this.enqueueCookie(async()=>{await this.rotateStockAuthorization();await commitCookie(value);await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();if(generation===this.authGeneration){this.cookieApplication=undefined;this.setAuth('logged-in');if(benchAttempt)douyinBench.persisted(this,benchAttempt);}return {ok:true,data:undefined} as DouyinResult<void>;});
     this.cookieApplication={generation,result};this.setAuth('unknown');
     try{return await result;}finally{if(this.cookieApplication?.result===result)this.cookieApplication=undefined;}
   }
   async clearCookie(commitCookie?:()=>Promise<void>,cleanup?:()=>Promise<void>){
     const observation=douyinBench.authClear(this);
     const commit=commitCookie??(()=>this.options.secureStorage.remove(COOKIE_KEY,observation));
-    this.authGeneration++;this.setAuth('logged-out');this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
+    this.authGeneration++;this.mediaTrafficStopped=false;this.setAuth('logged-out');this.policy=undefined;this.forbiddenRequests.clear();this.clearFeedCache();
     // Submit browser cleanup now, before a new login can submit browser authorization.
     // Keep its completion in the write chain so it cannot erase a newly applied Cookie.
     const extra=Promise.resolve().then(()=>cleanup?.()).then(()=>({status:'fulfilled',value:undefined} as const),reason=>({status:'rejected',reason} as const));
     await this.enqueueCookie(async()=>{
-      const results=await Promise.allSettled([(async()=>{await commit();await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();})()]);
+      const results=await Promise.allSettled([(async()=>{await this.rotateStockAuthorization();await commit();await this.options.secureStorage.remove(DOUYIN_AUTH403_COOLDOWN_KEY);await this.feedStore.clear();})()]);
       results.push(await extra);
       const failure=results.find(r=>r.status==='rejected');if(failure?.status==='rejected')throw failure.reason;
     });
   }
   logout(){return this.clearCookie(undefined,this.options.onLogout);}
-  async buildPlaybackHeaders():Promise<Record<string,string>>{const cookie=await this.readCookie(),profile=douyinRequestProfile(await resolveDouyinRequestConfig(this.options.requestConfig));return {...profile.headers,...(cookie?{Cookie:cookie}:{})};}
+  private async rotateStockAuthorization(){
+    const previous=Number(await this.options.secureStorage.get(STOCK_AUTHORIZATION_KEY));
+    await this.options.secureStorage.set(STOCK_AUTHORIZATION_KEY,String(Number.isSafeInteger(previous)&&previous>=0?previous+1:1));
+  }
+  /** Durable local generation; legacy inventory without this binding is invisible. */
+  async stockAuthorizationScope():Promise<string|undefined>{
+    await this.cookieWrites.catch(()=>{});const generation=this.authGeneration;
+    if(!await this.isLoggedIn())return undefined;
+    return this.enqueueCookie(async()=>{
+      if(generation!==this.authGeneration)return undefined;
+      let scope=await this.options.secureStorage.get(STOCK_AUTHORIZATION_KEY);
+      if(!scope){scope='1';await this.options.secureStorage.set(STOCK_AUTHORIZATION_KEY,scope);}
+      return generation===this.authGeneration?scope:undefined;
+    });
+  }
+  async buildPlaybackHeaders():Promise<Record<string,string>>{return {...DOUYIN_PUBLIC_MEDIA_HEADERS};}
   private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime):Promise<DouyinResult<string>> {
     const requestStarted=Date.now(),elapsed=(start:number)=>Math.min(600000,Math.max(0,Date.now()-start));
     await this.cookieWrites.catch(()=>{});
@@ -154,7 +171,7 @@ export class DouyinClient {
     if(!cookie)return fail('NOT_LOGGED_IN','未登录');
     const profile=douyinRequestProfile(config??await resolveDouyinRequestConfig(this.options.requestConfig));params={...profile.params,...params};
     const api:DouyinApiCategory=path==='/aweme/v2/web/module/feed/'?'feed':path==='/aweme/v1/web/aweme/detail/'?'detail':'other';
-    if(this.mediaTrafficStopped||this.strictMediaTraffic&&api==='detail'){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
+    if(background&&(this.mediaTrafficStopped||this.strictMediaTraffic&&api==='detail'))return fail('TEMPORARILY_UNAVAILABLE','后台媒体请求已停止');
     const policy=this.recoveryPolicy(cookie,generation);
     if(policy){const limited=await policy.cooldown(api);if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));if(limited?.kind==='limited'){douyinRequestDiagnostic({category:api==='detail'?'detail':'feed',http_status:0,douyin_status_code:-1,challenge:false,signing_ok:false,cookie_present:!!cookie,retry_after_ms:limited.retryAfterMs,error_code:'cooldown'});return this.limited(limited);}}
     const policyVersion=policy.snapshotVersion(api);
@@ -215,7 +232,7 @@ export class DouyinClient {
       } finally {douyinRequestDiagnostic(observed);}
     };
     const first=await attempt();if(!('forbidden' in first))return first;
-    if(this.strictMediaTraffic){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
+    if(background&&this.strictMediaTraffic){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
     if(background)return fail('REQUEST_FAILED',formatDouyinError('REQUEST_FAILED'));
     if(!this.recoveryEnabled())return this.authDecision(policy,cookie,generation,api);
     const key=JSON.stringify([generation,method,path,params]),existing=this.forbiddenRequests.get(key);if(existing)return existing;
@@ -248,7 +265,7 @@ export class DouyinClient {
     this.feedCache.delete(awemeId);this.feedCache.set(awemeId,cached);return cached.item;
   }
   async fetchFeedPage(input:{cursor?:string|null;count?:number;deferPersistence?:boolean;background?:import('../cloud/types.ts').RequestLifetime}={}):Promise<DouyinResult<DouyinFeedPage>>{
-    if(this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');
+    if(input.background&&this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','后台媒体请求已停止');
     if(input.background)return this.fetchFeedPageInner(input);
     const key=JSON.stringify([this.authGeneration,input.cursor?.trim()||null,input.count??10]);
     let pending=this.feedRequests.get(key);if(!pending){pending=this.fetchFeedPageInner(input);this.feedRequests.set(key,pending);}
@@ -312,7 +329,8 @@ export class DouyinClient {
     try{return await work;}finally{if(this.detailRequests.get(key)===work)this.detailRequests.delete(key);if(this.detailCacheTokens.get(id)===cacheToken)this.detailCacheTokens.delete(id);}
   }
   private async resolvePlaybackInner(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
-    if(this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');
+    if(options.prefetch&&this.mediaTrafficStopped)return fail('TEMPORARILY_UNAVAILABLE','后台媒体请求已停止');
+    if(options.prefetch&&this.strictMediaTraffic&&options.allowDetail!==false)return fail('TEMPORARILY_UNAVAILABLE','后台不得补取详情');
     const id=awemeId.trim();
     const cached=this.freshFeedItem(id);if(cached&&!options.forceRefresh&&!options.freshRequest)return {ok:true,data:cached,source:'feed-cache'};
     if(options.allowDetail===false){
@@ -323,6 +341,7 @@ export class DouyinClient {
       if(!item?.playUrl.trim())return fail('UNSUPPORTED','推荐内容缺少视频播放地址');
       // A known expired/rejected CDN URL is refreshed only through feed. Detail
       // remains an explicit caller choice with its own endpoint cooldown.
+      if(options.prefetch)return fail('TEMPORARILY_UNAVAILABLE','后台播放地址已过期');
       const page=await this.fetchFeedPage({count:12});if(!page.ok)return page;
       const refreshed=page.data.items.find(value=>value.awemeId===id&&value.playUrl.trim());
       return refreshed?{ok:true,data:refreshed,source:'feed-cache'}:{...fail<DouyinItem>('TEMPORARILY_UNAVAILABLE','推荐播放地址暂不可用'),retryAfterMs:1500};
@@ -332,7 +351,7 @@ export class DouyinClient {
     return !r.ok?r:r.data.kind==='video'?{ok:true,data:r.data.item,source:r.source}:fail('UNSUPPORTED','此内容没有视频播放流');
   }
   async resolvePlayback(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
-    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true,options.allowDetail!==false,...(options.freshRequest?[++this.reloadSequence]:[])]);const cached=!options.forceRefresh&&!options.freshRequest?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
+    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.prefetch===true,options.forceRefresh===true,options.allowDetail!==false,...(options.freshRequest?[++this.reloadSequence]:[])]);const cached=!options.forceRefresh&&!options.freshRequest?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
     if(result.ok){const item=await decodableDouyinItem(applyPreferredDouyinPlayback(result.data));if(!item.playUrl.trim()){const unavailable=fail<DouyinItem>('UNSUPPORTED','没有可用的视频播放流');if(options.prefetch)this.cachePrefetchFailure(id,unavailable);return unavailable;}const v=item.variants?.find(v=>v.playUrl===item.playUrl);const trace=new VideoPlaybackTrace('douyin',start);trace.event('api',{apiMs:Date.now()-start,cacheHit:result.source==='feed-cache'?1:0});trace.event('candidate',{width:v?.width,height:v?.height,bitrate:v?.bitrate});for(const url of [item.playUrl,...(item.variants?.find(v=>v.playUrl===item.playUrl)?.playUrls??[]).slice(0,8)])registerVideoResolution(url,trace);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);return {...result,data:item};}
     if(options.prefetch)this.cachePrefetchFailure(id,result);
     appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=${result.code}`);return result;
