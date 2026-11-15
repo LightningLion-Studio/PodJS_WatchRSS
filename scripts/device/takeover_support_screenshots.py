@@ -22,7 +22,7 @@ def main():
     parser.add_argument('--server-port', type=int, required=True)
     parser.add_argument('--apk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--screens', default='blocked-466,paused-466,preview-466,consent-466,success-466')
+    parser.add_argument('--screens', default='blocked-466,paused-466,preview-466,consent-466,success-466,unknown-466')
     args = parser.parse_args()
     if args.serial != 'emulator-5586' or args.server_port != 5056:
         raise SystemExit('only this task-owned emulator-5586 / isolated server 5056 is allowed')
@@ -91,6 +91,10 @@ def main():
                 buttons.append({'label':text,'bounds':bounds,'fourCornersInside':inside,'enabled':nodes[0].attrib.get('enabled')})
             if buttons[0]['bounds'][3] >= buttons[1]['bounds'][1]:
                 raise AssertionError('buttons are not vertically stacked')
+        if screen == 'unknown':
+            texts = [n.attrib.get('text', '') for n in ET.fromstring(xml).iter('node')]
+            if '正在检查数据' not in texts or any(label in ' '.join(texts) for label in ('迁移未完成', 'unknown_user_files', '上传日志', '重试迁移', '无法识别')):
+                raise AssertionError('legacy unknown file state leaked a failure notice')
         results[:]=[row for row in results if row['name'] != name]
         results.append({'apkSha256':apk_sha,'name':name,'screen':screen,'requestedSize':size,'width':width,'height':height,'viewportMatched':width==size and height==size,'buttons':buttons,'receiver':'local fake; INTERNET permission absent'})
         previous.write_text(json.dumps(results,ensure_ascii=False,indent=2)+'\n')
@@ -101,6 +105,7 @@ def main():
         capture('preview-466','preview')
         capture('consent-466','preview',scroll=True)
         capture('success-466','success')
+        capture('unknown-466','unknown')
         capture('blocked-192','blocked',size=192)
         (args.out/'screenshots.json').write_text(json.dumps(results,ensure_ascii=False,indent=2)+'\n')
         (args.out/'fixture-logcat.txt').write_text(adb('logcat','-d','-s','TakeoverSupportFixture:I','AndroidRuntime:E','*:S'))

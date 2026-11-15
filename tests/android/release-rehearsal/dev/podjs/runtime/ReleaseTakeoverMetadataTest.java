@@ -88,9 +88,11 @@ public final class ReleaseTakeoverMetadataTest {
             "files/watch-cloud-restore/"+hash+"/"+head+".json",
             "files/watch-cloud-restore/"+hash+"/"+head+".json.tmp"};
         for(String path:knownNew)write(new File(sandbox,path),new byte[]{1,2,3});
+        String[] unknown={"files/imports/PRIVATE_TITLE.txt","files/unknown.tmp","shared_prefs/PRIVATE_VENDOR.xml","files/datastore/PRIVATE.preferences_pb"};
+        for(String path:unknown)write(new File(sandbox,path),"malformed opaque unknown payload".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         // Defaults to the exact 2.0.1 files-5/stores-4 blocked source. Run older versions separately.
         String legacy=InstrumentationRegistry.getArguments().getString("legacyFilesVersion","5");
-        assertTrue(Arrays.asList("3","4","5").contains(legacy));
+        assertTrue(Arrays.asList("3","4","5","6").contains(legacy));
         // Wait longer than the old initializer delay: no profile writer should have started.
         SystemClock.sleep(7000);assertArrayEquals(new byte[8],Files.readAllBytes(marker.toPath()));
         Properties pre=TakeoverDigest.snapshot(sandbox,Collections.emptyMap());
@@ -115,11 +117,13 @@ public final class ReleaseTakeoverMetadataTest {
             assertArrayEquals(body,Files.readAllBytes(new File(PodTakeover.filesRoot(context),"article_content/fixture.txt").toPath()));
             JSONObject files=PodStoreConverter.json(new File(control,"generations/"+generation+"/files-snapshot.json")).getJSONObject("entries");
             JSONObject report=PodStoreConverter.json(new File(control,"generations/"+generation+"/files-report.json"));
-            assertEquals("watchrss-files-6",report.getString("version"));
+            assertEquals("watchrss-files-7",report.getString("version"));
             for(String path:knownNew)assertFalse(new File(PodTakeover.filesRoot(context),path.substring(6)).exists());
             assertEquals(1,report.getJSONObject("classes").getInt("native-transfer-checkpoint"));
             assertEquals(2,report.getJSONObject("classes").getInt("private-transfer-state"));
-            assertEquals(9,report.getInt("unrecognizedCacheFiles"));assertEquals(0,report.getInt("unknownFiles"));
+            assertEquals(9,report.getInt("unrecognizedCacheFiles"));assertEquals(4,report.getInt("unknownFiles"));
+            assertEquals(0,report.getJSONArray("blockers").length());assertFalse(report.toString().contains("PRIVATE"));
+            for(String path:unknown)assertFalse(new File(control,"generations/"+generation+"/podjs/"+path).exists());
             assertEquals(1,report.getJSONObject("classes").getInt("database-lock"));
             assertFalse(new File(PodTakeover.filesRoot(context),"cache").exists());
             assertFalse(new File(PodTakeover.filesRoot(context),"activity_choser_model_history.xml").exists());
@@ -135,7 +139,7 @@ public final class ReleaseTakeoverMetadataTest {
             assertTrue("actual ProfileInstaller successful write after ACTIVE",installed);
             assertArrayEquals(new byte[8],Files.readAllBytes(new File(sandbox,NativeBackup.BACKUP+"/"+generation+"/data/files/profileinstaller_profileWrittenFor_lastUpdateTime.dat").toPath()));
             assertEquals(after,TakeoverDigest.activeLines(sandbox,generation));
-            android.util.Log.i("T17Rehearsal","release=true migratedRoom=true legacyBlockedCandidates=3 converter=files-6 unknownCache=9 retained=true phase=ACTIVE nativeRootsEqual=true platformImported=false profileInstallerWrite=true");
+            android.util.Log.i("T17Rehearsal","release=true migratedRoom=true legacyBlockedCandidates=3 converter=files-7 unknownCache=9 unknownFiles=4 silentUnknown=true retained=true phase=ACTIVE nativeRootsEqual=true platformImported=false profileInstallerWrite=true");
         }finally{registry.runOnMainSync(activity::finish);}
     }
 }

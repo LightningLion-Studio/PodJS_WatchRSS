@@ -38,30 +38,32 @@ It waits beyond the old initializer delay, seeds three retained synthetic candid
 
 Capture logs for this target PID only, including `T17RehearsalPre`, `T17Rehearsal`, `PodTakeoverDigest`, `PodTakeoverFiles`, and `ProfileInstaller`. Uninstall only the rehearsal app/test, verify cleanup, and restore DEVICE_OWNER to released. This does not authorize formal/native/.podjs package operations.
 
-## T-TAKEOVER-UNKNOWN-FILES：2.0.1 → files-6
+## T-TAKEOVER-UNKNOWN-FILES：2.0.1 → stores-5/files-7
 
-本节替代上文的 files-4 目标。应用基线 `v2.0.1-1 / 782485f4` 固定框架 `d99b4a0`，
+本节按用户 2026-11-15 裁决执行，替代上文及旧 files-6 的阻断策略。应用基线 `v2.0.1-1 / 782485f4` 固定框架 `d99b4a0`，
 实际 converter 为 stores-4/files-5。不得根据共享框架目录或历史文档猜测发布版本。
 本卡执行主机测试与独立模拟器截图，不运行上文真机命令，不访问真实沙箱。
 
-路径清单位于框架 `tests/fixtures/watchrss-path-candidates.tsv`（75 条）。
-`UnknownFilesTest` 逐条核对分类/委派，检查未知路径阻断、业务资产导入、原文件摘要不变。
-既有 `FileTakeoverTest` 覆盖 files-3/4/5 未发布候选重分类、旧候选保留、receipt/pointer/阶段反例、
-真正未知仍阻断且同版不反复创建代际。已发布的 ACTIVE 代际保持原指针，不重新迁移。
+路径清单位于框架 `tests/fixtures/watchrss-path-candidates.tsv`（77 条）。
+`UnknownFilesTest` 逐条核对分类/委派，检查未知普通文件静默不导入、业务资产导入、原文件摘要不变。
+既有 `FileTakeoverTest` 覆盖 files-3/4/5/6 未发布候选重分类、旧候选保留、receipt/pointer/阶段反例、
+升级首启自动续迁，无需点击重试。未知偏好文件跳过解析，不导入 KV 或 secrets。已发布的 ACTIVE 代际保持原指针，不重新迁移。
 
 `ReleaseTakeoverMetadataTest` 默认播种 stores-4/files-5 的 BLOCKED journal，
 增加 Douyin stock 的 inventory/64hex.mp4/临时文件、手机传输分块与临时文件、云恢复派生回执与临时文件。
-要求 files-6 ACTIVE，原生四根封存摘要相等，正文/SQLite 可读，缓存/分块/回执不导入业务目录。
+要求 stores-5/files-7 ACTIVE，原生四根封存摘要相等，正文/SQLite 可读，缓存/分块/回执不导入业务目录。
 手机分块保持 native-transfer-checkpoint，不制造正文或 ACK；恢复回执只描述已合并状态，
 业务资料仍从 Room/stores/assets 导入。原生未完成传输和恢复进度不在 PodJS 中续跑。
-旧版 `-e legacyFilesVersion 3`、`4` 分别使用新的干净隔离合成安装验证，默认 `5` 对应实发基线。
+旧版 `-e legacyFilesVersion 3`、`4` 分别使用新的干净隔离合成安装验证，`6` 验证前次候选，默认 `5` 对应实发基线。
 未在模拟器执行该 release instrumentation 时，必须写「未验证」，不得称为设备验收。
 
 真正未知用独立合成 fixture：`files/imports/book.txt`、`files/unknown.tmp`、
 `files/douyin_unwatched_stock/notes.txt`、错误 hash 深度的恢复回执、Firebase/厂商 SDK 文件。
-要求 BLOCKED、没有 active pointer、原件不变。不得删除未知文件来凑 ACTIVE。
-恢复页必须提供「上传日志」，显示总数和前20条脱敏路径。
-所有失败页显示上下排列的「重试迁移」「上传日志」。同版 unknown 的重试按钮禁用，并说明原因；可恢复 PAUSED 保留重试。
+要求 ACTIVE、未知路径不在新业务目录、原件与原生备份逐字节不变。不得删除源文件。
+files-report/日志只记录未知数量与前20条脱敏路径类别；不得向用户提示未知文件。
+旧 BLOCKED/unknown_user_files 首次启动自动重新扫描，不闪现旧失败页。
+另测旧未知 store 的阻断、混合旧 blocker、断电后续跑、备份封存与实际回滚。
+已知业务损坏仍显示真实失败原因；所有实际失败页上下排列「重试迁移」「上传日志」。
 
 原生诊断不依赖 JS admission。应用资源 `android/res/raw/pod_takeover_support.json` 固定既有日志服务
 及公开 RSA key，`tests/takeover-support-config.test.ts` 防止与现有协议漂移。用户核对摘要，
@@ -85,7 +87,7 @@ app versionName/versionCode 和 files converter version。仅保留公开结构�
 
 `PodRecoveryRoundLayout` 对应 `safeTopBlock/rectInsideCircle`。原生文本区可滚动；
 两个固定按钮垂直排列，四角均在圆内。测试覆盖192/233/320/390/466px、PAUSED/BLOCKED、
-unknown/stage/admission/active 校验失败。journal 创建前失败也显示「上传日志」，摘要标明诊断缺失。
+store/stage/admission/active 校验失败。旧 unknown 状态只显示普通迁移进度。journal 创建前失败也显示「上传日志」，摘要标明诊断缺失。
 
 迁移完成后，在「管理已上传日志」中点击「迁移诊断回执」继续删除。该原生入口不能启动新上传。
 截图演练模块是 `scripts/migration/support-ui`，构建入口 `support-ui.init.gradle`。
@@ -93,3 +95,14 @@ unknown/stage/admission/active 校验失败。journal 创建前失败也显示�
 Manifest 移除 INTERNET。它使用生产 RecoveryView/上传页面，成功演练使用本机假接收器。
 这些截图证明生产原生控件的界面与假接收器流程，不证明实发 APK 完整迁移或线上服务可用。
 证据仅写入 `evidence/T-TAKEOVER-UNKNOWN-FILES/`；不操作既有接管模拟器或用户真表。
+
+当前策略主机回归：
+
+```sh
+cd /home/wilf/data/PodJS/podjs-watch.wt-takeover-unknown-files
+flock /tmp/wrss-heavy-podjs-watch.wt-takeover-unknown-files.lock capmem 16G bash scripts/test-stores.sh --policy
+```
+
+该命令运行77条路径矩阵、旧版自动续迁与中断、实际原生备份/回滚、未知偏好文件、
+旧混合 blocker 重检、已知业务错误保留、加密上传及12条脱敏差分向量。
+模拟器截图的旧 unknown 失败页仅作历史证据；当前 fixture 改用已知 store 失败，并截图核对旧 unknown 只显示普通检查进度。

@@ -19,20 +19,21 @@ public final class SupportUiFixtureActivity extends Activity {
         try {
             File control=new File(PodTakeover.sandbox(this),"files/package-takeover");java.nio.file.Files.createDirectories(control.toPath());
             String generation="g-00000000-0000-0000-0000-000000000000";
-            Properties journal=new Properties();journal.setProperty("generation",generation);journal.setProperty("phase","BLOCKED");journal.setProperty("reason","unknown_user_files");
+            Properties journal=new Properties();journal.setProperty("generation",generation);journal.setProperty("phase","BLOCKED");journal.setProperty("reason","store_unsupported_or_failed");
             PodTakeoverCoordinator.atomic(new File(control,"journal"),journal);
-            PodStoreConverter.json(new File(control,"generations/"+generation+"/files-report.json"),new JSONObject().put("version","watchrss-files-6").put("unknownFiles",24)
+            PodStoreConverter.json(new File(control,"generations/"+generation+"/files-report.json"),new JSONObject().put("version","watchrss-files-7").put("unknownFiles",24)
                 .put("unknownPaths",new JSONArray().put("files/imports/123456789/book-title.txt").put("files/Firebase/deadbeef/session"))
                 .put("classes",new JSONObject().put("unknown-user-content",24).put("asset",3)));
             recovery=new PodTakeover.RecoveryView(this);
             String screen=getIntent().getStringExtra("screen");
-            recovery.render(new JSONObject().put("phase","paused".equals(screen)?"PAUSED":"BLOCKED").put("reason","paused".equals(screen)?"stage_failed":"unknown_user_files").put("percent",86),false);
+            recovery.render(new JSONObject().put("phase","paused".equals(screen)?"PAUSED":"BLOCKED").put("reason","paused".equals(screen)?"stage_failed":"unknown".equals(screen)?"unknown_user_files":"store_unsupported_or_failed").put("percent",86),false);
             recovery.support.setOnClickListener(v->openSupport(false));recovery.retry.setOnClickListener(v->{});
             setContentView(recovery);
             if("preview".equals(screen)||"success".equals(screen))openSupport("success".equals(screen));
             recovery.post(()->{
                 if(!recovery.isAttachedToWindow())return;
                 for(View button:new View[]{recovery.retry,recovery.support}) {
+                    if(button.getVisibility()!=View.VISIBLE)continue;
                     boolean inside=PodRecoveryRoundLayout.rectInsideCircle(new PodRecoveryRoundLayout.Rect(button.getLeft(),button.getTop(),button.getWidth(),button.getHeight()),recovery.getWidth(),recovery.getHeight(),2);
                     android.util.Log.i("TakeoverSupportFixture","button="+((android.widget.TextView)button).getText()+" rect="+button.getLeft()+","+button.getTop()+","+button.getWidth()+","+button.getHeight()+" inside="+inside);
                     if(recovery.isAttachedToWindow()&&!inside)throw new AssertionError("button_outside_circle");
