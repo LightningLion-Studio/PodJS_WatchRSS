@@ -80,16 +80,27 @@ public final class ReleaseTakeoverMetadataTest {
             "cache/douyin_preload/42.mp4","cache/douyin_preview_snapshots/slot-0.json","cache/updates/fixture.apk","cache/tts_123.mp3",
             "cache/watchrss.db.lck"})write(new File(sandbox,path),new byte[]{1,2,3});
         write(new File(sandbox,"files/bili-smoke-00000000-0000-0000-0000-000000000000.preferences_pb"),new byte[0]);
+        String hash="a".repeat(64),head="b".repeat(64);
+        String[] knownNew={"files/douyin_unwatched_stock/inventory.json","files/douyin_unwatched_stock/"+hash+".mp4",
+            "files/douyin_unwatched_stock/"+hash+".mp4.tmp",
+            "files/phone-article-checkpoints/"+hash+"/"+head+"/0.bin",
+            "files/phone-article-checkpoints/"+hash+"/"+head+"/0.bin.tmp",
+            "files/watch-cloud-restore/"+hash+"/"+head+".json",
+            "files/watch-cloud-restore/"+hash+"/"+head+".json.tmp"};
+        for(String path:knownNew)write(new File(sandbox,path),new byte[]{1,2,3});
+        // Defaults to the exact 2.0.1 files-5/stores-4 blocked source. Run older versions separately.
+        String legacy=InstrumentationRegistry.getArguments().getString("legacyFilesVersion","5");
+        assertTrue(Arrays.asList("3","4","5").contains(legacy));
         // Wait longer than the old initializer delay: no profile writer should have started.
         SystemClock.sleep(7000);assertArrayEquals(new byte[8],Files.readAllBytes(marker.toPath()));
         Properties pre=TakeoverDigest.snapshot(sandbox,Collections.emptyMap());
         for(String line:TakeoverDigest.digestManifest(pre,"SNAPSHOTTED","g-t17-fixture-pre"))android.util.Log.i("T17RehearsalPre",line);
         // Seed the legacy v1002 verification BLOCKED journal and three retained candidates.
         Properties journal=new Properties();journal.setProperty("protocol","1");
-        journal.setProperty("converter","watchrss-room-v18-1+watchrss-stores-3+watchrss-files-3");
+        journal.setProperty("converter","watchrss-room-v18-1+watchrss-stores-4+watchrss-files-"+legacy);
         journal.setProperty("phase","BLOCKED");journal.setProperty("reason","unknown_user_files");journal.setProperty("generation","g-t17-v1002");
         for(String generation:new String[]{"g-t17-v1000","g-t17-v1001","g-t17-v1002"})write(new File(control,"generations/"+generation+"/files-source/retained.part"),new byte[]{7,8,9});
-        PodStoreConverter.json(new File(control,"generations/g-t17-v1002/files-report.json"),new JSONObject().put("version","watchrss-files-3").put("blockers",new JSONArray().put("unknown_user_files")));
+        PodStoreConverter.json(new File(control,"generations/g-t17-v1002/files-report.json"),new JSONObject().put("version","watchrss-files-"+legacy).put("blockers",new JSONArray().put("unknown_user_files")));
         PodTakeoverCoordinator.atomic(new File(control,"journal"),journal);
         Activity activity=registry.startActivitySync(new Intent().setClassName(PACKAGE,"dev.podjs.androidwatch.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try {
@@ -104,6 +115,10 @@ public final class ReleaseTakeoverMetadataTest {
             assertArrayEquals(body,Files.readAllBytes(new File(PodTakeover.filesRoot(context),"article_content/fixture.txt").toPath()));
             JSONObject files=PodStoreConverter.json(new File(control,"generations/"+generation+"/files-snapshot.json")).getJSONObject("entries");
             JSONObject report=PodStoreConverter.json(new File(control,"generations/"+generation+"/files-report.json"));
+            assertEquals("watchrss-files-6",report.getString("version"));
+            for(String path:knownNew)assertFalse(new File(PodTakeover.filesRoot(context),path.substring(6)).exists());
+            assertEquals(1,report.getJSONObject("classes").getInt("native-transfer-checkpoint"));
+            assertEquals(2,report.getJSONObject("classes").getInt("private-transfer-state"));
             assertEquals(9,report.getInt("unrecognizedCacheFiles"));assertEquals(0,report.getInt("unknownFiles"));
             assertEquals(1,report.getJSONObject("classes").getInt("database-lock"));
             assertFalse(new File(PodTakeover.filesRoot(context),"cache").exists());
@@ -120,7 +135,7 @@ public final class ReleaseTakeoverMetadataTest {
             assertTrue("actual ProfileInstaller successful write after ACTIVE",installed);
             assertArrayEquals(new byte[8],Files.readAllBytes(new File(sandbox,NativeBackup.BACKUP+"/"+generation+"/data/files/profileinstaller_profileWrittenFor_lastUpdateTime.dat").toPath()));
             assertEquals(after,TakeoverDigest.activeLines(sandbox,generation));
-            android.util.Log.i("T17Rehearsal","release=true migratedRoom=true legacyBlockedCandidates=3 converter=files-4 unknownCache=9 retained=true phase=ACTIVE nativeRootsEqual=true platformImported=false profileInstallerWrite=true");
+            android.util.Log.i("T17Rehearsal","release=true migratedRoom=true legacyBlockedCandidates=3 converter=files-6 unknownCache=9 retained=true phase=ACTIVE nativeRootsEqual=true platformImported=false profileInstallerWrite=true");
         }finally{registry.runOnMainSync(activity::finish);}
     }
 }

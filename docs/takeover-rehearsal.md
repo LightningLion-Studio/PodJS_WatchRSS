@@ -460,3 +460,11 @@ Android要求新code大于安装code，见[官方版本管理](https://developer
 native；保留`.podjs-recovered`供再次接管或人工分析。备份包含四个指定数据根，未涵盖
 app_webview、系统/Keystore状态；这两项及正式账号解密仍是独立验收门槛。物理耐久性、
 恢复后native功能、真实同UID/签名升级、公测清理和最终设备状态全部PENDING。
+
+## 未知文件与诊断补充
+
+发布版 `v2.0.1-1` 实际使用 files-5。升级修复目标为 files-6。
+运行框架 `bash scripts/test-stores.sh`，包含75条路径候选和离线上传协议回归。
+运行 `PodTakeoverSupportUiTest` 检查阻断时的原生上传入口与小屏滚动。
+本卡 adb 命令只指向新建独立模拟器；正式发布包迁移演练保持未验证，执行清单见
+[takeover-release-rehearsal.md](takeover-release-rehearsal.md#t-takeover-unknown-files201--files-6)。

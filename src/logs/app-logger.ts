@@ -3,8 +3,8 @@ import {debugLogReply} from '../sync/diagnostic-log.ts';
 export type {LogFile,LogLevel} from '@podjs/framework/logging';
 export const APP_LOG_FILE='app_log.txt';
 export const MAX_LOG_BYTES=5*1024*1024;
-const sensitive='access_token|api_key|apiKey|appRefreshToken|bili_jct|csrf_session_id|DedeUserID|DedeUserID__ckMd5|msToken|n_mh|odin_tt|passport_csrf_token|passport_csrf_token_default|refresh_token|refreshToken|SESSDATA|sessionid|sessionid_ss|sid|sid_guard|sid_tt|sid_ucp_v1|s_v_web_id|ssid_ucp_v1|ttwid|uid_tt|uid_tt_ss|watchrss_pair|[A-Za-z0-9_-]*token|password|secret|signature|sign|a_bogus|x_bogus|X-Bogus|w_rid';
-export const redactSensitiveLogContent=createLogRedactor({sensitivePattern:sensitive,headerPattern:'(?:set-)?cookie|authorization|proxy-authorization|x-watchrss-pairing-auth'});
+import {LOG_SENSITIVE_PATTERN,LOG_HEADER_PATTERN} from "./constants.ts";
+export const redactSensitiveLogContent=createLogRedactor({sensitivePattern:LOG_SENSITIVE_PATTERN,headerPattern:LOG_HEADER_PATTERN});
 export class AppLogger extends FileLogger {
  constructor(file:LogFile,now=()=>new Date(),output:(level:LogLevel,line:string)=>void=()=>{}){
   super(file,{redact:redactSensitiveLogContent,maxBytes:MAX_LOG_BYTES,trim:lines=>lines.slice(Math.floor(lines.length*.2)).join('\n')+'\n',writeFailureMessage:'AppLogger: 写入日志失败'},now,output);

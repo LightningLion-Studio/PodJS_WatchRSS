@@ -1,0 +1,13 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'dev.podjs.runtime'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.lightningstudio.watchrss.podjs.supportrehearsal'
+        minSdk 30
+        targetSdk 36
+        versionCode 1
+        versionName '2.0.1-support-rehearsal'
+    }
+}
+dependencies { implementation project(':runtime') }

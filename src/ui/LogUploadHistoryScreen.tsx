@@ -1,3 +1,4 @@
+import {takeover} from "@podjs/framework/services";
 import { Show, createSignal, onMount } from "solid-js";
 import { Text, View } from "@pocketjs/framework/components";
 import type { LogBackend } from "../logs/upload.ts";
@@ -54,6 +55,7 @@ export function LogUploadHistoryScreen(props: {
   });
   const entries = (): ScrollEntry[] => [
     row("已上传日志", 40),
+    row("迁移诊断回执",50,()=>{void takeover.openSupport().catch(()=>setMessage("迁移诊断回执暂不可用，请稍后重试。"));}),
     ...(message() ? [row(message(), 70)] : []),
     ...(error() ? [row(`删除失败：${error()}`, 70)] : []),
     ...receipts().map(receipt => ({
