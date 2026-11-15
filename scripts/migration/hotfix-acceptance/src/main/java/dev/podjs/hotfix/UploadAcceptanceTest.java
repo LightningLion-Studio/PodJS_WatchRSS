@@ -54,7 +54,7 @@ public class UploadAcceptanceTest {
    assertNotNull("actual migration failure offers upload",find(root,"上传日志"));
    ins.runOnMainSync(()->find(root,"上传日志").performClick());end=SystemClock.uptimeMillis()+15000;
    while(!text(root).contains("2.0.1-2 / 1278")&&SystemClock.uptimeMillis()<end)SystemClock.sleep(100);
-   assertTrue(text(root).contains("2.0.1-2 / 1278"));assertFalse(text(root).contains("PRIVATE_TITLE"));
+   assertTrue(text(root).contains("2.0.1-2 / 1278"));assertTrue("fixed business reason must survive native summary",text(root).contains("article_body_missing"));assertFalse(text(root).contains("PRIVATE_TITLE"));
    View upload=find(root,"上传脱敏诊断");assertNotNull(upload);assertFalse(upload.isEnabled());
    ins.runOnMainSync(()->checkbox(root).setChecked(true));assertTrue(upload.isEnabled());ins.runOnMainSync(upload::performClick);
    end=SystemClock.uptimeMillis()+60000;while(!text(root).contains("日志编号：654321")&&SystemClock.uptimeMillis()<end)SystemClock.sleep(100);

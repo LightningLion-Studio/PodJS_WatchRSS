@@ -38,20 +38,20 @@ It waits beyond the old initializer delay, seeds three retained synthetic candid
 
 Capture logs for this target PID only, including `T17RehearsalPre`, `T17Rehearsal`, `PodTakeoverDigest`, `PodTakeoverFiles`, and `ProfileInstaller`. Uninstall only the rehearsal app/test, verify cleanup, and restore DEVICE_OWNER to released. This does not authorize formal/native/.podjs package operations.
 
-## T-TAKEOVER-UNKNOWN-FILES：2.0.1 → stores-5/files-7
+## T-TAKEOVER-UNKNOWN-FILES：2.0.1 → stores-6/files-7
 
 本节按用户 2026-11-15 裁决执行，替代上文及旧 files-6 的阻断策略。应用基线 `v2.0.1-1 / 782485f4` 固定框架 `d99b4a0`，
 实际 converter 为 stores-4/files-5。不得根据共享框架目录或历史文档猜测发布版本。
 本卡执行主机测试与独立模拟器截图，不运行上文真机命令，不访问真实沙箱。
 
-路径清单位于框架 `tests/fixtures/watchrss-path-candidates.tsv`（77 条）。
+路径清单位于框架 `tests/fixtures/watchrss-path-candidates.tsv`（83 条）。
 `UnknownFilesTest` 逐条核对分类/委派，检查未知普通文件静默不导入、业务资产导入、原文件摘要不变。
 既有 `FileTakeoverTest` 覆盖 files-3/4/5/6 未发布候选重分类、旧候选保留、receipt/pointer/阶段反例、
 升级首启自动续迁，无需点击重试。未知偏好文件跳过解析，不导入 KV 或 secrets。已发布的 ACTIVE 代际保持原指针，不重新迁移。
 
 `ReleaseTakeoverMetadataTest` 默认播种 stores-4/files-5 的 BLOCKED journal，
 增加 Douyin stock 的 inventory/64hex.mp4/临时文件、手机传输分块与临时文件、云恢复派生回执与临时文件。
-要求 stores-5/files-7 ACTIVE，原生四根封存摘要相等，正文/SQLite 可读，缓存/分块/回执不导入业务目录。
+要求 stores-6/files-7 ACTIVE，原生四根封存摘要相等，正文/SQLite 可读，缓存/分块/回执不导入业务目录。
 手机分块保持 native-transfer-checkpoint，不制造正文或 ACK；恢复回执只描述已合并状态，
 业务资料仍从 Room/stores/assets 导入。原生未完成传输和恢复进度不在 PodJS 中续跑。
 旧版 `-e legacyFilesVersion 3`、`4` 分别使用新的干净隔离合成安装验证，`6` 验证前次候选，默认 `5` 对应实发基线。
@@ -103,7 +103,7 @@ cd /home/wilf/data/PodJS/podjs-watch.wt-takeover-unknown-files
 flock /tmp/wrss-heavy-podjs-watch.wt-takeover-unknown-files.lock capmem 16G bash scripts/test-stores.sh --policy
 ```
 
-该命令运行77条路径矩阵、旧版自动续迁与中断、实际原生备份/回滚、未知偏好文件、
+该命令运行83条路径矩阵、旧版自动续迁与中断、实际原生备份/回滚、未知偏好文件、
 旧混合 blocker 重检、已知业务错误保留、加密上传及12条脱敏差分向量。
 模拟器截图的旧 unknown 失败页仅作历史证据；当前 fixture 改用已知 store 失败，并截图核对旧 unknown 只显示普通检查进度。
 
@@ -142,3 +142,9 @@ Keep the established 0.x telemetry convention for this migration-only hotfix. Th
 ledger predates published 1277; compare against its independently verified archived APK too,
 or use an explicit temporary ledger overlay containing only that already-published release.
 Do not add a publication record for the new candidate before the coordinator publishes it.
+
+审查修复：shared_prefs/read_aloud_secure_prefs.xml（及原生.bak）按精确完整路径作为已发布退役业务存储保留。
+当前没有旧read_aloud_api_key消费者，不猜测映射到现代按引擎TTS密钥；retained-known原件封存，不导入、不阻断、不计未知。
+Room阅读位置/进度迁移与novel_reading_history在线续章URL保留是两种策略，后者不导入新业务存储。
+旧候选仅在重分类/断电续跑期间保留，ACTIVE后遵守原inactive清理，当前/备份关联代际仍受保护。
+正式tag writer系统扫描入口为 scripts/migration/audit_compose_writers.py；偏好名无法解析或不在清单时退出失败。

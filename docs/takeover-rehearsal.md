@@ -464,18 +464,18 @@ app_webview、系统/Keystore状态；这两项及正式账号解密仍是独立
 ## 未知文件与诊断补充
 
 发布版 `v2.0.1-1` 实际使用 files-5。升级修复目标为 files-6。
-运行框架 `bash scripts/test-stores.sh`，包含77条路径候选和离线上传协议回归。
+运行框架 `bash scripts/test-stores.sh`，包含83条路径候选和离线上传协议回归。
 运行 `PodTakeoverSupportUiTest` 检查阻断时的原生上传入口与小屏滚动。
 本卡 adb 命令只指向新建独立模拟器；正式发布包迁移演练保持未验证，执行清单见
 [takeover-release-rehearsal.md](takeover-release-rehearsal.md#t-takeover-unknown-files201--files-6)。
 
 ## T-TAKEOVER-UNKNOWN-FILES：用户裁决后的演练
 
-本节覆盖历史 unknown_user_files 阻断规则。当前目标 stores-5/files-7。
+本节覆盖历史 unknown_user_files 阻断规则。当前目标 stores-6/files-7。
 未知普通文件（含未知 XML/protobuf）静默不导入新代际，不阻断、不提示。
 源文件与原生备份保持原样；回滚仍恢复未知文件。已知业务文件继续迁移与校验。
 
-- 逐条运行框架77项路径矩阵；已发布业务路径必须导入，缓存与未知文件不导入。
+- 逐条运行框架83项路径矩阵；已发布业务路径必须导入，缓存与未知文件不导入。
 - 播种 files-3/4/5/6 的 BLOCKED/unknown_user_files，首次启动自动达到 ACTIVE，无需用户重试。
 - 在创建新代际后断电，冷启动继续该代际；旧候选与源文件保持不变。
 - 未知偏好文件含损坏 XML/protobuf 时，跳过解析并记录脱敏计数。
@@ -484,3 +484,9 @@ app_webview、系统/Keystore状态；这两项及正式账号解密仍是独立
 - 旧 unknown 不闪现失败 UI。其他迁移失败保留上下排列的重试与上传日志。
 
 精确命令与发布 instrumentation 在 takeover-release-rehearsal.md 的同卡节。
+
+审查修复：shared_prefs/read_aloud_secure_prefs.xml（及原生.bak）按精确完整路径作为已发布退役业务存储保留。
+当前没有旧read_aloud_api_key消费者，不猜测映射到现代按引擎TTS密钥；retained-known原件封存，不导入、不阻断、不计未知。
+Room阅读位置/进度迁移与novel_reading_history在线续章URL保留是两种策略，后者不导入新业务存储。
+旧候选仅在重分类/断电续跑期间保留，ACTIVE后遵守原inactive清理，当前/备份关联代际仍受保护。
+正式tag writer系统扫描入口为 scripts/migration/audit_compose_writers.py；偏好名无法解析或不在清单时退出失败。
