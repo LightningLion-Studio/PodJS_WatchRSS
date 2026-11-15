@@ -1,8 +1,8 @@
 {
   "entry": "src/main.tsx",
   "appId": "com.lightningstudio.watchrss.podjs",
-  "versionName": "0.1.0",
-  "versionCode": 28,
+  "versionName": "2.0.2-2",
+  "versionCode": 1280,
   "name": "腕上RSS · PodJS",
   "bytecode": {
     "stripSource": true
@@ -69,7 +69,9 @@
         "durationMs": 80
       }
     },
-    "bleProvisioning": false
+    "bleProvisioning": false,
+    "icon": "@mipmap/ic_launcher",
+    "roundIcon": "@mipmap/ic_launcher_round"
   },
   "capabilities": [
     "input.touch",
