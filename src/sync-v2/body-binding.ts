@@ -12,3 +12,7 @@ export function sameIndependentIdentity(kind:string,a:any,b:any){
  if(kind==='asset')return a.meta.payload.assetId===b.meta.payload.assetId;
  return businessBodyWitness(kind as any,fromWire(kind as any,a.meta.payload,a.state.payload))===businessBodyWitness(kind as any,fromWire(kind as any,b.meta.payload,b.state.payload));
 }
+
+/** A deletion fact needs no body proof, even on the first R0 migration. */
+export const bodylessTombstone=(candidate:any)=>['book','asset'].includes(candidate.meta.kind)&&candidate.state.payload.deleted===true;
+export const emptyBodyDescription=()=>({bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null});

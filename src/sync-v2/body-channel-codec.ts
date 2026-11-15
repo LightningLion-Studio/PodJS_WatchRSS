@@ -48,7 +48,7 @@ export async function prepareCarrier(options:{crypto:SnapshotCrypto;signer:Signi
  const descriptor=await signControl(options.signer,options.alias,BODY_DOMAIN,{version:1,purpose:BODY_PURPOSE,scope,carrierId:id,authorDeviceId,...{entityKey:binding.entityKey,bodyRevision:binding.bodyRevision},keyVersion,anchor:options.anchor,sourceSnapshotId:null,manifest:{sha256:hash,sizeBytes:manifest.length},chunks:[...snapshot.newChunks].map(([sha256,b])=>({sha256,sizeBytes:b.length})).sort((a,b)=>a.sha256<b.sha256?-1:a.sha256>b.sha256?1:0)}) as Carrier;
  validateCarrier(descriptor,scope);return {descriptor,objects};
 }
-export async function openCarrier(options:{descriptor:Carrier;scope:Scope;binding:BodyBinding;crypto:SnapshotCrypto;signer:SigningPort;publicKey:string;key:(version:number)=>Promise<Uint8Array>;read:(hash:string,size:number)=>Promise<Uint8Array>}){
+export async function openCarrier(options:{descriptor:Carrier;scope:Scope;binding:BodyBinding;crypto:SnapshotCrypto;signer:SigningPort;publicKey:string;key:(version:number)=>Promise<Uint8Array>;read:(hash:string,size:number)=>Promise<Uint8Array>;yieldControl?:()=>Promise<void>}){
  const {descriptor,crypto,binding}=options;validateCarrier(descriptor,options.scope);const b=descriptor.body;
  if(b.entityKey!==binding.entityKey||b.bodyRevision!==binding.bodyRevision)throw Error('body_revision_changed');
  await verifySigned(options.signer,options.publicKey,BODY_DOMAIN,b,descriptor.signature);
@@ -86,7 +86,9 @@ export async function openCarrier(options:{descriptor:Carrier;scope:Scope;bindin
   }
   if(closure.size!==b.chunks.length||b.chunks.some(c=>closure.get(c.sha256)!==c.sizeBytes))throw Error('closure_incomplete');
   const decoded=await new WatchCloudCodec(crypto,guard).restore(key,snapshot,hash=>read(hash,closure.get(hash)!));
-  const digest=new ContentSha256();for(const o of m.objects)digest.update(decoded.get(o.name)!);
+  const digest=new ContentSha256();for(const o of m.objects){const raw=decoded.get(o.name)!;
+   for(let at=0;at<raw.length;at+=262144){digest.update(raw.subarray(at,Math.min(raw.length,at+262144)));if(at+262144<raw.length)await options.yieldControl?.();}
+  }
   const hash=digest.finish();if(hash!==m.plaintextSha256||carrierBodyRevision(binding.kind,binding.entityKey,hash)!==binding.bodyRevision)throw Error('hash_mismatch');return decoded;
  }finally{key.fill(0);}
 }

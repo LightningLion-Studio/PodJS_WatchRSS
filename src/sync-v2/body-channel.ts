@@ -10,7 +10,7 @@ import {BodyChannelHttp} from './body-channel-http';
 import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,type BodyBinding,type Carrier,type BodyKind} from './body-channel-codec';
 import type {BodyResolver} from './publisher';
 import {SyncV2Error} from './http';
-import {businessBodyWitness,sameIndependentIdentity} from './body-binding';
+import {businessBodyWitness,sameIndependentIdentity,bodylessTombstone,emptyBodyDescription} from './body-binding';
 export interface BodyChannelRepository {
  read(kind:BodyKind,id:string):Promise<Uint8Array|undefined>;
  /** Validates frozen book identity/fingerprint before any file installation. */
@@ -20,9 +20,10 @@ export interface BodyChannelRepository {
 /** The v2 row carries a hash-bound placeholder, not a P3 recipe or cloud-ready. */
 const bodyFields=['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'];
 export function independentBodyResolver(repository:BodyChannelRepository,fallback:BodyResolver,onPending?:(code:string)=>void):BodyResolver{return async(entry,existing)=>{
+ if(bodylessTombstone(entry.candidate))return emptyBodyDescription();
  const kind=entry.candidate.meta.kind;if(kind!=='book'&&kind!=='asset')return fallback(entry,existing);
  const prior=existing?.candidate??existing,description=existing?.manifest??existing?.row;
- const same=prior&&description&&sameIndependentIdentity(kind,entry.candidate,prior),keep=()=>Object.fromEntries(bodyFields.map(k=>[k,description[k]])) as any;
+ const same=prior&&description&&description.bodyRevision!=null&&prior.state.payload.deleted!==true&&sameIndependentIdentity(kind,entry.candidate,prior),keep=()=>Object.fromEntries(bodyFields.map(k=>[k,description[k]])) as any;
  if(same&&description.recipeOid)return keep();
  try{const raw=await repository.read(kind,entry.candidate.meta.logicalId);
  if(!raw){if(same)return keep();onPending?.('body_channel_source_missing');throw Error('body_channel_source_missing');}
@@ -35,7 +36,7 @@ class BodyRetryDeferred extends Error {}
 /** Every source comes from an already authenticated current account tree.
  * Carrier success never advances a business ACK or rewrites a v2 row. */
 export class WatchBodyChannel {
- constructor(private readonly o:{http:BodyChannelHttp;scope:Scope;projection:WatchProjectionStore;crypto:SnapshotCrypto;signer:SigningPort;author:()=>Promise<{deviceId:string;alias:string}>;approved:(id:string)=>Promise<ApprovedKey>;key:(v:number)=>Promise<Uint8Array>;currentKey:()=>Promise<{key:Uint8Array;version:number}>;files:CloudBlobStore;root:string;repository:BodyChannelRepository;check:()=>Promise<void>;now?:()=>number}){}
+ constructor(private readonly o:{http:BodyChannelHttp;scope:Scope;projection:WatchProjectionStore;crypto:SnapshotCrypto;signer:SigningPort;author:()=>Promise<{deviceId:string;alias:string}>;approved:(id:string)=>Promise<ApprovedKey>;key:(v:number)=>Promise<Uint8Array>;currentKey:()=>Promise<{key:Uint8Array;version:number}>;files:CloudBlobStore;root:string;repository:BodyChannelRepository;check:()=>Promise<void>;now?:()=>number;yieldControl?:()=>Promise<void>}){}
  private now(){return (this.o.now??Date.now)();}
  private async current(entry:any,anchor:any){
   await this.o.check();const state=await this.o.projection.readState(),head=state.cloud?.current;
@@ -111,7 +112,7 @@ export class WatchBodyChannel {
  private async receive(entry:any,anchor:any,descriptor:Carrier,path:string,install:boolean){
   const binding={entityKey:entry.row.entityKey,bodyRevision:entry.row.bodyRevision,kind:entry.meta.kind,logicalId:entry.meta.logicalId},key=await this.o.approved(descriptor.body.authorDeviceId);
   if(key.deviceId!==descriptor.body.authorDeviceId)throw Error('signature_invalid');
-  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
+  const decoded=await openCarrier({descriptor,scope:this.o.scope,binding,crypto:this.o.crypto,signer:this.o.signer,publicKey:key.publicKey,key:this.o.key,yieldControl:async()=>{await this.o.check();await this.o.yieldControl?.();},read:(hash,size)=>this.o.http.download(descriptor.body.carrierId,hash,size,this.o.files,path+'/'+hash)});
   const raw=decoded.get(bodyObjectName(binding.kind,binding.logicalId))!;await this.o.repository.validate(binding.kind,binding.logicalId,fromWire(entry.meta.kind,entry.meta.payload,entry.state.payload),raw);
   await this.current(entry,anchor);
   if(install){
