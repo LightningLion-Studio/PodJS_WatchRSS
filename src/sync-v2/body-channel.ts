@@ -10,7 +10,7 @@ import {BodyChannelHttp} from './body-channel-http';
 import {prepareCarrier,openCarrier,carrierBodyRevision,bodyObjectName,type BodyBinding,type Carrier,type BodyKind} from './body-channel-codec';
 import type {BodyResolver} from './publisher';
 import {SyncV2Error} from './http';
-import {businessBodyWitness,sameIndependentIdentity,bodylessTombstone,emptyBodyDescription} from './body-binding';
+import {businessBodyWitness,sameIndependentIdentity,tombstoneBodyDescription} from './body-binding';
 export interface BodyChannelRepository {
  read(kind:BodyKind,id:string):Promise<Uint8Array|undefined>;
  /** Validates frozen book identity/fingerprint before any file installation. */
@@ -20,7 +20,7 @@ export interface BodyChannelRepository {
 /** The v2 row carries a hash-bound placeholder, not a P3 recipe or cloud-ready. */
 const bodyFields=['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'];
 export function independentBodyResolver(repository:BodyChannelRepository,fallback:BodyResolver,onPending?:(code:string)=>void):BodyResolver{return async(entry,existing)=>{
- if(bodylessTombstone(entry.candidate))return emptyBodyDescription();
+ const tombstone=tombstoneBodyDescription(entry.candidate,existing);if(tombstone)return tombstone;
  const kind=entry.candidate.meta.kind;if(kind!=='book'&&kind!=='asset')return fallback(entry,existing);
  const prior=existing?.candidate??existing,description=existing?.manifest??existing?.row;
  const same=prior&&description&&description.bodyRevision!=null&&prior.state.payload.deleted!==true&&sameIndependentIdentity(kind,entry.candidate,prior),keep=()=>Object.fromEntries(bodyFields.map(k=>[k,description[k]])) as any;

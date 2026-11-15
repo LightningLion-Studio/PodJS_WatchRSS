@@ -14,5 +14,14 @@ export function sameIndependentIdentity(kind:string,a:any,b:any){
 }
 
 /** A deletion fact needs no body proof, even on the first R0 migration. */
-export const bodylessTombstone=(candidate:any)=>['book','asset'].includes(candidate.meta.kind)&&candidate.state.payload.deleted===true;
+export const isBodyTombstone=(candidate:any)=>['book','asset'].includes(candidate.meta.kind)&&candidate.state.payload.deleted===true;
 export const emptyBodyDescription=()=>({bodyRevision:null,promiseId:null,recipeOid:null,opaqueContentId:null,contentBytes:null});
+
+/** Only a row from the current authenticated account tree may supply these
+ * fields. Deletion needs no original or body proof and preserves its reference.
+ * A selected local/historical manifest is not an authority for this decision. */
+export function tombstoneBodyDescription(candidate:any,current:any){
+ if(!isBodyTombstone(candidate))return null;
+ const d=current?.row??current?.manifest;
+ return d?{bodyRevision:d.bodyRevision,promiseId:d.promiseId,recipeOid:d.recipeOid,opaqueContentId:d.opaqueContentId,contentBytes:d.contentBytes}:emptyBodyDescription();
+}
