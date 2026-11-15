@@ -100,6 +100,8 @@ export type RouteEntry = {
   disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
   player?: {
+    shellState?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellState"];
+    shellPlaying?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellPlaying"];
     invalidatePrefetch?: (id:string)=>void;
     previewKind?: ()=>"actual_frame"|"cover"|undefined;
     onCrown: (delta: number) => boolean;

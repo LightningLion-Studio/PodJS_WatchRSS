@@ -514,6 +514,7 @@ export function createMediaRouteController(
   const changeDouyinVideo = async (
     entry: RouteEntry,
     direction: "next" | "previous",
+    isCurrent:()=>boolean=()=>true,
   ) => {
     if (!entry.queue || dependencies.current() !== entry) return;
     if (
@@ -529,6 +530,7 @@ export function createMediaRouteController(
     try {
     const switchStarted=Date.now();appLogger.i('DouyinTiming','switch begin');
     const result = await entry.queue[direction]();
+    if(!isCurrent())throw new Error("cancelled");
     if (dependencies.current() !== entry) return;
     if (!result.ok) {
       if (result.code !== "CANCELLED") {
@@ -539,6 +541,7 @@ export function createMediaRouteController(
     }
     const headers = await adjacentHeaders(entry);
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
+    if(!isCurrent())throw new Error("cancelled");
     if (
       dependencies.current() !== entry ||
       entry.queue.snapshot().item?.awemeId !== result.data.item.awemeId
@@ -555,6 +558,7 @@ export function createMediaRouteController(
       headers,
       webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
     };
+    if(!isCurrent())throw new Error("cancelled");
     if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==result.data.item.awemeId)return;
     entry.playback=nextSource;dependencies.setError("");
     dependencies.setPlayingSource(entry.playback);
@@ -565,7 +569,7 @@ export function createMediaRouteController(
       // Publication is the commit point. Preserve the playing anchor on a failed URL/header/transport step.
       if(dependencies.current()!==entry||entry.playback!==previousSource)return;
       if(previousSource?.awemeId&&entry.queue.restoreSelection(previousSource.awemeId))await entry.queue.persist();
-      dependencies.setError(error instanceof Error?error.message:'视频加载失败，请重试');
+      if(isCurrent())dependencies.setError(error instanceof Error?error.message:'视频加载失败，请重试');
       throw error;
     }
   };

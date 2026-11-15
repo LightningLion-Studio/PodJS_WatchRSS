@@ -1,3 +1,4 @@
+import {bindShellCommands} from '../debug/shell-host.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playerGesture} from "./player-gestures.ts";
 import {rightSwipeBack} from '../navigation/right-swipe-back.ts';
@@ -1230,8 +1231,8 @@ export default function WatchRSS(props: {
   }
   onFrame(updateFeedWhenSettled,()=>false);
   onFrame(()=>{if(page()==="home")idleHit(2);},()=>false);
-  let debugDisposed=false,debugStop:(()=>void)|undefined;
-  onCleanup(()=>{debugDisposed=true;debugStop?.();});
+  let debugDisposed=false,debugStop:(()=>void)|undefined,shellStop:(()=>void)|undefined;
+  onCleanup(()=>{debugDisposed=true;debugStop?.();shellStop?.();});
   onMount(() => {
     const unsubscribe = props.services.subscribeChannel((event) => {idleHit(47);
       if (event.kind === "error") {
@@ -1254,7 +1255,7 @@ export default function WatchRSS(props: {
     });
     onCleanup(unsubscribe);
     if (homeSnapshot) { startupMark("channels.snapshot"); startupFirstScreen(); }
-    void restoreStartupNavigation().then(()=>{if(!debugDisposed)debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));});
+    void restoreStartupNavigation().then(()=>{if(!debugDisposed){debugStop=startExternalDebug(resumeAwemeId=>douyinNavigate({name:"entry",resumeAwemeId}),id=>setPage("debug-summary",{articleId:id}));shellStop=bindShellCommands({current,client:douyinClient,navigate:douyinNavigate,play:douyinPlay,move:changeDouyinVideo});}});
   });
   createEffect(() => {idleHit(13);setNavigationState({ canGoBack: stack().length > 1 });});
   const removeHostEvent = __onHostEvent((event) => {

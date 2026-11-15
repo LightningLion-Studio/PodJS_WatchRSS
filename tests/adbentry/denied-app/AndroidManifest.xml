@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.podjs.adbentry.denied">
+ <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35" />
+ <queries><provider android:authorities="com.lightningstudio.watchrss.adbentry.podjs.shell" /></queries>
+ <application android:label="ADBENTRY denial probe" android:debuggable="false">
+  <activity android:name=".MainActivity" android:exported="true" />
+ </application>
+</manifest>

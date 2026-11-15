@@ -1,3 +1,4 @@
+import {wrapDouyinTransport} from '#douyin-transport-build';
 import {debugGate} from './debug/gate.ts';
 import type {HttpTransport} from './cloud/types.ts';
 import {backgroundResult} from './media/background-work.ts';
@@ -48,7 +49,7 @@ const createDouyinClient=(transport:HttpTransport)=>new DouyinClient({
  historyStorage:new DouyinSqlStateStorage(async()=>(await getExternalSavedStore()).db,{get:async key=>kv.get<string>(key)??null,set:async()=>{throw Error("Legacy Douyin data is read-only");},remove:async key=>{kv.delete(key);}})
 });
 
-let douyinTransport:HttpTransport=mediaTransport;
+let douyinTransport:HttpTransport=wrapDouyinTransport(mediaTransport);
 const douyinTransportPort:HttpTransport={request:request=>douyinTransport.request(request)};
 export const douyinClient=createDouyinClient(douyinTransportPort);
 export const douyinStock=createHostDouyinStock(douyinClient);

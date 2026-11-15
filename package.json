@@ -31,6 +31,9 @@
     },
     "#cloud-background-entry": {
       "default": "./src/cloud/background-v1.ts"
+    },
+    "#douyin-transport-build": {
+      "default": "./src/douyin/transport-build.ts"
     }
   }
 }
