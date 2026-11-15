@@ -870,3 +870,17 @@ for(const allowed of [false,true])test(`R09 sessions honor background permission
  lifecycleState='background';lifecycleListeners.forEach(fn=>fn('background'));await flush();
  if(allowed)expect(sessionReleases).toBe(releases);else expect(sessionReleases).toBeGreaterThan(releases);
 });
+
+for(const direction of ['up','down'] as const)test(`DYSWIPE ghost guest preview is absent throughout ${direction} drag and settle`,async()=>{
+ sessionsCapable=false;initial='available';gestures.length=0;ticks=[];current=state('idle');
+ const realNow=Date.now;let time=1000;Date.now=()=>time;
+ try{
+  const source={platform:'douyin' as const,immersive:true,previewOnly:true,awemeId:'offline-a',title:'offline',posterUrl:'file:///cover.png',videoWidth:320,videoHeight:180,
+   previewFrame:{entryId:'offline-a',frame:{available:true as const,kind:'actual_frame' as const,path:'offline-frame.png',width:320,height:180,positionMs:0,capturedAt:0,capturedGeneration:1}}};
+  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onPrevious:()=>{}});});
+  await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(1);
+  const g=gestures[0],sign=direction==='up'?-1:1;g.onPanStart({dy:sign});
+  for(let i=1;i<=20;i++){g.onPanMove({dy:sign*i*8});await flush();expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);}
+  g.onCancel();for(let i=0;i<20;i++){time+=10;ticks.splice(0).forEach(t=>t());await flush();if(i<10)expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);}
+ }finally{Date.now=realNow;}
+});

@@ -1,0 +1,61 @@
+{
+  "entry": "src/main.tsx",
+  "appId": "dev.podjs.dyswipe.ghost",
+  "versionName": "0.1.0",
+  "versionCode": 1201,
+  "name": "DYSWIPE offline ghost",
+  "bytecode": {
+    "stripSource": true
+  },
+  "android": {
+    "resources": "../../android/res",
+    "theme": "@style/Theme.WatchRSS.PodJS",
+    "cleartextTraffic": true,
+    "splash": {
+      "background": "#000000",
+      "icon": "@drawable/watchrss_splash_icon",
+      "iconBackground": "#000000",
+      "exit": {
+        "fade": true,
+        "scale": 1.12,
+        "durationMs": 80
+      }
+    },
+    "bleProvisioning": false
+  },
+  "capabilities": [
+    "input.touch",
+    "input.rotary",
+    "input.text",
+    "text.layout",
+    "text.environment",
+    "data.sqlite",
+    "data.uri",
+    "data.kv",
+    "data.files.chunks",
+    "data.secure",
+    "media.video",
+    "media.tts",
+    "media.audio",
+    "data.images",
+    "runtime.timer",
+    "crypto.basic",
+    "system.toast",
+    "input.time",
+    "text.raster",
+    "display.power",
+    "host.lifecycle"
+  ],
+  "resources": {
+    "preloadFontSlots": [
+      2,
+      1,
+      19,
+      22
+    ],
+    "fontRegular": "../../assets/fonts/watch_sans.ttf",
+    "fontBold": "../../assets/fonts/reader_default_bold.ttf",
+    "fontSlots": [],
+    "assets": {}
+  }
+}
