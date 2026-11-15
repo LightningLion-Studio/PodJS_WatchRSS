@@ -445,9 +445,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
   const warmEarly=()=>{
     if(!usingSessions()||!props.onPrepareAdjacent)return;const revision=neighborRevision;
     // Start nearest transport/decode as soon as the selected page is published.
-    // Metadata for +2 registers its prefix before it reaches the live slot.
+    // Keep only the immediate next page in the ordinary decode window.
     void warmForward().catch(()=>{});
-    for(const direction of ['next','previous']as const)for(const distance of [1,2]as const){
+    for(const direction of ['next']as const)for(const distance of [1]as const){
       if(props.onAdjacentKey&&!props.onAdjacentKey(direction,distance))continue;
       void previewAdjacent(direction,revision,false,distance).then(target=>{if(revision!==neighborRevision||!target||distance!==1)return;if(direction==='next')forwardTarget=target;else backwardTarget=target;}).catch(()=>{});
     }
@@ -488,7 +488,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     if(sessionPool!.neighbourCapacity>=4)void prepareAdjacent('previous',revision,false,2).catch(()=>{});
   };
   const warmForward=():Promise<DouyinPreparedSource|undefined>=>{
-    if(usingSessions()&&props.onAdjacentKey){const keys=([['next',1],['previous',1],['next',2],['previous',2],['next',3],['next',4],['next',5]] as const).map(([d,n])=>props.onAdjacentKey!(d,n)).filter((key):key is string=>!!key);sessionPool!.retainNeighbours(keys);}
+    if(usingSessions()&&props.onAdjacentKey){const keys=([['next',1]] as const).map(([d,n])=>props.onAdjacentKey!(d,n)).filter((key):key is string=>!!key);sessionPool!.retainNeighbours(keys);}
     void Promise.resolve().then(warmBackward);warmDeep();
     if(!props.onPrepareAdjacent)return Promise.resolve(undefined);
     if(forwardTarget&&(!usingSessions()||sessionPool!.hasStandby(forwardTarget.key)))return Promise.resolve(forwardTarget);
@@ -516,7 +516,7 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
     const ownNeighbor=neighborRevision;
     const pending=(direction==="up"?forwardWarm:backwardWarm)??prepareAdjacent(queueDirection,ownNeighbor,true);
     return pending.then(target=>{
-      if(revision!==dragRevision||direction!==dragDirection)return;
+      if(revision!==dragRevision||direction!==dragDirection||ownNeighbor!==neighborRevision)return;
       dragTarget=target;if(target&&usingSessions()){sessionPool!.selectStandby(target.key);setNativeDrag(true);setDragPoster(null);void sessionPool!.transition(dragProgress(),direction,bounds()).catch(value=>{if(!cancelledSessionError(value))void degradeSessions(value);});}return target;
     });
   };

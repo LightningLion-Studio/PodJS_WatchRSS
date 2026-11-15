@@ -382,7 +382,7 @@ test('SWIPEFEED DYBENCH action correlation reaches the native promotion without 
 });
 
 
-test('PREWARM production component resolves both neighbours, propagates active background preference, and promotes five forward/backward swipes without a prepare at settle',async()=>{
+test('PREWARM keeps one next neighbour, propagates active background preference, and promotes forward/backward swipes without a foreground prepare at settle',async()=>{
  sessionsCapable=true;decoderLimit=3;sessionCalls.length=0;sessionStates.clear();gestures.length=0;initial='available';ticks=[];
  const realNow=Date.now;let time=1000;Date.now=()=>time;
  try{
@@ -393,9 +393,10 @@ test('PREWARM production component resolves both neighbours, propagates active b
     onPrepareAdjacent:async direction=>{const id=selected+(direction==='next'?1:-1);requests.push(String(id));return {key:String(id),source:source(id)};},
     onPromoteAdjacent:async target=>{selected=Number(target.key);setCurrent(target.source as ReturnType<typeof source>);return true;}});
   });await flush();await flush();
-  expect(requests).toContain('9');expect(requests).toContain('11');
-  expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(3);
+  expect(requests).not.toContain('9');expect(requests).toContain('11');
+  expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(2);
   expect(sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm)?.backgroundPlayback).toBe(true);
+  expect(sessionCalls.filter(c=>c.method==='prepare'&&c.prewarm).every(c=>c.backgroundPlayback===undefined)).toBe(true);
   const gesture=gestures[0];
   for(const sign of [1,1,1,1,1,-1,-1,-1,-1,-1]){
    const from=selected,before=sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm).length;
@@ -515,16 +516,16 @@ for(const scenario of ['next','prev','rapid_forward','rapid_alternate','fling','
    if(!cancelled){const latency=Math.min(...f.stopsAt.filter(s=>s.at>=at).map(s=>s.at-at));stopLatency.push(latency);expect(latency,`old stop ${i+1}`).toBeLessThanOrEqual(100);}
    const active=sessionCalls.filter(c=>c.method==='promote').at(-1)?.id??sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm).sessionId;
    const neighbours=[...sessionStates.entries()].filter(([id])=>id!==active).map(([,v])=>v);
-   expect(neighbours.map(v=>Number(v.key))).toContain(expected-1);expect(neighbours.map(v=>Number(v.key))).toContain(expected+1);
+   expect(neighbours).toHaveLength(1);expect(neighbours.map(v=>Number(v.key))).toContain(expected+1);
    expect(neighbours.every(v=>v.hasRenderedFirstFrame)).toBe(true);if(cancelled)expect(sessionStates.get(active).state).toBe('playing');
   }
   expect(f.rings).toBe(0);expect(f.posters).toBe(0);expect(f.presentations.every(p=>p.decoded)).toBe(true);
   expect(f.presentations.length).toBe(scenario==='cancel'?0:count);
   expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(before);
   if(scenario==='cancel')expect(f.stopsAt).toHaveLength(0);
-  const active=sessionCalls.filter(c=>c.method==='promote').at(-1)?.id;
+  const active=sessionCalls.filter(c=>c.method==='promote').at(-1)?.id??sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm).sessionId;
   const warm=[...sessionStates.entries()].filter(([id])=>id!==active).map(([,value])=>Number(value.key));
-  expect(warm).toContain(f.selected-1);expect(warm).toContain(f.selected+1);
+  expect(warm).toHaveLength(1);expect(warm).toContain(f.selected+1);
   console.log('DYSWIPE_MODEL '+JSON.stringify({scenario,attempts:count,committed:f.presentations.length,intervalMs:interval,ringSamples:f.rings,coverSamples:f.posters,decoded:f.presentations.filter(p=>p.decoded).length,maxOldStopMs:stopLatency.length?Math.max(...stopLatency):null,deviceProof:false}));
  }finally{f.close();}
 },30000);
@@ -757,7 +758,7 @@ test('DYFIT sends the current mode to cached neighbours without preparing them a
  try{
   const source={platform:'douyin' as const,immersive:true,title:'a',awemeId:'a',url:'https://video/a'};
   const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source,width:233,height:233,active:true,offset:0,round:true,onNext(){},onPrevious(){},onPrepareAdjacent:async direction=>({key:direction,source:{...source,url:'https://video/'+direction,awemeId:direction}})});});
-  await flush();await flush();const before=sessionCalls.filter(c=>c.method==='prepare').length;expect(before).toBe(3);
+  await flush();await flush();const before=sessionCalls.filter(c=>c.method==='prepare').length;expect(before).toBe(2);
   for(const [icon,mode] of [['fullscreen','expanded'],['panorama','shrunk'],['fullscreen-exit','standard']]){
    const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&c.props.src===`../assets/icons/player-${icon}.svg`));expect(button).toBeDefined();button!.props.onPress();await flush();
    const ids=sessionCalls.filter(c=>c.method==='prepare').map(c=>c.sessionId);for(const id of ids)expect(transforms.filter(t=>t.id===id).at(-1)?.scaleMode).toBe(mode);
