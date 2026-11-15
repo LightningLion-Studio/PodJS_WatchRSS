@@ -1,10 +1,10 @@
 import {test,expect,mock} from 'bun:test';
-let online=true,feed=0,prepares=0,registered:any[]=[],stored:any[]=[],config:any,prepareGate:(()=>Promise<void>)|undefined;
+let online=true,feed=0,prepares=0,registered:any[]=[],stored:any[]=[],config:any,prepareGate:(()=>Promise<void>)|undefined,registrationGate:(()=>Promise<void>)|undefined,operationCancels=0;
 const value=(v:any)=>({result:Promise.resolve(v),cancel(){}});
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}}}));
 mock.module('@podjs/framework/services',()=>({delay:()=>({result:new Promise(()=>{}),cancel(){}}),discovery:{networkSnapshot:async()=>({active:online,internet:online,validated:online,wifi:true,metered:false})}}));
 mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,preserveSelectedDouyinItem:(v:any)=>v,decodableDouyinItem:async(v:any)=>v,VideoPlaybackTrace:class{event(){}},registerVideoResolution(){}}));
-mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{register:(...args:any[])=>{registered.push(args);return value({uri:'podjs-media-cache://play/'+args[0]});}},localMediaStore:{configure:(c:any)=>{config=c;return value(undefined);},list:()=>value({items:stored}),lookup:(key:string)=>value({item:stored.find(v=>v.key===key)}),prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{register:(...args:any[])=>{registered.push(args);const gate=registrationGate?.();return {result:Promise.resolve(gate).then(()=>({uri:'podjs-media-cache://play/'+args[0]})),cancel(){operationCancels++;}};}},localMediaStore:{configure:(c:any)=>{config=c;return value(undefined);},list:()=>value({items:stored}),lookup:(key:string)=>value({item:stored.find(v=>v.key===key)}),prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){operationCancels++;}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
 const {createHostDouyinStock}=await import('../src/douyin/stock-host.ts');
 test('complete stock uses browsing candidates, survives restart offline, and never reads expired URLs',async()=>{
  const client={stockAuthorizationScope:async()=> 'fixture-scope',isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({Cookie:'private-cookie'}),fetchFeedPage:async()=>{feed++;throw Error('extra feed forbidden');}};
@@ -55,4 +55,21 @@ test('R01/R04 production client plus stock keeps explicit detail available and s
  const host=createHostDouyinStock(client);expect((await client.fetchDetail('42',{forceRefresh:true})).ok).toBe(true);expect((await client.fetchFeedPage()).ok).toBe(true);expect(requests).toHaveLength(2);
  host.offer!([{awemeId:'clip',description:'offline',authorName:'fixture',playUrl:'https://fixture.invalid/main?x-expires=9999999999',durationMs:1000,variants:[]}] as any);await host.resume();
  expect(registered).toHaveLength(1);expect(Object.keys(registered[0][2]).map(k=>k.toLowerCase())).not.toContain('cookie');host.suspend();
+});
+
+test('P2-03 a registration arriving after Cookie replacement cannot submit complete storage',async()=>{
+ online=true;stored=[];registered=[];prepares=0;operationCancels=0;let scope='old',listener:(state:string)=>void=()=>{},started=false,release!:()=>void;
+ registrationGate=()=>{registrationGate=undefined;started=true;return new Promise<void>(resolve=>release=resolve);};
+ const client={stockAuthorizationScope:async()=>scope,subscribeAuth:(fn:any)=>listener=fn,isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinStock(client as any);host.offer!([{awemeId:'late-register',description:'fixture',authorName:'fixture',playUrl:'https://fixture.invalid/media?x-expires=9999999999',durationMs:1000,variants:[]}] as any);
+ const pending=host.resume();for(let n=0;!started&&n<100;n++)await Promise.resolve();expect(started).toBe(true);expect(prepares).toBe(0);
+ scope='new';listener('unknown');expect(operationCancels).toBe(1);release();await pending;expect(prepares).toBe(0);expect(stored).toEqual([]);host.suspend();
+});
+test('P2-03 Cookie replacement cancels a submitted native prepare operation',async()=>{
+ online=true;stored=[];registered=[];prepares=0;operationCancels=0;let scope='old',listener:(state:string)=>void=()=>{},started=false,release!:()=>void;
+ prepareGate=()=>{prepareGate=undefined;started=true;return new Promise<void>(resolve=>release=resolve);};
+ const client={stockAuthorizationScope:async()=>scope,subscribeAuth:(fn:any)=>listener=fn,isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+ const host=createHostDouyinStock(client as any);host.offer!([{awemeId:'late-prepare',description:'fixture',authorName:'fixture',playUrl:'https://fixture.invalid/media?x-expires=9999999999',durationMs:1000,variants:[]}] as any);
+ const pending=host.resume();for(let n=0;!started&&n<100;n++)await Promise.resolve();expect(started).toBe(true);expect(prepares).toBe(1);
+ scope='new';listener('unknown');expect(operationCancels).toBe(1);release();await pending;expect(await host.restore()).toEqual([]);expect(prepares).toBe(1);host.suspend();
 });

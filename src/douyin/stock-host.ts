@@ -14,6 +14,8 @@ import {completeDouyinRendition,douyinPrestoreConfig,storedDouyinMetadata,restor
  * candidates; no stock-owned feed, detail, cookie refresh or URL retry exists. */
 export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
  let candidates:DouyinItem[]=[],epoch=0,offeredRevision=0,enabled=false,running:Promise<void>|undefined;
+ const operations=new Set<{cancel():void}>();
+ const wait=async<T>(operation:{result:Promise<T>;cancel():void}):Promise<T>=>{operations.add(operation);try{return await operation.result;}finally{operations.delete(operation);}};
  const keys=new Map<string,string>(),consumed=new Set<string>();
  const config=()=>douyinPrestoreConfig(kv.get('watchrss.douyin.prestore.v1'));
  const allowed=async()=>config().enabled&&kv.get<boolean>('watchrss.douyin.stock.enabled')!==false&&await client.isLoggedIn()&&stockNetworkAllowed(await discovery.networkSnapshot(),videoOptEnabled('traffic'),kv.get<boolean>('watchrss.douyin.stock.wifi-only')!==false);
@@ -52,24 +54,25 @@ export function createHostDouyinStock(client:DouyinClient):DouyinStockService {
   ready:lookup,playbackReady:lookup,lookup:async id=>(await lookup(id))?.uri,
   consume(id){consumed.add(id);while(consumed.size>200)consumed.delete(consumed.values().next().value!);const key=keys.get(id);if(key)void localMediaStore.watched(key).result.catch(()=>{});},
   clear(){service.suspend();keys.clear();consumed.clear();void localMediaStore.clear().result.catch(()=>{});},
-  suspend(){enabled=false;epoch++;void localMediaStore.cancel().result.catch(()=>{});},
+  suspend(){enabled=false;epoch++;for(const operation of operations)operation.cancel();operations.clear();void localMediaStore.cancel().result.catch(()=>{});},
   async networkChanged(){if(await allowed())await service.resume();else service.suspend();},
   offer(items,anchor){offeredRevision++;const center=Math.max(0,items.findIndex(i=>i.awemeId===anchor));candidates=items.slice(center+(anchor?1:0),center+21).filter(i=>/^https?:/.test(i.playUrl));void service.resume().catch(()=>{});},
   resume(){const wasEnabled=enabled;enabled=true;if(running)return wasEnabled?running:running.catch(()=>{}).then(()=>enabled?service.resume():undefined);const own=++epoch,offerRevision=offeredRevision,current=()=>enabled&&own===epoch;
    const work=(async()=>{
     const authorization=await scope();if(!current()||!authorization)return;
-    const cfg=config();await localMediaStore.configure(cfg).result;if(!current()||!await allowed())return;
+    const cfg=config();await localMediaStore.configure(cfg).result;if(!current()||!await allowed()||!current())return;
     let slots=(await inventory()).filter(v=>!v.watched).length;const watched=new Set(await client.listWatchedIds());
     for(const candidate of candidates){
-     if(!current()||offerRevision!==offeredRevision||slots>=cfg.count||!await allowed())return;
+     if(!current()||offerRevision!==offeredRevision||slots>=cfg.count||!await allowed()||!current())return;
      if(watched.has(candidate.awemeId)||consumed.has(candidate.awemeId))continue;
      const item=completeDouyinRendition(candidate);if(!item)continue;const key=stockContentKey(item)+':authorization:'+authorization;
-     if((await localMediaStore.lookup(key).result).item)continue;
+     const known=(await localMediaStore.lookup(key).result).item;if(!current())return;if(known)continue;
      const audio=douyinPlaybackAudio(item),now=Date.now(),expiry=Math.min(douyinMediaExpiry(item.playUrl,now),audio?douyinMediaExpiry(audio,now):Infinity);if(expiry<=Date.now())continue;
      const headers=await client.buildPlaybackHeaders();if(!current()||expiry<=Date.now())continue;
      // A single selected rendition. No mirror race is needed for idle storage.
-     const {uri}=await mediaPrefixCache.register(key,item.playUrl,headers,true,[],expiry,audio).result;
-     try{const result=await localMediaStore.prepare(key,uri,{...storedDouyinMetadata(item),stockAuthorization:authorization},true).result;if(!current())return;if(result.ready){source(result.item,authorization);if(consumed.has(item.awemeId)){await localMediaStore.watched(key).result;continue;}slots++;}}
+     const {uri}=await wait(mediaPrefixCache.register(key,item.playUrl,headers,true,[],expiry,audio));
+     if(!current())return;
+     try{const result=await wait(localMediaStore.prepare(key,uri,{...storedDouyinMetadata(item),stockAuthorization:authorization},true));if(!current())return;if(result.ready){source(result.item,authorization);if(consumed.has(item.awemeId)){await localMediaStore.watched(key).result;continue;}slots++;}}
      catch(error){if((error as {code?:string}).code==='media_traffic_stopped'){service.suspend();return;}if(!current())return;}
     }
    })();running=work;return work.finally(()=>{if(running===work){running=undefined;if(enabled&&offerRevision!==offeredRevision)void service.resume().catch(()=>{});}});
