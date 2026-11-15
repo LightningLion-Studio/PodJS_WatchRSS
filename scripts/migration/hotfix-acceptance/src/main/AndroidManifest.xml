@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ <uses-permission android:name="android.permission.INTERNET"/>
+ <application android:label="Takeover hotfix emulator test"/>
+ <instrumentation android:name="androidx.test.runner.AndroidJUnitRunner" android:targetPackage="com.lightningstudio.watchrss" android:targetProcesses="com.lightningstudio.watchrss"/>
+</manifest>

@@ -106,3 +106,39 @@ flock /tmp/wrss-heavy-podjs-watch.wt-takeover-unknown-files.lock capmem 16G bash
 该命令运行77条路径矩阵、旧版自动续迁与中断、实际原生备份/回滚、未知偏好文件、
 旧混合 blocker 重检、已知业务错误保留、加密上传及12条脱敏差分向量。
 模拟器截图的旧 unknown 失败页仅作历史证据；当前 fixture 改用已知 store 失败，并截图核对旧 unknown 只显示普通检查进度。
+
+### Hotfix release acceptance on a task-owned emulator
+
+Use the actual non-debuggable, formally signed hotfix APK with the native package identity.
+First inspect both source APKs: archived `1.3.3-final` artifacts with a `.compose` coexistence
+applicationId do not prove same-package takeover. Build the frozen Compose source with its
+ordinary applicationId when necessary; sign through the existing isolated signing worker.
+Do not copy signing properties or keys into source snapshots.
+
+Create a new task-owned AVD and private ADB server. Require an emulator serial and
+`ro.kernel.qemu=1` before root/data operations. Let each native APK create its own Room database,
+stop it, and seed only that fresh emulator's synthetic article, memo, font/preset, asset and
+unknown files. Check the same UID across native→PodJS installation, ACTIVE, complete sealed
+backup equality, business records/assets, unknown-file absence, and cold restart.
+Run a separate chain with the exact published 1277 APK: it must actually reach
+BLOCKED/unknown_user_files before upgrading. Require automatic continuation without a retry tap.
+
+For real upload transport acceptance, the optional `hotfix-acceptance.init.gradle` includes a
+separate instrumentation module. It never changes or links into the candidate application.
+Build its CA assets from a new local-only receiver certificate; never include the private key.
+Sign the test APK with the same existing signer using the signing worker's verification-only
+mode. `UploadAcceptanceTest` refuses physical hardware, a debuggable target, a different package,
+or a target code other than 1278. It installs a process-local trust manager for that one test CA,
+preserves normal hostname verification, and proxies the expected log endpoint to the local TLS
+receiver. Firewall the target UID to only that local address/port before starting it.
+The production consent, encryption, OkHttp HTTPS, Keystore receipt, log-number display and
+DELETE must pass; all other target network egress stays rejected. Do not publish either the
+test APK or a synthetic native source APK. Stop and delete the task AVD/server after acceptance.
+
+The native APK version is injected by the external release packaging configuration/Gradle
+properties. Existing usage telemetry imports the application's original pod.config.json;
+inspect the actual bundled JS rather than inferring telemetry version from PackageInfo.
+Keep the established 0.x telemetry convention for this migration-only hotfix. The old release
+ledger predates published 1277; compare against its independently verified archived APK too,
+or use an explicit temporary ledger overlay containing only that already-published release.
+Do not add a publication record for the new candidate before the coordinator publishes it.
