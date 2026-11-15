@@ -82,7 +82,7 @@ interface MediaRoutesProps {
 
 export function MediaRoutes(props: MediaRoutesProps) {
   const batteryTelemetry=props.createBatteryTelemetry?.();
-  onCleanup(()=>{void props.entry.initialVideoPool?.releaseAll().catch(()=>{});void batteryTelemetry?.stop();douyinPreload.stop(props.entry);});
+  onCleanup(()=>{props.entry.savedPlaybackDiagnostic?.end();void props.entry.initialVideoPool?.releaseAll().catch(()=>{});void batteryTelemetry?.stop();douyinPreload.stop(props.entry);});
   createRenderEffect(()=>{if(!props.active())douyinPreload.stop(props.entry);});
   const updateBackground = (platform: "bili" | "douyin", value: boolean) => {
     props.saveMediaSetting(platform, "background-playback", value);
@@ -211,7 +211,8 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ?.onProgress(position, duration)
               .catch((error) => props.setError(String(error)));
           }}
-          onFirstFrame={() => props.douyinReady(props.entry)}
+          onFirstFrame={() => {props.entry.savedPlaybackDiagnostic?.firstFrame();props.douyinReady(props.entry);}}
+          onFailureObserved={error=>props.entry.savedPlaybackDiagnostic?.playbackFailure(error)}
           onCheckpoint={(type, position, duration) => {
             if (props.entry.playback?.url?.startsWith("managed-cache/bili-preview/")) return;
             void props.entry.checkpoint

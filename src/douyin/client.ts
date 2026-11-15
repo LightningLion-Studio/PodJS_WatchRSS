@@ -1,3 +1,4 @@
+import type {ResolutionFacts,ResolutionObservation} from './saved-playback-diagnostics.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
 import {douyinRequestDiagnostic,douyinRetryAfter} from './request-diagnostics.ts';
 import {douyinBench} from './bench.ts';
@@ -32,7 +33,7 @@ export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
 const fail=<T>(code:DouyinErrorCode,message:string):Extract<DouyinResult<T>,{ok:false}>=>({ok:false,code,message});
 export type DouyinAuthState='unknown'|'logged-in'|'logged-out';
-export interface DouyinPlaybackOptions {/** A reload owns a new request even if an abandoned resolution is still pending. */freshRequest?:boolean;forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean}
+export interface DouyinPlaybackOptions {/** A reload owns a new request even if an abandoned resolution is still pending. */freshRequest?:boolean;forceRefresh?:boolean;prefetch?:boolean;feedItem?:DouyinItem;allowDetail?:boolean;observeResolution?:(value:ResolutionObservation)=>void}
 export class DouyinClient {
   private reloadSequence=0;
   private detailCacheTokens=new Map<string,object>();
@@ -91,6 +92,8 @@ export class DouyinClient {
   private readonly now:()=>number;
   private readonly signer:DouyinSigner;
   private readonly saved:NonNullable<DouyinClientOptions["savedStore"]>;
+  private readonly resolutionFacts=new WeakMap<object,ResolutionFacts>();
+  private withResolutionFacts<T>(result:DouyinResult<T>,facts:ResolutionFacts|undefined):DouyinResult<T>{if(facts)this.resolutionFacts.set(result,facts);return result;}
   private readonly detailRequests=new Map<string,Promise<DouyinResult<DouyinContent>>>();
   private readonly feedRequests=new Map<string,Promise<DouyinResult<DouyinFeedPage>>>();
   private detailTimes:number[]=[];
@@ -146,7 +149,7 @@ export class DouyinClient {
   }
   logout(){return this.clearCookie(undefined,this.options.onLogout);}
   async buildPlaybackHeaders():Promise<Record<string,string>>{const cookie=await this.readCookie(),profile=douyinRequestProfile(await resolveDouyinRequestConfig(this.options.requestConfig));return {...profile.headers,...(cookie?{Cookie:cookie}:{})};}
-  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime):Promise<DouyinResult<string>> {
+  private async get(path:string,params:Record<string,string>,method:'GET'|'POST',config?:DouyinRequestConfig,background?:import('../cloud/types.ts').RequestLifetime,observe?:(value:ResolutionFacts)=>void):Promise<DouyinResult<string>> {
     const requestStarted=Date.now(),elapsed=(start:number)=>Math.min(600000,Math.max(0,Date.now()-start));
     await this.cookieWrites.catch(()=>{});
     const generation=this.authGeneration,cookie=await this.readCookie();
@@ -212,7 +215,7 @@ export class DouyinClient {
         appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
         return fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`);
       }
-      } finally {douyinRequestDiagnostic(observed);}
+      } finally {douyinRequestDiagnostic(observed);try{observe?.({httpStatus:observed.http_status,apiStatus:observed.douyin_status_code,requestReason:observed.error_code});}catch{}}
     };
     const first=await attempt();if(!('forbidden' in first))return first;
     if(this.strictMediaTraffic){this.stopMediaTraffic();return fail('TEMPORARILY_UNAVAILABLE','媒体请求已停止');}
@@ -302,12 +305,14 @@ export class DouyinClient {
     const cacheToken={};this.detailCacheTokens.set(id,cacheToken);
     const generation=this.authGeneration;
     const work=(async():Promise<DouyinResult<DouyinContent>>=>{
-      const r=await this.get('/aweme/v1/web/aweme/detail/',{aweme_id:id},'GET');
+      let facts:ResolutionFacts|undefined;
+      const r=await this.get('/aweme/v1/web/aweme/detail/',{aweme_id:id},'GET',undefined,undefined,value=>{facts=value;});
+      this.withResolutionFacts(r,facts);
       if(!r.ok&&r.code==='NOT_LOGGED_IN')return r;
       if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
       if(!r.ok)return r;
-      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
-      catch{return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
+      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return this.withResolutionFacts({ok:true,data,source:'network'},{...facts,detailShape:data.kind});}
+      catch(error){return this.withResolutionFacts(fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED')),{...facts,detailShape:error instanceof Error&&error.message==='响应缺少 aweme_detail'?'missing':'invalid'});}
     })();this.detailRequests.set(key,work);
     try{return await work;}finally{if(this.detailRequests.get(key)===work)this.detailRequests.delete(key);if(this.detailCacheTokens.get(id)===cacheToken)this.detailCacheTokens.delete(id);}
   }
@@ -329,11 +334,13 @@ export class DouyinClient {
     }
     const failure=this.prefetchFailures.get(id);if(options.prefetch&&failure&&failure.until>this.now())return failure.result;
     const r=await this.fetchDetail(id,options);
-    return !r.ok?r:r.data.kind==='video'?{ok:true,data:r.data.item,source:r.source}:fail('UNSUPPORTED','此内容没有视频播放流');
+    return this.withResolutionFacts(!r.ok?r:r.data.kind==='video'?{ok:true,data:r.data.item,source:r.source}:fail('UNSUPPORTED','此内容没有视频播放流'),this.resolutionFacts.get(r));
   }
   async resolvePlayback(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
     const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.forceRefresh===true,options.allowDetail!==false,...(options.freshRequest?[++this.reloadSequence]:[])]);const cached=!options.forceRefresh&&!options.freshRequest?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
-    if(result.ok){const item=await decodableDouyinItem(applyPreferredDouyinPlayback(result.data));if(!item.playUrl.trim()){const unavailable=fail<DouyinItem>('UNSUPPORTED','没有可用的视频播放流');if(options.prefetch)this.cachePrefetchFailure(id,unavailable);return unavailable;}const v=item.variants?.find(v=>v.playUrl===item.playUrl);const trace=new VideoPlaybackTrace('douyin',start);trace.event('api',{apiMs:Date.now()-start,cacheHit:result.source==='feed-cache'?1:0});trace.event('candidate',{width:v?.width,height:v?.height,bitrate:v?.bitrate});for(const url of [item.playUrl,...(item.variants?.find(v=>v.playUrl===item.playUrl)?.playUrls??[]).slice(0,8)])registerVideoResolution(url,trace);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);return {...result,data:item};}
+    const observed=(value:DouyinResult<DouyinItem>)=>{try{options.observeResolution?.({...this.resolutionFacts.get(result),ok:value.ok,...(value.ok?{source:value.source}:{code:value.code}),forceRefresh:options.forceRefresh===true});}catch{}};
+    if(result.ok){const item=await decodableDouyinItem(applyPreferredDouyinPlayback(result.data));if(!item.playUrl.trim()){const unavailable=fail<DouyinItem>('UNSUPPORTED','没有可用的视频播放流');if(options.prefetch)this.cachePrefetchFailure(id,unavailable);observed(unavailable);return unavailable;}const v=item.variants?.find(v=>v.playUrl===item.playUrl);const trace=new VideoPlaybackTrace('douyin',start);trace.event('api',{apiMs:Date.now()-start,cacheHit:result.source==='feed-cache'?1:0});trace.event('candidate',{width:v?.width,height:v?.height,bitrate:v?.bitrate});for(const url of [item.playUrl,...(item.variants?.find(v=>v.playUrl===item.playUrl)?.playUrls??[]).slice(0,8)])registerVideoResolution(url,trace);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);observed(result);return {...result,data:item};}
+    observed(result);
     if(options.prefetch)this.cachePrefetchFailure(id,result);
     appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=${result.code}`);return result;
   }

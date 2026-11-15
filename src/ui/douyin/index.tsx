@@ -1,4 +1,6 @@
 import {douyinBench} from '../../douyin/bench.ts';
+import {prepareSavedDetailPlayback} from '../../douyin/saved-detail-playback.ts';
+import type {DouyinSavedPlaybackDiagnostic} from '../../douyin/saved-playback-diagnostics.ts';
 import {observeDouyinAuth} from './auth-state.ts';
 import {usageTelemetry} from '../../telemetry/host.ts';
 import {DouyinQrLoadTelemetry} from '../../telemetry/qr-load.ts';
@@ -42,6 +44,7 @@ import { PlatformSettingsScreen } from "../PlatformSettingsScreen.tsx";
 import type { Article } from "../service.ts";
 import { SafeQrScreen } from "../SafeQrScreen.tsx";
 import { ShareQrScreen as SharedShareQrScreen } from "../ShareQrScreen.tsx";
+import { DETAIL_SHARE_QR_WIDTH_RATIO } from "../share-qr-layout.ts";
 import type { DouyinClient, DouyinContent, DouyinHistoryEntry, DouyinItem, DouyinResult } from "../../douyin/index.ts";
 
 export type DouyinRoute =
@@ -57,6 +60,7 @@ export type DouyinRoute =
   | { name: "player"; awemeId: string };
 
 export interface DouyinPlayRequest {
+  savedPlaybackDiagnostic?:DouyinSavedPlaybackDiagnostic;
   releaseStartupPreview?:()=>void;
   entrySeq?:number;
   isCurrent?:()=>boolean;
@@ -293,6 +297,8 @@ function FeedScreen(props: DouyinScreenProps) {
 }
 
 function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
+  let playBusy=false,disposed=false;
+  onCleanup(()=>{disposed=true;});
   const [content, setContent] = createSignal<DouyinContent | null>(null), [error, setError] = createSignal("");
   createEffect(() => {
     const id = props.awemeId, route = props.route;
@@ -304,16 +310,19 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
   });
   const item = () => content()?.kind === "video" ? (content() as Extract<DouyinContent, { kind: "video" }>).item : null;
   const play = async () => {
-    const current = item(); if (!current) return;
+    const current = item(); if (!current||playBusy||disposed) return;
+    playBusy=true;
+    let diagnostic:DouyinSavedPlaybackDiagnostic|undefined,published=false;
     try {
-      const result = await props.client.resolvePlayback(current.awemeId);
-      // RssPlayerViewModel allows the stored direct URL when initial refresh fails.
-      const playback = result.ok ? result.data : current.playUrl.trim() && !douyinVideoTarget(current.playUrl) ? current : null;
-      if (!playback) { setError(result.ok ? "播放地址为空" : result.message); return; }
+      const ready=await prepareSavedDetailPlayback(props.client,current,()=>!disposed&&props.active!==false);
+      if(!ready)return;
+      const {playback}=ready;diagnostic=ready.diagnostic;
       // Native history/detail uses a single RssPlayerActivity, never the history/feed list.
-      props.onPlay({ item: current, playback, playlist: [playback], hasMore: false, detailPlayback: true });
+      props.onPlay({ item: current, playback, playlist: [playback], hasMore: false, detailPlayback: true, savedPlaybackDiagnostic:diagnostic });
       props.onNavigate({ name: "player", awemeId: current.awemeId });
-    } catch (error) { setError(String(error)); }
+      published=true;
+    } catch (error) { if(!disposed){diagnostic?.openError();setError(String(error));} }
+    finally{playBusy=false;if(!published)diagnostic?.end();}
   };
   const preset = () => props.preset ?? defaultReaderPreset();
   // Native DouyinDetailActivity renders the article DetailContent: reader title, then the blocks,
@@ -369,7 +378,7 @@ function ShareScreen(props: DouyinScreenProps & { awemeId: string }) {
   const url = douyinShareLink(props.awemeId)??"";
   const [title, setTitle] = createSignal(itemTitle(props.route.name === "share" ? props.route.item : undefined));
   createEffect(() => { void props.client.fetchDetail(props.awemeId).then(result => { if (result.ok) setTitle(result.data.kind === "video" ? itemTitle(result.data.item) : result.data.kind === "note" ? result.data.description.trim() || "抖音图文" : "抖音内容"); }).catch(() => {}); });
-  return <SharedShareQrScreen width={props.width} height={props.height} title={title()} url={url} onClose={props.onBack} onError={message => props.onUnsupported?.(`二维码生成失败：${message}`)} />;
+  return <SharedShareQrScreen width={props.width} height={props.height} title={title()} url={url} qrWidthRatio={DETAIL_SHARE_QR_WIDTH_RATIO} onClose={props.onBack} onError={message => props.onUnsupported?.(`二维码生成失败：${message}`)} />;
 }
 
 /** Native DouyinSettingsActivity renders BiliSettingsScreen + DeleteConfirmDialog; messages toast. */

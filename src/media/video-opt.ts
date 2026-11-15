@@ -82,19 +82,31 @@ export class VideoPlaybackTrace {
   readonly session = ++sequence;
   private firstFrame = false;
   private lastSample = -Infinity;
+  private playbackStarted = Date.now();
+  private readonly earlyWindows = new Set<number>();
   private apiRoute=0;
   setBiliRoute(route:'watch'|'web'|undefined){this.apiRoute=route==='watch'?1:route==='web'?2:0;}
   constructor(private platform:'bili'|'douyin'|'rss', private started = Date.now()) {}
-  event(stage:'api'|'candidate'|'prepare'|'first_frame'|'sample'|'exit', values:Record<string,unknown> = {}) {
-    if(stage==='prepare')this.firstFrame=false;
-    if (!videoOptEnabled('metrics') && !(this.platform==='bili'&&['api','candidate','first_frame'].includes(stage))) return;
-    const allowed = ['apiMs','candidate','width','height','bitrate','sourceGeneration','bytesLoaded','firstByteMs','firstFrameMs','rebufferCount','rebufferMs','droppedFrames','throughputBps','cacheHit'];
+  event(stage:'api'|'candidate'|'prepare'|'first_frame'|'sample'|'early_window'|'exit', values:Record<string,unknown> = {}) {
+    if(stage==='prepare'){this.firstFrame=false;this.playbackStarted=Date.now();this.earlyWindows.clear();}
+    if (!videoOptEnabled('metrics') && stage!=='early_window' && !(this.platform==='bili'&&['api','candidate','first_frame'].includes(stage))) return;
+    const allowed = ['apiMs','candidate','width','height','bitrate','sourceGeneration','bytesLoaded','firstByteMs','firstFrameMs','rebufferCount','rebufferMs','droppedFrames','throughputBps','cacheHit','windowMs','elapsedMs','avgKBps10'];
     const safe:Record<string,number> = {};
     for (const key of allowed) if (typeof values[key] === 'number' && Number.isFinite(values[key])) safe[key] = Math.max(0, Math.floor(values[key] as number));
     appLogger.i('VideoOpt', JSON.stringify({session:this.session,platform:this.platform,stage,apiRoute:this.apiRoute,elapsedMs:Math.max(0,Date.now()-this.started),...safe}));
   }
   sample(state:{hasRenderedFirstFrame?:boolean;sourceGeneration?:number;width?:number;height?:number;metrics?:Record<string,number|undefined>}, presented = true) {
     const metrics = state.metrics ?? {};
+    const elapsedMs=Math.max(0,Date.now()-this.playbackStarted);
+    if(presented&&typeof metrics.bytesLoaded==='number'&&Number.isFinite(metrics.bytesLoaded)&&metrics.bytesLoaded>=0){
+      for(const windowMs of [3000,5000,10000])if(elapsedMs>=windowMs&&!this.earlyWindows.has(windowMs)){
+        this.earlyWindows.add(windowMs);
+        // bytesLoaded is the native player's cumulative network-transfer counter for this prepare generation.
+        // Record the observation time too, so analysis uses the actual sample interval rather than pretending
+        // a delayed poll happened exactly at the target boundary.
+        this.event('early_window',{windowMs,elapsedMs,bytesLoaded:metrics.bytesLoaded,avgKBps10:Math.round(metrics.bytesLoaded*10000/elapsedMs/1024)});
+      }
+    }
     if (state.hasRenderedFirstFrame && presented && !this.firstFrame) { this.firstFrame = true; this.event('first_frame',{...metrics,sourceGeneration:state.sourceGeneration,width:state.width,height:state.height}); }
     if (Date.now()-this.lastSample >= 8000) { this.lastSample=Date.now(); this.event('sample',{...metrics,sourceGeneration:state.sourceGeneration}); }
     // Only native network transfer observations feed adaptation; no inference from ready/position.

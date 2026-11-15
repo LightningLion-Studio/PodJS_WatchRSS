@@ -13,6 +13,8 @@ mock.module('../src/ui/PlatformNotice.tsx',()=>({PendingDisclosure:()=>null}));
 import { DouyinClient } from '../src/douyin/client.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
+import {prepareSavedDetailPlayback} from '../src/douyin/saved-detail-playback.ts';
+import {installSavedIssueSink} from '../src/douyin/saved-issue-events.ts';
 let readyOverride:undefined|(()=>Promise<any>);let client:DouyinClient;let optRecovery=false;let captureOverride:(()=>Promise<void>)|undefined;
 let loginOptions:any,completeLogin:(value:{cookie:string;origin:string})=>void;
 mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any)=>{loginOptions=options;return {result:new Promise(resolve=>completeLogin=resolve),cancel(){}};}}));
@@ -48,6 +50,21 @@ function fixture(opt=false,initial?:any){
  createRoot(stop=>{stops.push(stop);return MediaRoutes({entry,page:()=>entry.page,active:()=>true,playingSource:()=>source,backOffset:()=>0,width:233,height:233,round:true,douyinReady(){},changeDouyinVideo:controller.changeDouyinVideo,selectDouyinTarget:controller.selectDouyinTarget} as any);});return playerProps;
  }};
 }
+test('saved detail diagnostic reaches the production player and remains one issue through forced refresh',async()=>{
+ const f=fixture(),a=item('saved-detail'),issues:unknown[]=[];
+ client.listSaved=async()=>[{platform:'douyin',awemeId:a.awemeId,kind:'favorite',savedAtMillis:Date.now()-15*86400000,shareUrl:'',item:a}];
+ installSavedIssueSink((context,event)=>issues.push({context,event}));
+ try{
+  const ready=await prepareSavedDetailPlayback(client,a,()=>true);expect(ready).toBeDefined();
+  f.controller.douyinPlay({item:a,playback:ready!.playback,playlist:[a],hasMore:false,detailPlayback:true,savedPlaybackDiagnostic:ready!.diagnostic});
+  await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});const entry=f.stack().at(-1)!;
+  expect(entry.savedPlaybackDiagnostic).toBe(ready!.diagnostic);const props=f.render();props.onFailureObserved({code:'source_expired'});
+  client.resolvePlayback=async(_id,options)=>{options?.observeResolution?.({ok:true,forceRefresh:true,source:'network'});return {ok:true,data:{...a,playUrl:'https://video/refreshed'}};};
+  await f.controller.recoverDouyinVideo(entry,false,123,{code:'source_expired'});props.onFirstFrame();props.onFailureObserved({code:'decode_error'});
+  await f.controller.reloadVideo(entry,456);props.onFirstFrame();
+  expect(f.source().url).toBe('https://video/refreshed');expect(issues).toHaveLength(1);
+ }finally{installSavedIssueSink(undefined);}
+});
 test('stock selection uses one validated URI/frame bundle and does not repeat slow native lookups',async()=>{
  const f=fixture(),a=item('a');let readyReads=0;
  client.buildPlaybackHeaders=async()=>{throw Error('redundant secure header read for restored capability');};

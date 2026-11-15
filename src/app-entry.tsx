@@ -2,7 +2,7 @@ import {installIdleDiagnostics} from './diagnostics/idle-host';
 import {afterFirstScreen,startupMark} from './core/startup-trace.ts';
 import {trackDebugMemoryOwner} from '@podjs/framework/debug-memory';
 import {initializeDebugBuild} from './debug/host.ts';
-import {usageTelemetry,setTelemetryDeviceId} from './telemetry/host.ts';
+import {usageTelemetry,setTelemetryDeviceId,initializeSavedPlaybackTelemetry} from './telemetry/host.ts';
 import {getLibrarySyncRepository} from './services.ts';
 import {startAppLogger} from './logs/logger-host.ts';
 import { mount } from "@pocketjs/framework/solid";
@@ -54,6 +54,7 @@ function App(props:{beforeContent?:()=>Promise<void>}){installIdleDiagnostics();
 export function startWatchRssApp(beforeContent?:()=>Promise<void>){
  warmServices();
  startAppLogger(afterFirstScreen(5000));
+ initializeSavedPlaybackTelemetry();
  setTelemetryDeviceId(async()=>{await afterFirstScreen();return (await getLibrarySyncRepository()).deviceId();});
  usageTelemetry.recordAppLaunch();
  mount(()=>App({beforeContent}));

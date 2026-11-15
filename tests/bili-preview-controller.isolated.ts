@@ -25,10 +25,11 @@ mock.module('@pocketjs/framework/lifecycle', () => ({ onFrame() {} }));
 mock.module('../src/cache/host.ts', () => ({ managedCache: {} }));
 mock.module('../src/debug/douyin-host.ts', () => ({ douyinDebug: {} }));
 let resolveRemote: () => Promise<any>, lookup: () => Promise<any>, reports = 0;
+const douyin={listSaved:async()=>[] as any[],buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,_options?:any):Promise<any>=>({ok:false,code:'UNSUPPORTED',message:'fixture'})};
 mock.module('../src/media-services.ts', () => ({
   douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},
   biliClient: { detail:async()=>{throw Error('offline_detail');}, getSession: async () => ({ cookies: { SESSDATA: 'fixture' } }), resolvePlayback: () => resolveRemote(), reportHistory: async () => { reports++; } },
-  biliPreviewCache: { lookup: () => lookup() }, douyinClient: {}, douyinStock: {}, loadLocalBiliDetail: async () => undefined,
+  biliPreviewCache: { lookup: () => lookup() }, douyinClient: douyin, douyinStock: {}, loadLocalBiliDetail: async () => undefined,
 }));
 const { createMediaRouteController } = await import('../src/ui/routes/media-controller.ts');
 const { MediaRoutes } = await import('../src/ui/routes/media.tsx');
@@ -46,7 +47,7 @@ function fixture() {
   } as never); });
   return { controller, errors, get entry() { return entry; }, navigate() { entry = { page: 'settings' }; }, render() {
     createRoot(stop => { stops.push(stop); return MediaRoutes({ entry, page: () => 'video', active: () => true,
-      playingSource: () => source, setError: (value: string) => errors.push(value), douyinReady() {},
+      playingSource: () => source, setError: (value: string) => errors.push(value), douyinReady() {}, recoverRssDouyinVideo:controller.recoverRssDouyinVideo,
     } as never); });
     return player;
   } };
@@ -109,4 +110,31 @@ test('saved RSS video link without CID recovers the cached page when detail look
   await f.controller.openRssVideo({title:'saved',link:'https://www.bilibili.com/video/BVfixture'} as never,'https://www.bilibili.com/video/BVfixture');
   expect(f.entry.page).toBe('video'); expect(f.entry.playback?.url).toBe(local.path);
   expect(f.entry.videoTarget).toMatchObject({kind:'bili',cid:local.cid});
+});
+
+
+test('saved Douyin RSS opening carries one diagnostic through production player callbacks and forced recovery',async()=>{
+ const {AppLogger,installAppLogger}=await import('../src/logs/app-logger.ts');let log='';
+ const logger=new AppLogger({read:async()=>log,size:async()=>log.length,replace:async s=>{log=s;},append:async s=>{log+=s;}});installAppLogger(logger);
+ try{
+  let calls=0;
+  douyin.listSaved=async()=>[{kind:'favorite',savedAtMillis:Date.now()-15*86400000,item:{awemeId:'7'}}];
+  douyin.resolvePlayback=async(_id,options)=>{calls++;options?.observeResolution?.({ok:true,forceRefresh:options.forceRefresh===true,source:'network',httpStatus:200,apiStatus:0,detailShape:'video'});return {ok:true,data:{awemeId:'7',playUrl:'https://fixture.invalid/fresh-'+calls,variants:[]}};};
+  const f=fixture();await f.controller.openRssVideo({id:'local',title:'saved',link:'https://www.douyin.com/video/7'} as never,'https://fixture.invalid/stale');
+  expect(f.entry.savedPlaybackDiagnostic).toBeDefined();const props=f.render();props.onFailureObserved({code:'source_expired'});props.onPlaybackFailure(123,{code:'source_expired'});await flush();
+  expect(calls).toBe(2);expect(f.entry.playback?.url).toBe('https://fixture.invalid/fresh-2');props.onFirstFrame();f.entry.savedPlaybackDiagnostic!.end();await logger.flush();
+  const {analyzeSavedPlayback}=await import('../scripts/douyin-saved-analysis.ts');const data=analyzeSavedPlayback(log);expect(data.local).toHaveLength(1);expect(data.recovered).toBe(1);expect(data.groups[2].played).toBe(1);
+ }finally{installAppLogger(undefined);}
+});
+
+test('saved Douyin failure before player navigation still closes the diagnostic and compares the stored media address',async()=>{
+ const {AppLogger,installAppLogger}=await import('../src/logs/app-logger.ts');let log='';
+ const logger=new AppLogger({read:async()=>log,size:async()=>log.length,replace:async s=>{log=s;},append:async s=>{log+=s;}});installAppLogger(logger);
+ try{
+  douyin.listSaved=async()=>[{kind:'favorite',savedAtMillis:Date.now()-21*86400000,item:{awemeId:'7'}}];
+  douyin.resolvePlayback=async(_id,options)=>{options?.observeResolution?.({ok:false,code:'PARSE_FAILED',forceRefresh:false,httpStatus:200,apiStatus:0,detailShape:'missing'});return {ok:false,code:'PARSE_FAILED',message:'解析失败'};};
+  const f=fixture();await expect(f.controller.openRssVideo({id:'local',title:'saved',link:'https://www.douyin.com/video/7',videoUrl:'https://fixture.invalid/old?x-expires=1700000000'} as never,'https://www.douyin.com/video/7')).rejects.toThrow('解析失败');
+  expect(f.entry.page).toBe('home');await logger.flush();const {analyzeSavedPlayback}=await import('../scripts/douyin-saved-analysis.ts');const data=analyzeSavedPlayback(log);
+  expect(data.groups[2].failed).toBe(1);expect(data.expiredSavedUrls).toBe(1);expect(data.reasons[0]?.reason).toContain('不等于已删除');
+ }finally{installAppLogger(undefined);}
 });
