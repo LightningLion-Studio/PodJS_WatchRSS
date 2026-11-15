@@ -1,6 +1,6 @@
 import {idleHit} from './diagnostics/idle-counters';
 import {clearCloudSqlState} from './cloud/state-sql';
-import {createNoteAssetWriter,createNoteAssetCollector} from './notes/cloud-assets';
+import {createNoteAssetReader,createNoteAssetWriter,createNoteAssetCollector} from './notes/cloud-assets';
 import {readReaderBody} from './reader/body-state.ts';
 import {querySyncPages} from './sync/sql-pages.ts';
 import {readNovelDirectory} from "./reader/novel.ts";
@@ -436,6 +436,7 @@ export async function getLibrarySyncRepository():Promise<SqlLibrarySessionReposi
  return libraryRepository();
 }
 function libraryRepository(){return librarySyncRepository??=new SqlLibrarySessionRepository(db,{
+  noteAssetReader:createNoteAssetReader(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
   noteAssetWriter:createNoteAssetWriter(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
   noteAssetCollector:createNoteAssetCollector(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),
   bookFiles:createBookFiles(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),diagnostic:fields=>appLogger.d('BtSyncPerf',JSON.stringify(fields)),

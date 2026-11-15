@@ -8,7 +8,7 @@ import type {SourceReader,SourceRecord} from './store';
  * Missing metadata/identity/ancestry fails the page; no invented defaults. */
 export type Materialize=(table:string,row:Record<string,unknown>)=>Promise<SourceRecord[]>;
 export const BUSINESS_TABLE_KEYS:Readonly<Record<string,readonly string[]>>=Object.freeze({
- sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],memo_notes:['note_id'],memo_folders:['folder_id'],sync_source_states:['url'],articles:['id'],channels:['id'],sync_article_deletions:['article_id'],sync_book_reading_dirty:['item_id'],syncv2_rss_states:['id'],
+ sync_books:['book_id'],sync_book_reading:['book_id','chapter_index'],article_register_state:['article_id'],memo_notes:['note_id'],memo_assets:['asset_id'],memo_folders:['folder_id'],sync_source_states:['url'],articles:['id'],channels:['id'],sync_article_deletions:['article_id'],sync_book_reading_dirty:['item_id'],syncv2_rss_states:['id'],
 });
 export function encodeLocator(values:unknown[]){return 'hex-v1:'+values.map(value=>hex(encodeUtf8(String(value),'strict')).toUpperCase()).join(':');}
 function decodeLocator(value:string){
@@ -94,6 +94,7 @@ export async function materializeFrozen(table:string,row:Record<string,unknown>)
  const text=(key:string)=>{if(typeof row[key]!=='string')throw Error('source_record_invalid');return row[key] as string;};
  const bool=(key:string)=>{const n=number(key);if(n!==0&&n!==1)throw Error('source_record_invalid');return n===1;};
  if(table==='memo_notes'){const value={noteId:text('note_id'),folderId:row.folder_id===null?null:text('folder_id'),title:text('title'),markdown:text('markdown'),plainText:text('plain_text'),contentHash:text('content_hash'),baseContentHash:text('base_content_hash'),baseMarkdown:text('base_markdown'),pinned:bool('pinned'),createdAt:number('created_at'),updatedAt:number('updated_at'),modifiedBy:text('modified_by'),deleted:bool('deleted'),deletedAt:number('deleted_at')};return [{kind:'note',logicalId:value.noteId,value,...(value.createdAt>0?{addedAtMillis:value.createdAt}:{})}];}
+ if(table==='memo_assets'){const value={assetId:text('asset_id'),mime:text('mime'),originalFilename:text('original_filename'),updatedAt:number('updated_at'),sourceDeviceId:text('source_device_id'),deleted:bool('deleted'),deletedAt:number('deleted_at')};return [{kind:'asset',logicalId:value.assetId,value}];}
  if(table==='memo_folders'){const value={folderId:text('folder_id'),name:text('name'),sortOrder:number('sort_order'),updatedAt:number('updated_at'),modifiedBy:text('modified_by'),deleted:bool('deleted'),deletedAt:number('deleted_at')};return [{kind:'folder',logicalId:value.folderId,value}];}
  if(table==='sync_source_states'){const value={url:text('url'),sourceDeviceId:text('source_device_id'),title:text('title'),description:text('description'),siteUrl:row.site_url===null?null:text('site_url'),imageUrl:row.image_url===null?null:text('image_url'),createdAt:number('created_at'),updatedAt:number('updated_at'),sortOrder:number('sort_order'),isPinned:bool('is_pinned'),deleted:bool('deleted'),deletedAt:number('deleted_at')};return [{kind:'source',logicalId:value.url,value,...(value.createdAt>0?{addedAtMillis:value.createdAt}:{})}];}
  throw Error('source_reconciliation_required');

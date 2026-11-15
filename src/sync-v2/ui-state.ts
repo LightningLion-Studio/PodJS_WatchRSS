@@ -55,6 +55,7 @@ export interface SyncV2StateReader {
 export interface SyncV2UiStateOptions {
  /** Product boundary keeps the legacy core error contract intact. */
  productErrors?:boolean;
+ bodyError?:()=>string|null;
  /** The opened runtime, or null when Sync v2 is not open on this device. */
  runtime:SyncV2RuntimeHandle|null;
  /** The WatchAccountControl created through runtime.accountControl(...). */
@@ -172,8 +173,9 @@ export class WatchSyncV2UiState {
   const choice=state.pendingChoice?await this.choiceState(state,side):null;
   const recoveryCopies=(await control.recoveryCopies()).map(c=>({copyId:c.copyId,createdAtMillis:c.createdAtMillis,expiresAtMillis:c.expiresAtMillis}));
   const publication=this.publication(state),signingUnavailable=await this.o.runtime?.signingStatus?.()==='signing_state_unavailable';
-  const phase:SyncV2UiStatePhase=this.inflightSyncs>0?'syncing':state.pendingChoice?'awaiting_choice':signingUnavailable||unopenableNotes.length||state.cloud?.blockedCommitOid||this.lastErrorCode==='storage_pressure'?'blocked':this.lastErrorCode?'error':'idle';
-  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:signingUnavailable?'signing_state_unavailable':this.lastErrorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
+  const errorCode=this.lastErrorCode??this.o.bodyError?.()??null;
+  const phase:SyncV2UiStatePhase=this.inflightSyncs>0?'syncing':state.pendingChoice?'awaiting_choice':signingUnavailable||unopenableNotes.length||state.cloud?.blockedCommitOid||errorCode==='storage_pressure'?'blocked':errorCode?'error':'idle';
+  return cleanSnapshot<SyncV2UiState>({enabled:true,phase,lastSyncedAtMillis:this.lastSyncedAtMillis,errorCode:signingUnavailable?'signing_state_unavailable':errorCode,choice,unopenableNotes,recoveryCopies,keepDiscardedLocalChanges7Days:state.keepDiscardedLocalChanges7Days===true,gates,publication,ownDeviceId:await this.o.runtime?.signingDeviceId?.()??null});
  }
  /** canMerge/reason only exist where the planner can answer: the open preview,
   * its fingerprint cache, or one fresh pendingChoice() pass. */

@@ -1,7 +1,7 @@
 /** C3 fixed service key, pinned in the same protected store as cloud identity. */
-import {validateP256PublicKey} from '@podjs/framework/p256';
+import {validateP256PublicKey} from '@podjs/framework/p256-public-key';
 import {hex,unhex} from '@podjs/framework/crypto';
-import {exact,hexId,canonical,uint,checkD64,oid,type Scope} from './protocol';
+import {digest,exact,hexId,canonical,uint,checkD64,oid,type Scope} from './protocol';
 import {unb64,b64,sameScope} from './wire';
 import {verifySigned,type SigningPort} from './signing';
 import type {IdentityStorage} from './identity-store';
@@ -52,7 +52,6 @@ export async function signedAvailability(pin:WatchServiceKeyPin,port:SigningPort
  if(b.version!==2||b.entityKey!==expected.entityKey||b.bodyRevision!==expected.bodyRevision||b.recipeOid!==expected.recipeOid||!['source-pending','cloud-ready','source-unavailable'].includes(b.status))throw Error('invalid_schema');
  hexId(b.entityKey,64);hexId(b.bodyRevision,32);oid(b.recipeOid,'recipe');hexId(b.storeId,32);if(checkD64(b.receiptRevision)==='0')throw Error('invalid_schema');uint(b.createdAtMillis);uint(b.expiresAtMillis);
  if(b.expiresAtMillis<=b.createdAtMillis||b.expiresAtMillis-b.createdAtMillis>604800000)throw Error('invalid_schema');
- const {digest}=await import('./protocol');
  if(b.status==='cloud-ready'?b.blobOidsHash!==digest(expected.blobOids):b.blobOidsHash!==null)throw Error('fingerprint_mismatch');
  return pin.verify(port,'wrss.sync.v2/availability-sign',value,scope,now,readOnly);
 }

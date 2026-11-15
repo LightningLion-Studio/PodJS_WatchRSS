@@ -1,3 +1,4 @@
+import {isBodyTombstone,tombstoneBodyDescription} from './body-binding';
 /** Durable index publication journal. No body worker or account-choice apply. */
 import {sameBusinessRevision} from './business-revision';
 import {checkedResumeOffset} from './resume';
@@ -18,7 +19,7 @@ import {NOTE_SEGMENTS_FEATURE,NOTE_TEXT_BUDGET,STATE_LIMIT,sealSegmentedNote,seg
 import {encodeBase64,base64ToBytes} from '@podjs/framework/bytes';
 import type {Statement} from '@podjs/framework/sql-projection';
 const copy=<T>(x:T):T=>JSON.parse(canonical(x));
-export interface BodyManifest {bodyRevision:string;promiseId:string|null;recipeOid:string|null;opaqueContentId:string|null;contentBytes:number|null;}
+export interface BodyManifest {bodyRevision:string|null;promiseId:string|null;recipeOid:string|null;opaqueContentId:string|null;contentBytes:number|null;}
 export type BodyResolver=(entry:any,existing:any)=>Promise<BodyManifest|null>;
 /** Authenticated segment objects retained with a decoded cloud row (25.7). */
 export const storedSegments=(segments:PriorSegments)=>({noteRevision:segments.noteRevision,objects:segments.objects.map(o=>({oid:o.oid,sealed:encodeBase64(o.sealed)}))});
@@ -84,11 +85,11 @@ export class WatchIndexPublisher {
     const context={entityKey:entry.entityKey,noteId:c.meta.logicalId},local=readConflicts(c.state,context,['note-conflicts.v1']),remote=readConflicts(existing.state,context,['note-conflicts.v1']);
     if(local||remote){c.state.payload.noteConflicts=mergeConflicts(context.noteId,local??conflictSet(context.noteId,[]),remote??conflictSet(context.noteId,[]));c.state.requiredFeatures=[...new Set([...c.state.requiredFeatures,'note-conflicts.v1'])].sort();}
    }
-   const body=this.resolveBody?await this.resolveBody(entry,existing):null;
+   let body;try{body=tombstoneBodyDescription(c,existing)??(this.resolveBody?await this.resolveBody(entry,existing):null);}catch(error){if((error as Error).message!=='body_channel_source_missing')throw error;heldEdits=true;continue;}
    if(existing&&(!body||['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].every(k=>canonical((body as any)[k])===canonical(existing.row[k])))&&canonical(existing.meta)===canonical(c.meta)&&canonical(conflictNeutral(existing.state))===canonical(conflictNeutral(c.state))&&existing.row.addedAtMillis===c.addedAtMillis)continue;
    if(c.state.noteSegments.length)throw Error('unsupported_feature');
    const meta=await sealV2(this.crypto,this.keys.id,this.keys.content,this.http.scope,'meta',this.keys.version,jsonBytes(c.meta)),state={oid:await this.sealState(entry.entityKey,c,existing,alias,objects,bindings)};objects.set(meta.oid,meta.bytes);
-   const hasBody=['article','book','asset'].includes(c.meta.kind),old=rows.get(entry.entityKey),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
+   const hasBody=!isBodyTombstone(c)&&['article','book','asset'].includes(c.meta.kind),old=rows.get(entry.entityKey),bodyRevision=hasBody?hex(await this.crypto.random(16)):null,promiseId=hasBody?hex(await this.crypto.random(16)):null;
    const row={entityKey:entry.entityKey,metaOid:meta.oid,stateOid:state.oid,addedAtMillis:c.addedAtMillis,rowSequence:entry.rowSequence,deleted:c.state.payload.deleted===true,bodyRevision,promiseId,recipeOid:null,opaqueContentId:null,contentBytes:null,requiredFeatures:[],...(body??{})};
    // No unproved field merge: an advanced account must be reconciled by the frozen
    // business adapter before replacing an overlapping authenticated row.
@@ -120,6 +121,7 @@ export class WatchIndexPublisher {
   if(!this.http.indexWrite||input.kind==='rollback'&&!this.http.historyRestore||input.kind!=='rollback'&&!this.http.choiceApply)throw Error('feature_disabled');
   await this.http.capabilities();let before=await this.store.readStableState();if(canonical(before)!==canonical(input.expected))throw Error('choice_stale');
   if(!before.account||before.cloud?.pins?.accountOid!==before.account.oid)throw Error('choice_stale');if(before.cloud?.pendingPublish||before.cloud?.preparingPublication)throw Error('publication_pending');if(before.cloud?.witnessConflict)throw Error('ref_continuity_unavailable');if(before.cloud?.blockedCommitOid)throw Error('unsupported_feature');
+  if(input.kind!=='rollback'){const records=[];for(const entry of input.records){if(!['book','asset'].includes(entry.candidate.meta.kind)){records.push(entry);continue;}const existing=before.cloud?.current?.treeRoot?await this.store.cloudRow(before.cloud.current.treeRoot,entry.entityKey):null,body=tombstoneBodyDescription(entry.candidate,existing);records.push(body?{...entry,manifest:body}:this.resolveBody?{...entry,manifest:await this.resolveBody(entry,existing)}:entry);}input={...input,records};}
   this.preflightRecords(input.records);const {deviceId,alias,own,requestId}=input;hexId(deviceId,32);hexId(requestId,32);checkD64(own.revision);
   let sequence=before.cloud?.deviceSequence??'0';if(own.commitOid){const signed=await this.store.readHeader(own.commitOid)??await this.ownHeader(own.commitOid);const body=await verifyCommit(this.crypto,b64(await this.crypto.signingKey(alias)),signed,own.commitOid,this.http.scope);if(body.authorDeviceId!==deviceId)throw Error('signature_invalid');if(compareD64(body.deviceSequence,sequence)>0)sequence=body.deviceSequence;}
   sequence=nextD64(sequence);const reserved=copy(before);reserved.cloud={...reserved.cloud,deviceSequence:sequence,preparingPublication:{kind:input.kind,requestId,...(input.applyPlan?{applyPlan:input.applyPlan}:{}),capturedLocalRevision:before.localChangeRevision}};const checks:any[]=[];if(input.applyPlan){checks.push({sql:"INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM podjs_sql_programs WHERE binding=? AND id=? AND status='ready' AND root=?) THEN 1 ELSE 0 END",params:[input.applyPlan.binding,input.applyPlan.id,input.applyPlan.root]},{sql:'DELETE FROM podjs_sql_cas_guard'});const r=(input.applyPlan as any).reservation;if(r)checks.push({sql:'INSERT INTO podjs_sql_cas_guard SELECT CASE WHEN EXISTS(SELECT 1 FROM podjs_resource_quota WHERE binding=? AND id=? AND bytes=?) THEN 1 ELSE 0 END',params:[r.binding,r.id,r.bytes]},{sql:'DELETE FROM podjs_sql_cas_guard'});}await this.store.controlUpdate(before,reserved,checks);before=reserved;this.preparing=requestId;try{
@@ -267,6 +269,6 @@ export class WatchIndexPublisher {
   if(plan.explicit){const before=await this.store.readState(),next=copy(before);if(before.cloud?.pendingPublish?.requestId!==plan.requestId)throw Error('choice_stale');next.cloud.pendingPublish={...next.cloud.pendingPublish,phase:'confirmed',result};await this.store.observationUpdate(before,next);return result;}
   // R2: a local change of a quarantined note is not uploaded; it stays unsent
   // until the next pull keeps it as a new note.
-  const {before}=await this.pending(),next=copy(before);next.hasUnsentEdits=plan.heldEdits===true;next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result}};await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);return result;
+  const {before}=await this.pending(),next=copy(before);next.hasUnsentEdits=plan.heldEdits===true;next.acknowledgedLocalChangeRevision=plan.capturedLocalRevision;next.editBase={accountOid:plan.commitOid,generation:before.rollbackGeneration};next.cloud={...next.cloud,pendingPublish:null,lastPublication:{commitOid:plan.commitOid,localRevision:plan.capturedLocalRevision,result,...(plan.heldEdits?{heldEdits:true}:{})}};await this.store.finishUpload(before,next,plan.requestId,plan.commit?plan:undefined);return result;
  }
 }

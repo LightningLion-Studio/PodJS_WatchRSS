@@ -6,7 +6,8 @@ import {checkedResumeOffset} from './resume';
 import {digest,canonical,jsonBytes,hexId,uint,oid,type Scope} from './protocol';
 import {sealV2,openV2,type EnvelopeCrypto} from './sealed';
 import type {SigningPort} from './signing';
-import {signControl} from './signing';
+import {signControl,verifySigned} from './signing';
+import {b64} from './wire';
 import {readControlRefs} from './control-refs';
 import type {ApprovedKey} from './head-pins';
 import {recipe,recipeBlock,contentIdFromHash,type ContentRecipe,type ContentRange} from './content-schema';
@@ -202,8 +203,8 @@ return unit();
   const rawRecipe=await this.store.bytes(ro.cache,ro.total),opened=await openV2(this.crypto,this.keys.id,this.keys.readContentKey??this.keys.content,this.scope,ro.oid,rawRecipe);
   if(!this.keys.readContentKey&&opened.header.keyVersion!==this.keys.version||canonical(recipe(opened.value))!==canonical(r))throw Error('body_revision_changed');
   if(b.refs){const refs=b.refs,deviceId=refs.authorDeviceId;
-   if(deviceId){const approved=await this.options.approved(deviceId);if(approved.keyId!==refs.keyId)throw Error('signature_invalid');await (await import('./signing')).verifySigned(this.crypto,approved.publicKey,'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
-   else {const publicKey=await this.crypto.signingKey(this.options.alias,false);await (await import('./signing')).verifySigned(this.crypto,(await import('./wire')).b64(publicKey),'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
+   if(deviceId){const approved=await this.options.approved(deviceId);if(approved.keyId!==refs.keyId)throw Error('signature_invalid');await verifySigned(this.crypto,approved.publicKey,'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
+   else {const publicKey=await this.crypto.signingKey(this.options.alias,false);await verifySigned(this.crypto,b64(publicKey),'wrss.sync.v2/recipe-refs-sign',refs.body,refs.signature);}
    if(canonical(refs.body)!==canonical({scope:this.scope,recipeOid:ro.oid,blobOids:r.blocks.map(block=>block.oid)}))throw Error('closure_incomplete');
   }else {const http=readOnly?this.remote.http.readOnly(check):this.remote.http,window=await http.negotiate([],[]);await readControlRefs(http,this.crypto,this.options.approved,window.windowId,{type:'recipe',oid:ro.oid,value:r});}
 

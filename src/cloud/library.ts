@@ -1,4 +1,5 @@
-import {decodeNoteCloudState,NOTES_STATE_OBJECT,NOTES_ASSETS_OBJECT} from '../notes/cloud-state';
+import {NOTE_IMAGE_LIMIT,NOTE_ARCHIVE_LIMIT} from '../notes/cloud-assets';
+import {encodeNoteCloudState,exportNoteMarkdown,noteMarkdownPath,decodeNoteCloudState,NOTES_STATE_OBJECT,NOTES_ASSETS_OBJECT} from '../notes/cloud-state';
 import type {MemoNote} from '../notes/types';
 import {cpuWorkAsync,cpuWork,cpuJsonParse,cpuJsonStringify,cpuSort} from '@podjs/framework/cpu-work';
 import {rethrowSnapshotDeferred} from './snapshot-deferral';
@@ -26,8 +27,10 @@ import {knownRecordValue} from './compatibility';
 import {canonical,type RecordDocument,type RecordWorkProgress} from './records';
 export interface CloudLibrarySnapshot {articles:readonly ExportedArticle[];sources:readonly SyncedSource[];stateArticles:readonly ExportedArticle[];pendingPrivateBodies?:boolean;pendingPrivateArticleIds?:readonly string[]}
 export interface CloudLibraryRepository extends Partial<CloudBookPort> {
+ cloudNotes?(check?:()=>void):Promise<{notes:MemoNote[];assetKeys:string[]}>;
+ cloudNoteAsset?(key:string,check?:()=>void):Promise<Uint8Array>;
  mergeCloudNotes?(notes:readonly MemoNote[],check?:()=>void):Promise<number>;
- mergeCloudNoteAsset?(key:string,bytes:Uint8Array):Promise<number>;
+ mergeCloudNoteAsset?(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null):Promise<number>;
  collectCloudNoteAssets?(check:()=>void):Promise<number>;
  setCloudProgress?(sink?:(unit:string)=>Promise<void>):void;
  setCloudDiagnostic?(sink?:(fields:Record<string,string|number>)=>void):void;
@@ -193,7 +196,7 @@ export class WatchCloudLibraryAdapter {
   for(const [id,doc]of this.pendingReading)if(sources.has(doc.value.sourceId)&&!this.matchedReading.has(id))return 'all' as const;
   return requested;
  }
- async exportPayloads(full:boolean,deferBooks=false):Promise<{materialize?:()=>Promise<void>;objects:LogicalObject[];fingerprint:string;articleIds?:string[];bookIds?:string[];removedArticleIds?:string[];removedArticleUrls?:string[];removedObjectNames?:string[];pendingPrivateArticles?:number}>{
+ async exportPayloads(full:boolean,deferBooks=false):Promise<{materialize?:()=>Promise<void>;objects:LogicalObject[];fingerprint:string;articleIds?:string[];bookIds?:string[];removedArticleIds?:string[];removedArticleUrls?:string[];removedObjectNames?:string[];pendingPrivateArticles?:number;pendingNotes?:number}>{
   this.guard.require();if(!full)return {objects:[],fingerprint:''};const s=await this.repository.cloudSnapshot(true,()=>this.guard.require());const pending=new Set(s.pendingPrivateArticleIds??(s.pendingPrivateBodies?s.articles.filter(a=>!a.contentText.trim()&&!a.contentHtml?.trim()).map(a=>a.articleId):[]));
   const retired=new Set(s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId));for(const id of retired)pending.delete(id);
   const rows=cpuSort(s.articles.filter(a=>!retired.has(a.articleId)&&!pending.has(a.articleId)&&!a.deleted&&(privateCloudBody(a)||a.favoriteSaved||a.watchLaterSaved)),(a,b)=>a.articleId<b.articleId?-1:a.articleId>b.articleId?1:0);
@@ -216,10 +219,36 @@ export class WatchCloudLibraryAdapter {
    const object:LogicalObject={name:privateBook.packagePath,bytes:bytes??new Uint8Array(),privateBook,contentSha256:preview?.sha256??await this.crypto.sha256(bytes!)};objects.push(object);bookIds.push(book.bookId);
    if(preview){const expected=preview;deferred.push(async()=>{this.guard.require();const body=await this.repository.cloudBookBody?.(book.bookId);if(!body||body.length!==expected.size||await this.crypto.sha256(body)!==expected.sha256)throw Error('cloud_book_package_changed');object.bytes=body;});}
   }
+  let pendingNotes=0;
+  if(this.repository.cloudNotes){
+   try{
+    const snapshot=await this.repository.cloudNotes(()=>this.guard.require()),noteObjects:LogicalObject[]=[],noteFingerprints:unknown[]=[];
+    if(snapshot.notes.length){
+     const state=encodeNoteCloudState(snapshot.notes);if(state.length>NOTE_ARCHIVE_LIMIT||snapshot.notes.length>10000)throw Error('cloud_note_state_too_large');
+     noteObjects.push({name:NOTES_STATE_OBJECT,bytes:state});noteFingerprints.push(await this.crypto.sha256(state));
+     const archive=new Map<string,Uint8Array>();let size=22;
+     const add=(path:string,bytes:Uint8Array)=>{size+=bytes.length+76+2*utf8Encode(path).length;if(size>NOTE_ARCHIVE_LIMIT||archive.size>=10000)throw Error('cloud_note_archive_too_large');if(archive.has(path))throw Error('cloud_note_path_invalid');archive.set(path,bytes);};
+     for(const n of snapshot.notes.filter(n=>!n.deleted)){
+      add(noteMarkdownPath(n.noteId),exportNoteMarkdown(n));
+     }
+     for(const key of snapshot.assetKeys){
+      this.guard.require();if(!this.repository.cloudNoteAsset)throw Error('cloud_note_assets_unavailable');
+      const bytes=await this.repository.cloudNoteAsset(key,()=>this.guard.require());if(bytes.length>NOTE_IMAGE_LIMIT)throw Error('cloud_note_asset_too_large');add('notes/assets/'+key,bytes);
+     }
+     if(archive.size){const bytes=writeWrss(archive);noteObjects.push({name:NOTES_ASSETS_OBJECT,bytes,compress:false});noteFingerprints.push(await this.crypto.sha256(bytes));}
+    }
+    objects.push(...noteObjects);fingerprints.push(['notes',...noteFingerprints]);
+    for(const name of [NOTES_STATE_OBJECT,NOTES_ASSETS_OBJECT])if(!noteObjects.some(o=>o.name===name))removedObjectNames.push(name);
+   }catch(error){
+    // Keep the previous complete own note domain, and never retire it on a
+    // missing/oversize/changing file. Other private domains can still publish.
+    this.guard.require();pendingNotes=1;fingerprints.push(['notes','pending']);
+   }
+  }
   // Hash/size verification still runs for unchanged syncs. Only transfer and
   // guest allocation wait until a new snapshot actually needs these bodies.
   let materialized=false;const materialize=deferred.length?async()=>{if(materialized)return;for(const load of deferred)await load();materialized=true;}:undefined;
-  return {objects,...(materialize?{materialize}:{}),removedObjectNames,removedArticleUrls:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.url),removedArticleIds:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId),fingerprint:await this.crypto.sha256(utf8Encode(canonical(fingerprints))),articleIds:[...new Set(rows.flatMap(a=>[a.articleId,...(a.cloudLegacyArticleIds??[])]))],bookIds,pendingPrivateArticles:pending.size+missingBooks};
+  return {objects,pendingNotes,...(materialize?{materialize}:{}),removedObjectNames,removedArticleUrls:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.url),removedArticleIds:s.stateArticles.filter(a=>a.deleted||!(a.independentSaved||a.favoriteSaved||a.watchLaterSaved)&&Math.max(a.independentChangedAt,a.favoriteChangedAt,a.watchLaterChangedAt)>0).map(a=>a.articleId),fingerprint:await this.crypto.sha256(utf8Encode(canonical(fingerprints))),articleIds:[...new Set(rows.flatMap(a=>[a.articleId,...(a.cloudLegacyArticleIds??[])]))],bookIds,pendingPrivateArticles:pending.size+missingBooks};
  }
  private async decode(bytes:Uint8Array,state:boolean,inflate=this.crypto.gunzip):Promise<{sources:SyncedSource[];articles:ExportedArticle[]}>{
   const root=cpuJsonParse(utf8Decode(bytes));
@@ -263,7 +292,7 @@ export class WatchCloudLibraryAdapter {
     // Legacy archives also contain Markdown envelopes. notes-state is the sole
     // text authority; archive text must never overwrite a merged note.
     if(!path.startsWith('notes/assets/'))continue;
-    const key=path.slice('notes/assets/'.length);if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(key))throw Error('cloud_note_asset_path_invalid');
+    const key=path.slice('notes/assets/'.length);if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(key))throw Error('cloud_note_asset_path_invalid');
     const cp=options?.checkpoint,unit='note-asset:'+key;await cp?.check();if(cp?.has(unit))continue;
     const bytes=await readWrssEntry(assets,path,options?.inflate??this.crypto.gunzip,{yield:this.crypto.yieldTurn},directory);
     noteChanged+=await this.repository.mergeCloudNoteAsset(key,bytes!);await cp?.commit(unit);
