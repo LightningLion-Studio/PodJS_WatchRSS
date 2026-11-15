@@ -237,8 +237,8 @@ export class LocalArticleManifestStore {
    articles.push({cloudReadingItemId:num(r.id),articleId:id,...(identity?{cloudRssArticleId:id,cloudLegacyArticleIds:[identity.localArticleId,identity.nativeArticleId].filter(x=>x!==id)}:{}),sourceDeviceId:str(r.native_reading_source)||(m&&str(m.reading_source)&&clock===num(m.reading_clock)?str(m.reading_source):device),url,title:str(r.title)||url,siteName:str(r.channel_title),excerpt:str(r.summary),contentHtml:null,contentText:'',imageUrl:nullable(r.preview_image)??nullable(r.image_url),contentHash:m&&hash&&hash===str(m.body_hash)?str(m.content_hash):hash||await hashJavaText(url,this.codec),importedAt:num(r.fetched_at),updatedAt:num(r.fetched_at),rssSourceUrl:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_url),rssSourceTitle:str(r.channel_url)==='watchrss://phone-imports'?null:str(r.channel_title),independentSaved:str(r.channel_url)==='watchrss://phone-imports',independentChangedAt:str(r.channel_url)==='watchrss://phone-imports'?num(r.fetched_at):0,independentSortOrder:0,favoriteSaved:!!num(favorite?.saved),favoriteChangedAt:num(favorite?.changed_at),favoriteSortOrder:num(favorite?.sort_order),watchLaterSaved:!!num(later?.saved),watchLaterChangedAt:num(later?.changed_at),watchLaterSortOrder:num(later?.sort_order),deleted:false,deletedAt:0,readingProgress:Math.fround(num(r.progress??r.reading_progress)),readingPositionBytes:num(r.position_bytes),readingPositionContentHash:str(r.position_hash),readingPositionChangedAt:clock,isRead:!!num(r.is_read)});
   }return {articles,next:rows.length===limit?num(rows.at(-1)!.id):undefined};
  }
- async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls));}
- private async snapshotValue(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[]):Promise<PreparedArticle[]> {
+ async snapshot(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[],readOnly=false):Promise<PreparedArticle[]>{return repositoryWork(f=>this.report(f),'localSnapshot',()=>this.snapshotValue(readingPrepared,canonicalIds,bookMode,check,urls,readOnly));}
+ private async snapshotValue(readingPrepared=false,canonicalIds=false,bookMode=false,check?:()=>void,urls?:readonly string[],readOnly=false):Promise<PreparedArticle[]> {
   await playbackWork.wait(check);
   if(urls?.length===0)return [];
   await new ArticleKeepStore(this.db).initialize();
@@ -412,7 +412,7 @@ export class LocalArticleManifestStore {
    }
   }
   if(await libraryRevision(this.db)!==revision)throw new Error("Local library changed during sync snapshot");
-  for(let at=0;at<cacheUpdates.length;at+=100){const statements:{sql:string;params?:SqlParams}[]=[];for(const update of cacheUpdates.slice(at,at+100)){await checkpoint();statements.push(...await this.cacheMetadataStatements(update.row,update.prepared,update.reencoded));}await this.db.transaction([...(this.encodingGeneration?[projectionGuard(this.encodingGeneration)]:[]),revisionGuard(revision),...statements]);}
+  for(let at=0;!readOnly&&at<cacheUpdates.length;at+=100){const statements:{sql:string;params?:SqlParams}[]=[];for(const update of cacheUpdates.slice(at,at+100)){await checkpoint();statements.push(...await this.cacheMetadataStatements(update.row,update.prepared,update.reencoded));}await this.db.transaction([...(this.encodingGeneration?[projectionGuard(this.encodingGeneration)]:[]),revisionGuard(revision),...statements]);}
   trace('snapshot.complete');
   return out;
   }finally{try{await this.flushStableProgress();}finally{this.preparationRevision=previousPreparation;this.cacheRows=previousCacheRows;this.reencodedBodies.clear();this.db=originalDb;this.codec=originalCodec;this.text=originalText;}}
@@ -421,7 +421,7 @@ export class LocalArticleManifestStore {
  private reusableBody(row:Row):CachedBodyManifest|null{const p=this.reusableBodies.get(num(row.id));return p?{bodyHash:p.manifest.bodyHash,bodyByteCount:p.manifest.bodyByteCount,chunkSize:p.manifest.chunkSize,chunkHashes:[...p.manifest.chunkHashes]}:null;}
  projectionBindings(){return new Map(this.bodySourceIds);}
  restoreProjectionBindings(bindings:ReadonlyMap<string,number>){this.bodySourceIds=new Map([...bindings].filter(([,id])=>id>0));}
- async materializeRequested(prepared:PreparedArticle,prefetched?:Row):Promise<PreparedArticle>{
+ async materializeRequested(prepared:PreparedArticle,prefetched?:Row,freezeFresh=false):Promise<PreparedArticle>{
   if(prepared.encodedBody||!prepared.manifest.bodyAvailable)return prepared;
   const itemId=this.bodySourceIds.get(prepared.article.articleId);if(itemId===undefined)throw new Error('Cached sync body source is missing');
   const row=prefetched??(await this.db.query(this.rowSelect()+' WHERE a.id=?',[itemId]))[0];if(!row)throw new Error('Cached sync body source disappeared');
@@ -436,7 +436,7 @@ export class LocalArticleManifestStore {
   if(!body.available)throw new Error('Cached sync body file is unavailable');
   const actual=await prepareArticle({...prepared.article,contentHtml:body.contentHtml,contentText:body.contentText},{...this.codec,encode:async body=>{const bytes=await this.codec.encode(body);return await matchGzipHash(bytes,prepared.manifest.bodyHash,this.codec.sha256)??bytes;}},true);
   actual.manifest.deleted=prepared.manifest.deleted;
-  if(JSON.stringify(actual.manifest)!==JSON.stringify(prepared.manifest)){
+  if(!freezeFresh&&JSON.stringify(actual.manifest)!==JSON.stringify(prepared.manifest)){
    const changed=Object.keys(prepared.manifest).filter(key=>JSON.stringify((prepared.manifest as unknown as Record<string,unknown>)[key])!==JSON.stringify((actual.manifest as unknown as Record<string,unknown>)[key]));
    throw new Error('Cached sync body changed during export: '+changed.join(','));
   }

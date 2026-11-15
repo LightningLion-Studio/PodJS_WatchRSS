@@ -1,4 +1,5 @@
 import {onlyChangedSql} from '@podjs/framework/sql-changes';
+import type {ReceiptBoundary} from './library-resume/store';
 import {querySyncPages} from "./sql-pages.ts";
 import type {SqlDatabase,SqlParams} from '../core/types.ts';
 import type {SyncedSource} from './library-wire.ts';
@@ -26,24 +27,25 @@ const stateSql=onlyChangedSql(`INSERT INTO sync_source_states(url,source_device_
 export class SqlSourceSyncStore {
  constructor(private readonly db:SqlDatabase,private readonly uri:SourceUriPort,private readonly now=Date.now,private readonly onChannelRemoved?:(content:{channel:{id:number;url:string};itemIds:number[]})=>Promise<void>){}
  private async hostLabel(url:string):Promise<string>{const t=nativeTrim(url),u=t.startsWith('http://')||t.startsWith('https://')?t:'https://'+t;const p=await this.uri.parseUri(u);return nativeTrim((p.valid?p.host??'':'').replace(/^www\./,''));}
- async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false):Promise<number>{
+ async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false,receipt?:ReceiptBoundary):Promise<number>{
+  if(receipt&&sources.length!==1)throw Error('BUSINESS_REJECTED');
   if(!this.db.transactionChanges)throw new Error('Source sync requires committed transaction counts');let applied=0;
   for(const source of sources){
    for(const value of [source.createdAt,source.updatedAt,source.sortOrder,source.deletedAt])if(!Number.isSafeInteger(value))throw new Error('Invalid source clock');
-   const url=normalizeSourceUrl(source.url);if(url.length>2048||whitespace.test(url))continue;const parsed=await this.uri.parseAndroid(url);
-   if(!parsed.valid||!['http','https'].includes(parsed.scheme?.toLowerCase()??'')||!nativeTrim(parsed.host??'')||nativeTrim(url).toLowerCase()==='https://watchrss.local/import-content')continue;
+   const url=normalizeSourceUrl(source.url);if(url.length>2048||whitespace.test(url)){if(receipt)throw Error('BUSINESS_REJECTED');continue;}const parsed=await this.uri.parseAndroid(url);
+   if(!parsed.valid||!['http','https'].includes(parsed.scheme?.toLowerCase()??'')||!nativeTrim(parsed.host??'')||nativeTrim(url).toLowerCase()==='https://watchrss.local/import-content'){if(receipt)throw Error('BUSINESS_REJECTED');continue;}
    const title=nativeTrim(source.title)?source.title:await this.hostLabel(url);
    // Freeze the current library revision before conflict reads. A concurrent
    // local edit invalidates the transaction instead of accepting a stale delete.
    const revision=await libraryRevision(this.db),old=(await this.db.query('SELECT * FROM sync_source_states WHERE url=?',[url]))[0];
    const clock=source.updatedAt||source.deletedAt||source.sortOrder||source.createdAt;
-   if(!authoritative&&old&&(clock<Number(old.updated_at)||clock===Number(old.updated_at)&&deviceOrder(source.sourceDeviceId||remoteDeviceId)<deviceOrder(String(old.source_device_id))))continue;
-   if(!authoritative&&!old){const local=(await this.db.query('SELECT created_at,sort_order FROM channels WHERE url=?',[url]))[0];if(local&&clock<Math.max(Number(local.created_at),-Number(local.sort_order)))continue;}
+   if(!authoritative&&old&&(clock<Number(old.updated_at)||clock===Number(old.updated_at)&&deviceOrder(source.sourceDeviceId||remoteDeviceId)<deviceOrder(String(old.source_device_id)))){if(receipt)await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);continue;}
+   if(!authoritative&&!old){const local=(await this.db.query('SELECT created_at,sort_order FROM channels WHERE url=?',[url]))[0];if(local&&clock<Math.max(Number(local.created_at),-Number(local.sort_order))){if(receipt)await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);continue;}}
    if(source.deleted){
     const updated=source.updatedAt>0?source.updatedAt:source.deletedAt>0?source.deletedAt:source.sortOrder>0?source.sortOrder:source.createdAt,deletedAt=source.deletedAt>0?source.deletedAt:updated;
     const channel=this.onChannelRemoved?(await this.db.query('SELECT id,url FROM channels WHERE url=?',[url]))[0]:undefined;
     const itemIds=channel?(await querySyncPages(this.db,'SELECT id FROM articles WHERE channel_id=? ORDER BY id',[channel.id])).map(row=>n(row.id)):[];
-    const counts=await this.db.transactionChanges([revisionGuard(revision),{sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,source.sortOrder,source.isPinned?1:0,1,deletedAt]},{sql:'DELETE FROM channels WHERE url=?',params:[url]}]);
+    const committed=await this.db.transactionChanges([...(receipt?.before??[]),revisionGuard(revision),{sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,source.sortOrder,source.isPinned?1:0,1,deletedAt]},{sql:'DELETE FROM channels WHERE url=?',params:[url]},...(receipt?.after('merged')??[])]),counts=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+3);
     if(channel)await this.onChannelRemoved!({channel:{id:n(channel.id),url:s(channel.url)},itemIds});if(counts.slice(1).some(n=>n>0))applied++;continue;
    }
    const updated=source.updatedAt>0?source.updatedAt:source.sortOrder>0?source.sortOrder:source.createdAt,now=this.now(),order=source.sortOrder!==0?source.sortOrder:updated>0?updated:now;
@@ -51,7 +53,7 @@ export class SqlSourceSyncStore {
     ON CONFLICT(url) DO UPDATE SET title=excluded.title,description=excluded.description,image_url=excluded.image_url,sort_order=excluded.sort_order,is_pinned=excluded.is_pinned
     WHERE ?=1 OR ?>COALESCE((SELECT updated_at FROM sync_source_states WHERE url=channels.url),max(-channels.sort_order,channels.created_at)) OR (?=COALESCE((SELECT updated_at FROM sync_source_states WHERE url=channels.url),max(-channels.sort_order,channels.created_at)) AND ?>?)`,params:[url,title,nativeTrim(source.description)?source.description:source.siteUrl,source.imageUrl,source.createdAt>0?source.createdAt:now,-order,source.isPinned?1:0,authoritative?1:0,updated,updated,deviceOrder(source.sourceDeviceId||remoteDeviceId),deviceOrder(localDeviceId)]},
     {sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,order,source.isPinned?1:0,0,0]}];
-   const changes=await this.db.transactionChanges(statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})));applied+=changes.slice(1).some(n=>n>0)?1:0;
+   const committed=await this.db.transactionChanges([...(receipt?.before??[]),...statements.map(x=>({...x,sql:onlyChangedSql(x.sql)})),...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);applied+=changes.slice(1).some(n=>n>0)?1:0;
   }return applied;
  }
  async export(localDeviceId:string,urls?:readonly string[],readOnly=false):Promise<SyncedSource[]>{

@@ -83,6 +83,7 @@
     "net.http",
     "net.download",
     "data.files.chunks",
+    "data.files.resumable",
     "system.browser",
     "system.browser.inApp",
     "system.browser.inApp.theme",

@@ -11,6 +11,7 @@ import {buildCursorResponse,buildManifestResponse,buildManifestFrames,buildChunk
 import type {PreparedArticle} from './article-export.ts';
 import {LibrarySnapshotBusyError} from './manifest-contention';
 import type {WatchLocalObjectSession} from '../sync-v2/local-session';
+import type {ResumeSessionPort} from './library-resume/host';
 const {string,trim,bool,optLong}=wireFields;
 /** Byte deltas, including the four-byte prefix; never article/resource counts. */
 export interface TransferByteProgress {direction:'read'|'write';bytes:number}
@@ -45,6 +46,7 @@ export interface SessionActionResult {request:JsonObject;response:JsonObject;ack
 /** Opaque connection identity generated locally; never taken from wire fields. */
 export interface SyncActionContext {readonly session:object; checkCancelled?:()=>void; onCancel?:(cancel:()=>void)=>()=>void; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
 export interface LibrarySessionOptions {
+ resume?:ResumeSessionPort;
  localObjects?:WatchLocalObjectSession;
  actionSession?:object;
  acquireSession?:()=>()=>void;
@@ -133,6 +135,10 @@ export class LibrarySyncSession {
    const localId=await this.repository.deviceId();this.check();
    while(true){
     this.status({phase:'request'});let request=await this.read(timeout);releaseSession??=this.options.acquireSession?.();
+    if(request.action==='syncLibraryResume'){
+     if(!this.options.resume||this.options.filterRequest?.(request))throw Error('CAPABILITY_MISMATCH');
+     await this.options.resume.run(request,this.connection,this.actionContext);return results;
+    }
     if(typeof request.action==='string'&&request.action.startsWith('syncObjectsV2.')&&this.options.localObjects){if(await this.options.localObjects.handle(request,this.connection))return results;continue;}
     const accepted=!persistent&&bool(request.requestPersistentSession)&&bool(request.supportsPersistentSession);
     if(accepted){persistent=true;this.persistentSession=true;timeout=15*60*1000;this.log.event("server.session.accepted");}
@@ -174,7 +180,7 @@ export class LibrarySyncSession {
       if(descriptor&&this.options.offerIpEndpoint)try{ipUpgradeAccepted=await this.options.offerIpEndpoint(descriptor);}catch{}
       this.log.event("request.syncLibrary.probe",{remoteDeviceId:request.deviceId,ipUpgradeAccepted});
       const account=await this.options.handleAction?.accountBinding?.();this.check();
-      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...await this.options.localObjects?.probe(request),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
+      response={...buildProbeResponse(localId,{...this.options.handleAction?.capabilities,...this.options.capabilities,supportsManifestBatches:true,supportsPersistentSession:true,supportsTransferByteProgress:true},this.options.watchCapabilities),...await this.options.localObjects?.probe(request),...await this.options.resume?.probe(request,this.actionContext),...(account?{account}:{}),sentAt:this.now(),ipUpgradeAccepted};
      }
      else if(request.action==='syncDomains')response=await this.domainAction(request,persistent,localId);
      else if(this.options.handleAction){
@@ -196,7 +202,7 @@ export class LibrarySyncSession {
     if(pending&&ack?.success&&ack.applied){this.check();try{await this.repository.markSuccess(pending);this.check();libraryApplied=true;this.log.event("library.peerState.mark.success",{remoteDeviceId:pending.remoteDeviceId,localSeqMax:pending.localSeqToInclusive,remoteSeqApplied:pending.remoteSeqToInclusive,remoteProtocolVersion:pending.remoteProtocolVersion,fullSnapshot:pending.fullSnapshot});}catch(error){this.log.event("library.peerState.mark.failed",{message:"<redacted>"},"E");throw error;}}
     else if(request.action==='syncBooks')libraryApplied=!!(response.success&&ack?.success&&ack.applied);
     else if(pending)this.log.event("library.peerState.mark.skipped",{ackSuccess:ack?.success??null,ackApplied:ack?.applied??null,localSeqMax:pending.localSeqToInclusive,remoteSeqPendingAck:pending.remoteSeqToInclusive},"W");
-    if(response.success===true&&ack?.success&&ack.applied){this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
+    if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount')await this.options.resume?.accountConfirmed(request,this.actionContext);this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
     this.appliedAckJobs=[];
     this.log.event("server.exchange.complete",{persistentSession:persistent,completedActions:results.length+1,elapsedMs:this.log.elapsed()});
     const result={request,response,ack,libraryApplied};results.push(result);this.options.onActionCompleted?.(result);this.status({phase:'complete',applied:libraryApplied});

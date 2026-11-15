@@ -1,0 +1,20 @@
+import {VerifiedChunkStore,type ObjectLease,type VerifiedObject} from '@podjs/framework/verified-chunk-store';
+import {parseNoteAssetInventory,type NoteAssetInventory} from '../note-assets';
+import {CHUNK_BYTES,fail,hash,utf8,b64,strictJson,exact,type ObjectDescriptor,type Row} from './wire';
+import type {ResumeStore,ReceiptBoundary} from './store';
+import {decodeSyncUtf8} from '../protocol';
+export type AssetHost=<T>(method:string,args:Row)=>Promise<T>;
+export interface FrozenAsset extends NoteAssetInventory {chunkHashes:string[]}
+/** Files keep the existing notes/assets and conflict paths. A SQL asset record
+ * and APPLIED share one transaction; file publication is durable and immutable
+ * before that commit. Existing v14 writers continue to use their original paths.
+ */
+export class ResumeAssets {
+ constructor(private readonly host:AssetHost,private readonly store:ResumeStore,private readonly chunks:VerifiedChunkStore){}
+ async read(key:string){const path='notes/assets/'+key,stat=await this.host<{file:boolean;size:number}>('file.stat',{path});if(!stat.file||stat.size>5*1024*1024||stat.size<0)fail('SOURCE_CHANGED');const before=await this.host<{sha256:string;size:number}>('file.hash',{path});if(before.size!==stat.size)fail('SOURCE_CHANGED');const bytes=new Uint8Array(stat.size);for(let at=0;at<bytes.length;){const r=await this.host<{dataBase64:string;size:number}>('file.read',{path,offset:at,maxBytes:Math.min(CHUNK_BYTES,bytes.length-at)}),part=b64(r.dataBase64,CHUNK_BYTES);if(r.size!==bytes.length||part.length!==Math.min(CHUNK_BYTES,bytes.length-at))fail('SOURCE_CHANGED');bytes.set(part,at);at+=part.length;}const after=await this.host<{sha256:string;size:number}>('file.hash',{path});if(before.sha256!==after.sha256||after.size!==bytes.length||hash(bytes)!==after.sha256)fail('SOURCE_CHANGED');return bytes;}
+ async freeze():Promise<FrozenAsset[]>{const r=await this.host<{entries:{file:boolean;path:string}[]}>('file.list',{path:'notes/assets'}),all:FrozenAsset[]=[];for(const e of r.entries){if(!e.file||!e.path.startsWith('notes/assets/'))continue;const key=e.path.slice(13);if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(key)||/\.(?:part|pending|async-\d+|kv-migration)$/.test(key))continue;const bytes=await this.read(key),chunkHashes:string[]=[];for(let at=0;at<bytes.length;at+=CHUNK_BYTES)chunkHashes.push(hash(bytes.subarray(at,at+CHUNK_BYTES)));all.push({storageKey:key,sha256:hash(bytes),size:bytes.length,chunkHashes});}return all.sort((a,b)=>a.storageKey<b.storageKey?-1:1);}
+ private metadata(d:ObjectDescriptor){const m=exact(strictJson(decodeSyncUtf8(b64(d.metadataBase64,16384)),false),['storageKey','sha256','size']);let a:NoteAssetInventory;try{a=parseNoteAssetInventory([m])[0]!;}catch{fail('BUSINESS_REJECTED');}if(a.storageKey!==d.businessId||a.sha256!==d.sha256||a.size!==d.size||a.size>5*1024*1024)fail('OBJECT_CONFLICT');return a;}
+ private conflict(a:NoteAssetInventory){return 'notes/asset-conflicts/'+hash(utf8(a.storageKey))+'-'+a.sha256+'.bin';}
+ async publish(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor){const a=this.metadata(d);try{return await this.chunks.finalize(lease,object,'notes/assets/'+a.storageKey);}catch(e){if(!(e instanceof Error)||e.message!=='PUBLICATION_CONFLICT')throw e;return this.chunks.finalize(lease,object,this.conflict(a));}}
+ async apply(d:ObjectDescriptor,path:string,boundary:ReceiptBoundary){const a=this.metadata(d),conflict=path===this.conflict(a);if(path!=='notes/assets/'+a.storageKey&&!conflict)fail('OBJECT_CONFLICT');const verified=await this.host<{sha256:string;size:number}>('file.hash',{path});if(verified.sha256!==d.sha256||verified.size!==d.size)fail('HASH_MISMATCH');await this.store.db.transaction([...boundary.before,{sql:'INSERT INTO library_resume_assets(storage_key,sha256,size,path,outcome) VALUES(?,?,?,?,?) ON CONFLICT(storage_key,sha256) DO UPDATE SET path=excluded.path,outcome=excluded.outcome',params:[a.storageKey,a.sha256,a.size,path,conflict?'retainedLocal':'merged']},...boundary.after(conflict?'retainedLocal':'merged')]);}
+}

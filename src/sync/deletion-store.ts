@@ -1,4 +1,5 @@
 import {ArticleKeepStore} from './article-keep';
+import type {ReceiptBoundary} from './library-resume/store';
 import type {SqlDatabase,SqlParams} from '../core/types.ts';
 import {SyncSavedStateStore,deviceOrder} from './saved-state.ts';
 import {rebuildArticleBody,requireMetadataOnlyBody,type SyncBodyCodec,type SyncBodyPayload} from './article-body.ts';
@@ -10,22 +11,22 @@ import {libraryRevision,revisionGuard} from './revision.ts';
 export class SyncArticleDeletionStore {
  private readonly saved:SyncSavedStateStore;
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec,private readonly resolveLocal:LocalBodyResolver,private readonly onItemsRemoved?:(ids:number[])=>Promise<void>){this.saved=new SyncSavedStateStore(db);}
- async receive(article:WireIncomingArticle,payload:SyncBodyPayload,peer:string,authoritative=false):Promise<number>{
+ async receive(article:WireIncomingArticle,payload:SyncBodyPayload,peer:string,authoritative=false,receipt?:ReceiptBoundary,metadataTombstone=false):Promise<number>{
   if(!this.db.transactionChanges)throw new Error('Deletion requires committed transaction counts');
   if(!article.deleted||article.articleId!==payload.articleId)throw new Error('Invalid deletion identity');
   if(!Number.isSafeInteger(article.deletedAt))throw new Error('Invalid deletion clock');
   if(!(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1')).length)throw new Error('Initialize sync identity first');
   const keep=await new ArticleKeepStore(this.db).lookup(article.articleId,article.url);
   const revision=await libraryRevision(this.db),local=await this.resolveLocal(article,keep?.item_id==null?undefined:Number(keep.item_id));
-  if(payload.metadataOnly)await requireMetadataOnlyBody(payload,local?.body??null,!!local?.available,!!local?.hasStoredBody,this.codec);
-  else await rebuildArticleBody(payload,local?.available?local.body:null,this.codec);
+  if(!metadataTombstone){if(payload.metadataOnly)await requireMetadataOnlyBody(payload,local?.body??null,!!local?.available,!!local?.hasStoredBody,this.codec);
+  else await rebuildArticleBody(payload,local?.available?local.body:null,this.codec);}
   const incomingClock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
-  if(!authoritative&&keep&&(Number(keep.changed_at)>incomingClock||Number(keep.changed_at)===incomingClock&&String(keep.source_order)>deviceOrder(article.sourceDeviceId||peer)))return 0;
+  if(!authoritative&&keep&&(Number(keep.changed_at)>incomingClock||Number(keep.changed_at)===incomingClock&&String(keep.source_order)>deviceOrder(article.sourceDeviceId||peer))){if(receipt)await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);return 0;}
   // A delayed delete must not undo a later, durably received keep decision.
   // Encoding-cache provenance is an accepted sync receipt, not a feed fetch.
   if(local&&!authoritative){const live=(await this.db.query('SELECT updated_at,source_device_id FROM article_sync_encoding_cache WHERE item_id=?',[local.itemId]))[0];
    const clock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
-   if(live&&(Number(live.updated_at)>clock||Number(live.updated_at)===clock&&deviceOrder(String(live.source_device_id))>deviceOrder(article.sourceDeviceId||peer)))return 0;
+   if(live&&(Number(live.updated_at)>clock||Number(live.updated_at)===clock&&deviceOrder(String(live.source_device_id))>deviceOrder(article.sourceDeviceId||peer))){if(receipt)await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);return 0;}
   }
   const statements:{sql:string;params?:SqlParams}[]=[revisionGuard(revision)],counted:number[]=[];let deletionIndex=-1;
   if(authoritative||article.deletedAt>0){
@@ -42,6 +43,6 @@ export class SyncArticleDeletionStore {
     ON CONFLICT(article_id) DO UPDATE SET url=excluded.url,changed_at=excluded.changed_at,source_device_id=excluded.source_device_id,source_order=excluded.source_order`,params:[article.articleId,article.url,article.deletedAt,peer,deviceOrder(peer),...flags]});
   }
   for(const type of ['favorite','watchLater'] as const){const next=this.saved.remoteStatements({articleId:article.articleId,url:article.url,type,saved:article[`${type}Saved`],changedAt:article[`${type}ChangedAt`],sortOrder:0,sourceDeviceId:peer},{authoritative,tombstone:true});if(next.length)counted.push(statements.length);statements.push(...next);}
-  const changes=await this.db.transactionChanges(statements);if(local&&deletionIndex>=0&&changes[deletionIndex]!>0)await this.onItemsRemoved?.([local.itemId]);return counted.some(i=>changes[i]!>0)?1:0;
+  const committed=await this.db.transactionChanges([...(receipt?.before??[]),...statements,...(receipt?.after('merged')??[])]),changes=committed.slice(receipt?.before.length??0);if(local&&deletionIndex>=0&&changes[deletionIndex]!>0)await this.onItemsRemoved?.([local.itemId]);return counted.some(i=>changes[i]!>0)?1:0;
  }
 }

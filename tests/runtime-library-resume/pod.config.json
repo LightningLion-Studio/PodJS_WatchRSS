@@ -1,0 +1,1 @@
+{"entry":"main.tsx","appId":"dev.podjs.tests.resumec","name":"RESUMEC Verification","versionName":"0.1.0","versionCode":1,"capabilities":["data.sqlite","data.kv","data.secure","data.files.chunks","data.files.resumable","data.uri","crypto.basic","net.tcp"]}

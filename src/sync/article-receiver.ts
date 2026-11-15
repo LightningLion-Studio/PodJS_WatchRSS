@@ -1,4 +1,5 @@
 import {ArticleKeepStore} from './article-keep';
+import type {ReceiptBoundary} from './library-resume/store';
 import {articleState} from './article-provenance';
 import {projectionGuard} from './domain-definitions';
 import {onlyChangedSql} from '@podjs/framework/sql-changes';
@@ -37,11 +38,11 @@ export class SyncArticleReceiver {
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec,private readonly files:ArticleReceiveFiles,
   private readonly migrateReading:(id:number)=>Promise<void>,private readonly now=Date.now,private readonly resolveLocal?:LocalBodyResolver,private readonly encodingGeneration?:()=>string|undefined,private readonly timing?:(stage:string,ms:number)=>void){this.saved=new SyncSavedStateStore(db);this.keeps=new ArticleKeepStore(db);}
  async receive(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false):Promise<void>{await this.apply(article,payload,remoteDeviceId,authoritative,false);}
- async receiveWithStats(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false,targetItemId?:number,verifiedTarget=false):Promise<number>{
+ async receiveWithStats(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative=false,targetItemId?:number,verifiedTarget=false,receipt?:ReceiptBoundary):Promise<number>{
   if(!this.db.transactionChanges)throw new Error("Counted article receive requires transactionChanges");
-  return this.apply(article,payload,remoteDeviceId,authoritative,true,targetItemId,verifiedTarget);
+  return this.apply(article,payload,remoteDeviceId,authoritative,true,targetItemId,verifiedTarget,receipt);
  }
- private async apply(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative:boolean,counted:boolean,targetItemId?:number,verifiedTarget=false):Promise<number>{
+ private async apply(article:IncomingArticle,payload:SyncBodyPayload,remoteDeviceId:string,authoritative:boolean,counted:boolean,targetItemId?:number,verifiedTarget=false,receipt?:ReceiptBoundary):Promise<number>{
   let mark=globalThis.performance?.now?.()??Date.now();const phase=(label:string)=>{const next=globalThis.performance?.now?.()??Date.now();this.timing?.(label,next-mark);mark=next;};
   await this.keeps.initialize();const generation=this.encodingGeneration?.();
   if(article.deleted)throw new Error("Deleted article requires the deletion coordinator");
@@ -87,7 +88,7 @@ export class SyncArticleReceiver {
   if(existing)await this.migrateReading(Number(existing.id));
   const revision=await libraryRevision(this.db),liveClock=Math.max(article.updatedAt,(article as IncomingArticle&{independentChangedAt?:number}).independentChangedAt??0,article.favoriteChangedAt,article.watchLaterChangedAt);
   const deleted=(await this.db.query('SELECT changed_at,source_order FROM sync_article_deletions WHERE article_id=?',[article.articleId]))[0];
-  if(!authoritative&&deleted&&(Number(deleted.changed_at)>liveClock||Number(deleted.changed_at)===liveClock&&String(deleted.source_order)>=deviceOrder(article.sourceDeviceId||remoteDeviceId)))return 0;
+  if(!authoritative&&deleted&&(Number(deleted.changed_at)>liveClock||Number(deleted.changed_at)===liveClock&&String(deleted.source_order)>=deviceOrder(article.sourceDeviceId||remoteDeviceId))){if(receipt)await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);return 0;}
   const now=this.now(),updated=Math.max(article.updatedAt,article.importedAt),fetched=updated>0?updated:now,progress=Math.fround(Math.max(0,Math.min(1,article.readingProgress)));
   const title=nonblank(article.title)?article.title:article.url,excerpt=nonblank(article.excerpt)?article.excerpt:null;
   const sourceTitle=source?(nonblank(article.rssSourceTitle??"")?article.rssSourceTitle!:nonblank(article.siteName)?article.siteName:source.replace(/^https?:\/\//i,"").split(/[/:?#]/)[0]!):"独立文章";
@@ -164,8 +165,8 @@ export class SyncArticleReceiver {
   const keepStart=statements.length;const keep=article as IncomingArticle&{independentChangedAt?:number;legacyArticleIds?:readonly string[]};
   statements.push(...this.keeps.record(article.articleId,article.url,Math.max(article.updatedAt,keep.independentChangedAt??0,article.favoriteChangedAt,article.watchLaterChangedAt),article.sourceDeviceId||remoteDeviceId,idSql,idParams,keep.legacyArticleIds??[]));
   phase('receive.statements');
-  const guarded=statements.map(s=>({...s,sql:onlyChangedSql(s.sql)}));
-  if(counted){const changes=await this.db.transactionChanges!(guarded);phase('receive.commit');if(changes.length!==statements.length)throw new Error("Invalid committed transaction change receipt");const saves=countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);return changes[1]!>0||saves||changes.slice(keepStart).some(n=>n>0)||changes.some((n,i)=>n>0&&/^(?:INSERT INTO articles\b|INSERT INTO article_reading_state\b|UPDATE articles\b)/.test(statements[i]!.sql))?Math.max(1,saves):0;}
+  const guarded=[...(receipt?.before??[]),...statements.map(s=>({...s,sql:onlyChangedSql(s.sql)})),...(receipt?.after('merged')??[])];
+  if(counted){const committed=await this.db.transactionChanges!(guarded);phase('receive.commit');if(committed.length!==guarded.length)throw new Error("Invalid committed transaction change receipt");const changes=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+statements.length);const saves=countedIndexes.reduce((n,i)=>n+(changes[i]!>0?1:0),0);return changes[1]!>0||saves||changes.slice(keepStart).some(n=>n>0)||changes.some((n,i)=>n>0&&/^(?:INSERT INTO articles\b|INSERT INTO article_reading_state\b|UPDATE articles\b)/.test(statements[i]!.sql))?Math.max(1,saves):0;}
   await this.db.transaction(guarded);return 0;
  }
 }
