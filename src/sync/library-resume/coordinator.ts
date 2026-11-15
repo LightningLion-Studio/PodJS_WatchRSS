@@ -193,9 +193,9 @@ export class LibraryResumeConnection {
   const began=await this.request('begin',b.jobId,plan,null,p as unknown as Row),epoch=Number(began.epoch),beginResult=began.result!;
   if(!Number.isSafeInteger(epoch)||epoch<1||beginResult.selectionDigest!==p.selectionDigest)fail('CAPABILITY_MISMATCH');
   local=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.begin(this.scope,fake,{...p,intent:'resume'},this.ports.connectionId,epoch,null,'source')));
-  if(beginResult.state==='CANCELLED')fail('JOB_CANCELLED');
+  if(beginResult.state==='CANCELLED'){await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.cancel(local)));fail('JOB_CANCELLED');}
   if(beginResult.state==='COMPLETE'){await this.acceptCompletion(local,beginResult.completion as unknown as Completion);return;}
-  try{source??=await this.ports.source(o.watchSnapshot,b.selection);}catch(e){const error=resumeError(e);if(error.code!=='SOURCE_CHANGED')throw error;await this.request('cancel',b.jobId,plan,epoch,{reason:'SOURCE_CHANGED'});throw new ResumeError('SOURCE_CHANGED');}
+  try{source??=await this.ports.source(o.watchSnapshot,b.selection);}catch(e){const error=resumeError(e);if(error.code!=='SOURCE_CHANGED')throw error;await this.request('cancel',b.jobId,plan,epoch,{reason:'SOURCE_CHANGED'});await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.cancel(local)));throw new ResumeError('SOURCE_CHANGED');}
   if(objectsRoot(source.objects.map(v=>v.objectId))!==p.objectsRoot)fail('SOURCE_CHANGED');
   let start=0,previous='0'.repeat(64);for(let index=0;index<p.pageObjectCounts.length;index++){
    const entries=source.objects.slice(start,start+p.pageObjectCounts[index]!);const digest=pageDigest(plan,index,start,entries,previous),payload={pageIndex:index,startIndex:start,previousPageDigest:previous,pageDigest:digest,entries};
@@ -207,7 +207,7 @@ export class LibraryResumeConnection {
   const applied=new Map<string,AppliedReceipt>();for(const [id,v]of observed)if(v.receipt){this.validateReceipt(v.receipt,b.jobId,plan,id);applied.set(id,v.receipt);}
   while(applied.size<source.objects.length){
    const ready=source.objects.filter(d=>!applied.has(d.objectId)&&d.dependsOn.every(id=>applied.has(id))).sort((a,b)=>a.objectId<b.objectId?-1:1);if(!ready.length)fail('PLAN_CONFLICT');
-   for(const d of ready){const item=observed.get(d.objectId);if(!item)fail('RECEIPT_CONFLICT');for(const [from,to]of item.missing)for(let index=from;index<to;index++){this.check();let bytes:Uint8Array;try{bytes=await this.withHeartbeat(source.read(d,index),b.jobId,plan,epoch);}catch(e){this.ports.diagnostic?.(e);const error=resumeError(e);if(error.code!=='SOURCE_CHANGED')throw error;await this.request('cancel',b.jobId,plan,epoch,{reason:'SOURCE_CHANGED'});throw new ResumeError('SOURCE_CHANGED');}if(hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');await this.request('putChunk',b.jobId,plan,epoch,{objectId:d.objectId,chunkIndex:index,dataBase64:encodeBase64(bytes)});}
+   for(const d of ready){const item=observed.get(d.objectId);if(!item)fail('RECEIPT_CONFLICT');for(const [from,to]of item.missing)for(let index=from;index<to;index++){this.check();let bytes:Uint8Array;try{bytes=await this.withHeartbeat(source.read(d,index),b.jobId,plan,epoch);}catch(e){this.ports.diagnostic?.(e);const error=resumeError(e);if(error.code!=='SOURCE_CHANGED')throw error;await this.request('cancel',b.jobId,plan,epoch,{reason:'SOURCE_CHANGED'});await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.cancel(local)));throw new ResumeError('SOURCE_CHANGED');}if(hash(bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');await this.request('putChunk',b.jobId,plan,epoch,{objectId:d.objectId,chunkIndex:index,dataBase64:encodeBase64(bytes)});}
     const result=(await this.request('apply',b.jobId,plan,epoch,{objectId:d.objectId})).result!,receipt=result.receipt as unknown as AppliedReceipt;this.validateReceipt(receipt,b.jobId,plan,d.objectId);applied.set(d.objectId,receipt);
    }
   }
