@@ -2,7 +2,7 @@
 import {mount} from '@pocketjs/framework/solid';
 import {Text} from '@pocketjs/framework/components';
 import {kv} from '@podjs/framework/watch';
-import {sqlite,uri,tcp,byteStreams,hostOperation,secureStorage,fileChunks,base64ToBytes} from '@podjs/framework/services';
+import {sqlite,uri,tcp,byteStreams,hostOperation,delay,secureStorage,fileChunks,base64ToBytes} from '@podjs/framework/services';
 import {VerifiedChunkStore} from '@podjs/framework/verified-chunk-store';
 import type {SqlDatabase} from '../../src/core/types';
 import {initializeSchema} from '../../src/core/schema';
@@ -21,7 +21,7 @@ const chunks=new VerifiedChunkStore(<T,>(m:string,a:Row)=>hostOperation<T>(m,a).
 const account=new WatchAccountStore({get:async k=>(await secureStorage.get(k))??null,set:(k,v)=>secureStorage.set(k,v),remove:k=>secureStorage.delete(k)});
 const randomId=async()=>Array.from(base64ToBytes((await hostOperation<{bytesBase64:string}>('crypto.random',{bytes:16}).result).bytesBase64),b=>b.toString(16).padStart(2,'0')).join('');
 const repo=new SqlLibrarySessionRepository(db,{codec,text,uri:{parseUri:text.parseUri,parseAndroid:v=>uri.parse(v,'android')},files:{storeText:async(_k,v)=>v,hydrate:async v=>v},migrateReading:async()=>{},cleanupRemovedContent:async()=>{}});
-const resume=new ResumeApplicationService({diagnostic:e=>{errors.push(e instanceof Error?e.message+' '+JSON.stringify(e)+' '+e.stack:String(e));},assetHost:<T,>(m:string,a:Row)=>hostOperation<T>(m,a).result,store,chunks,account,repository:async()=>repo,randomId,localPermission:()=>true,readFile:async(path,size)=>{const bytes=new Uint8Array(size);for(let at=0;at<size;){const r=await fileChunks.read(path,at,Math.min(65536,size-at)),part=base64ToBytes(r.dataBase64);if(!part.length||r.size!==size)throw Error('LOCAL_IO');bytes.set(part,at);at+=part.length;}return bytes;}});
+const resume=new ResumeApplicationService({diagnostic:e=>{errors.push(e instanceof Error?e.message+' cause='+String(e.cause)+' '+JSON.stringify(e)+' '+e.stack:String(e));},assetHost:<T,>(m:string,a:Row)=>hostOperation<T>(m,a).result,store,chunks,account,repository:async()=>repo,randomId,localPermission:()=>true,readFile:async(path,size)=>{const bytes=new Uint8Array(size);for(let at=0;at<size;){const r=await fileChunks.read(path,at,Math.min(65536,size-at)),part=base64ToBytes(r.dataBase64);if(!part.length||r.size!==size)throw Error('LOCAL_IO');bytes.set(part,at);at+=part.length;}return bytes;}});
 let drop='';let errors:string[]=[];
 function stream(id:string){return new StreamFrameConnection(new HostSyncByteStream(id,byteStreams));}
 async function serveData(raw:StreamFrameConnection,first:Row){let initial:Row|undefined=first;const connection:SyncFrameConnection={readFrame:t=>{if(initial){const r=initial;initial=undefined;return Promise.resolve(r);}return raw.readFrame(t);},writeFrame:async r=>{if(drop&&r.action==='syncLibraryResume'&&r.phase===drop&&r.type==='response'&&r.success){drop='';await raw.close();throw Error('RESUMEC intentional lost reply');}await raw.writeFrame(r);},close:()=>raw.close()};
@@ -39,7 +39,7 @@ async function control(c:StreamFrameConnection,r:Row){try{let result:unknown;
  else if(r.op==='runtime')result=await chunks.runtime();
  else throw Error('Unknown control');await c.writeFrame({success:true,result:result as Row});
  }catch(e){await c.writeFrame({success:false,error:String(e)}).catch(()=>{});}finally{await c.close();}}
-let active=0;async function listen(port:number,accept:(id:string)=>Promise<void>){const server=await tcp.listen(port,'127.0.0.1').result;for(;;){while(active>=3)await new Promise<void>(r=>setTimeout(r,20));try{const peer=await tcp.accept(server.id,600000).result;active++;void accept(peer.id).finally(()=>{active--;});}catch(e){errors.push(String(e));await new Promise<void>(r=>setTimeout(r,100));}}}
+let active=0;async function listen(port:number,accept:(id:string)=>Promise<void>){const server=await tcp.listen(port,'127.0.0.1').result;for(;;){while(active>=3)await delay(20).result;try{const peer=await tcp.accept(server.id,600000).result;active++;void accept(peer.id).finally(()=>{active--;});}catch(e){errors.push(String(e));await delay(100).result;}}}
 async function run(){await initializeSchema(db);await new SyncSavedStateStore(db).initializeDevice('RESUMEC-WATCH');await store.initialize();if(!await account.read())await account.save({userId:'RESUMEC-FIXTURE',phoneMasked:'',installId:'RESUMEC',watchDeviceToken:'SYNTHETIC-OFFLINE',tokenExpiresAtMillis:0,watchRefreshToken:'',refreshTokenExpiresAtMillis:0,backendBaseUrl:'https://resume.invalid',posthogHost:'',posthogProjectApiKey:'',entitlement:{plan:'free',active:true,expiresAtMillis:0,features:[]},telemetryConfig:{anonymousEnabled:false,diagnosticsEnabled:false,sampleRate:0},updatedAtMillis:0});
  void listen(18460,async id=>{const c=stream(id);try{const first=await c.readFrame(30000);if(first.op)await control(c,first);else await serveData(c,first);}catch(e){errors.push(String(e));await c.close().catch(()=>{});}});kv.set('resumec-fixture',{state:'listening'});}
 mount(()=><Text>RESUMEC dedicated verification</Text>);void run().catch(e=>kv.set('resumec-fixture',{state:'failed',error:String(e)}));

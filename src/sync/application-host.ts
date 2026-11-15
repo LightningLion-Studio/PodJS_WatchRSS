@@ -46,7 +46,7 @@ export function startApplicationForegroundSync(){
  const diagnostics=new SyncDiagnosticLog(storage,undefined,message=>hostAppLogger.d('WatchSync',message));
  const accountTelemetry=usageTelemetry;
  const resume=new ResumeApplicationService({assetHost:<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result,store:new ResumeStore(db),chunks:new VerifiedChunkStore(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,args).result),account:summaryAccountStore,repository:getLibrarySyncRepository,
-  localPermission:()=>!disposed&&lifecycle()==='active'&&hasCapability('data.files.resumable')&&!SYNC_V2_PRODUCT.syncV2,
+  localPermission:()=>!disposed&&lifecycle()==='active'&&hasCapability('data.files.resumable')&&hasCapability('runtime.timer')&&!SYNC_V2_PRODUCT.syncV2,
   randomId:async()=>Array.from(base64ToBytes((await hostOperation<{bytesBase64:string}>('crypto.random',{bytes:16}).result).bytesBase64),b=>b.toString(16).padStart(2,'0')).join(''),
   readFile:async(path,size)=>{const result=new Uint8Array(size);for(let at=0;at<size;){const part=await fileChunks.read(path,at,Math.min(65536,size-at)),bytes=base64ToBytes(part.dataBase64);if(part.size!==size||!bytes.length||at+bytes.length>size)throw Error('LOCAL_IO');result.set(bytes,at);at+=bytes.length;}return result;},changed:notifyLibraryChanged,
  });

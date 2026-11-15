@@ -2,6 +2,7 @@ import type {WatchAccountStore} from '../../account/store';
 import type {WatchAccountState} from '../../account/types';
 import type {SqlLibrarySessionRepository} from '../library-repository';
 import type {SyncActionContext,SyncFrameConnection} from '../session';
+import {delay} from '@podjs/framework/services';
 import {VerifiedChunkStore} from '@podjs/framework/verified-chunk-store';
 import {LibraryResumeConnection} from './coordinator';
 import {ResumeStore} from './store';
@@ -48,7 +49,7 @@ export class ResumeApplicationService implements ResumeSessionPort {
   const check=()=>{context.checkCancelled?.();if(!this.ports.localPermission())fail('AUTH_REVOKED');};
   const current=<T>(run:()=>Promise<T>)=>this.ports.account.withLibraryAccount(account,async()=>{check();const runtime=await this.ports.chunks.runtime();if(!runtime)fail('CAPABILITY_MISMATCH');await this.ports.store.observeClock(runtime.elapsedMillis);try{return await run();}catch(e){this.ports.diagnostic?.(e);throw resumeError(e);}});
   await current(()=>this.ports.store.exclusive(()=>this.ports.store.collect(scope,job=>this.ports.chunks.collect(D('wrss.library-resume.v1/native-scope',[scope,job.jobId]),true))));
-  const owner=new LibraryResumeConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize:current,check,randomId:this.ports.randomId,
+  const owner=new LibraryResumeConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize:current,check,sleep:delay,randomId:this.ports.randomId,
    freeze:async()=>{check();const inventory=await repository.resumeFreeze(check);if(assets)inventory.assets=await assets.freeze();return {witness:{snapshotId:await this.ports.randomId(),manifestDigest:resumeInventoryDigest(inventory),fromExclusive:0,toInclusive:0},inventory};},
    source:(w,s)=>sourcePlan(repository,this.ports.store,scope,w,s,assets?.read.bind(assets)),
    publish:(lease,object,d)=>d.kind==='noteAsset'&&assets?assets.publish(lease,object,d):this.ports.chunks.finalize(lease,object),

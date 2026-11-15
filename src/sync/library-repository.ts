@@ -82,7 +82,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  resumeReadBody(item:FrozenResumeArticle):Promise<Uint8Array>{return this.run(async()=>{
   const local=new LocalArticleManifestStore(this.db,this.ports.codec,this.ports.text,this.ports.files,async()=>{throw Error('resume_read_only');});
   if(item.binding===null)throw Error('SOURCE_CHANGED');local.restoreProjectionBindings(new Map([[item.prepared.article.articleId,item.binding]]));
-  try{const actual=await local.materializeRequested(item.prepared);if(!actual.encodedBody)throw Error('SOURCE_CHANGED');return actual.encodedBody;}catch(e){if(e instanceof Error&&/^Cached sync body/.test(e.message))throw Error('SOURCE_CHANGED');throw e;}
+  try{const actual=await local.materializeRequested(item.prepared);if(!actual.encodedBody)throw Error('SOURCE_CHANGED');return actual.encodedBody;}catch(e){if(e instanceof Error&&/^Cached sync body/.test(e.message))throw new Error('SOURCE_CHANGED',{cause:e});throw e;}
  });}
  resumeReceiveArticle(entry:ReceivedArticle,remote:string,receipt:ReceiptBoundary){return this.receiveArticle(entry,remote,false,receipt);}
  resumeReceiveSource(source:SyncedSource,remote:string,receipt:ReceiptBoundary){return this.run(async()=>this.sources.merge([source],remote,await this.migrate(),false,receipt));}
