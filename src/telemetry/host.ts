@@ -1,5 +1,8 @@
+import {SavedPlaybackIssueTelemetry} from './saved-playback.ts';
+import {installSavedIssueSink} from '../douyin/saved-issue-events.ts';
+import {appLogger} from '../logs/app-logger.ts';
 import {ActiveBatterySession} from '@podjs/framework/telemetry';
-import {kv} from '@podjs/framework/watch';
+import {kv,onLifecycleChange} from '@podjs/framework/watch';
 import {application,battery,hostOperation,fileChunks,base64ToBytes,bytesToBase64,delay,type DownloadResult} from '@podjs/framework/services';
 import config from '../../pod.config.json';
 import {watchAppVersion} from '../core/app-version.ts';
@@ -50,4 +53,20 @@ export async function recordHostReleaseOobeOpened(){
 
 export function createVideoBatteryTelemetry(){
   return new ActiveBatterySession(()=>battery.percent(),sample=>usageTelemetry.recordVideoBatteryDrain(sample.source,sample.durationMs,sample.batteryStart,sample.batteryEnd));
+}
+
+
+let savedIssues:SavedPlaybackIssueTelemetry|undefined;
+export function initializeSavedPlaybackTelemetry(){
+ if(savedIssues)return;
+ savedIssues=new SavedPlaybackIssueTelemetry({get:key=>kv.get<string>(key),set:(key,value)=>kv.set(key,value)},{
+  readAccount:()=>summaryAccountStore.read(),
+  async freshAccount(){const account=await summaryAccountStore.read();if(!account)throw Error('account_missing');return new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport,appVersion:watchAppVersion}).freshAccount();},
+  async randomId(){const bytes=base64ToBytes((await hostOperation<{bytesBase64:string}>('crypto.random',{bytes:16}).result).bytesBase64);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const s=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`;},
+  transport,delay:ms=>delay(ms).result,version:config.versionName,appVersion:watchAppVersion,
+ });
+ installSavedIssueSink((context,event)=>{void savedIssues!.capture(context,event).catch(()=>appLogger.w('SavedIssueTelemetry','capture_failed'));});
+ savedIssues.retryPending();
+ summaryAccountStore.subscribe(()=>savedIssues?.retryPending());
+ onLifecycleChange(state=>{if(state==='active')savedIssues?.retryPending();});
 }

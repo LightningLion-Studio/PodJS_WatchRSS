@@ -86,6 +86,8 @@ export type RouteEntry = {
   douyinEntrySeq?:number;
   queue?: DouyinPlaybackQueue;
   rssDouyinRecovery?: DouyinRssRecovery;
+  /** Local diagnostic lifetime only; excluded from navigation snapshots. */
+  savedPlaybackDiagnostic?: import('../../douyin/saved-playback-diagnostics.ts').DouyinSavedPlaybackDiagnostic;
   douyinRecovery?: {id:string; policy:import("../../douyin/playback-recovery.ts").DouyinPlaybackRecovery};
   douyinRecovering?: boolean;
   douyinFailures?: Set<string>;

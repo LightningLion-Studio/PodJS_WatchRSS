@@ -30,6 +30,27 @@ test('numeric telemetry allowlist rejects arbitrary labels, headers, IDs, NaN an
  trace.sample({hasRenderedFirstFrame:false,metrics:{bytesLoaded:100,throughputBps:1000000}});trace.sample({hasRenderedFirstFrame:true,metrics:{firstFrameMs:200}});
  await logger.flush();expect(log).toContain('first_frame');expect(log).toContain('"apiMs":15');expect(log).not.toMatch(/private|secret|Cookie|token|NaN|https:/);
 });
+test('early network windows record actual elapsed time once per prepare without the experimental gate',async()=>{
+ let log='',now=100000;
+ const originalNow=Date.now;
+ Date.now=()=>now;
+ const logger=new AppLogger({read:async()=>log,size:async()=>log.length,replace:async s=>{log=s;},append:async s=>{log+=s;}});
+ installAppLogger(logger);
+ try{
+  const trace=new VideoPlaybackTrace('rss');trace.event('prepare');
+  const sample=(elapsed:number,bytes:number,presented=true)=>{now=100000+elapsed;trace.sample({metrics:{bytesLoaded:bytes}},presented);};
+  sample(2999,1024);sample(3100,310*1024);sample(3500,350*1024);
+  sample(5000,500*1024,false);sample(5200,520*1024);sample(10050,1005*1024);
+  sample(11000,1100*1024);
+  await logger.flush();
+  const rows=log.split('\n').filter(line=>line.includes('"stage":"early_window"')).map(line=>JSON.parse(line.slice(line.indexOf('{'))));
+  expect(rows.map(row=>row.windowMs)).toEqual([3000,5000,10000]);
+  expect(rows.map(row=>row.elapsedMs)).toEqual([3100,5200,10050]);
+  expect(rows.map(row=>row.bytesLoaded*1000/row.elapsedMs/1024)).toEqual([100,100,100]);
+  trace.event('prepare');now+=3000;trace.sample({metrics:{bytesLoaded:0}});await logger.flush();
+  expect(log.split('\n').filter(line=>line.includes('"stage":"early_window"'))).toHaveLength(4);
+ }finally{Date.now=originalNow;}
+});
 test('preloaded Bili URL expires early and network changes invalidate warm and in-flight entries',async()=>{
  enable('recovery');let now=1800000000000,calls=0,finish!:(v:any)=>void;
  const source={acceptQuality:[],acceptDescription:[],durl:[{url:'https://fixture/v?deadline=1800000040',backupUrl:[]}]};
@@ -55,4 +76,18 @@ test('list budgets reach the real download adapter and outgoing history page req
  await transport.request({method:'GET',url:'https://fixture/x/web-interface/history/cursor',headers:{}});expect(downloaded.maxBytes).toBe(2*1024*1024);
  let requested='';const client=new BiliClient({transport:{request:async request=>{requested=request.url;return {status:200,headers:{},body:new TextEncoder().encode('{"code":0,"data":{"cursor":{"ps":1000},"list":[]}}')};}}});
  await client.history({pageSize:1000});expect(new URL(requested).searchParams.get('ps')).toBe('12');
+});
+
+test('saved diagnostics compare refresh against the current failed backup rather than the first source',async()=>{
+ enable('recovery');let log='';const logger=new AppLogger({read:async()=>log,size:async()=>log.length,replace:async s=>{log=s;},append:async s=>{log+=s;}});installAppLogger(logger);
+ const {DouyinSavedPlaybackDiagnostic}=await import('../src/douyin/saved-playback-diagnostics.ts');
+ const {DouyinRssRecovery}=await import('../src/douyin/rss-recovery.ts');
+ const original={...item,playUrl:'https://fixture/old',variants:[{...item.variants[0],playUrl:'https://fixture/old',playUrls:['https://fixture/old','https://fixture/backup']}]};
+ const trace=new DouyinSavedPlaybackDiagnostic({kind:'favorite',savedAtMillis:Date.now()-15*86400000,url:original.playUrl});
+ const client={resolvePlayback:async(_id:string,options:any)=>{options.observeResolution?.({ok:true,forceRefresh:true,source:'network'});return {ok:true as const,data:{...original,playUrl:'https://fixture/backup',variants:[]}};},buildPlaybackHeaders:async()=>({})};
+ const recovery=new DouyinRssRecovery(client,original.awemeId,original,trace);
+ trace.playbackFailure({code:'network_error'});const backup=await recovery.recover({url:original.playUrl,title:''},()=>true,false,{code:'network_error'});expect(backup?.url).toBe('https://fixture/backup');
+ trace.playbackFailure({code:'source_expired'});await recovery.recover(backup!,()=>true,true,{code:'source_expired'});trace.firstFrame();trace.end();await logger.flush();
+ const address=log.split('\n').filter(s=>s.includes('[DouyinSavedPlayback]')&&s.includes('"stage":"address"'));
+ expect(address).toHaveLength(1);expect(address[0]).toContain('"changed":"no"');
 });

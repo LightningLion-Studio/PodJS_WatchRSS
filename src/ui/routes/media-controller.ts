@@ -1,5 +1,6 @@
 import {reloadDouyinPlayback} from '../../douyin/reload-playback.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
+import {DouyinSavedPlaybackDiagnostic,savedPlaybackContext} from '../../douyin/saved-playback-diagnostics.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
 import {bindDouyinStockIdle} from '../../douyin/stock-lifecycle.ts';
 import {playerFailureFields} from '../../media/player-errors.ts';
@@ -112,6 +113,7 @@ export function createMediaRouteController(
 
   async function openRssVideo(article: Article, rawUrl: string,memory?:RouteEntry["memory"]) {
     if (dependencies.busy()) return;
+    let diagnostic:DouyinSavedPlaybackDiagnostic|undefined,published=false;
     const origin = dependencies.current();
     dependencies.setBusy(true);setVideoLoading(true);
     dependencies.setError("");
@@ -148,14 +150,18 @@ export function createMediaRouteController(
       const resolved = resolveUrl(rawUrl, article.link) ?? rawUrl;
       const douyin =
         douyinVideoTarget(article.link) ?? douyinVideoTarget(rawUrl);
+      const savedMediaUrl=article.videoUrl?.trim()||(!douyinVideoTarget(resolved)?resolved:undefined);
       let url = resolved;
       let douyinItem:import("../../douyin/types.ts").DouyinItem|undefined;
       let headers: Record<string, string> | undefined;
       if (douyin) {
+        let context:{kind:string;savedAtMillis?:number}={kind:'unknown'};
+        try{context=savedPlaybackContext(await douyinClient.listSaved(),douyin.awemeId??'');}catch{}
+        diagnostic=new DouyinSavedPlaybackDiagnostic({...context,url:savedMediaUrl??'',itemId:douyin.awemeId});
         headers = await douyinClient.buildPlaybackHeaders();
         if (douyin.awemeId) {
-          const result = await douyinClient.resolvePlayback(douyin.awemeId);
-          if (result.ok) {url = result.data.playUrl;douyinItem=result.data;}
+          const result = await douyinClient.resolvePlayback(douyin.awemeId,{observeResolution:value=>diagnostic?.resolution('initial',value)});
+          if (result.ok) {url = result.data.playUrl;douyinItem=result.data;diagnostic.address('initial',savedMediaUrl,url);}
           else if (douyinVideoTarget(resolved)) {
             throw new Error(result.message);
           }
@@ -176,13 +182,17 @@ export function createMediaRouteController(
           ...playbackPreferences(),
         },
         {
-          memory,videoTarget:{kind:'rss',articleId:article.id,url:rawUrl},
+          memory,savedPlaybackDiagnostic:diagnostic,videoTarget:{kind:'rss',articleId:article.id,url:rawUrl},
           rssDouyinRecovery: douyin?.awemeId
-            ? new DouyinRssRecovery(douyinClient, douyin.awemeId,douyinItem)
+            ? new DouyinRssRecovery(douyinClient, douyin.awemeId,douyinItem,diagnostic)
             : undefined,
         },
       );
+      published=dependencies.current().savedPlaybackDiagnostic===diagnostic&&!!diagnostic;
+    } catch(error) {
+      if(dependencies.current()===origin)diagnostic?.openError();else diagnostic?.abandon();throw error;
     } finally {
+      if(!published)diagnostic?.end();
       dependencies.setBusy(false);setVideoLoading(false);
     }
   }
@@ -459,19 +469,21 @@ export function createMediaRouteController(
         else await persisted;
         if(!current())return;
         if(pendingInitialPool?.pool!==initialPool&&initialPool){initialPool=undefined;}
-        stage='backdrop';await openVideo(source, { queue, memory, initialVideoPool:initialPool, douyinEntrySeq:request?.entrySeq, videoTarget: {
+        stage='backdrop';await openVideo(source, { queue, memory, savedPlaybackDiagnostic:request?.savedPlaybackDiagnostic, initialVideoPool:initialPool, douyinEntrySeq:request?.entrySeq, videoTarget: {
           kind: 'douyin', awemeId: route.awemeId, immersive: source.immersive,
           ...(source.detailPlayback ? {detailPlayback:true} : {}),
         } },current);
         if(dependencies.current().playback===source){opened=true;initialPool=undefined;}
       } catch (error) {
         if(current()){
+          request?.savedPlaybackDiagnostic?.openError();
           benchmark.begin('error_page',{reason:'exhausted',...playerFailureFields(error,stage)});
           if(request?.onFailure)request.onFailure(douyinPlaybackFailure(error));
           else dependencies.setError(error instanceof Error?error.message:String(error));
         }
       } finally {
         setVideoLoading(false);
+        if(!opened)request?.savedPlaybackDiagnostic?.abandon();
         if(!opened)request?.releaseStartupPreview?.();
         if(initialPool){if(pendingInitialPool?.pool===initialPool)pendingInitialPool=undefined;void initialPool.releaseAll().catch(()=>{});}
         if(pendingDouyinPlayback===pending){pendingDouyinPlayback = undefined;pendingDouyinQueue = undefined;pendingDouyinRequest=undefined;}
@@ -749,7 +761,7 @@ export function createMediaRouteController(
       if(entry.playback?.url?.startsWith('podjs-media-cache:'))await douyinPreload.invalidate(id);
       if (dependencies.current() !== entry) return;
       if (entry.playback?.detailPlayback&&!(entry.playback.immersive&&(category==='restricted'||category==='decode'))) {
-        entry.rssDouyinRecovery ??= new DouyinRssRecovery(douyinClient, id);
+        entry.rssDouyinRecovery ??= new DouyinRssRecovery(douyinClient, id,entry.queue.snapshot().item??undefined,entry.savedPlaybackDiagnostic);
         const source = await entry.rssDouyinRecovery.recover(entry.playback, () => dependencies.current() === entry, manual);
         if (!source || dependencies.current() !== entry) return;
         entry.queue.updateCurrentUrl(source.url ?? "");
@@ -913,8 +925,15 @@ export function createMediaRouteController(
       const selected=()=>current()&&entry.queue?.snapshot().item?.awemeId===item.awemeId&&entry.queue.diagnostics().generation===queueGeneration;
       await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await reloadDouyinPlayback(douyinClient,item.awemeId,selected);
+      const diagnostic=entry.savedPlaybackDiagnostic;
+      diagnostic?.recovery(true);
+      const resolver=diagnostic?{
+        resolvePlayback:(id:string,options:import('../../douyin/client.ts').DouyinPlaybackOptions={})=>douyinClient.resolvePlayback(id,{...options,observeResolution:value=>diagnostic.resolution('refresh',value)}),
+        buildPlaybackHeaders:()=>douyinClient.buildPlaybackHeaders(),
+      }:douyinClient;
+      const resolved=await reloadDouyinPlayback(resolver,item.awemeId,selected).catch(error=>{diagnostic?.recoveryError();throw error;});
       if(!resolved)return;
+      diagnostic?.address('recovery',previous.url,resolved.item.playUrl);
       next=freshVideoSource(previous,{url:resolved.item.playUrl,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
       entry.queue.updateCurrentUrl(resolved.item.playUrl);
