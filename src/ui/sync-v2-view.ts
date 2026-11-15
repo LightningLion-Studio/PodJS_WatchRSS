@@ -55,7 +55,9 @@ export function syncV2ErrorText(code: string): string {
     case 'body_channel_pending': return '正文尚未上传。本机内容已保留。';
     case 'cloud_note_asset_missing': case 'cloud_note_assets_unavailable': return '笔记附件暂不可用。其他资料会继续同步。';
     case 'cloud_note_asset_too_large': return '附件超过本机同步大小上限。其他资料会继续同步。';
+    case 'body_channel_source_missing': return '缺少正文原件。元数据修改已留在本机。';
     case 'body_channel_capacity_pending': return '书籍超过正文通道的大小上限。本机原件已保留。';
+    case 'note_asset_conflict': return '附件出现冲突。双方原件已保留。';
     case 'body_revision_changed': return '正文版本有变化。本机原件已保留。';
     case 'hash_mismatch': case 'signature_invalid': case 'closure_incomplete': return '正文校验失败。本机原件已保留。';
     default: return '本机内容已保留，请稍后重试。';

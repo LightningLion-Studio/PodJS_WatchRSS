@@ -96,7 +96,7 @@ export async function openApplicationSyncV2Core<Ui extends {dispose():void}>(opt
   const local=await localFactory.open();if(!local)throw Error('feature_disabled');
   const crypto=createSyncV2Crypto(guardedHost),current=await content.current(),keys={id:unhex(installed.idKeyHex),content:current.key,version:current.version,readContentKey:async(v:number)=>(await content.at(v)).key};
   held.add(keys.id);
-  const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:id=>repository.cloudArticleBody(id)}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver):articleResolver;
+  const articleResolver=articleBodyResolver({crypto,keys,scope:fetched.scope,read:id=>repository.cloudArticleBody(id)}),resolveBody=bodyRepository?independentBodyResolver(bodyRepository,articleResolver,code=>{bodyError=bodyError??code;}):articleResolver;
   runtimeFactory=watchSyncV2({enabled:true,indexWrite:true,historyRestore:true,choiceApply:true,origin,originPolicy:{accountBaseUrl:origin,allowLoopback:options.allowLoopback===true},host:guardedHost,transport,local:localFactory,identity:async()=>{await assertCurrent();return installed;},contentKey:content.current,contentKeyAt:keys.readContentKey,bootstrap:options.bootstrap,session:async()=>{const a=await assertCurrent();return {userId:a.userId,accessToken:a.watchDeviceToken,legacyDeviceId:options.legacyDeviceId,scope:fetched.scope};},bodyResolver:resolveBody,clock,now:options.now});
   const runtime=await runtimeFactory.open();
   if(!runtime)throw Error('feature_disabled');

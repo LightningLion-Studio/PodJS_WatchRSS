@@ -1,3 +1,4 @@
+import {retainAssetConflict} from '../notes/asset-conflict';
 import type {JsonObject} from './protocol.ts';
 import {wireFields} from './article-batches.ts';
 const CHUNK_BYTES=512*1024;
@@ -11,7 +12,7 @@ export interface NoteAssetFiles {
  remove(path:string):Promise<void>;
  write(path:string,dataBase64:string):Promise<{size:number}>;
  append(path:string,dataBase64:string,offset:number):Promise<{size:number}>;
- commit(path:string,target:string,size:number,sha256:string):Promise<unknown>;
+ commit(path:string,target:string,size:number,sha256:string,expectedTargetSha256?:string|null):Promise<unknown>;
 }
 const result=(complete:boolean,alreadyPresent=false)=>({success:true,action:'syncNoteAsset',complete,alreadyPresent});
 function required(request:JsonObject,key:string):string{if(request[key]===undefined||request[key]===null)throw new Error('缺少 '+key);return wireFields.string(request[key]);}
@@ -47,7 +48,7 @@ export class NoteAssetReceiver {
    written+=bytes;if(value.size!==offset+written)throw new Error('备忘录图片写入不完整');at+=piece.length;
   }while(at<data.length);
   const complete=index===count-1;
-  if(complete){const actual=await this.files.hash(part);if(actual.sha256.toLowerCase()!==digest)throw new Error('备忘录图片校验失败');await this.files.commit(part,target,actual.size,digest);}
+  if(complete){const actual=await this.files.hash(part);if(actual.sha256.toLowerCase()!==digest)throw new Error('备忘录图片校验失败');try{await this.files.commit(part,target,actual.size,digest,null);}catch(error){if(!String(error).includes('file_target_changed'))throw error;await retainAssetConflict(this.files,part,key,digest,actual.size,null);throw Error('note_asset_conflict');}}
   return result(complete);
  }
 }

@@ -68,7 +68,7 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
     cloudNotes:repo.cloudNotes?check=>invoke(()=>repo.cloudNotes!(current(check))):undefined,
     cloudNoteAsset:repo.cloudNoteAsset?(key,check)=>invoke(()=>repo.cloudNoteAsset!(key,current(check))):undefined,
     mergeCloudNotes:repo.mergeCloudNotes?(notes,check)=>invoke(()=>repo.mergeCloudNotes!(notes,current(check))):undefined,
-    mergeCloudNoteAsset:repo.mergeCloudNoteAsset?(key,bytes)=>invoke(()=>repo.mergeCloudNoteAsset!(key,bytes)):undefined,
+    mergeCloudNoteAsset:repo.mergeCloudNoteAsset?(key,bytes,expected)=>invoke(()=>repo.mergeCloudNoteAsset!(key,bytes,expected)):undefined,
     collectCloudNoteAssets:repo.collectCloudNoteAssets?check=>invoke(()=>repo.collectCloudNoteAssets!(current(check))):undefined,
     setCloudProgress:repo.setCloudProgress?sink=>{if(sink)runGuard.require();repo.setCloudProgress!(sink);}:undefined,
     setCloudDiagnostic:repo.setCloudDiagnostic?sink=>{if(sink)runGuard.require();repo.setCloudDiagnostic!(sink);}:undefined,

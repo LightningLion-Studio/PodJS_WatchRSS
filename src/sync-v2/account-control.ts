@@ -1,3 +1,4 @@
+import {sameIndependentIdentity} from './body-binding';
 import {SigningStateUnavailable} from './signing-store';
 import {noteAssetKeys} from '../notes/cloud-assets';
 import {conflictTexts} from './note-conflict-set';
@@ -113,10 +114,20 @@ export class WatchAccountControl {
    return {...original,candidate:candidates(m.kind,identity,entityKey,business,m.addedAtSource==='original'?original.candidate.addedAtMillis:undefined,this.o.store.segmentOptions())};
   });
  }
+ /** Borrow only the exact descriptor already authenticated in this current
+  * account. This is a metadata reference, never a v2 content-ready witness. */
+ private async independentReferences(state:SyncState,rows:RecordRow[]){
+  const allowed=new Set<string>();if(!this.o.resolveBody||!rows.some(r=>['book','asset'].includes(r.candidate.meta.kind)&&r.manifest?.bodyRevision&&r.manifest.recipeOid===null))return allowed;
+  const current=new Map((await this.cloud(state)).map(r=>[r.entityKey,r]));
+  for(const r of rows){const prior=current.get(r.entityKey),kind=r.candidate.meta.kind;if(!prior||!['book','asset'].includes(kind)||!r.manifest?.bodyRevision||r.manifest.recipeOid!==null)continue;
+   if(sameIndependentIdentity(kind,r.candidate,prior.candidate)&&canonical(r.manifest)===canonical(prior.manifest))allowed.add(r.entityKey);
+  }return allowed;
+ }
  private async prepareApply(state:SyncState,rows:RecordRow[]){
-  const assets=new Map(rows.filter(r=>r.candidate.meta.kind==='asset').map(r=>[r.candidate.meta.logicalId,r]));for(const r of rows)if(r.candidate.meta.kind==='note'){const p=r.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];for(const text of texts)for(const id of noteAssetKeys(text)){const asset=assets.get(id);if(!asset||asset.candidate.state.payload.deleted||asset.manifest?.bodyRevision==null||asset.manifest?.recipeOid==null)throw Error('closure_incomplete');}}
+  const independent=await this.independentReferences(state,rows);
+  const assets=new Map(rows.filter(r=>r.candidate.meta.kind==='asset').map(r=>[r.candidate.meta.logicalId,r]));for(const r of rows)if(r.candidate.meta.kind==='note'){const p=r.candidate.state.payload,texts=[p.markdown,p.baseMarkdown,...(p.noteConflicts?conflictTexts(p.noteConflicts):[])];for(const text of texts)for(const id of noteAssetKeys(text)){const asset=assets.get(id);if(!asset||asset.candidate.state.payload.deleted||asset.manifest?.bodyRevision==null||asset.manifest?.recipeOid==null&&!independent.has(asset.entityKey))throw Error('closure_incomplete');}}
   const wire=this.o.publisher.preflightRecords(rows),window=await this.o.http.negotiate([],[]),closure=new Map<string,number>();
-  for(const r of rows){const body={entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null};const witness=await this.o.business.verifyBody(body,window.windowId);if(body.bodyRevision!==null&&!witness)throw Error('closure_incomplete');for(const o of witness?.objects??[]){oid(o.oid,o.oid.split(':')[0]!);uint(o.storedBytes);const old=closure.get(o.oid);if(old!==undefined&&old!==o.storedBytes)throw Error('closure_incomplete');closure.set(o.oid,o.storedBytes);}}
+  for(const r of rows){const body={entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null};const witness=independent.has(r.entityKey)?{objects:[]}:await this.o.business.verifyBody(body,window.windowId);if(body.bodyRevision!==null&&!witness)throw Error('closure_incomplete');for(const o of witness?.objects??[]){oid(o.oid,o.oid.split(':')[0]!);uint(o.storedBytes);const old=closure.get(o.oid);if(old!==undefined&&old!==o.storedBytes)throw Error('closure_incomplete');closure.set(o.oid,o.storedBytes);}}
   const records=this.records(rows),business=await this.o.business.prepare(records,state),prepared=await this.o.store.prepareAccountProjection(state,records,business),plan=(prepared as any).preparedPlan as import('@podjs/framework/sql-program').SqlProgramRef;
   let required=wire.wireBytes+plan.bytes*6+bytes(canonical(state)).length*4+32768;for(const size of closure.values())required+=size*2;if(!Number.isSafeInteger(required))throw Error('object_too_large');
   const release=await this.o.store.existingPlanReservation(plan)??await this.reserveBytes(required);const reservation=(release as import('@podjs/framework/resource-journal').ResourceRelease).reservation;let reservedPlan=plan;try{reservedPlan=reservation?await this.o.store.keepPlanReservation(plan,reservation):plan;await this.o.store.validateAccountProjection(state,prepared);if(canonical(await this.o.store.readStableState())!==canonical(state))throw Error('choice_stale');return {plan:reservedPlan,release:async()=>{if(reservation)await this.o.store.releasePlanReservation(reservedPlan);else await release();},required};}catch(error){if(!await this.o.store.planOwned(plan.id))await release();throw error;}
@@ -207,8 +218,8 @@ export class WatchAccountControl {
   if(merge){if(!p.merge.canMerge)throw Object.assign(Error('merge_unavailable'),{reason:p.merge.reason});const checked=this.merge(s,p.local,p.cloud,await this.o.store.editBases(s));if(!checked.canMerge||canonical(checked)!==canonical(p.merge))throw Object.assign(Error('merge_unavailable'),{reason:checked.reason??'missing_base'});
    rows=p.mergedRows!;if(!rows)throw Error('merge_unavailable');
   }
-  for(const r of rows)if(['article','book','asset'].includes(r.candidate.meta.kind)&&!r.manifest?.recipeOid)throw Error('closure_incomplete');
-  const author=await this.o.author(),window=await this.o.http.negotiate([],[]);for(const r of rows)await this.o.business.verifyBody({entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null},window.windowId);await this.checked(proof);const preflight=merge&&p.applyPlan?{plan:p.applyPlan,release:async()=>{}}:await this.prepareApply(s,rows);try{await this.o.publisher.prepareExplicit({kind:merge?'resolve-merge':'resolve-local',expected:s,...author,requestId,records:rows,applyPlan:preflight.plan,...(p.legacyKey?{legacyKey:p.legacyKey}:{})});const result=await this.resumePublication();await this.closePreview(proof);return result;}finally{if(!await this.o.store.planOwned(preflight.plan.id))await preflight.release();}
+  const independent=await this.independentReferences(s,rows);for(const r of rows)if(['article','book','asset'].includes(r.candidate.meta.kind)&&!r.manifest?.recipeOid&&!independent.has(r.entityKey))throw Error('closure_incomplete');
+  const author=await this.o.author(),window=await this.o.http.negotiate([],[]);for(const r of rows)if(!independent.has(r.entityKey))await this.o.business.verifyBody({entityKey:r.entityKey,...r.manifest,bodyRevision:r.manifest?.bodyRevision??null},window.windowId);await this.checked(proof);const preflight=merge&&p.applyPlan?{plan:p.applyPlan,release:async()=>{}}:await this.prepareApply(s,rows);try{await this.o.publisher.prepareExplicit({kind:merge?'resolve-merge':'resolve-local',expected:s,...author,requestId,records:rows,applyPlan:preflight.plan,...(p.legacyKey?{legacyKey:p.legacyKey}:{})});const result=await this.resumePublication();await this.closePreview(proof);return result;}finally{if(!await this.o.store.planOwned(preflight.plan.id))await preflight.release();}
  }
  async rollback(targetCommitOid:string,capture:Capture,requestId:string){
   await this.recoverPreparation();await this.gate('history');hexId(requestId,32);oid(targetCommitOid,'commit');const before=await this.o.store.readState();this.checkWindow(before,capture);if(before.hasUnsentEdits||before.pendingChoice)throw Error('choice_pending');

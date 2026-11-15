@@ -118,8 +118,7 @@ test('process restart keeps the same signed carrier and resumes durable server b
  const ports={http:b.http(),scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:cache,root:'test',repository:{read:async()=>p.raw,validate:async()=>{},install:async()=>{throw Error('local original must remain');}},check:async()=>{}};
  b.losePart();expect((await new WatchBodyChannel(ports).sync()).pending).toBe(1);expect(b.descriptors.size).toBe(1);const id=[...b.descriptors.keys()][0];
  expect((await new WatchBodyChannel(ports).sync()).errors).toEqual([]);expect(b.descriptors.size).toBe(1);expect(b.ready.has(id!)).toBe(true);
- const {SyncV2Error}=await import('../../src/sync-v2/http');let attempts=0;const throttled={...ports,http:Object.assign(Object.create(ports.http),{upload:async()=>{attempts++;throw new SyncV2Error('quota_exceeded',true,60000);},list:async()=>({carriers:[],nextAfter:null})})};
- expect((await new WatchBodyChannel(throttled).sync()).errors).toEqual(['quota_exceeded']);expect((await new WatchBodyChannel(throttled).sync()).errors).toEqual(['quota_exceeded']);expect(attempts).toBe(1);expect(await ports.repository.read()).toEqual(p.raw);
+
 });
 
 test('book receiver validates the existing producer fingerprint before installing exact JSONL bytes',async()=>{
@@ -131,4 +130,97 @@ test('book receiver validates the existing producer fingerprint before installin
  const decoded=await openCarrier({descriptor:p.descriptor,scope,binding,crypto:snapshotCrypto,signer,publicKey:b64(publicBytes),key:async()=>key.slice(),read:async h=>p.objects.get(h)!}),out=decoded.get(bodyObjectName('book',logicalId))!;
  await repository.validate('book',logicalId,book,out);await repository.install('book',logicalId,out);expect(installed).toEqual(raw);
  await expect(repository.validate('book',logicalId,{...book,fingerprint:'0'.repeat(64)},out)).rejects.toThrow('book_package_invalid');expect(installed).toEqual(raw);
+});
+
+function conditionalAssetHost(race:boolean){
+ const map=new Map<string,Uint8Array>();let serial=0,injected=false;
+ const host=async<T>(method:string,a:any):Promise<T>=>{
+  const get=(p:string)=>{const b=map.get(p);if(!b)throw Error('file_not_found');return b;};
+  if(method==='file.stat'){const b=map.get(a.path);return {file:!!b,size:b?.length??0} as T;}
+  if(method==='file.hash'){const b=get(a.path);return {sha256:sha256Hex(b),size:b.length} as T;}
+  if(method==='file.createTemp'){const path='notes/assets/.pod-write-'+(++serial)+'.part';map.set(path,new Uint8Array());return {path} as T;}
+  if(method==='file.write'){const b=new Uint8Array(Buffer.from(a.dataBase64,'base64')),old=a.append?get(a.path):new Uint8Array();if(a.append)expect(old.length).toBe(a.expectedOffset);const next=new Uint8Array(old.length+b.length);next.set(old);next.set(b,old.length);map.set(a.path,next);return {size:next.length} as T;}
+  if(method==='file.commit'){
+   expect(Object.hasOwn(a,'expectedTargetSha256')).toBe(true);
+   if(race&&!injected&&a.target==='notes/assets/image.png'){map.set(a.target,new Uint8Array([9,8,7]));injected=true;}
+   const current=map.get(a.target);if(a.expectedTargetSha256===null?!!current:!current||sha256Hex(current)!==a.expectedTargetSha256)throw Error('file_target_changed');
+   const b=get(a.path);expect(sha256Hex(b)).toBe(a.expectedSha256);map.set(a.target,b.slice());map.delete(a.path);return {} as T;
+  }
+  if(method==='file.delete'){map.delete(a.path);return {deleted:true} as T;}throw Error(method);
+ };return {host,map,injected:()=>injected};
+}
+for(const mode of ['cloud','local'] as const)test('RVPODNOTES-01 '+mode+' final commit competition preserves both files and records a conflict',async()=>{
+ const {createNoteAssetWriter}=await import('../../src/notes/cloud-assets'),{NoteAssetReceiver}=await import('../../src/sync/note-assets');
+ const p=await prepared('asset',new Uint8Array([1,2,3])),f=conditionalAssetHost(true),writer=createNoteAssetWriter(f.host);
+ if(mode==='local'){
+  const receiver=new NoteAssetReceiver({stat:path=>f.host('file.stat',{path}),hash:path=>f.host('file.hash',{path}),remove:async path=>{await f.host('file.delete',{path});},write:(path,dataBase64)=>f.host('file.write',{path,dataBase64}),append:(path,dataBase64,expectedOffset)=>f.host('file.write',{path,dataBase64,append:true,expectedOffset}),commit:(path,target,expectedSize,expectedSha256,expectedTargetSha256)=>f.host('file.commit',{path,target,expectedSize,expectedSha256,expectedTargetSha256})});
+  await expect(receiver.apply({version:1,storageKey:'image.png',sha256:sha256Hex(p.raw),chunkCount:1,chunkIndex:0,data:Buffer.from(p.raw).toString('base64')})).rejects.toThrow('note_asset_conflict');
+ }else{
+  const entry={row:{entityKey:p.binding.entityKey,bodyRevision:p.binding.bodyRevision,deleted:false,recipeOid:null},meta:{kind:'asset',logicalId:'image.png',payload:{assetId:'image.png',mime:'image/png',originalFilename:'image.png'}},state:{payload:{updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}}};
+  const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_r:string,after:string)=>after?[]:[entry]};
+  const channel=new WatchBodyChannel({http:{list:async()=>({carriers:[{descriptor:p.descriptor}],nextAfter:null}),download:async(_id:string,h:string)=>p.objects.get(h)} as any,scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:files(),root:'test',repository:{read:async()=>f.map.get('notes/assets/image.png'),validate:async()=>{},install:async(_k,id,raw,expected)=>{await writer(id,raw,expected);}},check:async()=>{}});
+  expect(await channel.sync()).toEqual({pending:1,errors:['note_asset_conflict']});
+ }
+ expect(f.injected()).toBe(true);expect(f.map.get('notes/assets/image.png')).toEqual(new Uint8Array([9,8,7]));
+ const path='notes/asset-conflicts/'+sha256Hex(new TextEncoder().encode('image.png'))+'-'+sha256Hex(p.raw)+'.bin';expect(f.map.get(path)).toEqual(p.raw);expect(JSON.parse(new TextDecoder().decode(f.map.get(path+'.json')))).toMatchObject({storageKey:'image.png',incomingSha256:sha256Hex(p.raw),retainedPath:path});
+});
+
+test('RVPODNOTES-03 backend 507/null builds persistent capped exponential backoff without a sliding deadline',async()=>{
+ const p=await prepared(),cache=files();let now=1000,reserves=0;
+ const http=new BodyChannelHttp({enabled:true,origin:'http://127.0.0.1:18991',policy:{accountBaseUrl:'http://127.0.0.1:18991',allowLoopback:true},scope,session:async()=>({accessToken:'synthetic',legacyDeviceId:'legacy',legacyEpoch:'epoch',legacyGeneration:'1'}),check:async()=>{},transport:{request:async r=>{
+  if(r.method==='POST'){reserves++;return {status:507,headers:{},body:jsonBytes({error:{code:'quota_exceeded',retryable:true,retryAfterMillis:null,details:{}}})};}
+  return {status:200,headers:{},body:jsonBytes({version:1,purpose:'p6-body.v1',scope,carriers:[],nextAfter:null})};
+ }}});
+ const entry={row:{entityKey:p.binding.entityKey,bodyRevision:p.binding.bodyRevision,deleted:false,recipeOid:null},meta:{kind:'asset',logicalId:'image.png',payload:{assetId:'image.png',mime:'image/png',originalFilename:'image.png'}},state:{payload:{updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}}};
+ const projection={readState:async()=>({account:{oid:anchor.commitOid,revision:'1',generation:'0'},cloud:{current:{commitOid:anchor.commitOid,treeRoot:'root'}}}),cloudRow:async()=>entry,cloudRows:async(_r:string,after:string)=>after?[]:[entry]};
+ const ports={http,scope,projection:projection as any,crypto:snapshotCrypto,signer,author:async()=>({deviceId:author,alias:'key'}),approved:async()=>({deviceId:author,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),key:async()=>key.slice(),currentKey:async()=>({key:key.slice(),version:1}),files:cache,root:'test',repository:{read:async()=>p.raw,validate:async()=>{},install:async()=>{}},check:async()=>{},now:()=>now};
+ const retry='test/'+p.binding.entityKey+'/'+p.binding.bodyRevision+'/retry.json';
+ for(let attempt=1;attempt<=8;attempt++){
+  expect((await new WatchBodyChannel(ports).sync()).errors).toEqual(['quota_exceeded']);const raw=cache.map.get(retry)!,record=parseCanonicalJson(raw);expect(record).toEqual({version:1,code:'quota_exceeded',attempts:attempt,until:now+Math.min(1800000,30000*2**(attempt-1))});expect(reserves).toBe(attempt);
+  expect((await new WatchBodyChannel(ports).sync()).errors).toEqual(['quota_exceeded']);expect(reserves).toBe(attempt);expect(cache.map.get(retry)).toEqual(raw);now=record.until;
+ }
+});
+
+for(const kind of ['book','asset'] as const)for(const explicit of [false,true])test(`RVPODNOTES-02 ${kind} metadata arrives first, offline rename, ${explicit?'explicit':'ordinary'} publish, then download`,async()=>{
+ const {publishingFixture,SyntheticIndexBackend,serverPin}=await import('./p2-fixture'),{idKey,binding}=await import('./fixture'),{WatchIndexPublisher}=await import('../../src/sync-v2/publisher'),{WatchCloudIndex}=await import('../../src/sync-v2/cloud-index'),{bodyChannelRepository}=await import('../../src/sync-v2/body-channel-repository'),{independentBodyResolver}=await import('../../src/sync-v2/body-channel'),{SyncV2Http}=await import('../../src/sync-v2/http'),{default:book}=await import('../fixtures/cli-single-txt-book.json');
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server),content=new Uint8Array(32).fill(0x22),keys={id:idKey,content,version:1},id=kind==='book'?book.bookId:'image.png',entity=entityKey(idKey,scope.repoId,kind,id),raw=kind==='book'?new TextEncoder().encode(book.packageUtf8):new Uint8Array([1,2,3]);let present=true;
+ const value=kind==='book'?{bookId:id,fingerprint:book.fingerprint,title:'Original',chapterCount:1,deletedChapters:[],deletionClock:0,deleted:false,deletedAt:0,updatedAt:1,sourceDeviceId:'watch',sourceUrl:book.sourceUrl,kind:'txt'}:{assetId:id,mime:'image/png',originalFilename:id,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0};
+ const repository={read:async()=>present?raw:undefined,validate:async(k:any,i:string,v:any,b:Uint8Array)=>{if(k==='book')await bodyChannelRepository({} as any).validate(k,i,v,b);},install:async()=>{}};
+ const baseResolver=independentBodyResolver(repository,async()=>null),resolver=async(e:any,prior:any)=>{const body=await baseResolver(e,prior);return body&&!prior?{...body,promiseId:'f'.repeat(32)}:body;},http=new SyncV2Http(server,'http://localhost:3000',scope,async()=>({accessToken:'synthetic',legacyDeviceId:'approved-old',userId:'00000000-0000-0000-0000-000000000001',scope}),true,serverPin(),false,false,false,true),publisher=new WatchIndexPublisher(f.store,http,signer,keys,()=>100,resolver);
+ const approved=async(deviceId:string)=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),reader=new WatchCloudIndex(f.store,http,signer,keys,approved,async()=>{},()=>100);
+ const scan=async(v:any,name:string)=>{await f.store.beginScan({...binding,schema:name});await f.store.scanPage({page:async()=>({rows:[{kind,logicalId:id,value:v}],after:'done',done:true}),changed:async()=>[]});};
+ let target:Awaited<ReturnType<typeof publishingFixture>>|undefined;try{
+  await scan(value,'before');await publisher.prepare(author,'key',{commitOid:null,revision:'0'},'c'.repeat(32));await publisher.flush();await reader.pull(server.window());
+  const initial=await f.store.readState(),entry=await f.store.cloudRow(initial.cloud.current.treeRoot,entity),old=entry.row.bodyRevision;
+  const body=await prepareCarrier({crypto:snapshotCrypto,signer,alias:'key',authorDeviceId:author,scope,anchor:{commitOid:server.account.commitOid,revision:server.account.revision,rollbackGeneration:'0'},binding:{kind,logicalId:id,entityKey:entity,bodyRevision:old},key:content.slice(),keyVersion:1,objects:[{name:bodyObjectName(kind,id),bytes:raw,compress:false}]});
+  present=false;await scan({...value,...(kind==='book'?{title:'Offline rename'}:{originalFilename:'Offline rename.png'}),updatedAt:2},'after');
+  const candidate=await f.store.readCandidate(entity),own={commitOid:server.device.commitOid,revision:server.device.revision};
+  // This is the shape supplied by explicit account choices, not the reader DTO.
+  expect(await resolver({entityKey:entity,candidate}, {entityKey:entity,candidate:{meta:entry.meta,state:entry.state},manifest:Object.fromEntries(['bodyRevision','promiseId','recipeOid','opaqueContentId','contentBytes'].map(k=>[k,entry.row[k]]))} as any)).toMatchObject({bodyRevision:old,promiseId:entry.row.promiseId});
+  if(explicit){
+   const {WatchAccountControl}=await import('../../src/sync-v2/account-control');const state=await f.store.readStableState(),manifest=await resolver({entityKey:entity,candidate},entry),selected={entityKey:entity,rowSequence:'1',candidate,manifest};
+   const control=new WatchAccountControl({store:f.store,http,publisher,reader,crypto:signer,approved,business:{prepare:async()=>[],reserve:async()=>async()=>{},verifyBody:async()=>{throw Error('closure_incomplete');}},resolveBody:resolver,trustedNow:()=>100} as any);
+   const prepared=await (control as any).prepareApply(state,[selected]);await prepared.release();
+   await expect((control as any).prepareApply(state,[{...selected,manifest:{...manifest,bodyRevision:'0'.repeat(32)}}])).rejects.toThrow('closure_incomplete');
+   await publisher.prepareExplicit({kind:'resolve-local',expected:await f.store.readStableState(),deviceId:author,alias:'key',own,requestId:'d'.repeat(32),records:[{entityKey:entity,rowSequence:'1',candidate,manifest:null}]});
+  }
+  else await publisher.prepare(author,'key',own,'d'.repeat(32));
+  if(explicit){const pending=(await f.store.readState()).cloud.pendingPublish,staged=await f.store.cloudRow(pending.treeRoot,entity);expect(staged.row.bodyRevision).toBe(old);expect(staged.row.promiseId).toBe(entry.row.promiseId);}await publisher.flush();
+  target=await publishingFixture(server);const receiverIndex=new WatchCloudIndex(target.store,target.http,signer,keys,approved,async()=>{},()=>100);await receiverIndex.pull(server.window());
+  const got=await target.store.readState();expect((await target.store.cloudRow(got.cloud.current.treeRoot,entity)).row.bodyRevision).toBe(old);let installed:Uint8Array|undefined;
+  const channel=new WatchBodyChannel({http:{list:async(_e:string,revision:string)=>({carriers:revision===old?[{descriptor:body.descriptor}]:[],nextAfter:null}),download:async(_id:string,h:string)=>body.objects.get(h)} as any,scope,projection:target.store,crypto:snapshotCrypto,signer,approved,author:async()=>({deviceId:author,alias:'key'}),key:async()=>content.slice(),currentKey:async()=>({key:content.slice(),version:1}),files:files(),root:'receiver',repository:{...repository,read:async()=>installed,install:async(_k,_id,b)=>{installed=b;}},check:async()=>{}});
+  expect(await channel.sync()).toEqual({pending:0,errors:[]});expect(installed).toEqual(raw);
+ }finally{target?.db.close();f.db.close();}
+});
+
+test('RVPODNOTES-02 missing new original holds only that entity and never invents a body revision',async()=>{
+ const {publishingFixture,SyntheticIndexBackend}=await import('./p2-fixture'),{idKey,binding,noteValue}=await import('./fixture'),{WatchIndexPublisher}=await import('../../src/sync-v2/publisher'),{WatchCloudIndex}=await import('../../src/sync-v2/cloud-index'),{independentBodyResolver}=await import('../../src/sync-v2/body-channel');
+ const server=new SyntheticIndexBackend(),f=await publishingFixture(server),id='missing.png',entity=entityKey(idKey,scope.repoId,'asset',id),keys={id:idKey,content:new Uint8Array(32).fill(0x22),version:1},pending:string[]=[];
+ try{
+  await f.store.beginScan({...binding,schema:'missing-original'});await f.store.scanPage({page:async()=>({rows:[{kind:'asset',logicalId:id,value:{assetId:id,mime:'image/png',originalFilename:id,updatedAt:1,sourceDeviceId:'watch',deleted:false,deletedAt:0}},{kind:'note',logicalId:'n',value:noteValue('n')}],after:'done',done:true}),changed:async()=>[]});
+  let original:Uint8Array|undefined;const publisher=new WatchIndexPublisher(f.store,f.http,signer,keys,()=>100,independentBodyResolver({read:async()=>original,validate:async()=>{},install:async()=>{}},async()=>null,code=>pending.push(code)));
+  await publisher.prepare(author,'key',{commitOid:null,revision:'0'},'e'.repeat(32));await publisher.flush();const reader=new WatchCloudIndex(f.store,f.http,signer,keys,async deviceId=>({deviceId,keyId:'b'.repeat(32),publicKey:b64(publicBytes)}),async()=>{},()=>100);await reader.pull(server.window());
+  const state=await f.store.readState();expect(await f.store.cloudRow(state.cloud.current.treeRoot,entity)).toBeNull();expect(await f.store.readCandidate(entity)).not.toBeNull();expect(state.hasUnsentEdits).toBe(true);expect(pending).toEqual(['body_channel_source_missing']);expect(await f.store.cloudRow(state.cloud.current.treeRoot,entityKey(idKey,scope.repoId,'note','n'))).not.toBeNull();
+  original=new Uint8Array([1,2,3]);await publisher.prepare(author,'key',{commitOid:server.device.commitOid,revision:server.device.revision},'b'.repeat(32));await publisher.flush();await reader.pull(server.window());const resumed=await f.store.readState();expect((await f.store.cloudRow(resumed.cloud.current.treeRoot,entity)).row.bodyRevision).toBe(carrierBodyRevision('asset',entity,sha256Hex(original)));expect(resumed.hasUnsentEdits).toBe(false);
+ }finally{f.db.close();}
 });

@@ -44,7 +44,7 @@ import type {SyncedSource} from './library-wire.ts';
 export interface RemovedLibraryContent {itemIds:readonly number[];channels:readonly {id:number;url:string}[]}
 export interface SqlLibraryRepositoryPorts {
  noteAssetReader?:(key:string,check?:()=>void)=>Promise<Uint8Array>;
- noteAssetWriter?:(key:string,bytes:Uint8Array)=>Promise<number>;
+ noteAssetWriter?:(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null)=>Promise<number>;
  noteAssetCollector?:(references:()=>Promise<ReadonlySet<string>>,check:()=>void)=>Promise<number>;
  reencodeStoredBodies?:(ids:readonly number[])=>Promise<readonly ReencodedBody[]>;
  clearContentFiles?:(privateData:boolean,control?:LibraryClearControl)=>Promise<void>;
@@ -99,7 +99,7 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   check();return {notes,assetKeys:[...new Set(texts.flatMap(t=>[...noteAssetKeys(t)]))].sort()};
  }
  async cloudNoteAsset(key:string,check?:()=>void){if(!this.ports.noteAssetReader)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetReader(key,check);}
- async mergeCloudNoteAsset(key:string,bytes:Uint8Array){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes);}
+ async mergeCloudNoteAsset(key:string,bytes:Uint8Array,expectedTargetSha256?:string|null){if(!this.ports.noteAssetWriter)throw Error('cloud_note_assets_unavailable');return this.ports.noteAssetWriter(key,bytes,expectedTargetSha256);}
  async collectCloudNoteAssets(check:()=>void){
   if(!this.ports.noteAssetCollector)return 0;
   await this.mergeCloudNotes([],check);
