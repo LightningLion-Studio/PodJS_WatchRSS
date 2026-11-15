@@ -1,0 +1,13 @@
+// Adds only an isolated, INTERNET-free screenshot fixture. Never alters the production application.
+settingsEvaluated { settings ->
+    def app = System.getProperty('watchrss.supportUiApp')
+    if (!app) throw new GradleException('watchrss.supportUiApp is required')
+    settings.include(':takeoverSupportUi')
+    settings.project(':takeoverSupportUi').projectDir = new File(app, 'scripts/migration/support-ui')
+}
+gradle.projectsEvaluated {
+    // This fixture renders Java widgets only; it never constructs a PodJS native runtime.
+    gradle.rootProject.project(':runtime').tasks.configureEach { task ->
+        if (task.name.contains('CMake') || task.name.startsWith('externalNativeBuild')) task.enabled = false
+    }
+}

@@ -11,3 +11,7 @@ WOvtLXLD/t7Y6jDVqAQap+vZjG86g8SEowTzOWnEEuQkkNceS1SU5XPkKaSPTZMn
 RQIDAQAB
 -----END PUBLIC KEY-----
 `;
+
+// Shared by the feedback logger and the pre-admission native uploader.
+export const LOG_SENSITIVE_PATTERN = "access_token|api_key|apiKey|appRefreshToken|bili_jct|csrf_session_id|DedeUserID|DedeUserID__ckMd5|msToken|n_mh|odin_tt|passport_csrf_token|passport_csrf_token_default|refresh_token|refreshToken|SESSDATA|sessionid|sessionid_ss|sid|sid_guard|sid_tt|sid_ucp_v1|s_v_web_id|ssid_ucp_v1|ttwid|uid_tt|uid_tt_ss|watchrss_pair|[A-Za-z0-9_-]*token|password|secret|signature|sign|a_bogus|x_bogus|X-Bogus|w_rid";
+export const LOG_HEADER_PATTERN = "(?:set-)?cookie|authorization|proxy-authorization|x-watchrss-pairing-auth";

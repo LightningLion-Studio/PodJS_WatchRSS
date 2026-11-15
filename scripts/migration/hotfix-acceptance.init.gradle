@@ -1,0 +1,7 @@
+// Adds a separate, formally signed instrumentation APK. Never changes the candidate application.
+settingsEvaluated { settings ->
+ def app=System.getProperty('watchrss.hotfixApp')
+ if(!app || !System.getProperty('watchrss.hotfixCaDir'))throw new GradleException('hotfix test app and local CA directory required')
+ settings.include(':takeoverHotfixTest')
+ settings.project(':takeoverHotfixTest').projectDir=new File(app,'scripts/migration/hotfix-acceptance')
+}
