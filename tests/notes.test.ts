@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import titleVectors from "./fixtures/notes-title-vectors.json";
 import type { SqlDatabase } from "../src/core/types.ts";
 import { MemoRepository, initializeMemoSchema } from "../src/notes/index.ts";
 import { NoteDraftAutosave } from "../src/notes/draft-autosave.ts";
@@ -149,4 +150,28 @@ describe("three-word title persistence",()=>{
     const [c]=await db.query("SELECT * FROM note_merge_conflicts");
     expect(c.base_markdown).toBe(local.baseMarkdown);expect(c.local_markdown).toBe(local.markdown);expect(c.remote_markdown).toBe("REMOTE\nmiddle\nlast");
   });
+});
+
+
+test("real user vocabulary sample derives its numbered first three words on save and merge",async()=>{
+ const sample=titleVectors.find(v=>v.name==='user-sample-vocab')!;
+ expect(sample.expected).toBe('1. republic 2');
+ const {repo,db}=repository();await repo.initialize();
+ const saved=await repo.save({title:'',markdown:sample.plainText});
+ console.log('USER-VOCAB PodJS save title='+JSON.stringify(saved.title));
+ expect(saved.title).toBe(sample.expected);
+ expect(saved.markdown).toBe(sample.plainText);expect(saved.baseMarkdown).toBe(sample.plainText);
+ expect(saved.plainText.split('\n')[0]).toBe(sample.plainText.split('\n')[0]!.replace(/^1\. /,'').trimEnd());
+ const html='<p>'+sample.plainText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+'</p>';
+ const rich=await repo.save({title:'',markdown:html});
+ console.log('USER-VOCAB PodJS HTML save title='+JSON.stringify(rich.title));
+ expect(rich.title).toBe(sample.expected);expect(rich.markdown).toBe(html);expect(rich.baseMarkdown).toBe(html);
+ const baseBody=sample.plainText.replace('1. republic','base republic');
+ const base=await repo.save({title:'base',markdown:baseBody});
+ await repo.save({noteId:base.noteId,title:'',markdown:sample.plainText});
+ await db.execute('UPDATE memo_notes SET title=? WHERE note_id=?',['',base.noteId]);
+ await repo.applyRemote({...base,markdown:baseBody+'\nremote tail',contentHash:'remote-sample-hash',updatedAt:500,modifiedBy:'phone'});
+ const merged=(await repo.get(base.noteId))!;
+ console.log('USER-VOCAB PodJS merge title='+JSON.stringify(merged.title));
+ expect(merged.title).toBe(sample.expected);expect(merged.markdown).toBe(sample.plainText+'\nremote tail');expect(merged.baseMarkdown).toBe(baseBody);
 });
