@@ -8,5 +8,20 @@
     "planning-heartbeat-cases.json": "e52a5f80c2f498de2e4117294e9abe96a885daf7991ba3f5e4f6615041928fe1",
     "review-r3-vectors.json": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76"
   },
-  "kotlinFixturePath": "Android_WatchRSS_Phone.wt-b2-s2/app/src/test/resources/b2/{spec-r3-vectors,review-r3-vectors}.json"
+  "sources": [
+    {
+      "repository": "Android_WatchRSS_Phone",
+      "path": "app/src/test/resources/b2/spec-r3-vectors.json",
+      "sourceCommit": "959c9049b16e0818a139160679ff14a11f807d7d",
+      "sha256": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76",
+      "fixture": "fixed-vectors.json"
+    },
+    {
+      "repository": "Android_WatchRSS_Phone",
+      "path": "app/src/test/resources/b2/review-r3-vectors.json",
+      "sourceCommit": "959c9049b16e0818a139160679ff14a11f807d7d",
+      "sha256": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76",
+      "fixture": "review-r3-vectors.json"
+    }
+  ]
 }

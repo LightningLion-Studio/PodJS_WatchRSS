@@ -81,22 +81,25 @@ export interface DurableChunks {
 export class ReceiveWindow {
  private nextTxSeq=1;private nextAckSeq=1;private busy=false;
  private readonly objects:RegisteredManifest;private admitted=false;
+ private readonly connectionId:string;private grantToken:GrantToken;private readonly grantedEpochs=new Set<number>();
  private readonly binding:JobBinding;
  constructor(binding:JobBinding,readonly grant:Grant,objects:RegisteredManifest){
   this.binding=Object.freeze({...binding});integer(objects.objectCount,4096);this.objects=objects;
+  this.grantToken=grant.token();grant.check(this.grantToken);this.connectionId=this.grantToken.connectionId;this.grantedEpochs.add(this.grantToken.epoch);
  }
 
+ private checkGrant():GrantToken {if(this.grantToken.connectionId!==this.connectionId)fail('AUTH_REVOKED');this.grant.check(this.grantToken);return {...this.grantToken};}
  /** Only after full manifest root/DAG validation, registration and peak reservation. */
- admit():void {this.grant.check(this.grant.token());this.admitted=true;}
- regrant(epoch:number):void {if(this.busy)fail('BUSY');this.grant.regrant(epoch);this.nextTxSeq=1;this.nextAckSeq=1;this.admitted=false;}
+ admit():void {this.checkGrant();this.admitted=true;}
+ regrant(epoch:number):void {this.checkGrant();if(this.busy)fail('BUSY');this.grant.regrant(epoch);this.grantToken=this.grant.token();this.grantedEpochs.add(epoch);this.nextTxSeq=1;this.nextAckSeq=1;this.admitted=false;}
  async receive(frame:DataFrame,store:DurableChunks,emitAck:(ack:AckFrame)=>Promise<void>,admissionError?:ResumeError):Promise<'STALE'|'ACK'> {
   try{return await this.checkedReceive(frame,store,emitAck,admissionError);}catch(e){
    if(!(e instanceof ResumeError)||e.wire().recovery==='STOP')this.grant.fence();throw e;
   }
  }
  private async checkedReceive(frame:DataFrame,store:DurableChunks,emitAck:(ack:AckFrame)=>Promise<void>,admissionError?:ResumeError):Promise<'STALE'|'ACK'> {
-  const token=this.grant.token();this.grant.check(token);
-  if(frame.streamId!==this.binding.streamId||frame.epoch>token.epoch)fail('STALE_EPOCH');
+  const token=this.checkGrant();
+  if(frame.streamId!==this.binding.streamId||!this.grantedEpochs.has(frame.epoch)||frame.epoch>token.epoch)fail('STALE_EPOCH');
   if(frame.epoch<token.epoch)return 'STALE'; // codec already bounded and consumed the complete frame.
   if(!this.admitted||this.busy)fail('FLOW_CONTROL_VIOLATION');
   this.busy=true;

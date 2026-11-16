@@ -20,7 +20,9 @@ Fixtures under `tests/fixtures/library-binary` are unchanged spec/review inputs;
   kinds and forces 1 chunk / 65536 bytes. A peer may advertise future book kinds;
   this core never selects/advertises them for its own S2 job.
 - `Preparation`: validates/persists offer and confirm bindings. The reverse job
-  may begin only after confirm success is **fully written**.
+  may begin only after confirm success is **fully written**. The first begin
+  must match its confirm intent; subsequent resume retains that job's first plan,
+  selection, snapshots and manifest page partition.
 - `state`: one DATA pending per stream, exact byte settlement, ACK/negative
   association, epoch reset, fixed IDs on retry, token buckets/backoff, independent
   business/heartbeat slots, local generation fence, immutable stream bindings,
@@ -74,7 +76,11 @@ Fixtures under `tests/fixtures/library-binary` are unchanged spec/review inputs;
    only the matching pending attempt; replay uses the same persistent ID/digest
    and a new txSeq. Apply sender backoff and the aggregate STATE bucket.
 8. Regrant only the same stream job/plan/selection after the writer/native fence
-   barrier. Clear old pending/ACK/error work, reset sequences and query missing
+   barrier. Use `ReceiveWindow.regrant()` to register the new connection-local
+   grant; changing its `Grant` directly invalidates the window. Only epochs
+   actually granted to this window may be discarded as old barrier frames. A
+   fresh connection first granted epoch 2 must STOP on epoch 1, as on future epochs.
+   Clear old pending/ACK/error work, reset sequences and query missing
    before resending. A different job/plan/selection requires closing both streams
    and starting a new physical connection. Old callbacks retain old grant tokens.
 9. Drive authenticated/begun heartbeat slots every <=10s, including PLANNING and
