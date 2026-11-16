@@ -30,7 +30,7 @@ export function mergeConflicts(noteId:string,a:ConflictSet,b:ConflictSet):Confli
  return conflictSet(noteId,[...records.values()]);
 }
 
-export function openConflicts(value:ConflictSet){return value.records.filter(r=>r.resolvedAt===0).sort((a,b)=>b.createdAt-a.createdAt||(a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0));}
+export function openConflicts(value:ConflictSet){return deduplicate(value.records).filter(r=>r.resolvedAt===0).sort((a,b)=>b.createdAt-a.createdAt||(a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0));}
 /** GC must scan resolved rows too; hydration can prioritize unresolved rows. */
 export function conflictTexts(value:ConflictSet){return value.records.flatMap(r=>[r.baseMarkdown,r.localMarkdown,r.remoteMarkdown]);}
 

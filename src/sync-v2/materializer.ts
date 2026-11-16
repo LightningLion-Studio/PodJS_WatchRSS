@@ -52,7 +52,7 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
    const conflicts=tables.has('note_merge_conflicts')?await db.query('SELECT * FROM note_merge_conflicts WHERE note_id=?',[row.note_id]):[];
    const resolved=tables.has('syncv2_note_resolutions')?await db.query('SELECT conflict_id,resolved_at FROM syncv2_note_resolutions WHERE note_id=?',[row.note_id]):[];
    const markers=new Map(resolved.map(r=>{if(typeof r.conflict_id!=='string')throw Error('invalid_schema');uint(r.resolved_at);return [r.conflict_id,r.resolved_at as number] as const;}));
-   for(const record of records)record.value.noteConflicts=conflictSet(record.logicalId,importLegacy('watch',record.logicalId,conflicts).records.map(r=>({...r,resolvedAt:markers.get(r.conflictId)??0})));
+   for(const record of records)record.value.noteConflicts=conflictSet(record.logicalId,conflicts.flatMap(row=>importLegacy('watch',record.logicalId,[row]).records.map(r=>({...r,resolvedAt:markers.get(r.conflictId)??0}))));
    return records;
   }
   if(table==='articles'){

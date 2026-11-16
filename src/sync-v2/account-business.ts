@@ -1,3 +1,4 @@
+import {conflictSet} from './note-conflict-set';
 import {NOTE_ASSET_SCHEMA} from './note-assets';
 /** Prepared replacement of the authenticated account projection in the original
  * watch database. No LWW merge: explicit account choices can select older clocks.
@@ -64,7 +65,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    if(r.kind==='article'&&!Object.hasOwn(v,'registerSources')){if(!Object.hasOwn(v,'contentHash')||!Object.hasOwn(v,'updatedAt'))throw Error('closure_incomplete');v=readArticleRegisters(JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v}),true).value;}
    if(r.kind==='note'){
     requireTable('memo_notes');statements.push(...noteUpsert(v));
-    if(v.noteConflicts){requireTable('note_merge_conflicts');requireTable('syncv2_note_resolutions');statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[v.noteId]},{sql:'DELETE FROM syncv2_note_resolutions WHERE note_id=?',params:[v.noteId]});for(const c of v.noteConflicts.records){statements.push(upsert('note_merge_conflicts','conflict_id note_id base_markdown local_markdown remote_markdown remote_device_id created_at'.split(' '),[c.conflictId,c.noteId,c.baseMarkdown,c.localMarkdown,c.remoteMarkdown,c.remoteDeviceId,c.createdAt],['conflict_id']),upsert('syncv2_note_resolutions',['note_id','conflict_id','resolved_at'],[v.noteId,c.conflictId,c.resolvedAt],['note_id','conflict_id']));}}
+    if(v.noteConflicts){requireTable('note_merge_conflicts');requireTable('syncv2_note_resolutions');statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[v.noteId]},{sql:'DELETE FROM syncv2_note_resolutions WHERE note_id=?',params:[v.noteId]});for(const c of conflictSet(v.noteId,v.noteConflicts.records).records){statements.push(upsert('note_merge_conflicts','conflict_id note_id base_markdown local_markdown remote_markdown remote_device_id created_at'.split(' '),[c.conflictId,c.noteId,c.baseMarkdown,c.localMarkdown,c.remoteMarkdown,c.remoteDeviceId,c.createdAt],['conflict_id']),upsert('syncv2_note_resolutions',['note_id','conflict_id','resolved_at'],[v.noteId,c.conflictId,c.resolvedAt],['note_id','conflict_id']));}}
    }else if(r.kind==='folder'){
     requireTable('memo_folders');statements.push(upsert('memo_folders','folder_id name sort_order updated_at modified_by deleted deleted_at'.split(' '),[v.folderId,v.name,v.sortOrder,v.updatedAt,v.modifiedBy,+v.deleted,v.deletedAt],['folder_id']));
    }else if(r.kind==='source'){

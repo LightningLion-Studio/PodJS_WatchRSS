@@ -66,13 +66,13 @@ function outer(state:any,context:{entityKey:string;noteId:string}){
 export function attachConflicts(state:any,context:{entityKey:string;noteId:string},value:ConflictSet){
  validateSet(context.noteId,value);outer(state,context);const next=clone(state),target=holder(next);
  if(Object.hasOwn(target,'noteConflicts')||next.requiredFeatures.includes(feature))fail('invalid_schema');
- target.noteConflicts=clone(value);next.requiredFeatures=[...next.requiredFeatures,feature].sort();readConflicts(next,context);if(c.jb(next).length>262144)fail('object_too_large');return next;
+ target.noteConflicts=conflictSet(context.noteId,value.records);next.requiredFeatures=[...next.requiredFeatures,feature].sort();readConflicts(next,context);if(c.jb(next).length>262144)fail('object_too_large');return next;
 }
 /** null means no conflict channel, NOT an authoritative empty table. */
 export function readConflicts(state:any,context:{entityKey:string;noteId:string},supported=[feature,'note-segments.v1']):ConflictSet|null{
  outer(state,context);const target=holder(state);if(state.requiredFeatures.some((f:string)=>!supported.includes(f)))fail('unsupported_feature');
  if(!state.requiredFeatures.includes(feature)){if(Object.hasOwn(target,'noteConflicts'))fail('invalid_schema');return null;}
- if(!Object.hasOwn(target,'noteConflicts'))fail('invalid_schema');validateSet(context.noteId,target.noteConflicts);return clone(target.noteConflicts);
+ if(!Object.hasOwn(target,'noteConflicts'))fail('invalid_schema');validateSet(context.noteId,target.noteConflicts);return conflictSet(context.noteId,target.noteConflicts.records);
 }
 /** An existing open incident blocks automatic merge even if current text is disjoint. */
 export function mergeNoteWithConflicts(noteId:string,base:string,local:string,remote:string,known:ConflictSet[]){
