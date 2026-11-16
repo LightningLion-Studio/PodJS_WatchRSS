@@ -37,4 +37,18 @@ test('NA-16 legacy repository ID suppresses new duplicate incident',async()=>{co
  const rows=await f.db.query('SELECT * FROM note_merge_conflicts');expect(rows).toHaveLength(1);expect(rows[0].conflict_id).toBe(legacy);
 }finally{f.sql.close()}});
 
-test('NA-15 derived title retains Unicode scalars',()=>{expect(deriveNoteTitle('.'.repeat(79)+'😀').isWellFormed()).toBe(true)});
+test('NA-15 derived title retains Unicode scalars',()=>{expect(deriveNoteTitle('.'.repeat(79)+'😀')).toBe('.'.repeat(79)+'😀')});
+
+for(const fence of ['```','~~~~','   ```']){
+ test('NA-12 mixed rich HTML protects '+JSON.stringify(fence),()=>{
+  const blocks=prepareNotePreview('<img src="real">\n'+fence+'html\n<img src="literal">\n'+fence.trim());
+  expect(blocks.filter(b=>b.kind==='image').map(b=>b.path)).toEqual(['real']);
+  expect(blocks.filter(b=>b.kind==='rich').flatMap(b=>noteTextRows(b.markup,b.html)).filter(r=>r.role==='code').map(r=>r.text)).toEqual(['<img src="literal">']);
+ });
+}
+test('NA-12 unclosed fence and mismatched delimiters remain code',()=>{
+ const source='```html\n<img src="literal">\n~~~\n<img src="still-literal">';
+ const blocks=prepareNotePreview(source);
+ expect(blocks.some(b=>b.kind==='image')).toBe(false);
+ expect(blocks.filter(b=>b.kind==='rich').flatMap(b=>noteTextRows(b.markup,b.html)).map(r=>r.text)).toEqual(['<img src="literal">','~~~','<img src="still-literal">']);
+});

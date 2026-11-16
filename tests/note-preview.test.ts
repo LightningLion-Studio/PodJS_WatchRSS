@@ -13,11 +13,11 @@ test('note preview images keep native aspect ratio within the watch height bound
  expect(noteImageDisplayHeight(205,0,100)).toBe(260);
 });
 
-test('native note preview collapses fenced code to one measured blank row without changing source text',async()=>{
+test('native body layout excludes code rendered separately by NotePreview',async()=>{
  const {noteBodyLayoutBlocks}=await import('../src/notes/native-layout-input.ts');
  const one='前文\n```text\n代码\n```\n后文',many='前文\n```text\n代码甲\n代码乙\n```\n后文';
- expect(noteBodyLayoutBlocks(one).map(block=>block.text)).toEqual(['前文','后文',' ']);
- expect(noteBodyLayoutBlocks(many).map(block=>block.text)).toEqual(['前文','后文',' ']);
+ expect(noteBodyLayoutBlocks(one).map(block=>block.text)).toEqual(['前文','后文']);
+ expect(noteBodyLayoutBlocks(many).map(block=>block.text)).toEqual(['前文','后文']);
 });
 
 test('table cells preserve literal Markdown while unwrapping native inline-code delimiters',async()=>{

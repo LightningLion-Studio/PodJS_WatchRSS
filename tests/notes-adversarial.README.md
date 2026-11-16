@@ -46,3 +46,17 @@ unrelated sync-v2 memory benchmarks.
 Selected from adversarial test commit 6639cddd: NA-12, NA-15, NA-17. Other findings belong to separate tasks.
 Run notes-adversarial.test with the existing notes unit tests.
 Run notes-adversarial-preview.isolated.ts in a separate Bun process; its native module mocks must not enter other suites.
+
+Derived titles use the first three words and then at most **80 Unicode code
+points**, identically in Kotlin, PodJS and the mini app. Explicit nonblank titles
+keep their existing behavior. This is a code-point limit, not grapheme segmentation;
+no dependency on Intl.Segmenter's grapheme support is introduced.
+
+The shared `notes-title-vectors.json` has 23 cases (18 existing + 5 Unicode limit
+cases); the phone copy is `app/src/test/resources/notes-title-vectors.json`.
+Native, missing Intl/Segmenter and throwing Segmenter paths use the same limit.
+
+```sh
+flock /tmp/wrss-heavy.lock flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-render-fix.lock capmem 8G bun test tests/notes-adversarial.test.ts tests/notes/title.test.ts tests/note-preview.test.ts
+flock /tmp/wrss-heavy.lock flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-render-fix.lock capmem 8G bun test ./tests/notes-adversarial-preview.isolated.ts
+```

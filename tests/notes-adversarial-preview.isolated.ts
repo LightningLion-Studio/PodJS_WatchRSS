@@ -21,3 +21,16 @@ test('NA-17 fenced code produces visible text instead of only blank spacers',()=
  const rows=notePreviewEntries('```\nliteral\n```',200);
  expect(rows.some((r:any)=>r.anchor?.renderedText==='literal')).toBe(true);
 });
+test('NA-17 multiline code retains indentation, blanks and source anchors',()=>{
+ const source='```html\n  <img src="x">\n\nsecond\n```';
+ const anchors=notePreviewEntries(source,200).flatMap((r:any)=>r.anchor?[r.anchor]:[]);
+ expect(anchors.map((a:any)=>a.renderedText)).toEqual(['  <img src="x">','','second']);
+ for(const a of anchors)expect(source.slice(a.sourceStart,a.sourceStart+a.sourceMarkup.length)).toBe(a.sourceMarkup);
+});
+test('NA-17 wrapped code retains all characters with native body metrics present',()=>{
+ const source='```\nabcdefghijklmnop\n```';
+ const native=new Map([[' ',[{height:88}]]]) as any;
+ const rows=notePreviewEntries(source,40,undefined,undefined,native).filter((r:any)=>r.anchor);
+ expect(rows.map((r:any)=>r.anchor.renderedText).join('')).toBe('abcdefghijklmnop');
+ expect(rows.every((r:any)=>r.height===19)).toBe(true);
+});

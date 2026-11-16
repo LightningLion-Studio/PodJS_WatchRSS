@@ -30,10 +30,30 @@ function parseTable(lines:string[],start:number):TableResult|null{
 }
 function* tableBlockSteps(markup:string):Generator<void,NotePreviewBlock[]>{const lines=normalized(markup).split('\n'),out:NotePreviewBlock[]=[];let buffer='',fence:Fence|null=null;const append=(line:string)=>{if(buffer)buffer+='\n';buffer+=line;};const flush=()=>{if(buffer){out.push(rich(buffer));buffer='';}};
  for(let i=0;i<lines.length;){yield;const line=lines[i],marker=noteFence(line);if(fence){append(line);if(closes(marker,fence))fence=null;i++;continue;}if(marker){fence=marker;append(line);i++;continue;}const found=parseTable(lines,i);if(found){flush();out.push(found.block);i=found.next;}else{append(line);i++;}}flush();return out;}
-function* parseBlockSteps(markup:string,onBlock?:(block:NotePreviewBlock)=>void):Generator<void,NotePreviewBlock[]>{
+function* parseContentBlockSteps(markup:string,onBlock?:(block:NotePreviewBlock)=>void):Generator<void,NotePreviewBlock[]>{
  if(isNoteRichHtml(markup)){const out:NotePreviewBlock[]=[];let cursor=0;for(const m of markup.matchAll(/<img\b[^>]*>(?:[ \t\n\v\f\r]*<\/img>)?/gis)){yield;const before=markup.slice(cursor,m.index);if(trim(before))out.push(rich(before,true));const attr=(name:string)=>new RegExp('\\b'+name+'[ \\t\\n\\v\\f\\r]*=[ \\t\\n\\v\\f\\r]*["\x27]([^"\x27]*)["\x27]','is').exec(m[0])?.[1];const src=attr('src');out.push(src&&trim(src)?{kind:'image',path:src,description:attr('alt')??''}:rich(m[0],true));cursor=m.index!+m[0].length;}const tail=markup.slice(cursor);if(trim(tail))out.push(rich(tail,true));return out.length?out:[rich(markup,true)];}
  const out:NotePreviewBlock[]=[];let buffer='',fence:Fence|null=null;const append=(block:NotePreviewBlock)=>{out.push(block);onBlock?.(block);};const flush=function*():Generator<void,void>{if(buffer){for(const block of yield* tableBlockSteps(buffer))append(block);buffer='';}};
  for(const line of normalized(markup).split('\n')){yield;const marker=noteFence(line);if(fence){if(buffer)buffer+='\n';buffer+=line;if(closes(marker,fence))fence=null;continue;}if(marker){fence=marker;if(buffer)buffer+='\n';buffer+=line;continue;}const images=[...line.matchAll(/!\[([^\]]*)\]\(([^) \t\n\v\f\r]+)(?:[ \t\n\v\f\r]+["'][^"']*["'])?\)/g)];if(!images.length){if(buffer)buffer+='\n';buffer+=line;continue;}let cursor=0;for(const image of images){buffer+=line.slice(cursor,image.index);yield* flush();append({kind:'image',path:image[2].replace(/%20/g,' '),description:image[1]});cursor=image.index!+image[0].length;}buffer+=line.slice(cursor);}yield* flush();return out;
+}
+// Split fenced source before the rich-HTML detector can interpret its tags.
+function* parseBlockSteps(markup:string,onBlock?:(block:NotePreviewBlock)=>void):Generator<void,NotePreviewBlock[]>{
+ if(!isNoteRichHtml(markup))return yield* parseContentBlockSteps(markup,onBlock);
+ const out:NotePreviewBlock[]=[];let lines:string[]=[],fence:Fence|null=null;
+ const emit=(block:NotePreviewBlock)=>{out.push(block);onBlock?.(block);};
+ const flush=function*(literal:boolean):Generator<void,void>{
+  if(!lines.length)return;
+  const source=lines.join('\n');lines=[];
+  if(literal)emit(rich(source));
+  else for(const block of yield* parseContentBlockSteps(source))emit(block);
+ };
+ for(const line of normalized(markup).split('\n')){
+  yield;
+  const marker=noteFence(line);
+  if(fence){lines.push(line);if(closes(marker,fence)){yield* flush(true);fence=null;}}
+  else if(marker){yield* flush(false);fence=marker;lines.push(line);}
+  else lines.push(line);
+ }
+ yield* flush(!!fence);return out;
 }
 function chunkMarkdown(markup:string,max:number):string[]{const out:string[]=[];let buffer='',fence:Fence|null=null;const flush=()=>{if(buffer){out.push(buffer.replace(/\n+$/,''));buffer='';}};for(const line of normalized(markup).split('\n')){const marker=noteFence(line),inside=!!fence,len=line.length+(buffer?1:0);if(!inside&&buffer&&buffer.length+len>max)flush();if(buffer)buffer+='\n';buffer+=line;if(fence){if(closes(marker,fence))fence=null;}else if(marker)fence=marker;if(!fence&&!trim(line)&&buffer.length>=Math.trunc(max/2))flush();}flush();return out.length?out:[markup];}
 export function* prepareNotePreviewSteps(markup:string,max=1200,onPrefix?:(blocks:NotePreviewBlock[])=>void):Generator<void,NotePreviewBlock[]>{

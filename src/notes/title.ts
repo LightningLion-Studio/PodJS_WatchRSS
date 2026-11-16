@@ -8,7 +8,8 @@ export function deriveNoteTitle(plainText:string):string {
   last=to;
   if(++count===3)break;
  }
- return (first<0?line:line.slice(first,last)).slice(0,80);
+ // Count Unicode code points on every runtime, including the Intl fallback.
+ return Array.from(first<0?line:line.slice(first,last)).slice(0,80).join('');
 }
 
 function* wordRanges(line:string):Generator<[number,number]> {
