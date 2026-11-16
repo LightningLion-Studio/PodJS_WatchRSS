@@ -21,8 +21,8 @@ test('RNR-04 a backtick in opener info does not silently hide that source line',
 });
 test('RNR-05 combining letters keep the same first three words without Intl',()=>{
  const source='e\u0301cole cafe noir suite',expected=deriveNoteTitle(source),saved=Intl.Segmenter;
- try {Intl.Segmenter=undefined as any;expect(deriveNoteTitle(source)).toBe(expected);}
- finally {Intl.Segmenter=saved;}
+ try {Object.defineProperty(Intl,'Segmenter',{value:undefined,configurable:true,writable:true});expect(deriveNoteTitle(source)).toBe(expected);}
+ finally {Object.defineProperty(Intl,'Segmenter',{value:saved,configurable:true,writable:true});}
 });
 test('RNR-CONTROL closed, unclosed, shorter and mismatched code fences remain literal',()=>{
  for(const source of ['```html\n<img src="x">\n```','~~~html\n<img src="x">\n~~~','````html\n```\n~~~\n<img src="x">','   ```\n<img src="x">']){
@@ -30,9 +30,9 @@ test('RNR-CONTROL closed, unclosed, shorter and mismatched code fences remain li
   expect(rows(source).some(r=>r.role==='code'&&r.text.includes('<img'))).toBe(true);
  }
 });
-test('RNR-07 documented code-point limit can split a grapheme (policy control)',()=>{
- expect(deriveNoteTitle('.'.repeat(78)+'👨‍👩‍👧‍👦')).toBe('.'.repeat(78)+'👨‍');
- expect(deriveNoteTitle('a'.repeat(79)+'e\u0301')).toBe('a'.repeat(79)+'e');
+test('RNR-07 80-code-point limit retreats to a complete grapheme',()=>{
+ expect(deriveNoteTitle('.'.repeat(78)+'👨‍👩‍👧‍👦')).toBe('.'.repeat(78));
+ expect(deriveNoteTitle('a'.repeat(79)+'e\u0301')).toBe('a'.repeat(79));
 });
 test.skipIf(!process.env.RENDER_PHONE_MAIN||!process.env.RENDER_PHONE_HOTFIX||!process.env.RENDER_MINI_ROOT)('RNR-06 expanded title vectors agree across both phone branches, watch and mini',()=>{
  const phone=JSON.parse(readFileSync(process.env.RENDER_PHONE_MAIN!,'utf8'));
@@ -41,7 +41,7 @@ test.skipIf(!process.env.RENDER_PHONE_MAIN||!process.env.RENDER_PHONE_HOTFIX||!p
  const saved=Intl.Segmenter;
  const matrix=phone.map((v:any,i:number)=>{
   const out={input:v.input,phone:v.title,hotfix:hotfix[i].title,watch:deriveNoteTitle(v.input),mini:mini(v.input),watchFallback:'',miniFallback:''};
-  try {Intl.Segmenter=undefined as any;out.watchFallback=deriveNoteTitle(v.input);out.miniFallback=mini(v.input);}finally{Intl.Segmenter=saved;}
+  try {Object.defineProperty(Intl,'Segmenter',{value:undefined,configurable:true,writable:true});out.watchFallback=deriveNoteTitle(v.input);out.miniFallback=mini(v.input);}finally{Object.defineProperty(Intl,'Segmenter',{value:saved,configurable:true,writable:true});}
   return out;
  });
  if(process.env.RENDER_MATRIX)writeFileSync(process.env.RENDER_MATRIX,JSON.stringify(matrix,null,2)+'\n');
