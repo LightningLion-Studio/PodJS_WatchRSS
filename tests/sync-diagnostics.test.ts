@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {LibraryDiagnostics} from '../src/debug/library-diagnostics';
-import {SyncHistory,HISTORY_KEY,HISTORY_LIMIT,ITEM_LIMIT,bookFields,summaryFields,syncRecord,bookRejections} from '../src/debug/sync-diagnostics';
+import {SyncHistory,HISTORY_KEY,HISTORY_LIMIT,ITEM_LIMIT,bookFields,summaryFields,syncRecord,bookRejections,requestItems} from '../src/debug/sync-diagnostics';
 import {createShellHandlers} from '../src/debug/shell-commands';
 const id='a'.repeat(64),sha='b'.repeat(64);
 function storage(){const data=new Map<string,string>();return {data,get:(key:string)=>data.get(key),set:(key:string,value:string)=>{data.set(key,value);}};}
@@ -11,7 +11,7 @@ test('books project only allowed fields and verify actual package/readable chapt
 test('summary matches saved UI predicates and filters deleted notes/books',async()=>{const {reader,sql}=library();sql.exec("INSERT INTO channels VALUES(1);INSERT INTO articles VALUES(1,1),(2,1);INSERT INTO article_saved_states VALUES(1,'favorite',1),(2,'favorite',0),(2,'watchLater',1);INSERT INTO memo_notes VALUES(0),(1);");expect(await reader.summary()).toEqual({channels:1,articles:2,favorites:1,watchLater:1,memos:1,books:0});sql.close();});
 test('persistent ring, rejects, timestamps, wire bytes and bounded items',()=>{const store=storage();let now=100;const history=new SyncHistory(store);for(let i=0;i<HISTORY_LIMIT+4;i++){now++;const trace=history.begin(i%2?'IP':'RFCOMM',()=>now);trace.bytes(500);trace.item({kind:'book',id,reasonCode:'book_package_invalid',result:'rejected',Cookie:'secret'});now+=1000;trace.finish(true);}expect(history.last()).toHaveLength(3);expect(new SyncHistory(store).last(12)).toHaveLength(12);expect(history.last(1)[0]).toMatchObject({result:'partial',totalBytes:500,bytesPerSecond:500,items:[{kind:'book',id,result:'rejected',reasonCode:'book_package_invalid'}]});const trace=history.begin('IP',()=>++now);for(let i=0;i<ITEM_LIMIT+3;i++)trace.item({kind:'book',id,reasonCode:'none',result:'applied'});trace.finish(false);expect(history.last(1)[0]?.items).toHaveLength(ITEM_LIMIT);expect(history.last(1)[0]?.itemsTruncated).toBe(true);expect(store.get(HISTORY_KEY)).not.toContain('secret');});
 test('poisoned persistent data is projected again and corruption fails closed',()=>{const store=storage();store.set(HISTORY_KEY,JSON.stringify([{startedAt:1,endedAt:null,channel:'http://secret',Cookie:'secret',items:[{kind:'http://secret',id:'https://secret',reasonCode:'Cookie=secret'}]}]));const output=JSON.stringify(new SyncHistory(store).last());expect(output).not.toContain('secret');store.set(HISTORY_KEY,'invalid');expect(new SyncHistory(store).last()).toEqual([]);});
-test('shell rejects unknown keys, type confusion and count bounds',async()=>{const h=createShellHandlers({} as any,{books:async()=>[],summary:async()=>({}),last:()=>[]});for(const args of [{n:0},{n:13},{n:1.1},{n:'3'},{n:null},{n:true},{n:1,route:'secret'}])await expect(h['sync.last']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});expect(await h['sync.last']!({}, {isActive:()=>true})).toEqual({sessions:[]});for(const c of ['library.books','library.summary'])await expect(h[c]!({url:'secret'},{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});});
+test('shell rejects unknown keys, type confusion and count bounds',async()=>{const h=createShellHandlers({} as any,{books:async()=>[],summary:async()=>({}),last:()=>[]});for(const args of [{n:0},{n:13},{n:1.1},{n:'3'},{n:null},{n:true},{n:1,route:'secret'}])await expect(h['sync.last']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});expect(await h['sync.last']!({}, {isActive:()=>true})).toEqual({sessions:[],itemOffset:0,nextItemOffset:null});for(const c of ['library.books','library.summary'])await expect(h[c]!({url:'secret'},{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});});
 test('all projections strip unapproved field names and unsafe identifiers',()=>{for(const value of [bookFields({token:'secret',sourceUrl:'secret',book_id:'https://secret'}),summaryFields({token:'secret'}),syncRecord({Cookie:'secret',items:[{kind:'unknown',id:'secret',reasonCode:'secret'}]})])expect(JSON.stringify(value)).not.toContain('secret');});
 
 test('real frame session persists byte totals and item rejection without sensitive payload',async()=>{
@@ -45,4 +45,35 @@ test('visible book count deduplicates mapped chapters and excludes metadata-only
  sql.run('INSERT INTO sync_book_aliases VALUES(?,?),(?,?)',[id,1,id,2]);expect((await reader.summary()).books).toBe(1);sql.close();
 });
 
-test('maximum history stays below the shell reply budget',()=>{const store=storage();const item={kind:'article',id,result:'rejected',reasonCode:'book_reading_delta_not_negotiated'};const row={startedAt:Number.MAX_SAFE_INTEGER,endedAt:Number.MAX_SAFE_INTEGER,channel:'RFCOMM',result:'partial',totalBytes:Number.MAX_SAFE_INTEGER,bytesPerSecond:Number.MAX_SAFE_INTEGER,reconnectCount:Number.MAX_SAFE_INTEGER,items:Array.from({length:ITEM_LIMIT},()=>item),itemsTruncated:true};store.set(HISTORY_KEY,JSON.stringify(Array.from({length:HISTORY_LIMIT},()=>row)));expect(new TextEncoder().encode(JSON.stringify({sessions:new SyncHistory(store).last(12)})).byteLength).toBeLessThan(600000);});
+test('bounded stored history stays below 600 KB',()=>{const store=storage();const item={kind:'article',id,result:'rejected',reasonCode:'book_reading_delta_not_negotiated'};const row={startedAt:Number.MAX_SAFE_INTEGER,endedAt:Number.MAX_SAFE_INTEGER,channel:'RFCOMM',result:'partial',totalBytes:Number.MAX_SAFE_INTEGER,bytesPerSecond:Number.MAX_SAFE_INTEGER,reconnectCount:Number.MAX_SAFE_INTEGER,items:Array.from({length:ITEM_LIMIT},()=>item),itemsTruncated:true};store.set(HISTORY_KEY,JSON.stringify(Array.from({length:HISTORY_LIMIT},()=>row)));expect(new TextEncoder().encode(JSON.stringify({sessions:new SyncHistory(store).last(12)})).byteLength).toBeLessThan(600000);});
+test('batch refusals retain each note ID and asset digest without paths or account IDs',()=>{
+ const note='12345678-1234-1234-1234-123456789abc';
+ expect(requestItems({action:'syncNotes',notes:[{noteId:note,markdown:'secret'},{noteId:id}]})).toEqual([{kind:'note',id:note},{kind:'note',id}]);
+ expect(requestItems({action:'syncNoteAsset',sha256:id,storageKey:'secret.png',data:'secret'})).toEqual([{kind:'asset',id}]);
+ expect(requestItems({action:'syncAccount',noteId:note,userId:note})).toEqual([{kind:'account',id:null}]);
+ expect(requestItems({action:'syncNotes',notes:Array.from({length:ITEM_LIMIT+2},()=>({noteId:id}))})).toHaveLength(ITEM_LIMIT+1);
+});
+
+test('shell pages the maximum history below the provider 32768-character limit',async()=>{
+ const item={kind:'article',id,result:'rejected',reasonCode:'book_reading_delta_not_negotiated'};
+ const rows=Array.from({length:12},(_,i)=>({startedAt:Number.MAX_SAFE_INTEGER-i,endedAt:Number.MAX_SAFE_INTEGER,totalBytes:Number.MAX_SAFE_INTEGER,bytesPerSecond:Number.MAX_SAFE_INTEGER,reconnectCount:Number.MAX_SAFE_INTEGER,channel:'RFCOMM',result:'partial',items:Array.from({length:256},()=>item)}));
+ const h=createShellHandlers({} as any,{books:async()=>[],summary:async()=>({}),last:n=>rows.slice(0,n)});
+ let offset=0;const counts=Array(12).fill(0);
+ for(let pages=0;pages<30;pages++){const page=await h['sync.last']!({n:12,itemOffset:offset},{isActive:()=>true}) as any;expect(Object.keys(page)).toEqual(['sessions','itemOffset','nextItemOffset']);expect(JSON.stringify(page).length).toBeLessThan(32768);page.sessions.forEach((r:any,i:number)=>counts[i]+=r.items.length);if(page.nextItemOffset===null)break;expect(page.nextItemOffset).toBeGreaterThan(offset);offset=page.nextItemOffset;}
+ expect(counts).toEqual(Array(12).fill(256));
+ for(const args of [{itemOffset:-1},{itemOffset:'0'},{itemOffset:257},{n:12,itemLimit:11},{itemLimit:0},{itemLimit:null}])await expect(h['sync.last']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});
+});
+test('book pages bound escaped titles and hash only selected files',async()=>{
+ const longest={bookId:id,title:'\ud800'.repeat(256),chapterCount:Number.MAX_SAFE_INTEGER,packageBytes:Number.MAX_SAFE_INTEGER,packageSha256:id,status:'ready',reasonCode:'book_reading_delta_not_negotiated',readable:true};
+ const h=createShellHandlers({} as any,{books:async()=>Array.from({length:13},()=>longest),summary:async()=>({}),last:()=>[]});
+ const page=await h['library.books']!({offset:0,limit:12},{isActive:()=>true}) as any;expect(page.nextOffset).toBe(12);expect(page.books).toHaveLength(12);expect(JSON.stringify(page).length).toBeLessThan(32768);
+ for(const args of [{offset:-1},{offset:'0'},{limit:13},{limit:0},{limit:null}])await expect(h['library.books']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});
+ const {reader,sql}=library();let hashes=0;const selected=new LibraryDiagnostics((reader as any).db,{hash:async()=>{hashes++;return {size:10,sha256:sha};}},async()=>true);
+ for(const key of [id,'b'.repeat(64),'c'.repeat(64)])sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[key,JSON.stringify({title:'Book'}),1,key,10,sha,1]);
+ expect((await selected.books(undefined,{offset:1,limit:1}))[0]?.bookId).toBe('b'.repeat(64));expect(hashes).toBe(1);sql.close();
+});
+test('pending book batches skip other bodies and summary never reads chapter data',async()=>{
+ const {reader,sql}=library();sql.exec("ALTER TABLE channels ADD COLUMN url TEXT;ALTER TABLE channels ADD COLUMN title TEXT;ALTER TABLE articles ADD COLUMN link TEXT;ALTER TABLE articles ADD COLUMN title TEXT;CREATE TABLE sync_book_aliases(book_id TEXT,item_id INTEGER);INSERT INTO channels VALUES(1,'https://watchrss.local/import-content','Imports');INSERT INTO articles VALUES(1,1,'https://watchrss.local/import-content/txt/one','One'),(2,1,'https://watchrss.local/import-content/txt/two','Two');");
+ const bodies:number[]=[];const selected=new LibraryDiagnostics((reader as any).db,{hash:async()=>{throw Error('no files');}},async id=>{bodies.push(id);return true;});
+ expect((await selected.summary()).books).toBe(2);expect(bodies).toEqual([]);expect((await selected.books(undefined,{offset:1,limit:1}))[0]?.title).toBe('Two');expect(bodies).toEqual([2]);sql.close();
+});

@@ -8,6 +8,13 @@ const itemId=(v:unknown)=>typeof v==='string'&&(/^[a-f0-9]{64}$/.test(v)||/^[a-f
 export const safeTitle=(v:unknown)=>typeof v==='string'?v.replace(/[\u0000-\u001f\u007f]/g,' ').replace(/[a-z][a-z0-9+.-]{1,31}:\/\/[^\s]+/gi,'[redacted]').slice(0,256):'';
 export const count=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0?v:0;
 export interface ItemResult {kind:string;id:string|null;result:string;reasonCode:string}
+/** Keep only public business IDs. Batch failure applies to each submitted item. */
+export function requestItems(request:Record<string,unknown>):{kind:string;id:string|null}[] {
+ const kind=request.action==='syncBooks'?'book':request.action==='syncNotes'?'note':request.action==='syncNoteAsset'?'asset':request.action==='syncReader'?'reader':request.action==='syncAccount'?'account':'library';
+ const rows=kind==='note'?(Array.isArray(request.notes)&&request.notes.length?request.notes:request.noteManifest):undefined;
+ const ids=Array.isArray(rows)&&rows.length?rows.slice(0,ITEM_LIMIT+1).map(r=>r&&typeof r==='object'?(r as Record<string,unknown>).noteId:null):[kind==='book'?request.bookId:kind==='asset'?request.sha256:request.noteId];
+ return ids.map(id=>{const item=itemResult({kind,id});return {kind:item.kind,id:item.id};});
+}
 export function itemResult(raw:Record<string,unknown>):ItemResult {
  return {kind:['book','article','note','asset','reader','library','account','unknown'].includes(String(raw.kind))?String(raw.kind):'unknown',id:['book','asset'].includes(String(raw.kind))?opaqueId(raw.id):['article','note'].includes(String(raw.kind))?itemId(raw.id):null,result:raw.result==='applied'?'applied':'rejected',reasonCode:reasonCode(raw.reasonCode)};
 }
@@ -27,7 +34,8 @@ export class SyncHistory {
  }
 }
 export type SyncTrace=ReturnType<SyncHistory['begin']>;
-export interface LibraryDiagnosticsPort {books(check?:()=>void):Promise<unknown[]>;summary(check?:()=>void):Promise<Record<string,unknown>>;last(n:number):unknown[]}
+export interface BookPage {offset:number;limit:number}
+export interface LibraryDiagnosticsPort {books(check?:()=>void,page?:BookPage):Promise<unknown[]>;summary(check?:()=>void):Promise<Record<string,unknown>>;last(n:number):unknown[]}
 export function bookFields(r:Record<string,unknown>){return {bookId:opaqueId(r.bookId),title:safeTitle(r.title),chapterCount:count(r.chapterCount),packageBytes:count(r.packageBytes),packageSha256:opaqueId(r.packageSha256),status:['ready','staged','failed'].includes(String(r.status))?String(r.status):'failed',reasonCode:reasonCode(r.reasonCode),readable:r.readable===true};}
 export function summaryFields(r:Record<string,unknown>){return {channels:count(r.channels),articles:count(r.articles),favorites:count(r.favorites),watchLater:count(r.watchLater),memos:count(r.memos),books:count(r.books)};}
 

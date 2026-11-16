@@ -106,9 +106,20 @@ known, unknown, and malformed calls. Keep APKs, screenshots, and logs outside gi
 
 | Method | JSON argument | Output |
 |---|---|---|
-| `library.books` | omitted or `{}` | `{books:[{bookId,title,chapterCount,packageBytes,packageSha256,status,reasonCode,readable}]}` |
+| `library.books` | omitted, `{}`, or `{offset:0,limit:8}` | `{books:[{bookId,title,chapterCount,packageBytes,packageSha256,status,reasonCode,readable}],offset,nextOffset}` |
 | `library.summary` | omitted or `{}` | `{channels,articles,favorites,watchLater,memos,books}` |
-| `sync.last` | omitted, `{}`, or `{"n":3}` | `{sessions:[...]}`; newest first; integer `n` must be 1–12 |
+| `sync.last` | omitted, `{}`, or `{"n":3,"itemOffset":0}` | `{sessions:[...],itemOffset,nextItemOffset}`; newest first; integer `n` must be 1–12 |
+
+The provider limits each JSON reply to 32,768 UTF-16 units. Book batches default
+to 8, with integer `limit` 1–12 and nonnegative safe-integer `offset`. Follow
+`nextOffset` until null. Only the selected batch (plus one lookahead book) is
+hashed. History batches use integer `itemOffset` 0–256 and optional `itemLimit`
+1–floor(120/n), default floor(120/n). Follow `nextItemOffset` until null and
+concatenate each session's item arrays. Session metadata must remain identical
+across those reads. These batch offsets are explicit whitelist fields and do
+not change the framework limit. `itemsTruncated` reports discarded persisted
+items, separately from the continuation offsets. The draft acceptance script
+collects all batches automatically.
 
 `status` is `ready`, `staged`, or `failed`. Book rows exclude whole-book
 tombstones. Package SHA-256 and size are checked against the local file. `readable`
@@ -121,6 +132,8 @@ running), `channel` (`RFCOMM`/`IP`), `result`, `totalBytes`, `bytesPerSecond`,
 `reconnectCount`, `items`, and `itemsTruncated`. Item fields are `kind`, `id`,
 `result`, and `reasonCode`. Book IDs are content hashes; article/note opaque UUIDs are also accepted.
 Account and routing identifiers always become null.
+Note-batch rejection records each submitted note ID. Asset rejection uses the
+content SHA-256 as its ID and never emits a storage key or filename.
 The ring retains 12 physical sessions and at most 256 items per session. The
 byte total includes both directions and frame prefixes; throughput divides this
 by session elapsed time (`performance.now()` when available, otherwise the
