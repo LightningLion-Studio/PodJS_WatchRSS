@@ -11,7 +11,7 @@ async function temporary(chunks:Iterable<Uint8Array>):Promise<string>{
   let offset=0;
   for(const chunk of chunks){
    for(let at=0;at<chunk.length;at+=65536){
-    const bytes=chunk.subarray(at,at+65536),result=await fileChunks.append(path,bytesToBase64(bytes),offset);
+    const bytes=chunk.subarray(at,at+65536),result=await fileChunks.appendBytes(path,bytes,offset);
     offset+=bytes.length;if(result.size!==offset)throw new Error("同步正文临时文件写入失败");
    }
   }
@@ -22,7 +22,7 @@ async function readBytes(path:string,size:number):Promise<Uint8Array>{
  if(!Number.isSafeInteger(size)||size<0||size>MAX_BODY_JSON_BYTES)throw new Error("同步正文压缩文件过大");
  const bytes=new Uint8Array(size);
  for(let offset=0;offset<size;){
-  const result=await fileChunks.read(path,offset,Math.min(65536,size-offset)),part=base64ToBytes(result.dataBase64);
+  const result=await fileChunks.readBytes(path,offset,Math.min(65536,size-offset)),part=result.bytes;
   if(result.size!==size||part.length===0||part.length>size-offset)throw new Error("同步正文文件读取不完整");
   bytes.set(part,offset);offset+=part.length;
  }

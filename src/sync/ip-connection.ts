@@ -1,9 +1,9 @@
-import type {webSockets,byteStreams,HostOperation} from '@podjs/framework/services';
-import {HostSyncByteStream} from './rfcomm.ts';
+import type {webSockets,HostOperation} from '@podjs/framework/services';
+import {HostSyncByteStream,type RfcommPorts} from './rfcomm.ts';
 import {StreamFrameConnection} from './stream.ts';
 import {buildIpHello,parseIpHelloAck,verifyIpHelloAck,type IpCrypto,type IpDescriptor,type IpEndpoint,type IpHelloAck} from './ip-protocol.ts';
 import type {ForegroundTimer} from './foreground.ts';
-export interface IpConnectionPorts {sockets:typeof webSockets;streams:typeof byteStreams;crypto:IpCrypto;delay(ms:number):ForegroundTimer}
+export interface IpConnectionPorts {sockets:typeof webSockets;streams:RfcommPorts['streams'];crypto:IpCrypto;delay(ms:number):ForegroundTimer}
 export interface OpenIpRoute {connection:StreamFrameConnection;endpoint:IpEndpoint;descriptorEpoch:number;ack:IpHelloAck}
 /** One cancellable native-style hello probe. There are no hidden retries. */
 export class IpConnectionProbe {

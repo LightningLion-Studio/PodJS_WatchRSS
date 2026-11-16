@@ -15,7 +15,13 @@ const files=new Map<string,Uint8Array>();let serial=0,smallSupported=true,invali
 const gzip=(bytes:Uint8Array)=>{const zipped=new Uint8Array(gzipSync(bytes,{level:6}));zipped[4]=17;zipped[9]=0;if(invalid)zipped[3]=2;return zipped;};
 const temp=(bytes=new Uint8Array())=>{const path='cloud-crypto/.pod-write-test'+(++serial)+'.part';files.set(path,bytes);return {path,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};};
 const fileChunks={createTemp:async()=>temp(),append:async(path:string,data:string,offset:number)=>{const old=files.get(path)!,part=unb64(data);expect(offset).toBe(old.length);const bytes=new Uint8Array(old.length+part.length);bytes.set(old);bytes.set(part,old.length);files.set(path,bytes);return {size:bytes.length};},read:async(path:string,offset:number,maxBytes:number)=>{const bytes=files.get(path)!;return {size:bytes.length,offset,dataBase64:b64(bytes.subarray(offset,offset+maxBytes))};},remove:async(path:string)=>{files.delete(path);},gzipBytes:async(data:string)=>{if(!smallSupported)throw Error('unknown method');return {dataBase64:b64(gzip(unb64(data)))};},gzip:async(path:string)=>temp(gzip(files.get(path)!))};
-mock.module('@podjs/framework/services',()=>({fileChunks,sqlite:{},uri:{parse:parseUri},hostOperation:()=>{throw Error('unexpected host call');},bytesToBase64:b64,base64ToBytes:unb64}));
+// The foreground adapter now sends owned bytes; the headless legacy host fixture
+// intentionally retains its original Base64 methods below.
+const rawFileChunks={...fileChunks,
+ appendBytes:async(path:string,bytes:Uint8Array,offset:number)=>fileChunks.append(path,b64(bytes),offset),
+ readBytes:async(path:string,offset:number,maxBytes:number)=>{const value=await fileChunks.read(path,offset,maxBytes);return {...value,bytes:unb64(value.dataBase64)};},
+};
+mock.module('@podjs/framework/services',()=>({fileChunks:rawFileChunks,sqlite:{},uri:{parse:parseUri},hostOperation:()=>{throw Error('unexpected host call');},bytesToBase64:b64,base64ToBytes:unb64}));
 mock.module('@podjs/framework/text-layout',()=>({yieldWorkTurn:()=>({result:Promise.resolve()})}));
 const {hostArticleBodyCodec}=await import('../../src/sync/article-body-host');
 

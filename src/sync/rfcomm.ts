@@ -5,12 +5,12 @@ import {StreamFrameConnection,type SyncByteStream} from './stream.ts';
 import {LibrarySyncSession,type LibrarySessionRepository,type LibrarySessionOptions,type SessionActionResult} from './session.ts';
 export const WATCH_RSS_RFCOMM_NAME='WatchRSS Bluetooth Sync';
 export const WATCH_RSS_RFCOMM_UUID='bb2f0b7d-8f2f-4a96-95b2-d2c91d58a861';
-export interface RfcommPorts {radio:typeof rfcomm;streams:typeof byteStreams}
+export interface RfcommPorts {radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'readBytes'|'writeBytes'>>}
 export class HostSyncByteStream implements SyncByteStream {
  private closed=false;
  constructor(private readonly id:string,private readonly ports:RfcommPorts['streams']){}
- async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await this.ports.read(this.id,maxBytes,timeoutMs).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
- async write(bytes:Uint8Array){if(this.closed)throw new Error('Bluetooth stream closed');const result=await this.ports.write(this.id,bytes,120000).result;if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
+ async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await (this.ports.readBytes?this.ports.readBytes(this.id,maxBytes,timeoutMs):this.ports.read(this.id,maxBytes,timeoutMs)).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return 'bytes' in value?value.bytes:decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
+ async write(bytes:Uint8Array){if(this.closed)throw new Error('Bluetooth stream closed');const result=await (this.ports.writeBytes??this.ports.write)(this.id,bytes,120000).result;if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
  async close(){if(this.closed)return;this.closed=true;await this.ports.close(this.id);}
 }
 /** One native-compatible secure RFCOMM session. Stop aborts pending
