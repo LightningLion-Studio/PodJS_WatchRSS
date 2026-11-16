@@ -394,6 +394,7 @@ test('PREWARM keeps one next neighbour, propagates active background preference,
     onPromoteAdjacent:async target=>{selected=Number(target.key);setCurrent(target.source as ReturnType<typeof source>);return true;}});
   });await flush();await flush();
   expect(requests).not.toContain('9');expect(requests).toContain('11');
+  expect(sessionStates.size).toBe(2);expect([...sessionStates.values()].filter(v=>v.presented)).toHaveLength(1);
   expect(sessionCalls.filter(c=>c.method==='prepare')).toHaveLength(2);
   expect(sessionCalls.find(c=>c.method==='prepare'&&!c.prewarm)?.backgroundPlayback).toBe(true);
   expect(sessionCalls.filter(c=>c.method==='prepare'&&c.prewarm).every(c=>c.backgroundPlayback===undefined)).toBe(true);
@@ -404,6 +405,7 @@ test('PREWARM keeps one next neighbour, propagates active background preference,
    for(let i=0;i<20&&selected===from;i++){time+=16;ticks.splice(0).forEach(t=>t());await flush();}
    await flush();expect(selected).toBe(from+sign);expect(sessionCalls.filter(c=>c.method==='prepare'&&!c.prewarm)).toHaveLength(before);
    expect(nodes(root).filter(n=>n.kind==='Poster')).toHaveLength(0);
+   expect(sessionStates.size).toBe(2); // Hidden layers retain leases; normal rest must still be two.
   }
   expect(selected).toBe(10);expect(sessionCalls.filter(c=>c.method==='promote')).toHaveLength(10);
  }finally{Date.now=realNow;}

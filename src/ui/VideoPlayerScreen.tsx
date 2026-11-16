@@ -462,12 +462,6 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return revision===neighborRevision&&usingSessions()&&sessionPool!.hasStandby(target.key)?target:undefined;
     }catch(value){if(revision===neighborRevision&&!cancelledSessionError(value)&&shouldFallbackFromVideoSessions(value)){if(await sessionPool!.supportsPrewarm())return;await degradeSessions(value);return revision===neighborRevision&&!disposed?target:undefined;}return;}
   };
-  const warmBackward=()=>{
-    if(!usingSessions()||sessionPool!.neighbourCapacity<2||!props.onPrevious||backwardWarm)return;
-    const revision=neighborRevision;
-    const pending=prepareAdjacent('previous',revision).then(target=>{if(revision===neighborRevision)backwardTarget=target;return target;}).finally(()=>{if(backwardWarm===pending)backwardWarm=undefined;});
-    backwardWarm=pending;void pending.catch(()=>{});
-  };
   let neighbourhoodWarmed=-1;
   const warmNeighbourhood=async(revision:number)=>{
     if(!usingSessions()||!props.onPrepareAdjacent||revision!==neighborRevision||neighbourhoodWarmed===revision||disposed)return;
@@ -480,16 +474,9 @@ export function VideoPlayerScreen(props: { initialPool?:DouyinVideoSessionPool; 
       return {source:target,options:{...target.source,respectSilentMode:true,bounds:bounds(),loop:loopMode()==="single",autoplay:false},direction:direction==="next"?"next" as const:"prev" as const};
     }));
   };
-  let deepWarmRevision=-1;
-  const warmDeep=()=>{
-    if(!usingSessions()||sessionPool!.supportsKeyframes||sessionPool!.neighbourCapacity<3||deepWarmRevision===neighborRevision)return;
-    deepWarmRevision=neighborRevision;const revision=neighborRevision;
-    void prepareAdjacent('next',revision,false,2).catch(()=>{});
-    if(sessionPool!.neighbourCapacity>=4)void prepareAdjacent('previous',revision,false,2).catch(()=>{});
-  };
   const warmForward=():Promise<DouyinPreparedSource|undefined>=>{
     if(usingSessions()&&props.onAdjacentKey){const keys=([['next',1]] as const).map(([d,n])=>props.onAdjacentKey!(d,n)).filter((key):key is string=>!!key);sessionPool!.retainNeighbours(keys);}
-    void Promise.resolve().then(warmBackward);warmDeep();
+    // Ordinary speculation owns only next. Reverse decode starts on explicit drag intent.
     if(!props.onPrepareAdjacent)return Promise.resolve(undefined);
     if(forwardTarget&&(!usingSessions()||sessionPool!.hasStandby(forwardTarget.key)))return Promise.resolve(forwardTarget);
     if(!usingSessions()&&forwardResolved&&!forwardTarget)return Promise.resolve(undefined);
