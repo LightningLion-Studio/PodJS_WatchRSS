@@ -1,9 +1,9 @@
 import {createHash} from 'node:crypto';
-import {appendFileSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,renameSync,rmSync,statSync,writeFileSync} from 'node:fs';
+import {appendFileSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,realpathSync,renameSync,rmSync,statSync,writeFileSync} from 'node:fs';
 import {dirname,join,relative,resolve} from 'node:path';
 const root=resolve(import.meta.dir,'../..');
 const cache=join(root,'.cache/test-gate/fixtures');
-const record=(kind:string,start:number,hit:boolean)=>{if(process.env.PODJS_TIMING_FILE)appendFileSync(process.env.PODJS_TIMING_FILE,JSON.stringify({phase:'setup',tool:'fixture',kind,cache_hit:hit,seconds:(performance.now()-start)/1000,command:process.env.PODJS_COMMAND_NAME})+'\n');};
+const record=(kind:string,start:number,hit:boolean)=>{if(process.env.PODJS_TIMING_FILE)appendFileSync(process.env.PODJS_TIMING_FILE,JSON.stringify({phase:kind==='background'?'build':'setup',tool:'fixture',kind,cache_hit:hit,seconds:(performance.now()-start)/1000,command:process.env.PODJS_COMMAND_NAME})+'\n');};
 const digest=(bytes:Uint8Array|string)=>createHash('sha256').update(bytes).digest('hex');
 /** All owned implementation, fixture, config and dependency inputs participate.
  * Fresh-schema/encoder tests keep calling their product entry directly. */
@@ -39,11 +39,55 @@ export async function immutableBytes(recipe:unknown,build:()=>Uint8Array|Promise
 export async function copyImmutableFile(destination:string,recipe:unknown,build:()=>Promise<Uint8Array>):Promise<void>{
  const bytes=await immutableBytes(recipe,build);writeFileSync(destination,bytes);
 }
+/** Re-scan the static graph on every lookup. Unknown inputs use a fresh build.
+ * Test source and mutable fixtures do not participate in bundle compilation. */
+function backgroundInputs(entries:Record<string,string>,frameworkRoot:string):string|undefined {
+ const h=createHash('sha256'),seen=new Set<string>(),parser=new Bun.Transpiler({loader:'ts'});
+ const add=(path:string)=>{if(!existsSync(path))return;const real=realpathSync(path);if(seen.has(real))return;seen.add(real);h.update(real);h.update(readFileSync(real));};
+ const visit=(path:string)=>{
+  const real=realpathSync(path);if(seen.has(real))return;
+  // JSX has an implicit runtime import; keep that mode uncached.
+  if(!/\.(?:ts|js|mjs|cjs|json)$/.test(real))throw Error('unsupported bundle input');
+  const code=readFileSync(real);seen.add(real);h.update(real);h.update(code);const alternatives:string[]=[];
+  for(let folder=dirname(real);;folder=dirname(folder)){
+   const packageFile=join(folder,'package.json');
+   if(existsSync(packageFile)&&!seen.has(realpathSync(packageFile))){
+    const meta=JSON.parse(readFileSync(packageFile,'utf8'));
+    const conditional=(value:unknown):boolean=>typeof value==='object'&&value!==null&&Object.entries(value).some(([key,item])=>(!key.startsWith('.')&&!key.startsWith('#')&&!['types','default'].includes(key))||conditional(item));
+    // The build targets browser resolution. Do not reuse a graph resolved in
+    // a different conditional-package mode.
+    if(meta.browser!==undefined||conditional(meta.exports)||(meta.module&&meta.main&&meta.module!==meta.main&&!meta.exports))throw Error('conditional bundle resolution: '+packageFile);
+   }
+    const importTargets=(value:unknown):void=>{
+     if(typeof value==='string'){if(!value.startsWith('./')||value.includes('*'))throw Error('unsupported import target');alternatives.push(resolve(folder,value));}
+     else if(value&&typeof value==='object')for(const child of Object.values(value))importTargets(child);
+     else if(value!==undefined)throw Error('unsupported import map');
+    };
+    if(existsSync(packageFile)&&!seen.has(realpathSync(packageFile)))importTargets(JSON.parse(readFileSync(packageFile,'utf8')).imports);
+   add(packageFile);add(join(folder,'tsconfig.json'));
+   const parent=dirname(folder);if(parent===folder)break;
+  }
+  for(const alternative of alternatives)visit(alternative);
+  if(!real.endsWith('.json'))for(const dependency of parser.scanImports(code)){
+   const resolved=Bun.resolveSync(dependency.path,dirname(real));
+   if(resolved.startsWith('node:')||resolved.startsWith('bun:'))continue;
+   visit(resolved);
+  }
+ };
+ try{
+  h.update(Bun.version);add(import.meta.path);
+  for(const entry of Object.values(entries))visit(entry);
+  for(const file of ['package.json','bun.lock','framework.lock.json','tsconfig.json','bunfig.toml'])add(join(root,file));
+  for(const file of ['package.json','bun.lock','packages/cli/src/background-build.ts','vendor/pocketjs/package.json','vendor/pocketjs/bun.lock'])add(join(frameworkRoot,file));
+  return h.digest('hex');
+ }catch(error){if(process.env.PODJS_CACHE_DEBUG==='1')console.error(String(error));return undefined;}
+}
 export async function cachedBackground(entries:Record<string,string>,output:string,frameworkRoot:string,build:(entries:Record<string,string>,output:string)=>Promise<Record<string,{file:string;sha256:string;bytes:number}>>){
  const begin=performance.now();let hit=false;try{
  if(Object.values(entries).some(entry=>relative(root,entry).startsWith('..'))){return await build(entries,output);}
- const inputs=fixtureInputs([...Object.values(entries),join(frameworkRoot,'packages'),join(frameworkRoot,'vendor/pocketjs/framework'),join(frameworkRoot,'bun.lock'),join(frameworkRoot,'package.json'),join(frameworkRoot,'vendor/pocketjs/bun.lock')]);
- const key=digest(JSON.stringify({kind:'background-bundle-v1',inputs,entries,env:{NODE_ENV:process.env.NODE_ENV??null,BUN_CONDITIONS:process.env.BUN_CONDITIONS??null,BUN_OPTIONS:process.env.BUN_OPTIONS??null,NODE_OPTIONS:process.env.NODE_OPTIONS??null}})),directory=join(cache,key);
+ const inputs=backgroundInputs(entries,frameworkRoot);
+ if(inputs===undefined)return await build(entries,output);
+ const key=digest(JSON.stringify({kind:'background-bundle-v2',inputs,entries,builder:String(build),env:{NODE_ENV:process.env.NODE_ENV??null,BUN_CONDITIONS:process.env.BUN_CONDITIONS??null,BUN_OPTIONS:process.env.BUN_OPTIONS??null,NODE_OPTIONS:process.env.NODE_OPTIONS??null}})),directory=join(cache,key);
  hit=process.env.PODJS_TEST_FRESH!=='1'&&existsSync(join(directory,'artifacts.json'));
  if(!hit){
   mkdirSync(cache,{recursive:true});const temp=mkdtempSync(join(cache,'.bundle-'));
