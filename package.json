@@ -8,7 +8,9 @@
     "typecheck": "bun scripts/link-framework.ts --check && tsc --noEmit",
     "build": "bun scripts/framework-cli.ts build",
     "package:android": "bun scripts/framework-cli.ts package",
-    "postinstall": "bun scripts/link-framework.ts"
+    "postinstall": "bun scripts/link-framework.ts",
+    "lint": "python3 scripts/lint.py",
+    "test-gate": "./test-gate"
   },
   "dependencies": {
     "@pocketjs/framework": "file:../../PodJS/podjs-watch/vendor/pocketjs",
@@ -19,7 +21,11 @@
   },
   "devDependencies": {
     "typescript": "5.9.3",
-    "@types/bun": "1.3.10"
+    "@types/bun": "1.3.10",
+    "@eslint/js": "9.39.1",
+    "eslint": "9.39.1",
+    "globals": "16.5.0",
+    "typescript-eslint": "8.48.0"
   },
   "overrides": {
     "@pocketjs/framework": "file:../../PodJS/podjs-watch/vendor/pocketjs"
@@ -35,5 +41,6 @@
     "#douyin-transport-build": {
       "default": "./src/douyin/transport-build.ts"
     }
-  }
+  },
+  "packageManager": "bun@1.4.4"
 }

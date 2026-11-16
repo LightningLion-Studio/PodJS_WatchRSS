@@ -2,3 +2,7 @@ node_modules/
 dist/
 artifacts/
 docs/release-ledger.json.lock
+
+.cache/
+__pycache__/
+*.pyc

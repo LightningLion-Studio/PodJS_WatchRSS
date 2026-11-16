@@ -18,9 +18,9 @@ individual `src` files by hand. To repair an existing install, run
 package names before replacing installed entries, and is safe to run repeatedly.
 It does not install or modify dependencies in the SDK source checkout.
 
-The lockfile uses the same absolute SDK paths as `package.json`; relative lock
-entries previously depended on the worktree's location. If relocating the SDK,
-update the manifest paths/override and regenerate the lockfile together.
+The manifest and lockfile keep the canonical relative SDK paths. Isolated
+worktrees must preserve the `../../PodJS/podjs-watch` directory relationship.
+Do not rewrite these dependency paths to a task-specific checkout.
 
 ## Normal and scale tests
 
@@ -66,3 +66,16 @@ Local parser, TTL, descriptor, BLE behavior and checked-in fixture assertions st
 run. A present malformed or mismatching external file fails the comparison.
 Release verification should set both variables and check that these comparisons
 have no skips. A green host run with skips is not evidence of external parity.
+
+## Test release gate
+
+Run `./test-gate` for the framework and application existing unit suites plus
+lint. `--repo-only` runs only application checks. `--fresh` bypasses helper and
+fixture caches; all test actions still execute in normal mode. `--workers 1`
+provides a serial diagnostic mode. Logs, XML, timing and original exit codes
+remain under `.cache/test-gate/runs/`, or the explicit `--output` directory.
+
+The gate uses repository `flock` locks and `capmem 8G`. The application keeps
+its canonical `../../PodJS/podjs-watch` dependency path. Isolated worktrees must
+preserve that directory relationship. The framework documents compiler keys,
+daemon cleanup and blocking lint in `scripts/test-gate.md`.

@@ -1,3 +1,4 @@
+import {cachedBackground} from '../helpers/immutable-cache';
 const journalTextReaders=new Map<string,{text:string;at:number}>();let journalTextReaderId=0;
 import {plainPart,openLocalPart} from './plain-parts-fixture';
 import {cloudStateValues} from './state-sql-fixture';
@@ -31,7 +32,7 @@ test('RESTOREOBJ production bundle converges huge legacy backing and many medium
  const stackLimit=Error.stackTraceLimit;Error.stackTraceLimit=100;
  const output=mkdtempSync(join(tmpdir(),'wrss-headless-contract-'));
  const worker=readFileSync(resolve(dirname(realpathSync(resolve(import.meta.dir,'../../node_modules/@podjs/framework/src/bytes.ts'))),'../../../platforms/android/runtime/src/main/java/dev/podjs/runtime/PodCloudWorker.java'),'utf8'),methods=javaHostMethods(worker);
- const artifact=(await buildBackground({'watchrss-cloud-sync':resolve(import.meta.dir,'../../src/cloud/background.ts')},output))['watchrss-cloud-sync']!;
+ const artifact=(await cachedBackground({'watchrss-cloud-sync':resolve(import.meta.dir,'../../src/cloud/background.ts')},output,frameworkRoot,buildBackground))['watchrss-cloud-sync']!;
  const source=readFileSync(join(output,artifact.file),'utf8');
  const headless=async(context:BackgroundContext,clock?:()=>number)=>{const realm:Record<string,any>={};if(clock)realm.Date=class extends Date{static now(){return clock();}};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();expect(realm.setTimeout).toBeUndefined();const result=await realm.backgroundHandler(context);expect(realm.__podYieldCodecTurn).toBeUndefined();return result;};
  try{for(const entry of (process.env.RESTOREOBJ_SCENARIO?[process.env.RESTOREOBJ_SCENARIO]:['huge','medium','gzip','yield-stall'])){
