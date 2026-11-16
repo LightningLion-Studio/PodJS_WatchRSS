@@ -40,3 +40,9 @@ Title tests with changed remote metadata follow the same metadata order as folde
 empty-title derivation remains covered when the selected metadata title is empty.
 Use explicit ./tests/... paths with Bun: bare filter strings can also select
 unrelated sync-v2 memory benchmarks.
+
+# Notes rendering regressions
+
+Selected from adversarial test commit 6639cddd: NA-12, NA-15, NA-17. Other findings belong to separate tasks.
+Run notes-adversarial.test with the existing notes unit tests.
+Run notes-adversarial-preview.isolated.ts in a separate Bun process; its native module mocks must not enter other suites.
