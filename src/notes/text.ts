@@ -1,4 +1,5 @@
 import {noteHtmlEntities} from './html-entities';
+import {deriveNoteTitle} from './title';
 // Kotlin Char.isWhitespace includes the four ASCII information separators,
 // and does not include JavaScript's BOM whitespace.
 const whitespace='[\\u0009-\\u000d\\u001c-\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
@@ -29,4 +30,4 @@ export function memoPlainText(value:string):string{
   .replace(/\*\*|__|~~|`/g,'');
  return trimNoteText(markdown.split(/\r\n|\r|\n/).map(line=>line.replace(new RegExp(whitespace+'+$'),'')).filter(line=>trimNoteText(line)!=='').join('\n'));
 }
-export function memoTitle(markdown:string):string{return memoPlainText(markdown).split(/\r\n|\r|\n/)[0]?.slice(0,80)||'未命名笔记';}
+export function memoTitle(markdown:string):string{return deriveNoteTitle(memoPlainText(markdown))||'未命名笔记';}

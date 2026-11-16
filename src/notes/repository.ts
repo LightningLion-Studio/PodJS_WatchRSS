@@ -98,7 +98,7 @@ export class MemoRepository {
           if(markdown===local.markdown)return finish([],0);
           if(markdown!==null&&!trimNoteText(local.title)&&!trimNoteText(phoneNotePlainText(markdown)))throw Error('笔记不能为空');
           if(markdown===null)conflict=true;
-          else value={...local,title:trimNoteText(local.title)||phoneNotePlainText(markdown).split(/\r\n|\r|\n/)[0].slice(0,80),markdown,plainText:phoneNotePlainText(markdown),contentHash:sha256(markdown),updatedAt:this.clock(),modifiedBy:this.deviceId,deleted:false,deletedAt:0};
+          else value={...local,title:trimNoteText(local.title)?local.title:memoTitle(markdown),markdown,plainText:phoneNotePlainText(markdown),contentHash:sha256(markdown),updatedAt:this.clock(),modifiedBy:this.deviceId,deleted:false,deletedAt:0};
         }
       }
     }
@@ -121,7 +121,8 @@ export class MemoRepository {
     if (old) await this.requireOpenable(old.noteId);
     if (!old && !markdown.trim() && !input.title?.trim()) throw new Error("新建备忘录不能为空");
     const now=this.clock(), hash=sha256(markdown), noteId=old?.noteId ?? this.idFactory();
-    const title=input.title!==undefined?input.title:(old?.title?.trim()?old.title:memoTitle(markdown));
+    const rawTitle=input.title??old?.title??'';
+    const title=trimNoteText(rawTitle)?rawTitle:memoTitle(markdown);
     await this.db.execute(`INSERT OR REPLACE INTO memo_notes(note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,0)`,[noteId,old?.folderId??null,title,markdown,memoPlainText(markdown),hash,old?.baseContentHash??hash,old?.baseMarkdown??markdown,old?.pinned?1:0,old?.createdAt??now,now,this.deviceId]);
     return (await this.get(noteId))!;
   }
