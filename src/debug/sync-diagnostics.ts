@@ -1,3 +1,4 @@
+import {bookIdPrefix,bookRejectionReason,rejectionTitle} from './book-rejections';
 import type {DiagnosticStorage} from '../sync/diagnostic-log';
 export const HISTORY_LIMIT=12, ITEM_LIMIT=256;
 export const HISTORY_KEY='watchrss.sync.readonly-history.v1';
@@ -7,15 +8,17 @@ export const opaqueId=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v)
 const itemId=(v:unknown)=>typeof v==='string'&&(/^[a-f0-9]{64}$/.test(v)||/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(v))?v:null;
 export const safeTitle=(v:unknown)=>typeof v==='string'?v.replace(/[\u0000-\u001f\u007f]/g,' ').replace(/[a-z][a-z0-9+.-]{1,31}:\/\/[^\s]+/gi,'[redacted]').slice(0,256):'';
 export const count=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0?v:0;
-export interface ItemResult {kind:string;id:string|null;result:string;reasonCode:string}
+export interface ItemResult {kind:string;id?:string|null;result?:string;reasonCode?:string;bookIdPrefix?:string;code?:string;title?:string|null;reason?:string}
+export const isRejectedItem=(r:ItemResult)=>r.result==='rejected'||r.kind==='book'&&r.code!==undefined;
 /** Keep only public business IDs. Batch failure applies to each submitted item. */
 export function requestItems(request:Record<string,unknown>):{kind:string;id:string|null}[] {
  const kind=request.action==='syncBooks'?'book':request.action==='syncNotes'?'note':request.action==='syncNoteAsset'?'asset':request.action==='syncReader'?'reader':request.action==='syncAccount'?'account':'library';
  const rows=kind==='note'?(Array.isArray(request.notes)&&request.notes.length?request.notes:request.noteManifest):undefined;
  const ids=Array.isArray(rows)&&rows.length?rows.slice(0,ITEM_LIMIT+1).map(r=>r&&typeof r==='object'?(r as Record<string,unknown>).noteId:null):[kind==='book'?request.bookId:kind==='asset'?request.sha256:request.noteId];
- return ids.map(id=>{const item=itemResult({kind,id});return {kind:item.kind,id:item.id};});
+ return ids.map(id=>{return {kind,id:kind==='book'||kind==='asset'?opaqueId(id):kind==='note'?itemId(id):null};});
 }
 export function itemResult(raw:Record<string,unknown>):ItemResult {
+ if(raw.kind==='book'&&raw.result!=='applied')return {kind:'book',bookIdPrefix:bookIdPrefix(raw.bookIdPrefix??raw.id),code:reasonCode(raw.code??raw.reasonCode),title:rejectionTitle(raw.title),reason:bookRejectionReason(raw.reason)};
  return {kind:['book','article','note','asset','reader','library','account','unknown'].includes(String(raw.kind))?String(raw.kind):'unknown',id:['book','asset'].includes(String(raw.kind))?opaqueId(raw.id):['article','note'].includes(String(raw.kind))?itemId(raw.id):null,result:raw.result==='applied'?'applied':'rejected',reasonCode:reasonCode(raw.reasonCode)};
 }
 export interface SyncRecord {startedAt:number;endedAt:number|null;channel:'RFCOMM'|'IP';result:string;totalBytes:number;bytesPerSecond:number;reconnectCount:number;items:ItemResult[];itemsTruncated:boolean}
@@ -30,7 +33,7 @@ export class SyncHistory {
   const at=start?.at??now(),tick=start?.tick??monotonic();let bytes=0,finished=false;const items:ItemResult[]=[];let truncated=false;
   const save=(result:string,endedAt:number|null)=>{const record=syncRecord({startedAt:at,endedAt,channel,result,totalBytes:bytes,bytesPerSecond:endedAt===null?0:Math.floor(bytes*1000/Math.max(1,monotonic()-tick)),reconnectCount:start?.reconnects??0,items,itemsTruncated:truncated});const rows=this.last(HISTORY_LIMIT).reverse();const existing=rows.findIndex(r=>r.startedAt===at&&r.channel===channel&&r.endedAt===null);if(existing>=0)rows.splice(existing,1);rows.push(record);try{this.storage.set(HISTORY_KEY,JSON.stringify(rows.slice(-HISTORY_LIMIT)));}catch{/* Diagnostics never interrupt synchronization. */}};
   save('running',null);
-  return {bytes:(n:number)=>{bytes+=count(n);},item:(raw:Record<string,unknown>)=>{if(items.length<ITEM_LIMIT)items.push(itemResult(raw));else truncated=true;},finish:(ok:boolean)=>{if(finished)return;finished=true;save(ok?(items.some(i=>i.result==='rejected')?'partial':'success'):'failed',now());}};
+  return {bytes:(n:number)=>{bytes+=count(n);},item:(raw:Record<string,unknown>)=>{if(items.length<ITEM_LIMIT)items.push(itemResult(raw));else truncated=true;},finish:(ok:boolean)=>{if(finished)return;finished=true;save(ok?(items.some(isRejectedItem)?'partial':'success'):'failed',now());}};
  }
 }
 export type SyncTrace=ReturnType<SyncHistory['begin']>;
@@ -40,4 +43,4 @@ export function bookFields(r:Record<string,unknown>){return {bookId:opaqueId(r.b
 export function summaryFields(r:Record<string,unknown>){return {channels:count(r.channels),articles:count(r.articles),favorites:count(r.favorites),watchLater:count(r.watchLater),memos:count(r.memos),books:count(r.books)};}
 
 /** Latest item outcome wins. A repaired local package still overrides historical failure. */
-export function bookRejections(records:readonly SyncRecord[]):Map<string,string>{const seen=new Set<string>(),reasons=new Map<string,string>();for(const record of records)for(const item of [...record.items].reverse()){if(item.kind!=='book'||!item.id||seen.has(item.id))continue;seen.add(item.id);if(item.result==='rejected')reasons.set(item.id,item.reasonCode);}return reasons;}
+export function bookRejections(records:readonly SyncRecord[]):Map<string,string>{const seen=new Set<string>(),reasons=new Map<string,string>();for(const record of records)for(const item of [...record.items].reverse()){if(item.kind!=='book')continue;const prefix=item.bookIdPrefix??(opaqueId(item.id)?.slice(0,8));if(!prefix||prefix==='invalid'||seen.has(prefix))continue;seen.add(prefix);if(isRejectedItem(item))reasons.set(prefix,item.code??'unknown');}return reasons;}

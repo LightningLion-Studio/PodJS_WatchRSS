@@ -23,7 +23,7 @@ export class LibraryDiagnostics {
   const tables=new Set((await this.db.query("SELECT name FROM sqlite_master WHERE type='table'")).map(r=>String(r.name)));
   if(!tables.has('sync_books'))return this.pending(check,page);
   const rows=await querySyncPages(this.db,'SELECT book_id,state_json,chapter_count,package_path,package_sha256,package_bytes,registration_complete FROM sync_books ORDER BY book_id');
-  const result=[];let registered=0;
+  const result=[];let registered=0;const prefixCounts=new Map<string,number>();for(const row of rows){const prefix=String(row.book_id).slice(0,8);prefixCounts.set(prefix,(prefixCounts.get(prefix)??0)+1);}
   for(const r of rows){
    check();   let state:Record<string,unknown>={};try{const parsed=JSON.parse(String(r.state_json));if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))state=parsed;}catch{}
    if(state.deleted===true)continue;
@@ -36,7 +36,7 @@ export class LibraryDiagnostics {
     readable=first?.item_id!=null&&await this.readable(Number(first.item_id));
     if(status==='ready'&&!readable){status='failed';reason='body_missing';}
    }catch{check();status='failed';reason='read_failed';}
-   if(status==='staged'&&this.rejections.has(String(r.book_id))){status='failed';reason=this.rejections.get(String(r.book_id))!;}
+   const prefix=String(r.book_id).slice(0,8);if(status==='staged'&&prefixCounts.get(prefix)===1&&this.rejections.has(prefix)){status='failed';reason=this.rejections.get(prefix)!;}
    if(typeof state.title!=='string'||!opaqueId(r.book_id)){status='failed';reason='metadata_invalid';}
    result.push(bookFields({bookId:r.book_id,title:state.title,chapterCount:Number(r.chapter_count),packageBytes:Number(r.package_bytes),packageSha256:r.package_sha256,status,reasonCode:reason,readable}));
   }

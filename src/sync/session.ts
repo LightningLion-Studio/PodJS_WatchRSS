@@ -1,3 +1,4 @@
+import {rejectionTitle} from '../debug/book-rejections';
 import {requestItems,type SyncHistory,type SyncTrace} from '../debug/sync-diagnostics';
 import {checkedStateRoots,checkedStateReceipts,checkedProjectionVersions,type AckedStateVector} from '@podjs/framework/acked-state-vector';
 import {SYNC_DOMAINS,DOMAIN_FAST_PATH_PROFILE,type DomainVectorProvider} from './domain-fast-path';
@@ -48,6 +49,7 @@ export interface SessionActionResult {request:JsonObject;response:JsonObject;ack
 export interface SyncActionContext {readonly session:object; checkCancelled?:()=>void; onCancel?:(cancel:()=>void)=>()=>void; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
 export interface LibrarySessionOptions {
  history?:SyncHistory;
+ diagnosticBookTitle?:(id:string)=>Promise<unknown>;
  diagnosticChannel?:'RFCOMM'|'IP';
  diagnosticReconnects?:number;
  resume?:ResumeSessionPort;
@@ -74,7 +76,7 @@ const persistentFields={supportsPersistentSession:true,persistentSessionAccepted
  * One instance owns and closes one connection. There are no automatic retries. */
 export class LibrarySyncSession {
  private diagnosticStartedAt=0;private diagnosticTick=0;
- private trace?:SyncTrace;private diagnosticBytes=0;private diagnosticFailed=false;private diagnosticRequest:JsonObject={};
+ private trace?:SyncTrace;private diagnosticBytes=0;private diagnosticTitles=new Map<string,string>();private diagnosticFailed=false;private diagnosticRequest:JsonObject={};
  private readonly actionContext:SyncActionContext;
  private readonly cancelObservers=new Set<()=>void>();
  private appliedAckJobs:(()=>Promise<void>)[]=[];
@@ -123,10 +125,10 @@ export class LibrarySyncSession {
  private check():void {if(this.cancelled)throw this.cancelled;}
  private status(status:SyncSessionStatus):void {this.options.onStatus?.(status);}
  private close():Promise<void>{if(this.closeJob)return this.closeJob;this.closed=true;return this.closeJob=(async()=>{try{await this.options.localObjects?.close();await this.connection.close();}catch(error){if(this.aborting)this.log.event("server.exchange.abort.close.failed",{},"W");throw error;}})();}
- private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();if(this.options.history)this.diagnosticRequest=f;if(this.options.history&&!this.trace&&['syncDomains','syncLibrary','syncBooks','syncNotes','syncNoteAsset','syncLibraryResume'].includes(String(f.action))&&f.phase!=='probe'){this.trace=this.options.history?.begin(this.options.diagnosticChannel??'RFCOMM',this.now,this.monotonic,{at:this.diagnosticStartedAt,tick:this.diagnosticTick,reconnects:this.options.diagnosticReconnects??0});this.trace?.bytes(this.diagnosticBytes);}return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
- private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();this.diagnosticResponse(frame);}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
- private diagnosticResponse(frame:JsonObject){
-  if(frame.success===false){this.diagnosticFailed=true;for(const item of requestItems(this.diagnosticRequest))this.trace?.item({...item,reasonCode:frame.errorCode??(this.diagnosticRequest.action==='syncBooks'?'book_request_invalid':'peer_rejected'),result:'rejected'});}
+ private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();if(this.options.history){this.diagnosticRequest=f;if(f.action==='syncBooks'&&Array.isArray(f.books))for(const raw of f.books.slice(0,257)){if(raw&&typeof raw==='object'){const row=raw as JsonObject,title=rejectionTitle(row.title);if(title&&typeof row.bookId==='string'&&(this.diagnosticTitles.has(row.bookId)||this.diagnosticTitles.size<256))this.diagnosticTitles.set(row.bookId,title);}}}if(this.options.history&&!this.trace&&['syncDomains','syncLibrary','syncBooks','syncNotes','syncNoteAsset','syncLibraryResume'].includes(String(f.action))&&f.phase!=='probe'){this.trace=this.options.history?.begin(this.options.diagnosticChannel??'RFCOMM',this.now,this.monotonic,{at:this.diagnosticStartedAt,tick:this.diagnosticTick,reconnects:this.options.diagnosticReconnects??0});this.trace?.bytes(this.diagnosticBytes);}return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
+ private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();await this.diagnosticResponse(frame);}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
+ private async diagnosticResponse(frame:JsonObject){
+  if(frame.success===false){this.diagnosticFailed=true;for(const item of requestItems(this.diagnosticRequest)){let title:unknown=item.id?this.diagnosticTitles.get(item.id):null;if(item.kind==='book'&&item.id&&this.options.diagnosticBookTitle){try{title=rejectionTitle(await this.options.diagnosticBookTitle(item.id))??title;}catch{/* Diagnostic reads never change the outcome. */}}this.trace?.item({...item,title,reason:frame.reason,reasonCode:frame.errorCode??(this.diagnosticRequest.action==='syncBooks'?'book_request_invalid':'peer_rejected'),result:'rejected'});}}
  }
  private async ack(minimumWaitMs=0):Promise<ResponseAck|null>{
   const initialWait=Math.max(this.options.responseAckTimeoutMs??10000,minimumWaitMs);

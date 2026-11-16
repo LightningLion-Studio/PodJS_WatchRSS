@@ -130,7 +130,15 @@ a mismatched package is `failed`. Unknown error strings become `unknown`.
 A session contains only `startedAt`, `endedAt` (Unix milliseconds or null while
 running), `channel` (`RFCOMM`/`IP`), `result`, `totalBytes`, `bytesPerSecond`,
 `reconnectCount`, `items`, and `itemsTruncated`. Item fields are `kind`, `id`,
-`result`, and `reasonCode`. Book IDs are content hashes; article/note opaque UUIDs are also accepted.
+`result`, and `reasonCode` for non-book refusals and applied items.
+Book refusals follow pC8 exactly: `kind`, `bookIdPrefix`, `code`, `title`,
+`reason`. The rejected ID is only an eight-character lowercase hexadecimal prefix
+(or `invalid`); it is not a unique key. Titles are nullable, sanitized for
+control/format characters and URLs, and capped at 120 UTF-16 units. `reason` is
+the fixed pC8 subcode or `unknown` when an older producer has no subcode.
+Legacy persisted book refusals are re-projected to these names without inventing
+a historical title or subcode. Full IDs remain in the book inventory and applied
+item records. Article/note opaque UUIDs are also accepted.
 Account and routing identifiers always become null.
 Note-batch rejection records each submitted note ID. Asset rejection uses the
 content SHA-256 as its ID and never emits a storage key or filename.
@@ -157,3 +165,10 @@ Titles redact URL schemes and control characters. The IP recovery counter is
 copied from the controller's bounded recovery attempts; RFCOMM reconnection
 creates a new physical-session entry. Library reads check shell cancellation
 between books and after native hashes.
+
+The `itemLimit` is an upper bound. Replies containing titles automatically use a
+smaller item batch to stay below 30,000 UTF-16 units (the provider ceiling is
+32,768). Always use the returned `nextItemOffset`. A prefix is joined to a local
+book status only when exactly one registered book has that prefix. Local titles
+take priority over incoming titles when available. The pinned watch validator
+may have no fine-grained subcode; diagnostics report `unknown` in that case.
