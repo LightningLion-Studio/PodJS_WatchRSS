@@ -95,7 +95,8 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   createEffect(() => {
     const max = column().max, control = untrack(selected);
     if (control && !controls().includes(control)) setSelected();
-    if (untrack(scroller.offset) > max) untrack(() => scroller.scrollTo(max, { immediate: true }));
+    // A centring tween keeps its old target, so judge the destination as well as the position.
+    if (untrack(() => Math.max(scroller.offset(), scroller.intent())) > max) untrack(() => scroller.scrollTo(Math.min(scroller.offset(), max), { immediate: true }));
   });
   const select = (control: Control | undefined) => {
     setSelected(control);
@@ -119,7 +120,8 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   let root: NodeMirror | undefined;
   const toCanvas = (px: number) => px / scale();
   const pager = createGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
-    onDown: () => { if (scroller.state() !== "idle") scroller.stop(); },
+    // A touch catches a fling; an edge spring keeps returning, or the overscroll would freeze.
+    onDown: () => { if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop(); },
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else setSelected(); },
     onPanStart: () => { setSelected(); scroller.beginDrag(); },
     onPanMove: contact => scroller.drag(-toCanvas(contact.fdy)),

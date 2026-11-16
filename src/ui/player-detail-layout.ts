@@ -133,9 +133,11 @@ export const infoRects = (layout: InfoLayout): Rect[] => [
 
 /** Full description below the info block, when the info block could not show it whole. */
 export const ABOUT = { slot: 1, size: 14, lineHeight: 20, width: 184, caption: 16, captionGap: 6, gap: 18 } as const;
+/** Longest description laid out, in code points; beyond it the text ends with an ellipsis. */
+export const ABOUT_MAX_CHARS = 20_000;
 /** Every line of the description at the column width. Bounded so a pathological body stays cheap. */
 export function aboutLines(text: string, measure: (text: string, slot: number) => number): string[] {
-  const body = Array.from(clean(text)).slice(0, 4_000).join("");
+  const chars = Array.from(clean(text)), body = chars.length > ABOUT_MAX_CHARS ? chars.slice(0, ABOUT_MAX_CHARS).join("") + "…" : chars.join("");
   return body ? measuredLines(body, ABOUT.width, value => measure(value, ABOUT.slot)) : [];
 }
 export const aboutHeight = (lines: number) => lines ? ABOUT.caption + ABOUT.captionGap + lines * ABOUT.lineHeight + ABOUT.gap : 0;

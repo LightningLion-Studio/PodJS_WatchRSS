@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ABOUT, aboutLines, CANVAS, chordWidth, columnLayout, CONTROL, controlCentreOffset, controlRects, controlRow, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, INFO, INFO_HEIGHT, infoLayout, infoRects, insideCanvasCircle, pillFill, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
+import { ABOUT, ABOUT_MAX_CHARS, aboutLines, CANVAS, chordWidth, columnLayout, CONTROL, controlCentreOffset, controlRects, controlRow, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, INFO, INFO_HEIGHT, infoLayout, infoRects, insideCanvasCircle, pillFill, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
 import { holdStepCount, seekHoldStep } from "../src/ui/video-player.ts";
 import { volumeArcLayout, volumeArcOutline } from "../src/ui/volume-arc.ts";
 
@@ -130,4 +130,6 @@ test('the complete description remains readable past 400 characters',()=>{
  const text='简介👩‍👧‍👦与拉丁text'.repeat(160)+'末尾验证',lines=aboutLines(text,measure);
  for(const line of lines)expect(measure(line,ABOUT.slot)).toBeLessThanOrEqual(ABOUT.width);
  expect(lines.join('')).toBe(text);expect(lines.length).toBeGreaterThan(20);
+ const long='甲'.repeat(ABOUT_MAX_CHARS-10)+'结束标记';expect(aboutLines(long,measure).join('')).toBe(long);
+ const over=aboutLines('乙'.repeat(ABOUT_MAX_CHARS+5),measure).join('');expect(over.endsWith('…')).toBe(true);expect(Array.from(over)).toHaveLength(ABOUT_MAX_CHARS+1);
 });

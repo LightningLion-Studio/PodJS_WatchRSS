@@ -62,3 +62,11 @@ test('disposing a dragged panel cannot reopen its surviving parent slide',()=>{
 test('settled detail panels request no frames',()=>{
  const f=mount();expect(frames.some(e=>e.needs())).toBe(false);f.handle.crown(15000);expect(frames.some(e=>e.needs())).toBe(true);f.tick();expect(frames.some(e=>e.needs())).toBe(false);
 });
+test('losing speed support mid-centring never leaves the offset past the new end',()=>{
+ const f=mount();f.handle.crown(60000);f.tick();f.find('PlayerDetail-speed-value').props.onPress();f.setSupported(false);f.tick();
+ expect(f.offset()).toBeLessThanOrEqual(281.5);
+});
+test('a tap during the edge spring still returns the column to its range',()=>{
+ const f=mount(),pager=gestures.find(g=>g.axis==='y');pager.onPanStart({});pager.onPanMove({fdy:100});pager.onPanEnd({vy:0});expect(f.offset()).toBeLessThan(0);
+ pager.onDown();pager.onTap({x:116,y:116});f.tick();expect(f.offset()).toBeGreaterThanOrEqual(0);expect(frames.some(e=>e.needs())).toBe(false);
+});
