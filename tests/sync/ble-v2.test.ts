@@ -112,7 +112,9 @@ test('R41 canonical inbound then legacy inbound reuses one row; full replacement
 test('same-body older metadata/tombstones cannot overwrite newer watch title/pin, equal clocks converge with phone tie order',async()=>{
  const f=await fixture();try{const repo=new MemoRepository(f.db,'watch');await repo.initialize();const newer={...note(),title:'watch title',pinned:true,updatedAt:200,modifiedBy:'watch'};await repo.merge([newer]);
   expect(await repo.merge([{...note(),title:'old phone',updatedAt:100}])).toBe(0);expect((await repo.get(newer.noteId))?.title).toBe('watch title');
-  expect(await repo.merge([{...newer,deleted:true,deletedAt:150,updatedAt:150}])).toBe(0);
+  // superseded: 0 (ignored old tombstone); r3 records a visible deletion conflict.
+  expect(await repo.merge([{...newer,deleted:true,deletedAt:150,updatedAt:150}])).toBe(1);
+  expect((await f.db.query('SELECT * FROM note_merge_conflicts')).length).toBeGreaterThan(0);
   const winner={...newer,title:'z',modifiedBy:'z'};expect(await repo.merge([winner])).toBe(1);expect(await repo.merge([newer])).toBe(0);
   const handle=createApplicationActionHandler({notes:repo,deviceId:async()=>'watch',notesChanged:()=>{}});const result=await handle({action:'syncNotes',phase:'delta',noteManifest:[noteManifest(note())],notes:[wire(note())]});expect(result.applied).toBe(0);expect(result.notes).toHaveLength(1);expect((result.notes as any[])[0].title).toBe('z');
  }finally{f.sql.close();}

@@ -1,3 +1,4 @@
+import {normalizeStoredNoteConflicts} from './conflict-migration';
 import {phoneNotePlainText} from './phone-text';
 import {trimNoteText} from './text';
 import {mergeNoteMarkdown} from './merge';
@@ -20,6 +21,7 @@ const MEMO_SCHEMA: { sql: string; params?: SqlParams }[] = [
 
 export async function initializeMemoSchema(db: SqlDatabase): Promise<void> {
   await db.transaction(MEMO_SCHEMA);
+  await normalizeStoredNoteConflicts(db);
 }
 
 function normalizeMarkdown(value: string): string { return value.replace(/\r\n?/g, "\n"); }
@@ -75,23 +77,19 @@ export class MemoRepository {
       if(local)statements.push({sql:'DELETE FROM note_merge_guard WHERE id=1'});
       await this.db.transaction(statements);return changed;
     };
-    let value=remote,conflict=false,cycle=false;
+    let value=remote,conflict=false;
     if(local){
       if(JSON.stringify(local)===JSON.stringify(remote))return finish([],0);
       const keys=(n:MemoNote):Array<number|string|boolean>=>[Math.max(n.updatedAt,n.deletedAt),n.modifiedBy,n.deleted,n.title,n.folderId!==null,n.folderId??'',n.pinned,n.createdAt,n.baseContentHash,n.baseMarkdown];
       const a=keys(remote),b=keys(local);let order=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]){order=a[i]!>b[i]!?1:-1;break;}
       const meta=order>0?remote:local;
-      if(local.markdown===remote.markdown)value=local.deleted!==remote.deleted&&(!local.modifiedBy||local.modifiedBy!==remote.modifiedBy)?(local.deleted?local:remote):meta;
+      if(local.markdown===remote.markdown&&local.deleted===remote.deleted)value=meta;
       else {
-        const restore=local.deleted&&!remote.deleted&&remote.baseMarkdown===local.markdown&&remote.updatedAt>local.updatedAt;
-        const localRestore=remote.deleted&&!local.deleted&&local.baseMarkdown===remote.markdown&&local.updatedAt>remote.updatedAt;
-        const sequentialDelete=remote.deleted&&!local.deleted&&remote.baseMarkdown===local.markdown&&local.markdown===local.baseMarkdown;
-        const deletionConflict=local.deleted!==remote.deleted&&!restore&&!localRestore&&!sequentialDelete;
-        cycle=!local.deleted&&!remote.deleted&&remote.baseMarkdown===local.markdown&&local.baseMarkdown===remote.markdown;
-        const markdown=deletionConflict||cycle?null:restore?remote.markdown:localRestore?local.markdown:
-          remote.baseMarkdown===local.markdown?remote.markdown:local.baseMarkdown===remote.markdown?local.markdown:
+        const forward=remote.baseMarkdown===local.markdown,backward=local.baseMarkdown===remote.markdown;
+        const markdown=local.deleted!==remote.deleted||local.deleted||!local.modifiedBy||!remote.modifiedBy||forward&&backward?null:
+          forward?remote.markdown:backward?local.markdown:
           local.baseMarkdown===remote.baseMarkdown?mergeNoteMarkdown(local.baseMarkdown,local.markdown,remote.markdown):null;
-        if(markdown===null){conflict=true;if(cycle)value=meta;}
+        if(markdown===null)conflict=true;
         else if(markdown===remote.markdown)value={...remote,title:meta.title,folderId:meta.folderId,pinned:meta.pinned};
         else if(markdown===local.markdown)value={...local,title:meta.title,folderId:meta.folderId,pinned:meta.pinned};
         else value={...meta,title:trimNoteText(meta.title)?meta.title:memoTitle(markdown),markdown,plainText:phoneNotePlainText(markdown),contentHash:sha256(markdown),updatedAt:nextTime(this.clock(),local,remote),modifiedBy:this.deviceId,deleted:false,deletedAt:0};
@@ -103,11 +101,11 @@ export class MemoRepository {
     if(conflict){
       const id=noteConflictId(local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy);
       // Repeated old/new IDs for the same immutable content denote one incident.
-      if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE note_id=? AND base_markdown=? AND local_markdown=? AND remote_markdown=? AND remote_device_id=?',[local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy])).length)return finish([],0);
+      if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE note_id=? AND base_markdown=? AND local_markdown=? AND remote_markdown=? AND remote_device_id=?',[local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy])).length){console.info("notes_conflict_tuple_seen");return finish([],0);}
       if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE conflict_id=?',[id])).length)throw Error('conflict_identity_mismatch');
       statements.push({sql:'INSERT OR IGNORE INTO note_merge_conflicts VALUES(?,?,?,?,?,?,?)',params:[id,local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy,this.clock()]});
     }
-    if(!conflict||cycle)statements.push({sql:(local?'INSERT OR REPLACE':'INSERT')+' INTO memo_notes('+NOTE_COLUMNS+') VALUES('+noteValues(value).map(()=>'?').join(',')+')',params:noteValues(value)});
+    if(!conflict)statements.push({sql:(local?'INSERT OR REPLACE':'INSERT')+' INTO memo_notes('+NOTE_COLUMNS+') VALUES('+noteValues(value).map(()=>'?').join(',')+')',params:noteValues(value)});
     return finish(statements,1);
   }
   async get(noteId: string): Promise<MemoNote | null> { const row=(await this.db.query(`SELECT * FROM memo_notes WHERE note_id=? AND deleted=0 LIMIT 1`,[noteId]))[0]; return row?note(row):null; }

@@ -13,8 +13,10 @@ test('NA-04 BLE preserves divergent saved bodies and applies newer same-body tom
   expect((await f.repo.get('a'))?.markdown).toBe('# phone');
   expect(f.raw.query('SELECT remote_markdown FROM note_merge_conflicts ORDER BY remote_markdown').all()).toEqual([{remote_markdown:'older clean baseline'},{remote_markdown:'stale'}]);
   expect(await f.handle({action:'syncNotes',notes:[remote({updatedAt:101,deleted:true,deletedAt:101})]})).toMatchObject({applied:1});
-  expect(await f.repo.list()).toEqual([]);
-  const response=await f.handle({action:'syncNotes'});expect(response).toMatchObject({applied:0,notes:[{noteId:'a',deleted:true}]});expect((response.notes as any[])[0]).not.toHaveProperty('plainText');
+  // superseded: []; r3 keeps the current note and records the tombstone conflict.
+  expect((await f.repo.list()).map(n=>n.markdown)).toEqual(['# phone']);
+  expect(f.raw.query('SELECT * FROM note_merge_conflicts').all()).toHaveLength(3);
+  const response=await f.handle({action:'syncNotes'});expect(response).toMatchObject({applied:0,notes:[{noteId:'a',deleted:false}]});expect((response.notes as any[])[0]).not.toHaveProperty('plainText');
  }finally{f.raw.close();}
 });
 test('malformed later entry does not partially apply earlier notes and sends failure',async()=>{const f=fixture();try{await f.repo.initialize();expect(await f.handle({action:'syncNotes',notes:[remote(),null]})).toMatchObject({success:false});expect(await f.repo.allIncludingDeleted()).toEqual([]);expect(f.changes()).toBe(0);}finally{f.raw.close();}});

@@ -12,9 +12,11 @@ test('RVM-08 ancestor replay after a -> b -> a does not undo the revert',async()
     await f.repo.initialize();await f.repo.save({title:'T',markdown:'a'});
     const b=await f.repo.save({noteId:'n',title:'T',markdown:'b'});
     await f.repo.applyRemote({...b,markdown:'a',plainText:'a',contentHash:hash('a'),baseMarkdown:'b',baseContentHash:hash('b'),updatedAt:300,modifiedBy:'peer'});
-    expect((await f.repo.get('n'))!.markdown).toBe('a');
+    expect((await f.repo.get('n'))!.markdown).toBe('b'); // superseded: 'a'; r3 retains current cycle branch.
     await f.repo.applyRemote(b);
-    expect((await f.repo.get('n'))!.markdown).toBe('a');
+    expect((await f.repo.get('n'))!.markdown).toBe('b'); // superseded: 'a'; r3 retains current cycle branch.
+    const versions=(await f.db.query('SELECT * FROM note_merge_conflicts')).flatMap(r=>[r.local_markdown,r.remote_markdown]);
+    expect(versions).toContain('a');expect(versions).toContain('b');
   } finally {f.sql.close();}
 });
 function store() {
@@ -76,7 +78,7 @@ test('RVM-08 ambiguous cycle keeps both bodies recoverable in either arrival ord
   await f.repo.applyRemote(swapped?reverted:b);await f.repo.applyRemote(swapped?b:reverted);
   const bodies=(await f.db.query('SELECT local_markdown,remote_markdown FROM note_merge_conflicts')).flatMap(r=>[r.local_markdown,r.remote_markdown]);
   expect(bodies).toContain('a');expect(bodies).toContain('b');
-  expect((await f.repo.get('n'))!.markdown).toBe('a');
+  expect((await f.repo.get('n'))!.markdown).toBe(swapped?'a':'b'); // superseded: 'a'; r3 retains current cycle branch.
  }finally{f.sql.close();}}
 });
 
@@ -112,6 +114,8 @@ test('RVM-04 only the deleting writer can restore the same body with a newer ver
   await f.repo.initialize();const a=await f.repo.save({title:'T',markdown:'a'});
   const dead={...a,deleted:true,deletedAt:101,updatedAt:101,modifiedBy:'peer'},live={...a,updatedAt:102,modifiedBy:source,pinned:true};
   await f.repo.applyRemote(reverse?live:dead);await f.repo.applyRemote(reverse?dead:live);
-  expect((await f.repo.allIncludingDeleted())[0].deleted).toBe(source!=='peer');
+  // superseded: source!=='peer'; initial saved note is live in both orders.
+  expect((await f.repo.allIncludingDeleted())[0].deleted).toBe(false);
+  expect((await f.db.query('SELECT * FROM note_merge_conflicts')).length).toBeGreaterThan(0);
  }finally{f.sql.close();}}
 });

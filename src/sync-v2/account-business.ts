@@ -1,3 +1,4 @@
+import {normalizeStoredNoteConflicts} from '../notes/conflict-migration';
 import {conflictSet} from './note-conflict-set';
 import {NOTE_ASSET_SCHEMA} from './note-assets';
 /** Prepared replacement of the authenticated account projection in the original
@@ -26,7 +27,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
  /** Additive metadata table for interaction records which have no local article
   * yet. No body materialization or identity replacement occurs. */
  async initialize(){return WatchAccountBusinessSql.initializeSchema(this.db);}
- static async initializeSchema(db:ProjectionSql){await db.transaction([{sql:NOTE_ASSET_SCHEMA},{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);}
+ static async initializeSchema(db:ProjectionSql){await db.transaction([{sql:NOTE_ASSET_SCHEMA},{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);await normalizeStoredNoteConflicts(db);}
  async prepare(records:SourceRecord[],before:SyncState){const out:Statement[]=[];for await(const page of this.prepareFeed(arrayRecordFeed(records,r=>entityKey(this.idKey,this.scope.repoId,r.kind,r.logicalId)),before).run())out.push(...page);return out;}
  /** R4: the same statements as `prepare`, produced page by page. Each run reads
   * the records twice and the candidates once; across records it keeps only

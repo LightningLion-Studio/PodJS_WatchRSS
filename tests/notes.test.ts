@@ -31,8 +31,8 @@ describe("standalone memo repository",()=>{
 
 describe("draft saving after a synced deletion",()=>{
   async function editingFixture(){
-    const {repo}=repository([100,200,300,400,600,700]);
-    const {repo:peer}=repository();
+    const {repo,db}=repository([100,200,300,400,600,700]);
+    const {repo:peer,db:peerDb}=repository();
     await repo.initialize();
     const created=await repo.save({title:"标题",markdown:"基线正文"});
     const folder=await repo.createFolder("工作");
@@ -43,20 +43,21 @@ describe("draft saving after a synced deletion",()=>{
     const receiveDeletion=async()=>{
       await syncNotes({action:"syncNotes",notes:[tombstone]},repo,async()=>"watch");
       await syncNotes({action:"syncNotes",notes:[tombstone]},peer,async()=>"phone");
-      expect(await repo.get(initial.noteId)).toBeNull();
-      expect(await repo.list()).toEqual([]);
+      // superseded: get() null/list []; r3 keeps the saved live branch and deletion conflict.
+      expect(await repo.get(initial.noteId)).toEqual(initial);
+      expect((await db.query('SELECT * FROM note_merge_conflicts')).length).toBeGreaterThan(0);
     };
-    return {repo,peer,initial,tombstone,receiveDeletion};
+    return {repo,peer,peerDb,initial,tombstone,receiveDeletion};
   }
 
   test("close flush restores the original identity and syncNotes exposes recovery to the peer",async()=>{
-    const {repo,peer,initial,tombstone,receiveDeletion}=await editingFixture();
+    const {repo,peer,peerDb,initial,tombstone,receiveDeletion}=await editingFixture();
     const draft=new NoteDraftAutosave(repo,initial);
     draft.setMarkdown("编辑中尚未保存的正文");
     await receiveDeletion();
     const restored=await draft.flush(); // NoteInlineEditor.close awaits this same flush.
     expect(draft.state).toBe("saved");
-    expect(restored).toMatchObject({noteId:initial.noteId,folderId:tombstone.folderId,pinned:true,createdAt:initial.createdAt,baseMarkdown:tombstone.markdown,baseContentHash:tombstone.contentHash,title:initial.title,markdown:"编辑中尚未保存的正文",deleted:false,deletedAt:0,updatedAt:600,modifiedBy:"podjs-watch"});
+    expect(restored).toMatchObject({noteId:initial.noteId,folderId:initial.folderId,pinned:true,createdAt:initial.createdAt,baseMarkdown:initial.baseMarkdown,baseContentHash:initial.baseContentHash,title:initial.title,markdown:"编辑中尚未保存的正文",deleted:false,deletedAt:0,updatedAt:700,modifiedBy:"podjs-watch"});
     expect(restored!.contentHash).not.toBe(tombstone.contentHash);
     expect(await repo.list()).toEqual([restored!]);
     expect(await repo.allIncludingDeleted()).toHaveLength(1);
@@ -65,8 +66,10 @@ describe("draft saving after a synced deletion",()=>{
     expect(response.applied).toBe(0);
     const peerResponse=await syncNotes(response,peer,async()=>"phone");
     expect(peerResponse.applied).toBe(1);
-    expect(await peer.get(initial.noteId)).toEqual(restored);
-    expect(await peer.list()).toEqual([restored!]);
+    // superseded: peer auto-restores; r3 retains its tombstone and exposes the edited body in a conflict.
+    expect(await peer.get(initial.noteId)).toBeNull();
+    expect(await peer.list()).toEqual([]);
+    expect(await peerDb.query('SELECT remote_markdown FROM note_merge_conflicts')).toEqual([{remote_markdown:restored!.markdown}]);
     draft.dispose();
   });
 
