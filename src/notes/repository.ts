@@ -1,7 +1,7 @@
 import {phoneNotePlainText} from './phone-text';
 import {trimNoteText} from './text';
 import {mergeNoteMarkdown} from './merge';
-import {onlyChangedSql} from '@podjs/framework/sql-changes';
+import {noteConflictId} from './conflict-id';
 import {sha256Hex} from '@podjs/framework/crypto';
 import {memoPlainText,memoTitle} from './text.ts';
 export {memoPlainText,memoTitle} from './text.ts';
@@ -38,6 +38,11 @@ function folder(row: Record<string,unknown>): MemoFolder { return {folderId:Stri
 // Kept local so notes also work in the Android QuickJS host, where Web Crypto is optional.
 const sha256=(value:string)=>sha256Hex(utf8Encode(value));
 
+function nextTime(now:number,...notes:(MemoNote|null)[]):number {
+ const prior=Math.max(0,...notes.filter(Boolean).flatMap(n=>[n!.updatedAt,n!.deletedAt]));
+ if(prior>=Number.MAX_SAFE_INTEGER)throw Error('counter_exhausted');
+ return Math.max(now,prior+1);
+}
 const NOTE_COLUMNS='note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at';
 const noteValues=(n:MemoNote)=>[n.noteId,n.folderId,n.title,n.markdown,n.plainText,n.contentHash,n.baseContentHash,n.baseMarkdown,n.pinned?1:0,n.createdAt,n.updatedAt,n.modifiedBy,n.deleted?1:0,n.deletedAt];
 export class MemoRepository {
@@ -46,25 +51,10 @@ export class MemoRepository {
   async initialize(): Promise<void> { await initializeMemoSchema(this.db); }
   async list(): Promise<MemoNote[]> { return (await this.db.query(`SELECT * FROM memo_notes WHERE deleted=0 ORDER BY pinned DESC,updated_at DESC`)).map(note); }
   async allIncludingDeleted(): Promise<MemoNote[]> { return (await this.db.query(`SELECT * FROM memo_notes ORDER BY updated_at DESC`)).map(note); }
-  /** Native WatchNoteRepository rule; tombstones participate in conflict resolution. */
+  /** BLE and cloud share the same conflict-preserving transaction. */
   async merge(incoming: readonly MemoNote[]): Promise<number> {
     let applied=0;
-    for(const remote of incoming){
-      const row=(await this.db.query("SELECT * FROM memo_notes WHERE note_id=?",[remote.noteId]))[0];
-      if(row){
-        const local=note(row),remoteClock=Math.max(remote.updatedAt,remote.deletedAt),localClock=Math.max(local.updatedAt,local.deletedAt);
-        if(remote.markdown===local.markdown&&remote.contentHash===local.contentHash){
-          // Same-body metadata uses the same total LWW order as the phone.
-          const keys=(n:MemoNote):Array<number|string|boolean>=>[Math.max(n.updatedAt,n.deletedAt),n.modifiedBy,n.deleted,n.title,n.folderId!==null,n.folderId??'',n.pinned,n.createdAt,n.baseContentHash,n.baseMarkdown];
-          const a=keys(remote),b=keys(local);let order=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]){order=a[i]!>b[i]!?1:-1;break;}
-          if(order<=0)continue;
-        }else if(remoteClock<localClock&&(remote.deleted||local.deleted))continue;
-        else if(remote.updatedAt<local.updatedAt&&local.contentHash!==local.baseContentHash)continue;
-      }
-      if(row&&JSON.stringify(note(row))===JSON.stringify(remote))continue;
-      const statement={sql:onlyChangedSql("INSERT INTO memo_notes(note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(note_id) DO UPDATE SET folder_id=excluded.folder_id,title=excluded.title,markdown=excluded.markdown,plain_text=excluded.plain_text,content_hash=excluded.content_hash,base_content_hash=excluded.base_content_hash,base_markdown=excluded.base_markdown,pinned=excluded.pinned,created_at=excluded.created_at,updated_at=excluded.updated_at,modified_by=excluded.modified_by,deleted=excluded.deleted,deleted_at=excluded.deleted_at WHERE (excluded.updated_at>=memo_notes.updated_at OR memo_notes.content_hash=memo_notes.base_content_hash OR (excluded.markdown=memo_notes.markdown AND excluded.content_hash=memo_notes.content_hash AND max(excluded.updated_at,excluded.deleted_at)>=max(memo_notes.updated_at,memo_notes.deleted_at)))"),params:[remote.noteId,remote.folderId,remote.title,remote.markdown,remote.plainText,remote.contentHash,remote.baseContentHash,remote.baseMarkdown,remote.pinned?1:0,remote.createdAt,remote.updatedAt,remote.modifiedBy,remote.deleted?1:0,remote.deletedAt]};
-      if(this.db.transactionChanges){const counts=await this.db.transactionChanges([statement]);applied+=counts[0]!>0?1:0;}else{await this.db.execute(statement.sql,statement.params);applied++;}
-    }
+    for(const remote of incoming)applied+=await this.applyRemote(remote);
     return applied;
   }
   /** Cloud import follows Phone NoteRepository.applyRemote, including durable conflicts.
@@ -88,24 +78,32 @@ export class MemoRepository {
     let value=remote,conflict=false;
     if(local){
       if(JSON.stringify(local)===JSON.stringify(remote))return finish([],0);
-      if(local.markdown===remote.markdown&&local.contentHash===remote.contentHash){
-        const keys=(n:MemoNote):Array<number|string|boolean>=>[Math.max(n.updatedAt,n.deletedAt),n.modifiedBy,n.deleted,n.title,n.folderId!==null,n.folderId??'',n.pinned,n.createdAt,n.baseContentHash,n.baseMarkdown];
-        const a=keys(remote),b=keys(local);let order=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]){order=a[i]!>b[i]!?1:-1;break;}if(order<=0)return finish([],0);
-      }else{
-        if(Math.max(remote.updatedAt,remote.deletedAt)<Math.max(local.updatedAt,local.deletedAt)&&(local.deleted||remote.deleted))return finish([],0);
-        if(!(local.deleted||remote.updatedAt>local.updatedAt&&local.contentHash===local.baseContentHash)){
-          const markdown=mergeNoteMarkdown(local.baseMarkdown,local.markdown,remote.markdown);
-          if(markdown===local.markdown)return finish([],0);
-          if(markdown!==null&&!trimNoteText(local.title)&&!trimNoteText(phoneNotePlainText(markdown)))throw Error('笔记不能为空');
-          if(markdown===null)conflict=true;
-          else value={...local,title:trimNoteText(local.title)?local.title:memoTitle(markdown),markdown,plainText:phoneNotePlainText(markdown),contentHash:sha256(markdown),updatedAt:this.clock(),modifiedBy:this.deviceId,deleted:false,deletedAt:0};
-        }
+      const keys=(n:MemoNote):Array<number|string|boolean>=>[Math.max(n.updatedAt,n.deletedAt),n.modifiedBy,n.deleted,n.title,n.folderId!==null,n.folderId??'',n.pinned,n.createdAt,n.baseContentHash,n.baseMarkdown];
+      const a=keys(remote),b=keys(local);let order=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]){order=a[i]!>b[i]!?1:-1;break;}
+      const meta=order>0?remote:local;
+      if(local.markdown===remote.markdown)value=meta;
+      else {
+        const restore=local.deleted&&!remote.deleted&&remote.baseMarkdown===local.markdown&&remote.updatedAt>local.updatedAt;
+        const localRestore=remote.deleted&&!local.deleted&&local.baseMarkdown===remote.markdown&&local.updatedAt>remote.updatedAt;
+        const sequentialDelete=remote.deleted&&!local.deleted&&remote.baseMarkdown===local.markdown&&local.markdown===local.baseMarkdown;
+        const deletionConflict=local.deleted!==remote.deleted&&!restore&&!localRestore&&!sequentialDelete;
+        const markdown=deletionConflict?null:restore?remote.markdown:localRestore?local.markdown:
+          remote.baseMarkdown===local.markdown?remote.markdown:local.baseMarkdown===remote.markdown?local.markdown:
+          local.baseMarkdown===remote.baseMarkdown?mergeNoteMarkdown(local.baseMarkdown,local.markdown,remote.markdown):null;
+        if(markdown===null)conflict=true;
+        else if(markdown===remote.markdown)value={...remote,title:meta.title,folderId:meta.folderId,pinned:meta.pinned};
+        else if(markdown===local.markdown)value={...local,title:meta.title,folderId:meta.folderId,pinned:meta.pinned};
+        else value={...meta,title:trimNoteText(meta.title)?meta.title:memoTitle(markdown),markdown,plainText:phoneNotePlainText(markdown),contentHash:sha256(markdown),updatedAt:nextTime(this.clock(),local,remote),modifiedBy:this.deviceId,deleted:false,deletedAt:0};
+        if(markdown!==null&&(markdown===remote.markdown&&meta!==remote||markdown===local.markdown&&meta!==local))value={...value,updatedAt:nextTime(this.clock(),local,remote),modifiedBy:this.deviceId};
       }
+      if(!conflict&&JSON.stringify(value)===JSON.stringify(local))return finish([],0);
     }
     const statements:{sql:string;params?:SqlParams}[]=[];
     if(conflict){
-      const id=sha256([local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy].join('\0'));
-      if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE conflict_id=?',[id])).length)return finish([],0);
+      const id=noteConflictId(local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy);
+      // Repeated old/new IDs for the same immutable content denote one incident.
+      if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE note_id=? AND base_markdown=? AND local_markdown=? AND remote_markdown=? AND remote_device_id=?',[local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy])).length)return finish([],0);
+      if((await this.db.query('SELECT 1 FROM note_merge_conflicts WHERE conflict_id=?',[id])).length)throw Error('conflict_identity_mismatch');
       statements.push({sql:'INSERT OR IGNORE INTO note_merge_conflicts VALUES(?,?,?,?,?,?,?)',params:[id,local!.noteId,local!.baseMarkdown,local!.markdown,remote.markdown,remote.modifiedBy,this.clock()]});
     }else statements.push({sql:(local?'INSERT OR REPLACE':'INSERT')+' INTO memo_notes('+NOTE_COLUMNS+') VALUES('+noteValues(value).map(()=>'?').join(',')+')',params:noteValues(value)});
     return finish(statements,1);
@@ -120,18 +118,18 @@ export class MemoRepository {
     if (input.noteId && !old) throw new Error("笔记不存在");
     if (old) await this.requireOpenable(old.noteId);
     if (!old && !markdown.trim() && !input.title?.trim()) throw new Error("新建备忘录不能为空");
-    const now=this.clock(), hash=sha256(markdown), noteId=old?.noteId ?? this.idFactory();
+    const now=nextTime(this.clock(),old), hash=sha256(markdown), noteId=old?.noteId ?? this.idFactory();
     const rawTitle=input.title??old?.title??'';
     const title=trimNoteText(rawTitle)?rawTitle:memoTitle(markdown);
-    await this.db.execute(`INSERT OR REPLACE INTO memo_notes(note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,0)`,[noteId,old?.folderId??null,title,markdown,memoPlainText(markdown),hash,old?.baseContentHash??hash,old?.baseMarkdown??markdown,old?.pinned?1:0,old?.createdAt??now,now,this.deviceId]);
+    await this.db.execute(`INSERT OR REPLACE INTO memo_notes(note_id,folder_id,title,markdown,plain_text,content_hash,base_content_hash,base_markdown,pinned,created_at,updated_at,modified_by,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,0)`,[noteId,old?.folderId??null,title,markdown,memoPlainText(markdown),hash,old?.deleted?old.contentHash:old?.baseContentHash??hash,old?.deleted?old.markdown:old?.baseMarkdown??markdown,old?.pinned?1:0,old?.createdAt??now,now,this.deviceId]);
     return (await this.get(noteId))!;
   }
   async setPinned(noteId:string,pinned:boolean): Promise<MemoNote> { return this.updateMeta(noteId,`pinned=?`,[pinned?1:0]); }
   async move(noteId:string,folderId:string|null): Promise<MemoNote> { if(folderId && !(await this.db.query(`SELECT 1 FROM memo_folders WHERE folder_id=? AND deleted=0`,[folderId])).length) throw new Error("文件夹不存在"); return this.updateMeta(noteId,`folder_id=?`,[folderId]); }
-  async delete(noteId:string): Promise<MemoNote> { const now=this.clock(); return this.updateMeta(noteId,`deleted=1,deleted_at=?`,[now],now,true); }
+  async delete(noteId:string): Promise<MemoNote> { return this.updateMeta(noteId,`deleted=1`,[],this.clock(),true); }
   async createFolder(name:string,sortOrder=0): Promise<MemoFolder> { const value=name.trim(); if(!value) throw new Error("文件夹名称不能为空"); const id=this.idFactory(), now=this.clock(); await this.db.execute(`INSERT INTO memo_folders(folder_id,name,sort_order,updated_at,modified_by) VALUES(?,?,?,?,?)`,[id,value,sortOrder,now,this.deviceId]); return folder((await this.db.query(`SELECT * FROM memo_folders WHERE folder_id=?`,[id]))[0]); }
   /** Sync v2 R2: a note this device cannot open is read-only; edits fail with
    * `note_unopenable` so the interface can explain why. */
   private async requireOpenable(noteId:string){ if(await noteUnopenable(this.db,noteId)) throw new Error("note_unopenable"); }
-  private async updateMeta(noteId:string,setSql:string,params:unknown[],now=this.clock(),includeDeleted=false): Promise<MemoNote> { const current=includeDeleted ? (await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0] : await this.get(noteId); if(!current) throw new Error("笔记不存在"); await this.requireOpenable(noteId); await this.db.execute(`UPDATE memo_notes SET ${setSql},updated_at=?,modified_by=? WHERE note_id=?`,[...params,now,this.deviceId,noteId]); return note((await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0]); }
+  private async updateMeta(noteId:string,setSql:string,params:unknown[],now=this.clock(),includeDeleted=false): Promise<MemoNote> { const current=includeDeleted ? (await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0] : await this.get(noteId); if(!current) throw new Error("笔记不存在"); await this.requireOpenable(noteId); const currentNote=includeDeleted?note(current as Record<string,unknown>):current as MemoNote; now=nextTime(now,currentNote); if(includeDeleted){setSql+=',deleted_at=?';params.push(now);} await this.db.execute(`UPDATE memo_notes SET ${setSql},updated_at=?,modified_by=? WHERE note_id=?`,[...params,now,this.deviceId,noteId]); return note((await this.db.query(`SELECT * FROM memo_notes WHERE note_id=?`,[noteId]))[0]); }
 }

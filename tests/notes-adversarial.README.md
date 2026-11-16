@@ -28,3 +28,15 @@ The cloud hop is an opaque local byte buffer. This is not Bluetooth, encrypted
 cloud publication, restore receipts, native editor or pixel acceptance. It checks
 six codec cycles for all text corpus files and actual v2 scalar segmentation.
 The six-cycle test skips if its environment paths are absent; segment tests remain active.
+
+T-NOTES-MERGE-FIX selects this card's merge/repository assertions by default.
+Set NOTES_ADVERSARIAL_ALL=1 for the separate NA-12 preview probe; NA-15 still
+requires NOTES_TITLE_MODULE. New tests in notes-merge-fix.test.ts cover v2 ID
+aliases and cross-client merge/ID equality. Set NOTES_MINI_ROOT to the mini checkout
+and NOTES_PHONE_MATRIX to phone-host/merge-matrix.json to run all three clients.
+The fixture expectations now reject touching insertions, preserve deletion/edit
+conflicts and use the NA-16 ID algorithm. BLE no longer uses the old overwrite rule.
+Title tests with changed remote metadata follow the same metadata order as folders;
+empty-title derivation remains covered when the selected metadata title is empty.
+Use explicit ./tests/... paths with Bun: bare filter strings can also select
+unrelated sync-v2 memory benchmarks.

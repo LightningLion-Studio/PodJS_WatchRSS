@@ -1,4 +1,5 @@
 import {choiceCurrent} from './state';
+import {noteConflictId} from '../notes/conflict-id';
 /** rc6a note-conflict wire and atomic resolution model. No product or network IO. */
 import {canonical,jsonBytes as jb,bytes as utf8} from './protocol';
 import {sha256Hex} from '@podjs/framework/crypto';
@@ -22,13 +23,13 @@ export function conflictNeutral(state:any){
  const payload={...state.payload};delete payload.noteConflicts;
  return {...state,requiredFeatures:state.requiredFeatures.filter((f:string)=>f!==feature),payload};
 }
-/** This preserves the existing creation algorithm; migrated IDs remain opaque. */
+/** Imported IDs remain opaque; new IDs use the NA-16 tuple encoding. */
 /** R2: digest of the conflict-neutral note model compared for local edits of a
  * candidate or decoded row (the edit-base shape). */
 export const noteEditDigest=(r:any)=>sha256Hex(jb({identity:r.meta.logicalId,...r.meta.payload,...conflictNeutral(r.state).payload}));
 export function newConflictId(noteId:string,base:string,local:string,remote:string,device:string){
  for(const v of [noteId,base,local,remote,device])c.canonical(v);
- return sha256Hex(utf8([noteId,base,local,remote,device].join('\0')));
+ return noteConflictId(noteId,base,local,remote,device);
 }
 /** Only a legacy importer may map absent resolvedAt to zero. Wire may not. */
 export function importLegacy(client:'watch'|'phone'|'mini',noteId:string,rows:any[]):ConflictSet{
