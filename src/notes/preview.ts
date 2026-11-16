@@ -6,7 +6,7 @@ const rich=(markup:string,html=false):NotePreviewBlock=>({kind:'rich',markup,htm
 const pad=(row:string[],n:number)=>row.slice(0,n).concat(Array(Math.max(0,n-row.length)).fill(''));
 interface Fence {marker:string;length:number}
 export function noteFence(line:string):Fence|null{
- const m=/^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+ const m=/^ {0,3}(`{3,}|~{3,})([^]*)$/.exec(line);
  return m&&!(m[1][0]==='`'&&m[2].includes('`'))?{marker:m[1][0],length:m[1].length}:null;
 }
 export const noteCodeIndent=(line:string)=>/^ {4}/.test(line)?4:(/^ {0,3}\t/.exec(line)?.[0].length??0);
@@ -15,11 +15,11 @@ export function noteFenceCloses(line:string,fence:Fence):boolean{
  return !!m&&m[1][0]===fence.marker&&m[1].length>=fence.length;
 }
 export function isNoteRichHtml(markup:string){return ['color:','background:','text-align:','<img','<sub>','<sup>'].some(s=>markup.includes(s));}
-function pipeRow(line:string):string[]|null{let s=trim(line);if(!s.includes('|')||s.startsWith('    '))return null;s=s.replace(/^\|/,'').replace(/\|$/,'');const cells:string[]=[];let cell='',escaped=false;for(const c of s){if(escaped){cell+=c;escaped=false;}else if(c==='\\')escaped=true;else if(c==='|'){cells.push(trim(cell));cell='';}else cell+=c;}if(escaped)cell+='\\';cells.push(trim(cell));return cells.length>=2?cells:null;}
-const tabRow=(line:string)=>!line.includes('\t')||line.startsWith('    ')?null:line.split('\t').map(trim);
-function alignedRow(line:string):string[]|null{if(line.startsWith('    ')||line.includes('\t'))return null;const s=trim(line);if(!s.includes('  '))return null;const cells=s.split(/ {2,}/).map(trim);return cells.length>=2&&cells.every(Boolean)?cells:null;}
+function pipeRow(line:string):string[]|null{if(noteCodeIndent(line))return null;let s=trim(line);if(!s.includes('|'))return null;s=s.replace(/^\|/,'').replace(/\|$/,'');const cells:string[]=[];let cell='',escaped=false;for(const c of s){if(escaped){cell+=c;escaped=false;}else if(c==='\\')escaped=true;else if(c==='|'){cells.push(trim(cell));cell='';}else cell+=c;}if(escaped)cell+='\\';cells.push(trim(cell));return cells.length>=2?cells:null;}
+const tabRow=(line:string)=>!line.includes('\t')||noteCodeIndent(line)?null:line.split('\t').map(trim);
+function alignedRow(line:string):string[]|null{if(noteCodeIndent(line)||line.includes('\t'))return null;const s=trim(line);if(!s.includes('  '))return null;const cells=s.split(/ {2,}/).map(trim);return cells.length>=2&&cells.every(Boolean)?cells:null;}
 function degradedRow(line:string,header:string[]):string[]|null{
- if(!trim(line)||line.startsWith('    ')||line.includes('\t'))return null;const h=header.map(s=>trim(s).toLowerCase()),s=trim(line);let m:RegExpExecArray|null=null;
+ if(!trim(line)||noteCodeIndent(line)||line.includes('\t'))return null;const h=header.map(s=>trim(s).toLowerCase()),s=trim(line);let m:RegExpExecArray|null=null;
  if(h.slice(0,3).join('|')==='option|type|default')m=/^(`[^`]+`)[ \t\n\v\f\r]+([^ \t\n\v\f\r]+)[ \t\n\v\f\r]+(`[^`]+`|empty|[^ \t\n\v\f\r]+)[ \t\n\v\f\r]+(.+)$/.exec(s);
  else if(h[0]==='lua function'&&h[1]==='legacy dispatcher')m=/^(`[^`]+`)[ \t\n\v\f\r]+(`[^`]+`)[ \t\n\v\f\r]+(.+)$/.exec(s);
  else if(h.join('|')==='argument|accepted by|meaning')m=/^(`[^`]+`|No argument)[ \t\n\v\f\r]+((?:`[^`]+`(?:,[ \t\n\v\f\r]*)?)+(?:[ \t\n\v\f\r]+only)?)[ \t\n\v\f\r]+(.+)$/.exec(s);
