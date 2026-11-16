@@ -428,12 +428,14 @@ export function createMediaRouteController(
             releaseStartupPreview:request.releaseStartupPreview,posterUrl:request.item.coverUrl,...playbackPreferences(),backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${request.item.awemeId}`};
           void queue?.persist().catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
           stage='backdrop';await openVideo(waiting,{queue,memory,douyinEntrySeq:request.entrySeq,videoTarget:{kind:'douyin',awemeId:route.awemeId,immersive:true}},current);
-          const entry=dependencies.current(),selected=()=>dependencies.current()===entry&&entry.playback===waiting&&entry.queue===queue;
+          const entry=dependencies.current(),selected=()=>(request.isCurrent?.()??true)&&dependencies.current()===entry&&entry.playback===waiting&&entry.queue===queue;
           if(entry.playback===waiting){
             opened=true;
-            void pending.then(ready=>{if(!selected())return;benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'source_ready'});entry.playback={...ready,previewOnly:false};dependencies.setPlayingSource(entry.playback);},error=>{
+            request.onSourcePublished?.(waiting);
+            void pending.then(ready=>{if(!selected())return;benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'source_ready'});entry.playback={...ready,previewOnly:false};dependencies.setPlayingSource(entry.playback);request.onSourcePublished?.(entry.playback);},error=>{
               if(!selected()||douyinPlaybackFailure(error).code==='CANCELLED')return;
               entry.playback={...waiting,preparationError:error};dependencies.setPlayingSource(entry.playback);
+              request.onSourceFailure?.(douyinPlaybackFailure(error));
             });
           }
           return;
@@ -463,7 +465,7 @@ export function createMediaRouteController(
           kind: 'douyin', awemeId: route.awemeId, immersive: source.immersive,
           ...(source.detailPlayback ? {detailPlayback:true} : {}),
         } },current);
-        if(dependencies.current().playback===source){opened=true;initialPool=undefined;}
+        if(dependencies.current().playback===source){opened=true;initialPool=undefined;request?.onSourcePublished?.(source);}
       } catch (error) {
         if(current()){
           benchmark.begin('error_page',{reason:'exhausted',...playerFailureFields(error,stage)});

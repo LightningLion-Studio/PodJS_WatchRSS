@@ -60,6 +60,10 @@ export interface DouyinPlayRequest {
   releaseStartupPreview?:()=>void;
   entrySeq?:number;
   isCurrent?:()=>boolean;
+  /** Receipt for this request's exact published source, including its preview replacement. */
+  onSourcePublished?:(source:import('../VideoPlayerScreen.tsx').PlaybackSource)=>void;
+  /** Failure after preview navigation belongs to the selected player, not the cover. */
+  onSourceFailure?:(failure:import('../../douyin/errors.ts').DouyinPlaybackFailure)=>void;
   onFailure?:(failure:import('../../douyin/errors.ts').DouyinPlaybackFailure)=>void;
   detailPlayback?:boolean; immersive?:boolean; item: DouyinItem; playback: DouyinItem; playlist?: DouyinItem[]; cursor?: string; hasMore?: boolean }
 export type DouyinPlaybackCommand = "toggle" | "previous" | "next" | "replay";

@@ -40,12 +40,17 @@ success), and `json` (serialized result, `null` on failure). Control commands
 return a state snapshot after their action. `play`, `next` and `prev` wait up to
 10 seconds for the player to report `playing`; this is not a first-frame or
 performance guarantee. `pause` and `resume` target the actual active session.
+Play success belongs to the requested target and its published source; an older
+playing video cannot satisfy it. Cancellation or a failed wait closes this
+request's pending source publications.
 
 State fields: `page`, `playbackState`, `position` (milliseconds), `bufferedMs`
 (buffered duration ahead), `rebufferCount`, `decoderInstances`, `pssKb`.
 `decoderInstances` counts Media3 video decoder lifetimes observed by this process;
 release initiation removes a decoder from the count. It is not the codec's
 advertised maximum. `pssKb` is Android's current process PSS in KiB.
+Background playback remains counted after the Activity detaches. The playback
+service keeps the numeric observer until decoder release or player termination.
 `diag.dump.sql` has `sql.query`, `sql.execute`, `sql.transaction`, and
 `sql.gzipJson` categories. Each reports completed count, queue/wall/CPU nanoseconds,
 and failures for the current foreground guest. These counters survive periodic
