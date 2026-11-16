@@ -25,3 +25,8 @@ test('RNR-CONTROL real reading entries keep ordinary code, indentation and blank
  const text='~~~\n  literal\n\nsecond\n~~~';
  expect(notePreviewEntries(text,200).filter((e:any)=>e.anchor).map((e:any)=>e.anchor.renderedText)).toEqual(['  literal','','second']);
 });
+
+for(const cp of ['\u2028','\u2029'])test('RNR3-04 real reading entries keep Unicode-info code '+JSON.stringify(cp),()=>{
+ const entries=notePreviewEntries('```lang'+cp+'x\n<img src="assets/x.png">\n```',200);
+ expect(entries.some((e:any)=>e.anchor?.renderedText.includes('<img'))).toBe(true);
+});
