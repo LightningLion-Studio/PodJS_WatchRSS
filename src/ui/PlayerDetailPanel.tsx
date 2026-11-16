@@ -15,6 +15,8 @@ const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
 const SLIDE_MS = 220;
 /** Crown scroll distance per degree, in canvas units. */
 const CROWN_PX = 4;
+/** Height of the top and bottom fades over the scrolling column, in canvas units. */
+const EDGE_FADE = 28;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
@@ -208,6 +210,9 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
           <View debugName={`PlayerDetailControl-${kind}`} class="absolute left-[0]" style={{ insetT: column().controls + index() * CONTROL.height, width: CANVAS, height: CONTROL.height }}>{control$(kind)}</View>
         </Show>}</For>
       </View>
+      {/* Content leaving the round screen fades out instead of being cut by its edge. */}
+      <View class="absolute left-[0] top-[0] bg-gradient-to-b from-[#000000] to-transparent" style={{ width: CANVAS, height: EDGE_FADE }} />
+      <View class="absolute left-[0] bg-gradient-to-b from-transparent to-[#000000]" style={{ insetT: CANVAS - EDGE_FADE, width: CANVAS, height: EDGE_FADE }} />
     </View>
   </View>;
 }
