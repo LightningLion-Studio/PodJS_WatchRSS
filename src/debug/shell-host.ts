@@ -1,3 +1,4 @@
+import {libraryDiagnostics,syncHistory} from './sync-diagnostics-host';
 import {registerShellCommands,shellDiagnostics,ShellCommandError,type ShellContext} from '@podjs/framework/shell';
 import {delay} from '@podjs/framework/services';
 import type {DouyinClient} from '../douyin/client.ts';
@@ -71,5 +72,5 @@ export function bindShellCommands(port:{current():RouteEntry;client:DouyinClient
   },
   state:async()=>{const entry=port.current();if(entry.page!=='video'||entry.playback?.platform!=='douyin')return null;try{return await player().shellState();}catch(error){if(error instanceof ShellCommandError&&error.code==='not_ready')return {state:'preparing',positionMs:0};throw error;}},
   diagnostics:shellDiagnostics,
- }));
+ },{books:()=>libraryDiagnostics.books(),summary:()=>libraryDiagnostics.summary(),last:n=>syncHistory.last(n)}));
 }

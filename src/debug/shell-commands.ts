@@ -1,6 +1,7 @@
+import {bookFields,summaryFields,syncRecord,type LibraryDiagnosticsPort} from './sync-diagnostics';
 import {ShellCommandError,type ShellContext,type ShellHandler,type ShellDiagnostics} from '@podjs/framework/shell';
 
-export const SHELL_COMMANDS=['douyin.open','douyin.play','douyin.pause','douyin.resume','douyin.next','douyin.prev','douyin.state','diag.dump'] as const;
+export const SHELL_COMMANDS=['douyin.open','douyin.play','douyin.pause','douyin.resume','douyin.next','douyin.prev','douyin.state','diag.dump','library.books','library.summary','sync.last'] as const;
 export interface PlaybackNumbers {state:string;positionMs:number;bufferedMs?:number;metrics?:{rebufferCount?:number}}
 export interface ShellPlaybackPort {
  page():string;
@@ -14,7 +15,7 @@ export interface ShellPlaybackPort {
 function noArgs(args:Record<string,unknown>){if(Object.keys(args).length)throw new ShellCommandError('invalid_argument');}
 const number=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>=0?value:0;
 /** Whitelist output fields. Never serialize a route, source, session or host error. */
-export function createShellHandlers(port:ShellPlaybackPort):Record<string,ShellHandler> {
+export function createShellHandlers(port:ShellPlaybackPort,library?:LibraryDiagnosticsPort):Record<string,ShellHandler> {
  const state=async()=>{
   const value=await port.state(),host=await port.diagnostics();
   return {page:port.page(),playbackState:value?.state??'idle',position:number(value?.positionMs),bufferedMs:number(value?.bufferedMs),rebufferCount:number(value?.metrics?.rebufferCount),decoderInstances:number(host.decoderInstances),pssKb:number(host.pssKb)};
@@ -33,5 +34,8 @@ export function createShellHandlers(port:ShellPlaybackPort):Record<string,ShellH
   'douyin.prev':async(args,context)=>{noArgs(args);await port.move('previous',context);return state();},
   'douyin.state':async args=>{noArgs(args);return state();},
   'diag.dump':async args=>{noArgs(args);const host=await port.diagnostics();return {sql:host.sql,videoSessions:host.videoSessions};},
+  'library.books':async(args,context)=>{noArgs(args);if(!library)throw new ShellCommandError('not_ready');const check=()=>{if(!context.isActive())throw new ShellCommandError('unavailable');};check();return {books:(await library.books(check)).map(v=>bookFields(v as Record<string,unknown>))};},
+  'library.summary':async(args,context)=>{noArgs(args);if(!library)throw new ShellCommandError('not_ready');const check=()=>{if(!context.isActive())throw new ShellCommandError('unavailable');};check();return summaryFields(await library.summary(check));},
+  'sync.last':async args=>{if(Object.keys(args).some(k=>k!=='n')||args.n!==undefined&&(!Number.isSafeInteger(args.n)||(args.n as number)<1||(args.n as number)>12))throw new ShellCommandError('invalid_argument');if(!library)throw new ShellCommandError('not_ready');return {sessions:library.last((args.n as number|undefined)??3).map(v=>syncRecord(v as Record<string,unknown>))};},
  };
 }

@@ -118,7 +118,7 @@ export class IpSyncController {
     try{const frame=await deadline.run(()=>route.connection.readFrame(timeout));if(!this.transferring){this.transferring=true;this.stopTimer?.cancel();this.stopTimer=undefined;this.mediaTimer?.cancel();this.mediaTimer=undefined;this.media(true);}return frame;}
     finally{if(this.cancelRead===cancelRead)this.cancelRead=undefined;if(readDeadline===deadline)readDeadline=undefined;if(this.waitingRoute===route)this.waitingRoute=undefined;}
    },writeFrame:(frame:JsonObject)=>route.connection.writeFrame(frame),close:async()=>{}};
-   const session=new LibrarySyncSession(connection,this.ports.repository,{...this.options,actionSession,diagnosticLog,initialRequestTimeoutMs:600000,responseAckTimeoutMs:600000});this.session=session;
+   const session=new LibrarySyncSession(connection,this.ports.repository,{...this.options,diagnosticChannel:'IP',diagnosticReconnects:this.recoveryAttempts,actionSession,diagnosticLog,initialRequestTimeoutMs:600000,responseAckTimeoutMs:600000});this.session=session;
    const results=await session.run();if(this.session===session)this.session=undefined;this.transferring=false;this.releaseLater();if(!this.active)this.scheduleStop(30000);this.lastAckSeq++;this.recoveryAttempts=0;
    if(results.some(r=>r.response.fatalSession===true))throw new Error('IP library exchange failed');
    if(this.bootstrapPending){completed=true;break;}

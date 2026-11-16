@@ -551,3 +551,11 @@ function startLocalRssPromotion(){if(localRssPromotionStarted)return;localRssPro
 
 /** Queue status includes extraction failures before media rows could be produced. */
 export async function getOfflineMediaStatus(id:string){await init();return offlineMediaQueue.status(Number(id));}
+
+/** Read the same body gate/marker as the reader, without UI repair or migration. */
+export async function diagnosticChapterReadable(itemId:number):Promise<boolean>{
+ const row=(await db.query('SELECT link FROM articles WHERE id=?',[itemId]))[0];if(!row)return false;
+ const body=await readReaderBody(db,importedTextStore,String(itemId),String(row.link??''),()=>repo.getArticleBody(itemId),null);
+ if(body.readerBodyState)return false;
+ return body.importedText?(await importedTextStore.chunk(body.importedText,0))!==null:!!body.rawContent.trim();
+}
