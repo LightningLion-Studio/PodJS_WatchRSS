@@ -2,8 +2,8 @@ import { measuredLines, type TextMeasurer } from "../reader/measured-text.ts";
 
 // Player detail panel geometry. Everything is laid out on the player's 233-unit
 // canvas (half of the 466 px round reference) and scaled to the screen, so every
-// rectangle below is checked against the canvas circle. The panel is a vertical
-// pager whose rest positions are whole pages: at rest only one page is on screen.
+// rectangle below is checked against the canvas circle. The panel is a
+// continuously scrolling column: the info block, the full description and the controls.
 export const CANVAS = 233;
 const C = CANVAS / 2;
 /** Clearance between any element corner and the screen circle. */
@@ -126,71 +126,66 @@ export const infoRects = (layout: InfoLayout): Rect[] => [
   ...(layout.author ? [layout.author.rect, layout.author.icon, layout.author.text] : []), ...layout.description.map(line => line.rect),
 ];
 
-// ---- description page --------------------------------------------------------------------
+// ---- scrolling column -------------------------------------------------------------------
 
-/** The full description, when it does not fit the info page: a caption and circle-flowing lines. */
-export const ABOUT = { caption: centred(120, 24, 16), slot: 1, size: 14, lineHeight: 20, maxWidth: 200, top: 46, bottom: 204 } as const;
-export interface AboutPage { lines: TextLine[]; nextOffset?: number }
-/** One bounded page of the complete description. Offsets are UTF-16 indices in
- * the already-normalized description; only the visible page is measured. */
-export function aboutPage(text: string, measure: (text: string, slot: number) => number, start = 0): AboutPage {
-  const count = Math.floor((ABOUT.bottom - ABOUT.top) / ABOUT.lineHeight);
-  const rects = lineRects(ABOUT.top, count, ABOUT.lineHeight, ABOUT.maxWidth);
-  const lines: TextLine[] = [];
-  let offset = start;
-  for (const rect of rects) {
-    // The bounded prefix exceeds the capacity of a line at this font size.
-    const line = measuredLines(text.slice(offset, offset + 400), rect.width, value => measure(value, ABOUT.slot))[0] ?? "";
-    if (!line) break;
-    lines.push({ text: line, rect });
-    offset += line.length;
-    while (offset < text.length && /\s/.test(text[offset]!)) offset++;
-    if (offset >= text.length) break;
-  }
-  return { lines, ...(offset < text.length && offset > start ? { nextOffset: offset } : {}) };
+// Below the info block the panel is one continuously scrolling column: the full description,
+// then one row per control. Content y is in canvas units from the top of the column.
+
+/** Full description below the info block, when the info block could not show it whole. */
+export const ABOUT = { slot: 1, size: 14, lineHeight: 20, width: 184, caption: 16, captionGap: 6, gap: 18 } as const;
+/** Every line of the description at the column width. Bounded so a pathological body stays cheap. */
+export function aboutLines(text: string, measure: (text: string, slot: number) => number): string[] {
+  const body = Array.from(clean(text)).slice(0, 4_000).join("");
+  return body ? measuredLines(body, ABOUT.width, value => measure(value, ABOUT.slot)) : [];
 }
-export function aboutLayout(description: string, measure: (text: string, slot: number) => number): TextLine[] {
-  return aboutPage(clean(description), measure).lines;
-}
+export const aboutHeight = (lines: number) => lines ? ABOUT.caption + ABOUT.captionGap + lines * ABOUT.lineHeight + ABOUT.gap : 0;
 
-// ---- control pages -----------------------------------------------------------------------
-
-/** One adjustable value per page: caption, [−] value [+], a detail line and an edge gauge. */
+/**
+ * One control row: caption, value, then [−] pill bar [+], then a detail line. Rects are
+ * relative to the row top and centred on the canvas. The pill is the selectable target.
+ */
 export const CONTROL = {
-  caption: centred(120, 54, 16),
-  value: centred(88, 92.5, 48),
-  detail: centred(110, 146, 16),
-  button: 50,
-  buttonGap: 6,
-  /** Gauge: a 240° arc, open at the bottom, filled clockwise from lower left. */
-  gauge: { radius: 107, width: 4, selectedWidth: 6, startDeg: 150, sweepDeg: 240 },
+  height: 124,
+  caption: centred(140, 0, 16),
+  value: centred(120, 18, 30),
+  detail: centred(140, 92, 16),
+  row: { y: 54, height: 34 },
+  button: 34,
+  buttonGap: 8,
+  pill: { width: 112, height: 10, selectedHeight: 14 },
 } as const;
-export const controlButtons = (): { minus: Rect; plus: Rect } => {
-  const v = CONTROL.value, size = CONTROL.button, y = v.y + (v.height - size) / 2;
-  return { minus: { x: v.x - CONTROL.buttonGap - size, y, width: size, height: size }, plus: { x: v.x + v.width + CONTROL.buttonGap, y, width: size, height: size } };
-};
-export const controlRects = (): Rect[] => { const b = controlButtons(); return [CONTROL.caption, CONTROL.value, CONTROL.detail, b.minus, b.plus]; };
-/** Bounding box of the gauge stroke (its outer edge is the circle that matters). */
-export const gaugeOuterRadius = (selected = false) => CONTROL.gauge.radius + (selected ? CONTROL.gauge.selectedWidth : CONTROL.gauge.width) / 2;
-
-/** PocketJS arc style (0° = 12 o'clock, clockwise) for a gauge fraction, on the 233 canvas. */
-export function gaugeArc(fraction: number, width: number): { insetL: number; insetT: number; width: number; height: number; arcStart: number; arcSweep: number; arcWidth: number } | undefined {
+export function controlRow(): { minus: Rect; plus: Rect; pillHit: Rect; pill: (selected: boolean) => Rect } {
+  const { row, button, buttonGap, pill } = CONTROL, total = button * 2 + buttonGap * 2 + pill.width, x = C - total / 2;
+  const by = row.y + (row.height - button) / 2, pillX = x + button + buttonGap;
+  return {
+    minus: { x, y: by, width: button, height: button },
+    plus: { x: x + total - button, y: by, width: button, height: button },
+    pillHit: { x: pillX, y: row.y, width: pill.width, height: row.height },
+    pill: selected => { const h = selected ? pill.selectedHeight : pill.height; return { x: pillX, y: row.y + (row.height - h) / 2, width: pill.width, height: h }; },
+  };
+}
+/** Filled part of a pill bar; never narrower than its own height so the caps stay round. */
+export function pillFill(track: Rect, fraction: number): Rect | undefined {
   const f = Math.max(0, Math.min(1, fraction));
   if (!(f > 0)) return undefined;
-  const outer = CONTROL.gauge.radius + width / 2;
-  return { insetL: C - outer, insetT: C - outer, width: outer * 2, height: outer * 2, arcStart: CONTROL.gauge.startDeg + 90, arcSweep: CONTROL.gauge.sweepDeg * f, arcWidth: width };
+  return { ...track, width: Math.max(track.height, track.width * f) };
 }
+/** Rows of a control, at row-relative positions, for the circle check at the canvas centre. */
+export const controlRects = (selected = true): Rect[] => { const r = controlRow(); return [CONTROL.caption, CONTROL.value, CONTROL.detail, r.minus, r.plus, r.pill(selected)]; };
 
-// ---- page indicator and entry arrow --------------------------------------------------------
-
-/** Horizontal page dots in the gauge's open bottom. */
-export function pageDots(count: number, active: number): (Rect & { active: boolean })[] {
-  const shown = Math.min(7, count), start = Math.max(0, Math.min(count - shown, active - Math.floor(shown / 2)));
-  const size = 5, activeWidth = 12, gap = 5, y = 214;
-  const total = (shown - 1) * (size + gap) + activeWidth;
-  let x = C - total / 2;
-  return Array.from({ length: shown }, (_, i) => { const width = start + i === active ? activeWidth : size, dot = { x, y, width, height: size, active: start + i === active }; x += width + gap; return dot; });
+/** Column metrics: where each section starts and how far the column scrolls. */
+export const INFO_HEIGHT = INFO.bottom + 8;
+export function columnLayout(aboutLineCount: number, controls: number): { about: number; controls: number; height: number; max: number } {
+  const about = INFO_HEIGHT, start = about + aboutHeight(aboutLineCount);
+  // Trailing space lets the last row scroll to the vertical centre.
+  const height = start + controls * CONTROL.height + Math.max(0, (CANVAS - CONTROL.height) / 2);
+  return { about, controls: start, height, max: Math.max(0, height - CANVAS) };
 }
+/** Offset that centres control row `index` on the canvas. */
+export const controlCentreOffset = (layout: { controls: number; max: number }, index: number) =>
+  Math.max(0, Math.min(layout.max, layout.controls + index * CONTROL.height + CONTROL.height / 2 - C));
+
+// ---- entry arrow ---------------------------------------------------------------------------
 
 /** The inward-pointing tab at the right edge of the player, and its larger touch target. */
 export const ENTRY_ARROW = { tab: { x: 207, y: 96.5, width: 16, height: 40 }, icon: { x: 205, y: 106.5, width: 20, height: 20 }, hit: { x: 189, y: 84.5, width: 40, height: 64 } } as const;
@@ -204,9 +199,3 @@ export function stepSpeed(current: number, steps: number): number {
 }
 export const speedFraction = (speed: number) => (speed - SPEED_STEPS[0]) / (SPEED_STEPS[SPEED_STEPS.length - 1]! - SPEED_STEPS[0]);
 export const formatSpeed = (speed: number) => `${Number.isInteger(speed) ? speed.toFixed(1) : Number(speed.toFixed(2))}×`;
-
-/** Pager settle target from release offset/velocity, in pages. */
-export function settlePage(page: number, dragPx: number, velocity: number, pageHeight: number, count: number): number {
-  const delta = Math.abs(velocity) > 400 ? -Math.sign(velocity) : Math.abs(dragPx) > pageHeight * .25 ? -Math.sign(dragPx) : 0;
-  return Math.max(0, Math.min(count - 1, page + delta));
-}
