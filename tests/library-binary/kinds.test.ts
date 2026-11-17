@@ -97,3 +97,17 @@ test('B2 RSS export freezes original clocks and deletion records and merges sour
   expect(JSON.parse((await kinds.freezeSources())[0]!.metadataUtf8)).toMatchObject({updatedAt:101,deleted:true,deletedAt:101});
  }finally{await f.dispose();}
 });
+
+test('B2 refuses RSS alias lookup that would need a whole uncached legacy body',async()=>{
+ const f=await binaryRuntime();
+ try{
+  const {repository,files}=await attachBinaryLibrary(f);
+  const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
+  const feed='https://fixture.invalid/alias',url='urn:legacy:entry';
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,?,'feed',0,0)",[feed]);
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,link,dedup_key,fetched_at) VALUES(1,1,'original',?,'title:original',0)",[url]);
+  const {object}=sampleArticle('alias','','articleMetadata',{url,rssSourceUrl:feed});
+  await expect(kinds.apply(object,'unused','phone',{before:[],after:()=>[]})).rejects.toThrow('BUSINESS_REJECTED');
+  expect(await f.db.query('SELECT title FROM articles')).toEqual([{title:'original'}]);
+ }finally{await f.dispose();}
+});
