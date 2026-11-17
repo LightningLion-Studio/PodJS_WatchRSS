@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
+import { createScroller } from "@pocketjs/framework/kinetics";
 import { getOps } from "@pocketjs/framework/host";
 import { hitNode, pressNode } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
@@ -8,10 +9,14 @@ import * as watch from "@podjs/framework/watch";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
-import { ABOUT, aboutPage, CANVAS, CONTROL, controlButtons, detailText, ENTRY_ARROW, formatSpeed, gaugeArc, INFO, infoLayout, pageDots, settlePage, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
+import { ABOUT, aboutLines, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
 
 const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
-const SLIDE_MS = 220, PAGE_MS = 260;
+const SLIDE_MS = 220;
+/** Crown scroll distance per degree, in canvas units. */
+const CROWN_PX = 4;
+/** Height of the top and bottom fades over the scrolling column, in canvas units. */
+const EDGE_FADE = 28;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
@@ -74,48 +79,32 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     const value = cover();
     return infoLayout({ title: props.title(), author: props.author(), description: props.description(), hasCover: !!value, portraitCover: value?.portrait }, (text, slot) => getOps().measureText(text, slot));
   });
+  const measure = (text: string, slot: number) => getOps().measureText(text, slot);
   const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
-  const [aboutStarts, setAboutStarts] = createSignal([0]);
-  const firstAbout = createMemo(() => info().descriptionMore ? aboutPage(description(), (text, slot) => getOps().measureText(text, slot)) : undefined);
-  type Page = "info" | `about:${number}` | Control;
-  const pages = createMemo<Page[]>(() => ["info", ...(firstAbout()?.lines.length ? aboutStarts().map(start => `about:${start}` as const) : []), "progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
-  const [page, setPage] = createSignal(0), [drag, setDrag] = createSignal(0), [selected, setSelected] = createSignal<Control>();
-  // Page settle animation, in canvas units.
-  const [settle, setSettle] = createSignal<number>();
-  let settleFrom = 0, settleStarted = 0;
-  const offset = () => settle() ?? -page() * CANVAS + drag();
-  const goTo = (next: number) => {
-    const target = Math.max(0, Math.min(pages().length - 1, next));
-    if (selected() && pages()[target] !== selected()) setSelected();
-    settleFrom = offset(); settleStarted = Date.now(); setPage(target); setDrag(0); setSettle(settleFrom);
+  // The info block shows what fits; the full description follows it when it did not fit whole.
+  const about = createMemo(() => info().descriptionMore ? aboutLines(description(), measure) : []);
+  const controls = createMemo<Control[]>(() => ["progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
+  const column = createMemo(() => columnLayout(about().length, controls().length));
+  const [selected, setSelected] = createSignal<Control>();
+  const scroller = createScroller({ max: () => column().max, extent: () => CANVAS });
+  onFrame(() => scroller.step(), () => scroller.state() !== "idle");
+
+  createEffect(() => { description(); untrack(() => { scroller.scrollTo(0, { immediate: true }); setSelected(); }); });
+  // Capabilities may disappear while a source is being replaced: drop a vanished
+  // selection and keep the offset inside the shorter column.
+  createEffect(() => {
+    const max = column().max, control = untrack(selected);
+    if (control && !controls().includes(control)) setSelected();
+    // A centring tween keeps its old target, so judge the destination as well as the position.
+    if (untrack(() => Math.max(scroller.offset(), scroller.intent())) > max) untrack(() => scroller.scrollTo(Math.min(scroller.offset(), max), { immediate: true }));
+  });
+  const select = (control: Control | undefined) => {
+    setSelected(control);
+    if (control) scroller.scrollTo(controlCentreOffset(column(), controls().indexOf(control)));
   };
-  createRenderEffect(()=>{if(settle()===undefined)return;onFrame(() => {
-    const t = (Date.now() - settleStarted) / PAGE_MS, to = -page() * CANVAS;
-    if (t >= 1) setSettle(); else setSettle(settleFrom + (to - settleFrom) * ease(t));
-  });});
-
-  // Discover one continuation ahead, rather than laying out/retaining the whole
-  // description. Control pages remain after the last description page.
-  createEffect(() => {
-    description();
-    untrack(() => { setAboutStarts([0]); setPage(0); setDrag(0); setSettle(); setSelected(); });
-  });
-  createEffect(() => {
-    const kind = pages()[page()];
-    if (!kind?.startsWith("about:")) return;
-    const next = aboutPage(description(), (text, slot) => getOps().measureText(text, slot), Number(kind.slice(6))).nextOffset;
-    if (next !== undefined && !aboutStarts().includes(next)) setAboutStarts(starts => [...starts, next]);
-  });
-
-  // Capabilities may disappear while a source is being replaced. Keep the
-  // pager on an existing page and return the crown to paging in that case.
-  createEffect(() => {
-    const count = pages().length;
-    if (page() >= count) { setPage(count - 1); setDrag(0); setSettle(); setSelected(); }
-  });
-  // Crown: the selected control, otherwise page by page.
-  let pageCrown = 0, speedCrown = 0;
-  createEffect(() => { selected(); pageCrown = 0; speedCrown = 0; });
+  // Crown: the selected control, otherwise a continuous scroll.
+  let speedCrown = 0;
+  createEffect(() => { selected(); speedCrown = 0; });
   props.ref?.({ crown(delta) {
     const degrees = delta / PER_DEGREE, control = selected();
     if (control === "progress") { if (props.seekable()) props.onSeek(Math.round(degrees * 250)); return; }
@@ -125,19 +114,19 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
       if (steps) { speedCrown -= steps * 12; const current = props.speed(); if (current !== undefined) props.onSpeed(stepSpeed(current, steps)); }
       return;
     }
-    if (settle() !== undefined) return;
-    pageCrown += degrees;
-    if (Math.abs(pageCrown) >= 15) { const direction = Math.sign(pageCrown); pageCrown = 0; goTo(page() + direction); }
+    scroller.scrollBy(degrees * CROWN_PX, { durMs: 120 });
   } });
 
   let root: NodeMirror | undefined;
   const toCanvas = (px: number) => px / scale();
   const pager = createGesture({ region: { node: () => root }, axis: "y", panSlop: 8,
+    // A touch catches a fling; an edge spring keeps returning, or the overscroll would freeze.
+    onDown: () => { if (scroller.state() === "fling" || scroller.state() === "tween") scroller.stop(); },
     onTap: contact => { const hit = hitNode(contact.x, contact.y, contact.surface); let pressable = hit; while (pressable && !pressable.onPress) pressable = pressable.parent; if (hit && pressable) pressNode(hit); else setSelected(); },
-    onPanStart: contact => { setSettle(); setSelected(); setDrag(toCanvas(contact.dy)); },
-    onPanMove: contact => { const dy = toCanvas(contact.dy), atEdge = (page() === 0 && dy > 0) || (page() === pages().length - 1 && dy < 0); setDrag(atEdge ? dy * .3 : dy); },
-    onPanEnd: contact => goTo(settlePage(page(), drag(), contact.vy, CANVAS, pages().length)),
-    onCancel: () => goTo(page()),
+    onPanStart: () => { setSelected(); scroller.beginDrag(); },
+    onPanMove: contact => scroller.drag(-toCanvas(contact.fdy)),
+    onPanEnd: contact => scroller.endDrag(-toCanvas(contact.vy)),
+    onCancel: () => scroller.endDrag(0),
   });
   // Left-to-right drags slide the panel back off the player; right-to-left drags are ignored.
   let closing = false;
@@ -149,7 +138,7 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   });
   // System back returns to the player without leaving the route.
   const removeBack = watch.onSystemBack?.(() => { if (!props.slide.shown()) return false; props.slide.close(); return true; });
-  onCleanup(() => { closing = false; pager.dispose(); dismiss.dispose(); removeBack?.(); });
+  onCleanup(() => { closing = false; scroller.stop(); pager.dispose(); dismiss.dispose(); removeBack?.(); });
 
 
   const InfoPage = () => <>
@@ -164,67 +153,68 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
     <For each={info().description}>{line => <Text class="absolute text-xs leading-[16] text-[#a6a6a6] text-center" style={box(line.rect)}>{line.text}</Text>}</For>
   </>;
 
-  // A control page: caption, [−] value [+], detail line and an edge gauge. Only the value,
-  // detail and gauge fill depend on the adjusted value, so a tick repaints just those nodes.
-  const ControlPage = (p: { kind: Control; caption: string; value: () => string; detail: () => string; fraction: () => number; minus: string; plus: string; enabled: () => boolean; step: (direction: -1 | 1, elapsedMs?: number) => void }) => {
-    const active = () => selected() === p.kind, buttons = controlButtons();
-    const gaugeWidth = () => active() ? CONTROL.gauge.selectedWidth : CONTROL.gauge.width;
-    const track = () => gaugeArc(1, gaugeWidth())!, fill = () => gaugeArc(p.fraction(), gaugeWidth());
+  // A control row: caption, value, [−] pill bar [+] and a detail line. Only the value,
+  // detail and fill depend on the adjusted value, so a tick repaints just those nodes.
+  const ControlRow = (p: { kind: Control; caption: string; value: () => string; detail: () => string; fraction: () => number; minus: string; plus: string; enabled: () => boolean; step: (direction: -1 | 1, elapsedMs?: number) => void }) => {
+    const active = () => selected() === p.kind, row = controlRow();
+    const track = () => row.pill(active()), fill = () => pillFill(track(), p.fraction());
     const Stepper = (s: { rect: Rect; icon: string; direction: -1 | 1; label: string }) => {
       let node: NodeMirror | undefined;
       createHoldPress(() => node, { enabled: p.enabled, onPress: () => p.step(s.direction), onHold: elapsed => p.step(s.direction, elapsed) });
       return <View ref={value => node = value} debugName={`PlayerDetail-${p.kind}-${s.direction > 0 ? "plus" : "minus"}`} accessibilityLabel={s.label} accessibilityRole="button" focusable onPress={() => { if (p.enabled()) p.step(s.direction); }}
         class="absolute rounded-[9999] items-center justify-center bg-[#262626] active:scale-96" style={{ ...box(s.rect), opacity: p.enabled() ? 1 : .4 }}>
-        <Image src={s.icon} style={{ width: 26, height: 26 }} />
+        <Image src={s.icon} style={{ width: 22, height: 22 }} />
       </View>;
     };
     return <>
-      <View class="absolute" style={{ ...track(), bgColor: "#ffffff1f" }} />
-      <Show when={fill()}>{style => <View class="absolute" style={{ ...style(), bgColor: "#ff6026" }} />}</Show>
       <Text class="absolute text-xs leading-[16] text-center" style={{ ...box(CONTROL.caption), textColor: active() ? "#ff6026" : "#b6b6b6" }}>{active() ? `${p.caption} · 表冠调节` : p.caption}</Text>
-      <View debugName={`PlayerDetail-${p.kind}-value`} accessibilityLabel={`${p.caption}，轻点后用表冠调节`} accessibilityRole="button" focusable onPress={() => setSelected(active() ? undefined : p.kind)}
-        class="absolute rounded-[24] items-center justify-center" style={{ ...box(CONTROL.value), bgColor: active() ? "#ff6026" : "#ffffff14" }}>
-        <Text class="text-2xl leading-[30] text-white">{p.value()}</Text>
+      <Text class="absolute text-2xl leading-[30] text-center" style={{ ...box(CONTROL.value), textColor: active() ? "#ff6026" : "#ffffff" }}>{p.value()}</Text>
+      <Stepper rect={row.minus} icon={p.minus} direction={-1} label={`${p.caption}减`} />
+      <View debugName={`PlayerDetail-${p.kind}-value`} accessibilityLabel={`${p.caption}，轻点后用表冠调节`} accessibilityRole="button" focusable onPress={() => select(active() ? undefined : p.kind)}
+        class="absolute bg-[#00000002]" style={box(row.pillHit)}>
+        <View class="absolute rounded-[9999]" style={{ insetL: 0, insetT: track().y - row.pillHit.y, width: track().width, height: track().height, bgColor: active() ? "#ffffff38" : "#ffffff1f" }} />
+        <Show when={fill()}>{rect => <View class="absolute rounded-[9999] bg-[#ff6026]" style={{ insetL: 0, insetT: rect().y - row.pillHit.y, width: rect().width, height: rect().height }} />}</Show>
       </View>
-      <Stepper rect={buttons.minus} icon={p.minus} direction={-1} label={`${p.caption}减`} />
-      <Stepper rect={buttons.plus} icon={p.plus} direction={1} label={`${p.caption}加`} />
+      <Stepper rect={row.plus} icon={p.plus} direction={1} label={`${p.caption}加`} />
       <Text class="absolute text-xs leading-[16] text-[#8a8a8a] text-center" style={box(CONTROL.detail)}>{p.detail()}</Text>
     </>;
   };
-
-  const AboutPage = (p: { start: number }) => {
-    const lines = createMemo(() => aboutPage(description(), (text, slot) => getOps().measureText(text, slot), p.start).lines);
-    return <>
-    <Text class="absolute text-xs leading-[16] text-[#ff6026] text-center" style={box(ABOUT.caption)}>简介</Text>
-    <For each={lines()}>{line => <Text class="absolute text-sm leading-[20] text-[#d0d0d0] text-center" style={box(line.rect)}>{line.text}</Text>}</For>
-  </>; };
-  const page$ = (kind: Page): (() => JSX.Element) => {
-    if (kind === "info") return InfoPage;
-    if (kind.startsWith("about:")) return () => <AboutPage start={Number(kind.slice(6))} />;
-    if (kind === "progress") return () => <ControlPage kind="progress" caption="播放进度" minus="../assets/icons/player-rewind.svg" plus="../assets/icons/player-forward.svg" enabled={props.seekable}
+  const control$ = (kind: Control): JSX.Element => {
+    if (kind === "progress") return <ControlRow kind="progress" caption="播放进度" minus="../assets/icons/player-rewind.svg" plus="../assets/icons/player-forward.svg" enabled={props.seekable}
       value={() => formatPlayerTime(props.positionMs())} detail={() => `共 ${formatPlayerTime(props.durationMs())}`}
       fraction={() => props.durationMs() > 0 ? props.positionMs() / props.durationMs() : 0}
       step={(direction, elapsed) => props.onSeek(elapsed === undefined ? 4_000 * direction : seekHoldStep(elapsed, direction))} />;
-    if (kind === "volume") return () => <ControlPage kind="volume" caption="音量" minus="../assets/icons/speech-minus.svg" plus="../assets/icons/speech-plus.svg" enabled={() => true}
+    if (kind === "volume") return <ControlRow kind="volume" caption="音量" minus="../assets/icons/speech-minus.svg" plus="../assets/icons/speech-plus.svg" enabled={() => true}
       value={() => `${props.volumePercent()}%`} detail={() => props.muted() ? "已静音" : props.volumePercent() <= 0 ? "无声" : "媒体音量"}
       fraction={() => props.volumePercent() / 100}
       step={(direction, elapsed) => props.onVolume(direction * (elapsed === undefined ? 1 : holdStepCount(elapsed)), false)} />;
-    return () => <ControlPage kind="speed" caption="播放速度" minus="../assets/icons/speech-minus.svg" plus="../assets/icons/speech-plus.svg" enabled={() => props.speed() !== undefined}
+    return <ControlRow kind="speed" caption="播放速度" minus="../assets/icons/speech-minus.svg" plus="../assets/icons/speech-plus.svg" enabled={() => props.speed() !== undefined}
       value={() => formatSpeed(props.speed() ?? 1)} detail={() => (props.speed() ?? 1) === 1 ? "正常速度" : "0.5× – 2.0×"}
       fraction={() => speedFraction(props.speed() ?? 1)}
       step={(direction, elapsed) => props.onSpeed(stepSpeed(props.speed() ?? 1, direction * (elapsed === undefined ? 1 : holdStepCount(elapsed))))} />;
   };
-  // Only pages that can be on screen (the current one and, while moving, its neighbours) mount.
-  const visible = (index: number) => Math.abs(-offset() / CANVAS - index) < 1;
+  // Only sections that intersect the viewport mount; long descriptions mount line by line.
+  const visible = (y: number, height: number) => y + height > scroller.offset() - 8 && y < scroller.offset() + CANVAS + 8;
+  const aboutTop = () => column().about + ABOUT.caption + ABOUT.captionGap;
+  const aboutLeft = (CANVAS - ABOUT.width) / 2;
 
   return <View ref={value => root = value} debugName="PlayerDetailPanel" class="absolute left-[0] top-[0] bg-[#000000]" style={{ width: props.width, height: props.height, translateX: props.slide.x() }}>
     <View class="absolute overflow-hidden" style={{ insetL: left(), insetT: top(), width: CANVAS, height: CANVAS, scale: scale(), originX: 0, originY: 0 }}>
-      <View class="absolute left-[0] top-[0]" style={{ width: CANVAS, height: CANVAS * pages().length, translateY: offset() }}>
-        <For each={pages()}>{(kind, index) => <Show when={visible(index())}>
-          <View debugName={`PlayerDetailPage-${kind}`} class="absolute left-[0]" style={{ insetT: index() * CANVAS, width: CANVAS, height: CANVAS }}>{page$(kind)()}</View>
+      <View debugName="PlayerDetailColumn" class="absolute left-[0] top-[0]" style={{ width: CANVAS, height: column().height, translateY: -scroller.offset() }}>
+        <Show when={visible(0, INFO_HEIGHT)}><View debugName="PlayerDetailInfo" class="absolute left-[0] top-[0]" style={{ width: CANVAS, height: INFO_HEIGHT }}><InfoPage /></View></Show>
+        <Show when={about().length && visible(column().about, ABOUT.caption)}>
+          <Text class="absolute text-xs leading-[16] text-[#ff6026] text-center" style={{ insetL: aboutLeft, insetT: column().about, width: ABOUT.width, height: ABOUT.caption }}>简介</Text>
+        </Show>
+        <For each={about()}>{(line, index) => <Show when={visible(aboutTop() + index() * ABOUT.lineHeight, ABOUT.lineHeight)}>
+          <Text debugName="PlayerDetailAboutLine" class="absolute text-sm leading-[20] text-[#d0d0d0]" style={{ insetL: aboutLeft, insetT: aboutTop() + index() * ABOUT.lineHeight, width: ABOUT.width, height: ABOUT.lineHeight }}>{line}</Text>
+        </Show>}</For>
+        <For each={controls()}>{(kind, index) => <Show when={visible(column().controls + index() * CONTROL.height, CONTROL.height)}>
+          <View debugName={`PlayerDetailControl-${kind}`} class="absolute left-[0]" style={{ insetT: column().controls + index() * CONTROL.height, width: CANVAS, height: CONTROL.height }}>{control$(kind)}</View>
         </Show>}</For>
       </View>
-      <For each={pageDots(pages().length, page())}>{dot => <View class="absolute rounded-[9999]" style={{ ...box(dot), bgColor: dot.active ? "#ffffff" : "#ffffff4d" }} />}</For>
+      {/* Content leaving the round screen fades out instead of being cut by its edge. */}
+      <View class="absolute left-[0] top-[0] bg-gradient-to-b from-[#000000] to-transparent" style={{ width: CANVAS, height: EDGE_FADE }} />
+      <View class="absolute left-[0] bg-gradient-to-b from-transparent to-[#000000]" style={{ insetT: CANVAS - EDGE_FADE, width: CANVAS, height: EDGE_FADE }} />
     </View>
   </View>;
 }

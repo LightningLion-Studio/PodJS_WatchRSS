@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import titleVectors from "./fixtures/notes-title-vectors.json";
 import type { SqlDatabase } from "../src/core/types.ts";
 import { MemoRepository, initializeMemoSchema } from "../src/notes/index.ts";
 import { NoteDraftAutosave } from "../src/notes/draft-autosave.ts";
@@ -25,7 +26,7 @@ describe("standalone memo repository",()=>{
   test("deletes with a tombstone instead of destroying sync identity",async()=>{const {repo}=repository();await repo.initialize();const saved=await repo.save({markdown:"稍后删除"});const deleted=await repo.delete(saved.noteId);expect(deleted).toMatchObject({noteId:saved.noteId,deleted:true,deletedAt:200,modifiedBy:"podjs-watch"});expect(await repo.get(saved.noteId)).toBeNull();expect(await repo.list()).toEqual([]);expect(await repo.allIncludingDeleted()).toEqual([deleted]);});
 
   test("rejects empty creates and truly missing IDs without creating a replacement",async()=>{const {repo}=repository();await repo.initialize();await expect(repo.save({markdown:"  "})).rejects.toThrow("新建备忘录不能为空");await expect(repo.save({noteId:"missing",markdown:"again"})).rejects.toThrow("笔记不存在");expect(await repo.allIncludingDeleted()).toEqual([]);});
-  test("preserves explicit raw titles, including whitespace and clearing a prior title",async()=>{const {repo}=repository();await repo.initialize();const note=await repo.save({title:"  原始标题  ",markdown:"正文"});expect(note.title).toBe("  原始标题  ");const cleared=await repo.save({noteId:note.noteId,title:"",markdown:"正文"});expect(cleared.title).toBe("");expect((await repo.save({noteId:note.noteId,markdown:"正文"})).title).toBe("正文");});
+  test("preserves nonblank raw titles and derives explicitly cleared titles",async()=>{const {repo}=repository();await repo.initialize();const note=await repo.save({title:"  原始标题  ",markdown:"正文"});expect(note.title).toBe("  原始标题  ");const cleared=await repo.save({noteId:note.noteId,title:"",markdown:"正文"});expect(cleared.title).toBe("正文");expect((await repo.save({noteId:note.noteId,markdown:"正文"})).title).toBe("正文");});
 });
 
 describe("draft saving after a synced deletion",()=>{
@@ -109,4 +110,68 @@ describe("draft saving after a synced deletion",()=>{
     expect(await repo.allIncludingDeleted()).toEqual([]);
     draft.dispose();
   });
+});
+
+
+describe("three-word title persistence",()=>{
+  test("missing, empty and whitespace titles derive; omitted nonblank titles stay raw",async()=>{
+    const {repo}=repository();await repo.initialize();
+    const markdown="\nHello, big world again\nsecond";
+    for(const title of [undefined,""," \t "]){
+      const n=await repo.save({title,markdown});
+      expect(n.title).toBe("Hello, big world");
+      expect(n.markdown).toBe(markdown);expect(n.baseMarkdown).toBe(markdown);
+    }
+    const n=await repo.save({title:"  hand written title  ",markdown});
+    expect((await repo.save({noteId:n.noteId,markdown})).title).toBe(n.title);
+    expect((await repo.save({noteId:n.noteId,title:" \t ",markdown})).title).toBe("Hello, big world");
+  });
+  for(const title of ["", " \t ", "  manual title  "])test("actual three-way merge title: "+JSON.stringify(title),async()=>{
+    const {repo,db}=repository();await repo.initialize();
+    const base=await repo.save({title:"base",markdown:"first\nmiddle\nlast"});
+    await repo.save({noteId:base.noteId,title:"local",markdown:"Hello, big world again\nmiddle\nlast"});
+    await db.execute("UPDATE memo_notes SET title=? WHERE note_id=?",[title,base.noteId]);
+    const remote={...base,title:"remote",markdown:"first\nmiddle\nREMOTE",contentHash:"remote-hash",updatedAt:500,modifiedBy:"phone"};
+    expect(await repo.applyRemote(remote)).toBe(1);
+    const n=(await repo.get(base.noteId))!;
+    expect(n.title).toBe(title.trim()?title:"Hello, big world");
+    expect(n.markdown).toBe("Hello, big world again\nmiddle\nREMOTE");
+    expect(n.baseMarkdown).toBe(base.markdown);expect(n.baseContentHash).toBe(base.contentHash);
+  });
+  test("receiving a blank title and recording a conflict preserves all body bytes",async()=>{
+    const {repo,db}=repository();await repo.initialize();
+    const base=await repo.save({title:"base",markdown:"first\nmiddle\nlast"});
+    const remote={...base,title:"",markdown:"  <p>remote</p>\r\n",baseMarkdown:"ancestor\r\n",contentHash:"remote",updatedAt:500,modifiedBy:"phone"};
+    await repo.applyRemote(remote);expect((await repo.get(base.noteId))!).toEqual(remote);
+    await repo.save({noteId:base.noteId,title:"",markdown:"LOCAL\nmiddle\nlast"});
+    const local=(await repo.get(base.noteId))!;
+    await repo.applyRemote({...remote,markdown:"REMOTE\nmiddle\nlast",contentHash:"new-remote",updatedAt:600});
+    expect((await repo.get(base.noteId))!).toEqual(local);
+    const [c]=await db.query("SELECT * FROM note_merge_conflicts");
+    expect(c.base_markdown).toBe(local.baseMarkdown);expect(c.local_markdown).toBe(local.markdown);expect(c.remote_markdown).toBe("REMOTE\nmiddle\nlast");
+  });
+});
+
+
+test("real user vocabulary sample derives its numbered first three words on save and merge",async()=>{
+ const sample=titleVectors.find(v=>v.name==='user-sample-vocab')!;
+ expect(sample.expected).toBe('1. republic 2');
+ const {repo,db}=repository();await repo.initialize();
+ const saved=await repo.save({title:'',markdown:sample.plainText});
+ console.log('USER-VOCAB PodJS save title='+JSON.stringify(saved.title));
+ expect(saved.title).toBe(sample.expected);
+ expect(saved.markdown).toBe(sample.plainText);expect(saved.baseMarkdown).toBe(sample.plainText);
+ expect(saved.plainText.split('\n')[0]).toBe(sample.plainText.split('\n')[0]!.replace(/^1\. /,'').trimEnd());
+ const html='<p>'+sample.plainText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+'</p>';
+ const rich=await repo.save({title:'',markdown:html});
+ console.log('USER-VOCAB PodJS HTML save title='+JSON.stringify(rich.title));
+ expect(rich.title).toBe(sample.expected);expect(rich.markdown).toBe(html);expect(rich.baseMarkdown).toBe(html);
+ const baseBody=sample.plainText.replace('1. republic','base republic');
+ const base=await repo.save({title:'base',markdown:baseBody});
+ await repo.save({noteId:base.noteId,title:'',markdown:sample.plainText});
+ await db.execute('UPDATE memo_notes SET title=? WHERE note_id=?',['',base.noteId]);
+ await repo.applyRemote({...base,markdown:baseBody+'\nremote tail',contentHash:'remote-sample-hash',updatedAt:500,modifiedBy:'phone'});
+ const merged=(await repo.get(base.noteId))!;
+ console.log('USER-VOCAB PodJS merge title='+JSON.stringify(merged.title));
+ expect(merged.title).toBe(sample.expected);expect(merged.markdown).toBe(sample.plainText+'\nremote tail');expect(merged.baseMarkdown).toBe(baseBody);
 });

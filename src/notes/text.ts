@@ -1,4 +1,5 @@
 import {noteHtmlEntities} from './html-entities';
+import {deriveNoteTitle} from './title';
 // Kotlin Char.isWhitespace includes the four ASCII information separators,
 // and does not include JavaScript's BOM whitespace.
 const whitespace='[\\u0009-\\u000d\\u001c-\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
@@ -12,7 +13,9 @@ export function nativeEntities(value:string):string{
  });
 }
 /** Native watchPlainText pipeline: selected HTML tags, HTML entities, Markdown. */
-export function memoPlainText(value:string):string{
+export function memoPlainText(value:string):string{return projectNoteText(value,false);}
+// Literal ordered-list numbers count as words only in the title projection.
+function projectNoteText(value:string,preserveListNumbers:boolean):string{
  const html=value
   .replace(/<img\b[^>]*alt=["']([^"']*)["'][^>]*>/gis,'[图片：$1]')
   .replace(/<img\b[^>]*>/gis,'[图片]')
@@ -25,8 +28,8 @@ export function memoPlainText(value:string):string{
   .replace(/\[([^\]]+)\]\([^)]*\)/g,'$1')
   .replace(/^#{1,6}[ \t\n\v\f\r]+/gm,'')
   .replace(/^>[ \t\n\v\f\r]?/gm,'')
-  .replace(/^[ \t\n\v\f\r]*(?:[-*+] |\d+\. )/gm,'')
+  .replace(preserveListNumbers?/^[ \t\n\v\f\r]*[-*+] /gm:/^[ \t\n\v\f\r]*(?:[-*+] |\d+\. )/gm,'')
   .replace(/\*\*|__|~~|`/g,'');
  return trimNoteText(markdown.split(/\r\n|\r|\n/).map(line=>line.replace(new RegExp(whitespace+'+$'),'')).filter(line=>trimNoteText(line)!=='').join('\n'));
 }
-export function memoTitle(markdown:string):string{return memoPlainText(markdown).split(/\r\n|\r|\n/)[0]?.slice(0,80)||'未命名笔记';}
+export function memoTitle(markdown:string):string{return deriveNoteTitle(projectNoteText(markdown,true))||'未命名笔记';}

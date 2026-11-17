@@ -1,4 +1,5 @@
 import nativeText from '../fixtures/note-text-native.json';
+import titleVectors from '../fixtures/notes-title-vectors.json';
 import {memoPlainText,memoTitle} from '../../src/notes/text.ts';
 import {mount} from '@pocketjs/framework/solid';
 import {Text} from '@pocketjs/framework/components';
@@ -10,7 +11,8 @@ import {createApplicationActionHandler} from '../../src/sync/application-actions
 const key='note-sync-result';
 function check(v:unknown,message:string):asserts v{if(!v)throw new Error(message);}
 async function run(){
- for(const c of nativeText.cases){check(memoPlainText(c.input)===c.plainText,'Native plain text: '+JSON.stringify(c.input));check(memoTitle(c.input)===c.title,'Native note title');}
+ for(const c of nativeText.cases)check(memoPlainText(c.input)===c.plainText,'Native plain text: '+JSON.stringify(c.input));
+ for(const c of titleVectors)check(memoTitle(c.plainText)===(c.expected||'未命名笔记'),'Three-word note title: '+c.name);
  const repo=new MemoRepository(sqlite as SqlDatabase,'note-sync-fixture');await repo.initialize();
  check((await repo.allIncludingDeleted()).length===0,'Fixture memo table must be empty');
  const articles=await sqlite.query('SELECT count(*) n FROM articles'),started=Date.now();let events=0;

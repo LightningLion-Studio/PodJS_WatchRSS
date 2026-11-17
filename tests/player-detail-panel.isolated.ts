@@ -8,6 +8,8 @@ mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(fn:any,needs=()=>true)
 mock.module('@pocketjs/framework/host',()=>({getOps:()=>({measureText:(text:string)=>Array.from(text).length*12})}));
 mock.module('@pocketjs/framework/input',()=>({hitNode:()=>null,pressNode(){}}));
 mock.module('@podjs/framework/watch',()=>({onSystemBack:(fn:any)=>{backs.add(fn);return()=>backs.delete(fn);}}));
+const {createScrollerWith}=await import(new URL('./kinetics-core.ts','file://'+Bun.resolveSync('@pocketjs/framework/kinetics',import.meta.dir)).href);
+mock.module('@pocketjs/framework/kinetics',()=>({createScroller:(opts:any)=>createScrollerWith(createSignal,opts),bindDpadScroll:()=>{}}));
 mock.module('../src/ui/RemoteImage.tsx',()=>({RemoteImage:()=>null}));
 const {PlayerDetailPanel,createDetailSlide}=await import('../src/ui/PlayerDetailPanel.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>{stops.splice(0).forEach(stop=>stop());expect(frames).toHaveLength(0);expect(gestures).toHaveLength(0);expect(backs.size).toBe(0);Date.now=clock;});
@@ -16,13 +18,14 @@ function mount(description='',supported=true){Date.now=()=>time;let slide:any,ha
  createRoot(stop=>{stops.push(stop);const [hasSpeed,set]=createSignal(supported);setSupported=set;slide=createDetailSlide(()=>233);tree=PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>description,cover:()=>undefined,positionMs:()=>1000,durationMs:()=>10000,seekable:()=>canSeek,onSeek:d=>seeks.push(d),volumePercent:()=>20,muted:()=>false,onVolume:(...args)=>volumes.push(args),speed:()=>hasSpeed()?1:undefined,onSpeed:s=>speeds.push(s),ref:h=>handle=h});});
  slide.open();time+=300;frames.slice().forEach(f=>f.fn());
  const find=(name:string)=>nodes(tree).find(n=>n.props.debugName===name);
- return{slide,handle,find,setSupported,seeks,volumes,speeds,disable:()=>canSeek=false,tick(){time+=300;frames.slice().forEach(f=>f.fn());nodes(tree);},nodes:()=>nodes(tree)};
+ return{slide,handle,find,setSupported,seeks,volumes,speeds,disable:()=>canSeek=false,tick(){for(let i=0;i<90;i++){time+=17;frames.slice().forEach(f=>{if(f.needs())f.fn();});}nodes(tree);},offset:()=>-nodes(tree).find(n=>n.props.debugName==='PlayerDetailColumn').props.style.translateY,nodes:()=>nodes(tree)};
 }
-test('crown selection returns to paging on deselect and vertical pan',()=>{
- const f=mount();f.handle.crown(15000);f.tick();f.find('PlayerDetail-progress-value').props.onPress();f.handle.crown(4000);expect(f.seeks).toEqual([1000]);
- f.find('PlayerDetail-progress-value').props.onPress();f.handle.crown(15000);f.tick();expect(f.find('PlayerDetail-volume-value')).toBeDefined();
- f.find('PlayerDetail-volume-value').props.onPress();f.handle.crown(1000);expect(f.volumes).toEqual([[1,true]]);
- const pager=gestures.find(g=>g.axis==='y');pager.onPanStart({dy:-80});pager.onPanEnd({vy:0});f.tick();expect(f.find('PlayerDetail-speed-value')).toBeDefined();
+test('crown scrolls continuously until a pill is selected, and deselect or pan returns it to scrolling',()=>{
+ const f=mount();f.handle.crown(10000);f.tick();const first=f.offset();expect(first).toBeCloseTo(40,0);f.handle.crown(3000);f.tick();expect(f.offset()).toBeCloseTo(52,0);
+ f.find('PlayerDetail-progress-value').props.onPress();f.tick();const centred=f.offset();f.handle.crown(4000);f.tick();expect(f.seeks).toEqual([1000]);expect(f.offset()).toBe(centred);
+ f.find('PlayerDetail-progress-value').props.onPress();f.handle.crown(5000);f.tick();expect(f.offset()).toBeGreaterThan(centred);
+ f.find('PlayerDetail-volume-value').props.onPress();f.tick();f.handle.crown(1000);expect(f.volumes).toEqual([[1,true]]);
+ const pager=gestures.find(g=>g.axis==='y');pager.onPanStart({dy:-10});pager.onPanMove({fdy:-30});pager.onPanEnd({vy:0});f.tick();f.handle.crown(5000);expect(f.volumes).toEqual([[1,true]]);
  f.find('PlayerDetail-speed-value').props.onPress();f.handle.crown(12000);expect(f.speeds).toEqual([1.25]);
 });
 test('cancelled dismiss stays open and system back restores the player',()=>{
@@ -34,16 +37,20 @@ test('cancelled open stays closed and a new open remains usable',()=>{
  slide.begin();slide.move(-180);slide.cancel();time+=300;frames.forEach(f=>f.fn());expect(slide.shown()).toBe(false);slide.open();time+=300;frames.forEach(f=>f.fn());expect(slide.x()).toBe(0);
 });
 test('panel steppers repeat only until disabled or scope disposal',()=>{
- const f=mount();f.handle.crown(15000);f.tick();const plus=f.find('PlayerDetail-progress-plus'),hold=gestures.find(g=>g.region?.node?.()===plus);hold.onLongPress();frames.slice().forEach(f=>f.fn());expect(f.seeks).toEqual([4000]);f.disable();f.tick();expect(f.seeks).toEqual([4000]);stops.pop()!();expect(frames).toHaveLength(0);
+ const f=mount();const plus=f.find('PlayerDetail-progress-plus'),hold=gestures.find(g=>g.region?.node?.()===plus);hold.onLongPress();frames.slice().forEach(f=>f.fn());expect(f.seeks).toEqual([4000]);f.disable();f.tick();expect(f.seeks).toEqual([4000]);stops.pop()!();expect(frames).toHaveLength(0);
 });
 
-test('all description continuation pages precede the controls',()=>{
- const description='完整简介内容'.repeat(100)+'最终末尾',f=mount(description);let read='';
- for(let i=0;i<100;i++){f.handle.crown(15000);f.tick();const page=f.nodes().find(n=>n.props.debugName?.startsWith('PlayerDetailPage-about:'));if(!page)break;read+=nodes(page).filter(n=>n.kind==='Text'&&n.props.children!=='简介').map(n=>n.props.children).join('');}
- expect(read).toBe(description);expect(f.find('PlayerDetail-progress-value')).toBeDefined();expect(frames.length).toBeLessThanOrEqual(6);
+test('the full description scrolls by line and the controls follow it',()=>{
+ const description='完整简介内容'.repeat(100)+'最终末尾',f=mount(description),read=new Map<number,string>();
+ for(let i=0;i<200;i++){for(const n of f.nodes().filter(n=>n.props.debugName==='PlayerDetailAboutLine'))read.set(n.props.style.insetT,n.props.children);f.handle.crown(15000);f.tick();}
+ expect([...read.entries()].sort((a,b)=>a[0]-b[0]).map(e=>e[1]).join('')).toBe(description);
+ expect(f.find('PlayerDetail-speed-value')).toBeDefined();
+ // Only lines near the viewport are mounted.
+ expect(f.nodes().filter(n=>n.props.debugName==='PlayerDetailAboutLine').length).toBeLessThan(14);
 });
-test('losing speed support returns the crown to an existing page',()=>{
- const f=mount();for(let i=0;i<3;i++){f.handle.crown(15000);f.tick();}f.find('PlayerDetail-speed-value').props.onPress();f.setSupported(false);f.tick();expect(f.find('PlayerDetail-volume-value')).toBeDefined();f.handle.crown(-15000);f.tick();expect(f.find('PlayerDetail-progress-value')).toBeDefined();
+test('losing speed support clears its selection and keeps the offset in range',()=>{
+ const f=mount();for(let i=0;i<6;i++){f.handle.crown(30000);f.tick();}f.find('PlayerDetail-speed-value').props.onPress();f.tick();const before=f.offset();f.setSupported(false);f.tick();
+ expect(f.offset()).toBeLessThan(before);f.handle.crown(5000);f.tick();expect(f.speeds).toEqual([]);expect(f.find('PlayerDetail-speed-value')).toBeUndefined();
 });
 
 test('disposing a dragged panel cannot reopen its surviving parent slide',()=>{
@@ -52,6 +59,14 @@ test('disposing a dragged panel cannot reopen its surviving parent slide',()=>{
  createRoot(stop=>{stopPanel=stop;PlayerDetailPanel({width:233,height:233,slide,title:()=>'',author:()=>undefined,description:()=>undefined,cover:()=>undefined,positionMs:()=>0,durationMs:()=>1000,seekable:()=>true,onSeek(){},volumePercent:()=>20,muted:()=>false,onVolume(){},speed:()=>1,onSpeed(){}});});
  const dismiss=gestures.find(g=>g.axis==='x');dismiss.onPanStart({dx:100});slide.reset();stopPanel();time+=300;frames.slice().forEach(f=>f.fn());expect(slide.shown()).toBe(false);
 });
-test('settled detail panels unregister animation callbacks',()=>{
- const f=mount();expect(frames).toHaveLength(0);f.handle.crown(15000);expect(frames.length).toBeGreaterThan(0);f.tick();expect(frames).toHaveLength(0);
+test('settled detail panels request no frames',()=>{
+ const f=mount();expect(frames.some(e=>e.needs())).toBe(false);f.handle.crown(15000);expect(frames.some(e=>e.needs())).toBe(true);f.tick();expect(frames.some(e=>e.needs())).toBe(false);
+});
+test('losing speed support mid-centring never leaves the offset past the new end',()=>{
+ const f=mount();f.handle.crown(60000);f.tick();f.find('PlayerDetail-speed-value').props.onPress();f.setSupported(false);f.tick();
+ expect(f.offset()).toBeLessThanOrEqual(281.5);
+});
+test('a tap during the edge spring still returns the column to its range',()=>{
+ const f=mount(),pager=gestures.find(g=>g.axis==='y');pager.onPanStart({});pager.onPanMove({fdy:100});pager.onPanEnd({vy:0});expect(f.offset()).toBeLessThan(0);
+ pager.onDown();pager.onTap({x:116,y:116});f.tick();expect(f.offset()).toBeGreaterThanOrEqual(0);expect(frames.some(e=>e.needs())).toBe(false);
 });

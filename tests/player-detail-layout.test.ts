@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ABOUT, aboutLayout, aboutPage, CANVAS, CONTROL, chordWidth, controlButtons, controlRects, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, gaugeOuterRadius, INFO, infoLayout, infoRects, insideCanvasCircle, pageDots, settlePage, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
+import { ABOUT, ABOUT_MAX_CHARS, aboutLines, CANVAS, chordWidth, columnLayout, CONTROL, controlCentreOffset, controlRects, controlRow, detailText, EDGE_MARGIN, ENTRY_ARROW, flowLines, INFO, INFO_HEIGHT, infoLayout, infoRects, insideCanvasCircle, pillFill, SPEED_STEPS, speedFraction, stepSpeed } from "../src/ui/player-detail-layout.ts";
 import { holdStepCount, seekHoldStep } from "../src/ui/video-player.ts";
 import { volumeArcLayout, volumeArcOutline } from "../src/ui/volume-arc.ts";
 
@@ -46,22 +46,18 @@ describe("player detail layout stays inside the round screen", () => {
     expect(Math.abs(bare.title[0]!.rect.y + bare.title[0]!.rect.height / 2 - (INFO.top + INFO.bottom) / 2)).toBeLessThan(1);
     expect(infoLayout({ title: "标题", description: "-", hasCover: false }, measure).description).toEqual([]);
   });
-  test("an overflowing description gets its own page that fits", () => {
+  test("an overflowing description continues below the info block at the column width", () => {
     const layout = infoLayout({ title: titles[2], author: "UP", description: longCjk, hasCover: true }, measure);
     expect(layout.descriptionMore).toBe(true);
     expect(infoLayout({ title: "标题", description: "一句话简介", hasCover: true }, measure).descriptionMore).toBe(false);
-    expect(insideCanvasCircle(ABOUT.caption)).toBe(true);
     for (const text of [longCjk, longLatin, "短简介"]) {
-      const lines = aboutLayout(text, measure);
+      const lines = aboutLines(text, measure);
       expect(lines.length).toBeGreaterThan(0);
-      for (const line of lines) {
-        expect(insideCanvasCircle(line.rect)).toBe(true);
-        expect(line.rect.y).toBeGreaterThanOrEqual(ABOUT.top);
-        expect(line.rect.y + line.rect.height).toBeLessThanOrEqual(ABOUT.bottom + 1e-6);
-        expect(measure(line.text, ABOUT.slot)).toBeLessThanOrEqual(line.rect.width + 1e-6);
-      }
+      for (const line of lines) expect(measure(line, ABOUT.slot)).toBeLessThanOrEqual(ABOUT.width + 1e-6);
+      expect(lines.at(-1)!.endsWith("…")).toBe(false);
     }
-    expect(aboutLayout(longCjk, measure).at(-1)!.text.endsWith("…")).toBe(false);
+    // At the centre band, where text is read, a full-width line is inside the circle.
+    expect(chordWidth(C - ABOUT.lineHeight / 2, C + ABOUT.lineHeight / 2)).toBeGreaterThanOrEqual(ABOUT.width);
   });
   test("lines taper with the circle", () => {
     const layout = infoLayout({ title: "短", description: longCjk, hasCover: true }, measure);
@@ -78,16 +74,19 @@ describe("player detail layout stays inside the round screen", () => {
     const lines = flowLines("一二三四五六七八九十一二三四五六七八九十", [60, 48, 36], text => Array.from(text).length * 12);
     expect(lines).toEqual(["一二三四五", "六七八九", "十一…"]);
   });
-  test("control pages, gauge, page dots and the entry arrow fit", () => {
-    for (const rect of controlRects()) expect(insideCanvasCircle(rect)).toBe(true);
-    for (const count of [3, 4]) for (let active = 0; active < count; active++) for (const dot of pageDots(count, active)) expect(insideCanvasCircle(dot)).toBe(true);
-    expect(gaugeOuterRadius(true)).toBeLessThanOrEqual(C - EDGE_MARGIN);
-    // Stepper circles (what is painted) stay inside the gauge's inner edge.
-    const b = controlButtons(), inner = CONTROL.gauge.radius - CONTROL.gauge.selectedWidth / 2;
-    for (const rect of [b.minus, b.plus]) expect(Math.hypot(rect.x + rect.width / 2 - C, rect.y + rect.height / 2 - C) + rect.width / 2).toBeLessThan(inner);
-    // Page dots sit in the gauge's open bottom.
-    const gaugeEndY = C + CONTROL.gauge.radius * Math.sin(Math.PI / 6) + CONTROL.gauge.selectedWidth;
-    for (const dot of pageDots(4, 0)) expect(dot.y).toBeGreaterThan(gaugeEndY);
+  test("a control row centred on the canvas fits, with a pill bar between its steppers", () => {
+    const offset = C - CONTROL.height / 2, at = (r: { x: number; y: number; width: number; height: number }) => ({ ...r, y: r.y + offset });
+    for (const selected of [false, true]) for (const rect of controlRects(selected)) expect(insideCanvasCircle(at(rect))).toBe(true);
+    const row = controlRow(), pill = row.pill(false), selected = row.pill(true);
+    expect(row.minus.x + row.minus.width).toBeLessThan(pill.x);
+    expect(pill.x + pill.width).toBeLessThan(row.plus.x);
+    expect(pill.width).toBeGreaterThan(pill.height * 4);
+    expect(selected.y + selected.height / 2).toBeCloseTo(pill.y + pill.height / 2);
+    for (const rect of [pill, selected]) expect(rect.y).toBeGreaterThanOrEqual(row.pillHit.y);
+    expect(pillFill(pill, 0)).toBeUndefined();
+    expect(pillFill(pill, .001)!.width).toBe(pill.height);
+    expect(pillFill(pill, .5)!.width).toBe(pill.width / 2);
+    expect(pillFill(pill, 7)!.width).toBe(pill.width);
     expect(insideCanvasCircle(ENTRY_ARROW.tab)).toBe(true);
     expect(insideCanvasCircle(ENTRY_ARROW.icon)).toBe(true);
   });
@@ -117,21 +116,20 @@ describe("player detail values", () => {
     expect(holdStepCount(2_000)).toBe(Math.round(seekHoldStep(2_000, 1) / 4_000));
     expect(holdStepCount(60_000)).toBe(15);
   });
-  test("pager settles by distance or fling", () => {
-    expect(settlePage(0, -80, 0, CANVAS, 4)).toBe(1);
-    expect(settlePage(1, 30, 0, CANVAS, 4)).toBe(1);
-    expect(settlePage(1, 10, 900, CANVAS, 4)).toBe(0);
-    expect(settlePage(3, -100, -900, CANVAS, 4)).toBe(3);
+  test("the column scrolls until the last control row is centred", () => {
+    const layout = columnLayout(12, 3);
+    expect(layout.about).toBe(INFO_HEIGHT);
+    expect(layout.controls).toBeGreaterThan(layout.about + 12 * ABOUT.lineHeight);
+    expect(controlCentreOffset(layout, 2)).toBe(layout.max);
+    expect(controlCentreOffset(layout, 0)).toBe(layout.controls + CONTROL.height / 2 - C);
+    expect(columnLayout(0, 2).controls).toBe(INFO_HEIGHT);
   });
 });
 
-test('the complete description remains readable past 400 characters with bounded pages',()=>{
- const text='简介👩‍👧‍👦与拉丁text'.repeat(160)+'末尾验证';
- let offset=0,read='',pages=0;
- do {const result=aboutPage(text,measure,offset);expect(result.lines.length).toBeGreaterThan(0);
-  for(const line of result.lines){expect(insideCanvasCircle(line.rect)).toBe(true);expect(measure(line.text,ABOUT.slot)).toBeLessThanOrEqual(line.rect.width);read+=line.text;}
-  pages++;if(result.nextOffset===undefined)break;expect(result.nextOffset).toBeGreaterThan(offset);offset=result.nextOffset;
- }while(pages<200);
- expect(read).toBe(text);expect(pages).toBeGreaterThan(4);
- for(const count of [5,7,20,200])for(const active of [0,Math.floor(count/2),count-1]){const dots=pageDots(count,active);expect(dots.filter(d=>d.active)).toHaveLength(1);for(const dot of dots)expect(insideCanvasCircle(dot)).toBe(true);}
+test('the complete description remains readable past 400 characters',()=>{
+ const text='简介👩‍👧‍👦与拉丁text'.repeat(160)+'末尾验证',lines=aboutLines(text,measure);
+ for(const line of lines)expect(measure(line,ABOUT.slot)).toBeLessThanOrEqual(ABOUT.width);
+ expect(lines.join('')).toBe(text);expect(lines.length).toBeGreaterThan(20);
+ const long='甲'.repeat(ABOUT_MAX_CHARS-10)+'结束标记';expect(aboutLines(long,measure).join('')).toBe(long);
+ const over=aboutLines('乙'.repeat(ABOUT_MAX_CHARS+5),measure).join('');expect(over.endsWith('…')).toBe(true);expect(Array.from(over)).toHaveLength(ABOUT_MAX_CHARS+1);
 });

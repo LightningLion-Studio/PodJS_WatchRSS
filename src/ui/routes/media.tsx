@@ -195,12 +195,6 @@ export function MediaRoutes(props: MediaRoutesProps) {
           active={props.active()}
           offset={props.active() ? props.backOffset() : 0}
           round={props.round}
-          onOpenWeb={() =>
-            void props.openUrl(
-              (props.playingSource() ?? props.entry.playback)?.webUrl ?? "",
-              (props.playingSource() ?? props.entry.playback)?.platform ?? "rss",
-            )
-          }
           onProgress={(position, duration) => {
             // A preview prefix must not overwrite full-video resume/history state.
             if (props.entry.playback?.url?.startsWith("managed-cache/bili-preview/")) return;
