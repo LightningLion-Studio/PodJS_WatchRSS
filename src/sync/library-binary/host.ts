@@ -8,7 +8,7 @@ import {BinaryStore} from './store';
 import {BinaryAssets,type BinaryAssetFiles} from './assets';
 import {BinaryByteTransport} from './transport';
 import {LibraryBinaryConnection} from './coordinator';
-import {SwitchGate,s2Capability,RELEASE_B2_ENABLED} from './routing';
+import {SwitchGate,binaryCapability,RELEASE_B2_ENABLED} from './routing';
 import {RecoveryRules} from './recovery';
 import {D} from './digests';
 import {HARD_LIMITS,ResumeError,fail,text,type Row,type Capability} from './wire';
@@ -45,7 +45,7 @@ export class BinaryApplicationService implements BinarySessionPort {
   const versions=r.supportedLibraryBinaryVersions;if(!Array.isArray(versions)||versions.some(v=>!Number.isSafeInteger(v)||v<1)||new Set(versions).size!==versions.length)fail('CAPABILITY_MISMATCH');if(!versions.includes(2))return {};
   const peer=text(r.deviceId,128),runtime=await this.ports.chunks.runtime();if(!runtime)fail('CAPABILITY_MISMATCH');
   await this.ports.sampleClock?.();await this.ports.store.initialize();await this.ports.store.observeClock(runtime.elapsedMillis);
-  const cap=s2Capability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],{...HARD_LIMITS,maxObjectBytes:Math.min(5242880,runtime.maxObjectBytes),maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes:Math.min(134217728,runtime.maxStagingBytes),maxInFlightChunks:1,maxInFlightBytes:65536});
+  const cap=binaryCapability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],{...HARD_LIMITS,maxObjectBytes:Math.min(5242880,runtime.maxObjectBytes),maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes:Math.min(134217728,runtime.maxStagingBytes)});
   if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
  }
  business(context:SyncActionContext){this.v1Sessions.add(context);}
