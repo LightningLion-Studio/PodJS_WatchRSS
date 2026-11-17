@@ -4,7 +4,8 @@ set -euo pipefail
 framework=$(realpath "${1:?framework required}")
 serial=${2:?owned emulator required}
 evidence=${3:?evidence required}
-[[ $framework == /home/wilf/data/PodJS/podjs-watch.wt-syncv2-p3b ]]
+expected_framework=$(realpath "${P3B_FRAMEWORK_SOURCE:?Set the approved isolated framework checkout}")
+[[ $framework == "$expected_framework" ]]
 [[ $serial =~ ^emulator-[0-9]+$ ]]
 project=$(cd "$(dirname "$0")/../../.." && pwd)
 [[ $(realpath "$project/node_modules/@podjs/framework") == "$framework/packages/framework" ]]

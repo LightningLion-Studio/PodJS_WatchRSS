@@ -1,7 +1,19 @@
 import {test,expect} from 'bun:test';
 import {prepareNotePreview,noteBlockSourceOffsets,type NotePreviewBlock} from '../src/notes/preview.ts';
 import native from './fixtures/note-preview-native.json';
-test('preview blocks, tables, fences, chunking and source offsets match native Kotlin',()=>{for(const c of native.cases){const blocks=prepareNotePreview(c.input);expect(blocks,JSON.stringify(c.input)).toEqual(c.blocks as NotePreviewBlock[]);expect(noteBlockSourceOffsets(c.input,blocks)).toEqual(c.offsets);}});
+// RNR-02 intentionally corrects the frozen Kotlin fixture's indented-image bug.
+// Keep that fixture unchanged and assert the corrected product blocks explicitly.
+test('preview blocks retain native parity except the RNR-02 indented-code correction',()=>{
+ for(const c of native.cases){
+  const corrected=c.input==='    ![indented](a)\n    ```\n|a|b|\n|---|---|';
+  const expected=corrected?[
+   {kind:'rich',markup:'    ![indented](a)\n    ```',html:false},
+   {kind:'table',rows:[['a','b']],headerRows:1,alignments:['Start','Start']}
+  ]:c.blocks;
+  const blocks=prepareNotePreview(c.input);expect(blocks,JSON.stringify(c.input)).toEqual(expected as NotePreviewBlock[]);
+  expect(noteBlockSourceOffsets(c.input,blocks)).toEqual(corrected?[0,null]:c.offsets);
+ }
+});
 
 test('presentation preserves code literals and resolves synced asset paths without rewriting remote URLs',async()=>{const {noteTextRows,noteImageSource}=await import('../src/notes/presentation.ts');expect(noteTextRows('# 标题\n- 内容\n> 引用\n```html\n<p>literal</p>\n```',false)).toMatchObject([{text:'标题',role:'heading'},{text:'• 内容',role:'body'},{text:'引用',role:'quote'},{text:'<p>literal</p>',role:'code'}]);expect(noteImageSource('assets/a.png')).toEqual({url:'assets/a.png',filePath:'notes/assets/a.png'});expect(noteImageSource('https://example.com/a.png')).toEqual({url:'https://example.com/a.png'});});
 
@@ -13,11 +25,11 @@ test('note preview images keep native aspect ratio within the watch height bound
  expect(noteImageDisplayHeight(205,0,100)).toBe(260);
 });
 
-test('native note preview collapses fenced code to one measured blank row without changing source text',async()=>{
+test('native body layout excludes code rendered separately by NotePreview',async()=>{
  const {noteBodyLayoutBlocks}=await import('../src/notes/native-layout-input.ts');
  const one='前文\n```text\n代码\n```\n后文',many='前文\n```text\n代码甲\n代码乙\n```\n后文';
- expect(noteBodyLayoutBlocks(one).map(block=>block.text)).toEqual(['前文','后文',' ']);
- expect(noteBodyLayoutBlocks(many).map(block=>block.text)).toEqual(['前文','后文',' ']);
+ expect(noteBodyLayoutBlocks(one).map(block=>block.text)).toEqual(['前文','后文']);
+ expect(noteBodyLayoutBlocks(many).map(block=>block.text)).toEqual(['前文','后文']);
 });
 
 test('table cells preserve literal Markdown while unwrapping native inline-code delimiters',async()=>{

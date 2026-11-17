@@ -6,8 +6,8 @@
   "scripts": {
     "test": "bun test --path-ignore-patterns='artifacts/**'",
     "typecheck": "bun scripts/link-framework.ts --check && tsc --noEmit",
-    "build": "bun ../../PodJS/podjs-watch/packages/cli/src/cli.ts build --target=android-watch --project=\"$PWD\"",
-    "package:android": "bun ../../PodJS/podjs-watch/packages/cli/src/cli.ts package --target=android-watch --project=\"$PWD\"",
+    "build": "bun scripts/framework-cli.ts build",
+    "package:android": "bun scripts/framework-cli.ts package",
     "postinstall": "bun scripts/link-framework.ts"
   },
   "dependencies": {

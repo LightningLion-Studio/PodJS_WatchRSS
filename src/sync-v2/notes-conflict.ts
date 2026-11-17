@@ -1,4 +1,5 @@
 import {choiceCurrent} from './state';
+import {noteConflictId} from '../notes/conflict-id';
 /** rc6a note-conflict wire and atomic resolution model. No product or network IO. */
 import {canonical,jsonBytes as jb,bytes as utf8} from './protocol';
 import {sha256Hex} from '@podjs/framework/crypto';
@@ -22,13 +23,13 @@ export function conflictNeutral(state:any){
  const payload={...state.payload};delete payload.noteConflicts;
  return {...state,requiredFeatures:state.requiredFeatures.filter((f:string)=>f!==feature),payload};
 }
-/** This preserves the existing creation algorithm; migrated IDs remain opaque. */
+/** Imported IDs remain opaque; new IDs use the NA-16 tuple encoding. */
 /** R2: digest of the conflict-neutral note model compared for local edits of a
  * candidate or decoded row (the edit-base shape). */
 export const noteEditDigest=(r:any)=>sha256Hex(jb({identity:r.meta.logicalId,...r.meta.payload,...conflictNeutral(r.state).payload}));
 export function newConflictId(noteId:string,base:string,local:string,remote:string,device:string){
  for(const v of [noteId,base,local,remote,device])c.canonical(v);
- return sha256Hex(utf8([noteId,base,local,remote,device].join('\0')));
+ return noteConflictId(noteId,base,local,remote,device);
 }
 /** Only a legacy importer may map absent resolvedAt to zero. Wire may not. */
 export function importLegacy(client:'watch'|'phone'|'mini',noteId:string,rows:any[]):ConflictSet{
@@ -65,13 +66,13 @@ function outer(state:any,context:{entityKey:string;noteId:string}){
 export function attachConflicts(state:any,context:{entityKey:string;noteId:string},value:ConflictSet){
  validateSet(context.noteId,value);outer(state,context);const next=clone(state),target=holder(next);
  if(Object.hasOwn(target,'noteConflicts')||next.requiredFeatures.includes(feature))fail('invalid_schema');
- target.noteConflicts=clone(value);next.requiredFeatures=[...next.requiredFeatures,feature].sort();readConflicts(next,context);if(c.jb(next).length>262144)fail('object_too_large');return next;
+ target.noteConflicts=conflictSet(context.noteId,value.records);next.requiredFeatures=[...next.requiredFeatures,feature].sort();readConflicts(next,context);if(c.jb(next).length>262144)fail('object_too_large');return next;
 }
 /** null means no conflict channel, NOT an authoritative empty table. */
 export function readConflicts(state:any,context:{entityKey:string;noteId:string},supported=[feature,'note-segments.v1']):ConflictSet|null{
  outer(state,context);const target=holder(state);if(state.requiredFeatures.some((f:string)=>!supported.includes(f)))fail('unsupported_feature');
  if(!state.requiredFeatures.includes(feature)){if(Object.hasOwn(target,'noteConflicts'))fail('invalid_schema');return null;}
- if(!Object.hasOwn(target,'noteConflicts'))fail('invalid_schema');validateSet(context.noteId,target.noteConflicts);return clone(target.noteConflicts);
+ if(!Object.hasOwn(target,'noteConflicts'))fail('invalid_schema');validateSet(context.noteId,target.noteConflicts);return conflictSet(context.noteId,target.noteConflicts.records);
 }
 /** An existing open incident blocks automatic merge even if current text is disjoint. */
 export function mergeNoteWithConflicts(noteId:string,base:string,local:string,remote:string,known:ConflictSet[]){

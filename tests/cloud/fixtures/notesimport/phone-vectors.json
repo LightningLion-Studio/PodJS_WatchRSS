@@ -2,7 +2,9 @@
   "apply": [
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -38,7 +40,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -87,7 +91,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": true,
@@ -136,7 +142,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -185,13 +193,15 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "conflict": true
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
           "deletedAt": 0,
           "folder": null,
-          "deleted": true,
+          "deleted": false,
           "markdown": "one\ntwo\nthree",
           "modifiedBy": "phone",
           "id": "n-1",
@@ -200,7 +210,17 @@
           "base": "one\ntwo\nthree",
           "updatedAt": 100
         },
-        "conflicts": []
+        "conflicts": [
+          {
+            "noteId": "n-1",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "one\ntwo\nthree",
+            "remoteMarkdown": "one\ntwo\nthree",
+            "remoteDeviceId": "phone",
+            "createdAt": 999,
+            "conflictId": "2eb670803b64713c1321ba4618d42926e550bd8c549ffa31077d4cb27bdd45d7"
+          }
+        ]
       },
       "name": "same-content tie deleted",
       "remote": {
@@ -230,11 +250,34 @@
         "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
         "base": "one\ntwo\nthree",
         "updatedAt": 100
-      }
+      },
+      "supersededExpected": {
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": true,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": []
+      },
+      "supersededReason": "r3 coordinator: deletion disagreement preserves current state and creates a conflict; clocks and sources cannot decide."
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -283,7 +326,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -332,7 +377,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": true,
@@ -381,7 +428,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 2,
           "pinned": false,
@@ -430,7 +479,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -479,7 +530,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "markdown": "one\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -528,7 +581,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "local"},
+        "result": {
+          "conflict": true
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -543,7 +598,17 @@
           "base": "one\ntwo\nthree",
           "updatedAt": 300
         },
-        "conflicts": []
+        "conflicts": [
+          {
+            "noteId": "n-1",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "local",
+            "remoteMarkdown": "one\ntwo\nthree",
+            "remoteDeviceId": "phone",
+            "createdAt": 999,
+            "conflictId": "bbb79bb47582ed32608101cc8e343c61079bb573e89c6c19f9e7b37d30abf25c"
+          }
+        ]
       },
       "name": "older deletion ignored",
       "remote": {
@@ -573,11 +638,34 @@
         "hash": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
         "base": "one\ntwo\nthree",
         "updatedAt": 300
-      }
+      },
+      "supersededExpected": {
+        "result": {
+          "markdown": "local"
+        },
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "local",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 300
+        },
+        "conflicts": []
+      },
+      "supersededReason": "r3 coordinator: deletion disagreement preserves current state and creates a conflict; clocks and sources cannot decide."
     },
     {
       "expected": {
-        "result": {"markdown": "one\ntwo\nthree"},
+        "result": {
+          "conflict": true
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -592,7 +680,17 @@
           "base": "one\ntwo\nthree",
           "updatedAt": 300
         },
-        "conflicts": []
+        "conflicts": [
+          {
+            "noteId": "n-1",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "one\ntwo\nthree",
+            "remoteMarkdown": "old",
+            "remoteDeviceId": "phone",
+            "createdAt": 999,
+            "conflictId": "fe40ee38e22bc9b9193672012acfee17e915bf4ff04aaca2b5c05a6cbfacb3ae"
+          }
+        ]
       },
       "name": "old edit cannot resurrect tombstone",
       "remote": {
@@ -626,22 +724,34 @@
     },
     {
       "expected": {
-        "result": {"markdown": "different remote"},
+        "result": {
+          "conflict": true
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
-          "deletedAt": 200,
+          "deletedAt": 0,
           "folder": null,
-          "deleted": true,
-          "markdown": "different remote",
+          "deleted": false,
+          "markdown": "one\ntwo\nthree",
           "modifiedBy": "phone",
           "id": "n-1",
           "title": "标题",
-          "hash": "80711e03214c07bc0b7f0158bebf93b8d2c47a6727f21d0478654c42da5f7747",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
           "base": "one\ntwo\nthree",
-          "updatedAt": 200
+          "updatedAt": 100
         },
-        "conflicts": []
+        "conflicts": [
+          {
+            "noteId": "n-1",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "one\ntwo\nthree",
+            "remoteMarkdown": "different remote",
+            "remoteDeviceId": "phone",
+            "createdAt": 999,
+            "conflictId": "0138d81c87ab4086871115449a23ad8877d27da9ad32ea9aca240bc01f7c1fb2"
+          }
+        ]
       },
       "name": "newer delete clean",
       "remote": {
@@ -671,26 +781,59 @@
         "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
         "base": "one\ntwo\nthree",
         "updatedAt": 100
-      }
-    },
-    {
-      "expected": {
-        "result": {"markdown": "restored"},
+      },
+      "supersededExpected": {
+        "result": {
+          "markdown": "different remote"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
-          "deletedAt": 0,
+          "deletedAt": 200,
           "folder": null,
-          "deleted": false,
-          "markdown": "restored",
+          "deleted": true,
+          "markdown": "different remote",
           "modifiedBy": "phone",
           "id": "n-1",
           "title": "标题",
-          "hash": "eb00bf0aba491c620ddf47bf68068be4cc52c39bf3b8b554e2c51ff74e5e915e",
+          "hash": "80711e03214c07bc0b7f0158bebf93b8d2c47a6727f21d0478654c42da5f7747",
           "base": "one\ntwo\nthree",
           "updatedAt": 200
         },
         "conflicts": []
+      },
+      "supersededReason": "r3 coordinator: deletion disagreement preserves current state and creates a conflict; clocks and sources cannot decide."
+    },
+    {
+      "expected": {
+        "result": {
+          "conflict": true
+        },
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 100,
+          "folder": null,
+          "deleted": true,
+          "markdown": "one\ntwo\nthree",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 100
+        },
+        "conflicts": [
+          {
+            "noteId": "n-1",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "one\ntwo\nthree",
+            "remoteMarkdown": "restored",
+            "remoteDeviceId": "phone",
+            "createdAt": 999,
+            "conflictId": "9fcbf747af09419a84fdb209729790ccbcec1be23209b60b233c4ed2e5164476"
+          }
+        ]
       },
       "name": "local deleted remote newer imported",
       "remote": {
@@ -720,11 +863,34 @@
         "hash": "058053d87c818d699cde0f00d670bca0e1c6ad857caa9758ea6a556d7c64fcee",
         "base": "one\ntwo\nthree",
         "updatedAt": 100
-      }
+      },
+      "supersededExpected": {
+        "result": {
+          "markdown": "restored"
+        },
+        "note": {
+          "createdAt": 1,
+          "pinned": false,
+          "deletedAt": 0,
+          "folder": null,
+          "deleted": false,
+          "markdown": "restored",
+          "modifiedBy": "phone",
+          "id": "n-1",
+          "title": "标题",
+          "hash": "eb00bf0aba491c620ddf47bf68068be4cc52c39bf3b8b554e2c51ff74e5e915e",
+          "base": "one\ntwo\nthree",
+          "updatedAt": 200
+        },
+        "conflicts": []
+      },
+      "supersededReason": "r3 coordinator: deletion disagreement preserves current state and creates a conflict; clocks and sources cannot decide."
     },
     {
       "expected": {
-        "result": {"markdown": "remote"},
+        "result": {
+          "markdown": "remote"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -773,7 +939,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "ONE\ntwo\nthree"},
+        "result": {
+          "markdown": "ONE\ntwo\nthree"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -822,7 +990,9 @@
     },
     {
       "expected": {
-        "result": {"markdown": "ONE\ntwo\nTHREE"},
+        "result": {
+          "markdown": "ONE\ntwo\nTHREE"
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -871,7 +1041,9 @@
     },
     {
       "expected": {
-        "result": {"conflict": true},
+        "result": {
+          "conflict": true
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
@@ -886,15 +1058,17 @@
           "base": "one\ntwo\nthree",
           "updatedAt": 100
         },
-        "conflicts": [{
-          "createdAt": 999,
-          "remoteDeviceId": "phone",
-          "baseMarkdown": "one\ntwo\nthree",
-          "localMarkdown": "ONE\ntwo\nthree",
-          "noteId": "n-1",
-          "conflictId": "6c2655aa7f4832ef5dbc43e0f1b845fe16f774b66fe3be32554b7360ed449213",
-          "remoteMarkdown": "REMOTE\ntwo\nthree"
-        }]
+        "conflicts": [
+          {
+            "createdAt": 999,
+            "remoteDeviceId": "phone",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "ONE\ntwo\nthree",
+            "noteId": "n-1",
+            "conflictId": "43fc4345602d24a687bd60fd911b7b948d429ae523bc68208aa6bc455db1ed3b",
+            "remoteMarkdown": "REMOTE\ntwo\nthree"
+          }
+        ]
       },
       "name": "overlap conflict",
       "remote": {
@@ -928,22 +1102,34 @@
     },
     {
       "expected": {
-        "result": {"markdown": "ONE\ntwo\nTHREE"},
+        "result": {
+          "conflict": true
+        },
         "note": {
           "createdAt": 1,
           "pinned": false,
           "deletedAt": 0,
           "folder": null,
           "deleted": false,
-          "markdown": "ONE\ntwo\nTHREE",
-          "modifiedBy": "mini",
+          "markdown": "ONE\ntwo\nthree",
+          "modifiedBy": "phone",
           "id": "n-1",
           "title": "标题",
-          "hash": "013c88e05d1b8a63b5f1b55f53a7c994c8720882c8cdd7df57aa79b08a45e899",
+          "hash": "28ac711c548e88e2a9ae470ad790e0c72cf0ee9956f88c1b6fb824b77aa48bc1",
           "base": "one\ntwo\nthree",
-          "updatedAt": 999
+          "updatedAt": 100
         },
-        "conflicts": []
+        "conflicts": [
+          {
+            "noteId": "n-1",
+            "baseMarkdown": "one\ntwo\nthree",
+            "localMarkdown": "ONE\ntwo\nthree",
+            "remoteMarkdown": "one\ntwo\nTHREE",
+            "remoteDeviceId": "phone",
+            "createdAt": 999,
+            "conflictId": "f01c78c292f9bbd27b92e028c9c804d1f1edcc78580ece0f3d45519574a6cb9a"
+          }
+        ]
       },
       "name": "newer deletion vs dirty phone diff3",
       "remote": {
@@ -982,7 +1168,7 @@
       "expected": "标题\n[图片：猫]\n链接"
     },
     {
-      "input": "<p><span style=\"color: red;\">红色正文<\/span><\/p>\n<ol><li><b>第一项<\/b><\/li><li>第二项<\/li><\/ol>",
+      "input": "<p><span style=\"color: red;\">红色正文</span></p>\n<ol><li><b>第一项</b></li><li>第二项</li></ol>",
       "expected": "红色正文\n第一项\n第二项"
     },
     {
@@ -990,89 +1176,111 @@
       "expected": "标题\n\n正文"
     },
     {
-      "input": "<p>&nbsp;&copy;&euro;&NotEqualTilde; &#x1F600; &amp; &lt; &notit;<\/p>",
-      "expected": "©\u20ac≂̸ 😀 & < &notit;"
+      "input": "<p>&nbsp;&copy;&euro;&NotEqualTilde; &#x1F600; &amp; &lt; &notit;</p>",
+      "expected": "©€≂̸ 😀 & < &notit;"
     },
     {
-      "input": "<p>x<\/p><img src=\"assets/x\" alt=\"猫\"><br><img src=\"assets/y\">",
+      "input": "<p>x</p><img src=\"assets/x\" alt=\"猫\"><br><img src=\"assets/y\">",
       "expected": "x\n[图片：猫]\n[图片]"
     },
     {
-      "input": "<script>x<\/script> **bold**",
-      "expected": "<script>x<\/script> bold"
+      "input": "<script>x</script> **bold**",
+      "expected": "<script>x</script> bold"
     },
     {
       "input": "> q\n1. one\n- two\n`code` ~~del~~",
       "expected": "q\none\ntwo\ncode del"
     },
     {
-      "input": "<div>  a  <\/div><p>\n \n<\/p><li> one <\/li>",
+      "input": "<div>  a  </div><p>\n \n</p><li> one </li>",
       "expected": "a\n one"
     }
   ],
   "merge": [
     {
-      "expected": {"markdown": "b"},
+      "expected": {
+        "markdown": "b"
+      },
       "remote": "b",
       "local": "b",
       "base": "a"
     },
     {
-      "expected": {"markdown": "b"},
+      "expected": {
+        "markdown": "b"
+      },
       "remote": "b",
       "local": "a",
       "base": "a"
     },
     {
-      "expected": {"markdown": "b"},
+      "expected": {
+        "markdown": "b"
+      },
       "remote": "a",
       "local": "b",
       "base": "a"
     },
     {
-      "expected": {"markdown": "ONE\ntwo\nTHREE"},
+      "expected": {
+        "markdown": "ONE\ntwo\nTHREE"
+      },
       "remote": "one\ntwo\nTHREE",
       "local": "ONE\ntwo\nthree",
       "base": "one\ntwo\nthree"
     },
     {
-      "expected": {"conflict": true},
+      "expected": {
+        "conflict": true
+      },
       "remote": "y\nb",
       "local": "x\nb",
       "base": "a\nb"
     },
     {
-      "expected": {"markdown": "y\nx\na\nb"},
+      "expected": {
+        "conflict": true
+      },
       "remote": "y\na\nb",
       "local": "x\na\nb",
       "base": "a\nb"
     },
     {
-      "expected": {"markdown": "a\nc"},
+      "expected": {
+        "conflict": true
+      },
       "remote": "a\nb\nc",
       "local": "a",
       "base": "a\nb"
     },
     {
-      "expected": {"markdown": "A\nb\nC"},
+      "expected": {
+        "markdown": "A\nb\nC"
+      },
       "remote": "a\r\nb\r\nC",
       "local": "A\r\nb\r\nc",
       "base": "a\r\nb\r\nc"
     },
     {
-      "expected": {"conflict": true},
+      "expected": {
+        "conflict": true
+      },
       "remote": "a\nB\nc",
       "local": "A\nb\nC",
       "base": "a\nb\nc"
     },
     {
-      "expected": {"conflict": true},
+      "expected": {
+        "conflict": true
+      },
       "remote": "b",
       "local": "a",
       "base": ""
     },
     {
-      "expected": {"markdown": "A\nx"},
+      "expected": {
+        "markdown": "A\nx"
+      },
       "remote": "A\n",
       "local": "a\nx",
       "base": "a\n"

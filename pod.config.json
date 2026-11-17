@@ -167,6 +167,14 @@
     "douyin.next",
     "douyin.prev",
     "douyin.state",
-    "diag.dump"
+    "diag.dump",
+    "library.books",
+    "library.summary",
+    "sync.last"
+  ],
+  "shellReadOnlyCommands": [
+    "library.books",
+    "library.summary",
+    "sync.last"
   ]
 }

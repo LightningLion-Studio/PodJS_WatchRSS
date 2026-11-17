@@ -17,7 +17,7 @@ perform requests. Capture the transition as well as the initial frame.
 Build the fixture with the same pinned framework as the app:
 
 ```
-flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-dyentry.lock capmem 16G bun ../podjs-watch-framework-pinned/packages/cli/src/cli.ts build android-watch --project="$PWD/tests/runtime-dyentry-layout"
+flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 16G bun ../podjs-watch-framework-pinned/packages/cli/src/cli.ts build android-watch --project="$PWD/tests/runtime-dyentry-layout"
 ```
 
 Package the resulting assets in an isolated Android build directory, targeting

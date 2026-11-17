@@ -101,3 +101,87 @@ Never run this fixture on a physical device or import real credentials.
 `build-denied-app.sh <evidence-dir>`, install it beside the fixture, and launch
 `dev.podjs.adbentry.denied/.MainActivity`. It must log `denied=3 unexpected=0` for
 known, unknown, and malformed calls. Keep APKs, screenshots, and logs outside git.
+
+## Read-only library diagnostics
+
+| Method | JSON argument | Output |
+|---|---|---|
+| `library.books` | omitted, `{}`, or `{offset:0,limit:8}` | `{books:[{bookId,title,chapterCount,packageBytes,packageSha256,status,reasonCode,readable}],offset,nextOffset}` |
+| `library.summary` | omitted or `{}` | `{channels,articles,favorites,watchLater,memos,books}` |
+| `sync.last` | omitted, `{}`, or `{"n":3,"itemOffset":0}` | `{sessions:[...],itemOffset,nextItemOffset}`; newest first; integer `n` must be 1–12 |
+
+The provider limits each JSON reply to 32,768 UTF-16 units. Book batches default
+to 8, with integer `limit` 1–12 and nonnegative safe-integer `offset`. Follow
+`nextOffset` until null. Only the selected batch (plus one lookahead book) is
+hashed. History batches use integer `itemOffset` 0–256 and optional `itemLimit`
+1–floor(120/n), default floor(120/n). Follow `nextItemOffset` until null and
+concatenate each session's item arrays. Session metadata must remain identical
+across those reads. These batch offsets are explicit whitelist fields and do
+not change the framework limit. `itemsTruncated` reports discarded persisted
+items, separately from the continuation offsets. The draft acceptance script
+collects all batches automatically.
+
+`status` is `ready`, `staged`, or `failed`. Book rows exclude whole-book
+tombstones. Package SHA-256 and size are checked against the local file. `readable`
+checks the chapter-1 mapping and the reader's pending-body/file-marker gate without
+opening UI or running repair/registration. A missing local package is `staged`;
+a mismatched package is `failed`. Unknown error strings become `unknown`.
+
+A session contains `startedAt`, `endedAt` (Unix milliseconds or null while
+running), `channel` (`RFCOMM`/`IP`), `result`, `totalBytes`, `bytesPerSecond`,
+`reconnectCount`, `items`, `itemsTruncated`, and the five r2 counters defined below. Item fields are `kind`, `id`,
+`result`, and `reasonCode` for non-book refusals and applied items.
+Book refusals follow pC8 exactly: `kind`, `bookIdPrefix`, `code`, `title`,
+`reason`. The rejected ID is only an eight-character lowercase hexadecimal prefix
+(or `invalid`); it is not a unique key. Titles are nullable, sanitized for
+control/format characters and URLs, and capped at 120 UTF-16 units. `reason` is
+the fixed pC8 subcode or `unknown` when an older producer has no subcode.
+Legacy persisted book refusals are re-projected to these names without inventing
+a historical title or subcode. Full IDs remain in the book inventory and applied
+item records. Article/note opaque UUIDs are also accepted.
+Account and routing identifiers always become null.
+Note-batch rejection records each submitted note ID. Asset rejection uses the
+content SHA-256 as its ID and never emits a storage key or filename.
+The ring retains 12 physical sessions and at most 256 items per session. The
+byte total includes both directions and frame prefixes; throughput divides this
+by session elapsed time (`performance.now()` when available, otherwise the
+existing session `Date.now()` clock). A physical session does not reconnect internally;
+new connections create new entries. A probe alone does not create a sync record.
+An incomplete ACK fails the session. Counters are persisted at start and finish;
+a process death leaves `running` and must never be accepted as success.
+
+Only local stored library data is inspected. The diagnostic commands do not
+request feeds, import data, register books, or query account credentials. Large
+libraries still share the provider's 15-second deadline; a timeout is not a
+successful validation. Diagnostics do not emit raw exceptions, paths, routing,
+account identities, or wire payloads.
+
+Unregistered imported book groups remain visible as `staged` with
+`registration_pending`; their ID and package hash are null until normal sync
+registers them. Summary counts visible imported groups and does not hash files.
+Metadata-only books without any displayed chapter remain in `library.books`
+but do not increase the visible book count.
+Titles redact URL schemes and control characters. The IP recovery counter is
+copied from the controller's bounded recovery attempts; RFCOMM reconnection
+creates a new physical-session entry. Library reads check shell cancellation
+between books and after native hashes.
+
+The `itemLimit` is an upper bound. Replies containing titles automatically use a
+smaller item batch to stay below 30,000 UTF-16 units (the provider ceiling is
+32,768). Always use the returned `nextItemOffset`. A prefix is joined to a local
+book status only when exactly one registered book has that prefix. Local titles
+take priority over incoming titles when available. The pinned watch validator
+may have no fine-grained subcode; diagnostics report `unknown` in that case.
+
+
+## r2 execution and counters
+
+`library.books`, `library.summary`, and `sync.last` are native `shellReadOnlyCommands`. When the owner or handler is absent, Provider returns `not_ready` without starting Activity. No normal initialization, identity creation, migration, recovery, or network lifecycle starts from this cold call. UID validation still precedes config access.
+
+Formal binding forwards page arguments and cancellation. SQLite projects only the selected registered page plus one lookahead. Pending import chapters are grouped in SQL; summaries count groups. Full state JSON and chapter-title arrays never cross the bridge. Cancellation is checked at query and book boundaries, and after native hash. A running native hash itself remains uninterruptible through the TS callback.
+
+`pendingCount` counts rejected business-result events observed during this recorded synchronization, including missing acknowledgements. The unit is one reported item outcome, including every refused manifest-batch member. This is not a package-chunk backlog, future work, or the cloud queue. `rejectedCount` has the same scope. `omittedCount`, `omittedRejectedCount`, and `omittedAppliedCount` count outcomes beyond the 256-detail limit, before truncation. `startedAt` identifies the counters' session. Old truncated records without counters report null. Library summary counts are separate.
+
+A manifest-wide refusal uses `book_batch_rejected` for each submitted identity. This does not assert that every book independently failed validation. A missing producer subreason remains `unknown`. Titles redact credential assignment tails as well as URLs and control/format characters before truncation. Host readonly-SQLite memory checks do not replace watch-device PSS measurement.
+
+Mnemonic-labelled title tails (`mnemonic:` / `助记词：`, including ASCII and fullwidth colons) are redacted before the final title limit. Tests use synthetic placeholders only.

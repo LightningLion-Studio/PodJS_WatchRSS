@@ -84,7 +84,7 @@ export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path
  for(let blockIndex=0;blockIndex<blocks.length;blockIndex++){
   const block=blocks[blockIndex]!,blockStart=offsets[blockIndex]??null;
   const textRows=block.kind==='rich'?(cache?cache.get('text:'+blockIndex,[block],()=>noteTextRows(block.markup,block.html)):noteTextRows(block.markup,block.html)):[];
-  const dependencies=[block,width,preset,onImage,onDownload,onImageSize,block.kind==='image'?imageHeights?.get(block.path):undefined,...textRows.map(row=>nativeBody?.get(row.text)),textRows.some(row=>row.role==='code')?nativeBody?.get(' '):undefined];
+  const dependencies=[block,width,preset,onImage,onDownload,onImageSize,block.kind==='image'?imageHeights?.get(block.path):undefined,...textRows.map(row=>nativeBody?.get(row.text))];
   const cached=cache?.peek<NotePreviewEntry[]>('block:'+blockIndex,dependencies);
   if(cached){for(const entry of cached){emitted++;yield entry;}continue;}
   const entries:NotePreviewEntry[]=[];
@@ -113,13 +113,7 @@ export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path
    entries.push(spacer(5));
    return;
   }
-  let inCodeFence=false;
   for(const row of textRows){
-   if(row.role==='code'){
-    if(!inCodeFence)entries.push(spacer(nativeBody?.get(' ')?.[0]?.height??rowFont(row,preset).lineHeight));
-    inCodeFence=true;continue;
-   }
-   inCodeFence=false;
    const inset=0,font=rowFont(row,preset),native=row.role==='body'||row.role==='quote'?nativeBody?.get(row.text):undefined;
    const fallback=native?.length?[]:wrap(row.text,width-inset*2,font);
    let cursor=0;
@@ -127,7 +121,7 @@ export function* notePreviewEntrySteps(markup:string,width:number,onImage?:(path
    for(const visual of visualLines){
     const line=visual.text,lineHeight=visual.height,pixelScale=getDisplayMetrics().physicalWidth/getDisplayMetrics().logicalWidth;
     entries.push({height:lineHeight,anchor:{renderedText:line,mappingText:row.mappingText,renderedStart:row.mappingStart+visual.start,sourceMarkup:row.sourceMarkup,sourceStart:blockStart===null?null:blockStart+row.sourceStart,fontSlot:font.fontSlot,scale:font.scale,tracking:font.tracking,inset},render:()=> {
-     const atlas=<Text class={noteSizeClass(row.size)} style={{insetL:inset,width:(width-inset*2)/font.scale,height:lineHeight/font.scale,lineHeight:lineHeight/font.scale,fontSlot:font.fontSlot,scale:font.scale,originX:-.5,originY:-.5,textColor:bodyColor}}>{line||' '}</Text>;
+     const atlas=<Text class={noteSizeClass(row.size)} style={{insetL:inset,width:(width-inset*2)/font.scale,height:lineHeight/font.scale,lineHeight:lineHeight/font.scale,fontSlot:font.fontSlot,scale:font.scale,originX:-.5,originY:-.5,textColor:row.role==='code'?codeColor:bodyColor}}>{line||' '}</Text>;
      return <View class="absolute inset-0">{visual.paragraph&&hasCapability('text.raster')?<SystemTextLine pixelScale={pixelScale} options={{...visual.paragraph,text:line,widthPx:Math.ceil((width-inset*2)*pixelScale),heightPx:Math.ceil(lineHeight*pixelScale),baselinePx:Math.ceil((visual.baseline??lineHeight*.8)*pixelScale),paragraph:visual.paragraph}} fallback={atlas}/>:atlas}</View>;
     }});
    }

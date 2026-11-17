@@ -1,3 +1,5 @@
+import {rejectionTitle} from '../debug/book-rejections';
+import {iterateRequestItems,type SyncHistory,type SyncTrace} from '../debug/sync-diagnostics';
 import {checkedStateRoots,checkedStateReceipts,checkedProjectionVersions,type AckedStateVector} from '@podjs/framework/acked-state-vector';
 import {SYNC_DOMAINS,DOMAIN_FAST_PATH_PROFILE,type DomainVectorProvider} from './domain-fast-path';
 import {LIBRARY_CHECKPOINT_FEATURE,libraryBatchAck,requireLibraryBatchAck,wantsLibraryCheckpoint} from './checkpoints.ts';
@@ -49,6 +51,10 @@ export interface SessionActionResult {request:JsonObject;response:JsonObject;ack
 /** Opaque connection identity generated locally; never taken from wire fields. */
 export interface SyncActionContext {readonly session:object; checkCancelled?:()=>void; onCancel?:(cancel:()=>void)=>()=>void; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
 export interface LibrarySessionOptions {
+ history?:SyncHistory;
+ diagnosticBookTitle?:(id:string)=>Promise<unknown>;
+ diagnosticChannel?:'RFCOMM'|'IP';
+ diagnosticReconnects?:number;
  binary?:BinarySessionPort;
  resume?:ResumeSessionPort;
  localObjects?:WatchLocalObjectSession;
@@ -73,6 +79,8 @@ const persistentFields={supportsPersistentSession:true,persistentSessionAccepted
 /** Watch-side phase coordinator shared by Bluetooth and IP byte transports.
  * One instance owns and closes one connection. There are no automatic retries. */
 export class LibrarySyncSession {
+ private diagnosticStartedAt=0;private diagnosticTick=0;
+ private trace?:SyncTrace;private diagnosticBytes=0;private diagnosticTitles=new Map<string,string>();private diagnosticFailed=false;private diagnosticRequest:JsonObject={};
  private readonly actionContext:SyncActionContext;
  private readonly cancelObservers=new Set<()=>void>();
  private appliedAckJobs:(()=>Promise<void>)[]=[];
@@ -115,14 +123,17 @@ export class LibrarySyncSession {
  private aborting=false;
  private readonly now:()=>number;
  private readonly monotonic:()=>number;
- constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.actionContext={session:options.actionSession??{},checkCancelled:()=>this.check(),onCancel:cancel=>{if(this.cancelled)cancel();else this.cancelObservers.add(cancel);return()=>{this.cancelObservers.delete(cancel);};},afterAppliedAck:commit=>this.appliedAckJobs.push(commit)};this.log=options.diagnosticLog??new SyncEventLog();this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());this.connection.setTransferProgress?.(options.onTransferProgress);this.connection.setFrameTiming?.(sample=>{this.log.event(sample.direction==='read'?'frame.read.complete':'frame.write.complete',{frameBytes:sample.bytes,readMs:sample.readMs,decodeMs:sample.decodeMs,encodeMs:sample.encodeMs,writeMs:sample.writeMs});});}
+ constructor(private readonly connection:SyncFrameConnection,private readonly repository:LibrarySessionRepository,private readonly options:LibrarySessionOptions={}){this.actionContext={session:options.actionSession??{},checkCancelled:()=>this.check(),onCancel:cancel=>{if(this.cancelled)cancel();else this.cancelObservers.add(cancel);return()=>{this.cancelObservers.delete(cancel);};},afterAppliedAck:commit=>this.appliedAckJobs.push(commit)};this.log=options.diagnosticLog??new SyncEventLog();this.now=options.now??Date.now;this.monotonic=options.monotonic??(()=>globalThis.performance?.now?.()??Date.now());if(options.history){this.diagnosticStartedAt=this.now();this.diagnosticTick=this.monotonic();this.connection.setTransferProgress?.(progress=>{this.diagnosticBytes+=progress.bytes;this.trace?.bytes(progress.bytes);options.onTransferProgress?.(progress);});}else this.connection.setTransferProgress?.(options.onTransferProgress);this.connection.setFrameTiming?.(sample=>{this.log.event(sample.direction==='read'?'frame.read.complete':'frame.write.complete',{frameBytes:sample.bytes,readMs:sample.readMs,decodeMs:sample.decodeMs,encodeMs:sample.encodeMs,writeMs:sample.writeMs});});}
  cancel():void {this.cancelled??=new Error('Sync session cancelled');for(const cancel of this.cancelObservers)cancel();this.cancelObservers.clear();void this.close().catch(()=>{});}
  private async timed<T>(event:string,action:()=>Promise<T>):Promise<T>{const start=this.monotonic();try{return await action();}finally{this.log.event(event,{elapsedMs:Math.max(0,Math.round(this.monotonic()-start))});}}
  private check():void {if(this.cancelled)throw this.cancelled;}
  private status(status:SyncSessionStatus):void {this.options.onStatus?.(status);}
  private close():Promise<void>{if(this.closeJob)return this.closeJob;this.closed=true;return this.closeJob=(async()=>{try{await this.options.localObjects?.close();await this.connection.close();}catch(error){if(this.aborting)this.log.event("server.exchange.abort.close.failed",{},"W");throw error;}})();}
- private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
- private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
+ private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();if(this.options.history){this.diagnosticRequest=f;if(f.action==='syncBooks'&&Array.isArray(f.books))for(const raw of f.books.slice(0,257)){if(raw&&typeof raw==='object'){const row=raw as JsonObject,title=rejectionTitle(row.title);if(title&&typeof row.bookId==='string'&&(this.diagnosticTitles.has(row.bookId)||this.diagnosticTitles.size<256))this.diagnosticTitles.set(row.bookId,title);}}}if(this.options.history&&!this.trace&&['syncDomains','syncLibrary','syncBooks','syncNotes','syncNoteAsset','syncLibraryResume'].includes(String(f.action))&&f.phase!=='probe'){this.trace=this.options.history?.begin(this.options.diagnosticChannel??'RFCOMM',this.now,this.monotonic,{at:this.diagnosticStartedAt,tick:this.diagnosticTick,reconnects:this.options.diagnosticReconnects??0});this.trace?.bytes(this.diagnosticBytes);}return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
+ private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();await this.diagnosticResponse(frame);}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
+ private async diagnosticResponse(frame:JsonObject){
+  if(frame.success===false){this.diagnosticFailed=true;for(const item of iterateRequestItems(this.diagnosticRequest)){let title:unknown=item.title??(item.id?this.diagnosticTitles.get(item.id):null);if(item.kind==='book'&&item.id&&this.options.diagnosticBookTitle){try{title=rejectionTitle(await this.options.diagnosticBookTitle(item.id))??title;}catch{/* Diagnostic reads never change the outcome. */}}this.trace?.item({...item,title,reason:frame.reason,reasonCode:this.diagnosticRequest.phase==='manifest'&&this.diagnosticRequest.action==='syncBooks'?'book_batch_rejected':frame.errorCode??(this.diagnosticRequest.action==='syncBooks'?'book_request_invalid':'peer_rejected'),result:'rejected'});}}
+ }
  private async ack(minimumWaitMs=0):Promise<ResponseAck|null>{
   const initialWait=Math.max(this.options.responseAckTimeoutMs??10000,minimumWaitMs);
   this.status({phase:'ack'});this.log.event('ack.read.start',{timeoutMs:initialWait});
@@ -146,14 +157,14 @@ export class LibrarySyncSession {
     if(!['syncLibrary','syncAccount','ack','syncSession'].includes(String(request.action))||request.action==='syncLibrary'&&request.phase!=='probe')this.options.binary?.business?.(this.actionContext);
     if(request.action==='syncLibraryResume'){
      if(!this.options.resume||this.options.filterRequest?.(request))throw Error('CAPABILITY_MISMATCH');
-     await this.options.resume.run(request,this.connection,this.actionContext);return results;
+     await this.options.resume.run(request,{readFrame:timeout=>this.read(timeout),writeFrame:frame=>this.write(frame),close:()=>this.close()},this.actionContext);return results;
     }
     if(typeof request.action==='string'&&request.action.startsWith('syncObjectsV2.')&&this.options.localObjects){if(await this.options.localObjects.handle(request,this.connection))return results;continue;}
     const accepted=!persistent&&bool(request.requestPersistentSession)&&bool(request.supportsPersistentSession);
     if(accepted){persistent=true;this.persistentSession=true;timeout=15*60*1000;this.log.event("server.session.accepted");}
     if(string(request.action)==='syncSession'){
-     const phase=string(request.phase);if(!persistent||!['complete','abort'].includes(phase))throw new Error('Invalid persistent session control');
-     const response={version:PROTOCOL_VERSION,action:'syncSession',phase,success:true,...persistentFields};await this.write(response);const ack=await this.ack();
+     const phase=string(request.phase);if(phase==='abort')this.diagnosticFailed=true;if(!persistent||!['complete','abort'].includes(phase))throw new Error('Invalid persistent session control');
+     const response={version:PROTOCOL_VERSION,action:'syncSession',phase,success:true,...persistentFields};await this.write(response);const ack=await this.ack();if(!ack?.success||!ack.applied)this.diagnosticFailed=true;
      if(phase==='complete'&&ack?.success&&ack.applied){try{const published=await this.domainVector?.applied();this.log.event('domains.receipts.published',{publishedCount:published??0});}catch{this.log.event('domains.receipts.publish.failed',{},'W');}}else this.domainVector?.abort();
      results.push({request,response,ack,libraryApplied:false});this.log.event("server.session.complete",{phase,completedActions:results.length,elapsedMs:this.log.elapsed()});return results;
     }
@@ -214,11 +225,13 @@ export class LibrarySyncSession {
     if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount'){await this.options.resume?.accountConfirmed(request,this.actionContext);await this.options.binary?.accountConfirmed(request,this.actionContext);}this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
     this.appliedAckJobs=[];
     this.log.event("server.exchange.complete",{persistentSession:persistent,completedActions:results.length+1,elapsedMs:this.log.elapsed()});
+    if(!ack?.success||!ack.applied){this.diagnosticFailed=true;for(const item of iterateRequestItems(request))this.trace?.item({...item,reasonCode:'ack_missing',result:'rejected'});}
+    if(request.action==='syncBooks'&&response.success===true&&ack?.success&&ack.applied&&response.complete===true)this.trace?.item({kind:'book',id:request.bookId,result:'applied',reasonCode:'none'});
     const result={request,response,ack,libraryApplied};results.push(result);this.options.onActionCompleted?.(result);this.status({phase:'complete',applied:libraryApplied});
     if(!persistent)return results;
    }
-  }catch(error){this.status({phase:'error',message:error instanceof Error?error.message:String(error)});throw this.options.binary?.failed?.(error,this.actionContext)??error;}
-  finally{try{this.domainVector?.abort();await this.close();this.options.onSessionClosed?.(results);}finally{releaseSession?.();}}
+  }catch(error){this.diagnosticFailed=true;this.status({phase:'error',message:error instanceof Error?error.message:String(error)});throw this.options.binary?.failed?.(error,this.actionContext)??error;}
+  finally{try{this.domainVector?.abort();await this.close();this.options.onSessionClosed?.(results);}finally{this.trace?.finish(!this.diagnosticFailed);releaseSession?.();}}
  }
  /** Preview peers send frames continuously, never response ACKs. Retain only
   * the final result, so an arbitrarily long stream has bounded bookkeeping. */

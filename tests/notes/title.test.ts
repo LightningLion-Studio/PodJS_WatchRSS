@@ -15,7 +15,7 @@ for(const mode of ['native','missing','no-intl','throws'] as const){
   }finally{Object.defineProperty(globalThis,'Intl',{value:original,configurable:true,writable:true});}
  });
 }
-test('a segmenter without a Han dictionary splits long runs into two-character words',()=>{
+test('fixed Unicode Han runs split independently of platform dictionaries',()=>{
  const original=Intl.Segmenter;
  try{
   Object.defineProperty(Intl,'Segmenter',{value:class{segment(line:string){return [{segment:line,index:0}];}},configurable:true,writable:true});

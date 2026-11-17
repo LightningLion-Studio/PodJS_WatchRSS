@@ -1,0 +1,2 @@
+/** Free titles are display text only. Credential assignment tails are never diagnostic data. */
+export function redactTitle(value:string){return value.replace(/[\p{Cc}\p{Cf}]/gu,' ').replace(/[a-z][a-z0-9+.-]{1,31}:\/\/[^\s]+/gi,'[redacted]').replace(/(?:\b(?:cookie|set-cookie|authorization|(?:access[_-]?|refresh[_-]?|auth[_-]?)?token|(?:api[_-]?|private[_-]?|secret[_-]?)?key|k_id|mnemonic)|助记词)\s*[:=：][\s\S]*/gi,'[redacted]');}

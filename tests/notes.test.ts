@@ -31,8 +31,8 @@ describe("standalone memo repository",()=>{
 
 describe("draft saving after a synced deletion",()=>{
   async function editingFixture(){
-    const {repo}=repository([100,200,300,400,600,700]);
-    const {repo:peer}=repository();
+    const {repo,db}=repository([100,200,300,400,600,700]);
+    const {repo:peer,db:peerDb}=repository();
     await repo.initialize();
     const created=await repo.save({title:"标题",markdown:"基线正文"});
     const folder=await repo.createFolder("工作");
@@ -43,20 +43,21 @@ describe("draft saving after a synced deletion",()=>{
     const receiveDeletion=async()=>{
       await syncNotes({action:"syncNotes",notes:[tombstone]},repo,async()=>"watch");
       await syncNotes({action:"syncNotes",notes:[tombstone]},peer,async()=>"phone");
-      expect(await repo.get(initial.noteId)).toBeNull();
-      expect(await repo.list()).toEqual([]);
+      // superseded: get() null/list []; r3 keeps the saved live branch and deletion conflict.
+      expect(await repo.get(initial.noteId)).toEqual(initial);
+      expect((await db.query('SELECT * FROM note_merge_conflicts')).length).toBeGreaterThan(0);
     };
-    return {repo,peer,initial,tombstone,receiveDeletion};
+    return {repo,peer,peerDb,initial,tombstone,receiveDeletion};
   }
 
   test("close flush restores the original identity and syncNotes exposes recovery to the peer",async()=>{
-    const {repo,peer,initial,tombstone,receiveDeletion}=await editingFixture();
+    const {repo,peer,peerDb,initial,tombstone,receiveDeletion}=await editingFixture();
     const draft=new NoteDraftAutosave(repo,initial);
     draft.setMarkdown("编辑中尚未保存的正文");
     await receiveDeletion();
     const restored=await draft.flush(); // NoteInlineEditor.close awaits this same flush.
     expect(draft.state).toBe("saved");
-    expect(restored).toMatchObject({noteId:initial.noteId,folderId:tombstone.folderId,pinned:true,createdAt:initial.createdAt,baseMarkdown:tombstone.baseMarkdown,baseContentHash:tombstone.baseContentHash,title:initial.title,markdown:"编辑中尚未保存的正文",deleted:false,deletedAt:0,updatedAt:600,modifiedBy:"podjs-watch"});
+    expect(restored).toMatchObject({noteId:initial.noteId,folderId:initial.folderId,pinned:true,createdAt:initial.createdAt,baseMarkdown:initial.baseMarkdown,baseContentHash:initial.baseContentHash,title:initial.title,markdown:"编辑中尚未保存的正文",deleted:false,deletedAt:0,updatedAt:700,modifiedBy:"podjs-watch"});
     expect(restored!.contentHash).not.toBe(tombstone.contentHash);
     expect(await repo.list()).toEqual([restored!]);
     expect(await repo.allIncludingDeleted()).toHaveLength(1);
@@ -65,8 +66,10 @@ describe("draft saving after a synced deletion",()=>{
     expect(response.applied).toBe(0);
     const peerResponse=await syncNotes(response,peer,async()=>"phone");
     expect(peerResponse.applied).toBe(1);
-    expect(await peer.get(initial.noteId)).toEqual(restored);
-    expect(await peer.list()).toEqual([restored!]);
+    // superseded: peer auto-restores; r3 retains its tombstone and exposes the edited body in a conflict.
+    expect(await peer.get(initial.noteId)).toBeNull();
+    expect(await peer.list()).toEqual([]);
+    expect(await peerDb.query('SELECT remote_markdown FROM note_merge_conflicts')).toEqual([{remote_markdown:restored!.markdown}]);
     draft.dispose();
   });
 
@@ -134,19 +137,19 @@ describe("three-word title persistence",()=>{
     const remote={...base,title:"remote",markdown:"first\nmiddle\nREMOTE",contentHash:"remote-hash",updatedAt:500,modifiedBy:"phone"};
     expect(await repo.applyRemote(remote)).toBe(1);
     const n=(await repo.get(base.noteId))!;
-    expect(n.title).toBe(title.trim()?title:"Hello, big world");
+    expect(n.title).toBe("remote"); // NA-10: the newer remote metadata accompanies the merged body.
     expect(n.markdown).toBe("Hello, big world again\nmiddle\nREMOTE");
     expect(n.baseMarkdown).toBe(base.markdown);expect(n.baseContentHash).toBe(base.contentHash);
   });
   test("receiving a blank title and recording a conflict preserves all body bytes",async()=>{
     const {repo,db}=repository();await repo.initialize();
     const base=await repo.save({title:"base",markdown:"first\nmiddle\nlast"});
-    const remote={...base,title:"",markdown:"  <p>remote</p>\r\n",baseMarkdown:"ancestor\r\n",contentHash:"remote",updatedAt:500,modifiedBy:"phone"};
-    await repo.applyRemote(remote);expect((await repo.get(base.noteId))!).toEqual(remote);
-    await repo.save({noteId:base.noteId,title:"",markdown:"LOCAL\nmiddle\nlast"});
-    const local=(await repo.get(base.noteId))!;
+    const remote={...base,noteId:base.noteId+"-import",title:"",markdown:"  <p>remote</p>\r\n",baseMarkdown:"ancestor\r\n",contentHash:"remote",updatedAt:500,modifiedBy:"phone"};
+    await repo.applyRemote(remote);expect((await repo.get(remote.noteId))!).toEqual(remote);
+    await repo.save({noteId:remote.noteId,title:"",markdown:"LOCAL\nmiddle\nlast"});
+    const local=(await repo.get(remote.noteId))!;
     await repo.applyRemote({...remote,markdown:"REMOTE\nmiddle\nlast",contentHash:"new-remote",updatedAt:600});
-    expect((await repo.get(base.noteId))!).toEqual(local);
+    expect((await repo.get(remote.noteId))!).toEqual(local);
     const [c]=await db.query("SELECT * FROM note_merge_conflicts");
     expect(c.base_markdown).toBe(local.baseMarkdown);expect(c.local_markdown).toBe(local.markdown);expect(c.remote_markdown).toBe("REMOTE\nmiddle\nlast");
   });
@@ -170,7 +173,7 @@ test("real user vocabulary sample derives its numbered first three words on save
  const base=await repo.save({title:'base',markdown:baseBody});
  await repo.save({noteId:base.noteId,title:'',markdown:sample.plainText});
  await db.execute('UPDATE memo_notes SET title=? WHERE note_id=?',['',base.noteId]);
- await repo.applyRemote({...base,markdown:baseBody+'\nremote tail',contentHash:'remote-sample-hash',updatedAt:500,modifiedBy:'phone'});
+ await repo.applyRemote({...base,title:'',markdown:baseBody+'\nremote tail',contentHash:'remote-sample-hash',updatedAt:500,modifiedBy:'phone'});
  const merged=(await repo.get(base.noteId))!;
  console.log('USER-VOCAB PodJS merge title='+JSON.stringify(merged.title));
  expect(merged.title).toBe(sample.expected);expect(merged.markdown).toBe(sample.plainText+'\nremote tail');expect(merged.baseMarkdown).toBe(baseBody);

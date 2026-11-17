@@ -1,0 +1,16 @@
+import {Database} from 'bun:sqlite';
+import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import assert from 'node:assert/strict';
+import {LibraryDiagnostics} from '../src/debug/library-diagnostics';
+const root=mkdtempSync(join(tmpdir(),'sync-diag-memory-')),path=join(root,'fixture.sqlite');
+const seed=new Database(path);seed.exec(`PRAGMA cache_size=-2048;CREATE TABLE channels(id INTEGER PRIMARY KEY,url TEXT,title TEXT);CREATE TABLE articles(id INTEGER PRIMARY KEY,channel_id INTEGER,link TEXT,title TEXT);CREATE TABLE sync_book_aliases(book_id TEXT,item_id INTEGER);CREATE TABLE article_saved_states(article_id INTEGER,save_type TEXT,saved INTEGER);CREATE TABLE memo_notes(deleted INTEGER);INSERT INTO channels VALUES(1,'https://watchrss.local/import-epub/review','Review book');WITH RECURSIVE chapters(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM chapters WHERE n<100000) INSERT INTO articles SELECT n,1,'https://watchrss.local/import-epub/review/chapter/'||n,printf('%02048d',n) FROM chapters;`);seed.close();
+const db=new Database(path,{readonly:true});db.exec('PRAGMA cache_size=-2048');
+let maxRows=0,maxBridgeBytes=0,queries=0;
+const pss=()=>Number(readFileSync('/proc/self/smaps_rollup','utf8').match(/^Pss:\s+(\d+)/m)![1]);
+const before=pss();let observed=before;
+const port={query:async(sql:string,args:readonly unknown[]=[])=>{assert(sql.startsWith('SELECT'));queries++;const rows=db.query(sql).all(...args as any[]) as any[];maxRows=Math.max(maxRows,rows.length);maxBridgeBytes=Math.max(maxBridgeBytes,JSON.stringify(rows).length);observed=Math.max(observed,pss());return rows;}};
+const r=new LibraryDiagnostics(port,{hash:async()=>{throw Error('unexpected hash')}},async()=>true);
+const summary=await r.summary();assert.equal(summary.books,1);assert.equal(summary.articles,100000);const rows=await r.books(undefined,{offset:0,limit:9});assert.equal(rows.length,1);assert.equal(rows[0]?.chapterCount,100000);assert(maxRows<=16);assert(maxBridgeBytes<10000);assert(observed<128*1024);
+console.log(JSON.stringify({fixture:'readonly SQLite 100000 chapters with 2048-character titles',summary,maxRows,maxBridgeBytes,queries,beforePssKiB:before,observedPeakPssKiB:observed,hostOnly:true,devicePssVerified:false}));db.close();rmSync(root,{recursive:true,force:true});

@@ -1,3 +1,5 @@
+import {normalizeStoredNoteConflicts} from '../notes/conflict-migration';
+import {conflictSet} from './note-conflict-set';
 import {NOTE_ASSET_SCHEMA} from './note-assets';
 /** Prepared replacement of the authenticated account projection in the original
  * watch database. No LWW merge: explicit account choices can select older clocks.
@@ -25,7 +27,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
  /** Additive metadata table for interaction records which have no local article
   * yet. No body materialization or identity replacement occurs. */
  async initialize(){return WatchAccountBusinessSql.initializeSchema(this.db);}
- static async initializeSchema(db:ProjectionSql){await db.transaction([{sql:NOTE_ASSET_SCHEMA},{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);}
+ static async initializeSchema(db:ProjectionSql){await db.transaction([{sql:NOTE_ASSET_SCHEMA},{sql:'CREATE TABLE IF NOT EXISTS syncv2_rss_states(id TEXT PRIMARY KEY,state_json TEXT NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS note_merge_conflicts(conflict_id TEXT PRIMARY KEY,note_id TEXT NOT NULL,base_markdown TEXT NOT NULL,local_markdown TEXT NOT NULL,remote_markdown TEXT NOT NULL,remote_device_id TEXT NOT NULL,created_at INTEGER NOT NULL)'},{sql:'CREATE TABLE IF NOT EXISTS syncv2_note_resolutions(note_id TEXT NOT NULL,conflict_id TEXT NOT NULL,resolved_at INTEGER NOT NULL,PRIMARY KEY(note_id,conflict_id))'}]);await normalizeStoredNoteConflicts(db);}
  async prepare(records:SourceRecord[],before:SyncState){const out:Statement[]=[];for await(const page of this.prepareFeed(arrayRecordFeed(records,r=>entityKey(this.idKey,this.scope.repoId,r.kind,r.logicalId)),before).run())out.push(...page);return out;}
  /** R4: the same statements as `prepare`, produced page by page. Each run reads
   * the records twice and the candidates once; across records it keeps only
@@ -64,7 +66,7 @@ export class WatchAccountBusinessSql implements AccountBusinessPort {
    if(r.kind==='article'&&!Object.hasOwn(v,'registerSources')){if(!Object.hasOwn(v,'contentHash')||!Object.hasOwn(v,'updatedAt'))throw Error('closure_incomplete');v=readArticleRegisters(JSON.stringify({format:'watchrss-rss-record',version:1,kind:'article',value:v}),true).value;}
    if(r.kind==='note'){
     requireTable('memo_notes');statements.push(...noteUpsert(v));
-    if(v.noteConflicts){requireTable('note_merge_conflicts');requireTable('syncv2_note_resolutions');statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[v.noteId]},{sql:'DELETE FROM syncv2_note_resolutions WHERE note_id=?',params:[v.noteId]});for(const c of v.noteConflicts.records){statements.push(upsert('note_merge_conflicts','conflict_id note_id base_markdown local_markdown remote_markdown remote_device_id created_at'.split(' '),[c.conflictId,c.noteId,c.baseMarkdown,c.localMarkdown,c.remoteMarkdown,c.remoteDeviceId,c.createdAt],['conflict_id']),upsert('syncv2_note_resolutions',['note_id','conflict_id','resolved_at'],[v.noteId,c.conflictId,c.resolvedAt],['note_id','conflict_id']));}}
+    if(v.noteConflicts){requireTable('note_merge_conflicts');requireTable('syncv2_note_resolutions');statements.push({sql:'DELETE FROM note_merge_conflicts WHERE note_id=?',params:[v.noteId]},{sql:'DELETE FROM syncv2_note_resolutions WHERE note_id=?',params:[v.noteId]});for(const c of conflictSet(v.noteId,v.noteConflicts.records).records){statements.push(upsert('note_merge_conflicts','conflict_id note_id base_markdown local_markdown remote_markdown remote_device_id created_at'.split(' '),[c.conflictId,c.noteId,c.baseMarkdown,c.localMarkdown,c.remoteMarkdown,c.remoteDeviceId,c.createdAt],['conflict_id']),upsert('syncv2_note_resolutions',['note_id','conflict_id','resolved_at'],[v.noteId,c.conflictId,c.resolvedAt],['note_id','conflict_id']));}}
    }else if(r.kind==='folder'){
     requireTable('memo_folders');statements.push(upsert('memo_folders','folder_id name sort_order updated_at modified_by deleted deleted_at'.split(' '),[v.folderId,v.name,v.sortOrder,v.updatedAt,v.modifiedBy,+v.deleted,v.deletedAt],['folder_id']));
    }else if(r.kind==='source'){

@@ -1,0 +1,107 @@
+import {test,expect} from 'bun:test';
+import {Database} from 'bun:sqlite';
+import {LibraryDiagnostics} from '../src/debug/library-diagnostics';
+import {SyncHistory,HISTORY_KEY,HISTORY_LIMIT,ITEM_LIMIT,bookFields,summaryFields,syncRecord,bookRejections,requestItems} from '../src/debug/sync-diagnostics';
+import {createShellHandlers} from '../src/debug/shell-commands';
+const id='a'.repeat(64),sha='b'.repeat(64);
+function storage(){const data=new Map<string,string>();return {data,get:(key:string)=>data.get(key),set:(key:string,value:string)=>{data.set(key,value);}};}
+function library(){const sql=new Database(':memory:');sql.exec(`CREATE TABLE channels(id INTEGER);CREATE TABLE articles(id INTEGER,channel_id INTEGER);CREATE TABLE article_saved_states(article_id INTEGER,save_type TEXT,saved INTEGER);CREATE TABLE memo_notes(deleted INTEGER);CREATE TABLE sync_books(book_id TEXT,state_json TEXT,chapter_count INTEGER,package_path TEXT,package_bytes INTEGER,package_sha256 TEXT,registration_complete INTEGER);CREATE TABLE sync_book_chapters(book_id TEXT,chapter_index INTEGER,item_id INTEGER);`);const queries:string[]=[];const reader=new LibraryDiagnostics({query:async(q,p=[])=>{queries.push(q);return sql.query(q).all(...p as any[]) as any;}},{hash:async()=>({size:10,sha256:sha})},async()=>true);return {sql,reader,queries};}
+test('empty materialized library and absent schema are read-only',async()=>{const {reader,queries,sql}=library();expect(await reader.books()).toEqual([]);expect(await reader.summary()).toEqual({channels:0,articles:0,favorites:0,watchLater:0,memos:0,books:0});expect(queries.every(q=>q.startsWith('SELECT'))).toBe(true);sql.close();expect(await new LibraryDiagnostics({query:async()=>[]},{hash:async()=>{throw Error();}},async()=>false).books()).toEqual([]);});
+test('books project only allowed fields and verify actual package/readable chapter',async()=>{const {reader,sql}=library();sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[id,JSON.stringify({title:'Book',sourceUrl:'https://secret',token:'secret',deleted:false}),2,'private-path',10,sha,1]);sql.run('INSERT INTO sync_book_chapters VALUES(?,?,?)',[id,1,1]);const books=await reader.books();expect(Object.keys(books[0]!)).toEqual(['bookId','title','chapterCount','packageBytes','packageSha256','status','reasonCode','readable']);expect(books[0]).toMatchObject({bookId:id,title:'Book',status:'ready',readable:true});expect(JSON.stringify(books)).not.toMatch(/secret|private-path|sourceUrl/);const failed=new LibraryDiagnostics((reader as any).db,{hash:async()=>({size:10,sha256:id})},async()=>false);expect((await failed.books())[0]).toMatchObject({status:'failed',reasonCode:'package_hash_mismatch',readable:false});sql.close();});
+test('summary matches saved UI predicates and filters deleted notes/books',async()=>{const {reader,sql}=library();sql.exec("INSERT INTO channels VALUES(1);INSERT INTO articles VALUES(1,1),(2,1);INSERT INTO article_saved_states VALUES(1,'favorite',1),(2,'favorite',0),(2,'watchLater',1);INSERT INTO memo_notes VALUES(0),(1);");expect(await reader.summary()).toEqual({channels:1,articles:2,favorites:1,watchLater:1,memos:1,books:0});sql.close();});
+test('persistent ring, rejects, timestamps, wire bytes and bounded items',()=>{const store=storage();let now=100;const history=new SyncHistory(store);for(let i=0;i<HISTORY_LIMIT+4;i++){now++;const trace=history.begin(i%2?'IP':'RFCOMM',()=>now);trace.bytes(500);trace.item({kind:'book',id,reasonCode:'book_package_invalid',result:'rejected',Cookie:'secret'});now+=1000;trace.finish(true);}expect(history.last()).toHaveLength(3);expect(new SyncHistory(store).last(12)).toHaveLength(12);expect(history.last(1)[0]).toMatchObject({result:'partial',totalBytes:500,bytesPerSecond:500,items:[{kind:'book',bookIdPrefix:id.slice(0,8),code:'book_package_invalid',title:null,reason:'unknown'}]});const trace=history.begin('IP',()=>++now);for(let i=0;i<ITEM_LIMIT+3;i++)trace.item({kind:'book',id,reasonCode:'none',result:'applied'});trace.finish(false);expect(history.last(1)[0]?.items).toHaveLength(ITEM_LIMIT);expect(history.last(1)[0]?.itemsTruncated).toBe(true);expect(store.get(HISTORY_KEY)).not.toContain('secret');});
+test('poisoned persistent data is projected again and corruption fails closed',()=>{const store=storage();store.set(HISTORY_KEY,JSON.stringify([{startedAt:1,endedAt:null,channel:'http://secret',Cookie:'secret',items:[{kind:'http://secret',id:'https://secret',reasonCode:'Cookie=secret'}]}]));const output=JSON.stringify(new SyncHistory(store).last());expect(output).not.toContain('secret');store.set(HISTORY_KEY,'invalid');expect(new SyncHistory(store).last()).toEqual([]);});
+test('shell rejects unknown keys, type confusion and count bounds',async()=>{const h=createShellHandlers({} as any,{books:async()=>[],summary:async()=>({}),last:()=>[]});for(const args of [{n:0},{n:13},{n:1.1},{n:'3'},{n:null},{n:true},{n:1,route:'secret'}])await expect(h['sync.last']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});expect(await h['sync.last']!({}, {isActive:()=>true})).toEqual({sessions:[],itemOffset:0,nextItemOffset:null});for(const c of ['library.books','library.summary'])await expect(h[c]!({url:'secret'},{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});});
+test('all projections strip unapproved field names and unsafe identifiers',()=>{for(const value of [bookFields({token:'secret',sourceUrl:'secret',book_id:'https://secret'}),summaryFields({token:'secret'}),syncRecord({Cookie:'secret',items:[{kind:'unknown',id:'secret',reasonCode:'secret'}]})])expect(JSON.stringify(value)).not.toContain('secret');});
+
+test('real frame session persists byte totals and item rejection without sensitive payload',async()=>{
+ const {LibrarySyncSession}=await import('../src/sync/session');
+ const {StreamFrameConnection}=await import('../src/sync/stream');
+ const {encodeFrame}=await import('../src/sync/protocol');
+ const store=storage(),history=new SyncHistory(store);
+ const requests=[{action:'syncBooks',version:1,phase:'body',bookId:id,dataBase64:'secret',url:'https://secret'},{action:'ack',success:true,applied:true}];
+ let pending=new Uint8Array(requests.flatMap(f=>[...encodeFrame(f)]));const output:number[]=[];
+ const connection=new StreamFrameConnection({read:async max=>{if(!pending.length)return null;const part=pending.slice(0,max);pending=pending.slice(max);return part;},write:async b=>{output.push(...b);},close:async()=>{}});
+ const session=new LibrarySyncSession(connection,{deviceId:async()=> 'private-device'} as any,{history,diagnosticChannel:'IP'});
+ await session.run();const row=history.last(1)[0]!;
+ expect(row.channel).toBe('IP');expect(row.result).toBe('failed');expect(row.totalBytes).toBe(requests.reduce((n,f)=>n+encodeFrame(f).length,0)+output.length);
+ expect(row.items).toContainEqual({kind:'book',bookIdPrefix:id.slice(0,8),code:'book_sync_not_negotiated',title:null,reason:'unknown'});
+ expect(JSON.stringify(row)).not.toMatch(/secret|private-device|dataBase64|url/);
+});
+
+test('cancelled shell library reads do not start storage work',async()=>{let calls=0;const h=createShellHandlers({} as any,{books:async()=>{calls++;return [];},summary:async()=>{calls++;return {};},last:()=>[]});for(const method of ['library.books','library.summary'])await expect(h[method]!({}, {isActive:()=>false})).rejects.toMatchObject({code:'unavailable'});expect(calls).toBe(0);});
+test('unregistered imported groups remain staged and summary does not write registration',async()=>{
+ const {reader,sql}=library();sql.exec("ALTER TABLE channels ADD COLUMN url TEXT;ALTER TABLE channels ADD COLUMN title TEXT;ALTER TABLE articles ADD COLUMN link TEXT;ALTER TABLE articles ADD COLUMN title TEXT;CREATE TABLE sync_book_aliases(book_id TEXT,item_id INTEGER);INSERT INTO channels VALUES(1,'https://watchrss.local/import-content','Imports');INSERT INTO articles VALUES(1,1,'https://watchrss.local/import-content/txt/test','Book');");
+ const before=sql.query('SELECT total_changes() n').get();expect((await reader.books())[0]).toMatchObject({bookId:null,title:'Book',status:'staged',reasonCode:'registration_pending'});expect((await reader.summary()).books).toBe(1);expect(sql.query('SELECT total_changes() n').get()).toEqual(before);sql.close();
+});
+
+test('malformed stored book metadata remains visible as failed without crashing summary',async()=>{const {reader,sql}=library();sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[id,'null',1,null,0,null,0]);expect((await reader.books())[0]).toMatchObject({bookId:id,status:'failed',reasonCode:'metadata_invalid'});expect((await reader.summary()).books).toBe(0);sql.close();});
+test('titles redact URLs and account identifiers never enter item fields',()=>{expect(bookFields({title:'Book https://private.invalid/path\n'}).title).toBe('Book [redacted] ');expect(syncRecord({items:[{kind:'account',id:'12345678-1234-1234-1234-123456789abc',result:'rejected',reasonCode:'account_required'}]}).items[0]?.id).toBeNull();});
+
+test('latest book refusal marks an unavailable package failed until an applied outcome',async()=>{const store=storage();let at=1;const h=new SyncHistory(store);const trace=h.begin('RFCOMM',()=>at);trace.item({kind:'book',bookIdPrefix:id.slice(0,8),code:'book_package_invalid',title:null,reason:'unknown'});trace.finish(true);expect(bookRejections(h.last(12)).get(id.slice(0,8))).toBe('book_package_invalid');const {reader,sql}=library();sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[id,JSON.stringify({title:'Book',deleted:false}),1,null,0,null,1]);const rejected=new LibraryDiagnostics((reader as any).db,{hash:async()=>{throw Error('not called');}},async()=>false,bookRejections(h.last(12)));expect((await rejected.books())[0]).toMatchObject({status:'failed',reasonCode:'book_package_invalid'});at++;const fixed=h.begin('RFCOMM',()=>at);fixed.item({kind:'book',id,result:'applied',reasonCode:'none'});fixed.finish(true);expect(bookRejections(h.last(12)).has(id.slice(0,8))).toBe(false);sql.close();});
+test('visible book count deduplicates mapped chapters and excludes metadata-only rows',async()=>{
+ const {reader,sql}=library();sql.exec("ALTER TABLE channels ADD COLUMN url TEXT;ALTER TABLE channels ADD COLUMN title TEXT;ALTER TABLE articles ADD COLUMN link TEXT;ALTER TABLE articles ADD COLUMN title TEXT;CREATE TABLE sync_book_aliases(book_id TEXT,item_id INTEGER);INSERT INTO channels VALUES(1,'https://watchrss.local/import-epub/book','Book');INSERT INTO articles VALUES(1,1,'https://watchrss.local/import-epub/book/chapter/1','One'),(2,1,'https://watchrss.local/import-epub/book/chapter/2','Two');");
+ for(const book of [id,'c'.repeat(64)])sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[book,JSON.stringify({title:'Book',deleted:false}),2,null,0,null,1]);
+ sql.run('INSERT INTO sync_book_aliases VALUES(?,?),(?,?)',[id,1,id,2]);expect((await reader.summary()).books).toBe(1);sql.close();
+});
+
+test('bounded stored history stays below 600 KB',()=>{const store=storage();const item={kind:'article',id,result:'rejected',reasonCode:'book_reading_delta_not_negotiated'};const row={startedAt:Number.MAX_SAFE_INTEGER,endedAt:Number.MAX_SAFE_INTEGER,channel:'RFCOMM',result:'partial',totalBytes:Number.MAX_SAFE_INTEGER,bytesPerSecond:Number.MAX_SAFE_INTEGER,reconnectCount:Number.MAX_SAFE_INTEGER,items:Array.from({length:ITEM_LIMIT},()=>item),itemsTruncated:true};store.set(HISTORY_KEY,JSON.stringify(Array.from({length:HISTORY_LIMIT},()=>row)));expect(new TextEncoder().encode(JSON.stringify({sessions:new SyncHistory(store).last(12)})).byteLength).toBeLessThan(600000);});
+test('batch refusals retain each note ID and asset digest without paths or account IDs',()=>{
+ const note='12345678-1234-1234-1234-123456789abc';
+ expect(requestItems({action:'syncNotes',notes:[{noteId:note,markdown:'secret'},{noteId:id}]})).toEqual([{kind:'note',id:note},{kind:'note',id}]);
+ expect(requestItems({action:'syncNoteAsset',sha256:id,storageKey:'secret.png',data:'secret'})).toEqual([{kind:'asset',id}]);
+ expect(requestItems({action:'syncAccount',noteId:note,userId:note})).toEqual([{kind:'account',id:null}]);
+ expect(requestItems({action:'syncNotes',notes:Array.from({length:ITEM_LIMIT+2},()=>({noteId:id}))})).toHaveLength(ITEM_LIMIT+1);
+});
+
+test('shell pages the maximum history below the provider 32768-character limit',async()=>{
+ const item={kind:'article',id,result:'rejected',reasonCode:'book_reading_delta_not_negotiated'};
+ const rows=Array.from({length:12},(_,i)=>({startedAt:Number.MAX_SAFE_INTEGER-i,endedAt:Number.MAX_SAFE_INTEGER,totalBytes:Number.MAX_SAFE_INTEGER,bytesPerSecond:Number.MAX_SAFE_INTEGER,reconnectCount:Number.MAX_SAFE_INTEGER,channel:'RFCOMM',result:'partial',items:Array.from({length:256},()=>item)}));
+ const h=createShellHandlers({} as any,{books:async()=>[],summary:async()=>({}),last:n=>rows.slice(0,n)});
+ let offset=0;const counts=Array(12).fill(0);
+ for(let pages=0;pages<257;pages++){const page=await h['sync.last']!({n:12,itemOffset:offset},{isActive:()=>true}) as any;expect(Object.keys(page)).toEqual(['sessions','itemOffset','nextItemOffset']);expect(JSON.stringify(page).length).toBeLessThan(32768);page.sessions.forEach((r:any,i:number)=>counts[i]+=r.items.length);if(page.nextItemOffset===null)break;expect(page.nextItemOffset).toBeGreaterThan(offset);offset=page.nextItemOffset;}
+ expect(counts).toEqual(Array(12).fill(256));
+ for(const args of [{itemOffset:-1},{itemOffset:'0'},{itemOffset:257},{n:12,itemLimit:11},{itemLimit:0},{itemLimit:null}])await expect(h['sync.last']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});
+});
+test('book pages bound escaped titles and hash only selected files',async()=>{
+ const longest={bookId:id,title:'\ud800'.repeat(256),chapterCount:Number.MAX_SAFE_INTEGER,packageBytes:Number.MAX_SAFE_INTEGER,packageSha256:id,status:'ready',reasonCode:'book_reading_delta_not_negotiated',readable:true};
+ const h=createShellHandlers({} as any,{books:async()=>Array.from({length:13},()=>longest),summary:async()=>({}),last:()=>[]});
+ const page=await h['library.books']!({offset:0,limit:12},{isActive:()=>true}) as any;expect(page.nextOffset).toBe(12);expect(page.books).toHaveLength(12);expect(JSON.stringify(page).length).toBeLessThan(32768);
+ for(const args of [{offset:-1},{offset:'0'},{limit:13},{limit:0},{limit:null}])await expect(h['library.books']!(args,{isActive:()=>true})).rejects.toMatchObject({code:'invalid_argument'});
+ const {reader,sql}=library();let hashes=0;const selected=new LibraryDiagnostics((reader as any).db,{hash:async()=>{hashes++;return {size:10,sha256:sha};}},async()=>true);
+ for(const key of [id,'b'.repeat(64),'c'.repeat(64)])sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[key,JSON.stringify({title:'Book'}),1,key,10,sha,1]);
+ expect((await selected.books(undefined,{offset:1,limit:1}))[0]?.bookId).toBe('b'.repeat(64));expect(hashes).toBe(1);sql.close();
+});
+test('pending book batches skip other bodies and summary never reads chapter data',async()=>{
+ const {reader,sql}=library();sql.exec("ALTER TABLE channels ADD COLUMN url TEXT;ALTER TABLE channels ADD COLUMN title TEXT;ALTER TABLE articles ADD COLUMN link TEXT;ALTER TABLE articles ADD COLUMN title TEXT;CREATE TABLE sync_book_aliases(book_id TEXT,item_id INTEGER);INSERT INTO channels VALUES(1,'https://watchrss.local/import-content','Imports');INSERT INTO articles VALUES(1,1,'https://watchrss.local/import-content/txt/one','One'),(2,1,'https://watchrss.local/import-content/txt/two','Two');");
+ const bodies:number[]=[];const selected=new LibraryDiagnostics((reader as any).db,{hash:async()=>{throw Error('no files');}},async id=>{bodies.push(id);return true;});
+ expect((await selected.summary()).books).toBe(2);expect(bodies).toEqual([]);expect((await selected.books(undefined,{offset:1,limit:1}))[0]?.title).toBe('Two');expect(bodies).toEqual([2]);sql.close();
+});
+
+test('pC8 book refusals have exactly five fields and stable reasons after restart',()=>{
+ const store=storage(),h=new SyncHistory(store),t=h.begin('RFCOMM',()=>1);
+ t.item({kind:'book',id,code:'book_manifest_invalid',title:'  Book\u202e\n https://secret  ',reason:'manifest_instance_identity_unsupported',Cookie:'secret',markdown:'secret'});t.finish(true);
+ const row=new SyncHistory(store).last(1)[0]!;expect(row.result).toBe('partial');expect(row.items[0]).toEqual({kind:'book',bookIdPrefix:'aaaaaaaa',code:'book_manifest_invalid',title:'Book   [redacted]',reason:'manifest_instance_identity_unsupported'});
+ expect(JSON.stringify(row)).not.toMatch(/secret|Cookie|markdown|reasonCode/);
+ expect(syncRecord({items:[{kind:'book',bookIdPrefix:'https://secret',code:'secret',title:'\u202e',reason:'secret'}]}).items[0]).toEqual({kind:'book',bookIdPrefix:'invalid',code:'unknown',title:null,reason:'unknown'});
+});
+test('all pC8 reasons survive projection but legacy records do not invent a reason',async()=>{
+ const {BOOK_REJECTION_REASONS}=await import('../src/debug/book-rejections');for(const reason of BOOK_REJECTION_REASONS)expect(syncRecord({items:[{kind:'book',id,result:'rejected',reasonCode:'book_manifest_invalid',reason}]}).items[0]?.reason).toBe(reason);
+ expect(syncRecord({items:[{kind:'book',id,result:'rejected',reasonCode:'book_manifest_invalid'}]}).items[0]?.reason).toBe('unknown');
+});
+test('worst pC8 titles are automatically segmented below the real provider limit',async()=>{
+ const row={startedAt:1,endedAt:2,items:Array.from({length:256},()=>({kind:'book',bookIdPrefix:'aaaaaaaa',code:'book_manifest_invalid',title:'\ud800'.repeat(120),reason:'manifest_instance_identity_unsupported'}))};
+ const h=createShellHandlers({} as any,{books:async()=>[],summary:async()=>({}),last:n=>Array.from({length:n},()=>row)});
+ const p=await h['sync.last']!({n:12},{isActive:()=>true}) as any;expect(JSON.stringify(p).length).toBeLessThan(32768);expect(p.nextItemOffset).toBeGreaterThan(0);expect(p.nextItemOffset).toBeLessThan(10);
+});
+test('an ambiguous pC8 prefix never marks another registered book failed',async()=>{
+ const {reader,sql}=library();const other=id.slice(0,8)+'c'.repeat(56);for(const book of [id,other])sql.run('INSERT INTO sync_books VALUES(?,?,?,?,?,?,?)',[book,JSON.stringify({title:'Book'}),1,null,0,null,1]);
+ const diag=new LibraryDiagnostics((reader as any).db,{hash:async()=>{throw Error();}},async()=>false,new Map([[id.slice(0,8),'book_manifest_invalid']]));expect((await diag.books()).every(b=>b.status==='staged')).toBe(true);sql.close();
+});
+test('real refusal preserves pC8 reason and prefers sanitized local title',async()=>{
+ const {LibrarySyncSession}=await import('../src/sync/session');const store=storage(),history=new SyncHistory(store);let reads=0;
+ const frames=[{action:'syncBooks',version:1,phase:'body',bookId:id,dataBase64:'secret'},{action:'ack',success:true,applied:true}];
+ const connection={readFrame:async()=>frames.shift()!,writeFrame:async()=>{},close:async()=>{}};
+ await new LibrarySyncSession(connection,{deviceId:async()=> 'private-device'} as any,{history,diagnosticBookTitle:async key=>{reads++;expect(key).toBe(id);return 'Local\u202e Book';},filterRequest:()=>({success:false,errorCode:'book_manifest_invalid',reason:'manifest_identity_mismatch'})}).run();
+ expect(reads).toBe(1);expect(history.last(1)[0]?.items[0]).toEqual({kind:'book',bookIdPrefix:id.slice(0,8),code:'book_manifest_invalid',title:'Local  Book',reason:'manifest_identity_mismatch'});
+});

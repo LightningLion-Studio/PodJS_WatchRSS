@@ -3,7 +3,7 @@
 set -euo pipefail
 app=$(cd "$(dirname "$0")/../.." && pwd)
 framework=${PODJS_FRAMEWORK_SOURCE:-$(bun "$app/scripts/framework-path.ts")}
-native=${WATCHRSS_RECOVERY_SOURCE:-/home/wilf/data/OPPO_Develop/Android_WatchRSS.wt-recovery}
+native=${WATCHRSS_RECOVERY_SOURCE:?Set the approved native recovery source checkout}
 package=com.lightningstudio.watchrss.podjs.rehearsal
 bun "$framework/packages/cli/src/cli.ts" build --target=android-watch --project="$app"
 (cd "$framework" && bash scripts/build-android-runtime.sh)

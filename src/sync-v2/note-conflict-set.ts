@@ -1,6 +1,7 @@
 /** Shared acyclic note-conflict validation/union for planner and journal. */
 import * as s from './notes-strict';
 import {bytes,canonical} from './protocol';
+import {sha256Hex} from '@podjs/framework/crypto';
 const clone=<T>(v:T):T=>JSON.parse(canonical(v));
 export const feature='note-conflicts.v1';
 export type Conflict={conflictId:string;noteId:string;baseMarkdown:string;localMarkdown:string;remoteMarkdown:string;remoteDeviceId:string;createdAt:number;resolvedAt:number};
@@ -14,7 +15,7 @@ function record(noteId:string,r:any){s.exact(r,fields);text(noteId,1024,true);te
 export function conflictSet(noteId:string,records:Conflict[]):ConflictSet{
  if(!Array.isArray(records)||records.length>1024)fail('invalid_schema');
  for(const r of records)record(noteId,r);
- const value={version:1 as const,records:clone(records).sort((a,b)=>a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0)};validateSet(noteId,value);return value;
+ const value={version:1 as const,records:clone(records).sort((a,b)=>a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0)};validateSet(noteId,value);return {...value,records:deduplicate(value.records)};
 }
 export function validateSet(noteId:string,value:any):asserts value is ConflictSet{
  text(noteId,1024,true);s.exact(value,['version','records']);if(value.version!==1||!Array.isArray(value.records)||value.records.length>1024)fail('invalid_schema');
@@ -25,8 +26,22 @@ export function mergeConflicts(noteId:string,a:ConflictSet,b:ConflictSet):Confli
  validateSet(noteId,a);validateSet(noteId,b);const records=new Map<string,Conflict>();
  for(const r of [...a.records,...b.records]){
   const prior=records.get(r.conflictId);if(prior){if(immutable.some(key=>prior[key as keyof Conflict]!==r[key as keyof Conflict]))fail('conflict_identity_mismatch');records.set(r.conflictId,{...prior,createdAt:Math.min(prior.createdAt,r.createdAt),resolvedAt:Math.max(prior.resolvedAt,r.resolvedAt)});}else records.set(r.conflictId,clone(r));
- }return conflictSet(noteId,[...records.values()]);
+ }
+ return conflictSet(noteId,[...records.values()]);
 }
-export function openConflicts(value:ConflictSet){return value.records.filter(r=>r.resolvedAt===0).sort((a,b)=>b.createdAt-a.createdAt||(a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0));}
+
+export function openConflicts(value:ConflictSet){return deduplicate(value.records).filter(r=>r.resolvedAt===0).sort((a,b)=>b.createdAt-a.createdAt||(a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0));}
 /** GC must scan resolved rows too; hydration can prioritize unresolved rows. */
 export function conflictTexts(value:ConflictSet){return value.records.flatMap(r=>[r.baseMarkdown,r.localMarkdown,r.remoteMarkdown]);}
+
+function deduplicate(records:Conflict[]):Conflict[]{
+ const tuples=new Map<string,Conflict>();
+ for(const r of records){
+  const values=immutable.map(key=>r[key as keyof Conflict] as string),key=canonical(values),prior=tuples.get(key);
+  if(!prior){tuples.set(key,r);continue;}
+  const legacy=sha256Hex(bytes(values.join('\0')));
+  const id=r.conflictId===legacy?r.conflictId:prior.conflictId===legacy?prior.conflictId:r.conflictId<prior.conflictId?r.conflictId:prior.conflictId;
+  tuples.set(key,{...r,conflictId:id,createdAt:Math.min(prior.createdAt,r.createdAt),resolvedAt:Math.max(prior.resolvedAt,r.resolvedAt)});
+ }
+ return [...tuples.values()].sort((a,b)=>a.conflictId<b.conflictId?-1:a.conflictId>b.conflictId?1:0);
+}
