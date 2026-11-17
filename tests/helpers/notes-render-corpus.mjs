@@ -1,8 +1,19 @@
-// Deterministic grammar fuzzing. The oracle is marked + parse5, not product logic.
+// Deterministic grammar fuzzing. The oracle is libcmark + parse5, not product logic.
 import {createRequire} from 'node:module';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 const host=createRequire(new URL('../../../PodJS_WatchRSS/package.json',import.meta.url));
-export const {parseFragment,serialize}=host('parse5');
-export const {marked}=host('marked');
+const parser=host('parse5');
+export const serialize=parser.serialize;
+export function parseFragment(source){return parser.parseFragment(parser.defaultTreeAdapter.createElement('div','http://www.w3.org/1999/xhtml',[]),source,{scriptingEnabled:true});}
+export function htmlOracle(source){
+ // Apply the documented noninteractive note policy using an independent parser
+ // version; Chromium separately compares the original, unmodified source.
+ const state=parser.Parser.getFragmentParser(parser.defaultTreeAdapter.createElement('div','http://www.w3.org/1999/xhtml',[]),{scriptingEnabled:true});
+ for(const method of ['onStartTag','onEndTag']){const receive=state[method].bind(state);state[method]=token=>receive(token.tagName==='select'&&!(method==='onStartTag'?state.shouldProcessStartTagTokenInForeignContent(token):state.currentNotInHTML)?{...token,tagName:'div',tagID:parser.html.TAG_ID.DIV}:token);}
+ state.tokenizer.write(source,true);return state.getFragment();
+}
+export function markdownOracles(seed,count=COUNT){return JSON.parse(execFileSync('python3',[fileURLToPath(new URL('./notes-cmark-oracle.py',import.meta.url))],{input:JSON.stringify(Array.from(cases(seed,count),c=>c.markdown)),encoding:'utf8',maxBuffer:128*1024*1024}));}
 export const SEEDS=[0x4e4f5445,0x524e5235,0x20261117,0xc0decafe];
 export const COUNT=Number(process.env.NOTES_FUZZ_CASES||128);
 export const blocked=new Set('script style iframe object template head noscript'.split(' '));
@@ -27,8 +38,9 @@ export function* cases(seed,count=COUNT){
   const marker=['```','~~~','````','~~~~'][pick(4)],prefix=['','> ','- ','> - ','- > ','> > ','1. ','  - ','> 1. > '][pick(9)];
   const next=prefix.replace(/(?:[-+*]|\d+[.)]) /g,s=>' '.repeat(s.length));
   const payload=text()+' | <img src="assets/x.png">',info=['lang|x','lang\u2028x','html','lang\u2029x',''][pick(5)];
-  const fence=prefix+marker+info+'\n'+next+payload+'\n'+next+marker;
-  const units=[fence,'A | B\n---|---\n'+marker+'lang|x\n'+text()+' | CODE\n'+marker,'    '+text()+' | <img src="assets/x.png">','- '+text()+'\n\n> '+text(),'<p title="<script>">'+escape(text())+'</p>','<template><object></template><p>'+escape(text())+'</p>','<script>DROP</script x><p>'+escape(text())+'</p>'];
+  const fake=pick(2)?next+marker+'\u00a0\n':'';
+  const fence=prefix+marker+info+'\n'+fake+next+payload+'\n'+next+marker+['',' \t',' '][pick(3)];
+  const units=[fence,'A | B\n---|---\n'+marker+'lang|x\n'+text()+' | CODE\n'+marker,['    ','\t','  \t'][pick(3)]+text()+' | <img src="assets/x.png">','- '+text()+'\n\n> '+text(),'<p title="<script>">'+escape(text())+'</p>','<template><object></template><p>'+escape(text())+'</p>','<style>DROP</style/><p>'+escape(text())+'</p>'];
   for(let i=units.length-1;i>0;i--){const j=pick(i+1);[units[i],units[j]]=[units[j],units[i]];}
   yield {seed,index,html:source,markdown:units.slice(0,3+pick(5)).join('\n\n')};
  }

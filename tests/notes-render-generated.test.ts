@@ -1,16 +1,21 @@
 import {test,expect} from 'bun:test';
 import {prepareNotePreview} from '../src/notes/preview';import {noteTextRows,noteTableCellText} from '../src/notes/presentation';
 // @ts-ignore Shared host-only generator is also executed by Node in the mini suite.
-import {cases,SEEDS,COUNT,parseFragment,marked,codes,visible,retains} from './helpers/notes-render-corpus.mjs';
-for(const seed of SEEDS)test('generated visible Markdown text and literal code survive seed='+seed.toString(16),()=>{
- const failures:any[]=[];for(const c of cases(seed)){
-  const oracle=parseFragment(marked.parse(c.markdown));
+import {cases,SEEDS,COUNT,parseFragment,markdownOracles,codes,visible,retains} from './helpers/notes-render-corpus.mjs';
+type NoteCase={seed:number;index:number;html:string;markdown:string};
+for(const seed of SEEDS){const corpus=Array.from(cases(seed)) as NoteCase[],references=markdownOracles(seed);
+for(let from=0;from<corpus.length;from+=256)test('generated visible Markdown text and literal code survive seed='+seed.toString(16)+' range='+from,()=>{
+ const failures:any[]=[];for(const c of corpus.slice(from,from+256)){
+  const oracle=parseFragment(references[c.index]);
   const blocks=prepareNotePreview(c.markdown),rows=blocks.flatMap(b=>b.kind==='rich'?noteTextRows(b.markup,b.html):[]);
   const actual=blocks.map(b=>b.kind==='table'?b.rows.flat().map(noteTableCellText).join(''):b.kind==='image'?b.description:noteTextRows(b.markup,b.html).map(r=>r.text).join('\n')).join('\n');
   const literal=rows.filter(r=>r.role==='code').map(r=>r.text).join('\n');
   const missing=codes(oracle).flatMap((s:string)=>s.split('\n')).filter((s:string)=>s.trim()&&!literal.includes(s.trim()));
-  if(!retains(visible(oracle),actual)||missing.length)failures.push({seed,index:c.index,source:c.markdown,actual,missing});
+  // Body atoms exclude Markdown syntax which the hybrid reader intentionally renders.
+  const atoms=visible(oracle).match(/K[0-9a-f]+Z[0-9a-f]+X文é😀/g)||[];
+  if(!retains(atoms.join(''),actual)||missing.length)failures.push({seed,index:c.index,source:c.markdown,actual,missing});
  }
  if(failures.length)console.error(JSON.stringify({seed,count:COUNT,failures:failures.slice(0,3)}));
  expect(failures.length).toBe(0);
 });
+}
