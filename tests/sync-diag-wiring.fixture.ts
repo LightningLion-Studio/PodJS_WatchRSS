@@ -1,7 +1,9 @@
 import {mock} from 'bun:test';
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
 const root=new URL('..',import.meta.url).pathname.replace(/\/$/,'');
-const framework='/home/wilf/data/PodJS/podjs-watch/packages/framework/src';
+const framework=resolve(root,JSON.parse(readFileSync(resolve(root,'framework.lock.json'),'utf8')).path,'packages/framework/src');
 let handlers:any;const calls:any[]=[];
 mock.module(framework+'/shell.ts',()=>({registerShellCommands:(h:any)=>{handlers=h;return ()=>{}},shellDiagnostics:async()=>({}),ShellCommandError:class extends Error{constructor(public code:string){super(code)}}}));
 mock.module(framework+'/services.ts',()=>({delay:()=>({result:Promise.resolve()})}));

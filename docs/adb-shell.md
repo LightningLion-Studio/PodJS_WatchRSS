@@ -127,9 +127,9 @@ checks the chapter-1 mapping and the reader's pending-body/file-marker gate with
 opening UI or running repair/registration. A missing local package is `staged`;
 a mismatched package is `failed`. Unknown error strings become `unknown`.
 
-A session contains only `startedAt`, `endedAt` (Unix milliseconds or null while
+A session contains `startedAt`, `endedAt` (Unix milliseconds or null while
 running), `channel` (`RFCOMM`/`IP`), `result`, `totalBytes`, `bytesPerSecond`,
-`reconnectCount`, `items`, and `itemsTruncated`. Item fields are `kind`, `id`,
+`reconnectCount`, `items`, `itemsTruncated`, and the five r2 counters defined below. Item fields are `kind`, `id`,
 `result`, and `reasonCode` for non-book refusals and applied items.
 Book refusals follow pC8 exactly: `kind`, `bookIdPrefix`, `code`, `title`,
 `reason`. The rejected ID is only an eight-character lowercase hexadecimal prefix
@@ -172,3 +172,14 @@ smaller item batch to stay below 30,000 UTF-16 units (the provider ceiling is
 book status only when exactly one registered book has that prefix. Local titles
 take priority over incoming titles when available. The pinned watch validator
 may have no fine-grained subcode; diagnostics report `unknown` in that case.
+
+
+## r2 execution and counters
+
+`library.books`, `library.summary`, and `sync.last` are native `shellReadOnlyCommands`. When the owner or handler is absent, Provider returns `not_ready` without starting Activity. No normal initialization, identity creation, migration, recovery, or network lifecycle starts from this cold call. UID validation still precedes config access.
+
+Formal binding forwards page arguments and cancellation. SQLite projects only the selected registered page plus one lookahead. Pending import chapters are grouped in SQL; summaries count groups. Full state JSON and chapter-title arrays never cross the bridge. Cancellation is checked at query and book boundaries, and after native hash. A running native hash itself remains uninterruptible through the TS callback.
+
+`pendingCount` counts rejected business-result events observed during this recorded synchronization, including missing acknowledgements. The unit is one reported item outcome, including every refused manifest-batch member. This is not a package-chunk backlog, future work, or the cloud queue. `rejectedCount` has the same scope. `omittedCount`, `omittedRejectedCount`, and `omittedAppliedCount` count outcomes beyond the 256-detail limit, before truncation. `startedAt` identifies the counters' session. Old truncated records without counters report null. Library summary counts are separate.
+
+A manifest-wide refusal uses `book_batch_rejected` for each submitted identity. This does not assert that every book independently failed validation. A missing producer subreason remains `unknown`. Titles redact credential assignment tails as well as URLs and control/format characters before truncation. Host readonly-SQLite memory checks do not replace watch-device PSS measurement.

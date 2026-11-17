@@ -171,5 +171,10 @@
     "library.books",
     "library.summary",
     "sync.last"
+  ],
+  "shellReadOnlyCommands": [
+    "library.books",
+    "library.summary",
+    "sync.last"
   ]
 }

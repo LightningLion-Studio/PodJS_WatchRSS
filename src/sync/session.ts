@@ -1,5 +1,5 @@
 import {rejectionTitle} from '../debug/book-rejections';
-import {requestItems,type SyncHistory,type SyncTrace} from '../debug/sync-diagnostics';
+import {iterateRequestItems,type SyncHistory,type SyncTrace} from '../debug/sync-diagnostics';
 import {checkedStateRoots,checkedStateReceipts,checkedProjectionVersions,type AckedStateVector} from '@podjs/framework/acked-state-vector';
 import {SYNC_DOMAINS,DOMAIN_FAST_PATH_PROFILE,type DomainVectorProvider} from './domain-fast-path';
 import {LIBRARY_CHECKPOINT_FEATURE,libraryBatchAck,requireLibraryBatchAck,wantsLibraryCheckpoint} from './checkpoints.ts';
@@ -128,7 +128,7 @@ export class LibrarySyncSession {
  private async read(timeout:number):Promise<JsonObject>{this.check();try{const f=await this.connection.readFrame(timeout);this.check();if(this.options.history){this.diagnosticRequest=f;if(f.action==='syncBooks'&&Array.isArray(f.books))for(const raw of f.books.slice(0,257)){if(raw&&typeof raw==='object'){const row=raw as JsonObject,title=rejectionTitle(row.title);if(title&&typeof row.bookId==='string'&&(this.diagnosticTitles.has(row.bookId)||this.diagnosticTitles.size<256))this.diagnosticTitles.set(row.bookId,title);}}}if(this.options.history&&!this.trace&&['syncDomains','syncLibrary','syncBooks','syncNotes','syncNoteAsset','syncLibraryResume'].includes(String(f.action))&&f.phase!=='probe'){this.trace=this.options.history?.begin(this.options.diagnosticChannel??'RFCOMM',this.now,this.monotonic,{at:this.diagnosticStartedAt,tick:this.diagnosticTick,reconnects:this.options.diagnosticReconnects??0});this.trace?.bytes(this.diagnosticBytes);}return f;}catch(error){this.log.event("frame.read.failed",{message:"<redacted>"},"E");throw error;}}
  private async write(frame:JsonObject):Promise<void>{this.check();try{await this.connection.writeFrame(frame);this.check();await this.diagnosticResponse(frame);}catch(error){this.log.event("frame.write.failed",{message:"<redacted>"},"E");throw error;}}
  private async diagnosticResponse(frame:JsonObject){
-  if(frame.success===false){this.diagnosticFailed=true;for(const item of requestItems(this.diagnosticRequest)){let title:unknown=item.id?this.diagnosticTitles.get(item.id):null;if(item.kind==='book'&&item.id&&this.options.diagnosticBookTitle){try{title=rejectionTitle(await this.options.diagnosticBookTitle(item.id))??title;}catch{/* Diagnostic reads never change the outcome. */}}this.trace?.item({...item,title,reason:frame.reason,reasonCode:frame.errorCode??(this.diagnosticRequest.action==='syncBooks'?'book_request_invalid':'peer_rejected'),result:'rejected'});}}
+  if(frame.success===false){this.diagnosticFailed=true;for(const item of iterateRequestItems(this.diagnosticRequest)){let title:unknown=item.title??(item.id?this.diagnosticTitles.get(item.id):null);if(item.kind==='book'&&item.id&&this.options.diagnosticBookTitle){try{title=rejectionTitle(await this.options.diagnosticBookTitle(item.id))??title;}catch{/* Diagnostic reads never change the outcome. */}}this.trace?.item({...item,title,reason:frame.reason,reasonCode:this.diagnosticRequest.phase==='manifest'&&this.diagnosticRequest.action==='syncBooks'?'book_batch_rejected':frame.errorCode??(this.diagnosticRequest.action==='syncBooks'?'book_request_invalid':'peer_rejected'),result:'rejected'});}}
  }
  private async ack(minimumWaitMs=0):Promise<ResponseAck|null>{
   const initialWait=Math.max(this.options.responseAckTimeoutMs??10000,minimumWaitMs);
@@ -216,7 +216,7 @@ export class LibrarySyncSession {
     if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount')await this.options.resume?.accountConfirmed(request,this.actionContext);this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
     this.appliedAckJobs=[];
     this.log.event("server.exchange.complete",{persistentSession:persistent,completedActions:results.length+1,elapsedMs:this.log.elapsed()});
-    if(!ack?.success||!ack.applied){this.diagnosticFailed=true;for(const item of requestItems(request))this.trace?.item({...item,reasonCode:'ack_missing',result:'rejected'});}
+    if(!ack?.success||!ack.applied){this.diagnosticFailed=true;for(const item of iterateRequestItems(request))this.trace?.item({...item,reasonCode:'ack_missing',result:'rejected'});}
     if(request.action==='syncBooks'&&response.success===true&&ack?.success&&ack.applied&&response.complete===true)this.trace?.item({kind:'book',id:request.bookId,result:'applied',reasonCode:'none'});
     const result={request,response,ack,libraryApplied};results.push(result);this.options.onActionCompleted?.(result);this.status({phase:'complete',applied:libraryApplied});
     if(!persistent)return results;
