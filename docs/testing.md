@@ -79,3 +79,7 @@ The gate uses repository `flock` locks and `capmem 8G`. The application keeps
 its canonical `../../PodJS/podjs-watch` dependency path. Isolated worktrees must
 preserve that directory relationship. The framework documents compiler keys,
 daemon cleanup and blocking lint in `scripts/test-gate.md`.
+
+The complete `./test-gate` Bun invocation has an approved 30-second default
+watchdog for real-disk tests. Explicit test deadlines, product time bounds and
+assertions remain unchanged. Ordinary `bun test` keeps its 5-second default.
