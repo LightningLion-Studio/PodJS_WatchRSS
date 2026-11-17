@@ -10,8 +10,8 @@ Test-only review of c25280ef. Red tests deliberately assert preservation of lite
 - RNR-07 is a passing policy control: 80 code points may split a grapheme. It does not assert an unapproved grapheme-count limit.
 
 ```sh
-flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-render-review.lock capmem 8G bun test ./tests/notes-render-review.test.ts
-flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-render-review.lock capmem 8G bun test ./tests/notes-render-review-preview.isolated.ts ./tests/notes-adversarial-preview.isolated.ts
+flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 8G bun test ./tests/notes-render-review.test.ts
+flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 8G bun test ./tests/notes-render-review-preview.isolated.ts ./tests/notes-adversarial-preview.isolated.ts
 ```
 
 Run the preview generators separately from unrelated UI suites because native host mocks are process-scoped. They execute the production generator; they do not establish pixel equivalence on a device.

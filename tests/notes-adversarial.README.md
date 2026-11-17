@@ -8,8 +8,8 @@ Dependencies must already be installed locally; no network is needed.
 From this worktree:
 
 ```sh
-NOTES_SOURCE_ROOT=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS.wt-notes-title-3w NOTES_TITLE_MODULE=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS.wt-notes-title-3w/src/notes/title.ts flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-adversarial.lock capmem 16G bun test tests/notes-adversarial.test.ts
-flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-adversarial.lock capmem 16G bun test ./tests/notes-adversarial-preview.isolated.ts
+NOTES_SOURCE_ROOT=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS NOTES_TITLE_MODULE=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS/src/notes/title.ts flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 16G bun test tests/notes-adversarial.test.ts
+flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 16G bun test ./tests/notes-adversarial-preview.isolated.ts
 ```
 
 The first test uses real Bun SQLite with the actual repository and Bluetooth
@@ -21,7 +21,7 @@ After running the phone host compiler and generating the corpus, run the separat
 passing controls:
 
 ```sh
-NOTES_SOURCE_ROOT=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS.wt-notes-title-3w NOTES_MINI_ROOT=/home/wilf/data/OPPO_Develop/WatchRSS_WeChat.wt-notes-title-3w NOTES_CORPUS=/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/evidence/T-NOTES-ADVERSARIAL/corpus NOTES_PHONE_JAR=/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/evidence/T-NOTES-ADVERSARIAL/phone-pc2-final/host.jar NOTES_PHONE_CLASSPATH=/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/evidence/T-NOTES-FORMAT-RCA/classpath.txt flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-adversarial.lock capmem 16G bun test tests/notes-adversarial-wire.test.ts
+NOTES_SOURCE_ROOT=/home/wilf/data/OPPO_Develop/PodJS_WatchRSS NOTES_MINI_ROOT=/home/wilf/data/OPPO_Develop/WatchRSS_WeChat NOTES_CORPUS=/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/evidence/T-NOTES-ADVERSARIAL/corpus NOTES_PHONE_JAR=/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/evidence/T-NOTES-ADVERSARIAL/phone-pc2-final/host.jar NOTES_PHONE_CLASSPATH=/home/wilf/data/OPPO_Develop/.codex-tmp/cloud-v2/evidence/T-NOTES-FORMAT-RCA/classpath.txt flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 16G bun test tests/notes-adversarial-wire.test.ts
 ```
 
 The cloud hop is an opaque local byte buffer. This is not Bluetooth, encrypted
@@ -57,6 +57,6 @@ cases); the phone copy is `app/src/test/resources/notes-title-vectors.json`.
 Native, missing Intl/Segmenter and throwing Segmenter paths use the same limit.
 
 ```sh
-flock /tmp/wrss-heavy.lock flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-render-fix.lock capmem 8G bun test tests/notes-adversarial.test.ts tests/notes/title.test.ts tests/note-preview.test.ts
-flock /tmp/wrss-heavy.lock flock /tmp/wrss-heavy-PodJS_WatchRSS.wt-notes-render-fix.lock capmem 8G bun test ./tests/notes-adversarial-preview.isolated.ts
+flock /tmp/wrss-heavy.lock flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 8G bun test tests/notes-adversarial.test.ts tests/notes/title.test.ts tests/note-preview.test.ts
+flock /tmp/wrss-heavy.lock flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 8G bun test ./tests/notes-adversarial-preview.isolated.ts
 ```

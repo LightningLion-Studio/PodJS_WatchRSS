@@ -18,9 +18,9 @@ for(const path of [...new Bun.Glob('tests/**/*.{json,ts,tsx,html}').scanSync({cw
   const visit=(node:any)=>{if(!node||typeof node!=='object')return;if(node.type==='StringLiteral')add(path+':'+node.loc.start.line,node.value);if(node.type==='TemplateLiteral'&&!node.expressions.length)add(path+':'+node.loc.start.line,node.quasis[0].value.cooked);for(const [key,next] of Object.entries(node))if(!['loc','start','end','extra'].includes(key)){if(Array.isArray(next))next.forEach(visit);else visit(next);}};visit(ast);
  }
 }
-for(const [name,path] of [['411',arg('411',root.replace('.wt-minor-rs1','')+'/.codex-tmp/k19-411.html')],['407',arg('407',root.replace('.wt-minor-rs1','')+'/.codex-tmp/k9-profile/article.html')]]){fixtures.push({name,html:await Bun.file(path).text()});}
+for(const [name,path] of [['411',arg('411',root+'/.codex-tmp/k19-411.html')],['407',arg('407',root+'/.codex-tmp/k9-profile/article.html')]]){fixtures.push({name,html:await Bun.file(path).text()});}
 const aliases:Record<string,string>={};
 for(const [key,file] of Object.entries((await Bun.file(resolve(framework,'packages/framework/package.json')).json()).exports) as [string,string][]){if(key.startsWith('./'))aliases['@podjs/framework/'+key.slice(2)]=resolve(framework,'packages/framework',file);}
-const out=resolve(arg('out',root.replace('.wt-minor-rs1','')+'/.codex-tmp/wrss-minor-rs2-html.js'));
+const out=resolve(arg('out',root+'/.codex-tmp/wrss-minor-rs2-html.js'));
 const result=await Bun.build({entrypoints:[resolve(import.meta.dir,'html-fragment-runner.ts')],target:'browser',format:'iife',alias:aliases,outdir:dirname(out),naming:out.split('/').at(-1)});if(!result.success)throw Error(result.logs.join('\n'));
 await Bun.write(out,`globalThis.__htmlFixtures=${JSON.stringify(fixtures)};\n`+await Bun.file(out).text());console.log(JSON.stringify({out,fixtures:fixtures.length,fixtureNames:fixtures.map(f=>f.name)}));

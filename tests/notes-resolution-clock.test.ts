@@ -7,12 +7,12 @@ const Journal=n.NoteConflictPlan;
 for(const clock of ['zero','rollback','equal'])for(const choice of ['local','remote','manual'])test(`RVM4-01 ${choice} resolution with ${clock} clock has durable positive markers`,()=>{
  const j=new Journal(initial),capture=j.capture(),before=structuredClone(j.state);
  const now=clock==='zero'?0:clock==='rollback'?50:before.note.updatedAt;
- const expected=choice==='local'?before.note.markdown:choice==='remote'?before.conflicts.records.find(r=>r.conflictId===capture.selectedConflictId).remoteMarkdown.replace(/\r\n?/g,'\n'):'chosen';
+ const expected=choice==='local'?before.note.markdown:choice==='remote'?before.conflicts.records.find((r:{conflictId:string;remoteMarkdown:string})=>r.conflictId===capture.selectedConflictId)!.remoteMarkdown.replace(/\r\n?/g,'\n'):'chosen';
  j.resolve(capture,choice as 'local'|'remote'|'manual',choice==='manual'?'chosen':null,now,'device');
  assert.equal(j.state.note.markdown,expected);assert(j.state.note.updatedAt>before.note.updatedAt);
  assert.equal(n.openConflicts(j.state.conflicts).length,0);
  for(const row of before.conflicts.records){
-  const after=j.state.conflicts.records.find(r=>r.conflictId===row.conflictId);
+  const after=j.state.conflicts.records.find((r:{conflictId:string})=>r.conflictId===row.conflictId);
   assert.deepEqual(after,{...row,resolvedAt:row.resolvedAt||Math.max(1,now)});
  }
  assert.equal(j.state.outbox.length,before.outbox.length+1);

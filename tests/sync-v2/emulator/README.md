@@ -65,7 +65,7 @@ P3A live content acceptance (opt-in; product startup remains disabled):
 
 ```sh
 bash tests/sync-v2/emulator/run-live-p3.sh \
-  /home/wilf/data/PodJS/podjs-watch.wt-syncv2-p3 \
+  /home/wilf/data/PodJS/podjs-watch \
   emulator-5578 /path/to/owned/evidence/attempt
 ```
 

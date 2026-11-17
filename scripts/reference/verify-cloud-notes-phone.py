@@ -6,6 +6,7 @@ export, Markdown hashing, three-way merge and conflict decisions are phone code.
 Usage: verify-cloud-notes-phone.py input.json output.json [phone checkout]
 Run under the caller's flock/capmem (including when invoked by Bun tests).
 """
+import os
 import hashlib
 import json
 from pathlib import Path
@@ -13,9 +14,11 @@ import subprocess
 import sys
 import tempfile
 
-phone = Path(sys.argv[3]) if len(sys.argv) > 3 else Path(__file__).resolve().parents[3] / 'Android_WatchRSS_Phone.wt-v2'
+phone = Path(sys.argv[3]) if len(sys.argv) > 3 else Path(os.environ.get('NOTES_PHONE_SOURCE_ROOT', Path(__file__).resolve().parents[3] / 'Android_WatchRSS_Phone'))
 native = phone / 'app/src/main/java/com/lightningstudio/watchrss/phone/data/note'
 names = ['NoteEntities.kt', 'NoteDao.kt', 'NoteRepository.kt', 'NoteCloudStateCodec.kt', 'MarkdownNoteCodec.kt', 'MarkdownThreeWayMerge.kt', 'MarkdownNoteArchive.kt']
+for optional in ['NoteTitle.kt', 'NoteConflictIdentity.kt']:
+    if (native / optional).exists(): names.append(optional)
 cache = Path.home() / '.gradle/caches/modules-2/files-2.1'
 deps = [('org.jetbrains.kotlin', 'kotlin-compiler-embeddable', '2.2.21'), ('org.jetbrains.kotlin', 'kotlin-stdlib', '2.2.21'), ('org.jetbrains.kotlin', 'kotlin-script-runtime', '2.2.21'), ('org.jetbrains.kotlin', 'kotlin-reflect', '1.6.10'), ('org.jetbrains.intellij.deps', 'trove4j', '1.0.20200330'), ('org.jetbrains.kotlinx', 'kotlinx-coroutines-core-jvm', '1.8.0'), ('org.jetbrains', 'annotations', '13.0'), ('org.json', 'json', '20240303'), ('org.jsoup', 'jsoup', '1.17.2')]
 cp = ':'.join(str(next((cache / g / n / v).glob('*/*.jar'))) for g, n, v in deps)
@@ -81,6 +84,18 @@ fun main(args:Array<String>)=runBlocking{
  println(out.toString())
 }
 '''
+# Support both legacy and receipt-aware DAO contracts without replacing product logic.
+dao_source = (native / 'NoteDao.kt').read_text()
+optional_methods = {
+    'conflictsFor': 'override suspend fun conflictsFor(noteId:String)=conflicts.values.filter{it.noteId==noteId}',
+    'allConflicts': 'override suspend fun allConflicts()=conflicts.values.toList()',
+    'hasRemoteReceipt': 'override suspend fun hasRemoteReceipt(hash:String)=hash in receipts',
+    'insertRemoteReceipt': 'override suspend fun insertRemoteReceipt(receipt:NoteRemoteReceiptEntity){receipts.add(receipt.snapshotHash)}',
+    'clearRemoteReceipts': 'override suspend fun clearRemoteReceipts(){receipts.clear()}',
+}
+probe = probe.replace('val rows=linkedMapOf<String,NoteEntity>();', 'val receipts=mutableSetOf<String>();val rows=linkedMapOf<String,NoteEntity>();')
+probe = probe.replace(' override suspend fun clearFolders(){}', ' override suspend fun clearFolders(){}\n' + '\n'.join(value for name,value in optional_methods.items() if 'suspend fun '+name+'(' in dao_source))
+
 with tempfile.TemporaryDirectory(prefix='podnotes-phone-jvm-') as folder:
     root = Path(folder)
     (root / 'Room.kt').write_text(annotations)

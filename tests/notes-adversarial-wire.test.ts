@@ -34,7 +34,7 @@ test('NA-CONTROL greedy note segments preserve emoji and JSON escapes at hostile
   const body='x'.repeat(offset)+'😀👨‍👩‍👧‍👦\\"\u0000\r\n\u2028\u2029éאבג'+'z'.repeat(270000-offset);
   const input={entityKey:'0'.repeat(64),features:[],metadata:{title:'Manual'},fields:{markdown:body}};
   const values:any[]=[],revision='1'.repeat(32),ids:string[]=[];
-  const encoded=encodeNote(input,revision,(i:number,text:string)=>{expect(text.isWellFormed()).toBe(true);values.push(segmentState(input.entityKey,revision,i,text));ids.push('state:sha256:'+i.toString(16).padStart(64,'0'));});
+  const encoded=encodeNote(input,revision,(i:number,text:string)=>{expect([...text].every(ch=>{const cp=ch.codePointAt(0)!;return cp<0xd800||cp>0xdfff;})).toBe(true);values.push(segmentState(input.entityKey,revision,i,text));ids.push('state:sha256:'+i.toString(16).padStart(64,'0'));});
   expect(encoded.form).toBe('segmented');const parent=parentState(input,revision,values.length,encoded.plaintextSha256,ids);checkSegmentedParent(parent);
   expect(assembleSegments(parent,values).payload.markdown).toBe(body);
  }
