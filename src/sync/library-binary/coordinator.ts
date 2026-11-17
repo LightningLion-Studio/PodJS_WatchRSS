@@ -122,7 +122,7 @@ export class LibraryBinaryConnection {
   // No writer lane, object scan, native allocation or peak reservation here.
   await this.ports.store.checkBinding(j,this.ports.phoneDeviceId,r);await this.ports.store.db.transaction([this.ports.store.guard(j,true),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.ports.store.touch(j);
   await this.write(this.reply(r,{state:j.state,nextManifestPage:j.nextPage,expiresAtMillis:j.expiresAt,completion:j.completion,items:[],next:null,done:true},j.epoch));
-  if(j.lease)void this.ports.chunks.check(j.lease as unknown as ObjectLease).catch(e=>{if(!this.stopped&&!(e instanceof Error&&e.message==='BUSY'))void this.close(e);});}catch(e){const error=resumeError(e);await this.write(this.reply(r,null,r.epoch,error));if(error.wire().recovery==='STOP')throw error;}
+  if(j.lease)void this.ports.chunks.check(j.lease as unknown as ObjectLease).catch(e=>{if(!this.stopped&&!['BUSY','LEASE_EXPIRED','STALE_EPOCH'].includes(resumeError(e).code))void this.close(resumeError(e));});}catch(e){const error=resumeError(e);await this.write(this.reply(r,null,r.epoch,error));if(error.wire().recovery==='STOP')throw error;}
  }
  private async answer(r:Envelope){let after:(()=>void)|undefined,charged=false;const charge=()=>{if(!charged){this.stateBucket.take(this.ports.now());charged=true;}};
   try{this.localWorkAt=this.ports.now();this.workUnit();const result=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.handle(r,charge)));this.check();await this.write(this.reply(r,result.result,result.epoch));after=result.after;

@@ -35,3 +35,8 @@ test('PLANNING heartbeat bypasses 48 seconds of progressing native index work in
 test('local cancellation persists a tombstone before a paused PLANNING owner releases its connection',async()=>{
  const f=await binaryRuntime();try{const x=await setup(f);x.s.owner.stop();await x.s.running.catch(()=>{});await x.pump.catch(()=>{});const cancelled=await f.db.query('SELECT job_id FROM library_binary_cancellations');expect(cancelled).toEqual([{job_id:x.job}]);expect((await f.db.query('SELECT state FROM library_binary_jobs'))[0]!.state).toBe('CANCELLED');expect((await f.db.query('SELECT * FROM library_binary_assets')).length).toBe(0);}finally{await f.dispose();}
 });
+
+
+test('background native lease/state callbacks cannot close the current protocol grant',async()=>{
+ for(const code of ['LEASE_EXPIRED','STALE_EPOCH']){let rejectCheck=false;const f=await binaryRuntime({fault:(m,a)=>{if(rejectCheck&&m==='file.resumable.status'&&a.operation==='check')throw Error(code);}});try{const x=await setup(f);rejectCheck=true;for(let i=0;i<2;i++){const hb=await x.send(x.request('missing',{afterObjectId:null,afterChunkIndex:null,limit:0}));expect(hb.success).toBe(true);await new Promise(r=>setTimeout(r,5));}x.s.owner.stop();await x.s.running.catch(()=>{});await x.pump.catch(()=>{});}finally{await f.dispose();}}
+});
