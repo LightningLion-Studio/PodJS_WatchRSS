@@ -26,6 +26,8 @@ export class SendWindow {
  private stale:TokenBucket;
  constructor(binding:JobBinding,epoch:number,now=0,staleAckBudget?:TokenBucket){this.binding=Object.freeze({...binding});this.epoch=integer(epoch);if(!epoch)fail();this.stale=staleAckBudget??new TokenBucket(32,16,now);}
  get credit():{chunks:number;bytes:number} {return {chunks:this.pending?1:0,bytes:this.pending?.payload.length??0};}
+ /** Partial ACK bytes count as activity only for the next pending settlement. */
+ acceptsAckProgress(epoch:number,ackSeq:number):boolean{return this.active&&this.pending!==null&&epoch===this.epoch&&ackSeq===this.lastAckSeq+1;}
  /** Call immediately before the first write byte; a failed write closes the stream. */
  reserve(input:Omit<DataFrame,'kind'|'streamId'|'epoch'|'txSeq'>):Pending {
   if(!this.active)fail('AUTH_REVOKED');if(this.pending)fail('WINDOW_FULL');

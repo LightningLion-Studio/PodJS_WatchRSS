@@ -60,3 +60,12 @@ test('raw metadata whitespace preserved in descriptor digest; book kinds exclude
 test('independent r3 review oracle is identical and also drives golden digest/bytes checks',async()=>{
  const reviewed=(await import('../fixtures/library-binary/review-r3-vectors.json')).default;expect(reviewed).toEqual(fixed);expect(encodeFrame(data())).toEqual(new Uint8Array(Buffer.from(reviewed.dataHex,'hex')));expect(capabilityDigest(reviewed.s2Capability as Capability)).toBe(reviewed.s2CapabilityDigest);
 });
+test('raw ACK partial activity carries its sequence and ignores a same-epoch duplicate',async()=>{
+ const {BinaryByteTransport}=await import('../../src/sync/library-binary/transport'),{SendWindow}=await import('../../src/sync/library-binary/state'),{binding}=await import('./helpers');
+ const window=new SendWindow(binding,1);window.reserve(data());const ack:AckFrame={kind:'ack',streamId:1,epoch:1,ackSeq:1,entries:[{txSeq:1,disposition:1}]};
+ let input:Uint8Array=new Uint8Array();let activity=0;const io=new BinaryByteTransport({read:async max=>{const out=input.slice(0,Math.min(max,7));input=input.slice(out.length);return out.length?out:null;},write:async()=>{},close:async()=>{}},()=>0);
+ io.setNetworkProgress((kind,stream,epoch,seq)=>{if(kind==='ack'&&stream===1&&window.acceptsAckProgress(epoch!,seq!))activity++;});
+ input=encodeFrame(ack);const first=decodeFrame(await io.readFrame());expect(first.kind).toBe('ack');expect(activity).toBeGreaterThan(1);if(first.kind==='ack')window.acceptAck(first,0);
+ window.reserve(data());activity=0;input=encodeFrame(ack);await io.readFrame();expect(activity).toBe(0);
+ input=encodeFrame({...ack,ackSeq:2,entries:[{txSeq:2,disposition:1}]});await io.readFrame();expect(activity).toBeGreaterThan(1);
+});

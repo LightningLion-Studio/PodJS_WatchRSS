@@ -71,7 +71,7 @@ export class LibraryBinaryConnection {
  private stopped=false;
  private closeReason:unknown;private cancelling?:Promise<void>;
  constructor(private readonly ports:BinaryPorts,gate:SwitchGate,io:ByteTransport){
-  this.networkAt=ports.now();io.setNetworkProgress?.((kind,stream,epoch)=>{if(kind==='control'||kind==='data'&&stream===1&&epoch===this.receive?.job.epoch||kind==='ack'&&stream===2&&epoch===this.send?.job.epoch)this.networkAt=ports.now();});
+  this.networkAt=ports.now();io.setNetworkProgress?.((kind,stream,epoch,sequence)=>{if(kind==='control'||kind==='data'&&stream===1&&epoch===this.receive?.job.epoch||kind==='ack'&&stream===2&&this.send?.window.acceptsAckProgress(epoch!,sequence!))this.networkAt=ports.now();});
   this.scope=D('wrss.library-binary.v2/storage',[ports.accountScope,ports.phoneDeviceId,ports.watchDeviceId]);
   this.binary=new BinaryConnection(gate,io,new Grant(ports.connectionId,1),ports.now,ports.capability.limits);
   this.preparation=new Preparation(ports.capability);this.stateBucket=new TokenBucket(8,4,ports.now());

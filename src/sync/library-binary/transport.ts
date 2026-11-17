@@ -5,9 +5,9 @@ import {fail} from './wire';
  * by another codec. Native idle deadlines and a 60s frame deadline are separate. */
 export class BinaryByteTransport implements ByteTransport {
  private closed=false;private reading=false;private writing=false;
- private networkProgress?: (kind:'control'|'data'|'ack',streamId?:number,epoch?:number)=>void;
+ private networkProgress?: (kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void;
  constructor(private readonly stream:SyncByteStream,private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void){}
- setNetworkProgress(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number)=>void){this.networkProgress=listener;}
+ setNetworkProgress(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void){this.networkProgress=listener;}
  private network(error:unknown):never{const e=error as {code?:string;message?:string};if(e?.code==='host_error'){
   if(/^(Stream operation timed out|.*[Ss]ocket.*timed out)$/.test(e.message??''))throw Error('SocketTimeout');
   if(/([Ss]ocket closed|[Ss]tream closed|Connection reset|[Bb]t socket closed)/.test(e.message??''))throw Error('reset');
@@ -20,7 +20,7 @@ export class BinaryByteTransport implements ByteTransport {
    const v=new DataView(frame.buffer),header=v.getUint32(12),payload=frame.length-16-header;
    if(frame[4]!==76||frame[5]!==66||frame[6]!==86||frame[7]!==50||frame[9]!==0||v.getUint16(10)!==0||payload<0)fail();
    if(frame[8]===1){if(payload!==0||header<1||header>131072)fail();const unit=()=>this.networkProgress?.('control');unit();await this.into(frame.subarray(16),end,unit);}
-   else{const data=frame[8]===2;if(!data&&frame[8]!==3||data&&(header!==80||payload<1||payload>65536)||!data&&(payload!==0||header<48||header>544))fail();const fixed=data?96:48;if(frame.length<fixed)fail();await this.into(frame.subarray(16,fixed),end);const stream=v.getUint32(16),raw=v.getBigUint64(24);if((stream!==1&&stream!==2)||raw<1n||raw>BigInt(Number.MAX_SAFE_INTEGER))fail();const unit=()=>this.networkProgress?.(data?'data':'ack',stream,Number(raw));unit();await this.into(frame.subarray(fixed),end,unit);}
+   else{const data=frame[8]===2;if(!data&&frame[8]!==3||data&&(header!==80||payload<1||payload>65536)||!data&&(payload!==0||header<48||header>544))fail();const fixed=data?96:48;if(frame.length<fixed)fail();await this.into(frame.subarray(16,fixed),end);const stream=v.getUint32(16),raw=v.getBigUint64(24);if((stream!==1&&stream!==2)||raw<1n||raw>BigInt(Number.MAX_SAFE_INTEGER))fail();const seq=v.getBigUint64(32);if(seq<1n||seq>BigInt(Number.MAX_SAFE_INTEGER))fail();const unit=()=>this.networkProgress?.(data?'data':'ack',stream,Number(raw),Number(seq));unit();await this.into(frame.subarray(fixed),end,unit);}
    return frame;
   }catch(e){this.close();throw e;}finally{this.reading=false;}
  }

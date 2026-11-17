@@ -72,7 +72,9 @@ heartbeat responses do not reset it. Production time samples come from native
 `elapsedRealtime`, not wall-clock time.
 
 `RecoveryRules` feeds the foreground listener through `stopAutomaticRecovery`.
-Only current-stream I/O failures enter recovery. A physical error is accounted
+Only current-stream I/O failures enter recovery. Partial ACK activity must match
+the current epoch and next pending ACK sequence; duplicate ACKs cannot refresh
+the idle deadline. A physical error is accounted
 once. The three search, rapid-disconnect and no-progress limits retain their
 logical state across authenticated reconnections. Semantic progress uses
 content object IDs and chunk indexes rather than job IDs. Protocol/account/local

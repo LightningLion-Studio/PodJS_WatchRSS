@@ -80,3 +80,9 @@ test('DATA before native index/peak admission is STOP, without a retryable uncon
  const o=object(),grant=new Grant('c',1),token=grant.token(),window=new ReceiveWindow(binding,grant,{objectCount:1,at:async()=>o});let commits=0;
  await expect(window.receive(data(),{commit:async()=>{commits++;return 1;}},async()=>{})).rejects.toThrow('FLOW_CONTROL_VIOLATION');expect(commits).toBe(0);expect(()=>grant.check(token)).toThrow('AUTH_REVOKED');
 });
+test('only the current pending ACK sequence can refresh partial-frame activity',()=>{
+ const w=new SendWindow(binding,1);expect(w.acceptsAckProgress(1,1)).toBe(false);w.reserve(data());
+ expect(w.acceptsAckProgress(1,1)).toBe(true);expect(w.acceptsAckProgress(0,1)).toBe(false);expect(w.acceptsAckProgress(2,1)).toBe(false);expect(w.acceptsAckProgress(1,2)).toBe(false);
+ w.acceptAck(ack(),0);expect(w.acceptsAckProgress(1,1)).toBe(false);w.reserve(data());expect(w.acceptsAckProgress(1,1)).toBe(false);expect(w.acceptsAckProgress(1,2)).toBe(true);
+ w.regrant(2);expect(w.acceptsAckProgress(2,1)).toBe(false);w.reserve(data());expect(w.acceptsAckProgress(1,2)).toBe(false);expect(w.acceptsAckProgress(2,1)).toBe(true);w.close();expect(w.acceptsAckProgress(2,1)).toBe(false);
+});
