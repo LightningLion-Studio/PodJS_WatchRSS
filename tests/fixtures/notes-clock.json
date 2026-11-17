@@ -1,0 +1,69 @@
+{
+  "stateVersion": "4",
+  "account": {
+    "oid": "commit:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": "3",
+    "generation": "1"
+  },
+  "rollbackGeneration": "1",
+  "localChangeRevision": "7",
+  "editBase": {
+    "accountOid": "commit:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "generation": "1"
+  },
+  "pendingChoice": null,
+  "note": {
+    "noteId": "备忘录-N",
+    "markdown": "live newer ![x](assets/live.png)\r\n",
+    "baseMarkdown": "edit ancestor",
+    "updatedAt": 90000,
+    "modifiedBy": "old-source",
+    "deleted": false,
+    "title": "unchanged title"
+  },
+  "conflicts": {
+    "version": 1,
+    "records": [
+      {
+        "conflictId": "c-0",
+        "noteId": "备忘录-N",
+        "baseMarkdown": "![old](assets/resolved.png)",
+        "localMarkdown": "saved local ![l](assets/local.png)",
+        "remoteMarkdown": "remote A ![r](assets/remote.png)",
+        "remoteDeviceId": "旧端-来源",
+        "createdAt": 100,
+        "resolvedAt": 7
+      },
+      {
+        "conflictId": "c-a",
+        "noteId": "备忘录-N",
+        "baseMarkdown": "base ![b](assets/base.png)",
+        "localMarkdown": "saved local ![l](assets/local.png)",
+        "remoteMarkdown": "remote A ![r](assets/remote.png)",
+        "remoteDeviceId": "旧端-来源",
+        "createdAt": 10,
+        "resolvedAt": 0
+      },
+      {
+        "conflictId": "c-b",
+        "noteId": "备忘录-N",
+        "baseMarkdown": "base ![b](assets/base.png)",
+        "localMarkdown": "saved local ![l](assets/local.png)",
+        "remoteMarkdown": "remote B\r\n尾",
+        "remoteDeviceId": "旧端-来源",
+        "createdAt": 50,
+        "resolvedAt": 0
+      }
+    ]
+  },
+  "outbox": [],
+  "applied": {
+    "cursor": "5"
+  },
+  "inbox": {
+    "unapplied": "retain"
+  },
+  "draft": {
+    "markdown": "unsaved draft"
+  }
+}
