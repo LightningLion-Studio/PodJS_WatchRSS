@@ -46,7 +46,7 @@ export interface LibrarySessionRepository {
  resetPeerState():Promise<void>;
  markSuccess(pending:PendingSyncSuccess):Promise<void>;
 }
-export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number;sentArticles?:number;totalArticles?:number}
+export interface SyncSessionStatus {phase:'request'|'cursor'|'manifest'|'receiving'|'sending'|'ack'|'handoff'|'complete'|'error';applied?:boolean;message?:string;receivedArticles?:number;sentArticles?:number;totalArticles?:number}
 export interface SessionActionResult {request:JsonObject;response:JsonObject;ack:ResponseAck|null;libraryApplied:boolean}
 /** Opaque connection identity generated locally; never taken from wire fields. */
 export interface SyncActionContext {readonly session:object; checkCancelled?:()=>void; onCancel?:(cancel:()=>void)=>()=>void; afterAppliedAck?:(commit:()=>Promise<void>)=>void}
@@ -182,12 +182,12 @@ export class LibrarySyncSession {
      if(!rejection&&request.action==='syncBooks'&&(!this.peerCapabilities.supportsBookSyncV1||this.extensionCapabilities().supportsBookSyncV1!==true))rejection={success:false,action:'syncBooks',version:1,errorCode:'book_sync_not_negotiated'};
      if(!rejection&&request.action==='syncBooks'&&['readingSummary','readingDelta','readingCommit'].includes(String(request.phase))&&(!this.peerCapabilities.supportsBookReadingDeltaV1||this.extensionCapabilities().supportsBookReadingDeltaV1!==true))rejection={success:false,action:'syncBooks',version:1,errorCode:'book_reading_delta_not_negotiated'};
     }
-    let response:JsonObject,pending:PendingSyncSuccess|null=null;
+    let response:JsonObject,pending:PendingSyncSuccess|null=null,legacySubset=false;
     if(rejection){response=accepted?{...rejection,...persistentFields}:rejection;await this.write(response);}
     else if(!unsupported()&&string(request.action)===ACTION_SYNC_LIBRARY&&string(request.phase)==='manifest'){
      try{
       this.log.event('library.manifest.handle.start');this.status({phase:'manifest'});const count=manifestBatchCount(request);if(count>512)throw new Error('Manifest batch limit exceeded');const frames=[request];for(let i=1;i<count;i++)frames.push(await this.read(180000));request=combineManifestFrames(frames);
-      const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;
+      const exchange=await this.exchange(request,localId,accepted);response=exchange.response;pending=exchange.pending;legacySubset=exchange.legacySubset;
      }catch(error){
       this.check();const busy=error instanceof LibrarySnapshotBusyError;this.log.event('library.manifest.handle.failed',{message:'<redacted>',retryable:busy},busy?'W':'E');response={success:false,action:ACTION_SYNC_LIBRARY,version:PROTOCOL_VERSION,message:error instanceof Error?error.message:String(error),errorCode:busy?'library_busy':'library_exchange_failed',fatalSession:!busy,...(busy?{retryable:true,retryAfterMillis:error.retryAfterMillis}:{})};
       try{await this.write(response);}catch{this.log.event('library.errorResponse.write.failed',{},'W');}this.aborting=true;this.log.event("server.exchange.aborted",{persistentSession:persistent,completedActions:results.length,elapsedMs:this.log.elapsed()});this.status({phase:'error',message:String(response.message)});results.push({request,response,ack:null,libraryApplied:false});return results;
@@ -218,16 +218,16 @@ export class LibrarySyncSession {
     // A legacy batch peer may durably merge the last buffered frames before
     // its first/direct applied ACK. Use the existing applied-stage budget for
     // multi-frame replies; small actions retain the ordinary response deadline.
-    const ack=await this.ack(pending&&!this.checkpointed&&Number(response.batchCount)>1?120000:0);let libraryApplied=false;
+    const ack=await this.ack((pending||legacySubset)&&!this.checkpointed&&Number(response.batchCount)>1?120000:0);let libraryApplied=false;
     if(pending&&ack?.success&&ack.applied){this.check();try{await this.repository.markSuccess(pending);this.check();libraryApplied=true;this.log.event("library.peerState.mark.success",{remoteDeviceId:pending.remoteDeviceId,localSeqMax:pending.localSeqToInclusive,remoteSeqApplied:pending.remoteSeqToInclusive,remoteProtocolVersion:pending.remoteProtocolVersion,fullSnapshot:pending.fullSnapshot});}catch(error){this.log.event("library.peerState.mark.failed",{message:"<redacted>"},"E");throw error;}}
-    else if(request.action==='syncBooks')libraryApplied=!!(response.success&&ack?.success&&ack.applied);
+    else if(legacySubset||request.action==='syncBooks')libraryApplied=!!(response.success&&ack?.success&&ack.applied);
     else if(pending)this.log.event("library.peerState.mark.skipped",{ackSuccess:ack?.success??null,ackApplied:ack?.applied??null,localSeqMax:pending.localSeqToInclusive,remoteSeqPendingAck:pending.remoteSeqToInclusive},"W");
-    if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount'){await this.options.resume?.accountConfirmed(request,this.actionContext);await this.options.binary?.accountConfirmed(request,this.actionContext);}this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
+    if(response.success===true&&ack?.success&&ack.applied){if(request.action==='syncAccount'){await this.options.resume?.accountConfirmed(request,this.actionContext);await this.options.binary?.accountConfirmed(request,this.actionContext);}if(!legacySubset)this.domainCompleted(request,response,libraryApplied);for(const commit of this.appliedAckJobs){this.check();await commit();this.check();}}
     this.appliedAckJobs=[];
     this.log.event("server.exchange.complete",{persistentSession:persistent,completedActions:results.length+1,elapsedMs:this.log.elapsed()});
     if(!ack?.success||!ack.applied){this.diagnosticFailed=true;for(const item of iterateRequestItems(request))this.trace?.item({...item,reasonCode:'ack_missing',result:'rejected'});}
     if(request.action==='syncBooks'&&response.success===true&&ack?.success&&ack.applied&&response.complete===true)this.trace?.item({kind:'book',id:request.bookId,result:'applied',reasonCode:'none'});
-    const result={request,response,ack,libraryApplied};results.push(result);this.options.onActionCompleted?.(result);this.status({phase:'complete',applied:libraryApplied});
+    const result={request,response,ack,libraryApplied};results.push(result);this.options.onActionCompleted?.(result);this.status(legacySubset&&libraryApplied?{phase:'handoff',message:'请在手机查看整次同步结果'}:{phase:'complete',applied:libraryApplied});
     if(!persistent)return results;
    }
   }catch(error){this.diagnosticFailed=true;this.status({phase:'error',message:error instanceof Error?error.message:String(error)});throw this.options.binary?.failed?.(error,this.actionContext)??error;}
@@ -246,18 +246,21 @@ export class LibrarySyncSession {
    if(string(request.action)!=='previewReader')throw new Error('实时预览连接收到了其他蓝牙动作');
   }
  }
- private async exchange(request:JsonObject,localId:string,accepted:boolean):Promise<{response:JsonObject;pending:PendingSyncSuccess}>{
+ private async exchange(request:JsonObject,localId:string,accepted:boolean):Promise<{response:JsonObject;pending:PendingSyncSuccess|null;legacySubset:boolean}>{
   this.capabilities(request);const peer=trim(string(request.deviceId))?string(request.deviceId):'phone',mode=string(request.libraryMode)||'merge';
   if(!['merge','phoneToWatchReplace','watchToPhoneReplace'].includes(mode))throw new Error('Invalid library mode');
   const target=mode==='phoneToWatchReplace',source=mode==='watchToPhoneReplace';this.checkpointed=this.checkpointRequested&&mode==='merge'&&request[LIBRARY_CHECKPOINT_FEATURE]===true;
   if(!bool(request.supportsChunkedBodies)||optLong(request.version)<=4)throw new Error('Chunked article protocol required by this receiver');
   const remoteCursor=parseCursor(request),remoteRange=parseChangeSequence(request),remoteManifest=parseArticleManifest(request),sources=parseSources(request);
+  const legacySubset=remoteRange.fallbackReason==='binarySubset'&&this.options.binary?.acceptsLegacySubset?.(peer,this.actionContext)===true;
+  if(legacySubset&&(mode!=='merge'||remoteRange.fromSeqExclusive!==0||remoteRange.toSeqInclusive!==0||remoteRange.fullSnapshot||remoteCursor.lastRemoteSeqApplied!==0||remoteCursor.lastLocalSeqAckedByPeer!==0||!bool(request.forceFull)))throw Error('CAPABILITY_MISMATCH');
   this.log.event("library.manifest.parsed",{remoteManifest:remoteManifest.length,incomingSources:sources.length,remoteSeqToInclusive:remoteRange.toSeqInclusive,remoteFullSnapshot:remoteRange.fullSnapshot});
   let sourcesApplied=mode==='merge'?await this.timed('library.sources.applied',()=>this.repository.mergeSources(sources,peer,false)):0;this.check();
   if(mode==="merge")this.log.event("library.sources.merged",{incomingSources:sources.length,sourcesApplied});
   const prepared=await this.timed('library.window.prepared',()=>this.repository.prepareWindow(peer,remoteCursor.lastRemoteSeqApplied,()=>this.check()));this.check();
   const force=bool(request.forceFull),full=force||mode!=='merge'||!bool(request.supportsChangeSequences)||optLong(request.version)<8;
-  const window:LibraryWindow=full?{...prepared,articleManifest:prepared.fullArticleManifest,rssSources:await this.repository.exportSources(peer,()=>this.check()),fullSnapshot:true,fromSeqExclusive:0,fallbackReason:force?'forcedFull':'peerProtocol'}:prepared;
+  const legacyWindow:LibraryWindow=full?{...prepared,articleManifest:prepared.fullArticleManifest,rssSources:await this.repository.exportSources(peer,()=>this.check()),fullSnapshot:true,fromSeqExclusive:0,fallbackReason:force?'forcedFull':'peerProtocol'}:prepared;
+  const window=legacySubset?{...legacyWindow,fromSeqExclusive:0,toSeqInclusive:0,fullSnapshot:false,fallbackReason:'binarySubset'}:legacyWindow;
   this.log.event("library.local.exported",{outgoingArticles:window.articleManifest.length,fullArticles:window.fullArticleManifest.length,outgoingSources:window.rssSources.length,chunked:true,localSeqMax:window.toSeqInclusive,peerAckedSeq:window.peerAckedSeq,fullSnapshot:window.fullSnapshot});
   this.capabilities(request);
   const selected=source?[]:selectArticleBodyRequests(window.fullArticleManifest,remoteManifest,{supportsMetadataOnly:bool(request.supportsMetadataOnlyArticles)&&optLong(request.version)>=8,supportsFullMetadataOnly:this.peerCapabilities.supportsFullMetadataOnlyArticles===true});
@@ -284,6 +287,6 @@ export class LibrarySyncSession {
   // Keep the same response summary as native without retaining body byte arrays.
   const first=responses[0]!,response:JsonObject={success:responses.every(f=>bool(f.success,true)),version:optLong(first.version,14),action:ACTION_SYNC_LIBRARY,phase:string(first.phase)||'complete',deviceId:string(first.deviceId),sentAt:optLong(first.sentAt),batchCount:responses.length,totalArticles:responses.reduce((n,f)=>n+(Array.isArray(f.articles)?f.articles.length:0),0)};if(first.stats)response.stats=first.stats;
   this.log.event("library.manifest.handle.complete",{incomingArticles:receipt.receivedArticles,outgoingSources:window.rssSources.length,localSeqMax:window.toSeqInclusive,peerAckedSeq:window.peerAckedSeq,remoteSeqPendingAck:remoteRange.toSeqInclusive,fullSnapshot:window.fullSnapshot,peerStatePendingAck:true});
-  return {response,pending:{remoteDeviceId:peer,localSeqToInclusive:target?0:window.toSeqInclusive,remoteSeqToInclusive:source?0:remoteRange.toSeqInclusive,remoteProtocolVersion:optLong(request.version),fullSnapshot:window.fullSnapshot,...(window.projectionGeneration?{projectionGeneration:window.projectionGeneration}:{}),receivedArticleManifest:source?[]:remoteManifest,receivedSources:source?[]:sources}};
+  return {response,legacySubset,pending:legacySubset?null:{remoteDeviceId:peer,localSeqToInclusive:target?0:window.toSeqInclusive,remoteSeqToInclusive:source?0:remoteRange.toSeqInclusive,remoteProtocolVersion:optLong(request.version),fullSnapshot:window.fullSnapshot,...(window.projectionGeneration?{projectionGeneration:window.projectionGeneration}:{}),receivedArticleManifest:source?[]:remoteManifest,receivedSources:source?[]:sources}};
  }
 }

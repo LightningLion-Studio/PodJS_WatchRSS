@@ -57,7 +57,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   if(method.endsWith('.release')){await rm(path(dir),{force:true,recursive:true});return {} as T;}
   if(prior.readOnly)throw Error('JOB_CANCELLED');
   if(method.endsWith('.stage')){if(!bytes)throw Error('B2_BASE64_FORBIDDEN');stageCalls++;peak=Math.max(peak,bytes.length);if(hash(bytes)!==d.chunkHashes[Number(a.index)])throw Error('HASH_MISMATCH');await durable(dir+'/'+a.index,bytes);return await status() as T;}
-  if(method.endsWith('.finalize')){if((await missing()).length)throw Error('CHUNKS_MISSING');const temp=dir+'/compose';await files.writeBytes(temp,new Uint8Array());for(let i=0;i<d.chunkHashes.length;i++){const b=await readFile(path(dir+'/'+i));await files.appendBytes(temp,b,i*65536);}const target=String(a.path);try{await files.commit(temp,target,d.size,d.sha256,null);}catch(e){if(String(e).includes('file_target_changed'))throw Error('PUBLICATION_CONFLICT');throw e;}return {path:target,size:d.size,sha256:d.sha256} as T;}
+  if(method.endsWith('.finalize')){if((await missing()).length)throw Error('CHUNKS_MISSING');const temp=dir+'/compose';await files.writeBytes(temp,new Uint8Array());for(let i=0;i<d.chunkHashes.length;i++){const b=await readFile(path(dir+'/'+i));await files.appendBytes(temp,b,i*65536);}const target=String(a.path??('resumable-published/'+scope+'/'+d.id+'.bin'));try{await files.commit(temp,target,d.size,d.sha256,null);}catch(e){if(String(e).includes('file_target_changed'))throw Error('PUBLICATION_CONFLICT');throw e;}return {path:target,size:d.size,sha256:d.sha256} as T;}
   throw Error('bad native method '+method);
  };
  const chunks=new VerifiedChunkStore((m,a)=>native(m,a),(m,a,b)=>native(m,a,b));const store=new BinaryStore(db);

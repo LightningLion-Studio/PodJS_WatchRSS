@@ -118,6 +118,17 @@ export class LocalArticleManifestStore {
   if(this.stableIds.size>=8192)this.stableIds.delete(this.stableIds.keys().next().value!);
   this.stableIds.set(value,id);if(this.cloudProgress){const definition=`stable-v1:${PROTOCOL_VERSION}:${DOMAIN_ENCODERS.library}`;await this.db.execute('INSERT OR REPLACE INTO sync_stable_article_ids VALUES(?,?,?,?)',[definition,value,id,await this.identityHash(utf8Encode(JSON.stringify([definition,value,id])))]);this.stablePending++;this.stableLast='identity:'+definition+':'+await this.identityHash(utf8Encode(value));if(this.stablePending>=16)await this.flushStableProgress();}return id;
  }
+ /** Resolve the same binding without loading the article body. */
+ async resolveIncomingItem(article:IncomingArticle,targetItemId?:number):Promise<{itemId:number}|null>{
+  const target=targetItemId?(await this.db.query('SELECT id FROM articles WHERE id=?',[targetItemId]))[0]:undefined;
+  if(target)return {itemId:num(target.id)};
+  const saved=(await this.db.query(`SELECT a.id FROM sync_saved_states s JOIN articles a ON a.id=s.item_id
+   WHERE s.article_id=? ORDER BY CASE s.save_type WHEN 'favorite' THEN 0 ELSE 1 END LIMIT 1`,[article.articleId]))[0];
+  if(saved)return {itemId:num(saved.id)};
+  const source=article.rssSourceUrl&&/^https?:\/\//i.test(nativeTrim(article.rssSourceUrl))?article.rssSourceUrl:'watchrss://phone-imports';
+  const row=(await this.db.query('SELECT a.id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE ch.url=? AND a.dedup_key=?',[source,article.articleId]))[0];
+  return row?{itemId:num(row.id)}:null;
+ }
  /** Native lookup uses each saved-type binding before source/dedup fallback. */
  async resolveIncomingBody(article:IncomingArticle,targetItemId?:number):Promise<LocalReceiveBody|null>{
   const revision=await libraryRevision(this.db);let row:Row|undefined=targetItemId?(await this.db.query(this.rowSelect()+` WHERE a.id=?`,[targetItemId]))[0]:undefined;
