@@ -1,0 +1,27 @@
+{
+  "specSha256": "3d1ed2b857be3d599d52221c02c04b2672f80b5b42e9443eaeab844632cad8cb",
+  "source": "T-SYNC-BINARY-SPEC-r3; independently verified by T-REVIEW-BINARY-SPEC-r3 (110 checks, PASS)",
+  "sharedContract": "Copy unchanged into Kotlin tests; raw file SHA-256 is the cross-language identity.",
+  "sha256": {
+    "fixed-vectors.json": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76",
+    "peer-fixtures.json": "798a778c3a9879cb7b785201a81ef075bcb14fed3308fab523cfaed284f78a70",
+    "planning-heartbeat-cases.json": "e52a5f80c2f498de2e4117294e9abe96a885daf7991ba3f5e4f6615041928fe1",
+    "review-r3-vectors.json": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76"
+  },
+  "sources": [
+    {
+      "repository": "Android_WatchRSS_Phone",
+      "path": "app/src/test/resources/b2/spec-r3-vectors.json",
+      "sourceCommit": "959c9049b16e0818a139160679ff14a11f807d7d",
+      "sha256": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76",
+      "fixture": "fixed-vectors.json"
+    },
+    {
+      "repository": "Android_WatchRSS_Phone",
+      "path": "app/src/test/resources/b2/review-r3-vectors.json",
+      "sourceCommit": "959c9049b16e0818a139160679ff14a11f807d7d",
+      "sha256": "3f3482e6205bef469db2e5a82c9a822c69341e228b3ee9b54d448971ea67eb76",
+      "fixture": "review-r3-vectors.json"
+    }
+  ]
+}
