@@ -1,4 +1,5 @@
 import {describe,expect,test} from "bun:test";
+import {admitDouyinItem} from '../../src/douyin/playback-ingress.ts';
 import type {VideoSessionState} from "@podjs/framework/services";
 import {
   DouyinVideoSessionPool,
@@ -66,8 +67,8 @@ describe("Douyin video sessions",()=>{
       {playUrl:"h264",codec:"h264" as const,bitrate:1,width:720,height:1280},
       {playUrl:"hevc",codec:"h265" as const,bitrate:1,width:1080,height:1920},
     ]};
-    expect(douyinDecoderProfile(item)).toEqual({videoMime:"video/avc",videoWidth:720,videoHeight:1280});
-    expect(douyinDecoderProfile(item,"hevc")).toEqual({videoMime:"video/hevc",videoWidth:1080,videoHeight:1920});
+    expect(douyinDecoderProfile(item)).toEqual({videoMime:"video/avc",videoWidth:720,videoHeight:1280,maxVideoShortEdge:720,audioUrl:undefined});
+    expect(douyinDecoderProfile(admitDouyinItem(item)!,"hevc")).toEqual({maxVideoShortEdge:720,audioUrl:undefined});
   });
 
   test("matches native positional/velocity settle and cancellation rebound",()=>{

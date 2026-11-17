@@ -19,7 +19,9 @@ export function biliVideoTarget(link?:string):BiliVideoTarget|null {
   const aid=/^av/i.test(id)?positive(id.slice(2)):undefined;return aid?{aid,...(cid?{cid}:{})}:null;
 }
 export function douyinVideoTarget(link?:string):{awemeId?:string;webUrl:string}|null {
-  const raw=link?.trim()??"",url=urlParts(raw);if(!url||(!domain(url.host,'douyin.com')&&!domain(url.host,'iesdouyin.com')))return null;
+  const raw=link?.trim()??"",url=urlParts(raw);if(!url)return null;
+  if(domain(url.host,'douyinvod.com')||/^v\d+-dy(?:-[a-z0-9]+)*\.zjcdn\.com$/.test(url.host))return {webUrl:raw};
+  if(!domain(url.host,'douyin.com')&&!domain(url.host,'iesdouyin.com'))return null;
   const index=url.segments.indexOf('video'),id=(index>=0?url.segments[index+1]:undefined)??url.query.aweme_id;
   return {awemeId:id,webUrl:id?`https://www.douyin.com/video/${id}`:raw};
 }

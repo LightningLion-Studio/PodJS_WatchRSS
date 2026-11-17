@@ -19,8 +19,8 @@ test('feed projection retains DASH companion audio from the same video',async()=
  // A CDN retry retains the same audio companion.
  expect(douyinDecoderProfile(item,'https://mirror/video-only.mp4')).toMatchObject({audioUrl:'https://fixture/audio.m4a'});
 });
-test('a DASH rendition without companion audio yields to the muxed source',()=>{
- const item=parseDouyinFeed(JSON.stringify({aweme_list:[{...row,video:{...row.video,bit_rate_audio:[]}}]})).items[0]!;
+test('a DASH rendition without audio yields to an in-cap muxed source',()=>{
+ const item=parseDouyinFeed(JSON.stringify({aweme_list:[{...row,video:{...row.video,play_addr:{...row.video.play_addr,width:1280,height:720},bit_rate_audio:[]}}]})).items[0]!;
  expect(item.playUrl).toBe('https://fixture/muxed.mp4');
  expect(douyinDecoderProfile(item).audioUrl).toBeUndefined();
 });

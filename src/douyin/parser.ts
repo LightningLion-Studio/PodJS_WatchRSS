@@ -1,5 +1,6 @@
 import {traceDouyinVariants} from './playback-diagnostics.ts';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
+import {admitDouyinItem} from './playback-ingress.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import type { DouyinCodec, DouyinContent, DouyinFeedPage, DouyinItem, DouyinVideoVariant } from "./types.ts";
 
@@ -10,7 +11,18 @@ const number = (v: unknown): number => Number.isFinite(Number(v)) ? Number(v) : 
 const allUrls = (v: unknown): string[] => [...new Set(array(object(v)?.url_list).filter((url):url is string=>typeof url==="string").map(url=>url.trim()).filter(Boolean))];
 const firstUrl = (v: unknown): string => allUrls(v)[0] ?? "";
 function codec(v: Record<string, any>, fallback: DouyinCodec = "unknown"): DouyinCodec { const label=`${string(v.gear_name)} ${string(v.codec_type)}`.toLowerCase(); return number(v.is_h265)===1?"h265":/(h264|avc|avc1)/.test(label)?"h264":/(h265|hevc|hev1|hvc1|bvc1|bytevc1)/.test(label)?"h265":fallback; }
-function variant(v: unknown, fallback: DouyinCodec = "unknown", gearName?: string): DouyinVideoVariant | null { const row=object(v), addr=object(row?.play_addr) ?? row; const playUrl=firstUrl(addr); if(!row||!addr||!playUrl)return null; const extra=object(row.video_extra); return {playUrl,playUrls:allUrls(addr),codec:codec(row,fallback),bitrate:number(row.bit_rate),width:number(addr.width),height:number(addr.height),...(row.format==='mp4'||row.format==='dash'?{format:row.format}:{}),...(string(extra?.definition)?{definition:string(extra?.definition)}:{}),...(string(extra?.quality)||string(row.quality_type)?{quality:string(extra?.quality)||string(row.quality_type)}:{}),...(string(row.gear_name)||gearName?{gearName:string(row.gear_name)||gearName}: {})}; }
+function variant(v: unknown, fallback: DouyinCodec = "unknown", gearName?: string): DouyinVideoVariant | null {
+ const row=object(v),addr=object(row?.play_addr)??row,playUrls=allUrls(addr),playUrl=playUrls[0];
+ if(!row||!addr||!playUrl)return null;
+ const extra=object(row.video_extra),rowWidth=number(row.width),rowHeight=number(row.height);
+ const width=number(addr.width)||rowWidth;
+ const height=number(addr.height)||rowHeight;
+ return {playUrl,playUrls,codec:codec(row,fallback),bitrate:number(row.bit_rate),width,height,
+  ...(row.format==='mp4'||row.format==='dash'?{format:row.format}:{}),
+  ...(string(extra?.definition)?{definition:string(extra?.definition)}:{}),
+  ...(string(extra?.quality)||string(row.quality_type)?{quality:string(extra?.quality)||string(row.quality_type)}:{}),
+  ...(string(row.gear_name)||gearName?{gearName:string(row.gear_name)||gearName}:{})};
+}
 function variants(video: Record<string,any>): DouyinVideoVariant[] {
  const out:DouyinVideoVariant[]=[];
  // DASH play_addr is a video-only MP4, not an MPD. Its audio belongs to this
@@ -18,18 +30,42 @@ function variants(video: Record<string,any>): DouyinVideoVariant[] {
  const audio=array(video.bit_rate_audio).map(v=>object(object(v)?.audio_meta)).filter(v=>v&&/^(mp4a|aac)$/i.test(string(v.codec_type)))
   .map(v=>({url:string(object(v?.url_list)?.main_url)||string(object(v?.url_list)?.backup_url),bitrate:number(v?.bitrate)}))
   .filter(v=>/^https?:\/\//i.test(v.url)).sort((a,b)=>(a.bitrate||Infinity)-(b.bitrate||Infinity))[0]?.url;
- for(const row of array(video.bit_rate)){const v=variant(row);if(v&&!out.some(x=>x.playUrl===v.playUrl))out.push(v.format==='dash'&&audio?{...v,audioUrl:audio}:v);}
- for(const [key,c] of [["play_addr_h264","h264"],["play_addr_265","h265"],["play_addr_h265","h265"],["play_addr_bytevc1","h265"],["play_addr","unknown"]] as const){const v=variant(object(video[key]),c,key);if(v&&!out.some(x=>x.playUrl===v.playUrl))out.push(v);}
+ for(const row of array(video.bit_rate)){
+  const variantRow=variant(row);
+  if(!variantRow)continue;
+  const v=variantRow.format==='dash'&&audio?{...variantRow,audioUrl:audio}:variantRow;
+  out.push(v);
+  const width=number(row.width),height=number(row.height);
+  if(width>0&&height>0&&(width!==v.width||height!==v.height))out.push({...v,width,height});
+ }
+ for(const [key,c] of [["play_addr_h264","h264"],["play_addr_265","h265"],["play_addr_h265","h265"],["play_addr_bytevc1","h265"],["play_addr","unknown"]] as const){const v=variant(object(video[key]),c,key);if(!v)continue;
+   if(key==='play_addr'){
+     if(!v.width)v.width=number(video.width);
+     if(!v.height)v.height=number(video.height);
+   }
+   out.push(v);
+ }
  return out;
 }
 const isAd=(row:Record<string,any>)=>row.is_ads===true||number(row.is_ads)===1||typeof row.raw_ad_data==='string'&&!!row.raw_ad_data.trim()||!!object(row.raw_ad_data);
-export function parseDouyinItem(value: unknown,origin:"feed"|"detail"="detail"): DouyinItem | null { const row=object(value), author=object(row?.author), stats=object(row?.statistics), video=object(row?.video); if(!row||!video||number(row.aweme_type)===68||number(row.aweme_type)===150||isAd(row))return null; const vs=traceServiceWork("douyin.item.variants",()=>variants(video)), playUrl=firstUrl(video.play_addr)||vs[0]?.playUrl||"", awemeId=string(row.aweme_id).trim(); if(!awemeId||!playUrl)return null; const item=applyPreferredDouyinPlayback({awemeId,description:string(row.desc),createdAtSeconds:number(row.create_time),authorId:string(author?.uid),authorName:string(author?.nickname),...(firstUrl(author?.avatar_thumb)?{authorAvatar:firstUrl(author?.avatar_thumb)}:{}),likeCount:number(stats?.digg_count),commentCount:number(stats?.comment_count),shareCount:number(stats?.share_count),collectCount:number(stats?.collect_count),playUrl,...(firstUrl(video.cover)?{coverUrl:firstUrl(video.cover)}:{}),durationMs:number(video.duration),variants:vs});traceDouyinVariants(item,origin);return item; }
+function readDouyinItem(value: unknown,origin:"feed"|"detail"="detail"): DouyinItem | null { const row=object(value), author=object(row?.author), stats=object(row?.statistics), video=object(row?.video); if(!row||!video||number(row.aweme_type)===68||number(row.aweme_type)===150||isAd(row))return null; const vs=traceServiceWork("douyin.item.variants",()=>variants(video)), playUrl=firstUrl(video.play_addr)||vs[0]?.playUrl||"", awemeId=string(row.aweme_id).trim(); if(!awemeId||!playUrl)return null; return {awemeId,description:string(row.desc),createdAtSeconds:number(row.create_time),authorId:string(author?.uid),authorName:string(author?.nickname),...(firstUrl(author?.avatar_thumb)?{authorAvatar:firstUrl(author?.avatar_thumb)}:{}),likeCount:number(stats?.digg_count),commentCount:number(stats?.comment_count),shareCount:number(stats?.share_count),collectCount:number(stats?.collect_count),playUrl,...(firstUrl(video.cover)?{coverUrl:firstUrl(video.cover)}:{}),durationMs:number(video.duration),variants:vs}; }
+function admittedPlayback(raw:DouyinItem,origin:"feed"|"detail"):DouyinItem|null {
+ const admitted=admitDouyinItem(raw);
+ if(!admitted)return null;
+ const item=applyPreferredDouyinPlayback(admitted);
+ traceDouyinVariants(item,origin);
+ return item;
+}
+export function parseDouyinItem(value:unknown,origin:"feed"|"detail"="detail"):DouyinItem|null {
+ const raw=readDouyinItem(value,origin);
+ return raw?admittedPlayback(raw,origin):null;
+}
 export function parseDouyinFeed(raw:string):DouyinFeedPage { const root=object(traceServiceWork("douyin.feed.json",()=>JSON.parse(raw),raw.length)); if(!root)throw new Error("响应不是 JSON 对象"); const items=traceServiceWork("douyin.feed.map",()=>array(root.aweme_list).map(row=>parseDouyinItem(row,"feed")).filter((v):v is DouyinItem=>v!==null),array(root.aweme_list).length); const cursor=number(root.max_cursor)>0?String(number(root.max_cursor)):string(root.cursor).trim()||null; return {items,nextCursor:cursor,hasMore:number(root.has_more)==1}; }
-export function parseDouyinDetail(raw:string):DouyinContent { const detail=object(object(traceServiceWork("douyin.detail.json",()=>JSON.parse(raw),raw.length))?.aweme_detail); if(!detail)throw new Error("响应缺少 aweme_detail"); if(isAd(detail))return {kind:'ad',awemeId:string(detail.aweme_id)}; const type=number(detail.aweme_type); if(type===68||type===150){const images=array(detail.images).map(firstUrl).filter(Boolean);if(!images.length)throw new Error("图文内容缺少图片");return {kind:"note",awemeId:string(detail.aweme_id),description:string(detail.desc),authorName:string(object(detail.author)?.nickname),likeCount:number(object(detail.statistics)?.digg_count),imageUrls:images};} const item=parseDouyinItem(detail);if(!item)throw new Error("视频内容缺少标识或播放地址");return {kind:"video",item}; }
+export function parseDouyinDetail(raw:string):DouyinContent|null { const detail=object(object(traceServiceWork("douyin.detail.json",()=>JSON.parse(raw),raw.length))?.aweme_detail); if(!detail)throw new Error("响应缺少 aweme_detail"); if(isAd(detail))return {kind:'ad',awemeId:string(detail.aweme_id)}; const type=number(detail.aweme_type); if(type===68||type===150){const images=array(detail.images).map(firstUrl).filter(Boolean);if(!images.length)throw new Error("图文内容缺少图片");return {kind:"note",awemeId:string(detail.aweme_id),description:string(detail.desc),authorName:string(object(detail.author)?.nickname),likeCount:number(object(detail.statistics)?.digg_count),imageUrls:images};} const rawItem=readDouyinItem(detail,"detail");if(!rawItem)throw new Error("视频内容缺少标识或播放地址");const item=admittedPlayback(rawItem,"detail");return item?{kind:"video",item}:null; }
 
 const urlAddress={url_list:null,width:null,height:null} as const;
 const variantFields={play_addr:urlAddress,url_list:null,width:null,height:null,gear_name:null,codec_type:null,is_h265:null,bit_rate:null,format:null,video_extra:{definition:null,quality:null},quality_type:null} as const;
-const itemFields={aweme_type:null,is_ads:null,raw_ad_data:null,aweme_id:null,desc:null,create_time:null,author:{uid:null,nickname:null,avatar_thumb:{url_list:null}},statistics:{digg_count:null,comment_count:null,share_count:null,collect_count:null},video:{bit_rate:[variantFields],bit_rate_audio:[{audio_meta:{codec_type:null,bitrate:null,url_list:{main_url:null,backup_url:null}}}],play_addr_h264:variantFields,play_addr_265:variantFields,play_addr_h265:variantFields,play_addr_bytevc1:variantFields,play_addr:variantFields,cover:{url_list:null},duration:null}} as const;
+const itemFields={aweme_type:null,is_ads:null,raw_ad_data:null,aweme_id:null,desc:null,create_time:null,author:{uid:null,nickname:null,avatar_thumb:{url_list:null}},statistics:{digg_count:null,comment_count:null,share_count:null,collect_count:null},video:{width:null,height:null,bit_rate:[variantFields],bit_rate_audio:[{audio_meta:{codec_type:null,bitrate:null,url_list:{main_url:null,backup_url:null}}}],play_addr_h264:variantFields,play_addr_265:variantFields,play_addr_h265:variantFields,play_addr_bytevc1:variantFields,play_addr:variantFields,cover:{url_list:null},duration:null}} as const;
 /** Only discard fields the existing mapper never reads. Native JSON projection
  * retains exact raw primitive spellings; the same mapper owns all app semantics. */
 export async function parseDouyinFeedAsync(raw:string):Promise<DouyinFeedPage>{

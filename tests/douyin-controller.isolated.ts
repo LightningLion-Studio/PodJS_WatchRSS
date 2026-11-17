@@ -11,7 +11,9 @@ mock.module('../src/ui/bili/index.tsx',()=>({BiliScreen:()=>null}));
 mock.module('../src/ui/douyin/index.tsx',()=>({DouyinScreen:()=>null}));
 mock.module('../src/ui/PlatformNotice.tsx',()=>({PendingDisclosure:()=>null}));
 import { DouyinClient } from '../src/douyin/client.ts';
+import type { DouyinStateStorage } from '../src/douyin/state-storage.ts';
 import type { DouyinItem } from '../src/douyin/types.ts';
+import type { PlaybackSource } from '../src/ui/VideoPlayerScreen.tsx';
 import type { RouteEntry } from '../src/ui/routes/types.ts';
 let readyOverride:undefined|(()=>Promise<any>);let client:DouyinClient;let optRecovery=false;let captureOverride:(()=>Promise<void>)|undefined;
 let loginOptions:any,completeLogin:(value:{cookie:string;origin:string})=>void;
@@ -20,7 +22,7 @@ let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
 const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
@@ -32,16 +34,16 @@ const {createMediaRouteController}=await import('../src/ui/routes/media-controll
 const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
 const stops:(()=>void)[]=[];afterEach(()=>stops.splice(0).forEach(stop=>stop()));
 const item=(id:string):DouyinItem=>({awemeId:id,description:id,createdAtSeconds:0,authorId:'',authorName:id,likeCount:0,commentCount:0,shareCount:0,collectCount:0,playUrl:`https://video/${id}`,durationMs:100,variants:[]});
-function fixture(opt=false,initial?:any){
+function fixture(opt=false,initial?:any,options?:{historyStorage?:DouyinStateStorage;publish?:(source:PlaybackSource|undefined)=>void}){
  entryTimers.length=0;optRecovery=opt;captureOverride=undefined;readyOverride=undefined;
  preloadWindows=[];canonicalSource=undefined;restoredFrame=undefined;prefetchHooks=undefined;localPaths.clear();invalidated.length=0;lookupOverride=undefined;proxyOverride=undefined;
  const values=new Map<string,string>();let requests=0;
- client=new DouyinClient({secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
+ client=new DouyinClient({historyStorage:options?.historyStorage,secureStorage:{get:async k=>values.get(k)??null,set:async(k,v)=>{values.set(k,v);},remove:async k=>{values.delete(k);}},transport:{request:async()=>{requests++;throw Error('offline');}}});
  let controller!:ReturnType<typeof createMediaRouteController>,stack!:()=>RouteEntry[],source:any,error!:()=>string;
  createRoot(stop=>{stops.push(stop);const [entries,setStack]=createSignal<RouteEntry[]>([{page:'home'},{page:'douyin',douyinRoute:{name:'history'}}]);stack=entries;
  const [busy,setBusy]=createSignal(false),[message,setError]=createSignal(''),[playing,setPlaying]=createSignal<any>();error=message;
  controller=createMediaRouteController({initialVideoBounds:initial?()=>({x:0,y:0,width:233,height:233}):undefined,createInitialVideoPool:initial?()=>typeof initial==='function'?initial():initial:undefined,current:()=>entries().at(-1)!,motion:{phase:'idle'},busy,setBusy,setError,settings:()=>({mediaVolumeControl:true,mediaVolumeGuard:false,playbackStartVolumeLimit:null}) as any,
- playingSource:playing,setPlayingSource:((v:any)=>{source=typeof v==='function'?v(playing()):v;return setPlaying(v);}) as any,
+ playingSource:playing,setPlayingSource:((v:any)=>{source=typeof v==='function'?v(playing()):v;const result=setPlaying(v);options?.publish?.(source);return result;}) as any,
  channels:()=>[],setChannels:(()=>[]) as any,setOriginalModes:(()=>({})) as any,setStack,setPage:(page,data)=>setStack(rows=>[...rows,{page,...data}]),popPage:()=>{setStack(rows=>rows.slice(0,-1));return true;},services:{} as any});
  });
  return {controller,stack,source:()=>source,error,requests:()=>requests,render(){const entry=stack().at(-1)!;
@@ -577,4 +579,407 @@ test('DECAP R08 retry replaces the failed cold source and a subsequent selection
  await f.controller.recoverDouyinVideo(entry,true);expect(f.source()).toMatchObject({awemeId:'b',previewOnly:false,url:items[1]!.playUrl});
  f.controller.selectDouyinTarget(entry,'next',1);expect(f.source()).toMatchObject({awemeId:'c',previewOnly:true});expect(f.source().preparationError).toBeUndefined();
  for(let i=0;i<40;i++)await Promise.resolve();expect(f.source()).toMatchObject({awemeId:'c',previewOnly:false});expect(f.requests()).toBe(0);
+});
+
+test('native resolution rejection supersedes an in-flight mirror refresh and advances the queue',async()=>{
+ const f=fixture(true),a=item('over-limit'),b=item('next-safe');
+ const save=client.savePlaybackQueue.bind(client);let savedForNext:string[]|undefined;
+ client.savePlaybackQueue=async(items,anchor,cursor,more)=>{
+  if(anchor===b.awemeId)savedForNext=items.map(value=>value.awemeId);
+  return save(items,anchor,cursor,more);
+ };
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;
+ let release!:()=>void;
+ client.resolvePlayback=async id=>{
+  if(id===a.awemeId){
+   await new Promise<void>(resolve=>{release=resolve;});
+   return {ok:true,data:{...a,playUrl:'https://fixture.invalid/late-mirror'}};
+  }
+  return {ok:true,data:b};
+ };
+ const refreshing=f.controller.recoverDouyinVideo(entry,false,0,{status:410});
+ for(let i=0;!release&&i<100;i++)await Promise.resolve();
+ expect(release).toBeDefined();
+ await f.controller.recoverDouyinVideo(entry,false,0,{code:'resolution_limit'});
+ expect(f.source()).toMatchObject({awemeId:b.awemeId,url:b.playUrl,maxVideoShortEdge:720});
+ expect(entry.queue?.diagnostics().quarantinedAwemeIds).toContain(a.awemeId);
+ release();await refreshing;
+ expect(f.source().url).toBe(b.playUrl);
+ expect(savedForNext).toEqual([b.awemeId]);
+});
+
+
+test('RVRESCAP-04 restored preview skips a native resolution rejection',async()=>{
+  const f=fixture(),a=item('bad-restored'),b=item('next-restored');
+  const save=client.savePlaybackQueue.bind(client);
+  let savedNext!:()=>void;
+  const saved=new Promise<void>(resolve=>savedNext=resolve);
+  client.savePlaybackQueue=async(items,anchor,cursor,more)=>{
+    await save(items,anchor,cursor,more);
+    if(anchor===b.awemeId)savedNext();
+  };
+  const resolve=client.resolvePlayback.bind(client);
+  client.resolvePlayback=(id,options)=>id===b.awemeId?Promise.resolve({ok:true,data:b}):resolve(id,options);
+  await client.savePlaybackQueue([a,b],a.awemeId,null,false);
+  restoredFrame={available:true,kind:'actual_frame',path:'video-frames/review.jpg'};
+  let reject!:(error:unknown)=>void;
+  proxyOverride=(selected)=>selected.awemeId===a.awemeId
+    ? new Promise((_resolve,fail)=>{reject=fail;})
+    : Promise.resolve(selected.playUrl);
+  expect(await f.controller.restoreDouyinVideo(a.awemeId,true)).toBe(true);
+  const entry=f.stack().at(-1)!;
+  expect(f.source()).toMatchObject({awemeId:a.awemeId,previewOnly:true});
+  reject(Object.assign(Error('native size 1080x1920'),{code:'resolution_limit'}));
+  for(let n=0;n<100&&f.source()?.awemeId===a.awemeId;n++)await new Promise(resolve=>setTimeout(resolve,1));
+  expect(entry.queue?.snapshot().item?.awemeId).toBe(b.awemeId);
+  expect(entry.queue?.snapshot().playlist.map(x=>x.awemeId)).toEqual([b.awemeId]);
+  expect(f.source()).toMatchObject({awemeId:b.awemeId,url:b.playUrl,previewOnly:false});
+  await saved;
+  expect(f.requests()).toBe(0);
+});
+
+test('RVRESCAP-01 RSS direct Douyin CDN carries the short-edge cap',async()=>{
+  const f=fixture(),cdn='https://v3-dy-o.zjcdn.com/fixture-1080.mp4';
+  await f.controller.openRssVideo({id:'review',link:'https://rss.invalid/post',title:'fixture'} as any,cdn);
+  expect(f.source()).toMatchObject({platform:'rss',url:cdn});
+  expect(f.source().maxVideoShortEdge).toBe(720);
+  expect(f.requests()).toBe(0);
+});
+
+test('RVRESCAP-01 normalized protocol-relative Douyin address keeps the cap',async()=>{
+  const f=fixture(),common={id:'review',link:'https://rss.invalid/post',title:'fixture'} as any;
+  const url='https://www.douyin.com/fixture-1080.mp4';
+  await f.controller.openRssVideo(common,url);
+  expect(f.source()).toMatchObject({url,maxVideoShortEdge:720});
+  await f.controller.openRssVideo(common,url.slice('https:'.length));
+  expect(f.source()).toMatchObject({url,platform:'rss'});
+  expect(f.source().maxVideoShortEdge).toBe(720);
+  expect(f.requests()).toBe(0);
+});
+
+test('RVRESCAP-04 immediate cold-start rejection opens the next item',async()=>{
+ const f=fixture(),a=item('fast-rejected'),b=item('fast-safe');
+ client.resolvePlayback=async()=>({ok:true,data:b});
+ proxyOverride=async selected=>{
+  if(selected.awemeId===a.awemeId)throw Object.assign(new Error('fixture oversized'),{code:'resolution_limit'});
+  return selected.playUrl;
+ };
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ expect(f.source()).toMatchObject({awemeId:b.awemeId,url:b.playUrl,previewOnly:false});
+ expect(f.stack().at(-1)?.queue?.snapshot().playlist.map(item=>item.awemeId)).toEqual([b.awemeId]);
+ expect(f.requests()).toBe(0);
+});
+
+test('RVRESCAP3-07 rejecting a 480-labeled adjacent source preserves its compliant 360 alternative',async()=>{
+  const f=fixture(),a=item('start-review'),b=item('adjacent-review');
+  const bad={playUrl:b.playUrl,codec:'h264' as const,width:480,height:854,bitrate:150};
+  const safe={playUrl:'https://review.invalid/360',codec:'h264' as const,width:360,height:640,bitrate:170};
+  const next={...b,variants:[bad,safe]};
+  f.controller.douyinPlay({item:a,playback:a,playlist:[a,next],hasMore:false,immersive:true});
+  await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+  const entry=f.stack().at(-1)!;
+  expect(entry.queue?.snapshot().playlist.map(x=>x.awemeId)).toEqual([a.awemeId,b.awemeId]);
+  expect(f.controller.rejectDouyinAdjacent(entry,b.awemeId,'podjs-media-cache://play/old.mp4',bad.playUrl)).toBe(true);
+  expect(entry.queue?.snapshot().playlist.map(x=>x.awemeId)).toEqual([a.awemeId,b.awemeId]);
+  expect(entry.queue?.snapshot().playlist[1]).toMatchObject({playUrl:safe.playUrl,variants:[safe]});
+  expect(f.controller.rejectDouyinAdjacent(entry,b.awemeId,'podjs-media-cache://play/old.mp4',bad.playUrl)).toBe(false);
+  expect(entry.queue?.snapshot().playlist[1]?.playUrl).toBe(safe.playUrl);
+});
+test('RVRESCAP4-03 native rejection persistently clears the non-immersive singleton',async()=>{
+  const results=[];
+  for(const count of [0,198,199,200,201,207,256]){
+    const f=fixture(),base=item('legacy-too-large-'+count);
+    const bad=count===0?base:{...base,variants:[{width:0,height:0,bitrate:100,codec:'h264' as const,playUrl:base.playUrl,
+      playUrls:Array.from({length:count},(_,i)=>'https://review.invalid/legacy-'+count+'-mirror-'+i)}]};
+    f.controller.douyinPlay({item:bad,playback:bad,playlist:[bad],hasMore:false,detailPlayback:true});
+    await f.controller.douyinNavigate({name:'player',awemeId:bad.awemeId});
+    const entry=f.stack().at(-1)!;
+    await entry.queue!.persist();
+    await client.savePlaybackQueue([bad],bad.awemeId,null,false);
+    const before=await client.restorePlaybackQueue();
+    expect(before.anchorAwemeId).toBe(bad.awemeId);
+    expect(before.items.map(v=>v.playUrl)).toEqual([bad.playUrl]);
+    expect(entry.playback?.immersive ?? false).toBe(false);
+    await f.controller.recoverDouyinVideo(entry,false,0,{code:'resolution_limit'});
+    expect(entry.queue?.snapshot().playlist).toEqual([]);
+    const restored=await client.restorePlaybackQueue();
+    expect(restored.anchorAwemeId).toBeNull();
+    results.push({count,anchor:restored.anchorAwemeId,urls:restored.items.map(v=>v.playUrl),retained:restored.items.some(v=>v.playUrl===bad.playUrl)});
+  }
+  console.log(JSON.stringify(results));
+  expect(results.filter(v=>v.retained)).toEqual([]);
+});
+
+test('RVRESCAP4-04 a rejected raced mirror does not remove a genuinely compliant primary',async()=>{
+  const f=fixture(),a=item('anchor-mirror-review'),b=item('mirror-review');
+  const good={playUrl:b.playUrl,playUrls:['https://review.invalid/bad-mirror'],codec:'h264' as const,width:480,height:854,bitrate:150};
+  const next={...b,variants:[good]};
+  f.controller.douyinPlay({item:a,playback:a,playlist:[a,next],hasMore:false,immersive:true});
+  await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+  const entry=f.stack().at(-1)!;
+  expect(entry.queue?.snapshot().playlist.map(x=>x.awemeId)).toEqual([a.awemeId,b.awemeId]);
+  await entry.queue!.persist();
+  expect(f.controller.rejectDouyinAdjacent(entry,b.awemeId,'podjs-media-cache://play/fixture.mp4',good.playUrls[0])).toBe(true);
+  const remaining=entry.queue?.snapshot().playlist.map(x=>x.awemeId);
+  console.log(JSON.stringify({remaining,goodPrimary:good.playUrl}));
+  expect(remaining).toEqual([a.awemeId,b.awemeId]);
+  expect(entry.queue?.snapshot().playlist[1]?.variants[0]?.playUrls).toEqual([]);
+  await entry.queue!.persist();
+  const restored=await client.restorePlaybackQueue();
+  expect(restored.items.find(v=>v.awemeId===b.awemeId)?.variants[0]?.playUrls).toEqual([]);
+  expect(restored.items.find(v=>v.awemeId===b.awemeId)?.playUrl).toBe(good.playUrl);
+});
+
+test('RVRESCAP5-01 a failed snapshot rewrite must not strand the foreground on a rejected source',async()=>{
+ const f=fixture(),bad=item('storage-reject-current'),safe=item('storage-reject-next');
+ f.controller.douyinPlay({item:bad,playback:bad,playlist:[bad,safe],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:bad.awemeId});
+ const entry=f.stack().at(-1)!;
+ await entry.queue!.persist();
+ expect(f.source()).toMatchObject({awemeId:bad.awemeId,url:bad.playUrl});
+ const {playbackItemKey}=await import('../src/douyin/feed-store.ts');
+ const {appLogger}=await import('../src/logs/app-logger.ts');
+ const store=(client as any).feedStore.storage;
+ let errors=0;
+ store.apply=async(changes:Array<{key:string,value:string|null}>)=>{
+  if(!errors&&changes.some(change=>change.key===playbackItemKey(bad.awemeId)&&change.value===null)){
+   errors++;
+   throw new Error('fixture SQL transaction failed once');
+  }
+  for(const {key,value} of changes)if(value===null)await store.remove(key);else await store.set(key,value);
+ };
+ const originalWarn=appLogger.w,warn=mock(originalWarn);
+ appLogger.w=warn;
+ try{await f.controller.recoverDouyinVideo(entry,false,0,{code:'resolution_limit'});}
+ finally{appLogger.w=originalWarn;}
+ expect(errors).toBe(1);
+ const result={selected:entry.queue?.snapshot().item?.awemeId,playing:f.source()?.awemeId,url:f.source()?.url,error:f.error(),errors};
+ expect(result.selected).toBe(safe.awemeId);
+ expect(result.playing).toBe(safe.awemeId);
+ expect(result.url).toBe(safe.playUrl);
+ expect(result.error).toBe('');
+ expect(warn).toHaveBeenCalledWith('DouyinPlayer','Rejected source snapshot cleanup failed');
+});
+
+test('RVRESCAP5-01 releases the replacement at the snapshot cleanup deadline',async()=>{
+ const bad=item('slow-storage-current'),safe=item('slow-storage-next');
+ let onPublish!:(source:PlaybackSource)=>void;
+ const published=new Promise<PlaybackSource>(resolve=>{onPublish=resolve;});
+ const f=fixture(false,undefined,{publish:source=>{if(source?.awemeId===safe.awemeId)onPublish(source);}});
+ f.controller.douyinPlay({item:bad,playback:bad,playlist:[bad,safe],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:bad.awemeId});
+ const entry=f.stack().at(-1)!;
+ await entry.queue!.persist();
+ const {playbackItemKey}=await import('../src/douyin/feed-store.ts');
+ const {appLogger}=await import('../src/logs/app-logger.ts');
+ const store=(client as any).feedStore.storage;
+ let notify!:()=>void,release!:()=>void;
+ const writeStarted=new Promise<void>(resolve=>notify=resolve),writeGate=new Promise<void>(resolve=>release=resolve);
+ const originalWarn=appLogger.w,warn=mock(originalWarn);
+ appLogger.w=warn;
+ let blocked=false;
+ store.apply=async(changes:Array<{key:string,value:string|null}>)=>{
+  if(!blocked&&changes.some(change=>change.key===playbackItemKey(bad.awemeId)&&change.value===null)){
+   blocked=true;
+   notify();
+   await writeGate;
+   throw Error('fixture storage unavailable');
+  }
+  for(const {key,value} of changes)if(value===null)await store.remove(key);else await store.set(key,value);
+ };
+ const recovery=f.controller.recoverDouyinVideo(entry,false,0,{code:'resolution_limit'});
+ try{
+  await writeStarted;
+  expect(f.source()?.url).toBe(bad.playUrl);
+  const deadline=entryTimers.find(timer=>timer.ms===2000);
+  expect(deadline).toBeDefined();
+  deadline!.fire();
+  expect((await published)?.url).toBe(safe.playUrl);
+  expect(f.error()).toBe('');
+  expect(warn).toHaveBeenCalledWith('DouyinPlayer','Rejected source snapshot cleanup timed out');
+ }finally{
+  release();
+  await recovery;
+  await client.restorePlaybackQueue();
+  appLogger.w=originalWarn;
+ }
+ expect(warn).toHaveBeenCalledTimes(1);
+});
+
+function resolutionChain(id:string,widths:number[]){
+ const base=item(id);
+ const variants=widths.map((width)=>({playUrl:`${base.playUrl}/${width}`,codec:'h264' as const,
+  width,height:Math.round(width*16/9),bitrate:200}));
+ return {...base,playUrl:variants[0]!.playUrl,variants};
+}
+
+for(const path of ['bound','foreground'])test(`RVRESCAP7-01 retries 480→360→540 during replacement writeback (${path})`,async()=>{
+ const chain=resolutionChain('same-item-chain',[480,360,540]);
+ const [firstUrl,secondUrl,safeUrl]=chain.variants.map(variant=>variant.playUrl);
+ const f=fixture();
+ f.controller.douyinPlay({item:chain,playback:chain,playlist:[chain],hasMore:false,immersive:true});
+ await f.controller.douyinNavigate({name:'player',awemeId:chain.awemeId});
+ const entry=f.stack().at(-1)!;
+ await entry.queue!.persist();
+ expect(f.source()?.url).toBe(firstUrl);
+ let release!:()=>void,markStarted!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ const started=new Promise<void>(resolve=>{markStarted=resolve;});
+ const save=client.savePlaybackQueue.bind(client);
+ let saveHeld=false;
+ client.savePlaybackQueue=async(items,id,cursor,hasMore)=>{
+  if(!saveHeld&&items.find(it=>it.awemeId===id)?.playUrl===secondUrl){
+   saveHeld=true;
+   markStarted();
+   await gate;
+  }
+  return save(items,id,cursor,hasMore);
+ };
+ const failure={code:'resolution_limit'};
+ const first=f.controller.recoverDouyinVideo(entry,false,0,failure,chain.awemeId,{url:firstUrl!,uri:firstUrl!});
+ let second:Promise<void>|undefined;
+ try{
+  await started;
+  expect(f.source()?.url).toBe(secondUrl);
+  second=path==='bound'
+    ?f.controller.recoverDouyinVideo(entry,false,0,failure,chain.awemeId,{url:secondUrl!,uri:secondUrl!})
+    :f.controller.recoverDouyinVideo(entry,false,0,failure);
+ }finally{
+  release();
+  await Promise.all([first,second]);
+ }
+ const restored=await client.restorePlaybackQueue();
+ expect(f.requests()).toBe(0);
+ expect(f.source()?.url).toBe(safeUrl);
+ expect(entry.queue?.snapshot().item?.playUrl).toBe(safeUrl);
+ expect(restored.items[0]?.variants.map(v=>v.playUrl)).toEqual([safeUrl]);
+});
+
+test('RVRESCAP7-01 three consecutive source rejections survive generated writeback schedules',async()=>{
+ let seed=0x720804;
+ const random=(limit:number)=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return (seed>>>8)%limit;};
+ const phases=['publish','during','after'] as const;
+ const covered=new Set<string>();
+ for(let trial=0;trial<32;trial++){
+  const chain=resolutionChain(`three-rejections-${trial}`,[480,360,540,720]);
+  const urls=chain.variants.map(variant=>variant.playUrl);
+  const timing=urls.slice(0,3).map(()=>phases[random(phases.length)]!);
+  const bound=timing.map(()=>random(2)===0);
+  const duplicate=timing.map(()=>random(2)===0);
+  const published:string[]=[],removed:string[]=[],requests:Promise<void>[]=[];
+  const triggered=new Set<number>();
+  let entry:RouteEntry|undefined;
+  const reject=(index:number)=>{
+   const url=urls[index]!;
+   if(!entry||triggered.has(index)||f.source()?.url!==url)return;
+   triggered.add(index);
+   const fail=(explicit:boolean)=>explicit
+    ?f.controller.recoverDouyinVideo(entry!,false,0,{code:'resolution_limit'},chain.awemeId,{uri:url,url})
+    :f.controller.recoverDouyinVideo(entry!,false,0,{code:'resolution_limit'});
+   requests.push(fail(bound[index]!));
+   if(duplicate[index])requests.push(fail(!bound[index]));
+  };
+  const f=fixture(false,undefined,{publish:source=>{
+   if(!source?.url)return;
+   published.push(source.url);
+   const index=urls.indexOf(source.url);
+   if(timing[index]==='publish')reject(index);
+  }});
+  f.controller.douyinPlay({item:chain,playback:chain,playlist:[chain],hasMore:false,immersive:true});
+  await f.controller.douyinNavigate({name:'player',awemeId:chain.awemeId});
+  entry=f.stack().at(-1)!;
+  const queue=entry.queue!;
+  await queue.persist();
+  const remove=queue.persistSourceRemoval.bind(queue);
+  queue.persistSourceRemoval=(id,url)=>{removed.push(url);return remove(id,url);};
+  const save=client.savePlaybackQueue.bind(client);
+  client.savePlaybackQueue=async(items,id,cursor,hasMore)=>{
+   const index=urls.indexOf(items.find(row=>row.awemeId===id)?.playUrl??'');
+   if(timing[index]==='during'){
+    await Promise.resolve();
+    reject(index);
+    await Promise.resolve();
+   }
+   return save(items,id,cursor,hasMore);
+  };
+  reject(0);
+  let completed=0;
+  for(let index=1;index<=2;index++){
+   covered.add(timing[index]!);
+   if(timing[index]!=='after')continue;
+   while(completed<requests.length)await requests[completed++];
+   reject(index);
+  }
+  while(completed<requests.length)await requests[completed++];
+  const label=`case ${trial} ${timing.slice(1).join('→')}`;
+  const restored=await client.restorePlaybackQueue();
+  expect(published,label).toEqual(urls);
+  expect(removed,label).toEqual(urls.slice(0,3));
+  expect(f.error(),label).toBe('');
+  expect(f.requests(),label).toBe(0);
+  expect(queue.snapshot().item?.playUrl,label).toBe(urls[3]);
+  expect(restored.anchorAwemeId,label).toBe(chain.awemeId);
+  expect(restored.items[0]?.variants.map(variant=>variant.playUrl),label).toEqual([urls[3]]);
+ }
+ expect([...covered].sort()).toEqual([...phases].sort());
+},10000);
+
+const restartDb=process.env.DOUYIN_RESTART_DB;
+test.skipIf(!restartDb)('RVRESCAP6-01 subprocess',async()=>{
+ const {Database}=await import('bun:sqlite');
+ const {writeSync}=await import('node:fs');
+ const {DouyinSqlStateStorage}=await import('../src/douyin/state-storage.ts');
+ const {playbackItemKey}=await import('../src/douyin/feed-store.ts');
+ const phase=process.env.DOUYIN_RESTART_PHASE;
+ const rejected=item('restart-rejected'),safeBase=item('restart-compliant');
+ const safe={...safeBase,variants:[{playUrl:safeBase.playUrl,codec:'h264' as const,width:480,height:854,bitrate:123}]};
+ const database=new Database(restartDb!,{create:phase!=='restore'});
+ database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+ let deletionCommitted=false,initialRouteReady=false;
+ const storage=new DouyinSqlStateStorage(async()=>({
+  query:async(sql,params=[])=>database.query(sql).all(...params as any[]) as Record<string,unknown>[],
+  execute:async(sql,params=[])=>{database.query(sql).run(...params as any[]);},
+  transaction:async statements=>{
+   database.transaction(()=>{for(const {sql,params=[]} of statements)database.query(sql).run(...params as any[]);})();
+   if(statements.some(({sql,params})=>sql.startsWith('DELETE')&&params?.[0]===playbackItemKey(rejected.awemeId)))deletionCommitted=true;
+  },
+ }),{get:async()=>null,set:async()=>{},remove:async()=>{}});
+ const interrupt=(boundary:string):never=>{
+  writeSync(1,JSON.stringify({boundary,deletionCommitted})+'\n');
+  process.kill(process.pid,'SIGKILL');
+  throw Error('SIGKILL did not stop the subprocess');
+ };
+ const f=fixture(false,undefined,{historyStorage:storage,publish:source=>{
+  if(phase==='publish'&&initialRouteReady&&source?.url===safe.playUrl)interrupt('publish');
+ }});
+ try{
+  if(phase==='restore'){
+   const snapshot=client.freshPlaybackSnapshot(await client.restorePlaybackQueue());
+   const resumedRejected=await f.controller.restoreDouyinVideo(rejected.awemeId,true);
+   expect(f.requests()).toBe(0);
+   expect(resumedRejected).toBe(false);
+   expect(f.source()?.url).toBeUndefined();
+   expect(snapshot.items.map(row=>row.awemeId)).toEqual([safe.awemeId]);
+   expect(snapshot.items[0]?.playUrl).toBe(safe.playUrl);
+   return;
+  }
+  const now=Date.now(),items=[rejected,safe];
+  client.freshPlaybackSnapshot({items,anchorAwemeId:rejected.awemeId,savedAtMillis:now,hasMore:false,cursor:null,
+   resolved:{[rejected.awemeId]:now,[safe.awemeId]:now}});
+  f.controller.douyinPlay({item:rejected,playback:rejected,playlist:items,hasMore:false,immersive:true});
+  await f.controller.douyinNavigate({name:'player',awemeId:rejected.awemeId});
+  const entry=f.stack().at(-1)!;
+  await entry.queue!.persist();
+  const before=client.freshPlaybackSnapshot(await client.restorePlaybackQueue());
+  expect(before.anchorAwemeId).toBe(rejected.awemeId);
+  expect(before.items.map(row=>row.awemeId)).toEqual(items.map(row=>row.awemeId));
+  expect(f.source()?.url).toBe(rejected.playUrl);
+  initialRouteReady=true;
+  if(phase==='prepare')proxyOverride=async selected=>selected.awemeId===safe.awemeId?interrupt('prepare'):selected.playUrl;
+  await f.controller.recoverDouyinVideo(entry,false,0,{code:'resolution_limit'});
+  throw Error(`Recovery did not reach the ${phase} boundary`);
+ }finally{database.close();}
 });

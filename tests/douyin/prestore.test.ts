@@ -29,8 +29,8 @@ test('DYWAIT-C complete defaults fit three large clips while all budgets remain 
  expect(douyinPrestoreConfig(undefined)).toMatchObject({count:3,entryBytes:32*1024*1024,totalBytes:128*1024*1024,minFreeBytes:512*1024*1024});
  expect(douyinPrestoreConfig({enabled:false,entryBytes:16*1024*1024,totalBytes:64*1024*1024,minFreeBytes:256*1024*1024})).toMatchObject({enabled:false,entryBytes:16*1024*1024,totalBytes:64*1024*1024,minFreeBytes:256*1024*1024});
 });
-test('DYWAIT-C prefers lowest bitrate 540p with audio over 480p, 720p and larger 540p',()=>{
+test('storage uses the same 480p preference as playback',()=>{
  const v=(name:string,width:number,bitrate:number,format:'mp4'|'dash'='mp4')=>({playUrl:'https://fixture.invalid/'+name,width,height:width*16/9,bitrate,codec:'h264' as const,format,...(format==='dash'?{audioUrl:'https://fixture.invalid/aac'}:{})});
  const variants=[v('480',480,200),v('720',720,300),v('540-large',540,500),v('540-dash',540,250,'dash')];
- const selected=completeDouyinRendition({playUrl:variants[1].playUrl,variants} as DouyinItem);expect(selected?.playUrl).toBe(variants[3].playUrl);expect(selected?.variants[0].audioUrl).toBe('https://fixture.invalid/aac');
+ const selected=completeDouyinRendition({playUrl:variants[1].playUrl,variants} as DouyinItem);expect(selected?.playUrl).toBe(variants[0].playUrl);
 });

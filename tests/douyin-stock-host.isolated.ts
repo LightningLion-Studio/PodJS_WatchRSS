@@ -3,8 +3,8 @@ let online=true,feed=0,prepares=0,registered:any[]=[],stored:any[]=[],config:any
 const value=(v:any)=>({result:Promise.resolve(v),cancel(){}});
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}}}));
 mock.module('@podjs/framework/services',()=>({delay:()=>({result:new Promise(()=>{}),cancel(){}}),discovery:{networkSnapshot:async()=>({active:online,internet:online,validated:online,wifi:true,metered:false})}}));
-mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,preserveSelectedDouyinItem:(v:any)=>v,decodableDouyinItem:async(v:any)=>v,VideoPlaybackTrace:class{event(){}},registerVideoResolution(){}}));
-mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{register:(...args:any[])=>{registered.push(args);const gate=registrationGate?.();return {result:Promise.resolve(gate).then(()=>({uri:'podjs-media-cache://play/'+args[0]})),cancel(){operationCancels++;}};}},localMediaStore:{configure:(c:any)=>{config=c;return value(undefined);},list:()=>value({items:stored}),lookup:(key:string)=>value({item:stored.find(v=>v.key===key)}),prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){operationCancels++;}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
+mock.module('../src/media/video-opt.ts',()=>({videoOptEnabled:()=>false,decodableDouyinItem:async(v:any)=>v,VideoPlaybackTrace:class{event(){}},registerVideoResolution(){}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({mediaPrefixCache:{remove:()=>value(undefined),register:(...args:any[])=>{registered.push(args);const gate=registrationGate?.();return {result:Promise.resolve(gate).then(()=>({uri:'podjs-media-cache://play/'+args[0]})),cancel(){operationCancels++;}};}},localMediaStore:{remove:(key:string)=>{stored=stored.filter(v=>v.key!==key);return value(undefined);},configure:(c:any)=>{config=c;return value(undefined);},list:()=>value({items:stored}),lookup:(key:string)=>value({item:stored.find(v=>v.key===key)}),prepare:(key:string,_uri:string,metadata:any)=>{prepares++;const item={key,metadata,audioTracks:1,videoTracks:1,uri:'file:///complete/'+metadata.awemeId+'.mp4',watched:false,bytes:1000,frame:{available:true,path:'frame.jpg'}};const gate=prepareGate?.();return {result:Promise.resolve(gate).then(()=>{stored.push(item);return {ready:true,item};}),cancel(){operationCancels++;}};},watched:(key:string)=>{stored.find(v=>v.key===key).watched=true;return value(undefined);},cancel:()=>value(undefined),clear:()=>value(undefined)}}));
 const {createHostDouyinStock}=await import('../src/douyin/stock-host.ts');
 test('complete stock uses browsing candidates, survives restart offline, and never reads expired URLs',async()=>{
  const client={stockAuthorizationScope:async()=> 'fixture-scope',isLoggedIn:async()=>true,listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({Cookie:'private-cookie'}),fetchFeedPage:async()=>{feed++;throw Error('extra feed forbidden');}};
@@ -72,4 +72,42 @@ test('P2-03 Cookie replacement cancels a submitted native prepare operation',asy
  const host=createHostDouyinStock(client as any);host.offer!([{awemeId:'late-prepare',description:'fixture',authorName:'fixture',playUrl:'https://fixture.invalid/media?x-expires=9999999999',durationMs:1000,variants:[]}] as any);
  const pending=host.resume();for(let n=0;!started&&n<100;n++)await Promise.resolve();expect(started).toBe(true);expect(prepares).toBe(1);
  scope='new';listener('unknown');expect(operationCancels).toBe(1);release();await pending;expect(await host.restore()).toEqual([]);expect(prepares).toBe(1);host.suspend();
+});
+
+test('stored portrait metadata is excluded even if the native inventory still lists it',async()=>{
+ online=false;stored=[{key:'portrait',uri:'file:///portrait.mp4',metadata:{awemeId:'portrait',description:'fixture',authorName:'fixture',durationMs:1000,stockAuthorization:'fixture-scope',width:1080,height:1920},audioTracks:1,videoTracks:1,bytes:100,frame:{available:true}}];
+ const client={stockAuthorizationScope:async()=> 'fixture-scope',listWatchedIds:async()=>[]};
+ const host=createHostDouyinStock(client as any);
+ expect(await host.restore()).toEqual([]);
+ expect(await host.playbackReady('portrait')).toBeUndefined();
+ expect(stored).toEqual([]);
+});
+
+const {admitDouyinItem}=await import('../src/douyin/playback-ingress.ts');
+
+test('RVRESCAP-07 cancels the active 1080 stock transfer and stores the 480 replacement',async()=>{
+  online=true;stored=[];registered=[];prepares=0;operationCancels=0;
+  let release!:()=>void,started=false;
+  prepareGate=()=>{prepareGate=undefined;started=true;return new Promise<void>(resolve=>release=resolve);};
+  const offline={stockAuthorizationScope:async()=> 'review-scope',isLoggedIn:async()=>true,
+    listWatchedIds:async()=>[],buildPlaybackHeaders:async()=>({})};
+  const old={awemeId:'review',description:'review',authorName:'review',
+    playUrl:'https://review.invalid/1080',variants:[],durationMs:1000};
+  const high={playUrl:old.playUrl,width:1080,height:1920,bitrate:100,codec:'h264'};
+  const safe={playUrl:'https://review.invalid/480',width:480,height:854,bitrate:100,codec:'h264'};
+  const host=createHostDouyinStock(offline as any);
+  host.offer!([old] as any);
+  const pending=host.resume();
+  for(let i=0;!started&&i<100;i++)await Promise.resolve();
+  expect(started).toBe(true);
+  expect(registered[0][1]).toBe(high.playUrl);
+  host.offer!([admitDouyinItem({...old,playUrl:safe.playUrl,variants:[high,safe]} as any)!]);
+  expect(operationCancels).toBe(1);
+  release();
+  await pending;
+  for(let i=0;!stored.length&&i<100;i++)await Promise.resolve();
+  await host.resume();
+  expect(registered.map(values=>values[1])).toEqual([high.playUrl,safe.playUrl]);
+  expect(stored.map(value=>value.metadata.width)).toEqual([480]);
+  host.suspend();
 });

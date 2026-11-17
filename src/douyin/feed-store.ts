@@ -1,11 +1,12 @@
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
+import {admitDouyinItem,withoutDouyinSource} from './playback-ingress.ts';
 import {projectJsonAsync} from "@podjs/framework/json";
 import {yieldWorkTurn} from "@podjs/framework/text-layout";
 import {traceServiceWork} from "@podjs/framework/service-trace";
 import {appLogger} from '../logs/app-logger.ts';
 import {logPlatformId} from '../logs/fields.ts';
-import {applyDouyinState,readDouyinState,type DouyinStateStorage} from "./state-storage.ts";
+import {applyDouyinState,readDouyinState,type DouyinStateChange,type DouyinStateStorage} from "./state-storage.ts";
 import type { DouyinFeedSnapshot, DouyinItem } from "./types.ts";
 
 export interface RecentFeed extends DouyinFeedSnapshot { anchorAwemeId: string | null; savedAtMillis: number; resolved: Record<string, number> }
@@ -30,6 +31,32 @@ export const snapshotRecordKey=(key:string)=>key.replace(/\.v1$/,'.v2');
 export const playbackItemKey=(id:string)=>`douyin.playback-item.v2.${id}`;
 export const PLAYBACK_ITEMS_KEY='douyin.playback-items.v2';
 const SNAPSHOTS=[FEED_KEY,RECENT_KEY,QUEUE_KEY];
+const OBSOLETE_RESOLUTION_KEY='douyin.resolution-rejections.v1';
+
+function snapshotWithItems(snapshot:RecentFeed,items:DouyinItem[],discarded:Iterable<string>):RecentFeed {
+  const anchorAwemeId=items.some(item=>item.awemeId===snapshot.anchorAwemeId)?snapshot.anchorAwemeId:null;
+  const original=snapshot.resolved??{};
+  let resolved=original;
+  for(const id of discarded)if(Object.hasOwn(resolved,id)){
+    if(resolved===original)resolved={...resolved};
+    delete resolved[id];
+  }
+  return {...snapshot,items,anchorAwemeId,resolved};
+}
+
+function filterSnapshot(snapshot:RecentFeed,limit:number){
+  const discarded=new Set<string>();
+  let changed=false;
+  const candidates=snapshot.items.flatMap(item=>{
+    const admitted=admitDouyinItem(item);
+    if(admitted!==item)changed=true;
+    if(admitted)return [admitted];
+    if(typeof item?.awemeId==='string')discarded.add(item.awemeId);
+    return [];
+  });
+  const items=normalizeItems(candidates).slice(0,limit);
+  return {snapshot:snapshotWithItems(snapshot,items,discarded),changed};
+}
 type SnapshotRecord=Omit<RecentFeed,'items'>&{ids:string[]};
 // Capture all DTO scalars and variant scalars without traversing large strings.
 // This also detects callers editing a DTO in place between saves.
@@ -52,6 +79,7 @@ function preferredItem(item:DouyinItem):DouyinItem{
 }
 export class DouyinFeedStore {
   private writes:Promise<unknown>=Promise.resolve();
+  private obsoleteCleaned=false;
   // Scalar comparison records share the DTO's immutable strings. Retaining
   // both encoded JSON and parsed variants duplicated every signed address.
   private readonly persisted=new PlaybackCache<string,{resolvedAtMillis:number;fields:unknown[]}>(4*1024*1024,200,(value,key)=>2*key.length+playbackPayloadBytes(value.fields));
@@ -69,32 +97,48 @@ export class DouyinFeedStore {
   memoryStats(){return {preferredEntries:preferredItems.size,preferredBytes:preferredItems.bytes,encodedEntries:0,encodedBytes:0,persistedEntries:this.persisted.size,persistedBytes:this.persisted.bytes};}
   private enqueue<T>(work:()=>Promise<T>):Promise<T>{const pending=this.writes.catch(()=>{}).then(work);this.writes=pending;return pending;}
   private async metadata(key:string):Promise<SnapshotRecord|null>{const raw=await this.storage.get(snapshotRecordKey(key));if(raw===null)return null;const value=JSON.parse(raw);if(!Array.isArray(value?.ids)||value.ids.length>(key===QUEUE_KEY?200:40)||value.ids.some((id:unknown)=>typeof id!=='string'))throw Error('Invalid Douyin snapshot');return value;}
+  private async readLegacy(key:string):Promise<RecentFeed|undefined>{
+    const raw=await traceServiceWork('douyin.store.get',()=>this.storage.get(key));
+    if(raw===null)return;
+    try{
+      const value=await projectJsonAsync(raw,{items:[null],cursor:null,hasMore:null,anchorAwemeId:null,savedAtMillis:null,resolved:null}) as Record<string,any>|null;
+      if(!value||!Array.isArray(value.items))return;
+      return {
+        items:value.items,cursor:typeof value.cursor==='string'?value.cursor:null,hasMore:value.hasMore===true,
+        anchorAwemeId:value.anchorAwemeId,savedAtMillis:Number(value.savedAtMillis)||0,
+        resolved:value.resolved&&typeof value.resolved==='object'?value.resolved:{},
+      };
+    }catch{return;}
+  }
+  private async readVersioned(metadata:SnapshotRecord):Promise<RecentFeed>{
+    const items:DouyinItem[]=[];
+    for(let i=0;i<metadata.ids.length;i+=4){
+      const ids=metadata.ids.slice(i,i+4),rows=await readDouyinState(this.storage,ids.map(playbackItemKey));
+      for(let j=0;j<rows.length;j++){
+        if(rows[j]===null)throw Error('Missing Douyin playback item');
+        const stored=JSON.parse(rows[j]!),item=stored.item;if(item?.awemeId!==ids[j])throw Error('Invalid Douyin playback item');
+        const memo={fields:itemFields(item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};
+        this.persisted.set(item.awemeId,memo);this.durableItems.set(item,{...memo,revision:this.revision(item.awemeId,true)});items.push(item);
+      }
+      await yieldWorkTurn().result;
+    }
+    const {ids:_,...fields}=metadata;
+    return {...fields,items};
+  }
   read(key:string):Promise<RecentFeed>{return this.enqueue(async()=>{
     await yieldWorkTurn().result;
-    const metadata=await this.metadata(key);
-    if(metadata){
-      const items:DouyinItem[]=[];
-      for(let i=0;i<metadata.ids.length;i+=4){
-        const ids=metadata.ids.slice(i,i+4),rows=await readDouyinState(this.storage,ids.map(playbackItemKey));
-        for(let j=0;j<rows.length;j++){
-          if(rows[j]===null)throw Error('Missing Douyin playback item');
-          const stored=JSON.parse(rows[j]!),item=stored.item;if(item?.awemeId!==ids[j])throw Error('Invalid Douyin playback item');
-          const memo={fields:itemFields(item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};
-          this.persisted.set(item.awemeId,memo);this.durableItems.set(item,{...memo,revision:this.revision(item.awemeId,true)});items.push(item);
-        }
-        await yieldWorkTurn().result;
-      }
-      const {ids:_,...fields}=metadata;return {...fields,items:normalizeItems(items)};
+    if(!this.obsoleteCleaned){
+      if((await this.storage.get(OBSOLETE_RESOLUTION_KEY))?.startsWith('['))await this.storage.remove(OBSOLETE_RESOLUTION_KEY);
+      this.obsoleteCleaned=true;
     }
-    const raw=await traceServiceWork('douyin.store.get',()=>this.storage.get(key));
-    let snapshot:RecentFeed;
-    try {
-      const value=await projectJsonAsync(raw??'null',{items:[null],cursor:null,hasMore:null,anchorAwemeId:null,savedAtMillis:null,resolved:null}) as Record<string,any>|null;
-      if(!value||!Array.isArray(value.items))return EMPTY();
-      const items=traceServiceWork('douyin.store.normalize',()=>normalizeItems(value.items)).slice(0,key===QUEUE_KEY?200:40);
-      snapshot={items,cursor:typeof value.cursor==='string'?value.cursor:null,hasMore:value.hasMore===true,anchorAwemeId:items.some(x=>x.awemeId===value.anchorAwemeId)?value.anchorAwemeId:null,savedAtMillis:Number(value.savedAtMillis)||0,resolved:value.resolved&&typeof value.resolved==='object'?value.resolved:{}};
-    }catch{return EMPTY();}
-    await this.saveNow(key,snapshot);await this.storage.remove(key);return snapshot;
+    const metadata=await this.metadata(key);
+    const raw=metadata?await this.readVersioned(metadata):await this.readLegacy(key);
+    if(!raw)return EMPTY();
+    const {snapshot,changed}=filterSnapshot(raw,key===QUEUE_KEY?200:40);
+    // V2 owns restore once published, including after an interrupted migration.
+    if(!metadata||changed)await this.saveNow(key,snapshot,changed);
+    if(!metadata||await this.storage.get(key)!==null)await this.storage.remove(key);
+    return snapshot;
   });}
   async bootstrap(): Promise<RecentFeed> {
     await this.writes;
@@ -110,9 +154,9 @@ export class DouyinFeedStore {
   save(key:string,snapshot:RecentFeed):Promise<void>{
     const copy={...snapshot,items:[...snapshot.items]};return this.enqueue(()=>this.saveNow(key,copy));
   }
-  private async saveNow(key:string,snapshot:RecentFeed):Promise<void>{
+  private async saveNow(key:string,snapshot:RecentFeed,cleaning=false):Promise<void>{
     const items=await normalizeItemsInTurns(snapshot.items,key===QUEUE_KEY?200:40),ids=items.map(item=>item.awemeId);
-    const originals=new Map(snapshot.items.map(item=>[item.awemeId.trim(),item]));
+    const originals=new Map(snapshot.items.filter(item=>typeof item?.awemeId==="string").map(item=>[item.awemeId.trim(),item]));
     const knownRaw=await this.storage.get(PLAYBACK_ITEMS_KEY),known=new Set<string>(knownRaw?JSON.parse(knownRaw):[]);
     // Encode only new/changed immutable item DTOs. Bound each guest turn to one
     // item; durable SQL updates retain one item plus the small ownership index; a page turn never re-encodes a list.
@@ -126,7 +170,7 @@ export class DouyinFeedStore {
       if(!prior&&known.has(item.awemeId)){const raw=await this.storage.get(playbackItemKey(item.awemeId));if(raw){const stored=JSON.parse(raw);prior={fields:itemFields(stored.item),resolvedAtMillis:Number(stored.resolvedAtMillis)||0};this.persisted.set(item.awemeId,prior);}}
       // Compare unchanged DTO fields before encoding. A byte-limited JSON memo
       // must not turn every 40-item save into 40 yields and re-encodes.
-      if(prior&&known.has(item.awemeId)&&(prior.resolvedAtMillis>resolvedAtMillis||prior.resolvedAtMillis===resolvedAtMillis&&sameFields(prior.fields,fields))){
+      if(prior&&known.has(item.awemeId)&&(!cleaning&&prior.resolvedAtMillis>resolvedAtMillis||prior.resolvedAtMillis===resolvedAtMillis&&sameFields(prior.fields,fields))){
         this.durableItems.set(original,{fields,resolvedAtMillis,revision:this.revision(item.awemeId)});continue;
       }
       await yieldWorkTurn().result;
@@ -137,13 +181,51 @@ export class DouyinFeedStore {
       this.persisted.set(item.awemeId,{fields,resolvedAtMillis});
       this.durableItems.set(original,{fields,resolvedAtMillis,revision:this.revision(item.awemeId,true)});
     }
-    const {items:_,...fields}=snapshot,metadata:SnapshotRecord={...fields,ids};
+    const {items:_,...fields}=snapshotWithItems(snapshot,items,[]),metadata:SnapshotRecord={...fields,ids};
     const referenced=new Set(ids);
     for(const other of SNAPSHOTS)if(other!==key)for(const id of (await this.metadata(other))?.ids??[])referenced.add(id);
     const obsolete=[...known].filter(id=>!referenced.has(id));
     await applyDouyinState(this.storage,[...obsolete.map(id=>({key:playbackItemKey(id),value:null})),
       {key:snapshotRecordKey(key),value:JSON.stringify(metadata)},{key:PLAYBACK_ITEMS_KEY,value:JSON.stringify([...referenced])}]);
     for(const id of obsolete){this.persisted.delete(id);this.revisions.delete(id);}
+  }
+  removeSource(id:string,url:string):Promise<void>{
+    return this.enqueue(async()=>{
+      const rowKey=playbackItemKey(id),raw=await this.storage.get(rowKey);
+      const stored=raw===null?undefined:JSON.parse(raw) as {item:DouyinItem;resolvedAtMillis:number};
+      const item=stored?.item?.awemeId===id?stored.item:undefined;
+      const replacement=item&&withoutDouyinSource(item,url);
+      const changes:DouyinStateChange[]=[];
+      if(item&&replacement!==item){
+        if(!replacement){
+          for(const key of SNAPSHOTS){
+            const record=await this.metadata(key);
+            if(!record?.ids.includes(id))continue;
+            const resolved={...record.resolved};delete resolved[id];
+            changes.push({key:snapshotRecordKey(key),value:JSON.stringify({...record,resolved,
+              ids:record.ids.filter(value=>value!==id),anchorAwemeId:record.anchorAwemeId===id?null:record.anchorAwemeId})});
+          }
+          const index=await this.storage.get(PLAYBACK_ITEMS_KEY);
+          if(index!==null)changes.push({key:PLAYBACK_ITEMS_KEY,value:JSON.stringify((JSON.parse(index) as string[]).filter(value=>value!==id))});
+        }
+        changes.push({key:rowKey,value:replacement?JSON.stringify({...stored,item:replacement}):null});
+        await applyDouyinState(this.storage,changes);
+        this.persisted.delete(id);this.revision(id,true);
+      }
+      for(const key of SNAPSHOTS){
+        const legacy=await this.readLegacy(key);
+        const old=legacy?.items.find(value=>value?.awemeId===id);
+        if(!legacy||!old)continue;
+        const next=withoutDouyinSource(old,url);
+        if(next===old)continue;
+        if(!await this.metadata(key)){
+          const {snapshot}=filterSnapshot(snapshotWithItems(legacy,legacy.items.flatMap(value=>
+            value?.awemeId===id?(next?[next]:[]):[value]),next?[]:[id]),key===QUEUE_KEY?200:40);
+          await this.saveNow(key,snapshot);
+        }
+        await this.storage.remove(key);
+      }
+    });
   }
   clear():Promise<void>{return this.enqueue(async()=>{
     const raw=await this.storage.get(PLAYBACK_ITEMS_KEY),ids:string[]=raw?JSON.parse(raw):[];

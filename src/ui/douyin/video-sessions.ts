@@ -1,17 +1,18 @@
 import {VideoSessionPool} from '@podjs/framework/video-session-pool';
-import {douyinPlaybackAudio} from '../../douyin/playback-selector.ts';
+import {DOUYIN_MAX_SHORT_EDGE,douyinPlaybackAudio} from '../../douyin/playback-selector.ts';
 export {videoPagerSettleDuration as douyinPagerSettleDuration} from '@podjs/framework/video-paging';
 import type { PlaybackSource } from "../VideoPlayerScreen.tsx";
 import type { DouyinItem } from "../../douyin/types.ts";
 
 export {videoPagerDelta as douyinPagerDelta,VIDEO_PAGER_SNAP_POSITIONAL_THRESHOLD as DOUYIN_PAGER_SNAP_POSITIONAL_THRESHOLD,VIDEO_PAGER_MIN_FLING_VELOCITY as DOUYIN_PAGER_MIN_FLING_VELOCITY,VIDEO_PAGER_SETTLE_DURATION_MS as DOUYIN_PAGER_SETTLE_DURATION_MS,videoPagerProgress as douyinPagerProgress,shouldSettleVideoPager as shouldSettleDouyinPager,videoPagerSettleProgress as douyinPagerSettleProgress} from '@podjs/framework/video-paging';
 export type DouyinPagerDirection = 'up'|'down';
-export interface DouyinPreparedSource {key:string;source:PlaybackSource;authorizationVersion?:number;queueIndex?:number;anchorIndex?:number}
+export interface DouyinPreparedSource {key:string;source:PlaybackSource;attemptedUrl?:string;authorizationVersion?:number;queueIndex?:number;anchorIndex?:number}
 
-export function douyinDecoderProfile(item:DouyinItem,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight"|"audioUrl">{
-  const variant=item.variants.find(candidate=>candidate.playUrl===url||candidate.playUrls?.includes(url));
-  if(!variant)return {audioUrl:undefined};
+export function douyinDecoderProfile(item:Pick<DouyinItem,"playUrl"|"variants">,url=item.playUrl):Pick<PlaybackSource,"videoMime"|"videoWidth"|"videoHeight"|"audioUrl"|"maxVideoShortEdge">{
+  const variant=item.variants?.find(v=>v.playUrl===url||v.playUrls?.includes(url));
+  if(!variant)return {audioUrl:undefined,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE};
   return {
+    maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE,
     audioUrl:douyinPlaybackAudio(item,url),
     ...(variant.codec==="h264"?{videoMime:"video/avc"}:variant.codec==="h265"?{videoMime:"video/hevc"}:{}),
     ...(variant.width>0?{videoWidth:variant.width}:{}),
