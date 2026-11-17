@@ -297,17 +297,17 @@ Execute and inspect these phases individually:
    HTTP timeouts are unchanged.
 7. Run `validate`. It requires exactly two successful `GET` requests to the exact
    privacy endpoint (an increase of one across process death), the same body R
-   through the held loading observation, canonical anchor `{index:0,offsetPx:0}`,
-   and semantic geometry matching the original top. Whole persistent KV bytes
-   must retain their seeded digest throughout.
+   through the held loading observation, and the same canonical list anchor and
+   semantic geometry as the scrolled view before process death. Whole persistent
+   KV bytes must retain their seeded digest throughout.
 
 The held barrier brackets both the new-process snapshot and raw body read with
 the same server request still held. At that moment the compact saved entry must
-retain the original non-null body reference R while reporting
-`isLoading=true`, `listAnchor=null`, and zero compatibility offset; the document
-list must be absent from the semantic tree. This distinguishes the observed
-loading reset from missing-file hydration fallback. Only after that evidence is
-durably saved may the coordinator publish `release-2.json`. A missed window or
+retain the original non-null body reference R and list anchor while reporting
+`isLoading=true`. The semantic tree must still show the document and match the
+pre-kill scrolled view. The anchor and visible geometry establish the position.
+The compatibility offset is validated as a nonnegative number. The coordinator
+publishes `release-2.json` after saving this evidence durably. A missed window or
 uncertain release records failure and permits only `collect`; it cannot be
 retried into a passing result.
 
@@ -318,9 +318,9 @@ the durable snapshot acknowledgements, process identities, event order and KV
 receipts. Raw recovery files are read only from the isolated package's
 `files/podjs/files/legal-recovery/v1/` subtree, with symlink/hardlink checks.
 
-This scenario proves the observed held-loading anchor reset after an externally
-terminated process. It does not assert exact candidate-consumption or mount
-event counts, a true-fast branch, pixels, physical gestures, actual low-memory
-pressure, or performance. The disabled fixture event logger is never excluded
+This scenario verifies document visibility and scroll position during and after
+reload following external process termination. Exact candidate-consumption and
+mount event counts, response timing relative to frames, pixels, physical
+gestures, low-memory pressure, and performance are outside this check. The disabled fixture event logger is never excluded
 from the KV comparison. Stop the owned server and remove only the owned reverse
 mapping after collecting the final evidence; the coordinator does neither.

@@ -11,6 +11,8 @@ import type {InformationDocumentHandle, InformationDocumentProps} from "../src/u
 import type {InformationRef, InformationScreenProps, InformationSnapshot} from "../src/ui/InformationScreens.tsx";
 import {defaultReaderPreset} from "../src/reader/preset.ts";
 import {informationText} from "../src/ui/information-data.ts";
+import {NetworkRecovery} from "../src/network/recovery.ts";
+import {NetworkRecoveryContext} from "../src/network/context.ts";
 
 // Compile the real screen using production-style Solid getters. Every mock is
 // a renderer/service boundary; the screen's effects and ownership remain real.
@@ -139,7 +141,7 @@ function textIn(value: unknown): string {
   const node = value as Element;
   return String(node.props.accessibilityLabel ?? "") + String((node.props.options as SystemTextLineOptions | undefined)?.text ?? "") + textIn(node.props.children);
 }
-function mount(overrides: Partial<InformationScreenProps> = {}) {
+function mount(overrides: Partial<InformationScreenProps> = {}, network?:NetworkRecovery) {
   let tree: unknown, owner!: Owner, dispose!: () => void, ref: Parameters<InformationRef>[0] | undefined;
   const snapshots: InformationSnapshot[] = [], navigation: string[] = [], events:string[] = [];
   const input: InformationScreenProps = {
@@ -150,7 +152,11 @@ function mount(overrides: Partial<InformationScreenProps> = {}) {
     onRestorationEvent:event => events.push(event),
     ref: value => {ref = value;}, ...overrides,
   };
-  createRoot(stop => {dispose = stop; disposers.push(stop); owner = getOwner()!; tree = InformationScreen(input);});
+  createRoot(stop => {
+    dispose = stop; disposers.push(stop); owner = getOwner()!;
+    tree = network ? createComponent(NetworkRecoveryContext.Provider,{value:network,get children(){return createComponent(InformationScreen,input);}})
+      : InformationScreen(input);
+  });
   const nodes = () => runWithOwner(owner, () => visit(tree))!;
   const snapshot = () => {expect(ref?.snapshot).toBeFunction(); return ref!.snapshot!();};
   return {input, nodes, snapshot, snapshots, navigation, events, dispose, ref: () => ref, owner};
@@ -415,42 +421,42 @@ test("top restoration refetches but a response before the next frame keeps the c
   expect(mounted.events).toEqual(['document-mounted','candidate-consumed','response-applied']);
 });
 
-test("a committed loading branch discards only the consumed live list and later success starts at zero", async () => {
+test("a cross-frame successful reload updates the same list and preserves its scroll position", async () => {
   const original = state("旧正文仍单独保存",null,2309), mounted = mount({restoredState:original});
   const document = renderedDocument(mounted);
   frame();
-  expect(document.disposed).toBe(true);
-  expect(mounted.nodes().filter(node => node.kind==='WatchProgressIndicator')).toHaveLength(1);
-  expect(mounted.snapshot()).toEqual(state(original.content,null,0,true,0,null));
-  expect(mounted.events).toContain('document-unmounted');
-  expect(mounted.events).toContain('loading-committed');
+  expect(renderedDocument(mounted)).toBe(document);
+  expect(mounted.snapshot()).toEqual({...original,isLoading:true});
+  expect(mounted.events).toEqual(['document-mounted','candidate-consumed']);
+
   requests[0]!.resolve("慢响应正文");
-  await microtasks();
-  frame();
-  const replacement = renderedDocument(mounted);
-  expect(replacement).not.toBe(document);
-  expect(replacement.initialAnchor).toBeUndefined();
-  expect(mounted.snapshot()).toEqual(state("慢响应正文",null));
-  expect(mounted.events.filter(event => event==='candidate-consumed')).toHaveLength(1);
+  await settle();
+  expect(renderedDocument(mounted)).toBe(document);
+  expect(document.props.content).toBe("慢响应正文");
+  expect(mounted.snapshot()).toEqual({...original,content:"慢响应正文"});
+  expect(mounted.events).toEqual(['document-mounted','candidate-consumed','response-applied']);
 });
 
-test("saving and recreating after committed unmount cannot resurrect the consumed candidate", async () => {
-  const first = mount({restoredState:state("首次正文",null,1508)});
-  renderedDocument(first);
+test("saving and recreating during a reload preserves the cached body and its live position", async () => {
+  const original = state("首次正文",null,1508);
+  const first = mount({restoredState:original});
   frame();
   const checkpoint = first.snapshot();
-  expect(checkpoint.listAnchor).toBeNull();
+  expect(checkpoint).toEqual({...original,isLoading:true});
   first.dispose();
+
   const second = mount({restoredState:checkpoint});
-  expect(second.nodes().some(node=>node.kind==='InformationDocument')).toBe(false);
+  const document = renderedDocument(second);
+  expect(document.props.content).toBe(original.content!);
+  expect(document.initialAnchor).toEqual(checkpoint.listAnchor ?? undefined);
   requests.at(-1)!.resolve("第二次恢复响应");
-  await microtasks(); frame();
-  expect(renderedDocument(second).initialAnchor).toBeUndefined();
-  expect(second.snapshot().listAnchor).toEqual({index:0,offsetPx:0});
+  await settle();
+  expect(renderedDocument(second)).toBe(document);
+  expect(second.snapshot()).toEqual({...original,content:"第二次恢复响应"});
 });
 
 test("an unconsumed candidate survives loading, another save, error and retry until the first document mount", async () => {
-  const pending = state("加载时保留的旧正文",null,0,true,2,{index:8,offsetPx:17});
+  const pending = state(null,null,0,true,2,{index:8,offsetPx:17});
   const first = mount({restoredState:pending});
   frame(); frame();
   expect(first.nodes().some(node=>node.kind==='InformationDocument')).toBe(false);
@@ -491,4 +497,81 @@ test("disposing the whole successful screen does not publish a synthetic lost-li
   expect(mounted.snapshots).toHaveLength(count);
   expect(mounted.snapshots.at(-1)).toEqual(checkpoint);
   expect(mounted.events).not.toContain('document-unmounted');
+});
+
+
+test("a cross-frame offline reload keeps the cached document and its scroll position", async () => {
+ const cached="上次读取的协议正文";
+ const mounted=mount({restoredState:state(cached,null,1207)});
+ const document=renderedDocument(mounted);
+ document.setOffset(1871);
+ const {listAnchor,scrollOffset}=mounted.snapshot();
+
+ await settle();
+ expect(document.disposed).toBe(false);
+ expect(renderedDocument(mounted)).toBe(document);
+ expect(mounted.nodes().some(node=>node.kind==="WatchProgressIndicator")).toBe(false);
+ expect(mounted.snapshot()).toMatchObject({listAnchor,scrollOffset,isLoading:true});
+
+ requests.at(-1)!.reject(Object.assign(Error("offline"),{code:"network_error"}));
+ await settle();
+ expect(renderedDocument(mounted)).toBe(document);
+ expect(document.props.content).toBe(cached);
+ expect(mounted.snapshot()).toMatchObject({listAnchor,scrollOffset,error:failure,isLoading:false});
+});
+
+
+test("an unconfirmed outage ends loading and exposes the legal page retry", async () => {
+  let routeNotice!:(requested:number)=>void,requested=0;
+  let rejectCheck!:(error:Error)=>void;
+  const timers = new Map<number,{due:number;complete:()=>void}>();
+  let clock=0,id=0;
+  const network = new NetworkRecovery({
+    observe(notify,invalidate){ routeNotice=invalidate; notify("available",{requested:++requested}); return ()=>{}; },
+    startCheck(){
+      requested++;
+      let reject!:typeof rejectCheck;
+      const result=new Promise<never>((_,fail)=>{reject=fail;});
+      rejectCheck=reject;
+      return {result,cancel(){reject(Error("check cancelled"));}};
+    },
+    delay(ms){
+      const key=++id,due=clock+ms;
+      const result=new Promise<void>(resolve=>timers.set(key,{due,complete:resolve}));
+      return {result,cancel(){timers.delete(key);}};
+    },
+  });
+  const advance=async(ms:number)=>{
+    clock+=ms;
+    for(const [key,timer] of timers)if(timer.due<=clock){timers.delete(key);timer.complete();}
+    await settle();
+  };
+  network.setActive(true);
+  disposers.push(()=>network.dispose());
+  const mounted=mount({},network);
+  requests[0]!.reject(Object.assign(Error("offline"),{code:"network_error"}));
+  await settle();
+  routeNotice(requested);
+  await settle();
+
+  for(let i=0;i<2;i++){
+    await advance(5000);
+    rejectCheck(Error("snapshot lookup failed"));
+    await settle();
+  }
+  await advance(4999);
+  expect(mounted.snapshot().isLoading).toBe(true);
+  expect(network.blocking).toBe(false);
+  await advance(1);
+  expect(timers.size).toBe(0);
+  expect(network.blocking).toBe(false);
+  expect(mounted.snapshot()).toEqual(state(null,failure));
+  expect(mounted.nodes().some(node=>node.kind==="WatchProgressIndicator")).toBe(false);
+
+  retry(mounted);
+  await settle();
+  expect(requests).toHaveLength(2);
+  requests[1]!.resolve("重试成功正文");
+  await settle();
+  expect(renderedDocument(mounted).props.content).toBe("重试成功正文");
 });

@@ -1,12 +1,12 @@
 import type { DouyinErrorCode } from './types.ts';
 
-export interface DouyinPlaybackFailure {code:DouyinErrorCode;retryAfterMs?:number;}
+export interface DouyinPlaybackFailure {networkFailure?:boolean;httpStatus?:number;code:DouyinErrorCode;retryAfterMs?:number;}
 /** Preserve closed recovery metadata across the playback promise boundary. */
 export function douyinPlaybackFailure(error:unknown):DouyinPlaybackFailure {
   const value=error as Partial<DouyinPlaybackFailure>|null;
   const codes:DouyinErrorCode[]=['PLAYBACK_FAILED','NOT_LOGGED_IN','REQUEST_FAILED','PARSE_FAILED','UNSUPPORTED','resolution_limit','CANCELLED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'];
   const code=codes.includes(value?.code as DouyinErrorCode)?value!.code!:'PLAYBACK_FAILED';
-  return {code,...(Number.isFinite(value?.retryAfterMs)&&value!.retryAfterMs!>0?{retryAfterMs:value!.retryAfterMs}:{})};
+  return {code,...(value?.networkFailure===true?{networkFailure:true}:{}),...(Number.isInteger(value?.httpStatus)?{httpStatus:value!.httpStatus}:{}),...(Number.isFinite(value?.retryAfterMs)&&value!.retryAfterMs!>0?{retryAfterMs:value!.retryAfterMs}:{})};
 }
 export const isDouyinRetryableFailure=(code:DouyinErrorCode)=>isDouyinTemporaryFailure(code)||code==='REQUEST_FAILED';
 

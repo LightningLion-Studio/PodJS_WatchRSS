@@ -4,7 +4,7 @@ import type {DouyinClient} from './client.ts';
 export async function reloadDouyinPlayback(client:Pick<DouyinClient,'resolvePlayback'|'buildPlaybackHeaders'>,id:string,current:()=>boolean){
   const result=await client.resolvePlayback(id,{forceRefresh:true,allowDetail:true,freshRequest:true});
   if(!current())return;
-  if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code});
+  if(!result.ok)throw Object.assign(new Error(result.message),{code:result.code,...(result.networkFailure?{networkFailure:true}:{}),...(result.httpStatus?{httpStatus:result.httpStatus}:{})});
   const headers=await client.buildPlaybackHeaders();
   return current()?{item:result.data,headers}:undefined;
 }

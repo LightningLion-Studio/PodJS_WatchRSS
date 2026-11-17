@@ -104,21 +104,20 @@ class LegalCoordinatorOfflineTest(unittest.TestCase):
         return self.server_value
 
     def snapshot_value(self, phase="held", new=True):
-        value = legal.snapshot(phase == "scrolled")
+        value = legal.snapshot(phase != "top")
         value.update(pid=201 if new else 101, processInstance=support.fixtures.NEW if new else support.fixtures.OLD)
         value["value"].update(hostState=legal.host_state(legal.saved_stack(phase)),
                               persistentKv=dict(support.fixtures.BASELINE))
-        if phase == "held":
-            value["value"]["tree"]["nodes"] = [legal.node(1, 0, "正在加载")]
-        elif phase in ("top", "loaded"):
+        if phase == "top":
             value["value"]["tree"]["nodes"][1]["label"] = legal.BODY.decode().split("\n", 1)[0]
         return value
 
-    def held_fixture(self):
-        coordinator = self.coordinator()
+    def held_fixture(self, **options):
+        coordinator = self.coordinator(**options)
         coordinator.state.update(phase="restored", expectedKv=dict(support.fixtures.BASELINE),
                                  restoredIdentity=["a" * 32, 201, support.fixtures.NEW],
-                                 legalBefore={"checkpoint": legal.checkpoint("scrolled")})
+                                 legalBefore={"checkpoint": legal.checkpoint("scrolled"),
+                                              "geometry": legal_probe.geometry(legal.snapshot(True))})
         coordinator.adb.deadline = 999.0
         coordinator.adb.files["files/podjs/files/" + legal.reference()["path"]] = legal.BODY
         self.server_observation()
@@ -142,8 +141,7 @@ class LegalCoordinatorOfflineTest(unittest.TestCase):
         body["artifact"] = coordinator.artifact("recorded-body.utf8", legal.BODY)
         sample = {"snapshot": coordinator.artifact("recorded-snapshot.json", value),
                   "checkpoint": point, "body": body}
-        if phase != "held":
-            sample["geometry"] = legal_probe.geometry(value, legal.BODY.decode().split("\n", 1)[0] if phase == "top" else None)
+        sample["geometry"] = legal_probe.geometry(value, legal.BODY.decode().split("\n", 1)[0] if phase == "top" else None)
         event = support.fixtures.event("commandAcknowledged", 5, new=phase == "held",
                                        id=value["id"], op="snapshot", status="ok")
         return sample, [event], probe.identity(value, "fixture")
@@ -270,6 +268,7 @@ class LegalCoordinatorOfflineTest(unittest.TestCase):
             saved = json.loads((coordinator.root / "run.json").read_text())
             self.assertEqual(saved["legalReleasePending"]["nonce"], manifest["nonce"])
             self.assertEqual(saved["legalHeld"]["checkpoint"], legal.checkpoint("held"))
+            self.assertEqual(saved["legalHeld"]["geometry"], saved["legalBefore"]["geometry"])
             self.assertEqual((coordinator.root / saved["legalHeld"]["body"]["artifact"]).read_bytes(), legal.BODY)
             self.assertEqual(saved["phase"], "restored")
             self.assertIsNone(saved["pending"])
@@ -359,13 +358,23 @@ class LegalCoordinatorOfflineTest(unittest.TestCase):
             coordinator.legal_hold_release()
         self.assert_failed_without_release(coordinator)
 
-    def test_loading_state_with_document_semantics_cannot_pass_held_barrier(self):
-        coordinator, value = self.held_fixture()
-        value["value"]["tree"]["nodes"] = legal.snapshot()["value"]["tree"]["nodes"]
-        with self.assertRaisesRegex(probe.EvidenceError, "deadline expired"):
-            coordinator.legal_hold_release()
-        self.assert_failed_without_release(coordinator)
-        self.assertNotIn("legalHeld", coordinator.state)
+    def test_held_barrier_rejects_missing_document_or_reset_geometry(self):
+        invalid = {"missing-document": [legal.node(1, 0, "正在加载")],
+                   "reset-geometry": legal.snapshot()["value"]["tree"]["nodes"]}
+        for name, nodes in invalid.items():
+            with self.subTest(name=name):
+                self.clock = 100.0
+                self.server_value = {"requestCount": 0, "failure": None, "requests": []}
+                coordinator, value = self.held_fixture(output=name)
+                try:
+                    value["value"]["tree"]["nodes"] = nodes
+                    with mock.patch.object(device.time, "sleep", side_effect=lambda _: self.advance(10)):
+                        with self.assertRaisesRegex(probe.EvidenceError, "deadline expired"):
+                            coordinator.legal_hold_release()
+                    self.assert_failed_without_release(coordinator)
+                    self.assertNotIn("legalHeld", coordinator.state)
+                finally:
+                    coordinator.close()
 
     def test_release_failure_keeps_core_restore_and_durable_intent(self):
         coordinator, _ = self.held_fixture()
@@ -438,7 +447,7 @@ class LegalCoordinatorOfflineTest(unittest.TestCase):
                 with self.assertRaises(probe.EvidenceError):
                     coordinator.legal_recorded_sample(sample, events, "top", ident)
 
-    def test_recorded_held_sample_rejects_document_branch_even_with_loading_state(self):
+    def test_recorded_held_sample_rejects_geometry_not_in_its_snapshot(self):
         coordinator = self.coordinator()
         coordinator.state["expectedKv"] = dict(support.fixtures.BASELINE)
         sample, events, ident = self.recorded_sample(coordinator, "held")
@@ -446,7 +455,7 @@ class LegalCoordinatorOfflineTest(unittest.TestCase):
         value = json.loads(path.read_text())
         value["value"]["tree"] = legal.snapshot()["value"]["tree"]
         path.write_bytes(device.encoded(value))
-        with self.assertRaisesRegex(probe.EvidenceError, "document branch"):
+        with self.assertRaisesRegex(probe.EvidenceError, "Cached semantic geometry differs"):
             coordinator.legal_recorded_sample(sample, events, "held", ident)
 
     def test_http_proof_binds_held_bracket_marker_receipt_and_completion_order(self):

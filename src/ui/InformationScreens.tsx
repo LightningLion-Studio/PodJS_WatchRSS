@@ -1,3 +1,5 @@
+import {isTransportFailure} from '../network/recovery.ts';
+import {useNetworkRecovery} from '../network/context.ts';
 import {createLogConsole} from '../logs/app-logger.ts';
 const logConsole=createLogConsole('InformationScreens');
 import { Text, View } from "@pocketjs/framework/components";
@@ -43,6 +45,7 @@ function wrap(text: string, width = 42): string[] { const max = Math.max(12, wid
 function textEntries(content: string, width?: number): ScrollEntry[] { return content.split(/\n\s*\n/).flatMap(p => { const lines = wrap(p.trim(), width); return [{ height: Math.max(24, lines.length * 18 + 8), render: () => <View class="absolute inset-0"><Text class="absolute inset-0 text-[13px] leading-[18] text-[#e5e5e5]">{lines.join("\n")}</Text></View> }]; }); }
 
 export function InformationScreen(props: InformationScreenProps) {
+  const network=useNetworkRecovery();
   const open = (url: string) => props.onOpenUrl?.(url);
   const restored = untrack(() => props.restoredState ?? props.restoredBackground);
   const retainedUnderlying = untrack(() => props.restoreMode === 'retained-underlying' || !props.restoredState && !!props.restoredBackground);
@@ -68,10 +71,11 @@ export function InformationScreen(props: InformationScreenProps) {
     const next = {content:legal(),error:legalError(),isLoading:isLoading()}, previous = committed();
     if (next.content === previous.content && next.error === previous.error && next.isLoading === previous.isLoading) return;
     setCommitted(next);
-    if (next.isLoading && !previous.isLoading) report('loading-committed');
+    if (next.content === null && next.isLoading && !previous.isLoading) report('loading-committed');
   });
   const documentContent = createMemo(() => remote() ? committed().content : props.page === 'info' ? informationText.intro : props.page === 'licenses' ? informationText.licenses : null);
-  const documentVisible = () => documentContent() !== null && (!remote() || !committed().isLoading);
+  // Keep the mounted list and its scroll position while revalidating cached content.
+  const documentVisible = () => documentContent() !== null;
   const documentPage = () => remote() || props.page === 'info' || props.page === 'licenses';
   // A document can still be measuring. Its snapshot getter preserves a pending
   // restore target, while its real scroller correctly remains at zero for now.
@@ -113,17 +117,26 @@ export function InformationScreen(props: InformationScreenProps) {
     const attempt = retry();
     if (!remote() || !props.legalBaseUrl || retainedUnderlying && restored && !restored.isLoading && attempt === restored.reloadKey) return;
     let current = true;
-    // Keep the saved old content while loading. A restored candidate survives
-    // until a document consumes it; actual branch disposal then loses it.
+    // Keep any saved content visible while the request runs.
     batch(() => { setIsLoading(true); setLegalError(null); });
     const path = props.page === 'privacy' ? '/functions/v1/legal/watch/privacy-policy' : '/functions/v1/legal/watch/user-agreement';
-    const request = fetchLegalDocument(props.legalBaseUrl.replace(/\/$/, '') + path);
-    void request.result.then(content => {
+    let request:ReturnType<typeof fetchLegalDocument>|undefined;
+    void network.run(()=>{request=fetchLegalDocument(props.legalBaseUrl!.replace(/\/$/, '') + path);return request.result;},()=>!!legal()).then(content => {
       if (current) { batch(() => { setLegal(content); setLegalError(null); setIsLoading(false); }); report('response-applied'); }
     }).catch(error => {
-      if (current) { logConsole.warn('Legal document fetch failed', String(error)); batch(() => { setLegal(null); setLegalError('协议正文加载失败，请检查网络后重试。'); setIsLoading(false); }); report('response-applied'); }
+      if (!current) return;
+      const keepContent=!!legal()&&isTransportFailure(error);
+      const message='协议正文加载失败，请检查网络后重试。';
+      logConsole.warn('Legal document fetch failed', String(error));
+      batch(() => {
+        if(!keepContent)setLegal(null);
+        setLegalError(message);
+        setIsLoading(false);
+      });
+      if(keepContent)void hostOperation('ui.toast',{message}).result.catch(()=>{});
+      report('response-applied');
     });
-    onCleanup(() => { current = false; request.cancel(); });
+    onCleanup(() => { current = false; request?.cancel(); });
   });
   const result = createMemo<ScrollEntry[]>(() => { let result: ScrollEntry[];
   switch (props.page) {

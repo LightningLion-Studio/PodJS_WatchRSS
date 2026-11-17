@@ -2,6 +2,8 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import { plugin } from 'bun';
 import { createRequire } from 'node:module';
 import { createComponent, createMemo, createRenderEffect, createRoot, createSignal, mergeProps } from 'solid-js';
+import {NetworkRecoveryContext} from '../src/network/context.ts';
+import {NetworkRecovery} from '../src/network/recovery.ts';
 import type { BiliScreenProps, BiliRoute } from '../src/ui/bili/index.tsx';
 const require = createRequire(import.meta.url), { transformSync } = require('@babel/core');
 plugin({ name: 'bili-comments-solid', setup(builder) { builder.onLoad({ filter: /\/ui\/bili\/CommentScreen\.tsx$/ }, async args => ({ contents: transformSync(await Bun.file(args.path).text(), { filename: args.path, babelrc: false, configFile: false, presets: [[require('babel-preset-solid'), { generate: 'universal', moduleName: '@pocketjs/framework/renderer' }], [require('@babel/preset-typescript'), { isTSX: true, allExtensions: true }]] }).code, loader: 'js' })); } });
@@ -22,9 +24,10 @@ const stops: (() => void)[] = []; afterEach(() => { for (const stop of stops.spl
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function nodes(value: any): Node[] { if (typeof value === 'function') return nodes(value()); if (Array.isArray(value)) return value.flatMap(nodes); if (!value || typeof value !== 'object' || !('props' in value)) return []; return [value, ...nodes(value.props.children)]; }
 const text = (root: any) => nodes(root).filter(n => n.kind === 'Text').map(n => n.props.children).join('\n');
-function mount(client: any, initial: BiliRoute = { name: 'comments', oid: 7, uploaderMid: 2 }) {
+function mount(client: any, initial: BiliRoute = { name: 'comments', oid: 7, uploaderMid: 2 }, network?:NetworkRecovery) {
   const [route, setRoute] = createSignal(initial); let destination: BiliRoute | undefined, back = 0;
-  const root = createRoot(stop => { stops.push(stop); return CommentScreen({ width: 233, height: 233, get route() { return route(); }, client, onNavigate: r => destination = r, onBack: () => back++ } as Parameters<typeof CommentScreen>[0]); });
+  const root = createRoot(stop => { stops.push(stop); const render=()=>CommentScreen({ width: 233, height: 233, get route() { return route(); }, client, onNavigate: r => destination = r, onBack: () => back++ } as Parameters<typeof CommentScreen>[0]);
+   return network?createComponent(NetworkRecoveryContext.Provider,{value:network,get children(){return render();}}):render(); });
   return { root, setRoute, destination: () => destination, back: () => back };
 }
 const sample = { rpid: 11, root: 999, mid: 2, replyCount: 5, like: 10000, ctime: Math.floor(Date.now() / 1000), replyControl: { isUpTop: true }, member: { name: '作者', avatar: '//image/avatar', vip: { nicknameColor: '#fb7299' } }, content: { message: '完整正文'.repeat(40) + ' @人[笑] https://example.test', emote: { '[笑]': { url: '//image/emote' } }, pictures: [{ url: '//image/pic1' }, { url: '//image/pic2' }] }, replies: [1, 2, 3, 4].map(rpid => ({ rpid, member: { name: `子${rpid}` }, content: { message: '预览' } })) };
@@ -72,4 +75,24 @@ test('route changes invalidate a pending comment response', async () => {
   const f = mount({ comments: () => new Promise(done => finish = done), replies: async () => ({ root: { rpid: 4, content: { message: '新根评论' } }, replies: [] }) }); await settle();
   f.setRoute({ name: 'replies', oid: 8, root: 4 }); await settle(); finish({ replies: [{ content: { message: '旧响应' } }], topReplies: [] }); await settle();
   expect(text(f.root)).toContain('新根评论'); expect(text(f.root)).not.toContain('旧响应');
+});
+
+
+test('offline refresh retains cached comments and shows a local failure', async () => {
+ const network=new NetworkRecovery({observe:fn=>{fn('unavailable');return()=>{};},check:async()=> 'unavailable'});
+ network.setActive(true);
+ stops.push(()=>network.dispose());
+ let calls=0;
+ const f=mount({comments:async()=>{
+  if(++calls>1)throw Object.assign(Error('断网'),{code:'network_error'});
+  return {topReplies:[],replies:[{rpid:1,content:{message:'缓存评论'}}]};
+ }},undefined,network);
+ await settle();
+ expect(text(f.root)).toContain('缓存评论');
+ scroll.onRefresh();
+ await settle();
+ expect(calls).toBe(2);
+ expect(network.blocking).toBe(false);
+ expect(text(f.root)).toContain('缓存评论');
+ expect(text(f.root)).toContain('加载失败:');
 });

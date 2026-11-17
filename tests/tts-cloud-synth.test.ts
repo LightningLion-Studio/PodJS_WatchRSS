@@ -34,3 +34,11 @@ test('cloud synthesis reports native provider errors and bounded fallback text',
  await expect(synthesizeCloudSpeech(fail(500,'X'.repeat(600)),{...base,config:config('doubao')})).rejects.toThrow('X'.repeat(512));
  await expect(synthesizeCloudSpeech(fail(503,'bad json'),{...base,config:config('minimax')})).rejects.toThrow('HTTP 503');
 });
+
+test('HTTP provider timeout text retains status and never becomes an offline transport failure',async()=>{
+ const {isTransportFailure}=await import('../src/network/recovery.ts');
+ for(const status of [401,429,500,503]){
+  const error=await synthesizeCloudSpeech({request:async()=>({status,headers:{},body:bytes('{"message":"upstream connection timed out"}')})},{apiKey:'synthetic',text:'fixture',rate:1,requestId:'fixture',config:config('minimax')}).catch(error=>error);
+  expect(error.message).toBe('upstream connection timed out');expect(error.httpStatus).toBe(status);expect(isTransportFailure(error)).toBe(false);
+ }
+});

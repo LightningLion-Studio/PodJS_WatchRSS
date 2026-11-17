@@ -110,17 +110,17 @@ def _state(value: Any, phase: str) -> dict[str, Any]:
         require(all(probe.integer(anchor[field]) for field in ("index", "offsetPx")),
                 "Anchor values must be nonnegative safe integers")
     if phase == "held":
-        require(value["isLoading"] and anchor is None and value["scrollOffset"] == 0,
-                "Held checkpoint must be loading with a discarded anchor and zero offset")
+        require(value["isLoading"] and anchor is not None,
+                "Held checkpoint must be loading with a preserved anchor")
     else:
         require(not value["isLoading"] and anchor is not None,
                 "Loaded checkpoint must have a canonical anchor and no loading state")
-        if phase == "top":
-            require(anchor == {"index": 0, "offsetPx": 0} and value["scrollOffset"] == 0,
-                    "Top checkpoint must be at the canonical zero anchor/offset")
-        elif phase == "scrolled":
-            require(anchor["index"] > 0 or anchor["offsetPx"] > 0,
-                    "Scrolled checkpoint must have a nonzero anchor")
+    if phase == "top":
+        require(anchor == {"index": 0, "offsetPx": 0} and value["scrollOffset"] == 0,
+                "Top checkpoint must be at the canonical zero anchor/offset")
+    elif phase in ("scrolled", "held"):
+        require(anchor["index"] > 0 or anchor["offsetPx"] > 0,
+                "Scrolled and held checkpoints must have a nonzero anchor")
     return copy.deepcopy(value)
 
 
@@ -129,8 +129,7 @@ def _entry(value: Any, owner: str, expected_url: str, phase: str) -> dict[str, A
     require(value["page"] == "privacy", "Only the single privacy fixture is supported")
     _identity(value["identity"], expected_url)
     _state(value["state"], phase)
-    # Non-null even while held: otherwise missing-file hydration fallback could
-    # be mistaken for the successful-document loading/unmount branch.
+    # The held page must keep the saved document and its file reference.
     _reference(value["bodyReference"], expected_url, owner)
     return copy.deepcopy(value)
 
@@ -293,28 +292,36 @@ def validate_held(before_checkpoint: dict[str, Any], held_checkpoint: dict[str, 
     before = _checkpoint(before_checkpoint, "scrolled")
     held = _checkpoint(held_checkpoint, "held")
     _same_reference(before, held)
+    require(held["state"]["listAnchor"] == before["state"]["listAnchor"],
+            "Held legal anchor differs from the pre-kill anchor")
 
 
 def validate_restored(top_checkpoint: dict[str, Any], scrolled_checkpoint: dict[str, Any],
                       held_checkpoint: dict[str, Any], after_checkpoint: dict[str, Any],
                       top_geometry: list[dict[str, Any]], scrolled_geometry: list[dict[str, Any]],
-                      after_geometry: list[dict[str, Any]]) -> dict[str, Any]:
+                      held_geometry: list[dict[str, Any]], after_geometry: list[dict[str, Any]]) -> dict[str, Any]:
     top, scrolled = _checkpoint(top_checkpoint, "top"), _checkpoint(scrolled_checkpoint, "scrolled")
-    held, after = _checkpoint(held_checkpoint, "held"), _checkpoint(after_checkpoint, "top")
+    held, after = _checkpoint(held_checkpoint, "held"), _checkpoint(after_checkpoint, "loaded")
     for candidate in (scrolled, held, after):
         _same_reference(top, candidate)
     validate_held(scrolled, held)
     require(not compare_geometry(top_geometry, scrolled_geometry), "Scrolled geometry did not differ from the top")
-    require(compare_geometry(top_geometry, after_geometry), "Restored legal geometry does not match the initial top")
+    require(after["state"]["listAnchor"] == scrolled["state"]["listAnchor"],
+            "Restored legal anchor differs from the pre-kill anchor")
+    require(compare_geometry(scrolled_geometry, held_geometry),
+            "Held legal geometry does not match the pre-kill scroll position")
+    require(compare_geometry(scrolled_geometry, after_geometry),
+            "Restored legal geometry does not match the pre-kill scroll position")
     return {"scenario": "legal-v2-held", "legalSchemaVersion": 2,
             "compactMetadataVerified": True, "scrolledAnchorWasNonzero": True,
             "bodyReferencePreservedThroughHeldLoading": True,
             "bodyReferenceUnchangedAcrossCheckpoints": True,
-            "restoredAnchorDiscardedDuringHeldLoading": True,
-            "canonicalAnchorResetToTop": True, "semanticTopGeometryVerified": True,
+            "anchorPreservedThroughHeldLoading": True, "semanticHeldGeometryVerified": True,
+            "anchorPreservedAfterReload": True, "semanticRestoredGeometryVerified": True,
             "owner": top["owner"], "bodyReference": copy.deepcopy(top["reference"]),
             "oldAnchor": copy.deepcopy(scrolled["state"]["listAnchor"]),
+            "heldAnchor": copy.deepcopy(held["state"]["listAnchor"]),
             "afterAnchor": copy.deepcopy(after["state"]["listAnchor"]),
             "eventTimingVerified": False, "exactEventCountsVerified": False,
             "pixelParityVerified": False, "uiParityVerified": False,
-            "scope": "Compact legal metadata and semantic reset outcome only; the caller must separately verify process replacement, file bytes, held HTTP response ordering and unchanged KV."}
+            "scope": "Compact legal metadata and preserved semantic scroll position; the caller must separately verify process replacement, file bytes, held HTTP response ordering and unchanged KV."}

@@ -33,13 +33,15 @@ mock.module('../src/ui/RssScreens.tsx', () => ({
 mock.module('../src/ui/ReaderBody.tsx', () => ({ReaderBody: (p: any) => {readerProps=p;return element('ReaderBody',p);}}));
 // Douyin detail renders through the shared reader-styled MediaReaderDetail (title row + blocks).
 mock.module('../src/ui/MediaReaderDetail.tsx', () => ({MediaReaderDetail: (p: any) => {readerProps={...p,fontSize:p.preset.body.fontSizeSp,onMedia:()=>p.onPlay()};return element('MediaReaderDetail',p);}}));
+const { NetworkRecovery } = await import('../src/network/recovery.ts');
+const { NetworkRecoveryContext } = await import('../src/network/context.ts');
 const { DouyinScreen } = await import('../src/ui/douyin/index.tsx');
 const stops: (() => void)[] = []; afterEach(() => { for (const stop of stops.splice(0)) stop(); });
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function nodes(value: any): Node[] { if (typeof value === 'function') return nodes(value()); if (Array.isArray(value)) return value.flatMap(nodes); if (!value || typeof value !== 'object' || !('props' in value)) return []; return [value, ...nodes(value.props.children)]; }
-function mount() {
-  calls = []; capability = true; statusCapability = true;
-  const root = createRoot(stop => { stops.push(stop); return DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {onAuthExpired:()=>()=>{},buildPlaybackHeaders:async()=>({"User-Agent":"SYNTHETIC-UA"})}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); });
+function mount(scope?: InstanceType<typeof NetworkRecovery>) {
+  calls = []; capability = true; statusCapability = true; network = () => {};
+  const root = createRoot(stop => { stops.push(stop); const screen = () => DouyinScreen({ width: 233, height: 233, route: { name: 'login' }, client: {onAuthExpired:()=>()=>{},buildPlaybackHeaders:async()=>({"User-Agent":"SYNTHETIC-UA"})}, settings: {}, onBack() {}, onNavigate() {}, onPlay() {}, input: async () => null } as unknown as DouyinScreenProps); return scope ? createComponent(NetworkRecoveryContext.Provider, {value: scope, get children(){return screen();}}) : screen(); });
   return { root, press: () => nodes(root).find(n => n.kind === 'View' && n.props.focusable && n.props.onPress)!.props.onPress(), text: () => nodes(root).filter(n => n.kind === 'Text').map(n => n.props.children).join('\n') };
 }
 for (const status of ['no_provider', 'initialization_failed'] as const) test(`${status} renders B6 unavailable page without authorizing`, async () => {
@@ -51,7 +53,7 @@ test('authorization waits for probe and ignores repeat presses while busy', asyn
   const f = mount(); await settle(); const press = nodes(f.root).find(n => n.props.focusable && n.props.onPress)!.props.onPress;
   press(); press(); await settle(); expect(calls).toEqual(['probe']); finish({ status: 'available' }); await settle(); expect(calls).toEqual(['probe', 'authorize']);
 });
-for (const invalidation of ['dispose', 'network'] as const) test(`pending probe cannot authorize after ${invalidation}`, async () => {
+for (const invalidation of ['dispose'] as const) test(`pending probe cannot authorize after ${invalidation}`, async () => {
   let finish!: (result: BrowserAvailability) => void; probe = () => new Promise(resolve => { finish = resolve; });
   const f = mount(); await settle(); f.press(); await settle();
   if (invalidation === 'dispose') stops.pop()!(); else { network('unavailable'); network('available'); }
@@ -136,9 +138,9 @@ test('M4 old host retains legacy extraction with no onStatus', async () => {
   expect(authOptions.onStatus).toBeUndefined(); expect(authOptions.qrExtractionScript).toBe(DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT);
   expect(authOptions.requiredCookieNames).toEqual(['sessionid']);
 });
-for (const cause of ['network','dispose'] as const) test(`M4 ignores status after ${cause}`, async()=>{
+for (const cause of ['dispose'] as const) test(`M4 ignores status after ${cause}`, async()=>{
   probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();const emit=authOptions.onStatus;
-  if(cause==='network') network('bluetooth'); else stops.pop()!();
+  stops.pop()!();
   const before=f.text();emit({type:'qr',kind:'secondVerify',mime:'image/jpeg',imageBase64:'AAAA'});
   expect(f.text()).toBe(before);expect(calls).toContain('cancel');
 });
@@ -155,17 +157,24 @@ test('D2 verifying suppresses late login and second-step QR until verification e
   emit({type:'qr',kind:'secondVerify',mime:'image/jpeg',imageBase64:'BBBB'});
   expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toBe('data:image/jpeg;base64,BBBB');
 });
-test('D2 network ban cancels login, WiFi return allows fresh attempt and rejects old success',async()=>{
-  probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
-  const oldFinish=finishAuth,oldEmit=authOptions.onStatus;
-  network('bluetooth');expect(f.text().replaceAll('\n','')).toContain('当前为蓝牙网络');
-  network('unavailable');expect(f.text().replaceAll('\n','')).toContain('未检测到可用互联网');
-  network('checking');expect(f.text().replaceAll('\n','')).toContain('正在检测互联网');
-  network('available');await settle();f.press();await settle();
-  oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'OLD'});oldFinish({cookie:'sessionid=old'});await settle();
-  expect(calls.filter(c=>c==='authorize')).toHaveLength(2);
+test('D2 failed offline authorization retries once and rejects settled native status callbacks',async()=>{
+  let status: InternetStatus = 'available';
+  const scope = new NetworkRecovery({observe:fn=>{network=value=>{status=value;fn(value);};fn(status);return()=>{};},check:async()=>status});
+  stops.push(()=>scope.dispose());
+  probe=async()=>({status:'available'});const f=mount(scope);scope.setActive(true);await settle();f.press();await settle();
+  const oldEmit=authOptions.onStatus;
+  network('unavailable');expect(scope.blocking).toBe(false);
+  rejectAuth({code:'network_error'});await settle();expect(scope.blocking).toBe(true);
+  oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'OLD'});
   expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
-  rejectAuth({code:'cancelled'});await settle();
+  network('bluetooth');await settle();expect(scope.blocking).toBe(false);
+  expect(calls.filter(c=>c==='authorize')).toHaveLength(2);expect(calls).not.toContain('cancel');
+  oldEmit({type:'qr',kind:'login',mime:'image/png',imageBase64:'OLD'});
+  expect(nodes(f.root).some(n=>n.kind==='Image')).toBe(false);
+  authOptions.onStatus({type:'qr',kind:'login',mime:'image/png',imageBase64:'NEW'});
+  expect(nodes(f.root).find(n=>n.kind==='Image')?.props.src).toContain('NEW');
+  rejectAuth({code:'network_error'});await settle();
+  expect(calls.filter(c=>c==='authorize')).toHaveLength(2);expect(scope.blocking).toBe(false);
 });
 test('D2 failed authorization clears QR and can retry without exposing raw exception',async()=>{
   probe=async()=>({status:'available'});const f=mount();await settle();f.press();await settle();
@@ -262,13 +271,46 @@ test('DYUI RSS unknown state renders a non-actionable placeholder and cannot ref
  rssProps.onRefresh();rssProps.onNext();expect(requests).toBe(0);
 });
 
-test('DYBENCH an older failed probe keeps its own attempt after a network retry',async()=>{
+test('DYBENCH an older failed probe keeps its own attempt after a disposed page retry',async()=>{
  const before=(globalThis as any).pod,events:any[]=[];let seq=500,fail!:(e:unknown)=>void,ready!:(v:BrowserAvailability)=>void;
  (globalThis as any).pod={benchmark:(raw:string)=>{const value=JSON.parse(raw);if(!value.seq)value.seq=++seq;events.push(value);return value.seq;}};
  try{
   probe=()=>new Promise((_resolve,reject)=>fail=reject);const f=mount();await settle();f.press();await settle();const first=events.find(x=>x.code==='login_entry')!;
-  network('unavailable');network('available');probe=()=>new Promise(resolve=>ready=resolve);f.press();await settle();const entries=events.filter(x=>x.code==='login_entry');expect(entries).toHaveLength(2);
+  stops.pop()!();probe=()=>new Promise(resolve=>ready=resolve);const fresh=mount();fresh.press();await settle();const entries=events.filter(x=>x.code==='login_entry');expect(entries).toHaveLength(2);
   fail(Error('synthetic old probe'));await settle();expect(events.filter(x=>x.code==='error').map(x=>x.seq)).toEqual([first.seq]);
   ready({status:'available'});await settle();expect(authOptions.benchmark).toEqual({seq:entries[1].seq,attempt:entries[1].attempt});
  }finally{(globalThis as any).pod=before;}
+});
+
+test('NETOVERLAY RSS-mode feed failure uses route recovery while optional share title does not',async()=>{
+ let changed!:(status:InternetStatus)=>void,requests=0,checks=0;
+ const scope=new NetworkRecovery({observe:fn=>{changed=fn;fn('unavailable');return()=>{};},check:async()=>{checks++;return 'unavailable';}});scope.setActive(true);
+ const client={authState:()=> 'logged-in',subscribeAuth:()=>()=>{},onAuthExpired:()=>()=>{},restorePlaybackQueue:async()=>undefined,fetchFeedPage:async()=>++requests===1?{ok:false,code:'REQUEST_FAILED',message:'fixture',networkFailure:true}:{ok:true,data:{items:[sample('restored')],hasMore:false}},fetchDetail:async()=>({ok:false,code:'REQUEST_FAILED',message:'fixture',networkFailure:true})};
+ const render=(route:any)=>createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return DouyinScreen({width:233,height:233,route,client,settings:{},onNavigate(){},onBack(){},onPlay(){}} as unknown as DouyinScreenProps);}});});
+ render({name:'feed'});await settle();expect(requests).toBe(1);expect(scope.blocking).toBe(true);
+ changed('available');await settle();expect(requests).toBe(2);expect(scope.blocking).toBe(false);expect(rssProps.items[0].title).toContain('restored');
+ stops.pop()!();changed('unavailable');const checked=checks;
+ render({name:'share',awemeId:'fixture'});await settle();expect(scope.blocking).toBe(false);expect(checks).toBe(checked);scope.dispose();
+});
+
+
+test('Douyin detail offers a new read after the recovery layer returns a transport failure',async()=>{
+ let reads=0;
+ const client={
+  onAuthExpired:()=>()=>{},listHistory:async()=>[],listSaved:async()=>[],
+  fetchDetail:async()=>{reads++;return {ok:false,code:'REQUEST_FAILED',message:'fixture detail failure',networkFailure:true};},
+ };
+ const root=createRoot(stop=>{stops.push(stop);return DouyinScreen({
+  width:233,height:233,route:{name:'detail',awemeId:'fixture'},client,settings:{},
+  onNavigate(){},onBack(){},onPlay(){},
+ } as unknown as DouyinScreenProps);});
+ await settle();
+ const text=()=>nodes(root).filter(node=>node.kind==='Text').map(node=>node.props.children).join('');
+ expect(text()).toContain('fixture detail failure');
+ expect(text()).not.toContain('加载中');
+ const retry=nodes(root).find(node=>node.props.accessibilityLabel==='重试');
+ expect(retry?.props.onPress).toBeFunction();
+ retry!.props.onPress();await settle();
+ expect(reads).toBe(2);
+ expect(text()).toContain('fixture detail failure');
 });

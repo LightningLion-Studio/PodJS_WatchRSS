@@ -1,3 +1,4 @@
+import {useNetworkRecovery,useCachedNetworkContent} from '../../network/context.ts';
 import {benchmark} from '@podjs/framework/benchmark';
 import {douyinBench} from '../../douyin/bench.ts';
 import {observeDouyinAuth} from './auth-state.ts';
@@ -23,11 +24,13 @@ export const DOUYIN_ENTRY_LOCAL_WAIT_MS=200;
 
 /** Entry restores local data; only an explicit user action starts playback. */
 function ImmersiveEntryImpl(props: DouyinScreenProps) {
+ const network=useNetworkRecovery();
   const guestEntryMs=Date.now();
   traceServiceWork('douyin.entry.guest',()=>{},guestEntryMs);
   const [stockPending,setStockPending]=createSignal(!!props.restoreStock);
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,lastActive=props.active??true;
   const [items,setItems]=createSignal<DouyinItem[]>([]),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(""),[slow,setSlow]=createSignal(false);
+  useCachedNetworkContent(()=>items().length>0);
   const auth=observeDouyinAuth(props.client),logged=()=>auth()==='logged-in';
   let cursor:string|null=null,hasMore=false,anchor:string|null=null,disposed=false,generation=0;
   const [opening,setOpening]=createSignal(false);
@@ -104,7 +107,7 @@ function ImmersiveEntryImpl(props: DouyinScreenProps) {
       }
       if(!logged())return;
       appLogger.d('DouyinEntry',`feed requested reason=${refresh?'refresh':'bootstrap'}`);
-      const result=await traceServiceWork("douyin.entry.fetch",()=>props.client.fetchFeedPage({count:16}));if(!current()||choseStock)return;
+      const result=await traceServiceWork("douyin.entry.fetch",()=>network.result(()=>props.client.fetchFeedPage({count:16}),()=>items().length>0));if(!current()||choseStock)return;
       if(result.ok){sealLocal();cancelRetry();setError('');failures=0;traceServiceWork("douyin.entry.feedResult",()=>{setItems(result.data.items);cursor=result.data.nextCursor;hasMore=result.data.hasMore;anchor=null;});}
       else{
         setError(formatDouyinError(result.code));

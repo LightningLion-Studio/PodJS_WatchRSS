@@ -33,6 +33,10 @@ let client:any;
 mock.module('../src/media-services.ts',()=>({biliClient:{getSession:()=>client.getSession(),resolvePlayback:(x:any)=>client.resolvePlayback(x),watchApiEnabled:()=>client.watchApiEnabled(),reportHistory:async()=>{}},biliPreviewCache:{lookup:async()=>undefined},douyinStock:{resume:async()=>{},suspend(){},networkChanged:async()=>{}},douyinClient:{},douyinPreload:{lookup:async()=>undefined,invalidate:async()=>{},start(){},stop(){},allowBluetooth(){}},loadLocalBiliDetail:async()=>undefined}));
 const {createBiliClient}=await import('../src/bili/client.ts');
 const {createMediaRouteController}=await import('../src/ui/routes/media-controller.ts');
+// This suite exercises the retained legacy watch-to-Web callback. The newer
+// onReload route has its own production-controller/component regression suite.
+const {VideoPlayerScreen:legacyPlayer}=await import('../src/ui/VideoPlayerScreen.tsx');
+mock.module('../src/ui/VideoPlayerScreen.tsx',()=>({VideoPlayerScreen:(props:any)=>legacyPlayer(mergeProps(props,{onReload:null}) as never)}));
 const {MediaRoutes}=await import('../src/ui/routes/media.tsx');
 const stops:(()=>void)[]=[];
 const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();};

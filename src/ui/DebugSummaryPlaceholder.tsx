@@ -1,3 +1,4 @@
+import {useNetworkRecovery} from '../network/context.ts';
 import {createMemo,createSignal,onCleanup} from 'solid-js';
 import {Image,Text,View} from '@pocketjs/framework/components';
 import {getOps} from '@pocketjs/framework/host';
@@ -18,8 +19,9 @@ const SURFACE_VARIANT='#2a2a2a',ON_SURFACE='#f5f5f5',ON_SURFACE_VARIANT='#b6b6b6
 const BODY_SLOT=1,SMALL_SLOT=0,TITLE_SLOT=1;
 export function DebugSummaryPlaceholder(props:{id:string;width:number;height:number;active:()=>boolean;services:AppServices;preset:()=>number;showTokens:()=>boolean}){
  if(!debugGate.allowed)return null;
+ const network=useNetworkRecovery();
  const [state,setState]=createSignal<SummaryState>({status:'idle',text:''});
- const summary=new DebugSummary(debugGate,(...args)=>props.services.createSummary(...args));
+ const summary=new DebugSummary(debugGate,(...args)=>props.services.createSummary(...args,network));
  summary.open(props.id,props.preset,setState);onCleanup(()=>summary.dispose());
  const inner=()=>props.width-36;
  const wrap=(text:string,width:number,slot:number)=>watchUiLines(text,{width:Math.max(1,width),measure:value=>getOps().measureText(value,slot)});

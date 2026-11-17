@@ -1,5 +1,5 @@
 import { createMemo, type Accessor } from "solid-js";
-import { Image, View } from "@pocketjs/framework/components";
+import { Image, Text, View } from "@pocketjs/framework/components";
 import { ReaderBody, type ReaderBodyHandle } from "./ReaderBody.tsx";
 import { useReaderFonts } from "./reader-fonts.ts";
 import { useReaderTitleEntry } from "./ReaderTitleEntry.tsx";
@@ -16,7 +16,7 @@ export function MediaReaderDetail(props: {
   width: number; height: number; preset: ReaderPreset; active: boolean; keepAwake?:boolean;
   articleId: string; title: string; blocks: ContentBlock[]; message?: string;
   favorite: Accessor<boolean>; onPlay: () => void; onFavorite: () => void; onShare: () => void;
-  onError: (message: string) => void; ref?: (handle: ReaderBodyHandle) => void;
+  onError: (message: string) => void; onRetry?: () => void; ref?: (handle: ReaderBodyHandle) => void;
 }) {
   const fonts = useReaderFonts();
   const chrome = () => readerChrome(props.preset);
@@ -31,7 +31,16 @@ export function MediaReaderDetail(props: {
       style={{ insetL: left, bgColor: active ? chrome().activeAction : chrome().action, borderWidth: chrome().dark ? 0 : 1, borderColor: active ? chrome().activeBorder : chrome().border }}>
       <Image src={icon} class="w-[20] h-[20]" />
     </View>;
-  const footer = createMemo<ScrollEntry[]>(() => [spacer(15), { height: 32, render: () => <View class="absolute top-[0] h-[32]" style={{ insetL: (props.width - 28 - 76) / 2, width: 76 }}>
+  const footer = createMemo<ScrollEntry[]>(() => [
+    ...(props.onRetry ? [spacer(8), {
+      height: 32,
+      render: () => <View onPress={() => { if (props.active) props.onRetry?.(); }} focusable accessibilityRole="button" accessibilityLabel="重试"
+        class="absolute top-[0] w-[72] h-[32] rounded-[16] items-center justify-center active:scale-96"
+        style={{ insetL: (props.width - 28 - 72) / 2, bgColor: chrome().action, borderWidth: chrome().dark ? 0 : 1, borderColor: chrome().border }}>
+        <Text class="text-sm" style={{ textColor: chrome().content }}>重试</Text>
+      </View>,
+    }] : []),
+    spacer(15), { height: 32, render: () => <View class="absolute top-[0] h-[32]" style={{ insetL: (props.width - 28 - 76) / 2, width: 76 }}>
       {circle(props.favorite() ? (chrome().dark ? "../assets/icons/star-active.svg" : "../assets/icons/star-active-light.svg") : (chrome().dark ? "../assets/icons/star.svg" : "../assets/icons/star-light.svg"), 0, props.favorite(), props.onFavorite, "收藏")}
       {circle(chrome().dark ? "../assets/icons/share.svg" : "../assets/icons/share-light.svg", 44, false, props.onShare, "分享")}
     </View> }, spacer(15)]);

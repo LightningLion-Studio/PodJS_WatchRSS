@@ -48,7 +48,7 @@ public final class LegalServiceCompletionRuntimeTest {
    s.h.performAction("协议正文",2);s.h.performAction("协议正文",2);
    JSONObject sample=s.stableBaseline(true),before=sample.getJSONObject("checkpoint");
    JSONArray beforeGeometry=sample.getJSONArray("geometry");
-   String scrolledParagraph=visibleParagraph(beforeGeometry),topParagraph=visibleParagraph(topGeometry);
+   String scrolledParagraph=visibleParagraph(beforeGeometry);
    assertFalse(sameCustomizationGeometry(topGeometry,beforeGeometry,1));
    proof.put("beforeRecreation",before).put("beforeGeometry",beforeGeometry).put("visibleBodyParagraphBefore",scrolledParagraph).put("semanticForwardScrolls",2)
     .put("observedMatchesPreviouslyReportedAnchor7_155",anchor(before).getLong("index")==7&&anchor(before).getLong("offsetPx")==155)
@@ -72,11 +72,12 @@ public final class LegalServiceCompletionRuntimeTest {
    proof.put("responseObservedBeforeAnySemanticOrStatePolling",frameEvidence(s,completed));
    JSONObject foreground=recreation.observeRawState();assertTrue(foreground.getBoolean("active"));assertEquals(0,foreground.getInt("lifecycleState"));
    proof.put("foregroundAtResponseObservation",foreground);
-   boolean fast=s.count(completed,s.run,"loading-committed")==0&&s.count(completed,s.run,"document-unmounted")==0;
+   assertEquals(0,s.count(completed,s.run,"loading-committed"));
+   assertEquals(0,s.count(completed,s.run,"document-unmounted"));
+   boolean responseBeforeFirstFrame=event(completed,s.run,"response-applied").getLong("frameCount")==0;
    if(controlled){
-    recreation.assertPaused();assertTrue("Controlled completion must keep its original document branch",fast);
+    recreation.assertPaused();assertTrue(responseBeforeFirstFrame);
     assertEquals(0L,event(completed,s.run,"candidate-consumed").getLong("frameCount"));
-    assertEquals(0L,event(completed,s.run,"response-applied").getLong("frameCount"));
     assertEquals(0L,currentRun(s,completed).getLong("frameCount"));assertEquals(0L,completed.getLong("frameCount"));
     proof.put("candidateAndResponseAppliedBeforeFirstFrame",true);
     recreation.restoreScheduling();
@@ -85,21 +86,12 @@ public final class LegalServiceCompletionRuntimeTest {
    proof.put("firstFrameObserved",currentRun(s,firstFrame));
    // The protected interval is over. These existing helpers may now drive
    // frames while verifying measured geometry and the durable checkpoint.
-   if(fast){
-    JSONObject after=s.awaitCheckpoint(false,anchor(before),true);
-    JSONArray afterGeometry=s.stableGeometry(beforeGeometry);s.assertStableAnchor(anchor(before),1);
-    assertVisibleParagraph(afterGeometry,scrolledParagraph);proof.put("visibleBodyParagraphAfter",scrolledParagraph).put("visibleBodyParagraphVerified",true);
-    s.assertSameCandidate(before,after);s.assertCompletedEventOrder("fast");
-    proof.put("afterRecreation",after).put("afterGeometry",afterGeometry)
-     .put("branch",controlled?"controlled-service-completion-before-first-frame":"natural-fast-document-remained-mounted")
-     .put("sameCanonicalAnchorAndGeometry",true).put("fastUnverified",false);
-   }else{
-    s.awaitDiscardedBranch();JSONObject after=s.awaitCheckpoint(false,zeroAnchor(),true);
-    JSONArray afterGeometry=s.stableGeometry(topGeometry);s.assertStableAnchor(zeroAnchor(),1);s.assertCompletedEventOrder("discarded");
-    assertVisibleParagraph(afterGeometry,topParagraph);proof.put("visibleBodyParagraphAfter",topParagraph).put("visibleBodyParagraphVerified",true);
-    proof.put("afterRecreation",after).put("afterGeometry",afterGeometry)
-     .put("branch","natural-immediate-http-committed-loading-reset").put("canonicalAnchorResetToTop",true).put("fastUnverified",true);
-   }
+   JSONObject after=s.awaitCheckpoint(false,anchor(before),true);
+   JSONArray afterGeometry=s.stableGeometry(beforeGeometry);s.assertStableAnchor(anchor(before),1);
+   assertVisibleParagraph(afterGeometry,scrolledParagraph);proof.put("visibleBodyParagraphAfter",scrolledParagraph).put("visibleBodyParagraphVerified",true);
+   s.assertSameCandidate(before,after);s.assertCompletedRetainedDocumentOrder();
+   proof.put("afterRecreation",after).put("afterGeometry",afterGeometry)
+    .put("sameCanonicalAnchorAndGeometry",true).put("responseBeforeFirstFrame",responseBeforeFirstFrame);
    capture(s,prefix,"after-recreation");s.server.awaitCompleted();s.assertKV();
    proof.put("allOtherKVUnchanged",true).put("naturalCaseClassifiedOnce",!controlled).put("state","passed");
   }catch(Exception|AssertionError error){problem=error;proof.put("state","failed").put("failure",error.toString());throw error;}

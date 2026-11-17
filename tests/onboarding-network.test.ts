@@ -13,8 +13,21 @@ test('network change supersedes old snapshots and disposal stops delivery and ob
  pending.shift()!({...base,bluetooth:true});await Promise.resolve();await Promise.resolve();expect(states).toEqual(['checking','bluetooth']);
  changed();stop();stop();pending.shift()!({...base,wifi:true});await Promise.resolve();await Promise.resolve();expect(states).toEqual(['checking','bluetooth']);expect(unsubscribed).toBe(1);
 });
-test('a failed snapshot reports unavailable and a later update recovers',async()=>{
+test('a failed snapshot stays unknown and a later update recovers',async()=>{
  let changed!:()=>void,calls=0;const states:string[]=[];
  const stop=observeInternet({snapshot:async()=>{if(++calls===1)throw Error('network changed');return {...base,cellular:true};},subscribe:listener=>{changed=listener;return ()=>{};}},status=>states.push(status));
- await Promise.resolve();await Promise.resolve();expect(states).toEqual(['checking','unavailable']);changed();await Promise.resolve();await Promise.resolve();expect(states).toEqual(['checking','unavailable','available']);stop();
+ await Promise.resolve();await Promise.resolve();expect(states).toEqual(['checking']);changed();await Promise.resolve();await Promise.resolve();expect(states).toEqual(['checking','available']);stop();
+});
+
+
+test('onboarding does not publish the same state again for an unchanged snapshot',async()=>{
+ let changed!:()=>void;
+ const states:string[]=[];
+ const stop=observeInternet({snapshot:async()=>({...base,wifi:true}),subscribe:listener=>{changed=listener;return()=>{};}},status=>states.push(status));
+ try{
+  await Promise.resolve();
+  changed();
+  await Promise.resolve();
+  expect(states).toEqual(['checking','available']);
+ }finally{stop();}
 });

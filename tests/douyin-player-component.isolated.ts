@@ -44,7 +44,7 @@ let sessionsCapable=false,decoderLimit=1,lifecycleState='active';const lifecycle
 mock.module('@podjs/framework/watch',()=>({kv:{get:()=>undefined,set(){}},hasCapability:()=>sessionsCapable,lifecycle:()=>lifecycleState,onLifecycleChange:(listener:(value:string)=>void)=>{lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},normalizedRelativeAxisStep:(n:number)=>Math.sign(n)}));
 let debugAllowed=false,diagnosticBindings=0,diagnosticDisposals=0,diagnosticReader:(()=>Promise<unknown>)|undefined;
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{get allowed(){return debugAllowed;},bindSessions(reader:()=>Promise<unknown>){diagnosticBindings++;diagnosticReader=reader;return ()=>{diagnosticDisposals++;};}}}));
-let network:(s:InternetStatus)=>void,initial:InternetStatus='available';
+let network:(s:InternetStatus)=>void=()=>{},initial:InternetStatus='available';
 mock.module('../src/onboarding/network-host.ts',()=>({observeHostInternet:(fn:typeof network)=>{network=fn;fn(initial);return()=>{};}}));
 let prepares:any[]=[],plays=0,retries=0,failures=0,nextError:unknown,current:any;
 let heldPrepare:Promise<any>|undefined;
@@ -66,23 +66,21 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  const root=createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform,url,title:'current',immersive,recoveryDeadlineMs},width:233,height:233,active:true,offset:0,round:true,onRetry:async()=>{retries++;},onPlaybackFailure:()=>{failures++;},onPlaybackActiveChanged:(source,active)=>activeEvents.push({source,active})});});
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
-test('D2 initial network gate clears on WiFi without fetching or replacing queue',async()=>{
- const f=mount('unavailable');await flush();expect(f.text()).toContain('未检测到可用互联网');expect(prepares).toHaveLength(0);
- network('available');await flush();expect(prepares).toHaveLength(1);expect(plays).toBe(1);expect(retries).toBe(0);
- network('unavailable');await flush();expect(f.text()).not.toContain('未检测到可用互联网');expect(plays).toBe(1);
+test('D2 offline status alone permits native prepare and cached playback',async()=>{
+ const f=mount('unavailable');await flush();expect(prepares).toHaveLength(1);expect(plays).toBe(1);
+ network('available');network('unavailable');await flush();expect(f.text()).not.toContain('未检测到可用互联网');expect(plays).toBe(1);expect(retries).toBe(0);
 });
-test('D2 Bluetooth continue prepares once and resumes existing ready player without route retry',async()=>{
- const f=mount('bluetooth');await flush();expect(prepares).toHaveLength(0);f.press('继续');await flush();expect(prepares).toHaveLength(1);expect(plays).toBe(1);expect(retries).toBe(0);
- // A new page requires a fresh confirmation. Mount separately with an already prepared WiFi stream.
- stops.pop()!();const ready=mount('available');await flush();current=state('paused');jankStateChanged(current);await flush();network('bluetooth');await flush();ready.press('继续');await flush();
- expect(prepares).toHaveLength(1);expect(plays).toBe(2);expect(retries).toBe(0);
+test('D2 Bluetooth permits playback and preserves a user pause',async()=>{
+ const f=mount('bluetooth');await flush();expect(prepares).toHaveLength(1);expect(plays).toBe(1);expect(f.text()).not.toContain('继续');
+ current=state('paused');jankStateChanged(current);await flush();network('bluetooth');await flush();
+ expect(prepares).toHaveLength(1);expect(plays).toBe(1);expect(retries).toBe(0);
 });
-test('D2 typed network prepare error on available WiFi shows native overlay and retries same source',async()=>{
- nextError={code:'network_error'};const f=mount('available');await flush();expect(f.text()).toContain('请连接 WiFi 或移动网络');expect(failures).toBe(0);
+test('D2 typed network prepare error with available WiFi keeps original error and manual retry',async()=>{
+ nextError={code:'network_error'};const f=mount('available');await flush();expect(f.text()).toContain('播放失败');expect(f.text()).not.toContain('请连接 WiFi 或移动网络');expect(failures).toBe(0);
  f.press('重试');await flush();expect(prepares).toHaveLength(2);expect(prepares[1].url).toBe('https://video/current');expect(retries).toBe(0);expect(plays).toBe(1);
 });
-test('D2 actual terminal network state masks failure and keeps selected source',async()=>{
- const f=mount('available');await flush();current={...state('error'),errorCode:'network_error'};jankStateChanged(current);await flush();expect(f.text()).toContain('未检测到可用互联网');expect(failures).toBe(0);
+test('D2 terminal network failure with available WiFi preserves the selected source',async()=>{
+ const f=mount('available');await flush();current={...state('error'),errorCode:'network_error'};jankStateChanged(current);await flush();expect(f.text()).toContain('播放失败');expect(f.text()).not.toContain('未检测到可用互联网');expect(failures).toBe(0);
  f.press('重试');await flush();expect(prepares).toHaveLength(2);expect(retries).toBe(0);
 });
 test('D2 local video remains playable while offline',async()=>{
@@ -101,14 +99,14 @@ test('Bili terminal network failure preserves source while actual source failure
  stops.pop()!();nextError={code:'prepare_failed'};mount('available','https://video/current',false,'bili');await flush();expect(failures).toBe(1);
 });
 
-test('D2 immersive paused rendered frame stays visible; buffering network pause resumes on recovery',async()=>{
+test('D2 immersive paused and buffering frames remain intact across status-only route changes',async()=>{
  const f=mount('available','https://video/current',true);await flush();
  expect(f.activeEvents.at(-1)).toEqual({source:'douyin',active:true});
  current={...state('paused'),hasRenderedFirstFrame:true};ticks.splice(0).forEach(t=>t());await flush();network('unavailable');await flush();
  expect(f.text()).not.toContain('未检测到可用互联网');expect(plays).toBe(1);expect(f.activeEvents.at(-1)?.active).toBe(false);
  network('available');await flush();current={...state('buffering'),hasRenderedFirstFrame:true};jankStateChanged(current);await flush();
- network('unavailable');await flush();expect(current.state).toBe('paused');expect(plays).toBe(1);
- network('available');await flush();expect(plays).toBe(2);expect(prepares).toHaveLength(1);expect(retries).toBe(0);expect(f.activeEvents.at(-1)?.active).toBe(true);
+ network('unavailable');await flush();expect(current.state).toBe('buffering');expect(plays).toBe(1);
+ network('available');await flush();expect(plays).toBe(1);expect(prepares).toHaveLength(1);expect(retries).toBe(0);expect(pauses).toBe(0);
  stops.pop()!();expect(f.activeEvents.at(-1)).toEqual({source:undefined,active:false});
 });
 
@@ -589,14 +587,14 @@ test('DYINTENT 50 cold releases select immediately without decoder or publicatio
 });
 
 
-test('DYINTENT a network prompt during a drag still records its cancelled release',async()=>{
+test('DYINTENT connectivity alone does not cancel a drag release',async()=>{
  initial='available';sessionsCapable=false;gestures.length=0;current={...state('buffering'),hasRenderedFirstFrame:false};heldPrepare=new Promise(()=>{});ticks=[];
  const original=(globalThis as any).pod,marks:any[]=[];let seq=1;
  (globalThis as any).pod={benchmark:(line:string)=>{const value=JSON.parse(line);marks.push(value);return value.seq??++seq;}};
  try{
-  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/cold',title:'cold'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onSelectTarget:()=>{throw Error('cancelled drag cannot select');}});});await flush();
+  createRoot(stop=>{stops.push(stop);return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'https://fixture/cold',title:'cold'},width:233,height:233,active:true,offset:0,round:true,onNext:()=>{},onSelectTarget:()=>{}});});await flush();
   const g=gestures[0];g.onPanStart({dy:-12});g.onPanMove({dy:-120});network('unavailable');await flush();g.onPanEnd({vy:-500});await flush();
-  expect(marks.filter(v=>v.code==='gesture_down')).toHaveLength(1);expect(marks.filter(v=>v.code==='gesture_release')).toMatchObject([{direction:'cancel',delta:0}]);
+  expect(marks.filter(v=>v.code==='gesture_down')).toHaveLength(1);expect(marks.filter(v=>v.code==='gesture_release')).toMatchObject([{direction:'next',delta:1}]);
  }finally{(globalThis as any).pod=original;heldPrepare=undefined;}
 });
 

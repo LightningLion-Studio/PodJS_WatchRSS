@@ -49,9 +49,9 @@ public final class LegalTopRestorationRuntimeTest {
  static final String BODY=body();
  static String body(){StringBuilder text=new StringBuilder(MARKER);for(int n=1;n<=32;n++)text.append("\n\n隐私隔离段落").append(n).append("。本段用于检查真实列表恢复的位置。");return text.toString();}
 
- @Test public void heldTopRecreationResetsAfterCommittedLoading()throws Exception {exercise("held",false,false);}
- @Test public void pendingCandidateSurvivesAnotherRecreationBeforeMount()throws Exception {exercise("pending",true,false);}
- @Test public void immediateResponseClassifiesActualMountBranch()throws Exception {exercise("immediate",false,true);}
+ @Test public void heldTopRecreationPreservesCachedBodyAndAnchor()throws Exception {exercise("held",false,false);}
+ @Test public void cachedBodySurvivesAnotherRecreationDuringReload()throws Exception {exercise("pending",true,false);}
+ @Test public void immediateResponseKeepsRestoredDocumentMounted()throws Exception {exercise("immediate",false,true);}
 
  private void exercise(String name,boolean pending,boolean immediate)throws Exception {
   Session s=new Session(name,pending,immediate);Throwable problem=null;
@@ -71,7 +71,7 @@ public final class LegalTopRestorationRuntimeTest {
    s.recreate(pending,scrolled,false);
    s.server.awaitRequest(2,5000);
    if(pending){
-    s.assertPendingRun();JSONObject pendingFirst=s.awaitCheckpoint(true,anchor(scrolled),true);
+    JSONObject pendingFirst=s.awaitCachedLoadingCheckpoint(scrolled);
     s.assertSameCandidate(scrolled,pendingFirst);s.proof.put("pendingFirstCheckpoint",pendingFirst);
     s.server.plan(2).expectedCancellation=true;
     long middleRun=s.run;
@@ -80,8 +80,8 @@ public final class LegalTopRestorationRuntimeTest {
     assertEquals("Old held response must still be gated when the next request arrives",1L,s.server.plan(2).gate.getCount());
     assertEquals("Old held request worker must still be alive",1L,s.server.plan(2).finished.getCount());
     s.proof.put("newRequestArrivedWhileCanceledOldRequestStillHeld",true);
-    s.assertPendingRun(middleRun);s.assertPendingRun();
-    JSONObject pendingSecond=s.awaitCheckpoint(true,anchor(scrolled),true);
+    assertEquals(0,s.count(middleRun,"response-applied"));
+    JSONObject pendingSecond=s.awaitCachedLoadingCheckpoint(scrolled);
     s.assertSameCandidate(scrolled,pendingSecond);s.proof.put("pendingSecondCheckpoint",pendingSecond);
     // A separate worker serves request 3 while the canceled request 2 is still
     // held. Release the old worker now; a successful old write is not required.
@@ -93,39 +93,23 @@ public final class LegalTopRestorationRuntimeTest {
     s.proof.put("afterRecreation",restored).put("afterGeometry",after)
      .put("pendingMetadataSimulationAppliedOnce",true).put("secondNaturalSavedBundlePreservedPendingAnchor",true)
      .put("secondRestoreClearedRetainedAsSavedOnlySimulation",true)
-     .put("pendingCandidateConsumedExactlyOnce",true).put("branch","pending-survives-until-first-document-mount");
-    s.assertPendingRun(middleRun);
-    assertEquals(0,s.count(s.run,"loading-committed"));assertEquals(0,s.count(s.run,"document-unmounted"));
-    s.assertCompletedEventOrder("pending");
-   }else if(!immediate){
-    s.awaitDiscardedBranch();
-    assertEquals(0,s.count(s.run,"response-applied"));
-    s.proof.put("heldLoadingCheckpoint",s.awaitDiscardedCheckpoint());
-    s.server.plan(2).release();s.awaitEvent("response-applied",1,7000);
-    JSONObject reset=s.awaitCheckpoint(false,zeroAnchor(),true);
-    JSONArray after=s.stableGeometry(top);s.assertStableAnchor(zeroAnchor(),1);
-    s.proof.put("afterRecreation",reset).put("afterGeometry",after)
-     .put("branch","consumed-then-committed-loading-reset").put("canonicalAnchorResetToTop",true);
-    s.assertCompletedEventOrder("discarded");
+     .put("pendingCandidateConsumedExactlyOnce",true).put("branch","cached-document-survives-consecutive-reloads");
+    assertEquals(0,s.count(middleRun,"response-applied"));
+    s.assertCompletedRetainedDocumentOrder();
    }else{
-    s.awaitEvent("response-applied",1,7000);s.awaitCheckpoint(false,null,true);
-    s.stableGeometry(null);
-    int loads=s.count(s.run,"loading-committed"),unmounts=s.count(s.run,"document-unmounted");
-    assertEquals("Restored candidate must be consumed once",1,s.count(s.run,"candidate-consumed"));
-    if(loads==0&&unmounts==0){
-     JSONObject restored=s.awaitCheckpoint(false,anchor(scrolled),true);
-     JSONArray after=s.stableGeometry(scrolledGeometry);s.assertStableAnchor(anchor(scrolled),1);
-     assertEquals(1,s.count(s.run,"document-mounted"));
-     s.proof.put("afterRecreation",restored).put("afterGeometry",after)
-      .put("branch","true-fast-document-remained-mounted").put("trueFastVerified",true).put("fastUnverified",false);
-     s.assertCompletedEventOrder("fast");
-    }else{
-     s.awaitDiscardedBranch();JSONObject reset=s.awaitCheckpoint(false,zeroAnchor(),true);
-     JSONArray after=s.stableGeometry(top);s.assertStableAnchor(zeroAnchor(),1);
-     s.proof.put("afterRecreation",reset).put("afterGeometry",after)
-      .put("branch","immediate-http-but-committed-loading-reset").put("trueFastVerified",false).put("fastUnverified",true);
-     s.assertCompletedEventOrder("discarded");
+    if(!immediate){
+     s.proof.put("heldLoadingCheckpoint",s.awaitCachedLoadingCheckpoint(scrolled))
+      .put("heldViewport",s.stableGeometry(scrolledGeometry));
+     assertEquals(0,s.count(s.run,"response-applied"));
+     s.server.plan(2).release();
     }
+    s.awaitEvent("response-applied",1,7000);
+    JSONObject restored=s.awaitCheckpoint(false,anchor(scrolled),true);
+    JSONArray after=s.stableGeometry(scrolledGeometry);s.assertStableAnchor(anchor(scrolled),1);
+    s.assertSameCandidate(scrolled,restored);
+    s.proof.put("afterRecreation",restored).put("afterGeometry",after)
+     .put("branch",immediate?"immediate-response-kept-cached-document":"held-response-kept-cached-document");
+    s.assertCompletedRetainedDocumentOrder();
    }
    s.capture("after-recreation");
    assertEquals(pending?originalRun+2:originalRun+1,s.run);
@@ -216,21 +200,15 @@ public final class LegalTopRestorationRuntimeTest {
    while(SystemClock.uptimeMillis()<end){pulse();int actual=count(run,event);assertTrue("Unexpected duplicate "+event,actual<=expected);if(actual==expected)return;server.assertHealthy();SystemClock.sleep(35);}
    throw new AssertionError("Expected "+event+" in current run "+run+": "+readLog());
   }
-  void awaitDiscardedBranch()throws Exception {
-   awaitEvent("candidate-consumed",1,5000);awaitEvent("loading-committed",1,5000);awaitEvent("document-unmounted",1,5000);
-   long candidate=0,loading=0,unmount=0;JSONArray events=readLog().getJSONArray("events");
-   for(int n=0;n<events.length();n++){JSONObject event=events.getJSONObject(n);if(event.getLong("run")!=run)continue;
-    if("candidate-consumed".equals(event.getString("event")))candidate=event.getLong("sequence");
-    if("loading-committed".equals(event.getString("event")))loading=event.getLong("sequence");
-    if("document-unmounted".equals(event.getString("event")))unmount=event.getLong("sequence");
-   }
-   assertTrue("Candidate must be consumed before the committed loading branch removes its document",candidate>0&&candidate<loading&&candidate<unmount);
+  JSONObject awaitCachedLoadingCheckpoint(JSONObject previous)throws Exception {
+   awaitEvent("candidate-consumed",1,5000);
+   JSONObject checkpoint=awaitCheckpoint(true,anchor(previous),true);
+   assertEquals(1,count(run,"document-mounted"));
+   assertEquals(0,count(run,"loading-committed"));
+   assertEquals(0,count(run,"document-unmounted"));
+   return checkpoint;
   }
-  void assertPendingRun()throws Exception {assertPendingRun(run);}
-  void assertPendingRun(long wantedRun)throws Exception {
-   JSONObject log=readLog();for(String event:new String[]{"document-mounted","candidate-consumed","response-applied","document-unmounted"})assertEquals("Pending run "+wantedRun+" must not have "+event,0,count(log,wantedRun,event));
-  }
-  void assertCompletedEventOrder(String branch)throws Exception {
+  void assertCompletedRetainedDocumentOrder()throws Exception {
    JSONObject log=readLog();Map<String,List<Long>> sequences=new HashMap<>();
    for(String event:new String[]{"document-mounted","document-unmounted","candidate-consumed","loading-committed","response-applied"})sequences.put(event,new ArrayList<>());
    JSONArray events=log.getJSONArray("events");
@@ -238,15 +216,8 @@ public final class LegalTopRestorationRuntimeTest {
    assertEquals(1,sequences.get("candidate-consumed").size());assertEquals(1,sequences.get("response-applied").size());
    long consumed=sequences.get("candidate-consumed").get(0),response=sequences.get("response-applied").get(0);
    List<Long> mounts=sequences.get("document-mounted"),loads=sequences.get("loading-committed"),unmounts=sequences.get("document-unmounted");
-   if("discarded".equals(branch)){
-    assertEquals(2,mounts.size());assertEquals(1,loads.size());assertEquals(1,unmounts.size());
-    assertTrue(mounts.get(0)<consumed&&consumed<loads.get(0)&&consumed<unmounts.get(0));
-    assertTrue(loads.get(0)<response&&unmounts.get(0)<response&&response<mounts.get(1));
-   }else{
-    assertEquals(1,mounts.size());assertEquals(0,loads.size());assertEquals(0,unmounts.size());
-    assertTrue(mounts.get(0)<consumed);
-    if("pending".equals(branch))assertTrue(response<mounts.get(0));else assertTrue(consumed<response);
-   }
+   assertEquals(1,mounts.size());assertEquals(0,loads.size());assertEquals(0,unmounts.size());
+   assertTrue(mounts.get(0)<consumed&&consumed<response);
    JSONObject receipt=new JSONObject();for(Map.Entry<String,List<Long>> entry:sequences.entrySet())receipt.put(entry.getKey(),new JSONArray(entry.getValue()));
    proof.put("completedBranchEventSequences",receipt).put("completedBranchEventOrderAsserted",true);
   }
@@ -280,11 +251,6 @@ public final class LegalTopRestorationRuntimeTest {
     server.assertHealthy();SystemClock.sleep(50);
    }
    throw new AssertionError("Checkpoint did not settle: loading="+loading+" anchor="+expectedAnchor+" last="+last);
-  }
-  JSONObject awaitDiscardedCheckpoint()throws Exception {
-   long end=SystemClock.uptimeMillis()+5000;JSONObject last=null;
-   while(SystemClock.uptimeMillis()<end){pulse();last=checkpoint(saved(),false);if(last!=null){JSONObject state=last.getJSONObject("entry").getJSONObject("state");if(state.getBoolean("isLoading")&&state.isNull("listAnchor"))return last;}SystemClock.sleep(40);}
-   throw new AssertionError("Unmounted loading branch must publish a null consumed anchor: "+last);
   }
   JSONObject stableBaseline(boolean scrolled)throws Exception {
    long end=SystemClock.uptimeMillis()+7000;JSONObject previousPoint=null,last=null;JSONArray previousGeometry=null;int repeats=0;
