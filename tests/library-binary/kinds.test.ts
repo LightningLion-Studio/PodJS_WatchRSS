@@ -13,7 +13,7 @@ test('B2 v14 body imports immutable file references with the business rows and r
  try{
   const {repository,files}=await attachBinaryLibrary(f);
   const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
-  const content=' '.repeat(16360)+'😀\\\/汉字\n'+'z'.repeat(150000);
+  const content=' '.repeat(16360)+'😀\\\/汉字\n'+'z'.repeat(150000)+'\ud800';
   const {object,payload}=sampleArticle('streamed',content);
   await files.writeBytes('raw/payload',payload);
   await f.db.execute('CREATE TABLE receipts(outcome TEXT)');
@@ -25,7 +25,7 @@ test('B2 v14 body imports immutable file references with the business rows and r
   const row=(await f.db.query('SELECT content,reading_progress FROM articles'))[0]!;
   expect(row.reading_progress).toBe(0.5);
   expect(row.content).toMatch(/^watchrss-watch-content:v2-[a-f0-9-]+\.txt$/);
-  expect(await readFile(join(f.root,'article_content',String(row.content).split(':')[1]!), 'utf8')).toBe(content);
+  expect(await readFile(join(f.root,'article_content',String(row.content).split(':')[1]!), 'utf8')).toBe(content.slice(0,-1)+'?');
   expect(await f.db.query('SELECT outcome FROM receipts')).toEqual([{outcome:'merged'}]);
   const metadata=sampleArticle('streamed','','articleMetadata',{title:'new',updatedAt:70,readingProgress:0.75,readingPositionChangedAt:70}).object;
   await kinds.apply(metadata,'unused','phone',boundary);

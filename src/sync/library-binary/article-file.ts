@@ -1,4 +1,3 @@
-import {encodeUtf8} from '@podjs/framework/bytes';
 import {MAX_BODY_JSON_BYTES} from '../article-body';
 import type {StagedArticleBody} from '../article-receiver';
 import type {BinaryAssetFiles} from './assets';
@@ -130,13 +129,31 @@ class TextFile {
   let text=this.surrogate+value;this.surrogate='';
   const tail=text.charCodeAt(text.length-1);
   if(!done&&tail>=0xd800&&tail<=0xdbff){this.surrogate=text.slice(-1);text=text.slice(0,-1);}
-  for(let i=0;i<text.length;){
-   let end=Math.min(text.length,i+16384);
-   if(end<text.length&&/[\ud800-\udbff]/.test(text[end-1]!))end--;
-   const bytes=encodeUtf8(text.slice(i,end),'question');
-   if(this.buffered+bytes.length>this.buffer.length)await this.flush();
-   this.buffer.set(bytes,this.buffered);this.buffered+=bytes.length;
-   i=end;
+  // Write UTF-8 directly into the file buffer. Java's original body writer
+  // substitutes '?' for an unpaired UTF-16 surrogate.
+  for(let i=0;i<text.length;i++){
+   let code=text.charCodeAt(i);
+   if(code>=0xd800&&code<=0xdbff){
+    const low=text.charCodeAt(i+1);
+    if(low>=0xdc00&&low<=0xdfff){code=0x10000+((code-0xd800)<<10)+low-0xdc00;i++;}
+    else code=63;
+   }else if(code>=0xdc00&&code<=0xdfff)code=63;
+   if(this.buffered+4>this.buffer.length)await this.flush();
+   const bytes=this.buffer;
+   if(code<0x80)bytes[this.buffered++]=code;
+   else if(code<0x800){
+    bytes[this.buffered++]=0xc0|(code>>6);
+    bytes[this.buffered++]=0x80|(code&63);
+   }else if(code<0x10000){
+    bytes[this.buffered++]=0xe0|(code>>12);
+    bytes[this.buffered++]=0x80|((code>>6)&63);
+    bytes[this.buffered++]=0x80|(code&63);
+   }else{
+    bytes[this.buffered++]=0xf0|(code>>18);
+    bytes[this.buffered++]=0x80|((code>>12)&63);
+    bytes[this.buffered++]=0x80|((code>>6)&63);
+    bytes[this.buffered++]=0x80|(code&63);
+   }
   }
  }
  private async flush(){
