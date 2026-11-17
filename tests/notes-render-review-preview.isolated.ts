@@ -30,3 +30,12 @@ for(const cp of ['\u2028','\u2029'])test('RNR3-04 real reading entries keep Unic
  const entries=notePreviewEntries('```lang'+cp+'x\n<img src="assets/x.png">\n```',200);
  expect(entries.some((e:any)=>e.anchor?.renderedText.includes('<img'))).toBe(true);
 });
+
+test('RNR4-01 reader retains literal code after a table',()=>{
+ const entries=notePreviewEntries('A | B\n---|---\n```lang|x\nCODE | TEXT\n```',200);
+ expect(entries.some((e:any)=>e.anchor?.renderedText==='CODE | TEXT')).toBe(true);
+});
+test('RNR4-02 reader retains literal image in a list fence',()=>{
+ const entries=notePreviewEntries('- ```\n  <img src="assets/x.png">\n  ```',200);
+ expect(entries.some((e:any)=>e.anchor?.renderedText.includes('<img src="assets/x.png">'))).toBe(true);
+});
