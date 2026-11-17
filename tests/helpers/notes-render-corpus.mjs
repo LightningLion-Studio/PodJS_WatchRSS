@@ -42,7 +42,9 @@ export function* cases(seed,count=COUNT){
   const fence=prefix+marker+info+'\n'+fake+next+payload+'\n'+next+marker+['',' \t',' '][pick(3)];
   const units=[fence,'A | B\n---|---\n'+marker+'lang|x\n'+text()+' | CODE\n'+marker,['    ','\t','  \t'][pick(3)]+text()+' | <img src="assets/x.png">','- '+text()+'\n\n> '+text(),'<p title="<script>">'+escape(text())+'</p>','<template><object></template><p>'+escape(text())+'</p>','<style>DROP</style/><p>'+escape(text())+'</p>'];
   for(let i=units.length-1;i>0;i--){const j=pick(i+1);[units[i],units[j]]=[units[j],units[i]];}
-  yield {seed,index,html:source,markdown:units.slice(0,3+pick(5)).join('\n\n')};
+  // Distinct per-occurrence URLs distinguish code images from allowed body images.
+  let asset=0;const markdown=units.slice(0,3+pick(5)).join('\n\n').replaceAll('assets/x.png',()=>`assets/code-${seed.toString(16)}-${index}-${asset++}.png`);
+  yield {seed,index,html:source,markdown};
  }
 }
 const allowed=new Set('p div span b strong i em u s strike del ol ul li br h1 h2 h3 h4 h5 h6 blockquote code a img mark sub sup'.split(' '));
@@ -55,3 +57,12 @@ export function unsafe(html){
   }walk(tree);if(bad)return bad;html=serialize(tree);
  }return '';
 }
+
+export function imagePaths(node,out=[]){if(node.tagName==='img'){const src=(node.attrs||[]).find(a=>a.name==='src');if(src)out.push(src.value);}for(const c of node.childNodes||[])imagePaths(c,out);return out;}
+export function codeImagePaths(oracle){
+ const paths=new Set();for(const text of codes(oracle)){
+  for(const m of text.matchAll(/<img\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi))paths.add(m[1]??m[2]??m[3]);
+  for(const m of text.matchAll(/!\[[^\]]*\]\(([^) ]+)\)/g))paths.add(m[1]);
+ }return paths;
+}
+export function codeImageEffects(paths,images,resolved=[]){return {images:images.filter(path=>paths.has(path)),resolved:resolved.filter(path=>paths.has(path))};}
