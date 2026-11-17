@@ -1,4 +1,4 @@
-import {foregroundRequestFilter} from '../../src/sync/action-policy';
+import {BluetoothActionPolicy} from '../../src/sync/action-policy';
 import {RfcommLibraryListener,type RfcommPorts} from '../../src/sync/rfcomm';
 import {Database} from 'bun:sqlite';
 import {mkdir,readFile,rename,stat,readdir,rm,open,mkdtemp} from 'node:fs/promises';
@@ -72,7 +72,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   const pair=bytePair(),operation=<T>(value:Promise<T>|T)=>({result:Promise.resolve(value),cancel:()=>{void pair.close();}});
   const radio={status:async()=>({permission:'granted',available:true,enabled:true}),listen:()=>operation({id:'listener'}),accept:()=>operation({id:'stream',remoteName:'host',remoteAddress:'host'}),close:async()=>{}} as unknown as RfcommPorts['radio'];
   const streams={read:()=>{throw Error('B2_BASE64_FORBIDDEN');},write:()=>{throw Error('B2_BASE64_FORBIDDEN');},readBytes:(_id:string,max:number)=>operation(pair.watch.read(max,3000).then(b=>({eof:b===null,bytes:b??new Uint8Array()}))),writeBytes:(_id:string,b:Uint8Array)=>operation(pair.watch.write(b).then(()=>({written:b.length}))),close:async()=>pair.close()} as unknown as RfcommPorts['streams'];
-  const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:foregroundRequestFilter,handleAction:async r=>({success:true,action:r.action,version:1}),now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
+  const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,handleAction:async r=>({success:true,action:r.action,version:1}),now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
  }
 
  return {root,sql,db,files,store,chunks,ports,service,accountScope,session,stats:()=>({stageCalls,peak}),dispose:async()=>{sql.close();await rm(root,{recursive:true,force:true});}};

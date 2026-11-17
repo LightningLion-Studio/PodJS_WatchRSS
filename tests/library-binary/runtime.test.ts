@@ -52,3 +52,11 @@ test('actual RFCOMM owner feeds all three recovery STOP rules without a fourth a
 test('foreground listener stops on the B2 fatal result instead of scheduling a retry',async()=>{
  const {ForegroundSyncController}=await import('../../src/sync/foreground');let starts=0,delays=0;const c=new ForegroundSyncController({createListener:()=>({start:async()=>{starts++;throw Object.assign(Error('HASH_MISMATCH'),{stopAutomaticRecovery:true});},stop:()=>{}}),delay:()=>{delays++;return {result:new Promise(()=>{}),cancel:()=>{}};},keepScreenOn:()=>{},acquireMedia:()=>{},releaseMedia:()=>{}});c.update({resumed:true,interactive:true,exclusive:false,permission:true,enabled:true});await new Promise(r=>setTimeout(r,10));expect(starts).toBe(1);expect(delays).toBe(0);await c.dispose();
 });
+
+test('automatic B2 switch is Bluetooth-only and opt-in while the shared v1 allowlist stays frozen',async()=>{
+ const {BluetoothActionPolicy,foregroundRequestFilter}=await import('../../src/sync/action-policy');
+ const r={action:'syncLibraryBinary',version:2,type:'request',phase:'switch'};let enabled=true;const policy=new BluetoothActionPolicy(()=>enabled);
+ expect(foregroundRequestFilter(r)?.success).toBe(false);expect(new BluetoothActionPolicy().filterRequest(r)?.success).toBe(false);expect(policy.filterRequest(r)).toBeUndefined();
+ for(const changed of [{version:1},{type:'response'},{phase:'begin'}])expect(policy.filterRequest({...r,...changed})?.success).toBe(false);
+ enabled=false;expect(policy.filterRequest(r)?.success).toBe(false);
+});

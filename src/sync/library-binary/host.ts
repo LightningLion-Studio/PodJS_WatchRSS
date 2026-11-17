@@ -35,6 +35,7 @@ export class BinaryApplicationService implements BinarySessionPort {
  private reconnected=false;
  constructor(private readonly ports:BinaryApplicationPorts){this.recovery=ports.recovery??new RecoveryRules();}
  private enabled(){return (this.ports.b2Enabled??RELEASE_B2_ENABLED)&&this.ports.byteBridge()&&this.ports.localPermission();}
+ canSwitch(){return this.enabled();}
  async probe(r:Row,context:SyncActionContext):Promise<Row>{
   this.sessions.delete(context.session);if(!this.enabled())return {};
   if(r.supportedLibraryBinaryVersions===undefined)return {};
