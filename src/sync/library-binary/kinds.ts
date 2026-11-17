@@ -7,7 +7,7 @@ import type {SqlLibrarySessionRepository} from '../library-repository';
 import {importArticleFile,type BinaryArticleFiles} from './article-file';
 import {D,objectId} from './digests';
 import type {ReceiptBoundary} from './store';
-import {CHUNK_BYTES,exact,fail,hash,hex,integer,strictJson,utf8,type ObjectDescriptor,type Row} from './wire';
+import {CHUNK_BYTES,exact,fail,hash,hex,integer,strictJson,utf8,type ObjectDescriptor} from './wire';
 
 const sourceFields=['url','sourceDeviceId','title','description','siteUrl','imageUrl','createdAt','updatedAt','sortOrder','isPinned','deleted','deletedAt'];
 const articleStrings=['articleId','sourceDeviceId','url','title','siteName','excerpt','contentHash','readingPositionContentHash'];

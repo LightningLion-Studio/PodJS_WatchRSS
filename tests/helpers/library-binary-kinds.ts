@@ -1,5 +1,6 @@
 import type {SQLQueryBindings} from 'bun:sqlite';
 import {createReadStream,createWriteStream} from 'node:fs';
+import {open} from 'node:fs/promises';
 import {pipeline} from 'node:stream/promises';
 import {createGunzip,gzipSync} from 'node:zlib';
 import {join} from 'node:path';
@@ -25,8 +26,8 @@ export async function attachBinaryLibrary(f:Awaited<ReturnType<typeof binaryRunt
   gunzip:async(path:string,max:number,allowPlain:boolean)=>{
    const src=join(f.root,path),out=(await f.files.createTemp('decoded')).path;let size=0;
    const header=await f.files.readBytes(path,0,2);
-   const source=createReadStream(src,{highWaterMark:8192});
-   const input=header.bytes[0]===31&&header.bytes[1]===139?source.pipe(createGunzip({chunkSize:8192})):source;
+   const source=createReadStream(src,{highWaterMark:65536});
+   const input=header.bytes[0]===31&&header.bytes[1]===139?source.pipe(createGunzip({chunkSize:65536})):source;
    if(input===source&&!allowPlain)throw Error('expected gzip');
    try{
     await pipeline(input,async function*(chunks:AsyncIterable<Uint8Array>){for await(const chunk of chunks){size+=chunk.length;if(size>max)throw Error('decompressed_content_too_large');yield chunk;}},createWriteStream(join(f.root,out)));
@@ -37,10 +38,17 @@ export async function attachBinaryLibrary(f:Awaited<ReturnType<typeof binaryRunt
    const id=nonce();
    async function* decode(){
     const decoder=new TextDecoder('utf-8',{fatal:true});
-    for await(const bytes of createReadStream(join(f.root,path),{highWaterMark:4093})){
-     const s=decoder.decode(bytes,{stream:true});if(s)yield s;
-    }
-    const tail=decoder.decode();if(tail)yield tail;
+    const input=await open(join(f.root,path),'r'),buffer=Buffer.allocUnsafe(16381);
+    try{
+     let offset=0;
+     while(true){
+      const {bytesRead}=await input.read(buffer,0,buffer.length,offset);
+      if(!bytesRead)break;
+      offset+=bytesRead;
+      const s=decoder.decode(buffer.subarray(0,bytesRead),{stream:true});if(s)yield s;
+     }
+     const tail=decoder.decode();if(tail)yield tail;
+    }finally{await input.close();}
    }
    readers.set(id,decode());return {id};
   },

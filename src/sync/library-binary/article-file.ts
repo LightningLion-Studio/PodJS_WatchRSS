@@ -120,6 +120,8 @@ class BodyJsonReader {
 
 class TextFile {
  private offset=0;
+ private readonly buffer=new Uint8Array(65536);
+ private buffered=0;
  private surrogate='';
  private meaningful=false;
  constructor(readonly path:string,private readonly files:BinaryAssetFiles,private readonly work:()=>void){}
@@ -132,14 +134,21 @@ class TextFile {
    let end=Math.min(text.length,i+16384);
    if(end<text.length&&/[\ud800-\udbff]/.test(text[end-1]!))end--;
    const bytes=encodeUtf8(text.slice(i,end),'question');
-   const result=await this.files.appendBytes(this.path,bytes,this.offset);
-   this.offset+=bytes.length;
-   if(result.size!==this.offset)fail('LOCAL_IO');
-   i=end;this.work();
+   if(this.buffered+bytes.length>this.buffer.length)await this.flush();
+   this.buffer.set(bytes,this.buffered);this.buffered+=bytes.length;
+   i=end;
   }
+ }
+ private async flush(){
+  if(!this.buffered)return;
+  const result=await this.files.appendBytes(this.path,this.buffer.subarray(0,this.buffered),this.offset);
+  this.offset+=this.buffered;
+  if(result.size!==this.offset)fail('LOCAL_IO');
+  this.buffered=0;this.work();
  }
  async publish(key:string){
   await this.append('',true);
+  await this.flush();
   if(!this.offset)return {value:'',bytes:0,meaningful:false};
   const verified=await this.files.hash(this.path);this.work();
   if(verified.size!==this.offset)fail('LOCAL_IO');
@@ -155,8 +164,9 @@ export async function importArticleFile(files:BinaryArticleFiles,path:string,d:O
  legacyHashes:readonly string[],work:()=>void):Promise<StagedArticleBody>{
  // Native finalize has already verified the outer full hash. The inherited
  // v14 index is independent and covers pairs of consecutive B2 blocks.
+ const bytes=new Uint8Array(Math.min(131072,d.size));
  for(let offset=0,index=0;offset<d.size;offset+=131072,index++){
-  const block=new Uint8Array(Math.min(131072,d.size-offset));
+  const block=bytes.subarray(0,Math.min(131072,d.size-offset));
   for(let at=0;at<block.length;at+=65536){
    const size=Math.min(65536,block.length-at),read=await files.readBytes(path,offset+at,size);
    if(read.size!==d.size||read.bytes.length!==size)fail('HASH_MISMATCH');
@@ -175,7 +185,7 @@ export async function importArticleFile(files:BinaryArticleFiles,path:string,d:O
   };
   const html=await create(),text=await create();
   reader=(await files.openText(decoded.path,{strictUtf8:true})).id;
-  const json=new BodyJsonReader(async()=>{const part=await files.readTextChunk(reader!,8192);work();return part;});
+  const json=new BodyJsonReader(async()=>{const part=await files.readTextChunk(reader!,16384);work();return part;});
   const fields=await json.fields(name=>value=>(name==='contentHtml'?html:text).append(value));
   const h=fields.html?await html.publish(d.businessId+'-html'):null;
   const t=fields.text?await text.publish(d.businessId+'-text'):null;

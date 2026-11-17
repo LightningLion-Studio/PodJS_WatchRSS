@@ -5,7 +5,6 @@ import {mkdir,readFile,rename,stat,readdir,rm,open,mkdtemp} from 'node:fs/promis
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
-import {createReadStream} from 'node:fs';
 import type {SqlDatabase} from '../../src/core/types';
 import {BinaryApplicationService,type BinaryApplicationPorts} from '../../src/sync/library-binary/host';
 import {BinaryStore} from '../../src/sync/library-binary/store';
@@ -35,7 +34,17 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  const files:BinaryAssetFiles={
   list:async p=>({entries:await readdir(path(p),{withFileTypes:true}).then(es=>Promise.all(es.map(async e=>({path:p+'/'+e.name,file:e.isFile(),size:(await stat(path(p+'/'+e.name))).size})))).catch(()=>[])}),
   stat:async p=>{try{const s=await stat(path(p));return {file:s.isFile(),size:s.size,usableBytes:2**40};}catch{return {file:false,size:0,usableBytes:2**40};}},
-  hash:async p=>{const h=createHash('sha256');let size=0;for await(const b of createReadStream(path(p),{highWaterMark:65536})){h.update(b);size+=b.length;}return {size,sha256:h.digest('hex')};},
+  hash:async p=>{
+   const input=await open(path(p),'r'),buffer=Buffer.allocUnsafe(65536),h=createHash('sha256');let size=0;
+   try{
+    while(true){
+     const {bytesRead}=await input.read(buffer,0,buffer.length,size);
+     if(!bytesRead)break;
+     h.update(buffer.subarray(0,bytesRead));size+=bytesRead;
+    }
+    return {size,sha256:h.digest('hex')};
+   }finally{await input.close();}
+  },
   readBytes:async(p,offset,max)=>{const f=await open(path(p),'r');try{const size=(await f.stat()).size,b=new Uint8Array(Math.min(max,Math.max(0,size-offset))),r=await f.read(b,0,b.length,offset);return {bytes:b.subarray(0,r.bytesRead),size};}finally{await f.close();}},
   writeBytes:async(p,b)=>{await durable(p,b);return {size:b.length};},
   appendBytes:async(p,b,offset)=>{const f=await open(path(p),'r+');try{if((await f.stat()).size!==offset)throw Error('LOCAL_IO');await f.write(b,0,b.length,offset);await f.sync();return {size:offset+b.length};}finally{await f.close();}},

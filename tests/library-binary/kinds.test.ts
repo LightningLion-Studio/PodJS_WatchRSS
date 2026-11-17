@@ -13,7 +13,7 @@ test('B2 v14 body imports immutable file references with the business rows and r
  try{
   const {repository,files}=await attachBinaryLibrary(f);
   const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
-  const content=' '.repeat(4080)+'😀\\\/汉字\n'+'z'.repeat(150000);
+  const content=' '.repeat(16360)+'😀\\\/汉字\n'+'z'.repeat(150000);
   const {object,payload}=sampleArticle('streamed',content);
   await files.writeBytes('raw/payload',payload);
   await f.db.execute('CREATE TABLE receipts(outcome TEXT)');
