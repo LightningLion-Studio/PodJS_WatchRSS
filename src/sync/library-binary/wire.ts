@@ -1,4 +1,4 @@
-/** Pure B2 S2 schemas. No production entry point imports this module. */
+/** Strict B2 S2 schemas shared by the RFCOMM owner and host tests. */
 import {encodeUtf8} from '@podjs/framework/bytes';
 import {sha256Hex} from '@podjs/framework/crypto';
 

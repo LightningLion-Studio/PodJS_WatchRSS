@@ -1,4 +1,4 @@
-/** Opt-in pure S2 library. Deliberately unreferenced by production sync entry points. */
+/** Opt-in S2 core. RFCOMM adapters are imported explicitly by the application. */
 export * from './wire';
 export * from './codec';
 export * from './digests';

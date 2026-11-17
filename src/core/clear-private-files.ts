@@ -1,6 +1,6 @@
 /** Owned content namespaces only. Fonts, reader configuration, credentials and logs stay outside. */
 export const LIBRARY_CONTENT_ROOTS=['books','article_content','offline/rss','sync_body','feeds','original','managed-cache/rss-offline'] as const;
-export const PRIVATE_CONTENT_ROOTS=['books','article_content','offline/rss','notes','sync_body','feeds','original','managed-cache/rss-offline','watch-cloud-cache','cloud-crypto'] as const;
+export const PRIVATE_CONTENT_ROOTS=['books','article_content','offline/rss','notes','sync_body','feeds','original','managed-cache/rss-offline','watch-cloud-cache','cloud-crypto','library-binary'] as const;
 export interface PrivateLibraryFiles {
  list(path:string):Promise<{entries:{path:string;file:boolean;directory:boolean}[]}>;
  remove(path:string):Promise<unknown>;

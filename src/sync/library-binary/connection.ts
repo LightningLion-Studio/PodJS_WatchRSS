@@ -3,10 +3,10 @@ import {fail,HARD_LIMITS,type Limits} from './wire';
 import {SwitchGate} from './routing';
 import {Grant,TokenBucket} from './state';
 
-interface Queued {bytes:Uint8Array;done:()=>void;reject:(e:unknown)=>void}
+interface Queued {started?:()=>void;bytes:Uint8Array;done:()=>void;reject:(e:unknown)=>void}
 /** One reader and one writer; complete frames never interleave. Durable ACK,
  * negative replies and heartbeat replies bypass ordinary DATA/control work.
- * This class has no production caller until the S1 integration card.
+ * The RFCOMM coordinator owns this connection after the switch write barrier.
  */
 export class BinaryConnection {
  private high:Queued[]=[];private normal:Queued[]=[];private writing=false;private reading=false;private closed=false;
@@ -24,14 +24,14 @@ export class BinaryConnection {
    const frame=decodeFrame(bytes,this.limits.maxFrameBytes);if(frame.kind==='control'&&bytes.length-16>this.limits.maxControlHeaderBytes)fail('LIMIT_EXCEEDED');return frame;
   }catch(e){this.close();throw e;}finally{this.reading=false;}
  }
- write(frame:Frame,priority:'ordinary'|'urgent'='ordinary'):Promise<void> {
+ write(frame:Frame,priority:'ordinary'|'urgent'='ordinary',started?:()=>void):Promise<void> {
   this.check();const bytes=encodeFrame(frame),control=frame.kind==='control';
   const urgent=frame.kind==='ack'||control&&(frame.envelope.success===false||frame.envelope.phase==='cancel'||frame.envelope.phase==='missing'&&frame.envelope.type==='response'&&(frame.envelope.result?.items as unknown[]|undefined)?.length===0)||priority==='urgent';
   if(bytes.length-4>this.limits.maxFrameBytes||control&&bytes.length-16>this.limits.maxControlHeaderBytes)fail('LIMIT_EXCEEDED');
   if(frame.kind==='ack'&&this.high.filter(q=>q.bytes[8]===3).length>=2)fail('LIMIT_EXCEEDED');
   if(control&&(this.queuedControls>=(urgent?8:6)||this.queuedControlBytes+bytes.length-16>1048576)||frame.kind==='data'&&this.normal.some(q=>q.bytes[8]===2))fail('LIMIT_EXCEEDED');
   if(control){this.queuedControls++;this.queuedControlBytes+=bytes.length-16;}
-  const result=new Promise<void>((done,reject)=>{(urgent?this.high:this.normal).push({bytes,done,reject});});
+  const result=new Promise<void>((done,reject)=>{(urgent?this.high:this.normal).push({bytes,done,reject,started});});
   void this.flush();return result;
  }
  private check():void {if(this.closed)fail('AUTH_REVOKED');this.gate.requireBinary();this.grant.check(this.grant.token());}
@@ -40,7 +40,7 @@ export class BinaryConnection {
   try{
    for(;;){const q=this.high.shift()??this.normal.shift();if(!q)break;
     if(q.bytes[8]===1){this.queuedControls--;this.queuedControlBytes-=q.bytes.length-16;}
-    try{this.check();await this.io.writeFrame(q.bytes);this.check();q.done();}catch(e){q.reject(e);this.close();break;}
+    try{this.check();q.started?.();await this.io.writeFrame(q.bytes);this.check();q.done();}catch(e){q.reject(e);this.close();break;}
    }
   }finally{this.writing=false;}
  }

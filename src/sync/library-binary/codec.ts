@@ -81,6 +81,7 @@ export function decodeFrame(b:Uint8Array,maximum=MAX_FRAME_LENGTH):Frame {
 
 /** No RFCOMM dependency: S1 supplies bounded complete byte frames and cancellation. */
 export interface ByteTransport {
+ setNetworkProgress?(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number)=>void):void;
  readFrame():Promise<Uint8Array>;
  writeFrame(bytes:Uint8Array):Promise<void>;
  close():void;

@@ -1,101 +1,94 @@
-# Library Binary v2: S2 pure core
+# Library Binary v2, S2
 
-This directory is an opt-in protocol library. No existing sync entry point imports
-it. `RELEASE_B2_ENABLED` is `false`. This card does not advertise `libraryBinary`,
-install a device transport, change the old journal, or enable cloud writes.
+The RFCOMM product entry is `BinaryApplicationService` →
+`LibraryBinaryConnection` → `BinaryConnection` / `BinaryByteTransport`.
+`RfcommLibraryListener` uses S1 `readBytes` / `writeBytes`. The locked framework
+supplies raw file reads/writes and verified native staging; no framework change
+is required. `RELEASE_B2_ENABLED=false` is the build default. A local integration
+host can explicitly inject `b2Enabled:true`; production builds change the build
+constant only after rollout authorization.
 
-The frozen contract is `library-binary-v2.md` SHA-256
+The frozen r3 specification SHA-256 is
 `3d1ed2b857be3d599d52221c02c04b2672f80b5b42e9443eaeab844632cad8cb`.
-Fixtures under `tests/fixtures/library-binary` are unchanged spec/review inputs;
-`SOURCE.json` records their raw-file hashes and Kotlin fixture names.
+S2 advertises only `noteAsset`, in both directions, with 65536-byte blocks and
+one pending DATA frame per direction. The watch advertises bounded local limits:
+5 MiB per asset, 512 objects, 256 KiB total manifest and 1 KiB metadata per object.
+The negotiated staging cap is no larger than the native cap, with a 32 MiB
+journal commitment. Insufficient peak space is STOP, never a v1 retry.
 
-## Public pieces
+## Connection and routes
 
-- `wire`, `digests`, `codec`: strict schemas/UTF-8, B2 digest domains, complete
-  `Uint8Array` CONTROL/DATA/ACK frames. `accountScope` remains the existing C-v1
-  account commitment; do not derive a B2 account identity.
-- `routing`: peer projection, directional capability intersection, explicit v1
-  tasks, connection protocol pin, whole-selection receipt accounting, switch
-  response write barrier. Local `s2Capability()` only accepts ready inherited
-  kinds and forces 1 chunk / 65536 bytes. A peer may advertise future book kinds;
-  this core never selects/advertises them for its own S2 job.
-- `Preparation`: validates/persists offer and confirm bindings. The reverse job
-  may begin only after confirm success is **fully written**. The first begin
-  must match its confirm intent; subsequent resume retains that job's first plan,
-  selection, snapshots and manifest page partition.
-- `state`: one DATA pending per stream, exact byte settlement, ACK/negative
-  association, epoch reset, fixed IDs on retry, token buckets/backoff, independent
-  business/heartbeat slots, local generation fence, immutable stream bindings,
-  separate directional object slots.
-- `lifecycle`: manifest pages, roots/DAG/identity validation, peak reservation
-  barrier, durable checkpoint restore, apply and completion receipt checks,
-  immediate local cancellation fence. Chunk hash arrays stay in a disk-backed
-  `RegisteredManifest` rather than a 4096-object in-memory manifest.
-- `missing`: bounded disk-backed inventory, rechecks local chunk bytes, paginates
-  real missing ranges and full business receipts. PLANNING `limit=0` never reads
-  this data index or allocates an object slot.
-- `recovery`: the three logical-task recovery rules, independent heartbeat/local
-  work deadlines and network/half-frame deadlines. A semantic progress key must
-  describe content/version; a new jobId must not make a new progress key.
-- `connection`: one reader/writer, complete-frame priority queue, reserved control
-  capacity, bounded raw frames, local fence on malformed input or I/O failure.
+An enabled, byte-capable, locally permitted listener advertises B2 only in
+response to an explicit version probe. The legacy session validates the stable
+peer and waits for successful account synchronization and its applied ACK.
+`SwitchGate` validates the echoed capability digest. Its legacy response must
+finish writing before `detachStream()` transfers the single reader. No legacy
+ACK follows switch. Native reads request exact remaining ranges, including the
+prefix; a socket-buffer tail cannot be consumed by the old decoder.
 
-## S1 integration contract (separate card)
+Business requests preceding switch pin the connection to v1. The phone's
+pre-write route planner splits assets from the remaining domains and opens a
+fresh authenticated connection for B2. Unknown/invalid B2 input, an account
+failure or a local/business error stops the owner. There is no post-switch v1
+path. IP remains on its existing implementation.
 
-1. With `b2Enabled=false`, delegate directly to existing v1 code. Do not construct
-   a B2 connection or advertise capabilities. Retain every old Base64 API/frame.
-2. Classify and select routes **before business writes**. Validate actual native
-   byte/storage/business-adapter readiness before creating `s2Capability()`.
-   Keep B2 and v1 work on different authenticated physical connections.
-3. Finish probe/stable identity/Ready/account checks and drain old ACKs. Use
-   `SwitchGate`; write its old-format response completely before handing the
-   single reader/writer to `BinaryConnection`. Preserve tail bytes from the same
-   underlying read. Never send old `action:ack` for switch.
-4. Implement `ByteTransport.readFrame/writeFrame/close`. Reject a length prefix
-   with `frameAllocationBytes()` **before allocating**. Reads preserve one exact
-   frame; writes handle partial I/O and never interleave. A partial frame at EOF
-   is not durable. WebSocket requires one binary message per B2 frame and no
-   compression/text. Codec helpers alone do not prove those host contracts.
-5. Implement `JobJournal`, `MissingIndex`, `RegisteredManifest`, `DurableChunks`
-   using the existing authenticated account scope and frozen source spool.
-   Bind request ID/locator/digest atomically; recheck the provided grant callback
-   at **every final durable or business commit**, not only before awaiting work.
-   Validate object SHA-256/finalize/dependencies and existing kind schemas in the
-   real adapter. Persist APPLIED with business rows/references in one transaction.
-   Retain IDs/receipts/checkpoints for at least 24h; preserve terminal resume data.
-6. An admitted receive window requires verified manifest root/DAG, native index,
-   dependency readiness, directional object slot and full peak reservation.
-   Admission failures must drain/hash the complete bounded DATA before a negative
-   reply; the native stream adapter must provide the 4KiB scratch/60s drain
-   contract. This pure core already receives a complete bounded byte frame.
-7. Share `BinaryConnection.staleAckBudget` between both `SendWindow` instances
-   (the fourth constructor argument); its 32/16 budget is physical-connection-wide.
-   Bind `ControlSlots` to the authenticated receiver device ID for receipt checks.
-   Reserve DATA credit at first write; do not resend a pending operation. A
-   durable callback invokes the ACK writer immediately. QUERY/WAIT/BEGIN settle
-   only the matching pending attempt; replay uses the same persistent ID/digest
-   and a new txSeq. Apply sender backoff and the aggregate STATE bucket.
-8. Regrant only the same stream job/plan/selection after the writer/native fence
-   barrier. Use `ReceiveWindow.regrant()` to register the new connection-local
-   grant; changing its `Grant` directly invalidates the window. Only epochs
-   actually granted to this window may be discarded as old barrier frames. A
-   fresh connection first granted epoch 2 must STOP on epoch 1, as on future epochs.
-   Clear old pending/ACK/error work, reset sequences and query missing
-   before resending. A different job/plan/selection requires closing both streams
-   and starting a new physical connection. Old callbacks retain old grant tokens.
-9. Drive authenticated/begun heartbeat slots every <=10s, including PLANNING and
-   waits for manifest/durable/apply. Start the independent 30s heartbeat deadline
-   at **write start**. On expiry close once and feed real SocketTimeout to
-   `RecoveryRules.ioFailure()`. Actual local work units alone refresh the 30s
-   local watchdog. Protocol/account/business/local failures call `stop()` and
-   fence; they do not initiate network search. Route handoff calls `detach()` and
-   preserves logical counters and semantic progress keys.
+## Persistence and fencing
 
-## Local checks
+`BinaryStore` uses private `library_binary_*` tables in the existing business
+SQLite database. It never changes the v1 or C-v1 journal schema. Every write
+restores FULL and checks `pragma_synchronous` inside the actual transaction.
+The connection/epoch guard and request bindings share the business transaction.
+`BinaryAssets` publishes immutable native files before writing the business
+reference and APPLIED receipt in that transaction. A conflicting local image
+retains its canonical path; the received image uses `notes/asset-conflicts`.
 
-Use the task's `flock /tmp/wrss-heavy-PodJS_WatchRSS.lock capmem 16G` prefix for
-Bun tests, type checks and builds. `bun test ./tests/library-binary/` includes 259
-baseline v1 frame comparisons. Optional live baseline byte comparison uses
-`B2_LEGACY_BASELINE_ROOT` (default sibling `PodJS_WatchRSS`); the frozen hash checks
-remain self-contained. `bun scripts/lint-library-binary.ts` checks this core and
-its tests for type errors and unused symbols. `bun run typecheck` checks the app.
+Source freeze copies one 64 KiB block at a time, verifies both the source and
+spool hashes, and persists the immutable witness and spool paths before offer.
+Content-addressed spools are reused across snapshots. Witness comparison uses
+field values; a Kotlin JSON field-order change cannot invalidate a frozen source.
+Transfer reads only those spools. DATA uses a point descriptor lookup and a
+constant-size persistent request-quota update, rather than scanning the journal. Whole-object finalize/hashing uses native
+files. DATA never passes through Base64. Manifest roots, page chains and graph
+bindings are revalidated on restore. COMPLETE resumes use durable receipts;
+CANCELLED resumes cannot write. Cancellation fences both directions before
+queuing durable tombstones and closing the raw transport.
+
+Frozen files and journals retain at least 24 hours of recovery state. Bounded
+collection retires at most four expired jobs and 64 unreferenced source files per
+authenticated connection. Relational snapshot references protect live spools;
+there is no dependency on SQLite JSON extensions. Business publications survive
+native cleanup. Failed cleanup retains its peak reservation. Bounded journal/peak
+accounting refuses new work when retained data consumes the local limit. Rollback must preserve these files and
+tables; use a new versionCode with the build switch disabled.
+
+## Timers and recovery
+
+The reader runs independently of the single business writer lane. PLANNING
+`missing(limit=0)` reads lightweight committed state and never scans objects,
+reserves peak storage or allocates DATA slots. The source probes every eight
+seconds using its independent control slot. Its 30-second deadline starts at
+actual writer entry. A local-work watchdog uses actual work-unit callbacks;
+heartbeat responses do not reset it. Production time samples come from native
+`elapsedRealtime`, not wall-clock time.
+
+`RecoveryRules` feeds the foreground listener through `stopAutomaticRecovery`.
+Only current-stream I/O failures enter recovery. A physical error is accounted
+once. The three search, rapid-disconnect and no-progress limits retain their
+logical state across authenticated reconnections. Semantic progress uses
+content object IDs and chunk indexes rather than job IDs. Protocol/account/local
+errors stop automatic retry. A deliberate route handoff detaches its interval.
+
+## Checks
+
+Use the task's `flock /tmp/wrss-heavy-<directory>.lock capmem 16G` prefix for
+installation, tests, lint, typecheck and package builds; run one command at a time.
+`bun test ./tests/library-binary/` includes fixed vectors, 259 legacy frame
+comparisons, actual RFCOMM/session integration, native BUSY retry, file/SQLite business receipts,
+recovery adapter tests and a baseline full-handshake comparison.
+`B2_LEGACY_BASELINE_ROOT` selects a read-only baseline checkout.
+`bun scripts/lint-library-binary.ts` checks types and unused symbols for the B2
+code and its tests; `bun run typecheck` checks the complete app.
+
+Host tests replace the Android service ports with files, SQLite and in-process
+byte pipes. They run the product watch session and byte adapters. They do not
+prove Android fsync behavior, device PSS, radio throughput or power-loss recovery.

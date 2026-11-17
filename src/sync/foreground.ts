@@ -59,7 +59,7 @@ export class ForegroundSyncController {
    catch(error){failure=error;}
    finally{if(this.listener===listener)this.listener=undefined;this.transfer(false);if(!this.disposed)this.releaseLater();}
    if(failure&&!this.listenerStopped&&this.desired&&!this.disposed){
-    this.report(failure);const timer=this.ports.delay(500);this.retryTimer=timer;
+    if((failure as {routeHandoff?:boolean}).routeHandoff!==true)this.report(failure);if((failure as {stopAutomaticRecovery?:boolean}).stopAutomaticRecovery===true){this.desired=false;return;}const timer=this.ports.delay(500);this.retryTimer=timer;
     try{await timer.result;}catch{}finally{if(this.retryTimer===timer)this.retryTimer=undefined;}
    }
    if(!this.eligible())this.scheduleStop();
