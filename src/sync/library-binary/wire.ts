@@ -1,6 +1,7 @@
 /** Strict B2 S2 schemas shared by the RFCOMM owner and host tests. */
-import {encodeUtf8} from '@podjs/framework/bytes';
-import {sha256Hex} from '@podjs/framework/crypto';
+import {encodeUtf8,sha256Bytes} from '@podjs/framework/bytes';
+import {hex as bytesHex} from '@podjs/framework/crypto';
+import {ContentSha256} from '@podjs/framework/content-sha256';
 
 export const ACTION='syncLibraryBinary',VERSION=2,CHUNK_BYTES=65536,RETENTION=86400000,LEASE=30000;
 export const PHASES=['prepare','begin','manifestPage','missing','putChunk','apply','complete','cancel'] as const;
@@ -48,7 +49,17 @@ export function text(v:unknown,max=2048,min=1):string{if(typeof v!=='string')fai
 export function hex(v:unknown,n=64):string{if(typeof v!=='string'||!new RegExp('^[0-9a-f]{'+n+'}$').test(v))fail();return v;}
 export function bool(v:unknown):boolean{if(typeof v!=='boolean')fail();return v;}
 export function array(v:unknown,max:number):unknown[]{if(!Array.isArray(v)||v.length>max)fail();return v;}
-export const hash=(bytes:Uint8Array)=>sha256Hex(bytes);
+export function hash(bytes:Uint8Array):string {
+ const native=sha256Bytes(bytes);
+ if(native)return bytesHex(native);
+ // The portable framework one-shot implementation expands the whole input
+ // into a JS number array. Keep the fallback bounded to streaming updates.
+ const digest=new ContentSha256();
+ for(let offset=0;offset<bytes.length;offset+=CHUNK_BYTES){
+  digest.update(bytes.subarray(offset,offset+CHUNK_BYTES));
+ }
+ return digest.finish();
+}
 export const utf8=(value:string)=>encodeUtf8(value,'strict');
 export function sorted(values:readonly string[]):void{if(values.some((v,i)=>i>0&&values[i-1]!>=v))fail('PLAN_CONFLICT');}
 export function limits(v:unknown):Limits {

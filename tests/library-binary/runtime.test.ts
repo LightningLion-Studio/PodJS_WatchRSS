@@ -60,3 +60,49 @@ test('automatic B2 switch is Bluetooth-only and opt-in while the shared v1 allow
  for(const changed of [{version:1},{type:'response'},{phase:'begin'}])expect(policy.filterRequest({...r,...changed})?.success).toBe(false);
  enabled=false;expect(policy.filterRequest(r)?.success).toBe(false);
 });
+
+test('v1 business pins the physical connection through reprobe and account confirmation',async()=>{
+ const f=await binaryRuntime();
+ const probe={action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',
+  supportsPersistentSession:true,requestPersistentSession:true};
+ const capableProbe={...probe,supportedLibraryBinaryVersions:[2]};
+ const account={action:'syncAccount',version:1,deviceId:'phone',account:{userId:'b2-host'}};
+ const business={action:'syncLlmTokenUsage',version:1,deviceId:'phone'};
+ const ack={action:'ack',success:true,applied:true};
+ type Session=ReturnType<typeof f.session>;
+ async function legacy(s:Session,request:Row){
+  await s.connection.writeFrame(request);
+  const response=await s.connection.readFrame(3000);
+  expect(response.success).toBe(true);
+  await s.connection.writeFrame(ack);
+  return response;
+ }
+ function switchRequest(cap:unknown):Row {
+  return {action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),
+   payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(cap as Capability)}};
+ }
+ try{
+  for(const initial of [probe,capableProbe]){
+   const s=f.session();
+   try{
+    const first=await legacy(s,initial);
+    expect(Boolean(first.libraryBinary)).toBe(initial===capableProbe);
+    await legacy(s,account);
+    await legacy(s,business);
+    // Keep the pin even across a probe that clears all B2 negotiation data.
+    await legacy(s,probe);
+    const repeated=await legacy(s,capableProbe);
+    await legacy(s,account);
+    await s.connection.writeFrame(switchRequest(repeated.libraryBinary));
+    await expect(s.running).rejects.toThrow('AUTH_REVOKED');
+   }finally{await s.pair.close();await s.running.catch(()=>{});}
+  }
+  const fresh=f.session();
+  try{
+   const negotiated=await legacy(fresh,capableProbe);
+   await legacy(fresh,account);
+   await fresh.connection.writeFrame(switchRequest(negotiated.libraryBinary));
+   expect((await fresh.connection.readFrame(3000)).success).toBe(true);
+  }finally{await fresh.pair.close();await fresh.running.catch(()=>{});}
+ }finally{await f.dispose();}
+});

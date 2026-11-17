@@ -19,7 +19,7 @@ export interface BinarySessionPort {
  failed?(error:unknown,context?:SyncActionContext):unknown;
  business?(context:SyncActionContext):void;
 }
-interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;business:boolean;connectionId:string;running:boolean}
+interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean}
 export interface BinaryApplicationPorts {
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
@@ -31,6 +31,9 @@ export interface BinaryApplicationPorts {
 /** RFCOMM only. There is no capability, table creation or file I/O when off. */
 export class BinaryApplicationService implements BinarySessionPort {
  private readonly sessions=new WeakMap<object,Negotiation>();
+ // The action context belongs to one physical session. A probe only replaces
+ // negotiation state, so it cannot reopen a connection already used for v1.
+ private readonly v1Sessions=new WeakSet<SyncActionContext>();
  private recovery:RecoveryRules;
  private reconnected=false;
  constructor(private readonly ports:BinaryApplicationPorts){this.recovery=ports.recovery??new RecoveryRules();}
@@ -43,9 +46,9 @@ export class BinaryApplicationService implements BinarySessionPort {
   const peer=text(r.deviceId,128),runtime=await this.ports.chunks.runtime();if(!runtime)fail('CAPABILITY_MISMATCH');
   await this.ports.sampleClock?.();await this.ports.store.initialize();await this.ports.store.observeClock(runtime.elapsedMillis);
   const cap=s2Capability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],{...HARD_LIMITS,maxObjectBytes:Math.min(5242880,runtime.maxObjectBytes),maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes:Math.min(134217728,runtime.maxStagingBytes),maxInFlightChunks:1,maxInFlightBytes:65536});
-  if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,business:false,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
+  if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
  }
- business(context:SyncActionContext){const n=this.sessions.get(context.session);if(n)n.business=true;}
+ business(context:SyncActionContext){this.v1Sessions.add(context);}
  async accountConfirmed(r:Row,context:SyncActionContext){const n=this.sessions.get(context.session);if(!n)return;const account=await this.ports.account.read();if(!account||!r.account||(r.account as Row).userId!==account.userId||r.deviceId!==undefined&&r.deviceId!==n.peer)fail('ACCOUNT_MISMATCH');n.account=account;this.recovery.accountReady(n.connectionId,this.reconnected);}
  failed(error:unknown,context?:SyncActionContext):unknown {
   const e=error as Error&{code?:string;b2Handled?:boolean;stopAutomaticRecovery?:boolean};if(e?.b2Handled)return e;
@@ -59,7 +62,7 @@ export class BinaryApplicationService implements BinarySessionPort {
  }
 
  async run(r:Row,connection:SyncFrameConnection,context:SyncActionContext){
-  const n=this.sessions.get(context.session);if(!this.enabled()||!n?.account||n.business||!connection.detachStream)fail('AUTH_REVOKED');
+  const n=this.sessions.get(context.session);if(!this.enabled()||!n?.account||this.v1Sessions.has(context)||!connection.detachStream)fail('AUTH_REVOKED');
   n.running=true;const account=n.account,watch=await this.ports.deviceId(),connectionId=n.connectionId;
   const gate=new SwitchGate(true,n.capability),reply=gate.accept(r,{identityVerified:true,accountConfirmed:true,legacyAcksDrained:true});
   const check=()=>{context.checkCancelled?.();if(!this.enabled())fail('AUTH_REVOKED');};
