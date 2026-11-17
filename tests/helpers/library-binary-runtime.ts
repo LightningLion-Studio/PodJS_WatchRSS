@@ -27,7 +27,7 @@ class Bytes {
 export function bytePair(){const a=new Bytes(),b=new Bytes();const close=async()=>{a.close();b.close();};const stream=(input:Bytes,output:Bytes):SyncByteStream=>({read:async max=>input.read(max),write:async bytes=>{if(output.closed)throw Error('closed');output.push(bytes);},close});return {phone:stream(a,b),watch:stream(b,a),close};}
 /** Host runtime for product TS, with real fsync files and the same SQLite DB for
  * receipts/business rows. This replaces Android service ports, never B2 logic. */
-export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fault?:(method:string,args:Row)=>void|Promise<void>}={}){
+export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number;fault?:(method:string,args:Row)=>void|Promise<void>;readFault?:()=>void}={}){
  const root=await mkdtemp(join(tmpdir(),'wrss-b2-runtime-'));const sql=new Database(join(root,'business.sqlite'));sql.exec('PRAGMA foreign_keys=ON');
  const db:SqlDatabase={query:async(q,p=[])=>sql.query(q).all(...p as any[]) as Row[],execute:async(q,p=[])=>{sql.query(q).run(...p as any[]);},transaction:async ss=>{sql.transaction(()=>{for(const s of ss)sql.query(s.sql).run(...(s.params??[]) as any[]);})();}};
  const path=(p:string)=>{if(p.includes('..')||p.startsWith('/'))throw Error('LOCAL_IO');return join(root,p);};
@@ -71,7 +71,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  function session(){
   const pair=bytePair(),operation=<T>(value:Promise<T>|T)=>({result:Promise.resolve(value),cancel:()=>{void pair.close();}});
   const radio={status:async()=>({permission:'granted',available:true,enabled:true}),listen:()=>operation({id:'listener'}),accept:()=>operation({id:'stream',remoteName:'host',remoteAddress:'host'}),close:async()=>{}} as unknown as RfcommPorts['radio'];
-  const streams={read:()=>{throw Error('B2_BASE64_FORBIDDEN');},write:()=>{throw Error('B2_BASE64_FORBIDDEN');},readBytes:(_id:string,max:number)=>operation(pair.watch.read(max,3000).then(b=>({eof:b===null,bytes:b??new Uint8Array()}))),writeBytes:(_id:string,b:Uint8Array)=>operation(pair.watch.write(b).then(()=>({written:b.length}))),close:async()=>pair.close()} as unknown as RfcommPorts['streams'];
+  const streams={read:()=>{throw Error('B2_BASE64_FORBIDDEN');},write:()=>{throw Error('B2_BASE64_FORBIDDEN');},readBytes:(_id:string,max:number)=>operation(pair.watch.read(max,3000).then(b=>{options.readFault?.();return {eof:b===null,bytes:b??new Uint8Array()};})),writeBytes:(_id:string,b:Uint8Array)=>operation(pair.watch.write(b).then(()=>({written:b.length}))),close:async()=>pair.close()} as unknown as RfcommPorts['streams'];
   const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,handleAction:async r=>({success:true,action:r.action,version:1}),now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
  }
 

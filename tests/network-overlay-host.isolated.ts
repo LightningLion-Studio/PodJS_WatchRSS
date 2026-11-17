@@ -1,6 +1,7 @@
 import {expect,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
+import {WatchCloudScheduler} from '../src/cloud/scheduler';
 
 const require=createRequire(import.meta.url);
 const {transformSync}=require('@babel/core');
@@ -17,7 +18,7 @@ plugin({
  },
 });
 
-type Request={t:'service.request';id:number;method:string;args:{milliseconds?:number;subscriptionId?:string}};
+type Request={t:'service.request';id:number;method:string;args:{milliseconds?:number;subscriptionId?:string;observeDebugOverride?:boolean}};
 type Cancel={t:'service.cancel';id:number;reason:string};
 
 function hostFixture(){
@@ -61,8 +62,8 @@ function hostFixture(){
    for(const [id,due] of timers)if(due<=clock)reply(id);
    await flush();
   },
-  response(id:number,validated:boolean){
-   reply(id,{active:true,internet:true,validated,wifi:true,cellular:false,bluetooth:false,snapshotSequence:++snapshotSequence});
+  response(id:number,validated:boolean,internetStatusOverride?:'unavailable'|'available'){
+   reply(id,{active:true,internet:true,validated,wifi:true,cellular:false,bluetooth:false,snapshotSequence:++snapshotSequence,internetStatusOverride});
    return flush();
   },
   failSnapshot(id:number){
@@ -75,13 +76,80 @@ function hostFixture(){
    events.push({t:'network.changed',subscriptionId:subscription.args.subscriptionId,value:{source:'default',reason:'available'}});
    await flush();
   },
+  async routeEvent(type:string){
+   for(const request of emitted){
+    if(request.t!=='service.request'||request.method!=='discovery.networkSubscribe')continue;
+    // Normal callbacks are common. Debug callbacks are opt-in at the native source.
+    if(type!=='network.changed'&&!request.args.observeDebugOverride)continue;
+    events.push({t:type,subscriptionId:request.args.subscriptionId,value:{source:'default',reason:'capabilities'}});
+   }
+   await flush();
+  },
   reply,flush,
  };
 }
 
 const {__pumpPodEvents}=await import('@podjs/framework/watch');
-const {serviceResourceCounts}=await import('@podjs/framework/services');
+const {HostServiceError,onNetworkChange,serviceResourceCounts}=await import('@podjs/framework/services');
 const {createHostNetworkRecovery}=await import('../src/ui/network-recovery.tsx');
+
+test('the UI can recover a native transport failure while preserving the host error code',async()=>{
+ const host=hostFixture(),network=createHostNetworkRecovery();
+ const local=new HostServiceError('host_error','Unable to read local file');
+ const transport=new HostServiceError('host_error','connect failed: ENETDOWN (Network is down)');
+ network.setActive(true);
+ try{
+  await host.flush();
+  await host.response(host.snapshots()[0]!.id,false);
+  await expect(network.run(async()=>{throw local;})).rejects.toBe(local);
+  expect(host.snapshots()).toHaveLength(0);
+  expect(network.blocking).toBe(false);
+
+  let attempts=0;
+  const result=network.run(async()=>{
+   if(++attempts===1)throw transport;
+   return 'loaded';
+  });
+  await host.flush();
+  await host.response(host.snapshots()[0]!.id,false);
+  expect(network.blocking).toBe(true);
+  expect(transport.code).toBe('host_error');
+  await host.onlineEvent();
+  await host.response(host.snapshots()[0]!.id,true);
+  expect(await result).toBe('loaded');
+  expect(attempts).toBe(2);
+ }finally{network.dispose();await host.flush();}
+});
+
+test('a debug override refreshes the UI without scheduling cloud work on the same route',async()=>{
+ const host=hostFixture();
+ let now=0,runs=0;
+ const cloud=new WatchCloudScheduler({
+  now:()=>now,sync:async()=>{runs++;return true;},delay:()=>()=>{},
+  scheduleWorker:async()=>{},cancelWorker:async()=>{},
+ },{require(){}});
+ const stop=onNetworkChange(()=>cloud.trigger('network'));
+ const network=createHostNetworkRecovery();
+ try{
+  cloud.foreground(true);
+  network.setActive(true);
+  await host.flush();
+  await host.response(host.snapshots()[0]!.id,true);
+  expect(network.status).toBe('available');
+  expect(runs).toBe(1);
+
+  now=5*60*1000;
+  await host.routeEvent(process.env.WRSS_R16_OVERRIDE_EVENT??'network.debugOverrideChanged');
+  expect(runs).toBe(1);
+  expect(host.snapshots()).toHaveLength(1);
+  await host.response(host.snapshots()[0]!.id,true,'unavailable');
+  expect(network.status).toBe('unavailable');
+
+  await host.routeEvent('network.changed');
+  expect(runs).toBe(2);
+  await host.response(host.snapshots()[0]!.id,true);
+ }finally{stop();cloud.dispose();network.dispose();await host.flush();}
+});
 
 async function openWaitingRoute(){
  const host=hostFixture();

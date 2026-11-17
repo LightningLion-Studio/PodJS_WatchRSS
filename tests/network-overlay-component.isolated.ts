@@ -18,7 +18,7 @@ let hostDelay:(ms:number)=>ReturnType<typeof idleDelay>=idleDelay;
 mock.module('@podjs/framework/services',()=>({
  discovery:{networkSnapshot:()=>snapshot()},
  hostOperation:()=>({result:snapshot(),cancel:()=>{}}),
- onNetworkChange:(listener:(change?:RouteChange)=>void)=>{changed=listener;return()=>{};},
+ onInternetAvailabilityChange:(listener:()=>void)=>{changed=listener;return()=>{};},
  delay:(ms:number)=>hostDelay(ms),
 }));
 const {networkMessages}=await import('../src/ui/OnboardingNetworkScreen.tsx');
