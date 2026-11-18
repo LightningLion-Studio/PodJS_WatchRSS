@@ -13,6 +13,8 @@ import {decodableDouyinItem,videoOptEnabled,VideoPlaybackTrace,registerVideoReso
 import {DouyinHistoryStore} from './history-store.ts';
 import {applyPreferredDouyinPlayback,normalizedDouyinResolution} from './playback-selector.ts';
 import {traceServiceWork} from "@podjs/framework/service-trace";
+import {benchmark,type FeedStage} from '@podjs/framework/benchmark';
+import {processMemoryBudgetBytes} from '@podjs/framework/memory';
 import {logPlatformId} from '../logs/fields.ts';
 import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './errors.ts';
@@ -31,6 +33,7 @@ const STOCK_AUTHORIZATION_KEY="douyin.stock.authorization.v1";
 export const DOUYIN_DETAIL_WINDOW_MS=10_000;
 export const DOUYIN_DETAIL_MAX_REQUESTS=4;
 const FEED_CACHE_LIMIT=60;
+const BUDGETED_REFILL_ITEMS=5;
 // DouyinWebCrawler uses OkHttp defaults: 10s connect/read/write, no call timeout.
 export const DOUYIN_NETWORK_TIMEOUT_MS=10_000;
 const query=(p:Record<string,string>)=>Object.keys(p).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(p[k])}`).join("&");
@@ -194,6 +197,7 @@ export class DouyinClient {
         this.detailTimes.push(this.now());
       }
       const url=`https://www.douyin.com${path}?${query({...params,a_bogus:signed})}`;
+      let decodingResponse=false;
       try{
         if(api==='detail')appLogger.i('DouyinDetail',JSON.stringify({event:'request',api:'detail',count:1,mode:'abogus_only'}));
         const transportStarted=Date.now();
@@ -203,7 +207,9 @@ export class DouyinClient {
         observed.http_status=r.status;observed.retry_after_ms=douyinRetryAfter(r.headers);
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         appLogger.d('DouyinClient',`response path=${path} status=${r.status}`);
-        observed.error_code='decode';const textStarted=Date.now();const detailBody=await decodeMediaText(r.body);observed.request_text_ms=elapsed(textStarted);const statusStarted=Date.now();const detailStatusCode=await readDouyinStatusCode(detailBody);observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
+        decodingResponse=true;
+        const textStarted=Date.now();const detailBody=await decodeMediaText(r.body);observed.request_text_ms=elapsed(textStarted);const statusStarted=Date.now();const detailStatusCode=await readDouyinStatusCode(detailBody);observed.request_status_ms=elapsed(statusStarted);observed.douyin_status_code=Number.isInteger(detailStatusCode)&&detailStatusCode!>=-1&&detailStatusCode!<=2147483647?detailStatusCode!:-1;
+        decodingResponse=false;
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         if(isDouyinHtmlChallenge(detailBody)){observed.challenge=true;observed.error_code='challenge';
           appLogger.w('DouyinDetail',JSON.stringify({event:'challenge',api:'detail',count:1,mode:'abogus_only'}));
@@ -227,7 +233,7 @@ export class DouyinClient {
         return await this.currentAuth(cookie,generation)?{ok:true,data:body}:fail('CANCELLED',formatDouyinError('CANCELLED'));
       }catch(error){
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
-        const failure=mediaRequestFailure(error);observed.error_code=failure.category==='http'&&failure.status===403?'forbidden':failure.category;observed.http_status=failure.status??observed.http_status;
+        const failure=mediaRequestFailure(error);observed.error_code=decodingResponse?'decode':failure.category==='http'&&failure.status===403?'forbidden':failure.category;observed.http_status=failure.status??observed.http_status;
         if(failure.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category} status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
         appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
         return {...fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`),...(isTransportFailure(error)?{networkFailure:true}:{})};
@@ -285,10 +291,15 @@ export class DouyinClient {
     try{return await pending;}finally{if(this.feedRequests.get(key)===pending)this.feedRequests.delete(key);}
   }
   private async fetchFeedPageInner(input:{cursor?:string|null;count?:number;deferPersistence?:boolean;background?:import('../cloud/types.ts').RequestLifetime}={}):Promise<DouyinResult<DouyinFeedPage>> {
+    const seq=benchmark.begin('feed_stage',{feed_stage:'credentials'});
+    const stage=(feed_stage:FeedStage)=>benchmark.mark('feed_stage',seq,{feed_stage});
     const generation=this.authGeneration;
     const cookie=await this.readCookie(),config=await resolveDouyinRequestConfig(this.options.requestConfig);
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
-    const count=Math.max(1,Math.min(20,boundedVideoPageSize(input.count,videoOptEnabled('traffic'),10))),cursor=input.cursor?.trim()||null;
+    // Continuation overlaps playback. Bound the bytes that coexist in the
+    // response buffer, decoded text and projection for a budgeted process.
+    const limit=input.deferPersistence&&processMemoryBudgetBytes()>0?BUDGETED_REFILL_ITEMS:20;
+    const count=Math.max(1,Math.min(limit,boundedVideoPageSize(input.count,videoOptEnabled('traffic'),10))),cursor=input.cursor?.trim()||null;
     const storage=this.options.historyStorage??this.options.secureStorage,key=cookie?douyinFeedSeenKey(cookie):'';
     let params:Record<string,string>={count:String(count)},web:ReturnType<NonNullable<DouyinClientOptions['webFeedPagination']>>|undefined;
     if(config.webPagination&&this.options.webFeedPagination){
@@ -298,13 +309,21 @@ export class DouyinClient {
       if(cursor){params.cursor=cursor;params.max_cursor=cursor;}
     }
     if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
-    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config,input.background);if(input.background&&!input.background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));if(!r.ok)return r;
+    stage('transport');
+    const r=await this.get('/aweme/v2/web/module/feed/',params,'POST',config,input.background);
+    stage('transport_done');
+    if(input.background&&!input.background.isCurrent())return fail('CANCELLED',formatDouyinError('CANCELLED'));if(!r.ok)return r;
     try{
-      const parsed=await parseDouyinFeedAsync(r.data),resolvedAtMillis=this.now();
+      stage('projecting');
+      const parsed=await parseDouyinFeedAsync(r.data,stage),resolvedAtMillis=this.now();
+      stage('mapping_done');
       if(web)parsed.nextCursor=web.nextCursor(parsed);
+      stage('storage_wait');
       return await this.enqueueCookie(async():Promise<DouyinResult<DouyinFeedPage>>=>{
+        stage('storage_enter');
         if(input.background&&!input.background.isCurrent()||!cookie||!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         const previous=await readDouyinSeenIds(storage,key);
+        stage('seen_read');
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         const filtered=filterDouyinRecommendations(parsed.items,previous);
         // Empty/duplicate pages keep the server continuation; the queue bounds refill work.
@@ -314,14 +333,15 @@ export class DouyinClient {
         // write while the foreground is consuming the last cached neighbours.
         const saved=this.feedStore.save(FEED_KEY,{items:data.items.slice(0,20),cursor:data.nextCursor,hasMore:data.hasMore,anchorAwemeId:null,savedAtMillis:resolvedAtMillis,resolved:Object.fromEntries(data.items.map(item=>[item.awemeId,resolvedAtMillis]))});
         if(input.deferPersistence)void saved.catch(()=>appLogger.w('DouyinFeed','prefetch snapshot write failed'));
-        else await saved;
+        else {stage('persist_wait');await saved;}
         if(!await this.currentAuth(cookie,generation))return fail('CANCELLED',formatDouyinError('CANCELLED'));
         for(const item of data.items)this.cacheItem(item,resolvedAtMillis);
         this.feedCursor=data.nextCursor;this.feedHasMore=data.hasMore;
         appLogger.i('DouyinFeed',JSON.stringify({filteredCount:filtered.filteredCount}));
+        stage('ready');
         return {ok:true,data,source:'network'};
       });
-    }catch{appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
+    }catch{stage('failed');appLogger.e('DouyinClient','feed failed category=parse_or_cache');return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
   }
   feedSnapshot(){const items:DouyinItem[]=[];for(const id of [...this.feedCache.keys()]){const item=this.freshFeedItem(id);if(item)items.push(item);}return {items:items.slice(-40),cursor:this.feedCursor,hasMore:this.feedHasMore};}
   async fetchDetail(awemeId:string,options:{forceRefresh?:boolean;freshRequest?:boolean}={}):Promise<DouyinResult<DouyinContent>>{
