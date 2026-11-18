@@ -67,7 +67,7 @@ function sourceDescriptor(source:SyncedSource):ObjectDescriptor{
  return d;
 }
 
-type BusinessRepository=Pick<SqlLibrarySessionRepository,'binaryFreezeSources'|'binaryReceiveArticle'|'resumeReceiveSource'>;
+type BusinessRepository=Pick<SqlLibrarySessionRepository,'binaryFreezeSources'|'binaryReceiveArticle'|'binaryReceiveSource'>;
 
 export class BinaryLibraryKinds {
  constructor(private readonly repository:()=>Promise<BusinessRepository>,private readonly files:BinaryArticleFiles,
@@ -76,10 +76,26 @@ export class BinaryLibraryKinds {
   return (await (await this.repository()).binaryFreezeSources(this.work)).map(sourceDescriptor);
  }
  validate(d:ObjectDescriptor){
-  if(d.dependsOn.length)fail('OBJECT_CONFLICT');
-  if(d.kind==='articleBody'||d.kind==='articleMetadata')return validateArticle(d);
-  if(d.kind==='rssSource')return validateSource(d);
+  if(d.kind==='articleBody'||d.kind==='articleMetadata'){
+   if(d.dependsOn.length>1)fail('OBJECT_CONFLICT');
+   return validateArticle(d);
+  }
+  if(d.kind==='rssSource'){
+   if(d.dependsOn.length)fail('OBJECT_CONFLICT');
+   return validateSource(d);
+  }
   fail('UNSUPPORTED_KIND');
+ }
+ /** The manifest keeps objectId order for digests. The declared edge orders apply. */
+ validatePlan(objects:readonly ObjectDescriptor[]){
+  const sources=new Map(objects.filter(d=>d.kind==='rssSource').map(d=>[d.businessId,d.objectId]));
+  for(const d of objects){
+   if(d.kind!=='articleBody'&&d.kind!=='articleMetadata')continue;
+   const url=validateArticle(d).article.rssSourceUrl;
+   const source=url?sources.get(normalizeSourceUrl(url)):undefined;
+   if(d.dependsOn.length!==(source===undefined?0:1)||d.dependsOn[0]!==source)fail('PLAN_CONFLICT');
+   this.work();
+  }
  }
  /** Temporary inflate file and decoded field files can coexist. */
  shadowBytes(objects:readonly ObjectDescriptor[]){
@@ -90,7 +106,7 @@ export class BinaryLibraryKinds {
   if('article' in value){
    const staged=d.kind==='articleBody'?await importArticleFile(this.files,path,d,value.body.chunkHashes,this.work):null;
    await repository.binaryReceiveArticle(value,peer,boundary,staged);
-  }else await repository.resumeReceiveSource(value,peer,boundary);
+  }else await repository.binaryReceiveSource(value,peer,boundary);
   this.work();
  }
 }

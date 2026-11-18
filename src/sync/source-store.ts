@@ -6,6 +6,7 @@ import type {SyncedSource} from './library-wire.ts';
 import {nativeTrim,type SyncTextPort} from './local-manifest.ts';
 import {libraryRevision,revisionGuard} from './revision.ts';
 import {deviceOrder} from './saved-state.ts';
+import {isImportedContentUrl} from '../core/imported-content';
 import {lazyRegExpTest} from '../core/lazy-regexp.ts';
 export interface SourceUriPort {parseUri:SyncTextPort['parseUri'];parseAndroid:SyncTextPort['parseUri']}
 const whitespace=/[\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
@@ -28,6 +29,13 @@ export const binaryChannelProjectionSchema=`CREATE TABLE IF NOT EXISTS library_b
 // Refreshing a feed claims the channel as a real source. Local pin, order
 // and deletion operations record their own state in sync_source_states.
 const articleProjectionJoin='LEFT JOIN library_binary_channel_projection p ON p.channel_id=c.id';
+// A source tombstone carries no decision about saved articles or accepted live
+// articles. Delete only feed cache rows that have no independent keep evidence.
+const disposableArticle=`articles.is_saved=0
+ AND NOT EXISTS(SELECT 1 FROM article_saved_states s WHERE s.article_id=articles.id AND s.saved=1)
+ AND articles.id NOT IN(SELECT item_id FROM sync_article_keeps WHERE item_id IS NOT NULL)
+ AND articles.id NOT IN(SELECT item_id FROM library_binary_article_versions)
+ AND articles.id NOT IN(SELECT article_id FROM notes)`;
 const articleProjectionCurrent='p.source_fetched_at IS c.last_fetched_at';
 export class SqlSourceSyncStore {
  constructor(private readonly db:SqlDatabase,private readonly uri:SourceUriPort,private readonly now=Date.now,private readonly onChannelRemoved?:(content:{channel:{id:number;url:string};itemIds:number[]})=>Promise<void>){}
@@ -39,7 +47,7 @@ export class SqlSourceSyncStore {
   return this.hasBinaryProjection;
  }
  private async hostLabel(url:string):Promise<string>{const t=nativeTrim(url),u=t.startsWith('http://')||t.startsWith('https://')?t:'https://'+t;const p=await this.uri.parseUri(u);return nativeTrim((p.valid?p.host??'':'').replace(/^www\./,''));}
- async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false,receipt?:ReceiptBoundary):Promise<number>{
+ async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false,receipt?:ReceiptBoundary,preserveLiveArticles=false):Promise<number>{
   if(receipt&&sources.length!==1)throw Error('BUSINESS_REJECTED');
   if(!this.db.transactionChanges)throw new Error('Source sync requires committed transaction counts');let applied=0;
   const projection=sources.length>0&&await this.binaryProjectionAvailable();
@@ -61,9 +69,37 @@ export class SqlSourceSyncStore {
    if(source.deleted){
     const updated=source.updatedAt>0?source.updatedAt:source.deletedAt>0?source.deletedAt:source.sortOrder>0?source.sortOrder:source.createdAt,deletedAt=source.deletedAt>0?source.deletedAt:updated;
     const channel=this.onChannelRemoved?(await this.db.query('SELECT id,url FROM channels WHERE url=?',[url]))[0]:undefined;
-    const itemIds=channel?(await querySyncPages(this.db,'SELECT id FROM articles WHERE channel_id=? ORDER BY id',[channel.id])).map(row=>n(row.id)):[];
-    receipt?.check?.();const committed=await this.db.transactionChanges([...(receipt?.before??[]),revisionGuard(revision),{sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,source.sortOrder,source.isPinned?1:0,1,deletedAt]},{sql:'DELETE FROM channels WHERE url=?',params:[url]},...(receipt?.after('merged')??[])]),counts=committed.slice(receipt?.before.length??0,(receipt?.before.length??0)+3);
-    if(channel)await this.onChannelRemoved!({channel:{id:n(channel.id),url:s(channel.url)},itemIds});if(counts.slice(1).some(n=>n>0))applied++;continue;
+    const filter=preserveLiveArticles?' AND '+disposableArticle:'';
+    const itemIds=channel?(await querySyncPages(this.db,'SELECT id FROM articles WHERE channel_id=?'+filter+' ORDER BY id',[channel.id])).map(row=>n(row.id)):[];
+    const changes:{sql:string;params:SqlParams}[]=[
+     {sql:stateSql,params:[url,nativeTrim(source.sourceDeviceId)?source.sourceDeviceId:remoteDeviceId,title,source.description,source.siteUrl,source.imageUrl,source.createdAt,updated,source.sortOrder,source.isPinned?1:0,1,deletedAt]},
+     {sql:'DELETE FROM channels WHERE url=?',params:[url]}
+    ];
+    if(preserveLiveArticles){
+     const latestArticle='(SELECT max(fetched_at) FROM articles WHERE channel_id=channels.id)';
+     const imported=isImportedContentUrl(url),keepProjection=provisional?1:0;
+     changes.splice(1,1,
+      {sql:'DELETE FROM articles WHERE channel_id=(SELECT id FROM channels WHERE url=?) AND '+disposableArticle,params:[url]},
+      {sql:'DELETE FROM channels WHERE url=? AND NOT EXISTS(SELECT 1 FROM articles WHERE channel_id=channels.id)',params:[url]},
+      {sql:'DELETE FROM rss_local_sources WHERE url=?',params:[url]},
+      // A retained channel now holds articles, like the placeholder created
+      // when v1 receives those articles after merging the RSS tombstone.
+      {sql:`UPDATE channels SET description=NULL,image_url=NULL,is_pinned=0,
+       created_at=CASE WHEN ? THEN created_at ELSE ? END,
+       sort_order=CASE WHEN ? THEN sort_order ELSE ${latestArticle} END,
+       last_fetched_at=CASE WHEN ? THEN ${latestArticle} ELSE NULL END
+       WHERE url=? AND (?=0 OR description IS NOT NULL OR image_url IS NOT NULL OR is_pinned!=0)`,
+       params:[keepProjection,this.now(),keepProjection,imported?1:0,url,keepProjection]},
+      {sql:onlyChangedSql(`INSERT INTO library_binary_channel_projection(channel_id,article_title,sort_floor,source_fetched_at,provisional)
+       SELECT id,title,sort_order,last_fetched_at,1 FROM channels WHERE url=?
+       ON CONFLICT(channel_id) DO UPDATE SET article_title=excluded.article_title,sort_floor=excluded.sort_floor,
+       source_fetched_at=excluded.source_fetched_at,provisional=1`),params:[url]});
+    }
+    receipt?.check?.();
+    const prefix=[...(receipt?.before??[]),revisionGuard(revision)];
+    const committed=await this.db.transactionChanges([...prefix,...changes,...(receipt?.after('merged')??[])]);
+    if(channel)await this.onChannelRemoved!({channel:{id:n(channel.id),url:s(channel.url)},itemIds});
+    if(committed.slice(prefix.length,prefix.length+changes.length).some(n=>n>0))applied++;continue;
    }
    const updated=source.updatedAt>0?source.updatedAt:source.sortOrder>0?source.sortOrder:source.createdAt,now=this.now(),order=source.sortOrder!==0?source.sortOrder:updated>0?updated:now;
    const description=nativeTrim(source.description)?source.description:source.siteUrl,created=source.createdAt>0?source.createdAt:now;

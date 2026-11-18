@@ -207,3 +207,64 @@ test('RVB2KINDS-02 staging admits the advertised article limit and shares it acr
   await expect(occupied.reserve('scope','job',limits,[sized('body-a',max)])).rejects.toThrow('STORAGE_PRESSURE');
  }finally{await f.dispose();}
 });
+
+test('RVB2KINDS-06 plans require the matching RSS dependency for both article kinds',async()=>{
+ const f=await binaryRuntime();
+ try{
+  const {repository,files}=await attachBinaryLibrary(f);
+  const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
+  const first='https://fixture.invalid/source-a',second='https://fixture.invalid/source-b';
+  const source={sourceDeviceId:'phone',title:'Feed',description:'',siteUrl:null,imageUrl:null,createdAt:10,
+   updatedAt:20,sortOrder:40,isPinned:false,deleted:false,deletedAt:0};
+  await repository.mergeSources([{...source,url:first},{...source,url:second}],'phone',false);
+  const sources=await kinds.freezeSources();
+  const same=sources.find(d=>d.businessId===first)!,other=sources.find(d=>d.businessId===second)!;
+  for(const kind of ['articleBody','articleMetadata'] as const){
+   const {object}=sampleArticle(kind,'text',kind,{rssSourceUrl:first});
+   const withSource={...object,dependsOn:[same.objectId]};
+   withSource.objectId=objectId(withSource);
+   expect(()=>kinds.validatePlan([withSource,same,other])).not.toThrow();
+   expect(()=>kinds.validatePlan([object,other])).not.toThrow();
+   expect(()=>kinds.validatePlan([object,same])).toThrow('PLAN_CONFLICT');
+   expect(()=>kinds.validatePlan([{...withSource,dependsOn:[other.objectId]},same,other])).toThrow('PLAN_CONFLICT');
+  }
+ }finally{await f.dispose();}
+});
+
+test('RVB2KINDS-06 a B2 RSS tombstone keeps existing saved articles and deletes cache rows in its receipt transaction',async()=>{
+ const f=await binaryRuntime();
+ try{
+  const cleaned:number[]=[];
+  const {repository,files}=await attachBinaryLibrary(f,async content=>{cleaned.push(...content.itemIds);});
+  const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
+  const url='https://fixture.invalid/removed-feed';
+  const source={url,sourceDeviceId:'phone',title:'Feed',description:'',siteUrl:null,imageUrl:null,
+   createdAt:10,updatedAt:20,sortOrder:30,isPinned:false,deleted:false,deletedAt:0};
+  await repository.mergeSources([source],'phone',false);
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at,is_saved) VALUES "+
+   "(1,1,'favorite','saved-body','https://fixture.invalid/favorite','favorite',30,1),"+
+   "(2,1,'feed cache','cache-body','https://fixture.invalid/cache','cache',40,0),"+
+   "(3,1,'accepted','accepted-body','https://fixture.invalid/keep','keep',35,0)");
+  await f.db.execute("INSERT INTO sync_article_keeps VALUES('keep','https://fixture.invalid/keep',35,'phone','phone',3)");
+  await f.db.execute('INSERT INTO rss_local_sources VALUES(?)',[url]);
+  const live=(await kinds.freezeSources())[0]!;
+  const metadataUtf8=JSON.stringify({...source,updatedAt:50,deleted:true,deletedAt:50});
+  const tombstone={...live,contentVersion:'50',metadataUtf8,metadataSha256:hash(utf8(metadataUtf8))};
+  tombstone.objectId=objectId(tombstone);
+  await f.db.execute('CREATE TABLE rss_receipts(outcome TEXT)');
+  const apply=(sql:string)=>kinds.apply(tombstone,'unused','phone',{before:[],after:outcome=>[{sql,params:[outcome]}]});
+  await expect(apply('INSERT INTO absent_table VALUES(?)')).rejects.toThrow();
+  expect(await f.db.query('SELECT id FROM articles ORDER BY id')).toEqual([{id:1},{id:2},{id:3}]);
+  expect((await f.db.query('SELECT deleted FROM sync_source_states'))[0]).toEqual({deleted:0});
+  expect(cleaned).toEqual([]);
+  await apply('INSERT INTO rss_receipts VALUES(?)');
+  expect(cleaned).toEqual([2]);
+  expect(await f.db.query('SELECT id,content FROM articles ORDER BY id')).toEqual([
+   {id:1,content:'saved-body'},{id:3,content:'accepted-body'},
+  ]);
+  expect(await f.db.query('SELECT * FROM rss_local_sources')).toEqual([]);
+  expect(await f.db.query('SELECT outcome FROM rss_receipts')).toEqual([{outcome:'merged'}]);
+  expect(JSON.parse((await kinds.freezeSources())[0]!.metadataUtf8)).toMatchObject({deleted:true,deletedAt:50});
+  expect(await f.db.query('PRAGMA foreign_key_check')).toEqual([]);
+ }finally{await f.dispose();}
+});

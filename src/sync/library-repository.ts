@@ -92,13 +92,20 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
   return sources;
  });}
  private binaryArticleSchema?:Promise<unknown>;
- async binaryReceiveArticle(entry:ReceivedArticle,remote:string,receipt:ReceiptBoundary,staged:StagedArticleBody|null){
-  await (this.binaryArticleSchema??=this.db.transaction([{sql:`CREATE TABLE IF NOT EXISTS library_binary_article_versions(
+ private initializeBinaryArticles(){
+  return this.binaryArticleSchema??=this.db.transaction([{sql:`CREATE TABLE IF NOT EXISTS library_binary_article_versions(
    item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
-   updated_at INTEGER NOT NULL,source_device_id TEXT NOT NULL)`},{sql:binaryChannelProjectionSchema}]).catch(error=>{this.binaryArticleSchema=undefined;throw error;}));
+   updated_at INTEGER NOT NULL,source_device_id TEXT NOT NULL)`},{sql:binaryChannelProjectionSchema}]).catch(error=>{this.binaryArticleSchema=undefined;throw error;});
+ }
+ async binaryReceiveArticle(entry:ReceivedArticle,remote:string,receipt:ReceiptBoundary,staged:StagedArticleBody|null){
+  await this.initializeBinaryArticles();
   return this.receiveArticle(entry,remote,false,receipt,{staged});
  }
  resumeReceiveArticle(entry:ReceivedArticle,remote:string,receipt:ReceiptBoundary){return this.receiveArticle(entry,remote,false,receipt);}
+ binaryReceiveSource(source:SyncedSource,remote:string,receipt:ReceiptBoundary){return this.run(async()=>{
+  if(source.deleted)await this.initializeBinaryArticles();
+  return this.sources.merge([source],remote,await this.migrate(),false,receipt,true);
+ });}
  resumeReceiveSource(source:SyncedSource,remote:string,receipt:ReceiptBoundary){return this.run(async()=>this.sources.merge([source],remote,await this.migrate(),false,receipt));}
  private readonly perf:FullSyncPerf;private receivedCount=0;
  private readonly local:LocalArticleManifestStore;private readonly receiver:SyncArticleReceiver;private readonly deletion:SyncArticleDeletionStore;
