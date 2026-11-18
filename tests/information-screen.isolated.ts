@@ -521,6 +521,33 @@ test("a cross-frame offline reload keeps the cached document and its scroll posi
 });
 
 
+test("an uncached legal body read timeout checks the route and retries once when online", async () => {
+  let observed!:(status:"available"|"unavailable")=>void;
+  let checks=0;
+  const network=new NetworkRecovery({
+    observe(notify){observed=notify;notify("unavailable");return ()=>{};},
+    check:async()=>{checks++;return "unavailable";},
+  });
+  network.setActive(true);
+  disposers.push(()=>network.dispose());
+  const mounted=mount({},network);
+  // This is the response from the native OkHttp body read, whose message is exactly "timeout".
+  requests[0]!.reject(Object.assign(Error("timeout"),{code:process.env.WRSS_R17_BODY_TIMEOUT_CODE??"host_error",nativeTransportFailure:true}));
+  await settle();
+  expect({checks,blocking:network.blocking,error:mounted.snapshot().error}).toEqual({checks:1,blocking:true,error:null});
+
+  observed("available");
+  await settle();
+  expect(network.blocking).toBe(false);
+  expect(requests).toHaveLength(2);
+  requests[1]!.resolve("恢复后读取的协议正文");
+  await settle();
+  expect(renderedDocument(mounted).props.content).toBe("恢复后读取的协议正文");
+  observed("available");
+  await settle();
+  expect(requests).toHaveLength(2);
+});
+
 test("an unconfirmed outage ends loading and exposes the legal page retry", async () => {
   let routeNotice!:(requested:number)=>void,requested=0;
   let rejectCheck!:(error:Error)=>void;

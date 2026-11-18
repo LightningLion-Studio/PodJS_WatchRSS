@@ -1,7 +1,9 @@
 import {expect,test} from 'bun:test';
 import {plugin} from 'bun';
 import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
 import {WatchCloudScheduler} from '../src/cloud/scheduler';
+import {isTransportFailure} from '../src/network/recovery';
 
 const require=createRequire(import.meta.url);
 const {transformSync}=require('@babel/core');
@@ -28,7 +30,7 @@ function hostFixture(){
  const events:unknown[]=[];
  let clock=0,snapshotSequence=0;
  (globalThis as {pod?:unknown}).pod={
-  capabilities:()=>JSON.stringify(['net.discovery','runtime.timer']),
+  capabilities:()=>JSON.stringify(['net.discovery','net.stream','runtime.timer']),
   takeEvents:()=>events.length?JSON.stringify(events.splice(0)):undefined,
   emit:(line:string)=>{
    const message=JSON.parse(line) as Request|Cancel;
@@ -52,6 +54,10 @@ function hostFixture(){
   timers.delete(id);
   events.push({t:'service.result',id,ok:true,value});
  }
+ function reject(id:number,code:string,message:string,nativeTransportFailure?:true){
+  pending.delete(id);
+  events.push({t:'service.result',id,ok:false,code,message,nativeTransportFailure});
+ }
  const flush=async()=>{for(let i=0;i<30;i++){__pumpPodEvents();await Promise.resolve();}};
  return {
   emitted,
@@ -67,8 +73,7 @@ function hostFixture(){
    return flush();
   },
   failSnapshot(id:number){
-   pending.delete(id);
-   events.push({t:'service.result',id,ok:false,code:'host_error',message:'snapshot unavailable'});
+   reject(id,'host_error','snapshot unavailable');
    return flush();
   },
   async onlineEvent(){
@@ -85,18 +90,44 @@ function hostFixture(){
    }
    await flush();
   },
-  reply,flush,
+  reply,reject,flush,
  };
 }
 
 const {__pumpPodEvents}=await import('@podjs/framework/watch');
-const {HostServiceError,onNetworkChange,serviceResourceCounts}=await import('@podjs/framework/services');
+const {HostServiceError,hostOperation,onNetworkChange,serviceResourceCounts}=await import('@podjs/framework/services');
 const {createHostNetworkRecovery}=await import('../src/ui/network-recovery.tsx');
+
+type ErrorCase={name:string;exception:string|null;message:string|null;baselineCode:string;r15Code:string;recover:boolean};
+const cases:ErrorCase[]=JSON.parse(readFileSync(new URL('../../../platforms/android/runtime/src/test/resources/transport-error-cases.json',
+ import.meta.resolve('@podjs/framework/services')),'utf8'));
+for(const row of cases)test(`${row.name} keeps the baseline code and matches r15 UI classification`,async()=>{
+ const host=hostFixture();
+ const outcome=hostOperation('stream.read',{id:'fixture',maxBytes:1,timeoutMs:1000}).result.catch(error=>error);
+ const request=host.emitted.at(-1)!;
+ const message=row.message??row.exception!.split('.').at(-1)!;
+ host.reject(request.id,row.baselineCode,message,row.baselineCode===row.r15Code?undefined:true);
+ await host.flush();
+ const error=await outcome;
+ expect(error).toBeInstanceOf(HostServiceError);
+ expect(error).toMatchObject({code:row.baselineCode,message});
+ expect(isTransportFailure(error)).toBe(row.recover);
+});
+test('guest cancellation preserves cancelled and stays outside the recovery layer',async()=>{
+ const host=hostFixture();
+ const operation=hostOperation('stream.read',{id:'fixture',maxBytes:1,timeoutMs:1000});
+ const outcome=operation.result.catch(error=>error);
+ operation.cancel();
+ await host.flush();
+ const error=await outcome;
+ expect(error).toMatchObject({code:'cancelled',message:'Operation cancelled'});
+ expect(isTransportFailure(error)).toBe(false);
+});
 
 test('the UI can recover a native transport failure while preserving the host error code',async()=>{
  const host=hostFixture(),network=createHostNetworkRecovery();
  const local=new HostServiceError('host_error','Unable to read local file');
- const transport=new HostServiceError('host_error','connect failed: ENETDOWN (Network is down)');
+ const transport=new HostServiceError('host_error','connect failed: ENETDOWN (Network is down)',undefined,true);
  network.setActive(true);
  try{
   await host.flush();

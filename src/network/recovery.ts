@@ -13,15 +13,14 @@ function hasHttpFailure(error:unknown,depth=0):boolean {
 /** Closed transport classification. Business, parsing, cancellation and HTTP errors stay local. */
 export function isTransportFailure(error: unknown,depth=0): boolean {
  if(depth>4)return false;
- const e=error as {code?:unknown;kind?:unknown;status?:unknown;httpStatus?:unknown;networkFailure?:unknown;cause?:unknown;message?:unknown;name?:unknown}|null;
+ const e=error as {code?:unknown;kind?:unknown;status?:unknown;httpStatus?:unknown;networkFailure?:unknown;nativeTransportFailure?:unknown;cause?:unknown;message?:unknown;name?:unknown}|null;
  const code=String(e?.code??''),message=String(e?.message??'');
  if(e?.kind==='api'||e?.kind==='auth'||hasHttpFailure(error))return false;
  if(/cancel|abort/i.test(code)||e?.name==='AbortError')return false;
  if(e?.networkFailure===true)return true;
  if(code==='REQUEST_FAILED')return false; // This legacy code also means signing/storage/API failure.
  if(e?.kind==='transport')return e.cause===undefined||isTransportFailure(e.cause,depth+1);
- // Android host services preserve host_error for both socket and local failures.
- if(code==='host_error'&&/\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETDOWN|ENETUNREACH|EHOSTUNREACH|EPIPE|EAI_AGAIN|EAI_NONAME)\b|no route to host|network is down|connection refused|software caused connection abort|name or service not known|no address associated with hostname/i.test(message))return true;
+ if(code==='host_error'&&e?.nativeTransportFailure===true)return true;
  return /^(network_error|network_timeout|timeout|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|webview_load_-(2|6|7|8|11))$/.test(code)
   || (e?.cause!==undefined&&isTransportFailure(e.cause,depth+1))
   || /(?:UnknownHostException|SocketTimeoutException|ConnectException|Unable to resolve host|failed to connect|Network is unreachable|timed out|DNS lookup failed|connection reset|unexpected end of stream|broken pipe)/i.test(message);

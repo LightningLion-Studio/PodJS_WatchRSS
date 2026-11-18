@@ -59,7 +59,7 @@ test('a host stream reset after the B2 switch remains eligible for automatic rec
  // The paired native probe supplies the code from the real PodServices mapping.
  const hostCode=process.env.WRSS_R16_STREAM_RESET_CODE??'host_error';
  const f=await binaryRuntime({readFault:()=>{
-  if(inject){inject=false;throw new HostServiceError(hostCode,'Connection reset');}
+  if(inject){inject=false;throw new HostServiceError(hostCode,'Connection reset',undefined,true);}
  }});
  try{
   const {s,probe}=await ready(f);
