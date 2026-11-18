@@ -3,6 +3,7 @@ import {afterFirstScreen,startupMark} from './core/startup-trace.ts';
 import {trackDebugMemoryOwner} from '@podjs/framework/debug-memory';
 import {initializeDebugBuild} from './debug/host.ts';
 import {usageTelemetry,setTelemetryDeviceId} from './telemetry/host.ts';
+import {startDeviceProfileTelemetry} from './telemetry/device-profile-host.ts';
 import {getLibrarySyncRepository} from './services.ts';
 import {startAppLogger} from './logs/logger-host.ts';
 import { mount } from "@pocketjs/framework/solid";
@@ -41,6 +42,8 @@ function deferredForegroundSync(){
  };
 }
 function ContentApp(){
+ const stopDeviceTelemetry=startDeviceProfileTelemetry();
+ onCleanup(stopDeviceTelemetry);
  trackDebugMemoryOwner();
  startupMark('content.mount');
  const sync=deferredForegroundSync();

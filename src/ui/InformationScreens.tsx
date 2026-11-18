@@ -251,12 +251,14 @@ function InformationError(props:{width:number;height:number;message:string;activ
     const edge=Math.max(Math.abs(secondaryTopPx()-center),Math.abs(secondaryTopPx()+touchHeightPx()-center));
     return Math.max(1,Math.floor(Math.min(148*pixelScale,2*Math.sqrt(Math.max(0,radius*radius-edge*edge)))));
   };
+  let mounted=true;
+  onCleanup(()=>{mounted=false;});
   const [opening,setOpening]=createSignal(false);
   const checkNetwork=async()=>{
     if(opening()||props.active?.()===false)return;setOpening(true);
     try{await systemSettings.openWifi();}
-    catch{await hostOperation<void>('ui.toast',{message:'无法打开网络设置，请从系统设置中打开 Wi-Fi'}).result.catch(()=>{});}
-    finally{setOpening(false);}
+    catch{if(!mounted||props.active?.()===false)return;await hostOperation<void>('ui.toast',{message:'无法打开网络设置，请从系统设置中打开 Wi-Fi'}).result.catch(()=>{});}
+    finally{if(mounted)setOpening(false);}
   };
   const text = (value:() => ErrorTextLayout|undefined, fallback:string,color='#f5f5f5') => <View accessibilityHidden class="absolute inset-0">
     <Show when={value()} fallback={<Text class="absolute inset-0 text-sm leading-[17] text-center" style={{textColor:color}}>{fallback}</Text>}>{measured =>

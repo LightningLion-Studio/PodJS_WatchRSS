@@ -602,3 +602,15 @@ test("an unconfirmed outage ends loading and exposes the legal page retry", asyn
   await settle();
   expect(renderedDocument(mounted).props.content).toBe("重试成功正文");
 });
+
+for(const leave of ['inactive','disposed'] as const){
+ test(`late Wi-Fi settings failure after ${leave} produces no toast`,async()=>{
+  const [active,setActive]=createSignal(true);const mounted=mount({active});
+  requests[0]!.reject(Error('offline fixture'));await settle();await settle();
+  let reject!:(reason:Error)=>void;settingsPending=new Promise<void>((_,fail)=>{reject=fail;});
+  const control=mounted.nodes().find(node=>node.props.accessibilityLabel==='检查网络')!;
+  (control.props.onPress as ()=>void)();expect(settingsCalls).toBe(1);
+  if(leave==='inactive')setActive(false);else mounted.dispose();
+  reject(Error('delayed settings failure'));await settle();expect(hostRequests).toEqual([]);
+ });
+}

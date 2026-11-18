@@ -1,5 +1,5 @@
 export const CURRENT_OOBE_VERSION=3;
-export const PRIVACY_POLICY_VERSION=1;
+export const PRIVACY_POLICY_VERSION=2;
 export type InternetStatus='checking'|'available'|'unavailable'|'bluetooth';
 export interface IntroState {page:number;agreed:boolean;agreementError:boolean;offlineWarning:boolean;internet:InternetStatus}
 export const initialIntroState=():IntroState=>({page:0,agreed:false,agreementError:false,offlineWarning:false,internet:'checking'});

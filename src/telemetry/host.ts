@@ -8,7 +8,7 @@ import {WatchTokenManager} from '../account/token.ts';
 import type {HttpTransport} from '../cloud/types.ts';
 import {WatchUsageTelemetry} from './usage.ts';
 let sequence=0;
-const transport:HttpTransport={async request(request){
+export const telemetryTransport:HttpTransport={async request(request){
   const path=`telemetry/response-${Date.now()}-${++sequence}.json`;
   const refreshing=request.url.endsWith('/account/watch-token/refresh');
   try{
@@ -23,6 +23,7 @@ const transport:HttpTransport={async request(request){
     return {status:response.status,headers:response.headers,body};
   }finally{await fileChunks.remove(path).catch(()=>{});}
 }};
+const transport=telemetryTransport;
 let deviceId:(()=>Promise<string>)|undefined;
 export function setTelemetryDeviceId(provider:()=>Promise<string>){deviceId=provider;}
 let identityPromise:Promise<string>|undefined;

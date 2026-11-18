@@ -12,7 +12,7 @@ bun run build
 bun run package:android
 ```
 
-`pod.config.json` 定义入口、应用标识、字库和所需宿主能力。`framework.lock.json` 锁定已提交的框架基线与 PocketJS revision（`requiresLocalChanges=false`）；构建环境必须能取得这两个提交。应用使用 `com.lightningstudio.watchrss.podjs`，不会覆盖已安装的原生正式版。
+`pod.config.json` 定义入口、应用标识、字库和所需宿主能力。`framework.lock.json` 锁定框架提交与 PocketJS revision（`requiresLocalChanges=false`）；构建环境必须能取得这两个提交。应用使用 `com.lightningstudio.watchrss.podjs`，不会覆盖已安装的原生正式版。
 
 ## 已接入
 
@@ -34,3 +34,10 @@ bun run package:android
 设备验收清单仍以 [docs/acceptance.md](docs/acceptance.md) 为准，其中 `NOT VERIFIED` 未因本轮源码与打包结果而改动。功能差距和提交级证据见三份审计：[A-1](docs/parity-gap-audit-a.md)、[A-2](docs/parity-gap-audit-a2.md)、[B](docs/parity-gap-audit-b.md)。
 
 功能验收基线见 [docs/acceptance.md](docs/acceptance.md)，数据/协议约定见 [docs/migration-contract.md](docs/migration-contract.md)。当前测试证据与限制见 [docs/implementation-status.md](docs/implementation-status.md)。
+
+型号统计与账号统计独立调度。每次前台进入后随机等待30～180分钟，
+每次只上传一个去重日期；失败、剩余日期和后台返回均重新等待随机时机。
+网络恢复不得跳过等待。后台取消定时器，不唤醒设备。
+服务端只保留日期，不保存型号记录的精确接收或更新时间。
+本版本服务端迁移删除所有旧格式型号记录，不建立新旧摘要映射；
+迁移完成后，旧版去标识型号记录已清除。
