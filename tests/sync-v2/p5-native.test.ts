@@ -42,3 +42,35 @@ test('P5 incomplete article native metadata fails before any business write',asy
 test('P5 native source apply retains the frozen site description fallback and preference fields',async()=>{const f=await p5Fixture();try{await initializeSchema(f.db);await f.projection.initialize();await f.db.execute('INSERT OR REPLACE INTO sync_local_identity VALUES(1,?,?)',['watch','watch']);const value={url:'https://synthetic.invalid/feed',title:'chosen feed',description:'',siteUrl:'https://synthetic.invalid/site',imageUrl:null,createdAt:1,updatedAt:2,sortOrder:7,isPinned:true,deleted:false,deletedAt:0,sourceDeviceId:'original',useOriginalContent:true,continuePlaybackInBackground:false},records:SourceRecord[]=[{kind:'source',logicalId:value.url,value,addedAtMillis:1}],before=await f.projection.readState();await f.projection.controlUpdate(before,{...before},await f.projection.prepareAccountProjection(before,records,await f.native.prepare(records,before)));const channel=(await f.db.query('SELECT * FROM channels WHERE url=?',[value.url]))[0]!;expect(channel.description).toBe(value.siteUrl);const materialize=watchMaterializer(f.db,{cloudRestoreMetadata:async()=>{throw Error('body read forbidden');}} as any);expect((await materialize('channels',channel))[0]!.value).toEqual(value);}finally{f.close();}});
 
 for(const sourceFirst of [true,false])test('P5 selected source tombstone cannot resurrect a subscription through a retained article '+sourceFirst,async()=>{const f=await p5Fixture();try{await initializeSchema(f.db);await f.projection.initialize();const {default:vectors}=await import('../cloud/fixtures/article-provenance-v1/vectors.json'),article:any=structuredClone(vectors.mergeCases[0]!.inputs[0]!.value),url='https://synthetic.invalid/deleted-feed';article.rssSourceUrl=url;const source={url,title:'deleted source',description:'',siteUrl:null,imageUrl:null,createdAt:1,updatedAt:2,sortOrder:0,isPinned:false,deleted:true,deletedAt:2,sourceDeviceId:'watch'},a:SourceRecord={kind:'article',logicalId:article.articleId,value:article},s:SourceRecord={kind:'source',logicalId:url,value:source},records=sourceFirst?[s,a]:[a,s];const initial=[{...s,value:{...source,deleted:false,deletedAt:0}},a],start=await f.projection.readState();await f.projection.controlUpdate(start,{...start},await f.projection.prepareAccountProjection(start,initial,await f.native.prepare(initial,start)));const item=(await f.db.query('SELECT item_id FROM article_register_state'))[0]!.item_id;await f.db.execute("INSERT INTO channels(url,title,created_at,sort_order) VALUES('watchrss://test-retained','sentinel',0,0)");await f.db.execute("INSERT INTO articles(id,channel_id,title,link,dedup_key,fetched_at) SELECT 100000,id,'sentinel','https://synthetic.invalid/sentinel','sentinel',0 FROM channels WHERE url='watchrss://test-retained'");const before=await f.projection.readState();await f.projection.controlUpdate(before,{...before},await f.projection.prepareAccountProjection(before,records,await f.native.prepare(records,before)));expect((await f.db.query('SELECT item_id FROM article_register_state'))[0]!.item_id).toBe(item);expect(await f.db.query('SELECT 1 FROM channels WHERE url=?',[url])).toHaveLength(0);expect((await f.db.query('SELECT c.url FROM articles a JOIN channels c ON c.id=a.channel_id JOIN article_register_state r ON r.item_id=a.id'))[0]!.url).toBe('watchrss://phone-imports');expect((await f.db.query('SELECT deleted FROM sync_source_states WHERE url=?',[url]))[0]!.deleted).toBe(1);}finally{f.close();}});
+
+test('P6 applies a Mini book source with omitted optional native fields', async () => {
+  const fixture = await p5Fixture();
+  try {
+    await initializeSchema(fixture.db);
+    await fixture.projection.initialize();
+    const url = 'https://watchrss.local/import-txt-novel/mini-open';
+    const value = {url, title: 'Joint mini-open', description: '导入书籍', updatedAt: 0, deleted: false, deletedAt: 0};
+    const records: SourceRecord[] = [{kind: 'source', logicalId: url, value}];
+    const before = await fixture.projection.readState();
+    const business = await fixture.native.prepare(records, before);
+    const statements = await fixture.projection.prepareAccountProjection(before, records, business);
+    await fixture.projection.controlUpdate(before, {...before, hasUnsentEdits: false}, statements);
+    expect(await fixture.db.query(
+      'SELECT source_device_id, created_at, sort_order, is_pinned FROM sync_source_states WHERE url=?', [url],
+    )).toEqual([{source_device_id: '', created_at: 0, sort_order: 0, is_pinned: 0}]);
+    expect(await fixture.db.query('SELECT title, description, created_at, sort_order, is_pinned FROM channels WHERE url=?', [url]))
+      .toEqual([{title: value.title, description: value.description, created_at: 0, sort_order: 0, is_pinned: 0}]);
+    const candidates = await fixture.projection.candidatePage('', 32, 65536);
+    const source = candidates.find(row => row.candidate.meta.logicalId === url)!.candidate;
+    expect(fromWire('source', source.meta.payload, source.state.payload)).toEqual(value);
+    const nativeRow = (await fixture.db.query('SELECT * FROM sync_source_states WHERE url=?', [url]))[0]!;
+    const materialize = watchMaterializer(fixture.db, {
+      cloudRestoreMetadata: async () => { throw Error('body read forbidden'); },
+    }, undefined, async () => source);
+    expect((await materialize('sync_source_states', nativeRow))[0]!.value).toEqual(value);
+    expect((await materialize('sync_source_states', {...nativeRow, is_pinned: 1, sort_order: 3}))[0]!.value)
+      .toEqual({...value, isPinned: true, sortOrder: 3});
+  } finally {
+    fixture.close();
+  }
+});

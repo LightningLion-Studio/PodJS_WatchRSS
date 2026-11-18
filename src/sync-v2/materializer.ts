@@ -28,6 +28,14 @@ export function watchMaterializer(db:ProjectionSql,metadata:Pick<LocalArticleMan
   if(previous?.meta.payload.sourceId!==undefined)value.sourceId=previous.meta.payload.sourceId;
   if(tables.has('source_preferences')){const p=(await db.query('SELECT p.use_original_content FROM source_preferences p JOIN channels c ON c.id=p.channel_id WHERE c.url=?',[value.url]))[0];if(p)value.useOriginalContent=!!Number(p.use_original_content);}
   if(tables.has('source_media_preferences')){const p=(await db.query('SELECT p.continue_in_background FROM source_media_preferences p JOIN channels c ON c.id=p.channel_id WHERE c.url=?',[value.url]))[0];if(p)value.continuePlaybackInBackground=!!Number(p.continue_in_background);}
+  // Applying sparse sources fills native defaults. Do not capture those
+  // defaults as business edits when book hydration revisits the source.
+  if(previous){
+   const defaults={sourceDeviceId:'',siteUrl:null,imageUrl:null,createdAt:0,sortOrder:0,isPinned:false};
+   for(const [field,fallback] of Object.entries(defaults)){
+    if(value[field]===fallback&&!Object.hasOwn(previous.meta.payload,field)&&!Object.hasOwn(previous.state.payload,field))delete value[field];
+   }
+  }
   return value;
  };
  return async(table,row)=>{
