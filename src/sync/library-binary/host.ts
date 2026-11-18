@@ -5,12 +5,15 @@ import type {SyncActionContext,SyncFrameConnection} from '../session';
 import type {SyncByteStream} from '../stream';
 import type {VerifiedChunkStore,ObjectLease} from '@podjs/framework/verified-chunk-store';
 import {BinaryStore} from './store';
-import {BinaryAssets,type BinaryAssetFiles} from './assets';
+import {BinaryAssets,STAGING_COPIES,type BinaryAssetFiles} from './assets';
+import {ARTICLE_IMPORT_SHADOW_BYTES,BinaryLibraryKinds} from './kinds';
+import type {BinaryArticleFiles} from './article-file';
 import {BinaryByteTransport} from './transport';
 import {LibraryBinaryConnection} from './coordinator';
-import {SwitchGate,binaryCapability,RELEASE_B2_ENABLED} from './routing';
+import {SwitchGate,binaryCapability,negotiate,RELEASE_B2_ENABLED} from './routing';
 import {RecoveryRules} from './recovery';
 import {D} from './digests';
+import type {SqlLibrarySessionRepository} from '../library-repository';
 import {HARD_LIMITS,ResumeError,fail,text,type Row,type Capability} from './wire';
 export interface BinarySessionPort {
  probe(request:Row,context:SyncActionContext):Promise<Row>;
@@ -18,13 +21,15 @@ export interface BinarySessionPort {
  run(request:Row,connection:SyncFrameConnection,context:SyncActionContext):Promise<void>;
  failed?(error:unknown,context?:SyncActionContext):unknown;
  business?(context:SyncActionContext):void;
+ acceptsLegacySubset?(peer:string,context:SyncActionContext):boolean;
 }
 interface Negotiation {peer:string;capability:Capability;account?:WatchAccountState;connectionId:string;running:boolean}
 export interface BinaryApplicationPorts {
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
+ library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
- sleep(milliseconds:number):{result:Promise<void>;cancel():void};changed?():void;
+ sleep(milliseconds:number):{result:Promise<void>;cancel():void};changed?(kind?:string):void;
  /** Native listener identity is fixed per accepted stream. */
  recovery?:RecoveryRules;
 }
@@ -45,10 +50,25 @@ export class BinaryApplicationService implements BinarySessionPort {
   const versions=r.supportedLibraryBinaryVersions;if(!Array.isArray(versions)||versions.some(v=>!Number.isSafeInteger(v)||v<1)||new Set(versions).size!==versions.length)fail('CAPABILITY_MISMATCH');if(!versions.includes(2))return {};
   const peer=text(r.deviceId,128),runtime=await this.ports.chunks.runtime();if(!runtime?.chunkReceipt||!runtime.requestBindings)fail('CAPABILITY_MISMATCH');
   await this.ports.sampleClock?.();await this.ports.store.initialize();await this.ports.store.observeClock(runtime.elapsedMillis);
-  const cap=binaryCapability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],{...HARD_LIMITS,maxObjectBytes:Math.min(5242880,runtime.maxObjectBytes),maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes:Math.min(134217728,runtime.maxStagingBytes)});
+  const kinds:Capability['kinds']=[{kind:'noteAsset',schemaVersion:1,send:true,receive:true}];
+  if(this.ports.library){
+   kinds.unshift({kind:'articleBody',schemaVersion:1,send:false,receive:true},{kind:'articleMetadata',schemaVersion:1,send:false,receive:true});
+   kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
+  }
+  const importBudget=this.ports.library?ARTICLE_IMPORT_SHADOW_BYTES:0;
+  const maxStagingBytes=Math.min(134217728,runtime.maxStagingBytes+importBudget);
+  const maxObjectBytes=Math.min(this.ports.library?HARD_LIMITS.maxObjectBytes:5242880,runtime.maxObjectBytes,Math.floor((maxStagingBytes-importBudget)/STAGING_COPIES));
+  if(maxObjectBytes<1)fail('CAPABILITY_MISMATCH');
+  const cap=binaryCapability(kinds,{...HARD_LIMITS,maxObjectBytes,maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:this.ports.library?HARD_LIMITS.maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes});
   if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
  }
  business(context:SyncActionContext){this.v1Sessions.add(context);}
+ acceptsLegacySubset(peer:string,context:SyncActionContext){
+  if(!this.enabled()||!this.ports.library)return false;
+  const n=this.sessions.get(context.session);
+  if(n?.peer!==peer||!n.account||n.running)fail('AUTH_REVOKED');
+  return true;
+ }
  async accountConfirmed(r:Row,context:SyncActionContext){const n=this.sessions.get(context.session);if(!n)return;const account=await this.ports.account.read();if(!account||!r.account||(r.account as Row).userId!==account.userId||r.deviceId!==undefined&&r.deviceId!==n.peer)fail('ACCOUNT_MISMATCH');n.account=account;this.recovery.accountReady(n.connectionId,this.reconnected);}
  failed(error:unknown,context?:SyncActionContext):unknown {
   const e=error as Error&{code?:string;b2Handled?:boolean;stopAutomaticRecovery?:boolean};if(e?.b2Handled)return e;
@@ -70,10 +90,13 @@ export class BinaryApplicationService implements BinarySessionPort {
   await authorize(()=>connection.writeFrame(reply));gate.responseFullyWritten();
   const accountScope=D('wrss.library-resume.v1/account',[account.backendBaseUrl,account.userId]);
   const scope=D('wrss.library-binary.v2/storage',[accountScope,n.peer,watch]);
-  let owner:LibraryBinaryConnection;const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,()=>owner?.workUnit());
+  let owner:LibraryBinaryConnection;
+  const work=()=>{check();owner?.workUnit();};
+  const kinds=this.ports.library?new BinaryLibraryKinds(this.ports.library.repository,this.ports.library.files,work):undefined;
+  const assets=new BinaryAssets(this.ports.files,this.ports.store,this.ports.chunks,check,work,kinds);
   await authorize(()=>this.ports.store.exclusive(async()=>{await this.ports.store.collect(scope,j=>this.ports.chunks.collect(D('wrss.library-binary.v2/native-scope',[scope,j.jobId]),false));await assets.collect();}));
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
-   freeze:()=>assets.freeze(scope,/* persistent snapshot identity */ connectionId,n.capability.limits),source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d)=>assets.publish(l,o,d),apply:(_j,d,path,b)=>assets.apply(d,path,b),reserve:async(j,objects)=>{await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease)for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
+   freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d)=>assets.publish(l,o,d),apply:(_j,d,path,b)=>assets.apply(d,path,b,n.peer),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease)for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(connection.detachStream() as SyncByteStream,this.ports.now));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});
   try{await owner.run();this.recovery.detach(connectionId);this.reconnected=false;}

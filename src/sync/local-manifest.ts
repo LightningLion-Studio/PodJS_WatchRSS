@@ -118,6 +118,17 @@ export class LocalArticleManifestStore {
   if(this.stableIds.size>=8192)this.stableIds.delete(this.stableIds.keys().next().value!);
   this.stableIds.set(value,id);if(this.cloudProgress){const definition=`stable-v1:${PROTOCOL_VERSION}:${DOMAIN_ENCODERS.library}`;await this.db.execute('INSERT OR REPLACE INTO sync_stable_article_ids VALUES(?,?,?,?)',[definition,value,id,await this.identityHash(utf8Encode(JSON.stringify([definition,value,id])))]);this.stablePending++;this.stableLast='identity:'+definition+':'+await this.identityHash(utf8Encode(value));if(this.stablePending>=16)await this.flushStableProgress();}return id;
  }
+ /** Resolve the same binding without loading the article body. */
+ async resolveIncomingItem(article:IncomingArticle,targetItemId?:number):Promise<{itemId:number}|null>{
+  const target=targetItemId?(await this.db.query('SELECT id FROM articles WHERE id=?',[targetItemId]))[0]:undefined;
+  if(target)return {itemId:num(target.id)};
+  const saved=(await this.db.query(`SELECT a.id FROM sync_saved_states s JOIN articles a ON a.id=s.item_id
+   WHERE s.article_id=? ORDER BY CASE s.save_type WHEN 'favorite' THEN 0 ELSE 1 END LIMIT 1`,[article.articleId]))[0];
+  if(saved)return {itemId:num(saved.id)};
+  const source=article.rssSourceUrl&&/^https?:\/\//i.test(nativeTrim(article.rssSourceUrl))?article.rssSourceUrl:'watchrss://phone-imports';
+  const row=(await this.db.query('SELECT a.id FROM articles a JOIN channels ch ON ch.id=a.channel_id WHERE ch.url=? AND a.dedup_key=?',[source,article.articleId]))[0];
+  return row?{itemId:num(row.id)}:null;
+ }
  /** Native lookup uses each saved-type binding before source/dedup fallback. */
  async resolveIncomingBody(article:IncomingArticle,targetItemId?:number):Promise<LocalReceiveBody|null>{
   const revision=await libraryRevision(this.db);let row:Row|undefined=targetItemId?(await this.db.query(this.rowSelect()+` WHERE a.id=?`,[targetItemId]))[0]:undefined;
@@ -161,34 +172,34 @@ export class LocalArticleManifestStore {
   * rather than assuming an await necessarily gives Android's looper a turn. */
  private workCheckpoint(check?:()=>void){let work=0,slice=Date.now();return async(weight=1)=>{check?.();work+=weight;if(work>=32||Date.now()-slice>=8){await playbackWork.wait(check);await (this.text.yieldTurn?.()??this.db.query('SELECT 1'));check?.();work=0;slice=Date.now();}};}
  /** Cloud identities remain separate from native-wire bindings. Pool IDs are authoritative. */
- private async cloudIdentity(r:Row,metadataOnly=false):Promise<CloudRssIdentity|undefined>{
+ private async cloudIdentity(r:Row,metadataOnly=false,requireBounded=false):Promise<CloudRssIdentity|undefined>{
   try{
   if(isImportedContentUrl(str(r.channel_url))||isLocalOnlyRssSource(str(r.channel_url)))return;
   const pool=nullable(r.cloud_rss_id);
   const legacyMaterialized=!!r.bound_id&&r.guid===r.bound_id&&r.dedup_key===r.bound_id&&!pool,guid=legacyMaterialized?null:nullable(r.guid);
   let contentHash:string|undefined;
-  if(!pool&&!str(guid).trim()){let web=false;try{canonicalRssUrl(str(r.link),false);web=true;}catch{}if(!web){if(metadataOnly)return;const full=r.content_inline===undefined?(await this.db.query(this.rowSelect()+' WHERE a.id=?',[r.id]))[0]:r;if(!full)return;await this.hydrateRow(full);const body=await this.bodyFromRow(full);if(!body.available)return;if(body.contentHtml||body.contentText)contentHash=await this.identityHash(utf8Encode(body.contentHtml??body.contentText));}}
+  if(!pool&&!str(guid).trim()){let web=false;try{canonicalRssUrl(str(r.link),false);web=true;}catch{}if(!web){if(metadataOnly)return;if(requireBounded)throw Error('BUSINESS_REJECTED');const full=r.content_inline===undefined?(await this.db.query(this.rowSelect()+' WHERE a.id=?',[r.id]))[0]:r;if(!full)return;await this.hydrateRow(full);const body=await this.bodyFromRow(full);if(!body.available)return;if(body.contentHtml||body.contentText)contentHash=await this.identityHash(utf8Encode(body.contentHtml??body.contentText));}}
   const articleId=await tryRssArticleId({dedupKey:pool??undefined,link:nullable(r.link),guid,title:str(r.title),contentHash},this.identityHash);if(!articleId)return;
   const url=str(r.link)||str(r.guid)||str(r.dedup_key);
   // A transport binding can be retained even when its URL normalization predates R41.
   let nativeArticleId:string;try{nativeArticleId=metadataOnly?(str(r.bound_id)||articleId):await this.stableId(r.link==null?str(r.dedup_key):str(r.link));}catch{return;}const localArticleId=str(r.bound_id)||articleId;
   return {itemId:num(r.id),articleId,localArticleId,nativeArticleId,legacyMaterialized,canonicalBinding:!!pool,url,sourceUrl:str(r.channel_url)};
-  }catch{return undefined;}
+  }catch(error){if(requireBounded&&error instanceof Error&&error.message==='BUSINESS_REJECTED')throw error;return undefined;}
  }
  /** Independent read-only identity work shares four host requests. Ordered
   * collection preserves alias precedence; cancellation drains the current group. */
- private cloudIdentityBatches(rows:readonly Row[],check?:()=>void){return cpuWorkAsyncIterable('alias-match','items',rows.length,()=>this.cloudIdentityBatchSteps(rows,check));}
- private async *cloudIdentityBatchSteps(rows:readonly Row[],check?:()=>void){
+ private cloudIdentityBatches(rows:readonly Row[],check?:()=>void,requireBounded=false){return cpuWorkAsyncIterable('alias-match','items',rows.length,()=>this.cloudIdentityBatchSteps(rows,check,requireBounded));}
+ private async *cloudIdentityBatchSteps(rows:readonly Row[],check?:()=>void,requireBounded=false){
   const checkpoint=this.workCheckpoint(check);
   for(let at=0;at<rows.length;at+=4){const part=rows.slice(at,at+4);await checkpoint(part.length);
-   const identities=await Promise.all(part.map(row=>this.cloudIdentity(row)));check?.();yield {rows:part,identities};
+   const identities=await Promise.all(part.map(row=>this.cloudIdentity(row,false,requireBounded)));check?.();yield {rows:part,identities};
   }
  }
- async cloudRssIdentities(filter?:{sourceUrl:string;url:string;ids:readonly string[]},check?:()=>void):Promise<CloudRssIdentity[]>{
+ async cloudRssIdentities(filter?:{sourceUrl:string;url:string;ids:readonly string[]},check?:()=>void,requireBounded=false):Promise<CloudRssIdentity[]>{
   const marks=filter?.ids.map(()=>'?').join(',');
   const where=filter?`ch.url=? AND (a.link=? OR a.dedup_key IN (${marks}) OR a.id IN (SELECT item_id FROM sync_article_ids WHERE article_id IN (${marks})) OR a.id IN (SELECT item_id FROM cloud_rss_article_ids WHERE article_id IN (${marks})))`:"ch.url LIKE 'http://%' OR ch.url LIKE 'https://%'";
   const rows=await querySyncKeysetPages(this.db,IDENTITY_SELECT+" WHERE ("+where+") AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id",filter?[filter.sourceUrl,filter.url,...filter.ids,...filter.ids,...filter.ids]:[],{key:'id'}),out:CloudRssIdentity[]=[];
-  for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.push(identity);return out;
+  for await(const group of this.cloudIdentityBatches(rows,check,requireBounded))for(const identity of group.identities)if(identity)out.push(identity);return out;
  }
  async cloudRssIdentitiesForUrls(urls:readonly string[],check?:()=>void,itemIds:readonly number[]=[]):Promise<CloudRssIdentity[]>{const out=new Map<number,CloudRssIdentity>();for(let at=0;at<urls.length;at+=100){const part=urls.slice(at,at+100),marks=part.map(()=>'?').join(',');const rows=await querySyncKeysetPages(this.db,IDENTITY_SELECT+` WHERE (a.link IN (${marks}) OR a.guid IN (${marks}) OR a.dedup_key IN (${marks})) AND ch.url NOT LIKE 'https://watchrss.local/import-%' AND a.id>? ORDER BY a.id`,[...part,...part,...part],{key:'id'});for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}for(let at=0;at<itemIds.length;at+=100){const part=itemIds.slice(at,at+100),rows=await this.db.query(IDENTITY_SELECT+' WHERE a.id IN ('+part.map(()=>'?').join(',')+')',part);for await(const group of this.cloudIdentityBatches(rows,check))for(const identity of group.identities)if(identity)out.set(identity.itemId,identity);}return [...out.values()].sort((a,b)=>a.itemId-b.itemId);}
  /** Ordinary read RSS rows are absent from saved-article snapshots. */

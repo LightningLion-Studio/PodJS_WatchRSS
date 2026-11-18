@@ -80,3 +80,22 @@ test('session cancellation reaches an in-progress destructive action and cannot 
  await expect(result).rejects.toThrow('cancelled');expect(writes).toBe(0);
  finish();for(let n=0;n<10;n++)await Promise.resolve();expect(destructive).toBe(0);
 });
+
+test('an authenticated split v14 exchange confirms only its own work and leaves the full cursor unpublished',async()=>{
+ const row=fixture.cases[0]!,{window,articles}=sessionFixtureParts(row),writes:JsonObject[]=[],phases:string[]=[];
+ const manifest={...(row.inbound[0] as JsonObject),fallbackReason:'binarySubset',forceFull:true,fullSnapshot:false,
+  changeSeqRange:{fromExclusive:0,toInclusive:0},syncCursor:{lastRemoteSeqApplied:0,lastLocalSeqAckedByPeer:0}};
+ const frames=[manifest,...row.inbound.slice(1) as JsonObject[]];let i=0,marks=0;
+ const repo:LibrarySessionRepository={deviceId:async()=>row.deviceId,cursor:async()=>row.beforeCursor,mergeSources:async()=>0,
+  prepareWindow:async()=>window,exportSources:async()=>window.rssSources,receiveArticle:async()=>1,
+  exportRequested:async requests=>articles.filter(a=>requests.some(r=>r.articleId===a.article.articleId)),
+  finalizeSnapshot:async()=>{},resetPeerState:async()=>{},markSuccess:async()=>{marks++;}};
+ const session=new LibrarySyncSession({readFrame:async()=>frames[i++]!,writeFrame:async frame=>{writes.push(frame);},close:async()=>{}},
+  repo,{onStatus:s=>phases.push(s.phase),binary:{probe:async()=>({}),accountConfirmed:async()=>{},run:async()=>{},
+   acceptsLegacySubset:()=>true}});
+ const [result]=await session.run();
+ expect(result?.libraryApplied).toBe(true);
+ expect(writes[0]).toMatchObject({fallbackReason:'binarySubset',changeSeqRange:{fromExclusive:0,toInclusive:0},fullSnapshot:false});
+ expect(marks).toBe(0);
+ expect(phases.at(-1)).toBe('handoff');
+});

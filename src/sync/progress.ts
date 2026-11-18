@@ -18,12 +18,12 @@ export function updateLibraryProgress(status:SyncSessionStatus){
  if(status.phase==='cursor'||status.phase==='manifest')active=true;
  if(!active)return;
  if(status.phase==='complete'&&status.applied===false){current={...current,phase:'error',message:'手机未确认应用结果，已接收文章保留；请重新同步'};active=false;publish();return;}
- if(status.phase==='cursor'||status.phase==='manifest'&&(current.phase==='complete'||current.phase==='error'||current.phase==='request')){started=Date.now();current={phase:status.phase,message:'',bytes:0,receivedArticles:0,sentArticles:0,totalArticles:0,elapsedMs:0};}
- current={...current,...status,message:status.phase==='error'?syncFailureReason(status.message):status.message??''};if(status.phase==='complete'||status.phase==='error')active=false;publish();
+ if(status.phase==='cursor'||status.phase==='manifest'&&(current.phase==='complete'||current.phase==='handoff'||current.phase==='error'||current.phase==='request')){started=Date.now();current={phase:status.phase,message:'',bytes:0,receivedArticles:0,sentArticles:0,totalArticles:0,elapsedMs:0};}
+ current={...current,...status,message:status.phase==='error'?syncFailureReason(status.message):status.message??''};if(status.phase==='complete'||status.phase==='handoff'||status.phase==='error')active=false;publish();
 }
 export function updateLibraryBytes(progress:TransferByteProgress){if(!active)return;current.bytes+=progress.bytes;publish();}
 export function libraryProgressText(p:Readonly<LibraryProgress>):string {
- const labels={request:'等待手机同步',cursor:'正在协商同步游标',manifest:'正在比较资料库',receiving:'正在接收并应用文章',sending:'正在发送文章',ack:'正在等待手机确认',complete:'资料库同步完成',error:'资料库同步失败'};
+ const labels={request:'等待手机同步',cursor:'正在协商同步游标',manifest:'正在比较资料库',receiving:'正在接收并应用文章',sending:'正在发送文章',ack:'正在等待手机确认',handoff:'资料库分段同步',complete:'资料库同步完成',error:'资料库同步失败'};
  return labels[p.phase];
 }
 export function libraryProgressDetail(p:Readonly<LibraryProgress>):string {

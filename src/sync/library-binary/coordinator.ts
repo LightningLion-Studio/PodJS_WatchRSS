@@ -21,12 +21,12 @@ export interface BinaryPorts {
  authorize<T>(run:()=>Promise<T>):Promise<T>;
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};
  check():void;randomId():Promise<string>;
- freeze():Promise<{witness:Snapshot;inventory:unknown}>;
+ freeze(peer:Capability):Promise<{witness:Snapshot;inventory:unknown}>;
  source(witness:Snapshot,selection:Selection):Promise<BinarySourcePlan>;
  apply(job:Job,object:ObjectDescriptor,path:string,boundary:ReceiptBoundary):Promise<void>;
  publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor):Promise<VerifiedPublication>;
  supportsRange?(p:BeginPayload):Promise<boolean>;
- applied?():void;
+ applied?(kind:ObjectDescriptor['kind']):void;
  reserve(job:Job,objects:readonly ObjectDescriptor[]):Promise<void>;
  now():number;sampleClock?():Promise<void>;
  recovery?:RecoveryRules;
@@ -367,7 +367,7 @@ export class LibraryBinaryConnection {
    if(this.offers.size>=4)fail('LIMIT_EXCEEDED');
    if(p.accountScope!==this.ports.accountScope)fail('ACCOUNT_MISMATCH');if(p.phoneDeviceId!==this.ports.phoneDeviceId||p.watchDeviceId!==this.ports.watchDeviceId)fail('PEER_MISMATCH');const phone=capability(p.phoneCapabilities);await this.ports.store.budget(0,Math.min(phone.limits.maxJournalBytes,this.ports.capability.limits.maxJournalBytes));
    let witness:Snapshot;
-   if(p.watchSnapshot===null){const frozen=await this.ports.freeze();witness=frozen.witness;await this.ports.store.saveSnapshot(this.scope,witness,frozen.inventory);}
+   if(p.watchSnapshot===null){const frozen=await this.ports.freeze(phone);witness=frozen.witness;await this.ports.store.saveSnapshot(this.scope,witness,frozen.inventory);}
    else{witness=p.watchSnapshot as unknown as Snapshot;const old=await this.ports.store.snapshot(this.scope,witness.snapshotId);if(!old)fail('SOURCE_CHANGED');if(!sameSnapshot(old.witness,witness))fail('PLAN_CONFLICT');}
    const result=await this.preparation.offerRequest(r.requestId,p,witness,async()=>{}),digest=String(result.offerDigest);
    this.offers.set(r.requestId,{request:r,payload:p,watchSnapshot:witness,digest,result});return {result:result as unknown as Row,epoch:null};
@@ -500,7 +500,7 @@ export class LibraryBinaryConnection {
   this.receive?.index?.didApply(o.descriptor.objectId);
   // Business commit is authoritative. Cleanup is repeatable and cannot revoke it.
   try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource'].includes(o.descriptor.kind));}catch{}
-  this.activeReceive.delete(o.descriptor.objectId);this.ports.recovery?.confirm('APPLIED','phoneToWatch:'+o.descriptor.objectId);this.ports.applied?.();return {state:'APPLIED',receipt:saved.receipt};
+  this.activeReceive.delete(o.descriptor.objectId);this.ports.recovery?.confirm('APPLIED','phoneToWatch:'+o.descriptor.objectId);this.ports.applied?.(o.descriptor.kind);return {state:'APPLIED',receipt:saved.receipt};
  }
  private makeRequest(phase:Envelope['phase'],job:string,plan:string,epoch:number|null,payload:Row,stable=true):Envelope{const digest=requestDigest(job,plan,phase,payload),id=stable?D('wrss.library-binary.v2/source-request',[job,digest]).slice(0,32):'';return {action:ACTION,version:VERSION,phase,type:'request',jobId:job,planDigest:plan,epoch,requestId:id,requestDigest:digest,payload};}
  private async request(phase:Envelope['phase'],job:string,plan:string,epoch:number|null,payload:Row,stable=true):Promise<Envelope>{

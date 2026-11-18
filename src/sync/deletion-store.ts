@@ -11,15 +11,16 @@ import {libraryRevision,revisionGuard} from './revision.ts';
 export class SyncArticleDeletionStore {
  private readonly saved:SyncSavedStateStore;
  constructor(private readonly db:SqlDatabase,private readonly codec:SyncBodyCodec,private readonly resolveLocal:LocalBodyResolver,private readonly onItemsRemoved?:(ids:number[])=>Promise<void>){this.saved=new SyncSavedStateStore(db);}
- async receive(article:WireIncomingArticle,payload:SyncBodyPayload,peer:string,authoritative=false,receipt?:ReceiptBoundary,metadataTombstone=false):Promise<number>{
+ async receive(article:WireIncomingArticle,payload:SyncBodyPayload,peer:string,authoritative=false,receipt?:ReceiptBoundary,metadataTombstone=false,resolveItem?:(article:WireIncomingArticle,target?:number)=>Promise<{itemId:number}|null>):Promise<number>{
   if(!this.db.transactionChanges)throw new Error('Deletion requires committed transaction counts');
   if(!article.deleted||article.articleId!==payload.articleId)throw new Error('Invalid deletion identity');
   if(!Number.isSafeInteger(article.deletedAt))throw new Error('Invalid deletion clock');
   if(!(await this.db.query('SELECT device_id FROM sync_local_identity WHERE id=1')).length)throw new Error('Initialize sync identity first');
   const keep=await new ArticleKeepStore(this.db).lookup(article.articleId,article.url);
-  const revision=await libraryRevision(this.db),local=await this.resolveLocal(article,keep?.item_id==null?undefined:Number(keep.item_id));
-  if(!metadataTombstone){if(payload.metadataOnly)await requireMetadataOnlyBody(payload,local?.body??null,!!local?.available,!!local?.hasStoredBody,this.codec);
-  else await rebuildArticleBody(payload,local?.available?local.body:null,this.codec);}
+  const revision=await libraryRevision(this.db),target=keep?.item_id==null?undefined:Number(keep.item_id);
+  const body=resolveItem?null:await this.resolveLocal(article,target),local=resolveItem?await resolveItem(article,target):body;
+  if(!metadataTombstone){if(payload.metadataOnly)await requireMetadataOnlyBody(payload,body?.body??null,!!body?.available,!!body?.hasStoredBody,this.codec);
+  else await rebuildArticleBody(payload,body?.available?body.body:null,this.codec);}
   const incomingClock=Math.max(article.updatedAt,article.independentChangedAt,article.favoriteChangedAt,article.watchLaterChangedAt,article.deletedAt);
   if(!authoritative&&keep&&(Number(keep.changed_at)>incomingClock||Number(keep.changed_at)===incomingClock&&String(keep.source_order)>deviceOrder(article.sourceDeviceId||peer))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}return 0;}
   // A delayed delete must not undo a later, durably received keep decision.
