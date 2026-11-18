@@ -31,6 +31,12 @@ export class SendWindow {
   private readonly limits={maxInFlightChunks:1,maxInFlightBytes:65536}){
   this.binding=Object.freeze({...binding});if(!integer(epoch))fail();this.grantedEpochs.add(epoch);this.stale=staleAckBudget??new TokenBucket(32,16,now);
  }
+ nativeCursor(){if(!this.active||this.pending.size)fail('BUSY');return {tx:this.nextTxSeq-1,ack:this.lastAckSeq};}
+ acceptNativeCursor(tx:number,ack:number){
+  const prior=this.nativeCursor();
+  if(integer(tx)<prior.tx||integer(ack)<prior.ack)fail('STALE_EPOCH');
+  this.nextTxSeq=tx+1;this.lastAckSeq=ack;
+ }
  get currentEpoch():number{return this.epoch;}
  granted(epoch:number):boolean{return this.grantedEpochs.has(epoch);}
  oldEpoch(epoch:number):boolean{if(!this.granted(epoch))fail('STALE_EPOCH');return epoch<this.epoch;}

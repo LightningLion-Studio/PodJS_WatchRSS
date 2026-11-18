@@ -67,6 +67,7 @@ export class LibraryBinaryConnection {
  private readonly drainBuffer=new Uint8Array(4096);
  private nativeHeartbeat?:Promise<void>;
  private nativeReceive=false;
+ private nativeSending=false;
  private nativeProgress=0;
  private clockSync?:Promise<void>;
  private applying?:string;
@@ -132,6 +133,12 @@ export class LibraryBinaryConnection {
     if(r.type==='response'){
      if(r.phase==='putChunk'){
       if(!this.send)fail();
+      if(this.nativeSending){
+       if(r.success!==false||r.jobId!==this.send.job.jobId||r.planDigest!==this.send.job.planDigest||r.epoch!==this.send.job.epoch)fail('REQUEST_CONFLICT');
+       await this.io.native!.sendRejected({stream:2,epoch:r.epoch!,operation:r.requestId,digest:r.requestDigest,
+        code:String(r.error!.code),retryAfterMillis:Number(r.error!.retryAfterMillis)});
+       continue;
+      }
       const n=this.send.window.negative(r,this.ports.now());
       if(n){
        const error=new ResumeError(String(r.error!.code));
@@ -590,7 +597,36 @@ export class LibraryBinaryConnection {
   }
  }
  private async sendChunks(source:BinarySourcePlan,local:Job,objects:readonly {descriptor:ObjectDescriptor;missing:number[][]}[]){
-  const send=this.send!,indices=this.chunks(objects,source.objects);
+  const send=this.send!;
+  if(this.io.native&&objects.every(({descriptor})=>descriptor.kind.startsWith('book'))){
+   const chunks=[...this.chunks(objects,source.objects)].map(({slot,index})=>{
+    const object=source.objects[slot]!,range=source.range?.(object,index);
+    if(!range)fail('CAPABILITY_MISMATCH');
+    const digest=requestDigest(local.jobId,local.planDigest,'putChunk',{objectId:object.objectId,chunkIndex:index});
+    return {slot,index,...range,digest,operation:D('wrss.library-binary.v2/source-request',[local.jobId,digest]).slice(0,32)};
+   });
+   if(!chunks.length)return;
+   this.nativeSending=true;
+   try{
+    const result=await this.io.native.send({stream:2,epoch:local.epoch,window:local.description.selection.limits.maxInFlightChunks,...send.window.nativeCursor(),chunks});
+    send.window.acceptNativeCursor(result.tx,result.ack);
+    for(const entry of result.staged){
+     const [slot,index]=entry.split(':').map(Number);
+     const d=source.objects[slot!];if(!d||d.chunkHashes[index!]===undefined)fail('INVALID_FRAME');
+     this.ports.recovery?.confirm('STAGED','watchToPhone:'+d.objectId+':'+index);
+    }
+    if(result.error)throw new ResumeError(result.error);
+   }catch(error){
+    const failure=resumeError(error);
+    if(failure.code==='SOURCE_CHANGED'){
+     await this.request('cancel',local.jobId,local.planDigest,local.epoch,{reason:'SOURCE_CHANGED'});
+     await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.ports.store.cancel(local)));
+    }
+    throw failure;
+   }finally{this.nativeSending=false;}
+   return;
+  }
+  const indices=this.chunks(objects,source.objects);
   let next=indices.next(),ahead=indices.next();
   let prefetch:{slot:number;index:number;file:Promise<SourceFileChunk>}|undefined;
   const readFile=async(d:ObjectDescriptor,index:number)=>{

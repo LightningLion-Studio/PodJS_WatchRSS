@@ -21,6 +21,8 @@ export class HostSyncByteStream implements SyncByteStream {
    register:(...args:Parameters<typeof host.register> extends [string,...infer P]?P:never)=>host.register(id,...args),
    enable:(...args:Parameters<typeof host.enable> extends [string,...infer P]?P:never)=>host.enable(id,...args),
    bind:(...args:Parameters<typeof host.bind> extends [string,...infer P]?P:never)=>host.bind(id,...args),
+   send:(plan:Parameters<typeof host.send>[1])=>host.send(id,plan),
+   sendRejected:(value:Parameters<typeof host.sendRejected>[1])=>host.sendRejected(id,value),
    markApplied:(slot:number)=>host.markApplied(id,slot),state:()=>host.state(id),retire:()=>host.retire(id),
   };
  }
