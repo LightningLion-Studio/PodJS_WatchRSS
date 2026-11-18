@@ -13,9 +13,9 @@ import {appendUsage} from "./usage.ts";
 
 export const summaryAccountStore=new WatchAccountStore({exclusive:action=>withAccountLease(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result,action),revokeCloudScope:state=>revokeAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result,state),clearCloudScope:state=>clearAccountCloud(<T>(method:string,args:Record<string,unknown>)=>hostOperation<T>(method,secureCallsite(method,args)).result,state),get:async key=>(await secureStorage.get(key,1))??null,set:(key,value)=>secureStorage.set(key,value,1),remove:key=>secureStorage.delete(key,undefined,1)});
 let sequence=0;
-export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,original:()=>Promise<unknown>,changed:(state:SummaryState)=>void):SummarySession {
+export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,original:()=>Promise<unknown>,changed:(state:SummaryState)=>void,network?:import("../network/recovery.ts").NetworkWork):SummarySession {
  const requests=new Set<HostOperation<DownloadResult>>();let disposed=false;
- const transport:HttpTransport={async request(request){
+ const rawTransport:HttpTransport={async request(request){
   if(disposed)throw new Error("总结已取消");
   const path=`llm/response-${Date.now()}-${++sequence}.json`;
   const task=hostOperation<DownloadResult>("http.download",{url:request.url,path,temporary:true,method:request.method,headers:request.headers,bodyBase64:request.body?bytesToBase64(request.body):undefined,acceptHttpErrors:true,timeoutMs:15000,readTimeoutMs:600000,maxBytes:8*1024*1024});
@@ -27,6 +27,7 @@ export function createSummarySession(db:SqlDatabase,id:string,preset:()=>number,
    return {status:result.status,headers:result.headers,body};
   }finally{requests.delete(task);await fileChunks.remove(path).catch(()=>{});}
  }};
+ const transport:HttpTransport={request:request=>network?network.run(()=>rawTransport.request(request)):rawTransport.request(request)};
  let tokens:WatchTokenManager|undefined;
  return new SummarySession({source:waiting=>loadSummarySource(db,id,original,waiting),account:()=>summaryAccountStore.read(),freshAccount:(account,force,rejectedAccessToken)=>{tokens??=new WatchTokenManager(summaryAccountStore,{backendBaseUrl:account.backendBaseUrl,transport,appVersion:watchAppVersion});return tokens.freshAccount(force,rejectedAccessToken);},transport,
   recordUsage:async(model,usage)=>{const createdAt=Date.now();await appendUsage(db,{provider:"WatchRSS",model,requestId:`${createdAt}_${++sequence}_server_summary`,usage,createdAt});},

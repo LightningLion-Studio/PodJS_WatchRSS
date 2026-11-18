@@ -1,3 +1,4 @@
+import {useNetworkRecovery,useCachedNetworkContent} from '../../network/context.ts';
 import {douyinBench} from '../../douyin/bench.ts';
 import {observeDouyinAuth} from './auth-state.ts';
 import {usageTelemetry} from '../../telemetry/host.ts';
@@ -18,8 +19,6 @@ import { douyinBrowserAvailable } from "../../douyin/browser.ts";
 import { hasCapability } from "@podjs/framework/watch";
 import { authorizeInBrowser } from "../../media/browser-auth.ts";
 import { DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT } from "../../media/douyin-login.ts";
-import { observeHostInternet } from "../../onboarding/network-host.ts";
-import type { InternetStatus } from "../../onboarding/state.ts";
 import { loginGate, loginError, douyinLoginFailureCode, initialLoginStatus, updateLoginStatus, loginStatusMessage, DOUYIN_QR_WAIT, finishLoginStatus } from "./login-state.ts";
 import { ImmersiveEntry } from "./ImmersiveEntry.tsx";
 import { platformCardEntry } from "../PlatformNotice.tsx";
@@ -146,6 +145,7 @@ function ChannelInfoScreen(props: DouyinScreenProps) {
 }
 
 function LoginScreen(props: DouyinScreenProps) {
+ const network=useNetworkRecovery();
   let benchAttempt=douyinBench.loginEntry(props.client),benchStarted=false;
   onCleanup(()=>douyinBench.leaveLogin(props.client,benchAttempt));
   const loginLog=new DouyinLoginLog();
@@ -155,15 +155,10 @@ function LoginScreen(props: DouyinScreenProps) {
   const [authStatus, setAuthStatus] = createSignal(initialLoginStatus());
   const [statusMode, setStatusMode] = createSignal(false);
   const qrImage = () => statusMode() ? (authStatus().qr ? `data:${authStatus().qr!.mime};base64,${authStatus().qr!.imageBase64}` : undefined) : props.loginQrImage;
-  const [internet, setInternet] = createSignal<InternetStatus>("checking");
   const [browserAvailable, setBrowserAvailable] = createSignal(hasCapability("system.browser.auth"));
-  const gate = () => loginGate(internet(), browserAvailable());
+  const gate = () => loginGate("available", browserAvailable());
   let disposed = false, generation = 0;
   let authorization: ReturnType<typeof authorizeInBrowser> | undefined;
-  onMount(() => onCleanup(observeHostInternet(status => {
-    setInternet(status);
-    if (status !== "available") { generation++; authorization?.cancel(); authorization = undefined; setAuthStatus(finishLoginStatus(authStatus())); setBusy(false); }
-  })));
   onCleanup(() => { loginLog.dispose(); disposed = true; generation++; authorization?.cancel(); });
   const openLogin = async () => {
     if (gate() || busy()) return;
@@ -175,20 +170,25 @@ function LoginScreen(props: DouyinScreenProps) {
     setStatusMode(hasCapability("system.browser.auth.status"));
     setAuthStatus(initialLoginStatus());
     setMessage("正在加载抖音登录页…");
-    let acceptingStatus = true;
+    let acceptingStatus = true, nativeAttempt = 0;
     try {
       const available = await douyinBrowserAvailable({ ...browser, hasCapability });
       if (disposed || current !== generation || gate()) return;
       if (!available) { douyinBench.error(currentBench);setBrowserAvailable(false); return; }
-      authorization = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,qrWait:DOUYIN_QR_WAIT,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
-        if (disposed || current !== generation || !acceptingStatus) return;
+      const authorize=()=>{
+        // Recovery replaces the native operation without changing the page attempt.
+        const attempt = ++nativeAttempt;
+        const operation = authorizeInBrowser({url:"https://www.douyin.com/chat?isPopup=1",cookieOrigin:"https://www.douyin.com",qrExtractionScript:statusMode() ? DOUYIN_AUTH_STATUS_SCRIPT : DOUYIN_LOGIN_QR_EXTRACTION_SCRIPT,...(statusMode() ? {completeOnLoginPanelHidden:true,qrWait:DOUYIN_QR_WAIT,onStatus: (event: import("@podjs/framework/services").BrowserAuthStatus) => {
+        if (disposed || current !== generation || !acceptingStatus || attempt !== nativeAttempt) return;
         loginLog.status(event);
         qrTelemetry.status(event);
         setAuthStatus(state => updateLoginStatus(state, event));
         setMessage(loginStatusMessage(authStatus()));
       }} : {}),benchmark:{seq:currentBench.seq,attempt:currentBench.attempt},completeOnRequiredCookies:true,lowMemory:true,requiredCookieNames:["sessionid"],userAgent:DOUYIN_USER_AGENT});
+        return { ...operation, result: operation.result.finally(() => { if (attempt === nativeAttempt) nativeAttempt++; }) };
+      };
       benchRequested=true;
-      const result = await authorization.result;
+      const result = await network.run(()=>{setAuthStatus(initialLoginStatus());setMessage("正在加载抖音登录页…");authorization=authorize();return authorization.result;});
       nativeCompleted=true;
       acceptingStatus = false;
       if (disposed || current !== generation || gate()) return;
@@ -248,6 +248,7 @@ function detailNavigation(props: DouyinScreenProps, onRecorded?: () => Promise<v
 }
 
 function FeedScreen(props: DouyinScreenProps) {
+ const network=useNetworkRecovery();
   let entrySeq=(props.active??true)?douyinBench.entry(props.client):0,entryActive=props.active??true;
   const auth=observeDouyinAuth(props.client);
   const openDetail = detailNavigation(props);
@@ -256,16 +257,17 @@ function FeedScreen(props: DouyinScreenProps) {
   const continuePlayback = async () => {
     const queue = resume(), id = queue?.anchorAwemeId; if (!queue || !id) return;
     try {
-      const result = await props.client.resolvePlayback(id);
+      const result = await network.result(()=>props.client.resolvePlayback(id));
       if (!result.ok) { setError(result.message); return; }
       props.onPlay({item:result.data,playback:result.data,playlist:queue.items,cursor:queue.cursor ?? undefined,hasMore:queue.hasMore});
       props.onNavigate({name:"player",awemeId:id});
     } catch (error) { setError(String(error)); }
   };
   const initial = feedSnapshots.get(props.client);
-  const controller = new DouyinRssFeedController(props.client, initial, state => setFeed(state), snapshot => feedSnapshots.set(props.client, snapshot));
+  const controller: DouyinRssFeedController = new DouyinRssFeedController({fetchFeedPage:options=>network.result(()=>props.client.fetchFeedPage(options),()=>controller.state.items.length>0)}, initial, state => setFeed(state), snapshot => feedSnapshots.set(props.client, snapshot));
   const [feed, setFeed] = createSignal(controller.state), [error, setError] = createSignal("");
   const items = () => feed().items, hasMore = () => feed().hasMore, loading = () => feed().loading;
+  useCachedNetworkContent(()=>items().length>0||(resume()?.items.length??0)>0);
   const [refreshing, setRefreshing] = createSignal(false);
   createEffect(()=>{const enabled=props.active??true;if(enabled&&!entryActive)entrySeq=douyinBench.entry(props.client);entryActive=enabled;const code=auth()==='logged-out'?'needs_login':refreshing()?'refreshing':undefined;if(enabled&&code){douyinBench.presentEntry(props.client,entrySeq,code);onCleanup(()=>douyinBench.cancelPresented(code,entrySeq));}});
   const load = (append = false) => { if(auth()!=='logged-in')return Promise.resolve(); setError(""); if (append) return controller.loadMore(); setRefreshing(true); return controller.refresh().finally(() => setRefreshing(false)); };
@@ -282,8 +284,12 @@ function FeedScreen(props: DouyinScreenProps) {
   const toggleSaved = (item: DouyinItem, kind: "favorite" | "watchLater") => void props.client.toggleSaved(item, kind).then(saved => toast(kind === "favorite" ? saved ? "已收藏" : "已取消收藏" : saved ? "已加入稍后再看" : "已从稍后再看移除"), error => toast(error instanceof Error ? error.message : String(error)));
   const leading = createMemo<ScrollEntry[]>(() => [platformNoticeEntry(props.width - 36, platformNotice("抖音", true)), ...(auth() === 'unknown' ? [feedEmptyStateEntry("读取登录状态…", "", props.width)] : loggedIn() === false
     ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">未登录</Text> }, feedPillEntry("登录", props.width, () => douyinBench.loginTap(props.client,()=>props.client.authState()==='unknown'?undefined:props.client.authState()==='logged-in',()=>props.onNavigate({ name: "login" })), true)]
-    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : [])]);
-  const empty = createMemo<ScrollEntry[]>(() => auth() !== 'logged-in' || (loading() && !error()) ? [] : [feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width)]);
+    : resume()?.anchorAwemeId ? [feedPillEntry("继续上次播放", props.width, () => void continuePlayback())] : []),
+    ...(auth()==='logged-in' && items().length && error() ? [feedEmptyStateEntry("加载失败", error(), props.width)] : [])]);
+  const empty = createMemo<ScrollEntry[]>(() => auth() !== 'logged-in' || (loading() && !error()) ? [] : [
+    feedEmptyStateEntry(error() ? "加载失败" : "暂无内容", error() || "下拉刷新获取推荐内容", props.width),
+    ...(error() ? [feedPillEntry("重试刷新", props.width, () => void load(false))] : []),
+  ]);
   return <RssFeedScreen width={props.width} height={props.height} title="抖音" active={props.active !== false} onInfo={() => props.onNavigate({ name: "channel-info" })}
     items={articles()} refreshing={auth()==='logged-in' && (refreshing() || (loading() && !items().length))} loadingMore={loading() && !refreshing() && items().length > 0} canNext={hasMore() && auth() === 'logged-in'}
     onOpen={article => withItem(article, item => void openDetail(item).catch(error => setError(String(error))))}
@@ -293,20 +299,24 @@ function FeedScreen(props: DouyinScreenProps) {
 }
 
 function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
+ const network=useNetworkRecovery();
   const [content, setContent] = createSignal<DouyinContent | null>(null), [error, setError] = createSignal("");
+  const [attempt, setAttempt] = createSignal(0);
+  useCachedNetworkContent(()=>content()!==null);
   createEffect(() => {
+    attempt();
     const id = props.awemeId, route = props.route;
     let current = true; onCleanup(() => { current = false; });
     setContent(null); setError("");
-    void loadDouyinDetail(props.client, id, route.name === "detail" ? route.item : undefined)
-      .then(result => { if (current) result.ok ? setContent(result.data) : setError(result.message); })
+    void network.result(()=>loadDouyinDetail(props.client, id, route.name === "detail" ? route.item : undefined))
+      .then(result => { if (current) result.ok ? setContent(result.data) : setError(result.message || "详情加载失败"); })
       .catch(error => { if (current) setError(String(error)); });
   });
   const item = () => content()?.kind === "video" ? (content() as Extract<DouyinContent, { kind: "video" }>).item : null;
   const play = async () => {
     const current = item(); if (!current) return;
     try {
-      const result = await props.client.resolvePlayback(current.awemeId);
+      const result = await network.result(()=>props.client.resolvePlayback(current.awemeId),()=>!!current.playUrl.trim()&&!douyinVideoTarget(current.playUrl));
       // RssPlayerViewModel allows the stored direct URL when initial refresh fails.
       const playback = result.ok ? result.data : current.playUrl.trim() && !douyinVideoTarget(current.playUrl) ? current : null;
       if (!playback) { setError(result.ok ? "播放地址为空" : result.message); return; }
@@ -330,6 +340,12 @@ function DetailScreen(props: DouyinScreenProps & { awemeId: string }) {
   };
   return <Show when={content()} fallback={<View class="absolute inset-0 items-center justify-center" style={{ bgColor: readerColor(preset().background.colorArgb) }}>
       <Text class="text-[21px] leading-[26] text-center" style={{ textColor: readerChrome(preset()).content }}>{error() || "加载中..."}</Text>
+      <Show when={error()}>
+        <View focusable accessibilityRole="button" accessibilityLabel="重试" onPress={() => { if (props.active !== false) setAttempt(value => value + 1); }}
+          class="mt-[10] px-[16] py-[8] rounded-[18] bg-[#292929] items-center justify-center">
+          <Text class="text-sm text-white">重试</Text>
+        </View>
+      </Show>
     </View>}>
     {value => {
       const blocks = () => douyinDetailBlocks(value());

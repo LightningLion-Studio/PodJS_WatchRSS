@@ -1,3 +1,5 @@
+import {networkReadClient} from '../../network/recovery.ts';
+import {useNetworkRecovery,useCachedNetworkContent} from '../../network/context.ts';
 import {biliFeedScope} from '../../bili/recommendations.ts';
 import {useModalInput} from '../modal-input.ts';
 import type {ModalInput,ModalInputRecovery} from '../service.ts';
@@ -6,7 +8,7 @@ import { CommentScreen } from "./CommentScreen.tsx";
 import { BiliDetailController, type DetailState, type DetailTarget } from "../../bili/detail.ts";
 import { BiliFeedBrowser, BiliSearchHistory, favoritePager, historyPager, searchPager, type BrowseState } from "../../bili/browse.ts";
 import {biliShareLink,biliActionTitle,type ShareHandler} from "../../sharing/policy.ts";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, mergeProps, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import type { Scroller } from "@pocketjs/framework/kinetics";
 import { kv } from "@podjs/framework/watch";
@@ -99,6 +101,7 @@ function Scrolled(props: BiliScreenProps & { entries: ScrollEntry[]; onRefresh?:
 
 function pagedData<T>(source: () => unknown, factory: (changed: (state: BrowseState<T>) => void) => { state: BrowseState<T>; refresh: () => Promise<void>; loadMore: () => Promise<void>; dispose: () => void }) {
   const [state, setState] = createSignal<BrowseState<T>>({ items: [], loading: true, canLoadMore: true });
+  useCachedNetworkContent(()=>state().items.length>0);
   let pager: ReturnType<typeof factory> | undefined;
   createEffect(() => { source(); pager?.dispose(); pager = factory(value => setState(() => value)); setState(() => pager!.state); void pager.refresh(); });
   onCleanup(() => pager?.dispose());
@@ -159,6 +162,7 @@ function FeedScreen(props: BiliScreenProps) {
           onOpenSwipe={() => setOpenSwipeId(key)} onCloseSwipe={() => { if (openSwipeId() === key) setOpenSwipeId(null); }}
           edgeSwipe={{ startX: x => sideMenu?.isEdge(x) ?? false, onSwipe: dx => sideMenu?.edgeSwipe(dx) }}>{card.content()}</SwipeCard> };
       }),
+      ...(loggedIn && values.length && feed.state().error ? [messageEntry('加载失败: '+String(feed.state().error),props.width ?? 233)] : []),
       ...(loggedIn && feed.state().loading && values.length ? [{ height: 21, render: () => <Text class="absolute left-[0] right-[0] top-[0] text-[17px] leading-[21] text-center text-[#b6b6b6]">加载中...</Text> }] : [])];
   });
   // Native loads more once the last visible item is within 3 of the end.
@@ -262,6 +266,7 @@ function BiliListPage(props: BiliScreenProps & { title: string; items: ScrollEnt
     </View> },
     ...(!props.items.length && !props.loading ? [props.error ? emptyStateEntry("加载失败", String(props.error instanceof Error ? props.error.message : props.error), width()) : emptyStateEntry("暂无内容", "稍后再试", width())] : []),
     ...props.items,
+    ...(props.items.length && props.error ? [messageEntry('加载失败: '+String(props.error),width())] : []),
     ...(props.loading && props.items.length ? [{ height: 21, render: () => <Text class="absolute left-[0] top-[0] text-[17px] leading-[21] text-[#b6b6b6]">加载中...</Text> }] : []),
     { height: 40, render: () => null },
   ]);
@@ -278,13 +283,15 @@ function historyEntry(item: BiliHistoryItem, width: number, props: BiliScreenPro
 
 function WatchLaterScreen(props: BiliScreenProps) {
   const page = asyncData(() => props.client.toView());
+  useCachedNetworkContent(()=>(page.value()?.items.length??0)>0);
   const items = createMemo(() => (page.value()?.items ?? []).map(item => listVideoEntry(item, listSummary(item.owner?.name, item.duration), props.width ?? 233, () => props.onNavigate({ name: "detail", aid: item.aid, bvid: item.bvid, cid: item.cid }))));
   return <BiliListPage {...props} title="稍后再看" items={items()} loading={page.loading()} error={page.error()} onRefresh={page.refetch} />;
 }
 
 /** Native FAVORITE list opens the first favorite folder directly. */
 function FavoritesScreen(props: BiliScreenProps) {
-  const folders = asyncData(() => props.client.favoriteFolders());
+ const network=useNetworkRecovery();
+  const folders = asyncData(() => network.run(()=>props.client.favoriteFolders()));
   const mediaId = createMemo(() => { const first = folders.value()?.[0]; return first ? first.id ?? first.fid : undefined; });
   return <Show when={mediaId()} keyed fallback={<BiliListPage {...props} title="收藏夹" items={[]} loading={folders.loading()} error={folders.error()} onRefresh={folders.refetch} />}>
     {id => <FavoriteFolderScreen {...props} route={{ name: "favorite-folder", mediaId: id, title: "收藏夹" }} />}
@@ -408,14 +415,16 @@ function surfaceCard(pal: DetailPalette, text: string, width: number, color = pa
 function detailDuration(seconds?: number) { if (!seconds || seconds <= 0) return undefined; return durationText(seconds); }
 
 function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
+ const network=useNetworkRecovery();
   const [selectedCid,saveSelectedCid]=restoredSignal<number>('retained','bili-selected-cid',num(props.route.cid),(v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>0);
   const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
   let controller: BiliDetailController;
   createEffect(() => {
     const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: untrack(selectedCid) || undefined };
-    controller = new BiliDetailController(props.client, kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
+    controller = new BiliDetailController(networkReadClient(props.client,network,['detail'],()=>!!state().detail), kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
     const own = controller; setState(own.state); void own.load(); onCleanup(() => own.dispose());
   });
+  useCachedNetworkContent(()=>!!state().detail);
   const [busy, setBusy] = createSignal("");
   const [expanded, setExpanded] = restoredSignal('saved','bili-description-expanded',false,booleanState);
   let disposed = false; onCleanup(() => { disposed = true; });
@@ -451,7 +460,7 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       <View class={pal.dark ? "absolute inset-0 bg-gradient-to-b from-transparent to-[#0b1211b3]" : "absolute inset-0 bg-gradient-to-b from-transparent to-[#f7f4f0b3]"} />
       <View class="absolute w-[36] h-[36] rounded-full items-center justify-center" style={{ bgColor: pal.scrim, insetL: (cardWidth - 36) / 2, insetT: (cardWidth * 2 / 3 - 36) / 2 }}><Image src={pal.dark ? "../assets/icons/bili-action-play-circle.svg" : "../assets/icons/bili-action-play-circle-dark.svg"} style={{ width: 32, height: 32 }} /></View>
     </View> };
-    const title = measuredLines(it?.title?.trim() || "加载中...", inner, measureScaled(titleFont), 3);
+    const title = measuredLines(it?.title?.trim() || (st.loading ? "加载中..." : st.error ? "详情加载失败" : "哔哩哔哩视频"), inner, measureScaled(titleFont), 3);
     const owner = it?.owner?.name?.trim();
     const chips = [it?.stat?.view != null ? `播放 ${formatCount(it.stat.view)}` : "", it?.stat?.like != null ? `点赞 ${formatCount(it.stat.like)}` : "", it?.stat?.danmaku != null ? `弹幕 ${formatCount(it.stat.danmaku)}` : ""].filter(Boolean);
     const titleHeight = title.length * titleFont.lineHeight;
@@ -509,6 +518,8 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
       ...description(),
       ...(SHOW_COMMENT_ENTRY && it?.aid ? [sectionTitle(pal, "评论"), surfaceCard(pal, "查看评论", cardWidth, pal.onSurface, () => props.onNavigate({ name: "comments", oid: it.aid!, uploaderMid: it.owner?.mid }))] : []),
       ...(message ? [surfaceCard(pal, message, cardWidth)] : []),
+      ...(st.error && !st.loading ? [surfaceCard(pal, "重试", cardWidth, pal.onSurface,
+        () => { if (props.active !== false) void controller.load(); })] : []),
       { height: 50, render: () => <View class="absolute inset-0" /> },
     ];
   });
@@ -521,13 +532,15 @@ function DetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { nam
 const readerColorOf = (preset: ReaderPreset) => readerColor(preset.background.colorArgb);
 /** RSS-mode (原文阅读模式 off) detail: native BiliRssDetailScreen, a reader page on the preset background. */
 function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "detail" }> }) {
+ const network=useNetworkRecovery();
   const [state, setState] = createSignal<DetailState>({ selected: 0, interaction: {}, loading: true, busy: false, offline: false });
   let controller: BiliDetailController;
   createEffect(() => {
     const target = { aid: num(props.route.aid) || undefined, bvid: props.route.bvid, cid: num(props.route.cid) || undefined };
-    controller = new BiliDetailController(props.client, kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
+    controller = new BiliDetailController(networkReadClient(props.client,network,['detail'],()=>!!state().detail), kv, target, props.loadLocalDetail ?? (async () => undefined), setState);
     const own = controller; setState(own.state); void own.load(); onCleanup(() => own.dispose());
   });
+  useCachedNetworkContent(()=>!!state().detail);
   const [busy, setBusy] = createSignal("");
   let disposed = false; onCleanup(() => { disposed = true; });
   async function play() {
@@ -553,14 +566,23 @@ function RssDetailScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { 
   }
   const message = () => busy() || state().message || (state().error ? String(state().error) : "");
   const chrome = () => readerChrome(preset());
+  const canRetry = () => !!state().error && !state().loading && !state().busy && !busy();
+  const retry = () => { if (props.active !== false && canRetry()) void controller.load(); };
   return <Show when={state().detail} fallback={<View class="absolute inset-0 items-center justify-center" style={{ bgColor: readerColorOf(preset()) }}>
       <Text class="text-[21px] leading-[26] text-center" style={{ textColor: chrome().content }}>{state().loading ? "加载中..." : message() || "加载中..."}</Text>
+      <Show when={canRetry()}>
+        <View focusable accessibilityRole="button" accessibilityLabel="重试" onPress={retry}
+          class="mt-[10] px-[16] py-[8] rounded-[18] bg-[#292929] items-center justify-center">
+          <Text class="text-sm text-white">重试</Text>
+        </View>
+      </Show>
     </View>}>
     <MediaReaderDetail width={props.width ?? 233} height={props.height} preset={preset()} active={props.active ?? true}
       articleId={`bili-rss:${props.route.bvid ?? props.route.aid ?? ""}`} title={display().title} message={message()}
       blocks={[{ type: "text", text: `作者：${display().owner}`, style: "subtitle" }, { type: "text", text: `简介：${display().desc}`, style: "body" }, { type: "video", url: "bili-cover", poster: display().cover }]}
       favorite={() => !!state().interaction.favorite} onPlay={() => void play()} onFavorite={() => { if (!state().busy && !state().loading) void controller.act("favorite"); }} onShare={share}
-      onError={message => fail(props, new Error(message))} ref={handle => props.ref?.({ scroller: handle.scroller, onRootBack: () => false })} />
+      onError={message => fail(props, new Error(message))} onRetry={canRetry() ? retry : undefined}
+      ref={handle => props.ref?.({ scroller: handle.scroller, onRootBack: () => false })} />
   </Show>;
 }
 
@@ -618,6 +640,8 @@ function SettingsScreen(props: BiliScreenProps) {
 function PlayerScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: "player" }> }) { const entries = [titleEntry("播放", props.route.title), messageEntry("播放器路由应由宿主接管，当前页面未取得原生播放边界。", props.width ?? 233), buttonEntry("返回", props.onBack)]; return <Scrolled {...props} entries={entries} />; }
 
 export function BiliScreen(props: BiliScreenProps) {
+ const network=useNetworkRecovery();
+ props=mergeProps(props,{client:networkReadClient(props.client,network,['feed','search','favoriteResources','history','toView','requestQrLogin','pollQrLogin'])});
   const route = () => props.route;
   return <Show when={route().name !== "entry" && route().name !== "feed"} fallback={<FeedScreen {...props} />}>
     <Show when={route().name !== "channel-info"} fallback={<ChannelInfoScreen {...props} />}><Show when={route().name !== "history"} fallback={<HistoryScreen {...props} />}><Show when={route().name !== "watch-later"} fallback={<WatchLaterScreen {...props} />}><Show when={route().name !== "favorites"} fallback={<FavoritesScreen {...props} />}><Show when={route().name !== "favorite-folder"} fallback={<FavoriteFolderScreen {...props} route={route() as Extract<BiliRoute, { name: "favorite-folder" }>} />}><Show when={route().name !== "login"} fallback={<LoginScreen {...props} />}><Show when={route().name !== "search"} fallback={<SearchScreen {...props} />}>

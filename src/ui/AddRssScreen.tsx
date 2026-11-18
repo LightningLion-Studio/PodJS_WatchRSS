@@ -1,3 +1,4 @@
+import {useNetworkRecovery} from '../network/context.ts';
 import {useModalInput} from './modal-input.ts';
 import type {ModalInput,ModalInputRecovery} from './service.ts';
 import {restoredSignal,stringState,booleanState} from './route-activity.tsx';
@@ -12,6 +13,7 @@ const SAFE=18,GAP=8;
 type Inline=(value:string,bounds:{x:number;y:number;width:number;height:number},onChange:(value:string)=>void,onSubmit:()=>void,options?:{hint?:string;fontSizeSp?:number;inputType?:"text"|"uri"})=>Promise<{close():Promise<void>}>;
 
 export function AddRssScreen(props:{width:number;height:number;active:boolean;initialUrl:string;initialPreview?:AddChannelPreview;initialError?:string;preview?:(url:string)=>Promise<AddChannelPreview>;confirm?:(token:string)=>Promise<Channel>;input:ModalInput;inputRecovery?:ModalInputRecovery;openInlineInput?:Inline;onAdded:(channel:Channel)=>void;onExisting:(channel:Channel)=>void;ref?:(value:{scroller:Scroller;onRootBack:()=>boolean})=>void}){
+ const network=useNetworkRecovery();
   const [url,setUrl]=restoredSignal('retained','add-url',props.initialUrl,stringState),[step,setStep]=createSignal<"input"|"preview"|"existing">(props.initialPreview?.kind==="ready"?"preview":props.initialPreview?.kind==="existing"?"existing":"input");
   const [preview,setPreview]=createSignal<AddChannelPreview|undefined>(props.initialPreview);
   const [loading,setLoading]=createSignal(false),[submitting,setSubmitting]=createSignal(false),[error,setError]=restoredSignal('retained','add-error',props.initialError??'',stringState);
@@ -57,7 +59,7 @@ export function AddRssScreen(props:{width:number;height:number;active:boolean;in
     if(!props.preview){setError("无法预览订阅");return;}
     setError("");setLoading(true);const current=++previewVersion;
     try{
-      const result=await props.preview(url());
+      const result=await network.run(()=>props.preview!(url()));
       if(disposed||current!==previewVersion)return;
       setRestorePreview(true);setPreview(result);setStep(result.kind==="ready"?"preview":"existing");scroller?.scrollTo(0,{immediate:true});
     }catch(cause){if(!disposed&&current===previewVersion)setError(cause instanceof Error?cause.message:String(cause));}

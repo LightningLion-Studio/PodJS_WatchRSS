@@ -18,10 +18,12 @@ ops.setProp=(id:number,key:number,value:number)=>{let p=props.get(id);if(!p)prop
 ops.setText=ops.replaceText=(id:number,text:string)=>texts.set(id,text);
 ops.loadPakImage=()=>next++;ops.uploadTexture=()=>next++;ops.freeTexture=()=>{};ops.measureText=(s:string)=>s.length*8;
 ops.wrapText=()=>[];ops.getLayout=()=>({x:0,y:0,w:233,h:193});ops.getProp=(id:number,key:number)=>props.get(id)?.get(key)??0;
-(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','data.secure','runtime.timer','text.layout']),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
+(globalThis as any).pod={capabilities:()=>JSON.stringify(['data.kv','data.secure','net.discovery','runtime.timer','text.layout']),displayMetrics:()=>JSON.stringify({logicalWidth:233,logicalHeight:233,physicalWidth:466,physicalHeight:466,density:2,shape:'round',safeInsets:{top:0,right:0,bottom:0,left:0}}),kvGet:(k:string)=>kv.get(k),kvSet:(k:string,v:string)=>{kv.set(k,v);return 0;},kvDelete:(k:string)=>{kv.delete(k);return 0;},kvKeys:()=>JSON.stringify([...kv.keys()]),takeEvents:()=>JSON.stringify(events.splice(0)),emit:(line:string)=>{const r=JSON.parse(line);if(r.t!=='service.request')return;let value:any=null;const {method,id,args}=r;
  if(method==='runtime.delay'){timers.set(id,clockMs+args.milliseconds);return;}
  if(method==='application.activityState.write'||method==='app.activityState.write'){}
  else if(method==='media.video.stop'){}
+ else if(method==='discovery.networkSubscribe')value={subscriptionId:args.subscriptionId};
+ else if(method==='discovery.networkSnapshot')value={active:false,internet:false,validated:false,wifi:false,cellular:false,bluetooth:false};
  else if(method==='text.environment')value={density:2,fontScale:1,spValuesPx:[]};
  else if(method==='text.layout')value={lines:[{start:0,end:args.text.length,visibleEnd:args.text.length}]};
  else if(method==='secure.get')value={exists:false};
@@ -74,9 +76,9 @@ const state=()=>{const content:any=activityStateHub.read().saved['watchrss.conte
 let stop:(()=>void)|undefined;
 async function tick(dt=17){clockMs+=dt;for(const [id,at]of timers)if(at<=clockMs){timers.delete(id);events.push({t:'service.result',id,ok:true,value:null});}(globalThis as any).frame(0,undefined);for(let n=0;n<25;n++)await Promise.resolve();}
 async function settle(){for(let n=0;n<5;n++)await tick();}
-async function mount(announcementServices?:any,entries:any[]=[{page:'home'}]){
+async function mount(announcementServices?:any,entries:any[]=[{page:'home'}],appServices=services){
  activityStateHub.seed(captureActivityNavigation({saved:{},retained:{}},entries));
- stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services,announcements:announcementServices});},{ops});await settle();
+ stop=render(()=>{setStyleResolver(()=>0);return WatchRSS({services:appServices,announcements:announcementServices});},{ops});await settle();
 }
 afterEach(()=>{stop?.();stop=undefined;kv.clear();lists.length=0;media.length=0;events.length=0;timers.clear();texts.clear();props.clear();});
 
@@ -133,4 +135,72 @@ for(const platform of ['bili','douyin'] as const)test(`${platform}: initial then
  events.push({t:'back'});for(let n=0;n<30;n++)await tick();expect(state()).toEqual(['home']);
  confirm(platform+'，');await settle();
  expect(button('我已了解')).toBeUndefined();expect(button('知道了，继续')).toBeUndefined();expect(currentMedia()).toBeDefined();
+});
+
+
+test('an offline RSS refresh keeps the cached Home channels selectable and shows the error',async()=>{
+ const cached={id:'cached-rss',title:'Cached RSS',url:'https://cached.invalid/rss'};
+ kv.set(INITIAL_DISCLOSURE_KEY,'true');
+ kv.set('watchrss.home.channels.v1',JSON.stringify([cached]));
+ let refreshes=0;
+ const openedChannels:string[]=[];
+ const offlineServices=new Proxy(services,{get(target,key,receiver){
+  // Keep the initial list read pending to exercise the real startup cache.
+  if(key==='listChannels')return ()=>new Promise(()=>{});
+  if(key==='listArticles')return async(query:{channelId?:string})=>{
+   if(query.channelId)openedChannels.push(query.channelId);
+   return [];
+  };
+  if(key==='refresh')return async()=>{
+   refreshes++;
+   throw Object.assign(new Error('RSS refresh offline'),{code:'network_error'});
+  };
+  return Reflect.get(target,key,receiver);
+ }});
+ await mount(undefined,[{page:'home'}],offlineServices);
+ expect(text()).toContain(cached.title);
+ homeList().input.onRefresh();
+ await settle();
+
+ expect(refreshes).toBe(1);
+ expect(text()).not.toContain('互联网可用状态');
+ expect(text()).toContain('RSS refresh offline');
+ expect(text()).not.toContain('正在刷新全部…');
+ expect(homeList().input.inputActive()).toBe(true);
+ confirm(cached.title+'，');
+ await settle();
+ expect(openedChannels).toContain(cached.id);
+});
+
+
+for(const hasCache of [true,false])test(`offline single-channel pull refresh ${hasCache?'keeps cached articles usable':'can block an empty feed'}`,async()=>{
+ const cached={id:'cached-rss',title:'Cached RSS',url:'https://cached.invalid/rss'};
+ const article={id:'cached-article',channelId:cached.id,title:'Article from local cache',content:'<p>Local content</p>'};
+ const refreshed:(string|undefined)[]=[];
+ kv.set(INITIAL_DISCLOSURE_KEY,'true');
+ const offlineServices=new Proxy(services,{get(target,key,receiver){
+  if(key==='listChannels')return async()=>[cached];
+  if(key==='listArticles')return async(query:{channelId?:string})=>query.channelId===cached.id&&hasCache?[article]:[];
+  if(key==='refresh')return async(id?:string)=>{
+   refreshed.push(id);
+   throw Object.assign(new Error('Channel refresh offline'),{code:'network_error'});
+  };
+  return Reflect.get(target,key,receiver);
+ }});
+ await mount(undefined,[{page:'home'}],offlineServices);
+ confirm(cached.title+'，');
+ await settle();
+ expect(text().replace(/\s/g,'').includes(article.title.replace(/\s/g,''))).toBe(hasCache);
+ const feed=lists.find(list=>!list.disposed&&list!==homeList()&&typeof list.input.onRefresh==='function');
+ expect(feed).toBeDefined();
+ feed!.input.onRefresh();
+ await settle();
+
+ expect(refreshed).toEqual([cached.id]);
+ expect(text().replace(/\s/g,'').includes(article.title.replace(/\s/g,''))).toBe(hasCache);
+ expect({
+  overlay:text().includes('互联网可用状态'),
+  refreshIndicator:text().includes('正在刷新中...'),
+  localError:text().includes('Channel refresh offline'),
+ }).toEqual({overlay:!hasCache,refreshIndicator:!hasCache,localError:hasCache});
 });

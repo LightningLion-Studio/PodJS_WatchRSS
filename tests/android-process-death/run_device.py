@@ -566,12 +566,8 @@ fi'''
         checked_body = legal_probe.body(point["reference"], raw_body, self.state["legal"]["url"], expected)
         require(all(sample["body"].get(key) == item for key, item in checked_body.items()),
                 "Recorded legal body receipt differs from its actual bytes")
-        if phase == "held":
-            require(not any(node.get("label") == "协议正文" for node in probe.nodes_from_snapshot(value).values()),
-                    "Recorded held snapshot still exposes the document branch")
-        else:
-            geometry = legal_probe.geometry(snapshot, expected.decode("utf-8").split("\n", 1)[0] if phase == "top" else None)
-            require(geometry == sample["geometry"], "Cached semantic geometry differs from its actual snapshot")
+        geometry = legal_probe.geometry(snapshot, expected.decode("utf-8").split("\n", 1)[0] if phase == "top" else None)
+        require(geometry == sample["geometry"], "Cached semantic geometry differs from its actual snapshot")
         return event
 
     def legal_http_proof(self, completed: dict[str, Any]) -> dict[str, Any]:
@@ -676,10 +672,11 @@ fi'''
                 snapshot, path = self.snapshot()
                 try:
                     point = self.fixture_checkpoint(probe.host_state(probe.ack(snapshot, "snapshot")["hostState"], "held legal state"), "held")
-                    legal_probe.validate_held(self.state["legalBefore"]["checkpoint"], point)
-                    require(not any(node.get("label") == "协议正文" for node in
-                                    probe.nodes_from_snapshot(probe.ack(snapshot, "snapshot")).values()),
-                            "Held response has not committed the loading branch")
+                    before = self.state["legalBefore"]
+                    legal_probe.validate_held(before["checkpoint"], point)
+                    geometry = legal_probe.geometry(snapshot)
+                    require(legal_probe.compare_geometry(before["geometry"], geometry),
+                            "Held legal geometry does not match the pre-kill scroll position")
                 except probe.EvidenceError as error:
                     last_error = error
                     self.legal_server_state(2, "held")
@@ -689,7 +686,7 @@ fi'''
                 bracket_after = self.legal_server_state(2, "held")
                 require(bracket_after["requests"][-1]["receivedMonotonicNs"] == request["receivedMonotonicNs"] and
                         time.monotonic() < deadline, "Response was no longer held around the body/snapshot observation")
-                held = {"snapshot": path, "checkpoint": point, "body": body,
+                held = {"snapshot": path, "checkpoint": point, "geometry": geometry, "body": body,
                         "serverBefore": bracket_before, "serverAfter": bracket_after,
                         "capturedAt": now(), "capturedMonotonicNs": time.monotonic_ns()}
                 self.state["legalHeld"] = held
@@ -1040,8 +1037,7 @@ mv "$1" files/process-death/command.json'''
             require("legalHeld" in self.state and "legalRelease" in self.state and
                     self.state.get("legalReleasePending") is None and self.state.get("legalFailure") is None,
                     "Legal validation requires the completed held-reference barrier and release")
-            _, manifest, expected = self.legal_context()
-            marker = expected.decode("utf-8").split("\n", 1)[0]
+            _, manifest, _ = self.legal_context()
             previous: dict[str, Any] | None = None
             def loaded() -> tuple[dict[str, Any], str, dict[str, Any]]:
                 nonlocal previous
@@ -1050,14 +1046,15 @@ mv "$1" files/process-death/command.json'''
                             for request in server["requests"]), "Legal requests did not both complete successfully")
                 snapshot, snapshot_path = self.snapshot()
                 point = self.fixture_checkpoint(probe.host_state(probe.ack(snapshot, "snapshot")["hostState"], "restored legal state"), "loaded")
-                geometry = legal_probe.geometry(snapshot, marker)
+                geometry = legal_probe.geometry(snapshot)
                 sample = {"snapshot": snapshot_path, "checkpoint": point, "geometry": geometry}
                 same = previous is not None and point == previous["checkpoint"] and legal_probe.compare_geometry(previous["geometry"], geometry)
                 previous = sample
                 require(same, "Restored legal state/semantics need a second stable observation")
                 result = legal_probe.validate_restored(self.state["legalTop"]["checkpoint"], self.state["legalBefore"]["checkpoint"],
                                                       self.state["legalHeld"]["checkpoint"], point,
-                                                      self.state["legalTop"]["geometry"], self.state["legalBefore"]["geometry"], geometry)
+                                                      self.state["legalTop"]["geometry"], self.state["legalBefore"]["geometry"],
+                                                      self.state["legalHeld"]["geometry"], geometry)
                 result.update(body=self.legal_body(point, "legal-restored-body"), server=server,
                               requestsBefore=1, requestsAfter=2, additionalRequests=1,
                               requestMethod="GET", requestPath=manifest["requestPath"],
@@ -1066,7 +1063,7 @@ mv "$1" files/process-death/command.json'''
                 result["http"] = self.legal_http_proof(server)
                 self.legal_server_state(2, "complete")
                 return snapshot, snapshot_path, result
-            after, path, legal_result = self.poll(loaded, "restored legal top and request count")
+            after, path, legal_result = self.poll(loaded, "restored legal scroll position and request count")
         else:
             after, path = self.snapshot()
         events, event_path = self.events()

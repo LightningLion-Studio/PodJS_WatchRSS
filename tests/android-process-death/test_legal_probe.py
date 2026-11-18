@@ -30,11 +30,9 @@ def reference(raw=BODY, url=URL, owner=OWNER, token="file_17-a"):
 
 
 def saved_stack(phase="top", ref=None):
-    anchors = {"top": {"index": 0, "offsetPx": 0},
-               "scrolled": {"index": 3, "offsetPx": 11},
-               "held": None, "loaded": {"index": 0, "offsetPx": 0}}
+    anchor = {"index": 0, "offsetPx": 0} if phase == "top" else {"index": 3, "offsetPx": 11}
     state = {"error": None, "isLoading": phase == "held", "reloadKey": 7,
-             "listAnchor": anchors[phase], "scrollOffset": 113 if phase == "scrolled" else 0}
+             "listAnchor": anchor, "scrollOffset": 113 if phase == "scrolled" else 0}
     ref = reference() if ref is None else ref
     return {"version": 2, "owner": ref["owner"], "pages": ["privacy"], "snapshots": [
         {"page": "privacy", "identity": copy.deepcopy(ref["identity"]),
@@ -77,7 +75,7 @@ def snapshot(scrolled=False):
 def restore_inputs():
     return [checkpoint("top"), checkpoint("scrolled"), checkpoint("held"), checkpoint("loaded"),
             legal_probe.geometry(snapshot()), legal_probe.geometry(snapshot(True)),
-            legal_probe.geometry(snapshot())]
+            legal_probe.geometry(snapshot(True)), legal_probe.geometry(snapshot(True))]
 
 
 def legal_core_fixture():
@@ -199,7 +197,7 @@ class LegalCheckpointTest(unittest.TestCase):
                 with self.assertRaises(legal_probe.EvidenceError):
                     legal_probe.checkpoint(host_state(saved_stack(state_phase)), URL, phase=requested)
         held = saved_stack("held")
-        held["snapshots"][0]["state"]["scrollOffset"] = 1
+        held["snapshots"][0]["state"]["listAnchor"] = None
         with self.assertRaises(legal_probe.EvidenceError):
             legal_probe.checkpoint(host_state(held), URL, phase="held")
 
@@ -398,10 +396,14 @@ class LegalGeometryTest(unittest.TestCase):
 
 
 class LegalRestoreTest(unittest.TestCase):
-    def test_complete_held_reset_proof_keeps_pixel_and_event_claims_false(self):
+    def test_complete_held_preservation_keeps_pixel_and_event_claims_false(self):
         values = restore_inputs()
         legal_probe.validate_held(values[1], values[2])
         result = legal_probe.validate_restored(*values)
+        self.assertTrue(result["anchorPreservedThroughHeldLoading"])
+        self.assertTrue(result["anchorPreservedAfterReload"])
+        self.assertEqual(result["heldAnchor"], result["oldAnchor"])
+        self.assertEqual(result["afterAnchor"], result["oldAnchor"])
         self.assertIs(result["pixelParityVerified"], False)
         self.assertIs(result["eventTimingVerified"], False)
 
@@ -412,30 +414,34 @@ class LegalRestoreTest(unittest.TestCase):
             "changed identity": lambda v: v["entry"]["identity"].update(url=URL.replace("38417", "38418")),
             "reload changed": lambda v: v["state"].update(reloadKey=8),
             "loading false": lambda v: v["state"].update(isLoading=False),
-            "anchor retained": lambda v: v["state"].update(listAnchor={"index": 3, "offsetPx": 11}),
-            "offset retained": lambda v: v["state"].update(scrollOffset=113),
+            "anchor lost": lambda v: v["state"].update(listAnchor=None),
+            "anchor changed": lambda v: v["state"].update(listAnchor={"index": 3, "offsetPx": 12}),
+            "offset invalid": lambda v: v["state"].update(scrollOffset=-1),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):
                 before, held = checkpoint("scrolled"), checkpoint("held")
+                held["state"] = held["entry"]["state"]
                 mutate(held)
                 with self.assertRaises(legal_probe.EvidenceError):
                     legal_probe.validate_held(before, held)
 
-    def test_restore_requires_top_reset_and_distinct_prior_scroll_geometry(self):
+    def test_restore_requires_held_and_loaded_scroll_geometry_and_original_anchor(self):
         mutations = {
-            "after anchor not top": lambda v: v[3]["state"].update(listAnchor={"index": 1, "offsetPx": 0}),
+            "after anchor reset": lambda v: v[3]["state"].update(listAnchor={"index": 0, "offsetPx": 0}),
             "after anchor offset": lambda v: v[3]["state"].update(listAnchor={"index": 0, "offsetPx": 1}),
             "after loading": lambda v: v[3]["state"].update(isLoading=True),
             "after reference changed": lambda v: v[3]["reference"].update(path=v[3]["reference"]["path"].replace("file_17-a", "file-new")),
             "top reference changed": lambda v: v[0]["reference"].update(path=v[0]["reference"]["path"].replace("file_17-a", "file-top")),
             "unchanged scroll geometry": lambda v: v.__setitem__(5, copy.deepcopy(v[4])),
-            "after text mismatch": lambda v: v[6][1].update(label="unexpected"),
-            "after geometry mismatch": lambda v: v[6][1]["bounds"].update(top=30),
+            "held geometry reset": lambda v: v.__setitem__(6, copy.deepcopy(v[4])),
+            "after text mismatch": lambda v: v[7][1].update(label="unexpected"),
+            "after geometry mismatch": lambda v: v[7][1]["bounds"].update(top=30),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):
                 values = restore_inputs()
+                values[3]["state"] = values[3]["entry"]["state"]
                 mutate(values)
                 with self.assertRaises(legal_probe.EvidenceError):
                     legal_probe.validate_restored(*values)
@@ -454,8 +460,10 @@ class LegalRestoreTest(unittest.TestCase):
         with self.assertRaises(legal_probe.EvidenceError):
             legal_probe.validate_held(checkpoint("scrolled"), held)
         values = restore_inputs()
-        values[3]["state"] = copy.deepcopy(values[3]["state"])
-        values[3]["state"]["listAnchor"]["index"] = False
+        for point in values[1:4]:
+            point["entry"]["state"]["listAnchor"]["offsetPx"] = 0
+            point["state"]["listAnchor"]["offsetPx"] = 0
+        values[3]["state"]["listAnchor"]["offsetPx"] = False
         self.assertEqual(values[3]["state"], values[3]["entry"]["state"])
         with self.assertRaises(legal_probe.EvidenceError):
             legal_probe.validate_restored(*values)

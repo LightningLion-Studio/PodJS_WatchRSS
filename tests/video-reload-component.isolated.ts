@@ -244,3 +244,54 @@ for(const suspension of [['inactive'],['inactive','background']] as const)test(`
  expect(sessionValue(resumed.sessionId)).toMatchObject({state:'playing',positionMs:678});
  expect(f.text()).not.toContain('播放失败');
 });
+
+
+test('NETOVERLAY actual native failure waits for offline recovery and prepares exactly once after online',async()=>{
+ const {NetworkRecovery}=await import('../src/network/recovery.ts');
+ const {NetworkRecoveryContext}=await import('../src/network/context.ts');
+ let changed!:(s:any)=>void;
+ const scope=new NetworkRecovery({observe:fn=>{changed=fn;fn('unavailable');return()=>{};},check:async()=> 'unavailable'});scope.setActive(true);
+ initial='unavailable';prepares=[];plays=0;nextError={code:'network_error'};current=state('idle');
+ createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return VideoPlayerScreen({source:{platform:'rss',url:'https://fixture.invalid/current',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
+ await flush();expect(scope.blocking).toBe(true);expect(prepares).toHaveLength(1);
+ changed('available');await flush();expect(scope.blocking).toBe(false);expect(prepares).toHaveLength(2);expect(plays).toBe(1);
+ changed('unavailable');changed('available');await flush();expect(prepares).toHaveLength(2);scope.dispose();
+});
+test('NETOVERLAY cached native prefix keeps playing while offline without a request failure',async()=>{
+ const {NetworkRecovery}=await import('../src/network/recovery.ts');const {NetworkRecoveryContext}=await import('../src/network/context.ts');
+ const scope=new NetworkRecovery({observe:fn=>{fn('unavailable');return()=>{};},check:async()=> 'unavailable'});scope.setActive(true);
+ prepares=[];plays=0;nextError=undefined;current=state('idle');
+ createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return VideoPlayerScreen({source:{platform:'douyin',immersive:true,url:'podjs-media-cache://fixture',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
+ await flush();expect(scope.blocking).toBe(false);expect(prepares).toHaveLength(1);expect(plays).toBe(1);scope.dispose();
+});
+
+test('NETOVERLAY second native prepare failure keeps its original error without rearming offline recovery',async()=>{
+ const {NetworkRecovery}=await import('../src/network/recovery.ts');const {NetworkRecoveryContext}=await import('../src/network/context.ts');
+ let changed!:(s:any)=>void;
+ const scope=new NetworkRecovery({observe:fn=>{changed=fn;fn('unavailable');return()=>{};},check:async()=> 'unavailable'});scope.setActive(true);
+ prepares=[];plays=0;nextError={code:'network_error'};current=state('idle');
+ const root=createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return VideoPlayerScreen({source:{platform:'rss',url:'https://fixture.invalid/current',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
+ await flush();expect(scope.blocking).toBe(true);nextError={code:'network_error'};
+ changed('available');await flush();expect(scope.blocking).toBe(false);expect(prepares).toHaveLength(2);expect(plays).toBe(0);
+ expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('')).toContain('播放失败');
+ changed('unavailable');changed('available');await flush();expect(prepares).toHaveLength(2);scope.dispose();
+});
+
+test('NETOVERLAY re-resolved native source shares the one automatic network retry budget',async()=>{
+ const {NetworkRecovery}=await import('../src/network/recovery.ts');const {NetworkRecoveryContext}=await import('../src/network/context.ts');
+ let changed!:(s:any)=>void,checks=0,resolutions=0;
+ const scope=new NetworkRecovery({observe:fn=>{changed=fn;fn('unavailable');return()=>{};},check:async()=>{checks++;return 'unavailable';}});scope.setActive(true);
+ prepares=[];plays=0;nextError={code:'network_error'};current=state('idle');
+ const root=createRoot(stop=>{stops.push(stop);const [source,setSource]=createSignal({platform:'rss' as const,url:'https://fixture.invalid/current',title:'fixture'});return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return createComponent(VideoPlayerScreen,{get source(){return source();},width:233,height:233,active:true,offset:0,round:true,onReload:async()=>{resolutions++;setSource({...source(),url:'https://fixture.invalid/refreshed'});}});}});});
+ await flush();expect(scope.blocking).toBe(true);nextError={code:'network_error'};
+ changed('available');await flush();expect(scope.blocking).toBe(false);expect(prepares).toHaveLength(2);expect(resolutions).toBe(1);expect(checks).toBe(1);
+ expect(nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('')).toContain('网络连接失败，请检查网络后重试');scope.dispose();
+});
+
+test('NETOVERLAY direct Bluetooth media loading shows an advisory without blocking cached playback',async()=>{
+ const {NetworkRecovery}=await import('../src/network/recovery.ts');const {NetworkRecoveryContext}=await import('../src/network/context.ts');
+ const scope=new NetworkRecovery({observe:fn=>{fn('bluetooth');return()=>{};},check:async()=> 'bluetooth'});scope.setActive(true);stops.push(()=>scope.dispose());
+ prepares=[];plays=0;nextError=undefined;current=state('idle');
+ createRoot(stop=>{stops.push(stop);return createComponent(NetworkRecoveryContext.Provider,{value:scope,get children(){return createComponent(VideoPlayerScreen,{source:{platform:'douyin',immersive:true,url:'podjs-media-cache://fixture',title:'fixture'},width:233,height:233,active:true,offset:0,round:true});}});});
+ await flush();expect(plays).toBe(1);expect(prepares).toHaveLength(1);expect(scope.blocking).toBe(false);expect(scope.bluetooth).toBe(true);
+});

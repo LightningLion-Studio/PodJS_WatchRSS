@@ -5,6 +5,7 @@ import {encodeFrame,decodeFrame} from '../../src/sync/library-binary/codec';
 import {capabilityDigest,requestDigest,preparationDigest,selectionDigest,objectId,objectsRoot,planDigest,pageDigest,receiptsRoot} from '../../src/sync/library-binary/digests';
 import {hash,utf8,type Envelope,type Row,type ObjectDescriptor,type Capability,type BeginPayload} from '../../src/sync/library-binary/wire';
 import {negotiate} from '../../src/sync/library-binary/routing';
+import {HostServiceError} from '@podjs/framework/services';
 async function ready(f:Awaited<ReturnType<typeof binaryRuntime>>){const s=f.session(),legacy=async(r:Row)=>{await s.connection.writeFrame(r);const reply=await s.connection.readFrame(3000);await s.connection.writeFrame({action:'ack',success:true,applied:true});return reply;};const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true});await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:'b2-host'}});return {s,probe,legacy};}
 function request(phase:Envelope['phase'],payload:Row,job:string|null=null,plan:string|null=null,epoch:number|null=null):Envelope{return {action:'syncLibraryBinary',version:2,type:'request',phase,jobId:job,planDigest:plan,epoch,requestId:nonce(),requestDigest:requestDigest(job,plan,phase,payload),payload};}
 export {ready,request};
@@ -51,6 +52,46 @@ test('actual RFCOMM owner feeds all three recovery STOP rules without a fourth a
 
 test('foreground listener stops on the B2 fatal result instead of scheduling a retry',async()=>{
  const {ForegroundSyncController}=await import('../../src/sync/foreground');let starts=0,delays=0;const c=new ForegroundSyncController({createListener:()=>({start:async()=>{starts++;throw Object.assign(Error('HASH_MISMATCH'),{stopAutomaticRecovery:true});},stop:()=>{}}),delay:()=>{delays++;return {result:new Promise(()=>{}),cancel:()=>{}};},keepScreenOn:()=>{},acquireMedia:()=>{},releaseMedia:()=>{}});c.update({resumed:true,interactive:true,exclusive:false,permission:true,enabled:true});await new Promise(r=>setTimeout(r,10));expect(starts).toBe(1);expect(delays).toBe(0);await c.dispose();
+});
+
+test('a host stream reset after the B2 switch remains eligible for automatic reconnect',async()=>{
+ let inject=false;
+ // The paired native probe supplies the code from the real PodServices mapping.
+ const hostCode=process.env.WRSS_R16_STREAM_RESET_CODE??'host_error';
+ const f=await binaryRuntime({readFault:()=>{
+  if(inject){inject=false;throw new HostServiceError(hostCode,'Connection reset',undefined,true);}
+ }});
+ try{
+  const {s,probe}=await ready(f);
+  await s.connection.writeFrame({action:'syncLibraryBinary',version:2,type:'request',phase:'switch',requestId:nonce(),
+   payload:{codec:'lb2',watchCapabilityDigest:capabilityDigest(probe.libraryBinary as unknown as Capability)}});
+  expect((await s.connection.readFrame(3000)).success).toBe(true);
+  inject=true;
+  await s.pair.phone.write(Uint8Array.of(0));
+  const failure=await s.running.then(()=>{throw Error('failure expected');},error=>error);
+  expect(failure).toMatchObject({message:'reset',stopAutomaticRecovery:false});
+
+  const {ForegroundSyncController}=await import('../../src/sync/foreground');
+  let starts=0,retry!:()=>void,finish!:()=>void;
+  const controller=new ForegroundSyncController({
+   createListener:()=>({start:async()=>{
+    if(++starts===1)throw failure;
+    await new Promise<void>(resolve=>{finish=resolve;});
+    return [];
+   },stop:()=>finish?.()}),
+   delay:ms=>({result:new Promise<void>(resolve=>{if(ms===500)retry=resolve;}),cancel:()=>retry?.()}),
+   keepScreenOn(){},acquireMedia(){},releaseMedia(){},
+  });
+  try{
+   controller.update({resumed:true,interactive:true,exclusive:false,permission:true,enabled:true});
+   for(let turn=0;turn<12;turn++)await Promise.resolve();
+   expect(starts).toBe(1);
+   expect(retry).toBeDefined();
+   retry();
+   for(let turn=0;turn<12;turn++)await Promise.resolve();
+   expect(starts).toBe(2);
+  }finally{await controller.dispose();}
+ }finally{await f.dispose();}
 });
 
 test('automatic B2 switch is Bluetooth-only and opt-in while the shared v1 allowlist stays frozen',async()=>{

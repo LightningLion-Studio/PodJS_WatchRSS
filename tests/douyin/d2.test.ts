@@ -48,18 +48,19 @@ test('D2 persists pre-playback navigation and keeps feed cursor/order when resto
   expect(f.requests()).toBe(0);
 });
 test('D2 player native network copy and local/playing exemptions, no invented weak-network state',()=>{
-  expect(douyinPlayerNetwork('unavailable',false,false)).toEqual({title:'未检测到可用互联网',detail:'请连接 WiFi 或移动网络',action:'重试'});
-  expect(douyinPlayerNetwork('bluetooth',false,false)?.detail).toBe('当前使用蓝牙网络，网速较慢，建议连接 WiFi 或移动网络');
+  expect(douyinPlayerNetwork('unavailable',false,false,true,true)).toEqual({title:'未检测到可用互联网',detail:'请连接 WiFi 或移动网络',action:'重试'});
+  expect(douyinPlayerNetwork('bluetooth',false,false)).toBeNull();
   for(const status of ['available','checking','unavailable','bluetooth'] as const){
     expect(douyinPlayerNetwork(status,true,false)).toBeNull();expect(douyinPlayerNetwork(status,false,false,false,true)).toBeNull();
   }
-  expect(douyinPlayerNetwork('available',false,false,true,true)?.action).toBe('重试');
+  expect(douyinPlayerNetwork('available',false,false,true,true)).toBeNull();
   expect(douyinPlayerNetwork('available',false,false)).toBeNull();
   expect(douyinPlayerNetwork('bluetooth',false,true)).toBeNull();
   for(const url of ['file:///video','content://media/1','/data/video',''])expect(douyinSourceNeedsInternet(url)).toBe(false);
   expect(douyinSourceNeedsInternet('https://video/1')).toBe(true);
   expect(douyinNetworkFailure({code:'network_error'})).toBe(true);
-  for(const error of [{code:'timeout'},{code:'prepare_failed'},Error('network timeout')])expect(douyinNetworkFailure(error)).toBe(false);
+  expect(douyinNetworkFailure({code:'timeout'})).toBe(true);
+  for(const error of [{code:'prepare_failed'},Error('network timeout')])expect(douyinNetworkFailure(error)).toBe(false);
 });
 test('D2 WebView main-frame failures map native messages without raw text and remain retryable',()=>{
   expect(loginError({code:'webview_load_-2',message:'SECRET'})).toEqual({unavailable:false,message:'无法找到服务器，请检查网络连接'});
@@ -74,5 +75,5 @@ test('offline stock can prepare and autoplay its cached prefix, then show the ac
  expect(douyinPlayerNetwork('unavailable',false,false,true,false,local)).toBeNull();
  expect(douyinPlayerNetwork('unavailable',false,false,true,false,{...local,hasRenderedFirstFrame:true,buffering:false})).toBeNull();
  expect(douyinPlayerNetwork('unavailable',false,false,true,true,{...local,hasError:true})?.title).toBe('未检测到可用互联网');
- expect(douyinPlayerNetwork('unavailable',false,false,true,false,{...local,cacheBacked:false})?.action).toBe('重试');
+ expect(douyinPlayerNetwork('unavailable',false,false,true,false,{...local,cacheBacked:false})).toBeNull();
 });

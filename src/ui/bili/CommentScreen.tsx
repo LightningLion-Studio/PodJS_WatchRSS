@@ -1,3 +1,5 @@
+import {useCachedNetworkContent,useNetworkRecovery} from '../../network/context.ts';
+import {networkReadClient} from '../../network/recovery.ts';
 import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Image, Text, View, type NodeMirror } from '@pocketjs/framework/components';
 import { getOps } from '@pocketjs/framework/host';
@@ -63,11 +65,13 @@ export function commentEntry(comment: BiliComment, width: number, uploaderMid?: 
 }
 export function CommentScreen(props: BiliScreenProps & { route: Extract<BiliRoute, { name: 'comments' | 'replies' }> }) {
   const [state, setState] = createSignal<CommentState>({ items: [], loading: true, refreshing: true, canLoadMore: true });
+  const network=useNetworkRecovery();
+  useCachedNetworkContent(()=>state().items.length>0||!!state().root);
   let controller: BiliComments;
   let listScroller: Scroller | undefined;
   createEffect(() => {
     const route = props.route;
-    const own = new BiliComments(props.client, { oid: Number(route.oid), root: route.name === 'replies' ? Number(route.root) : undefined }, setState);
+    const own = new BiliComments(networkReadClient(props.client,network,['comments','replies']), { oid: Number(route.oid), root: route.name === 'replies' ? Number(route.root) : undefined }, setState);
     controller = own; listScroller?.scrollTo(0, { immediate: true }); setState(own.state); void own.refresh(); onCleanup(() => own.dispose());
   });
   const width = () => (props.width ?? 233) - 36;
@@ -76,10 +80,10 @@ export function CommentScreen(props: BiliScreenProps & { route: Extract<BiliRout
     return { height: Math.max(49, text.length * 17 + 32), render: () => <View class="absolute inset-0" onPress={action} focusable={!!action}><Text class="absolute left-[16] right-[16] top-[16] text-sm leading-[17] text-center" style={{ textColor: color }}>{text.join('\n')}</Text></View> };
   };
   const entries = createMemo<ScrollEntry[]>(() => {
-    const s = state(), reply = props.route.name === 'replies', showItems = !s.refreshing;
+    const s = state(), reply = props.route.name === 'replies';
     const result: ScrollEntry[] = [];
     if (reply && s.root) { result.push(commentEntry(s.root, width(), Number(props.route.uploaderMid))); result.push({ height: 43, render: () => <View class="absolute inset-0"><View class="absolute left-[0] right-[0] top-[0] h-[1] bg-[#2c3135]" /><Text class="absolute left-[18] top-[17] text-[21px] leading-[26] text-[#f5f5f5]">所有回复</Text></View> }); }
-    if (showItems) result.push(...s.items.map(comment => commentEntry(comment, width(), Number(props.route.uploaderMid), !reply && comment.rpid !== undefined ? () => props.onNavigate({ name: 'replies', oid: props.route.oid, root: comment.rpid!, uploaderMid: props.route.uploaderMid }) : undefined)));
+    result.push(...s.items.map(comment => commentEntry(comment, width(), Number(props.route.uploaderMid), !reply && comment.rpid !== undefined ? () => props.onNavigate({ name: 'replies', oid: props.route.oid, root: comment.rpid!, uploaderMid: props.route.uploaderMid }) : undefined)));
     if (s.loading) result.push({ height: 64, render: () => <View class="absolute inset-0 items-center justify-center"><WatchProgressIndicator size={32} /></View> });
     else if (s.error) result.push(status(`加载失败: ${s.error}`, '#e54d4d', () => void controller.retry()));
     else if (!reply && !s.items.length) result.push({ height: Math.max(70, props.height - 64), render: () => <View class="absolute inset-0 items-center justify-center"><Text class="text-[21px] leading-[26] text-[#b6b6b6]">暂无评论</Text><View class="h-[8]" /><Text class="text-sm leading-[17] text-[#b6b6b6]">快来发表第一条评论吧</Text></View> });

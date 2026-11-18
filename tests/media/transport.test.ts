@@ -27,7 +27,7 @@ test('media transport keeps other callers defaults and cleans partial downloads 
   await f.transport.request({method:'GET',url:'https://api.test/feed',headers:{}});
   expect(f.args[0]?.timeoutMs).toBe(30_000);expect(f.args[0]).not.toHaveProperty('readTimeoutMs');expect(f.args[0]).not.toHaveProperty('acceptHttpErrors');
   f.setError({code:'host_error',message:'SocketTimeoutException: timeout'});
-  expect(await f.client.fetchFeedPage()).toEqual({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'});
+  expect(await f.client.fetchFeedPage()).toEqual({ok:false,code:'REQUEST_FAILED',message:'网络请求失败',networkFailure:true});
   expect(f.removed).toHaveLength(2);
 });
 

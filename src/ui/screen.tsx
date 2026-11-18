@@ -1,3 +1,7 @@
+import {preserveNetworkContent} from '../network/context.ts';
+import {isNetworkRecoveryCancellation} from '../network/recovery.ts';
+import {createHostNetworkRecovery,NetworkRecoveryProvider,NetworkRecoveryLayer} from './network-recovery.tsx';
+import {readCloudAccountStatus,subscribeCloudAccountStatus} from '../cloud/status.ts';
 import {bindShellCommands} from '../debug/shell-host.ts';
 import {PlayerLoadingIndicator} from './PlayerLoadingIndicator.tsx';
 import {playerGesture} from "./player-gestures.ts";
@@ -181,7 +185,12 @@ export default function WatchRSS(props: {
   onCleanup(()=>informationActivity.close());
   const [playingSource, setPlayingSource] = createSignal<PlaybackSource>();
   const current = () => stack()[stack().length - 1];
+  const networkScopes=new WeakMap<Entry,ReturnType<typeof createHostNetworkRecovery>>();
+  const networkFor=(entry:Entry)=>{let scope=networkScopes.get(entry);if(!scope){scope=createHostNetworkRecovery();networkScopes.set(entry,scope);}return scope;};
   const page = () => current().page;
+  const [cloudOwnerChoice,setCloudOwnerChoice]=createSignal(!!readCloudAccountStatus()?.ownerChoiceRequired);
+  onCleanup(subscribeCloudAccountStatus(()=>setCloudOwnerChoice(!!readCloudAccountStatus()?.ownerChoiceRequired)));
+  const recoveryEnabled = (entry:Entry) => entry.page !== 'cloud-sync' && entry.page !== 'sync-v2' && !cloudOwnerChoice();
   const readerFlushTimer = (milliseconds: number) => delay(milliseconds);
   const readerExit = new ReaderExitGuard<Entry>(readerFlushTimer);
   const backgroundReaderFlush = new ReaderExitGuard<Entry>(readerFlushTimer);
@@ -284,6 +293,7 @@ export default function WatchRSS(props: {
       rect: () =>
         stack().length > 1 &&
         !disclosurePending() &&
+        !networkFor(current()).blocking &&
         motion.phase !== "settling" &&
         (current().player?.canSwipeBack?.() ?? true) &&
         current().page !== "reader-image" &&
@@ -350,6 +360,17 @@ export default function WatchRSS(props: {
   const notesPlacementStore = new HomeEntryPlacementStore();
   const [notesHomePlacement, setNotesHomePlacement] = createSignal(notesPlacementStore.read());
   const [articles, setArticles] = createSignal<Article[]>([]);
+  const hasLocalPageContent = (entry: Entry) => {
+    if (entry.page === "home") return channels().length > 0;
+    if (entry.page === "reader") {
+      const body = entry.readerArticle;
+      return !!(body?.content.trim() || body?.importedText || body?.contentBlocks?.length);
+    }
+    if (entry.page === "saved" || entry.page === "watch-later") return savedEntries().length > 0;
+    if (entry.page === "search") return searchResults().some(item => item.channelId === entry.channelId);
+    return entry.page === "articles" && !!entry.channelId &&
+      articles().some(item => item.channelId === entry.channelId);
+  };
   const [article, setArticle] = createSignal<Article | null>(null);
   const [loading, setLoading] = createSignal(!homeSnapshot),
     [busy, setBusy] = createSignal(false),
@@ -402,7 +423,14 @@ export default function WatchRSS(props: {
   const [platformLoginState, setPlatformLoginState] =
     createSignal<HomePlatformLoginState>({ bili: false, douyin: false });
   const speechPlayback = new SpeechPlayback(
-    props.services,
+    {
+      listArticles:query=>props.services.listArticles(query),
+      getArticle:id=>props.services.getArticle(id),
+      getOriginalArticle:id=>props.services.getOriginalArticle(id),
+      getSpeechSource:props.services.getSpeechSource?(article,anchor)=>props.services.getSpeechSource!(article,anchor):undefined,
+      speak:(...args)=>networkFor(current()).run(()=>props.services.speak(...args)),
+      stopSpeech:()=>props.services.stopSpeech(),
+    },
     (state) => {
       const previous = speechState();
       setSpeechState(state);
@@ -1146,6 +1174,7 @@ export default function WatchRSS(props: {
     }
   }
   async function refresh() {
+    const origin=current();
     const refreshAll = page() === "home";
     if (refreshAll && homeRefreshing()) return;
     // Native HomeComposeScreen keeps channel interactions enabled while "刷新全部" runs; the
@@ -1154,7 +1183,9 @@ export default function WatchRSS(props: {
     else setBusy(true);
     setError("");
     try {
-      try { await props.services.refresh(current().channelId); }
+      try {
+        await networkFor(origin).run(() => props.services.refresh(origin.channelId));
+      }
       finally { if (refreshAll) usageTelemetry.recordFeedRefreshed(); }
       if (page() === "home") await loadChannels();
       else if (page() === "articles" && current().channelId)
@@ -1165,7 +1196,7 @@ export default function WatchRSS(props: {
         await searchChannelArticles(current().channelId!, query());
       else await loadArticles(currentQuery);
     } catch (e) {
-      setError(String(e));
+      if(current()===origin&&!isNetworkRecoveryCancellation(e))setError(String(e));
     } finally {
       if (refreshAll) setHomeRefreshing(false);
       else setBusy(false);
@@ -1396,6 +1427,7 @@ export default function WatchRSS(props: {
     videoLoading,
     deleteBuiltin,
   } = createMediaRouteController({
+    network:()=>networkFor(current()),
     initialVideoBounds:()=>hasCapability("media.video.sessions")?{x:0,y:0,width,height,visible:false}:undefined,
     onActivityStateChange:saveActivity,
     onRssSourcePublished: () => usageTelemetry.recordVideoPlayed(),
@@ -1463,6 +1495,8 @@ export default function WatchRSS(props: {
   };
 
   const renderPage = (entry: Entry) => {
+    const network=networkFor(entry);
+    preserveNetworkContent(network,()=>hasLocalPageContent(entry));
     if(entry.page==='reader-scroll-controls')entry.reader=stack().slice(0,stack().indexOf(entry)).reverse().find(item=>item.page==='reader')?.reader;
     const entryPage = () => entry.page;
     const active = () => current() === entry;
@@ -1472,7 +1506,7 @@ export default function WatchRSS(props: {
     const handlers=new Set<()=>void>();checkpoints.set(entry,handlers);const scrollSlots=new Set<number>();
     onCleanup(()=>checkpoints.delete(entry));
     return (
-      <RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
+      <NetworkRecoveryProvider network={network} active={()=>active()&&foreground()&&recoveryEnabled(entry)}><RouteActivityProvider entry={entry} changed={saveActivity} checkpoints={handlers} scrollSlots={scrollSlots}>
       <View
         class={
           entryPage() === "video"
@@ -1786,7 +1820,7 @@ export default function WatchRSS(props: {
           </Show>
         </View>
       </View>
-      </RouteActivityProvider>
+      </RouteActivityProvider></NetworkRecoveryProvider>
     );
   };
 
@@ -1810,6 +1844,9 @@ export default function WatchRSS(props: {
         state={speechState()}
         onOpen={() => setPage("speech-playback")}
       />
+      <Show when={recoveryEnabled(current())}>
+        <NetworkRecoveryLayer network={networkFor(current())} width={width} height={height} round={metrics.shape==='round'}/>
+      </Show>
     </View>
   );
 }

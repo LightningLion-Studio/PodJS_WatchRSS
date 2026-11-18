@@ -87,6 +87,7 @@ export function InfoRoutes(props: InfoRoutesProps) {
           consumeConsent={() => { props.entry.logUploadConsent = false; }}
           active={() => props.active() && props.foreground()}
           onManage={() => props.setPage("log-upload-history")}
+          onRetry={() => props.openInformation("log-upload-privacy")}
         />
       </Show>
       <Show when={props.page() === "log-upload-history"}>

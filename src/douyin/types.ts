@@ -22,5 +22,5 @@ export interface DouyinSavedEntry { platform: "douyin"; awemeId: string; item: D
 export interface DouyinSavedState { favorite: boolean; watchLater: boolean; }
 export type DouyinErrorCode = "NOT_LOGGED_IN" | "PLAYBACK_FAILED" | "REQUEST_FAILED" | "PARSE_FAILED" | "UNSUPPORTED" | "resolution_limit" | "CANCELLED" | "RATE_LIMITED" | "TEMPORARILY_UNAVAILABLE";
 export type DouyinDataSource = "network" | "feed-cache";
-export type DouyinResult<T> = { ok: true; data: T; source?: DouyinDataSource } | { ok: false; code: DouyinErrorCode; message: string; retryAfterMs?:number };
+export type DouyinResult<T> = { ok: true; data: T; source?: DouyinDataSource } | { ok: false; networkFailure?:boolean; httpStatus?:number; code: DouyinErrorCode; message: string; retryAfterMs?:number };
 export type DouyinInteraction = "like" | "unlike" | "favorite" | "unfavorite" | "follow" | "unfollow" | "comment";

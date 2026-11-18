@@ -1,3 +1,4 @@
+import {isTransportFailure} from '../network/recovery.ts';
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
 import {douyinRequestDiagnostic,douyinRetryAfter} from './request-diagnostics.ts';
 import {douyinBench} from './bench.ts';
@@ -228,7 +229,7 @@ export class DouyinClient {
         const failure=mediaRequestFailure(error);observed.error_code=failure.category==='http'&&failure.status===403?'forbidden':failure.category;observed.http_status=failure.status??observed.http_status;
         if(failure.status===403){appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category} status=403`);this.metric({stage:'forbidden',api,count:1});return {forbidden:true};}
         appLogger.e('DouyinClient',`request failed path=${path} category=${failure.category}${failure.status===undefined?'':` status=${failure.status}`}`);
-        return fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`);
+        return {...fail(failure.category==='cancelled'?'CANCELLED':'REQUEST_FAILED',failure.status===undefined?formatDouyinError('REQUEST_FAILED'):`请求失败，状态码：${failure.status}（仅支持200）`),...(isTransportFailure(error)?{networkFailure:true}:{})};
       }
       } finally {douyinRequestDiagnostic(observed);}
     };

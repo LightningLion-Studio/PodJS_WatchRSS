@@ -72,7 +72,7 @@ export interface AppServices {
   clearSummaryUsage?():Promise<void>;
   subscribeSummaryUsage?(listener:()=>void):()=>void;
   hasSummaryAccount():Promise<boolean>;
-  createSummary(id:string,preset:()=>number,changed:(state:import("../llm/summary.ts").SummaryState)=>void):import("../llm/summary.ts").SummarySession;
+  createSummary(id:string,preset:()=>number,changed:(state:import("../llm/summary.ts").SummaryState)=>void,network?:import("../network/recovery.ts").NetworkWork):import("../llm/summary.ts").SummarySession;
   listChannels(): Promise<Channel[]>;
   setOriginalUpdatesPaused(channelId:string,paused:boolean):void;
   requestOriginalContents(channelId:string,articleIds:string[]):Promise<void>;

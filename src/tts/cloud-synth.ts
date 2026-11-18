@@ -31,7 +31,7 @@ function httpFailure(body:Uint8Array,status:number,provider:ProviderError):strin
 }
 async function send(transport:HttpTransport,url:string,headers:Record<string,string>,body:string,provider:ProviderError){
  const response=await transport.request({method:'POST',url,headers,body:stringToUtf8(body)});
- if(response.status<200||response.status>=300)throw new Error(httpFailure(response.body,response.status,provider));
+ if(response.status<200||response.status>=300)throw Object.assign(new Error(httpFailure(response.body,response.status,provider)),{httpStatus:response.status});
  return response.body;
 }
 

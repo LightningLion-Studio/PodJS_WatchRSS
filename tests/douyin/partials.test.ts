@@ -47,8 +47,8 @@ test('network mask preserves running video and allows explicit Bluetooth continu
   expect(douyinPlayerNetwork('checking',false,false)).toBeNull();
   expect(douyinPlayerNetwork('available',false,false)).toBeNull();
   expect(douyinPlayerNetwork('unavailable',true,false)).toBeNull();
-  expect(douyinPlayerNetwork('unavailable',false,true)?.action).toBe('重试');
-  expect(douyinPlayerNetwork('bluetooth',false,false)?.action).toBe('继续');
+  expect(douyinPlayerNetwork('unavailable',false,true,true,true)?.action).toBe('重试');
+  expect(douyinPlayerNetwork('bluetooth',false,false)).toBeNull();
   expect(douyinPlayerNetwork('bluetooth',false,true)).toBeNull();
 });
 test('real QR extraction script drops PNG overlay on second verification and JPEG challenges, then recovers',()=>{
