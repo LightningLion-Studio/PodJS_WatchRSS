@@ -37,8 +37,9 @@ export function bindShellCommands(port:{current():RouteEntry;client:DouyinClient
   open:async context=>{check(context);await port.navigate({name:'entry'});},
   play:async(target,context)=>{
    const origin=port.current(),snapshot=origin.queue?.snapshot();
-   const restored=snapshot?undefined:port.client.freshPlaybackSnapshot(await port.client.restoreFeed());
-   let items=snapshot?.playlist??restored!.items,cursor=snapshot?.cursor??restored?.cursor,hasMore=snapshot?.hasMore??restored?.hasMore;
+   const restored=snapshot?undefined:await port.client.restoreFeed();
+   const fresh=restored&&port.client.freshPlaybackSnapshot(restored);
+   let items=snapshot?.playlist??fresh!.items,cursor=snapshot?snapshot.cursor:fresh?.cursor,hasMore=snapshot?snapshot.hasMore:fresh?.hasMore;
    check(context);if(port.current()!==origin)throw new ShellCommandError('unavailable');
    if(target.index!==undefined&&!items[target.index]){
     const result=await port.client.fetchFeedPage({count:20});check(context);

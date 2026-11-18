@@ -47,9 +47,9 @@ const {ReaderBody}=await import('../src/ui/ReaderBody.tsx');
 const {defaultReaderPreset}=await import('../src/reader/preset.ts');
 const {createContentLayouter}=await import('../src/reader/content-layout.ts');
 const {offsetForDocumentAnchor}=await import('../src/reader/document-layout.ts');
-const blocks=Array.from({length:40},(_,i)=>({type:'text' as const,style:'body' as const,text:`Paragraph-${i} `+'long text 中文 '.repeat(15)}));
+const blocks=Array.from({length:mode.startsWith('windowed')?1000:40},(_,i)=>({type:'text' as const,style:'body' as const,text:`Paragraph-${i} `+'long text 中文 '.repeat(15)}));
 const preset=defaultReaderPreset(),text=blocks.map(b=>b.text).join('\n'),progress={offset:0,progress:.7,updatedAt:1,textAnchor:{character:Math.floor(text.length*.7),fraction:.25}};
-storage.set('watchrss.reader.progress.12569',JSON.stringify(JSON.stringify(mode==='saved'?progress:{offset:0,progress:0,updatedAt:1})));
+storage.set('watchrss.reader.progress.12569',JSON.stringify(JSON.stringify((mode==='saved'||mode==='windowed-saved')?progress:{offset:0,progress:0,updatedAt:1})));
 const native=new Map<any,any[]>();
 function paragraph(args:any){const lines:any[]=[];for(let start=0;start<args.text.length;start+=20)lines.push({start,end:Math.min(args.text.length,start+20),visibleEnd:Math.min(args.text.length,start+20),topPx:lines.length*40,bottomPx:(lines.length+1)*40,baselinePx:lines.length*40+30});return {lines};}
 async function pump(){for(let i=0;i<8;i++)await Promise.resolve();for(const req of requests.splice(0)){
@@ -71,6 +71,17 @@ test(`default ReaderBody slices entry, preserves saved geometry and cancels late
  const root=createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,footer:mode==='prefix'?[{height:40,render:()=>createComponent(element('Text') as any,{children:'END-OF-DOCUMENT'})}]:undefined,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v),ref:v=>{handle=v;}});});
  expect(measureCalls).toBe(0);expect(visible(root)).not.toContain('Paragraph-0');
  const storedBefore=storage.get('watchrss.reader.progress.12569');
+ if(mode.startsWith('windowed')){
+  await until(()=>handle.ready()&&pending.size===0&&requests.length===0);
+  expect(visible(root)).toContain('long text');
+  const batches=calls.filter(c=>c.method==='text.layoutBatch');expect(batches.length).toBeLessThan(6);
+  for(const batch of batches)expect(batch.args.paragraphs.reduce((n:number,p:any)=>n+p.text.length,0)).toBeLessThanOrEqual(2048);
+  handle.scroller.scrollTo(handle.scroller.offset()+1,{immediate:true});await handle.flushProgress();
+  const saved=JSON.parse(JSON.parse(storage.get('watchrss.reader.progress.12569')!));
+  if(mode==='windowed-saved')expect(Math.abs(saved.textAnchor.character-progress.textAnchor.character)).toBeLessThanOrEqual(20);
+  expect(errors).toEqual([]);dispose();await pump();expect(frames.size).toBe(0);expect(gestures.size).toBe(0);return;
+ }
+
  if(mode==='prefix'){
   const gesture=Array.from(gestures).find((g:any)=>g.onPanMove) as any;
   gesture.onDown();gesture.onPanStart();gesture.onPanMove({fdy:-35});
@@ -114,7 +125,7 @@ test(`default ReaderBody slices entry, preserves saved geometry and cancels late
 
 // This case crosses two cold entries and the production 1500ms quiet warm-up.
 // The budget bounds the integration test; first-input timing has separate assertions.
-test('production default ReaderBody checkpoints the latest anchor before any async save and cold restores it',async()=>{
+if(!mode.startsWith('windowed'))test('production default ReaderBody checkpoints the latest anchor before any async save and cold restores it',async()=>{
  const props={articleId:'12569',text,blocks,preset,width:233,height:193,fontSize:16,lineHeight:24,active:true,autoStart:false,speed:1,onMedia(){},onControls(){},onError:(v:any)=>errors.push(v)};
  let dispose!:()=>void,handle:any;
  const mount=()=>createRoot(stop=>{dispose=stop;return createComponent(ReaderBody,{...props,ref:v=>handle=v});});

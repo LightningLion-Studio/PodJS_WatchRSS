@@ -1,4 +1,5 @@
 {
+  "memoryBudgetMb": 128,
   "entry": "src/main.tsx",
   "appId": "com.lightningstudio.watchrss.podjs",
   "versionName": "2.0.3-2",

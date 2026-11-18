@@ -1,5 +1,5 @@
 import {PlaybackCache,playbackPayloadBytes} from './cache-budget.ts';
-import {applyPreferredDouyinPlayback} from './playback-selector.ts';
+import {applyPreferredDouyinPlayback,prefersLowMemoryDouyinRendition} from './playback-selector.ts';
 import {admitDouyinItem,withoutDouyinSource} from './playback-ingress.ts';
 import {projectJsonAsync} from "@podjs/framework/json";
 import {yieldWorkTurn} from "@podjs/framework/text-layout";
@@ -70,12 +70,15 @@ function itemFields(item:DouyinItem):unknown[]{
   visit(item);return fields;
 }
 function sameFields(a:unknown[],b:unknown[]):boolean{return a.length===b.length&&a.every((value,i)=>value===b[i]);}
-const preferredItems=new PlaybackCache<DouyinItem,{fields:unknown[];item:DouyinItem}>(2*1024*1024,128,(value,key)=>playbackPayloadBytes([key,value]));
+const preferredItems=new PlaybackCache<DouyinItem,{fields:unknown[];item:DouyinItem;lowMemory:boolean}>(2*1024*1024,128,(value,key)=>playbackPayloadBytes([key,value]));
 function preferredItem(item:DouyinItem):DouyinItem{
   if(!item||typeof item!=='object')return item;
   const fields=itemFields(item),prior=preferredItems.get(item);
-  if(prior&&sameFields(prior.fields,fields))return prior.item;
-  const selected=applyPreferredDouyinPlayback(item);preferredItems.set(item,{fields,item:selected});return selected;
+  const lowMemory=prefersLowMemoryDouyinRendition();
+  if(prior&&prior.lowMemory===lowMemory&&sameFields(prior.fields,fields))return prior.item;
+  const selected=applyPreferredDouyinPlayback(item);
+  preferredItems.set(item,{fields,item:selected,lowMemory});
+  return selected;
 }
 export class DouyinFeedStore {
   private writes:Promise<unknown>=Promise.resolve();

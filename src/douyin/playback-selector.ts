@@ -1,4 +1,5 @@
 import type {DouyinItem,DouyinVideoVariant} from './types.ts';
+import {memoryPressureLevel,processMemoryBudgetBytes} from '@podjs/framework/memory';
 
 export const DOUYIN_TARGET_RESOLUTION=480;
 export const DOUYIN_MAX_SHORT_EDGE=720;
@@ -40,11 +41,21 @@ function resolutionRank(v:DouyinVideoVariant):number {
   return 4+Math.abs(r-DOUYIN_TARGET_RESOLUTION)/DOUYIN_MAX_SHORT_EDGE;
 }
 
+export function prefersLowMemoryDouyinRendition():boolean {
+  return processMemoryBudgetBytes()>0&&memoryPressureLevel()>=2;
+}
+
 export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVariant[]):DouyinVideoVariant|undefined {
   const playable=variants.filter(v=>typeof v?.playUrl==='string'&&v.playUrl.trim()
     &&(v.format!=='dash'||!!v.audioUrl)&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
+  // A lower tier is optional. Keep the standard capped order as the fallback.
+  const smaller=prefersLowMemoryDouyinRendition()?playable.filter(v=>{
+    const resolution=normalizedDouyinResolution(v);
+    return resolution!==undefined&&resolution<=320&&(shortEdge(v)??0)<=320;
+  }):[];
+  const pool=smaller.length?smaller:playable;
   const bitrate=(v:DouyinVideoVariant)=>v.bitrate>0?v.bitrate:Infinity;
-  return playable.reduce<DouyinVideoVariant|undefined>((best,v)=>{
+  return pool.reduce<DouyinVideoVariant|undefined>((best,v)=>{
     if(!best)return v;
     const compare=resolutionRank(v)-resolutionRank(best)||bitrate(v)-bitrate(best)
       ||Number(best.codec==='h264')-Number(v.codec==='h264');

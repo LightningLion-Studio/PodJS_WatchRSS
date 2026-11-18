@@ -16,17 +16,24 @@ function paragraphArgs(block:TextBlock,width:number,fontSize:number,pixelScale:n
   const args:ParagraphRequest={...resolveFont?.(style),text,widthPx:Math.max(1,Math.ceil(width*pixelScale)),fontSizePx:readerFontPixels(style,pixelScale),lineHeightPx:readerLinePixels(style,pixelScale),fontWeight:style.fontWeight,italic:style.italic,letterSpacingEm:style.letterSpacingEm,hyphenation:style.hyphenation==="AUTO"?"full":"none",justify:style.alignment==="JUSTIFY",align:style.alignment==="CENTER"||profile==="preview"&&block.style==="title"?"center":"left",textMotion:profile==="preview"?"subpixel":style.renderMode==="LINEAR_SMOOTH"?"animated":"static",colorArgb:style.colorArgb,underline:style.underline,strikethrough:style.strikethrough,...(profile==="preview"?{lineHeightMode:"spacing" as const,fallbackLineSpacing:false,lineBreak:style.lineBreakMode==="PARAGRAPH"?"balanced" as const:style.lineBreakMode==="SYSTEM"?"paragraph" as const:"simple" as const}:{lineBreak:style.lineBreakMode==="PARAGRAPH"?"paragraph" as const:"simple" as const})};
   return {text,args};
 }
+function paragraphJson(this:ParagraphRequest&{lineIndex:number}){return {...Object.getPrototypeOf(this),...this};}
 function readParagraphLines(text:string,args:ParagraphRequest,lines:PlatformParagraphLine[],pixelScale:number):readonly ParagraphLine[]{
   validateParagraphLines(text,lines);
+  // Thousands of lines share the paragraph style/text; only the line index varies.
+  // The service boundary still receives a complete plain JSON value.
+  const shared=Object.defineProperty({...args},'toJSON',{value:paragraphJson});
   return lines.map((line,lineIndex)=>{
     if(line.topPx===undefined&&line.bottomPx===undefined&&line.baselinePx===undefined)return line;
     if(![line.topPx,line.bottomPx,line.baselinePx].every(Number.isFinite)||line.bottomPx!<=line.topPx!)throw new Error("Invalid paragraph line metrics");
-    return {...line,paragraph:{...args,lineIndex},height:(line.bottomPx!-line.topPx!)/pixelScale,baseline:(line.baselinePx!-line.topPx!)/pixelScale};
+    return {...line,paragraph:Object.assign(Object.create(shared),{lineIndex}),height:(line.bottomPx!-line.topPx!)/pixelScale,baseline:(line.baselinePx!-line.topPx!)/pixelScale};
   });
 }
 /** One request in flight per reader; cancellation also suppresses already queued replies. */
 export function requestReaderLayout(blocks:readonly ContentBlock[],width:number,fontSize:number,pixelScale:number,preset:ReaderPreset|undefined,
   request:(args:ParagraphRequest)=>ParagraphOperation,update:(layouts:NativeBlockLayouts)=>void,onError:(error:unknown)=>void,resolveFont?:ReaderFontResolver,profile:"compose"|"preview"="compose",publication?:LayoutPublication) {
+  if(blocks.some(block=>block.type==='text'&&block.text.length>8192))return requestReaderLayoutBatched(blocks,width,fontSize,pixelScale,preset,args=>{
+    const operations=args.map(request);return {result:Promise.all(operations.map(op=>op.result)).then(results=>({results})),cancel(){for(const op of operations)op.cancel();}};
+  },update,onError,resolveFont,publication,profile);
   let cancelled=false,current:ParagraphOperation|undefined;
   const layouts=new Map<ContentBlock,readonly ParagraphLine[]>();
   let lastPublished=0;
@@ -54,6 +61,50 @@ export function requestReaderLayout(blocks:readonly ContentBlock[],width:number,
 /** Long documents keep one host operation in flight, with bounded first-screen and later batches. */
 export function requestReaderLayoutBatched(blocks:readonly ContentBlock[],width:number,fontSize:number,pixelScale:number,preset:ReaderPreset|undefined,
   requestBatch:(args:readonly ParagraphRequest[])=>ParagraphBatchOperation,update:(layouts:NativeBlockLayouts)=>void,onError:(error:unknown)=>void,
+  resolveFont?:ReaderFontResolver,publication:LayoutPublication={firstBlocks:4,batchBlocks:16},profile:"compose"|"preview"="compose"){
+  if(blocks.every(block=>block.type!=='text'||block.text.length<=8192))return requestReaderLayoutBatchedLegacy(blocks,width,fontSize,pixelScale,preset,requestBatch,update,onError,resolveFont,publication);
+  let cancelled=false,current:ParagraphBatchOperation|undefined;
+  const layouts=new Map<ContentBlock,readonly ParagraphLine[]>(),texts=blocks.filter((block):block is TextBlock=>block.type==='text');
+  const done=(async()=>{
+    for(const block of texts){
+      if(cancelled)return;
+      const {text,args}=paragraphArgs(block,width,fontSize,pixelScale,preset,resolveFont,profile);
+      let combined:ParagraphLine[]=[];
+      // Bound each native shaping turn. Line indices refer to their own chunk,
+      // while source offsets stay relative to the original block for anchors.
+      for(const part of readerTextChunks(text)){
+        if(cancelled)return;
+        try{
+          const chunkArgs={...args,text:part.text};current=requestBatch([chunkArgs]);
+          const response=await current.result;if(cancelled)return;
+          if(!Array.isArray(response.results)||response.results.length!==1)throw new Error('Invalid paragraph batch result count');
+          const value=response.results[0]!;if('error' in value)throw new Error(value.error);
+          let raw=value.lines;
+          if(part.offset+part.text.length<text.length&&part.text.endsWith('\n'))raw=raw.filter((line,index)=>index!==raw.length-1||line.start!==part.text.length||line.end!==part.text.length);
+          const shaped=readParagraphLines(part.text,chunkArgs,raw,pixelScale);
+          const shifted=shaped.map(line=>({...line,start:line.start+part.offset,end:line.end+part.offset,visibleEnd:line.visibleEnd+part.offset}));
+          combined=combined.concat(shifted);layouts.set(block,combined);update(new Map(layouts));
+        }catch(error){if(cancelled)return;onError(error);break;}
+        current=undefined;
+      }
+    }
+  })();
+  return {done,cancel(){cancelled=true;current?.cancel();}};
+}
+
+/** Exact UTF-16 coverage, newline preference and no split surrogate pair. */
+export function* readerTextChunks(text:string,maximum=8192):Generator<{offset:number;text:string}>{
+ if(!Number.isInteger(maximum)||maximum<2)throw new RangeError('Invalid reader window');
+ if(!text.length){yield {offset:0,text:''};return;}
+ for(let offset=0;offset<text.length;){
+  let end=Math.min(text.length,offset+maximum);
+  if(end<text.length){const newline=text.lastIndexOf('\n',end-1);if(newline>offset+maximum/2)end=newline+1;else if(/[\uD800-\uDBFF]/.test(text[end-1]!)||text[end-1]==='\r'&&text[end]==='\n')end--;}
+  yield {offset,text:text.slice(offset,end)};offset=end;
+ }
+}
+
+function requestReaderLayoutBatchedLegacy(blocks:readonly ContentBlock[],width:number,fontSize:number,pixelScale:number,preset:ReaderPreset|undefined,
+  requestBatch:(args:readonly ParagraphRequest[])=>ParagraphBatchOperation,update:(layouts:NativeBlockLayouts)=>void,onError:(error:unknown)=>void,
   resolveFont?:ReaderFontResolver,publication:LayoutPublication={firstBlocks:4,batchBlocks:16}){
   let cancelled=false,current:ParagraphBatchOperation|undefined;
   const layouts=new Map<ContentBlock,readonly ParagraphLine[]>(),texts=blocks.filter((block):block is TextBlock=>block.type==='text');
@@ -64,7 +115,7 @@ export function requestReaderLayoutBatched(blocks:readonly ContentBlock[],width:
       let size=0,units=0;
       while(size<target){
         const length=texts[offset+size]!.text.replace(/\r\n?/g,'\n').length;
-        if(size&&units+length>262144)break;
+        if(size&&units+length>8192)break;
         units+=length;size++;
       }
       if(size<1)throw new Error('Invalid paragraph batch size');

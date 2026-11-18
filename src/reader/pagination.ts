@@ -114,8 +114,8 @@ export function bookPageForAnchor(pages:readonly BookPage[],target:PageAnchor):n
 
 /** Cache body geometry across mode switches and header/action updates. Native measurement is expensive. */
 export function createBookPaginator(measure:PaginationOptions['measure']){
- const resized=new WeakMap<BookPage[],{ratios:PaginationOptions["ratios"];pages:BookPage[]}>();
- const bodies=new WeakMap<readonly ContentBlock[],Map<string,BookPage[]>>(),compositions=new WeakMap<BookPage[],Map<string,BookPage[]>>(),widths=new Map<string,number>();
+ let resized=new WeakMap<BookPage[],{ratios:PaginationOptions["ratios"];pages:BookPage[]}>();
+ let bodies=new WeakMap<readonly ContentBlock[],Map<string,BookPage[]>>(),compositions=new WeakMap<BookPage[],Map<string,BookPage[]>>();const widths=new Map<string,number>();
  const measured=(text:string,slot:number)=>{
   const key=slot+':'+text,cached=widths.get(key);if(cached!==undefined)return cached;
   const value=measure(text,slot);if(widths.size>=4096)widths.delete(widths.keys().next().value!);widths.set(key,value);return value;
@@ -160,5 +160,6 @@ export function createBookPaginator(measure:PaginationOptions['measure']){
    }
   },{rowLimit:1,...slices});
  };
+ paginate.trimMemory=()=>{resized=new WeakMap();bodies=new WeakMap();compositions=new WeakMap();widths.clear();};
  return paginate;
 }

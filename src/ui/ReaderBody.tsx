@@ -1,3 +1,5 @@
+import {onMemoryTrim,memoryPressureLevel} from '@podjs/framework/memory';
+import {WindowedReaderDocument,needsReaderWindows} from '../reader/windowed-document';
 import {readerMediaRatio} from '../reader/media-geometry.ts';
 import {AutoPageClock} from "../reader/auto-page.ts";
 import {ReaderBookPage} from "./ReaderBookPage.tsx";
@@ -111,15 +113,36 @@ function ReaderBodyImpl(props:{
     }
     return layoutContent([block],width,size,{},preset,lines);
   },()=>setImportedRevision(value=>value+1)):undefined;
+  let previousWindowed:WindowedReaderDocument|undefined;
+  const windowed=createMemo(()=>{
+    const source=props.blocks,enabled=!props.imported&&!props.pageMode&&needsReaderWindows(source);
+    const previous=previousWindowed;
+    const anchor=previous?untrack(()=>documentAnchorAt(previous.layout(),scroller.offset(),headerHeight())):undefined;
+    previous?.close();
+    const document=enabled?new WindowedReaderDocument(source,async parts=>{
+      const width=props.width-28,size=props.fontSize,preset=props.preset,values=parts.map(part=>part.block);
+      let lines:NativeBlockLayouts=new Map();
+      if(hasCapability('text.layout')){
+        const metrics=getDisplayMetrics();
+        const task=requestReaderLayoutBatched(values,width,size,metrics.physicalWidth/metrics.logicalWidth,preset,args=>textLayout.layoutBatch(args),value=>{lines=value;},error=>logConsole.warn('Reader window layout',String(error)),fonts());
+        importedTasks.add(task);try{await task.done;}finally{importedTasks.delete(task);}
+      }
+      return parts.map(part=>{const ratio=ratios()[part.blockIndex];return layoutContent([part.block],width,size,ratio===undefined?{}:{0:ratio},preset,lines,props.height);});
+    },()=>setImportedRevision(value=>value+1)):undefined;
+    previousWindowed=document;
+    if(previous&&document&&anchor){setRestored(false);void Promise.resolve().then(async()=>{await document.ensureAnchor(anchor);if(disposed||windowed()!==document)return;scroller.scrollTo(offsetForDocumentAnchor(document.layout(),anchor,headerHeight(),max()),{immediate:true});setRestored(true);}).catch(error=>props.onError(String(error)));}
+    return document;
+  });
   const blocks=createMemo(()=>{importedRevision();return imported?.blocks()??props.blocks;});
   let initialImportedLayout=true;
   createEffect(()=>{
-    const configuration=[props.width,props.fontSize,props.preset,fonts()];
+    const configuration=[props.width,props.fontSize,props.preset,fonts(),ratios()];const document=windowed();
     if(initialImportedLayout){initialImportedLayout=false;return;}
     if(imported)void imported.relayout().catch(error=>props.onError(String(error)));
+    if(document)void document.relayout().catch(error=>props.onError(String(error)));
   });
   createEffect(()=>{
-    if(imported)return;
+    if(imported||windowed())return;
     const blocks=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset;
     latestNativeLayouts=new Map();
     batch(()=>{setNativeReady(false);setNativeLayouts(new Map());});
@@ -135,7 +158,7 @@ function ReaderBodyImpl(props:{
   });
   const [prepared,setPrepared]=createSignal<{layout:ReturnType<typeof layoutContent>;entries:PositionedScrollEntry[];indices:ReadonlyMap<string,number>;complete:boolean;scope:ContentBlock[]}|undefined>();
   createEffect(()=>{
-    if(imported)return;
+    if(imported||windowed())return;
     if(!progressLoaded())return;
     const native=nativeLayouts(),source=props.blocks,width=props.width-28,size=props.fontSize,preset=props.preset,ratio=ratios(),complete=nativeReady(),viewportHeight=props.height;
     // Native-capable hosts can show their first shaped paragraphs without
@@ -177,11 +200,12 @@ function ReaderBodyImpl(props:{
     void task.done.then(()=>{if(revision===preparationRevision)prefixPreparing=false;},error=>{if(revision===preparationRevision)prefixPreparing=false;logConsole.warn("Reader layout preparation",String(error));});
     onCleanup(()=>task.cancel());
   });
-  const layout=createMemo(()=>{importedRevision();return imported?.layout()??prepared()?.layout??{rows:[],height:0,textLength:0};});
+  const layout=createMemo(()=>{importedRevision();return imported?.layout()??windowed()?.layout()??prepared()?.layout??{rows:[],height:0,textLength:0};});
 
   const [pageAnchor,setPageAnchor]=createSignal<PageAnchor>();
   const round=()=>getDisplayMetrics().shape==='round';
   const paginateCached=createBookPaginator((text,slot)=>getOps().measureText(text,slot));
+  onCleanup(onMemoryTrim(5,level=>{const document=windowed();if(document)document.trimMemory(documentAnchorAt(document.layout(),scroller.offset(),headerHeight()),level);if(level>0){layoutContent.trimMemory();paginateCached.trimMemory();}}));
   const bookPages=createMemo(()=>props.pageMode?paginateCached(blocks(),{width:props.width,height:props.height,ratios:ratios(),round:round(),fontSize:props.fontSize,preset:props.preset,header:props.header?.map(entry=>entry.height),footer:props.footer?.map(entry=>entry.height),unloaded:imported?index=>imported.text(index)===undefined:undefined}):[]);
   const bookPageIndex=createMemo(()=>bookPageForAnchor(bookPages(),pageAnchor()??{section:'header',character:0,blockIndex:0,sourceStart:0,sectionOffset:0}));
   const bookPage=()=>bookPages()[bookPageIndex()];
@@ -195,7 +219,7 @@ function ReaderBodyImpl(props:{
     return contentHighlightRects(layout(),imported&&highlight.importedChunkIndex!==undefined?{...highlight,contentBlockIndex:highlight.importedChunkIndex}:highlight,props.width-28,(text,slot)=>getOps().measureText(text,slot),systemCarets());
   });
   const headerHeight=()=>props.header?.reduce((sum,row)=>sum+row.height,0)??0;
-  const footerReady=()=>!!imported||!!props.pageMode||prepared()?.complete===true;
+  const footerReady=()=>!!imported||!!windowed()||!!props.pageMode||prepared()?.complete===true;
   const footerHeight=()=>footerReady()?(props.footer?.reduce((sum,row)=>sum+row.height,0)??0):0;
   const max=()=>Math.max(0,headerHeight()+layout().height+footerHeight()-props.height);
   const scroller=createScroller({max});
@@ -276,7 +300,7 @@ function ReaderBodyImpl(props:{
       feedbackTimer=schedule(1500,()=>setFeedback(""));
     }
   };
-  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&(props.pageMode?bookPageIndex()===bookPages().length-1:!!(imported||prepared()?.complete)&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset())),flushProgress:save};
+  const handle:ReaderBodyHandle={ready:restored,manualScroll,tap:()=>tap(),scroller,playing,setPlaying:value=>setPlaying(value),pause:()=>{if(playing())setPlaying(false);},reachedBottom:()=>restored()&&(props.pageMode?bookPageIndex()===bookPages().length-1:!!(imported||windowed()||prepared()?.complete)&&readerReachedBottom(headerHeight()+layout().height+footerHeight(),props.height,scroller.offset())),flushProgress:save};
   props.ref(handle);
   let tapOrigin:PageAnchor|undefined;
   const tap=(direction=0)=>{
@@ -369,7 +393,7 @@ function ReaderBodyImpl(props:{
   createEffect(()=>{
     const ready=restored(),active=props.active,moving=scrolling(),automatic=playing(),source=blocks(),width=props.width,height=props.height,size=props.fontSize,preset=props.preset;
     lastManualScroll(); // A new input cancels speculative preparation.
-    if(!ready||!active||moving||automatic||props.pageMode||source.reduce((sum,block)=>sum+(block.type==='text'?block.text.length:0),0)>128*1024)return;
+    if(!ready||!active||moving||automatic||props.pageMode||windowed()||memoryPressureLevel()>0||source.reduce((sum,block)=>sum+(block.type==='text'?block.text.length:0),0)>8192)return;
     const task=delay(1500);let preparation:ReturnType<typeof paginateCached.prepare>|undefined;
     void task.result.then(()=>{if(!disposed){
       preparation=paginateCached.prepare(source,{width,height,round:round(),fontSize:size,preset,unloaded:imported?index=>imported.text(index)===undefined:undefined});
@@ -381,7 +405,7 @@ function ReaderBodyImpl(props:{
   let restoreTimer:ReturnType<typeof delay>|undefined;
   const canRestore=()=>!!prepared()&&(!(pendingProgress?.textAnchor||pendingProgress&&pendingProgress.progress>0)||prepared()!.complete);
   const restoreProgress=()=>{
-    if(!pendingProgress||disposed||imported||!canRestore()||restoreTimer)return;
+    if(!pendingProgress||disposed||imported||windowed()||!canRestore()||restoreTimer)return;
     if(!pendingProgress.textAnchor&&pendingProgress.progress<=0){
       pendingProgress=undefined;lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);return;
     }
@@ -410,6 +434,14 @@ function ReaderBodyImpl(props:{
         scroller.scrollTo(!saved&&progress.progress<=0?0:imported.offset(anchor,headerHeight(),max()),{immediate:true});
         lastOffset=scroller.offset();setRestored(true);setPlaying(props.autoStart,false);return;
       }
+      const document=windowed();
+      if(document){
+        const anchor=progress.textAnchor??{character:progress.progress*normalizedTextLength(),fraction:0};
+        if(!progress.textAnchor&&progress.progress<=0)await document.ensure(0);else await document.ensureAnchor(anchor);
+        if(disposed||windowed()!==document)return;
+        scroller.scrollTo(!progress.textAnchor&&progress.progress<=0?0:offsetForDocumentAnchor(document.layout(),anchor,headerHeight(),max()),{immediate:true});
+        lastOffset=scroller.offset();setProgressLoaded(true);setRestored(true);setPlaying(props.autoStart,false);return;
+      }
       pendingProgress=progress;setProgressLoaded(true);restoreProgress();
     }).catch(error=>{if(!disposed){if(!importedReadFailed){setProgressLoaded(true);setRestored(true);}reportImportedError(error);}});
   });
@@ -418,7 +450,7 @@ function ReaderBodyImpl(props:{
     if(!restored()||!props.active||!foreground){lastFrame=0;autoPages.reset();return;}
     // Publish another shaped prefix before the drag reaches its current end.
     // Only one prefix preparation runs; later native replies remain available.
-    if(!imported&&!props.pageMode&&!nativeReady()&&!prefixPreparing&&latestNativeLayouts.size>nativeLayouts().size&&scroller.offset()+props.height+80>=headerHeight()+layout().height)setNativeLayouts(latestNativeLayouts);
+    if(!imported&&!windowed()&&!props.pageMode&&!nativeReady()&&!prefixPreparing&&latestNativeLayouts.size>nativeLayouts().size&&scroller.offset()+props.height+80>=headerHeight()+layout().height)setNativeLayouts(latestNativeLayouts);
     if(props.pageMode){
       if(autoPages.tick(now,playing()&&bookPage()?.loading===undefined,props.pageSeconds??5)){if(!turnBookPage(1,false)||bookPageIndex()===bookPages().length-1)setPlaying(false);}
       if(!tapTimer&&now-pageTurnAt>=100&&now-lastSave>=1000)void save();
@@ -428,6 +460,12 @@ function ReaderBodyImpl(props:{
       const target=props.speechPlaying&&Date.now()-lastManualScroll()>=3000?props.highlight?.importedChunkIndex:undefined;
       const load=target!==undefined&&imported.text(target)===undefined?imported.ensure(target):imported.visible(scroller.offset()-headerHeight(),props.height);
       void load.catch(error=>{if(!disposed)reportImportedError(error);});
+    }
+    const document=windowed();
+    if(document&&!props.pageMode){
+      const target=props.speechPlaying&&Date.now()-lastManualScroll()>=3000?props.highlight:undefined;
+      const load=target?.contentBlockIndex!==undefined?document.ensureSource(target.contentBlockIndex,target.sourceStart):document.visible(scroller.offset()-headerHeight(),props.height);
+      void load.catch(error=>{if(!disposed)props.onError(String(error));});
     }
     // A user drag, fling, d-pad chase or crown tween cancels automatic movement.
     if(scroller.state()!=="idle")handle.pause();
@@ -447,13 +485,13 @@ function ReaderBodyImpl(props:{
     void syncAwake();
     if(!foreground)void save();
   });
-  onCleanup(()=>{textCache.close();void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
+  onCleanup(()=>{textCache.close();void awake.close();void save();disposed=true;restoreTimer?.cancel();imported?.close();windowed()?.close();for(const task of importedTasks)task.cancel();removeLifecycle();removeCheckpoint();controller.pause();scroller.stop();if(tapTimer)tapTimer();if(feedbackTimer)feedbackTimer();});
   function makeEntry(initial:ReaderRow):PositionedScrollEntry {return {top:initial.top,key:readerRowKey(initial),data:initial,height:initial.height,retain:initial.kind==="text",onPress:initial.kind==="text"?tap:undefined,render:(current?:()=>ScrollEntry)=>{const raw=()=>current?.().data as ReaderRow??initial;const row=createMemo(raw);const textRow=()=>row() as Extract<ReaderRow,{kind:"text"}>;return initial.kind==="text"?<>{(()=>{const rect=highlightRects().get(raw());return rect?<View debugName="SpeechBodyHighlight" class="absolute" style={{insetL:rect.left,insetT:rect.top,width:rect.width,height:rect.height,bgColor:props.highlightColor??"#ff651557"}}/>:null;})()}<ReaderTextRow cache={textCache} top={textRow().gap} environment={textEnvironment()} row={textRow()} style={blocks()[textRow().blockIndex]?.type==="text"?(blocks()[textRow().blockIndex] as ContentBlock & {type:"text"}).style:"body"} fontSize={props.fontSize} width={props.width-28} preset={props.preset} fonts={fonts()} onCarets={(positions,owner)=>setSystemCarets(previous=>updateSystemCarets(previous,owner,positions))}/></>:(()=>{const row=createWindowValue(()=>raw() as Exclude<ReaderRow,{kind:"text"}>);return <View onPress={()=>{if(props.active){handle.pause();props.onMedia(row.block);}}} focusable class="absolute left-[0] right-[0] bg-[#161616]" style={{insetT:row.gap,height:row.height-row.gap}}>
       {row.kind==="image"?<RemoteImage inline url={resolveUrl(row.block.url,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.url]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:<>{row.block.type==="video"&&row.block.poster?<RemoteImage url={resolveUrl(row.block.poster,props.baseUrl)??""} filePath={props.offlineMedia?.[row.block.poster]} width={props.width-28} height={row.height-row.gap} fit="contain" onSize={(width,height)=>untrack(()=>{const ratio=width/height;if(Number.isFinite(ratio)&&ratio>0&&readerMediaRatio(row.block,ratios()[row.blockIndex])!==ratio)setRatios({...ratios(),[row.blockIndex]:ratio});})}/>:null}<Image src="../assets/icons/play-circle.svg" class="absolute w-[24] h-[24]" style={{insetL:(props.width-28-24)/2,insetT:(row.height-row.gap-24)/2}}/></>}
     </View>;})();}};}
   const indexedEntries=createMemo<IndexedScrollEntries>(()=>{
     const snapshot=prepared();
-    if(snapshot&&!imported)return snapshot;
+    if(snapshot&&!imported&&!windowed())return snapshot;
     const entries=layout().rows.map(makeEntry),indices=new Map<string,number>();
     entries.forEach((entry,index)=>indices.set(entry.key as string,index));
     return {entries,indices,scope:blocks()};

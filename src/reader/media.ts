@@ -40,3 +40,16 @@ function appendArticleMedia(blocks:ContentBlock[],article:{enclosureImageUrl?:st
   }
   return blocks;
 }
+
+interface ReusableArticleContent {
+  id:string;rawContent?:string;content:string;contentBlocks?:ContentBlock[];
+  enclosureImageUrl?:string;videoUrl?:string;link?:string;
+  readerBodyState?:string;importedText?:unknown;
+}
+/** The caller already owns this body. Reuse only exact, freshly reread inputs;
+ * no extra cache, stale metadata, or second full HTML tree is retained. */
+export function reusableArticleContent(previous:ReusableArticleContent|null|undefined,next:ReusableArticleContent):Pick<ReusableArticleContent,'content'|'contentBlocks'>|undefined {
+  if(!previous?.contentBlocks||previous.id!==next.id||previous.rawContent===undefined||previous.rawContent!==next.rawContent||previous.readerBodyState||next.readerBodyState||previous.importedText||next.importedText)return;
+  if(previous.enclosureImageUrl!==next.enclosureImageUrl||previous.videoUrl!==next.videoUrl||previous.link!==next.link)return;
+  return {contentBlocks:previous.contentBlocks,content:previous.content};
+}

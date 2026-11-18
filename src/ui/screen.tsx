@@ -887,7 +887,7 @@ export default function WatchRSS(props: {
     const active=()=>revision===articleOpenRevision&&stack()===origin&&foreground()&&motion.phase==="idle";
     const previousReader=replaceReader&&current().page==="reader"?current():undefined;
     try {
-      const full = await props.services.getArticle(item.id);
+      const full = await props.services.getArticle(item.id,article());
       if(!active())return;
       if(!full)throw new Error("文章不存在，请返回后重试");
       const available=!readerBodyState(full),read=available?true:full.read;
@@ -918,7 +918,7 @@ export default function WatchRSS(props: {
     const origin = current();
     setBusy(true);
     try {
-      const full = await props.services.getArticle(item.id);
+      const full = await props.services.getArticle(item.id,article());
       if (current() === origin) {
         setArticle(full ?? item);
         setPage("rss-actions");

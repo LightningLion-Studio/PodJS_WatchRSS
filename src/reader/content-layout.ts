@@ -50,10 +50,10 @@ function measuredHardWrap(text:string,width:number,measure:(value:string)=>numbe
 }
 /** Reuse text wrapping while image aspect ratios change; replaced blocks can be collected. */
 export function createContentLayouter(measure:(text:string,slot:number)=>number,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined){
- const textCache=new WeakMap<object,TextBlockLayout>(),widths=new Map<string,number>();
+ let textCache=new WeakMap<object,TextBlockLayout>();const widths=new Map<string,number>();
  const measured=(text:string,slot:number)=>{if(text.length>128)return measure(text,slot);const key=slot+":"+text,hit=widths.get(key);if(hit!==undefined){widths.delete(key);widths.set(key,hit);return hit;}const value=measure(text,slot);if(widths.size>=4096)widths.delete(widths.keys().next().value!);widths.set(key,value);return value;};
  const steps=(blocks:readonly ContentBlock[],width:number,fontSize:number,ratios:Readonly<Record<number,number>>={},preset?:ReaderPreset,native?:NativeBlockLayouts,viewportHeight=width)=>contentLayoutSteps(blocks,width,fontSize,measured,ratios,textCache,wrap,preset,native,atlasMetrics,viewportHeight);
- return Object.assign((...args:Parameters<typeof steps>)=>finishContentLayout(steps(...args)),{steps});
+ return Object.assign((...args:Parameters<typeof steps>)=>finishContentLayout(steps(...args)),{steps,trimMemory(){textCache=new WeakMap();widths.clear();}});
 }
 export function layoutContent(blocks:readonly ContentBlock[],width:number,fontSize:number,measure:(text:string,slot:number)=>number,ratios:Readonly<Record<number,number>>={},textCache?:WeakMap<object,TextBlockLayout>,wrap?:(text:string,slot:number,width:number)=>number[]|undefined,preset?:ReaderPreset,native?:NativeBlockLayouts,atlasMetrics?:(slot:number)=>AtlasLineMetrics|undefined,viewportHeight=width):ContentLayout {
  return finishContentLayout(contentLayoutSteps(blocks,width,fontSize,measure,ratios,textCache,wrap,preset,native,atlasMetrics,viewportHeight));

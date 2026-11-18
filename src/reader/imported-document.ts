@@ -18,6 +18,8 @@ interface Chunk {block:ContentBlock & {type:"text"};layout:ContentLayout}
 /** Native-style lazy chunks. Heights of unseen chunks are placeholders, never estimated text. */
 export class ImportedReaderDocument {
  private chunks=new Map<number,Chunk>();
+ // Retain three text/layout windows; evicted windows keep only measured height.
+ private heights=new Map<number,number>();
  private busy=false;
  private closed=false;
  private epoch=0;
@@ -32,7 +34,7 @@ export class ImportedReaderDocument {
   const rows:ReaderRow[]=[];let top=0;
   for(let index=0;index<this.handle.chunkCount;index++){
    const chunk=this.chunks.get(index),gap=index?6:0;
-   if(!chunk){const height=index?6:1;rows.push({kind:"text",text:"",blockIndex:index,character:0,sourceStart:0,top,height,gap:0,fontSlot:1,scale:1,color:"#00000000",lineHeight:height});top+=height;continue;}
+   if(!chunk){const height=this.heights.get(index)??(index?6:1);rows.push({kind:"text",text:"",blockIndex:index,character:0,sourceStart:0,top,height,gap:0,fontSlot:1,scale:1,color:"#00000000",lineHeight:height});top+=height;continue;}
    for(const row of chunk.layout.rows)rows.push({...row,blockIndex:index,top:top+row.top+(row===chunk.layout.rows[0]?0:gap),height:row.height+(row===chunk.layout.rows[0]?gap:0),gap:row.gap+(row===chunk.layout.rows[0]?gap:0)});
    top+=chunk.layout.rows.length?chunk.layout.height+gap:0;
   }
@@ -48,23 +50,26 @@ export class ImportedReaderDocument {
    const block:ContentBlock & {type:"text"}={type:"text",style:"body",text:text??""};
    const layout=text!==null&&/[^\u0009-\u000d\u001c-\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.test(text)?await this.measure(block):{rows:[],height:0,textLength:0};
    if(this.closed||epoch!==this.epoch)return;
-   this.chunks.set(index,{block,layout});this.publish();
+   this.chunks.set(index,{block,layout});
+   this.heights.set(index,layout.rows.length?layout.height+(index?6:0):0);
+   while(this.chunks.size>3)this.chunks.delete(this.chunks.keys().next().value!);
+   this.publish();
   }finally{if(epoch===this.epoch)this.busy=false;}
  }
  async visible(offset:number,height:number):Promise<void>{
   if(this.busy||this.closed)return;
   const rows=this.layout().rows,first=rowAtOffset(rows,Math.max(0,offset));
   for(let i=first;i<rows.length&&rows[i]!.top<=offset+height+80;i++){
-   const index=rows[i]!.blockIndex;if(!this.chunks.has(index)){await this.ensure(index);return;}
+   const index=rows[i]!.blockIndex;if(!this.chunks.has(index)&&this.heights.get(index)!==0){await this.ensure(index);return;}
   }
  }
  async relayout():Promise<void>{
   const epoch=++this.epoch;this.busy=true;
   try{
-   const next=new Map<number,Chunk>();
+   const next=new Map<number,Chunk>();this.heights.clear();
    for(const [index,chunk] of this.chunks){
     const layout=chunk.layout.rows.length?await this.measure(chunk.block):chunk.layout;
-    if(this.closed||epoch!==this.epoch)return;next.set(index,{...chunk,layout});
+    if(this.closed||epoch!==this.epoch)return;next.set(index,{...chunk,layout});this.heights.set(index,layout.rows.length?layout.height+(index?6:0):0);
    }
    if(this.closed||epoch!==this.epoch)return;this.chunks=next;this.publish();
   }finally{if(epoch===this.epoch)this.busy=false;}
@@ -87,5 +92,5 @@ export class ImportedReaderDocument {
   if(anchor.section==="header")return 0;if(anchor.section==="footer")return 1;
   return Math.fround(Math.max(0,Math.min(1,(anchor.chunkIndex*this.handle.chunkBytes+importedBytesBefore(this.text(anchor.chunkIndex)??"",anchor.charOffset))/Math.max(1,this.handle.byteLength))));
  }
- close(){this.closed=true;this.epoch++;this.chunks.clear();this.cached=undefined;}
+ close(){this.closed=true;this.epoch++;this.chunks.clear();this.heights.clear();this.cached=undefined;}
 }

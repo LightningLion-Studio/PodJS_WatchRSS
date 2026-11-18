@@ -53,10 +53,10 @@ test("batched layout splits very long paragraphs within the host text limit",asy
  const blocks=[block('甲'.repeat(150000)),block('乙'.repeat(150000)),block('丙')],calls:number[]=[];
  const task=requestReaderLayoutBatched(blocks,200,14,2,undefined,args=>{
   calls.push(args.length);
-  expect(args.reduce((sum,value)=>sum+value.text.length,0)).toBeLessThanOrEqual(262144);
+  expect(args.reduce((sum,value)=>sum+value.text.length,0)).toBeLessThanOrEqual(8192);
   return {result:Promise.resolve({results:args.map(value=>({lines:[{start:0,end:value.text.length,visibleEnd:value.text.length}]}))}),cancel(){}};
  },()=>{},error=>{throw error;});
- await task.done;expect(calls).toEqual([1,2]);
+ await task.done;expect(calls.length).toBeGreaterThan(30);expect(calls.every(size=>size===1)).toBe(true);
 });
 test("paragraph failures preserve other results; source omissions are rejected",async()=>{
  const errors:unknown[]=[],updates:NativeBlockLayouts[]=[],blocks=[block("甲乙"),block("丙丁")];let calls=0;

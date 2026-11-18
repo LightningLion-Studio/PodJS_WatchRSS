@@ -80,6 +80,19 @@ test('RVADB-01: failed target preparation cannot succeed on the old playing sour
 function bind(f:ReturnType<typeof fixture>){bindShellCommands({current:()=>f.stack().at(-1)!,client,navigate:f.controller.douyinNavigate,play:f.controller.douyinPlay,move:f.controller.changeDouyinVideo});}
 const timer=(ms:number)=>entryTimers.filter(t=>t.ms===ms).at(-1)!;
 const playing=()=>({shellState:async()=>({state:'playing',positionMs:1234}),shellPlaying:async()=>{}} as any);
+for(const queued of [false,true])test(`shell play preserves ${queued?'the existing terminal queue':'restored feed continuation'}`,async()=>{
+ const f=fixture(),a=item('123');let restores=0,request:any;
+ client.restoreFeed=async()=>{restores++;return {items:[a],cursor:'40',hasMore:true,resolved:{[a.awemeId]:Date.now()}} as any;};
+ const origin:RouteEntry={page:'douyin',douyinRoute:{name:'entry'}};
+ if(queued)origin.queue={snapshot:()=>({playlist:[a],cursor:null,hasMore:false})} as any;
+ let entry=origin;
+ bindShellCommands({current:()=>entry,client,move:async()=>{},
+  play:value=>{request=value;value.onSourcePublished?.({platform:'douyin',awemeId:a.awemeId,url:a.playUrl} as any);},
+  navigate:async()=>{entry={page:'video',playback:{platform:'douyin',awemeId:a.awemeId,url:a.playUrl} as any,player:playing()};request.onSourcePublished?.(entry.playback);},
+ });
+ expect((await registeredHandlers['douyin.play']({index:0},{isActive:()=>true})).playbackState).toBe('playing');
+ expect(request.playlist).toEqual([a]);expect(request.cursor).toBe(queued?undefined:'40');expect(request.hasMore).toBe(!queued);expect(restores).toBe(queued?0:1);
+});
 test('RVADB-01: a failed replay of the same aweme cannot reuse its old player',async()=>{
  const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
  f.stack().at(-1)!.player=playing();bind(f);readyOverride=async()=>{throw Error('synthetic replay failure');};

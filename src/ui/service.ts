@@ -91,7 +91,7 @@ export interface AppServices {
   /** Directory metadata only; never reads chapter bodies. */
   listNovelChapters?(source:string):Promise<import("../reader/novel.ts").NovelChapter[]>;
   searchArticles?(channelId:string,keyword:string):Promise<Article[]>;
-  getArticle(id: string): Promise<Article | null>;
+  getArticle(id: string, previous?: Article | null): Promise<Article | null>;
   getOriginalArticle(id: string): Promise<Article>;
   getSpeechSource?(article: Article, anchor?: import("../reader/speech-segments.ts").SpeechAnchor): Promise<import("../reader/speech-source.ts").SpeechSegmentSource | null>;
   loadImportedTextChunk?(handle:import("../reader/imported-text.ts").ImportedTextHandle,index:number):Promise<string|null>;
