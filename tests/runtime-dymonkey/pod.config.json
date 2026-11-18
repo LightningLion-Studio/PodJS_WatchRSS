@@ -1,0 +1,9 @@
+{
+  "entry": "src/main.tsx",
+  "appId": "dev.podjs.tests.dymonkey",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "name": "Douyin offline Monkey",
+  "resources": { "fontSource": "system" },
+  "capabilities": ["input.touch", "input.rotary", "data.kv", "media.video", "media.audio", "runtime.timer", "host.lifecycle"]
+}
