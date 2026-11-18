@@ -58,7 +58,8 @@ export class BinaryApplicationService implements BinarySessionPort {
    kinds.unshift({kind:'articleBody',schemaVersion:1,send:false,receive:true},{kind:'articleMetadata',schemaVersion:1,send:false,receive:true});
    kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
   }
-  const books=!!(runtime.fileRefs&&this.ports.books&&this.ports.library);
+  const books=!!(runtime.fileRefs&&this.ports.books&&this.ports.library&&
+   await (await this.ports.library.repository()).books?.binaryReady());
   if(books){
    for(const kind of BOOK_KINDS)kinds.push({kind,schemaVersion:1,send:true,receive:true});
    kinds.sort((a,b)=>a.kind<b.kind?-1:1);

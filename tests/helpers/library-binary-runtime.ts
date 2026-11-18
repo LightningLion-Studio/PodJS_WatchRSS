@@ -97,8 +97,8 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  const ports:BinaryApplicationPorts={b2Enabled:options.enabled??true,byteBridge:()=>true,localPermission:()=>true,store,chunks,files,account,deviceId:async()=>'watch',randomId:async()=>nonce(),now:()=>performance.now(),sleep};
  const service=new BinaryApplicationService(ports);
  const repository={deviceId:async()=>'watch',configurePeer:()=>{}} as unknown as LibrarySessionRepository;
- function session(){
-  const pair=bytePair(),operation=<T>(value:Promise<T>|T)=>({result:Promise.resolve(value),cancel:()=>{void pair.close();}});
+ function session(pair=bytePair()){
+  const operation=<T>(value:Promise<T>|T)=>({result:Promise.resolve(value),cancel:()=>{void pair.close();}});
   const radio={status:async()=>({permission:'granted',available:true,enabled:true}),listen:()=>operation({id:'listener'}),accept:()=>operation({id:'stream',remoteName:'host',remoteAddress:'host'}),close:async()=>{}} as unknown as RfcommPorts['radio'];
   const streams={read:()=>{throw Error('B2_BASE64_FORBIDDEN');},write:()=>{throw Error('B2_BASE64_FORBIDDEN');},readBytes:(_id:string,max:number)=>operation(pair.watch.read(max,3000).then(b=>{options.readFault?.();return {eof:b===null,bytes:b??new Uint8Array()};})),writeBytes:(_id:string,b:Uint8Array)=>operation(pair.watch.write(b).then(()=>({written:b.length}))),close:async()=>pair.close()} as unknown as RfcommPorts['streams'];
   if(options.fileRefs){

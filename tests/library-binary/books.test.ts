@@ -174,3 +174,39 @@ test('insufficient peak stops at manifest before accepting book DATA',async()=>{
   await peer.session.running.catch(()=>{});
  }finally{await f.dispose();}
 },10000);
+
+test('book cancellation preserves hidden segment and never publishes a readable package',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {repository,files}=await attachBinaryBooks(f);
+  const book=await sampleBook(f,files,CHUNK_BYTES+5);
+  const peer=await receiver(f,book.objects);
+  await peer.manifest();
+  await transfer(peer,book.stateObject,book.read);await peer.operation('apply',{objectId:book.stateObject.objectId});
+  const part=book.segments[0]!;
+  await transfer(peer,part,book.read);await peer.operation('apply',{objectId:part.objectId});
+  const cancelled=await peer.operation('cancel',{reason:'USER_CANCEL'});
+  expect(cancelled.result).toEqual({state:'CANCELLED',alreadyComplete:false});
+  await peer.session.running;
+  expect(await repository.books!.package(book.state.bookId)).toBeUndefined();
+  expect(await f.db.query('SELECT id FROM articles')).toEqual([]);
+  expect(await f.db.query('SELECT ready FROM library_binary_book_files')).toEqual([{ready:1}]);
+  expect(await f.db.query('SELECT bytes FROM library_binary_peaks')).toHaveLength(1);
+ }finally{await f.dispose();}
+},10000);
+
+test('unregistered legacy originals keep the books domain on syncBooks',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  await attachBinaryBooks(f);
+  const source='https://watchrss.local/import-txt-novel/unregistered';
+  await f.db.execute("INSERT INTO channels(id,url,title,created_at,sort_order) VALUES(1,?,'book',1,0)",[source]);
+  await f.db.execute("INSERT INTO articles(id,channel_id,title,content,link,dedup_key,fetched_at) VALUES(1,1,'chapter','body',?,'chapter',1)",[source+'/chapter/1']);
+  const {session,cap}=await connect(f);
+  expect(cap.kinds.some(k=>k.kind.startsWith('book'))).toBe(false);
+  await session.connection.writeFrame({action:'syncBooks',phase:'reading',version:1,deviceId:'phone',states:[],after:0});
+  expect(await session.connection.readFrame(3000)).toMatchObject({action:'syncBooks',version:1,success:true});
+  await session.connection.writeFrame({action:'ack',success:true,applied:true});
+  await session.pair.close();await session.running.catch(()=>{});
+ }finally{await f.dispose();}
+});

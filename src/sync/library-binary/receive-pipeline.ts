@@ -131,15 +131,17 @@ export class ReceivePipeline {
   const chunk=this.staging.shift();
   if(!chunk)return;
   const {header,object,check,verifiedAt}=chunk;
+  let consumed=false;
   this.stageWork=this.ports.stage(chunk).then(disposition=>{
-   check();this.durable.push({header,object,check,disposition,verifiedAt});this.scheduleCommit();
+   consumed=disposition===1;check();this.durable.push({header,object,check,disposition,verifiedAt});this.scheduleCommit();
   },e=>{
    if(this.closed)return;
    const error=resumeError(e);
    this.reject(header,error);
   }).catch(e=>this.failed(e)).finally(async()=>{
-   if('file' in chunk)await this.ports.dropFile?.(chunk.file).catch(()=>{});
-   else if(!this.closed)this.pool.push(new Uint8Array(chunk.payload.buffer));
+   if('file' in chunk){
+    if(!consumed)await this.ports.dropFile?.(chunk.file).catch(()=>{});
+   }else if(!this.closed)this.pool.push(new Uint8Array(chunk.payload.buffer));
    this.stageWork=undefined;this.stageNext();
   });
  }

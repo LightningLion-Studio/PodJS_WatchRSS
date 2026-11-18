@@ -56,6 +56,20 @@ export class SqlBookStore {
  async manifests(){const rows=await this.states(),out=[];for(const s of rows)out.push({...s,contentAvailable:!!await this.package(s.bookId)});return out;}
  private async guarded<T>(action:(revision:number)=>Promise<T>):Promise<T>{for(let attempt=0;attempt<3;attempt++){const revision=await libraryRevision(this.db);try{return await action(revision);}catch(error){if(await libraryRevision(this.db)===revision)throw error;}}throw Error('book_changed_repeatedly');}
  async merge(remote:BookState):Promise<number>{return this.work('book-state-merge',()=>this.mergeValue(remote));}
+ /** Callers keep the legacy domain until every local original has an
+  * immutable package. Legacy registration may hydrate an unbounded chapter. */
+ async binaryReady():Promise<boolean>{
+  const pending=await this.db.query(`SELECT 1 FROM articles a JOIN channels c ON c.id=a.channel_id
+   WHERE (c.url LIKE 'https://watchrss.local/import-txt-novel/%' OR c.url LIKE 'https://watchrss.local/import-epub/%'
+    OR a.link LIKE 'https://watchrss.local/import-content/txt/%')
+   AND NOT EXISTS(SELECT 1 FROM sync_book_aliases m JOIN sync_books b ON b.book_id=m.book_id
+    WHERE m.item_id=a.id AND b.registration_complete=1) LIMIT 1`);
+  return !pending.length;
+ }
+ private commitBinary(boundary:ReceiptBoundary,statements:Statement[]):Promise<void>{
+  boundary.check?.();
+  return boundary.transaction?.(statements)??this.db.transaction(statements);
+ }
  async mergeBinaryState(remote:BookState,boundary:ReceiptBoundary,received:Statement):Promise<void>{
   const state=await validateBook(remote,this.ports.sha256);
   await this.guarded(async revision=>{
@@ -69,8 +83,7 @@ export class SqlBookStore {
     {sql:"UPDATE articles SET title=? WHERE title IS NOT ? AND id IN(SELECT item_id FROM sync_book_aliases WHERE book_id=? AND channel_url='https://watchrss.local/import-content')",params:[next.title,next.title,next.bookId]}]:[];
    const deletion=await this.deletionStatements(next);
    const outcome=compareLifecycleTokens(old?.lifecycle,state.lifecycle)>0?'retainedLocal':changed?'merged':'alreadyPresent';
-   boundary.check?.();
-   await this.db.transaction([revisionGuard(revision),...boundary.before,...writes,...deletion.members,...deletion.effects,
+   await this.commitBinary(boundary,[revisionGuard(revision),...boundary.before,...writes,...deletion.members,...deletion.effects,
     ...this.displayReceiptStatements(next.bookId),received,...boundary.after(outcome)]);
   });
  }
@@ -197,13 +210,16 @@ export class SqlBookStore {
    const boundary=options.boundary;
    const guards=[...(boundary?.before??[]),...(options.guards??[])];
    if(!affected.size){
-    boundary?.check?.();
-    if(guards.length)await this.db.transaction([revisionGuard(revision),...guards,...(boundary?.after('alreadyPresent')??[])]);
+    if(boundary)await this.commitBinary(boundary,[revisionGuard(revision),...guards,...boundary.after('alreadyPresent')]);
+    else if(guards.length)await this.db.transaction([revisionGuard(revision),...guards]);
     return 0;
    }if(!this.db.transactionChanges)throw Error('Book reading requires committed counts');const writes=statements.length;
    for(const id of affected)statements.push(...this.projectReadingStatements(id,[...merged].filter(([k,v])=>v.bookId===id&&canonical(v)!==canonical(before.get(k)??null)).map(([,v])=>v.chapterIndex)));
-   boundary?.check?.();
-   const counts=await this.db.transactionChanges([revisionGuard(revision),...guards,...statements,...(boundary?.after('merged')??[])].map(s=>({...s,sql:onlyChangedSql(s.sql)})));
+   if(boundary){
+    await this.commitBinary(boundary,[revisionGuard(revision),...guards,...statements,...boundary.after('merged')]);
+    return writes;
+   }
+   const counts=await this.db.transactionChanges([revisionGuard(revision),...guards,...statements].map(s=>({...s,sql:onlyChangedSql(s.sql)})));
    return Math.max(counts.slice(1+guards.length,1+guards.length+writes).filter(n=>n>0).length,counts.some(n=>n>0)?1:0);
   }catch(error){if(options.expectedRevision!==undefined||await libraryRevision(this.db)===revision)throw error;}}
   throw Error('book_reading_changed_repeatedly');
@@ -267,11 +283,16 @@ export class SqlBookStore {
    compareLifecycleTokens(current.lifecycle,incoming.lifecycle)!==0;
   if(current.fingerprint!==incoming.fingerprint||current.instanceId!==incoming.instanceId)throw Error('book_package_identity_or_size');
   const installed=await this.package(id);
-  if(retained||installed){
+  const installedDirectory=installed?(await this.db.query('SELECT count(*) AS count FROM sync_book_chapters WHERE book_id=?',[id]))[0]:undefined;
+  if(retained||installed&&num(installedDirectory?.count)===current.chapterCount){
    await scan(undefined);
-   boundary.check?.();
-   const outcome=retained||installed?.sha256!==info.sha256?'retainedLocal':'alreadyPresent';
-   await this.db.transaction([revisionGuard(revision),...boundary.before,...boundary.after(outcome)]);
+   let outcome:'retainedLocal'|'alreadyPresent'='retainedLocal';
+   if(!retained&&installed?.sha256===info.sha256){
+    const measured=await this.ports.files.hash(installed.path);
+    if(measured.size!==info.size||measured.sha256!==info.sha256)throw Error('book_package_changed');
+    outcome='alreadyPresent';
+   }
+   await this.commitBinary(boundary,[revisionGuard(revision),...boundary.before,...boundary.after(outcome)]);
    return;
   }
   const key=[id,stageKey];
@@ -314,7 +335,7 @@ export class SqlBookStore {
   boundary.check?.();
   const published=await publish(),deletion=await this.deletionStatements(next);
   boundary.check?.();
-  await this.db.transaction(this.packageStatements(next,published,stageKey,revision,null,boundary.before,
+  await this.commitBinary(boundary,this.packageStatements(next,published,stageKey,revision,null,boundary.before,
    [...deletion.members,...deletion.effects,...this.displayReceiptStatements(id),...boundary.after('merged')]));
  }
  private packageStatements(next:BookState,published:BookFileInfo,stagedSha:string,revision:number,binding:string|null,prefix:readonly Statement[]=[],suffix:readonly Statement[]=[]):Statement[]{

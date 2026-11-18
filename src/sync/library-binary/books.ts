@@ -42,6 +42,7 @@ export class BinaryBooks {
   reserve:(bytes:number)=>Promise<void>){
   if(!send.has('bookState'))return;
   const books=await this.repo();
+  if(!await books.binaryReady())fail('SOURCE_CHANGED');
   await books.capture();await books.captureReading();
   const revision=await libraryRevision(this.store.db);
   const created=new Set<string>();
@@ -118,6 +119,7 @@ export class BinaryBooks {
     }
     this.work();
    }
+   if(!await books.binaryReady())fail('SOURCE_CHANGED');
    if(await libraryRevision(this.store.db)!==revision)fail('SOURCE_CHANGED');
   }catch(e){
    for(const path of created){
@@ -134,6 +136,7 @@ export class BinaryBooks {
   validateBookPlan(objects,limits);
   let total=0,maxSegment=0;
   for(const d of objects){
+   if((d.kind==='bookState'||d.kind==='bookReading')&&d.size>metadataBytes)fail('LIMIT_EXCEEDED');
    if(d.kind==='bookPackageSegment')maxSegment=Math.max(maxSegment,d.size);
    if(d.kind==='bookPackageCommit'){
     const m=bookDescription(d,limits);
@@ -169,6 +172,7 @@ export class BinaryBooks {
    const state=strictJson(await this.payload(d,path),false,200000);
    validateBookShape(state);
    if(state.bookId!==id)fail('BUSINESS_REJECTED');
+   await repo.capture();
    await repo.mergeBinaryState(state,boundary,{
     sql:'INSERT INTO library_binary_book_states VALUES(?,?,?,?)',params:[...key,id,JSON.stringify(state)],
    });
@@ -183,6 +187,7 @@ export class BinaryBooks {
     if(item.bookId!==id||reading.length&&reading.at(-1)!.chapterIndex>=item.chapterIndex)fail('BUSINESS_REJECTED');
     reading.push(item);
    }
+   await repo.captureReading();
    const first=reading[0]!.chapterIndex,last=reading.at(-1)!.chapterIndex,page=book.metadata.pageIndex;
    // Interval ordering detects duplicates in either apply order. The unique
    // chapter index is authoritative if two pages are retried concurrently.
@@ -259,7 +264,7 @@ export class BinaryBooks {
   if(!row)return;
   const name=stagingKey(job,oid);
   if(row.path!=='library-binary/spool/'+name+'.bin'&&row.path!=='books/part-b2-'+name+'.bin')fail('JOURNAL_CORRUPT');
-  await this.files.remove(String(row.path));
+  await this.files.durableRemove(String(row.path));
   await this.store.db.execute('DELETE FROM library_binary_book_files WHERE scope=? AND job_id=? AND object_id=?',[...key,oid]);
  }
  async collect(job:Job,purge=true){

@@ -17,7 +17,7 @@ export async function attachBinaryBooks(f:Awaited<ReturnType<typeof binaryRuntim
   hash:f.files.hash,remove:f.files.remove,publish:unexpected,write:unexpected,writeBytes:unexpected,async *lines(){await unexpected();},combine:unexpected,
  };
  const {repository,files:article}=await attachBinaryLibrary(f,undefined,legacy);
- const files:BinaryBookFiles={...article,durableCommit:f.files.commit,copyRanges:async options=>{
+ const files:BinaryBookFiles={...article,durableCommit:f.files.commit,durableRemove:f.files.remove,copyRanges:async options=>{
   const total=createHash('sha256'),partHashes=[];if(options.prefix)total.update(Uint8Array.from(options.prefix));
   let size=0,partSize=0,parts=createHash('sha256'),chunkHashes:string[]=[];
   const output=options.target?await open(join(f.root,options.target),'w'):undefined;

@@ -11,6 +11,7 @@ import {fail,hash,strictJson} from './wire';
 export interface BookRange {path:string;offset:number;size:number}
 export interface BinaryBookFiles extends BinaryArticleFiles {
  copyRanges(options:{ranges:readonly BookRange[];target?:string;size:number;sha256?:string;index?:true;segmentBytes?:number;prefix?:readonly number[]}):Promise<{size:number;sha256:string;segments:BookFileDigest[]}>;
+ durableRemove(path:string):Promise<void>;
  durableCommit(path:string,target:string,size:number,sha256:string):Promise<{path:string}>;
 }
 export interface StreamedBookChapter {
