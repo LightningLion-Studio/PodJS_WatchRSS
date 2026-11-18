@@ -8,7 +8,7 @@ import {libraryRevision} from '../revision';
 import {D} from './digests';
 import {bookDescription,bookObject,BOOK_SEGMENT_BYTES,validateBookPlan} from './book-plan';
 import {BodyJsonReader} from './article-file';
-import {bookSqlText,pagedBookBoundary} from './book-metadata';
+import {BOOK_METADATA_BODY_BYTES,BOOK_METADATA_STRING_BYTES,BookMetadataRejected,bookSqlText,pagedBookBoundary} from './book-metadata';
 import {importBookPackage,type BinaryBookFiles} from './book-import';
 import type {BinaryStore,Job,ReceiptBoundary} from './store';
 import {CHUNK_BYTES,HARD_LIMITS,fail,hash,utf8,type Kind,type Limits,type ObjectDescriptor} from './wire';
@@ -201,7 +201,7 @@ export class BinaryBooks {
   }
   const repo=await this.repo();
   if(book.kind==='bookState'){
-   const state=await this.payload(path);
+   const state=await this.payload(d,path);
    validateBookShape(state);
    if(state.bookId!==id)fail('BUSINESS_REJECTED');
    await repo.capture();
@@ -212,7 +212,7 @@ export class BinaryBooks {
    return;
   }
   if(book.kind==='bookReading'){
-   const value=await this.payload(path);
+   const value=await this.payload(d,path);
    if(!Array.isArray(value)||!value.length||value.length>100)fail('BUSINESS_REJECTED');
    const reading:BookReading[]=[];
    for(const item of value){
@@ -285,10 +285,14 @@ export class BinaryBooks {
    if((await this.store.object(job,d.objectId)).receipt)await this.removeArtifact(job,d.objectId,published).catch(()=>{});
   }
  }
- private async payload(path:string):Promise<unknown>{
+ private async payload(d:ObjectDescriptor,path:string):Promise<unknown>{
+  // Finalize has already verified the raw size and SHA-256 against the manifest.
+  if(d.size>BOOK_METADATA_BODY_BYTES)throw new BookMetadataRejected();
   const reader=(await this.files.openText(path,{strictUtf8:true})).id;
   try{
-   return await new BodyJsonReader(async()=>{this.work();return this.files.readTextChunk(reader,16384);},false,true).document();
+   return await new BodyJsonReader(async()=>{this.work();return this.files.readTextChunk(reader,16384);},false,true).document(bytes=>{
+    if(bytes>BOOK_METADATA_STRING_BYTES)throw new BookMetadataRejected();
+   });
   }finally{await this.files.closeText(reader).catch(()=>{});}
  }
  private async verify(file:BookFileInfo){

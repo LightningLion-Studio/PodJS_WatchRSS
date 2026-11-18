@@ -97,16 +97,22 @@ export class BodyJsonReader {
   }
   this.at++;
  }
- async document():Promise<unknown>{
+ async document(checkStringBytes:(bytes:number)=>void):Promise<unknown>{
   let nodes=0;
   const readString=async()=>{
    const pieces:string[]=[];
-   let tail='';
+   let tail='',bytes=0;
    await this.string(async piece=>{
     let text=tail+piece;
     tail=/[\ud800-\udbff]$/.test(text)?text.slice(-1):'';
     if(tail)text=text.slice(0,-1);
     if(/[\ud800-\udfff]/u.test(text))fail('BUSINESS_REJECTED');
+    for(let i=0;i<text.length;i++){
+     const code=text.charCodeAt(i);
+     if(code>=0xd800&&code<=0xdbff){bytes+=4;i++;}
+     else bytes+=code<0x80?1:code<0x800?2:3;
+    }
+    checkStringBytes(bytes);
     pieces.push(text);
    });
    if(tail)fail('BUSINESS_REJECTED');

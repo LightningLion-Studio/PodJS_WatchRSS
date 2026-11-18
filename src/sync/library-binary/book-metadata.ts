@@ -1,6 +1,15 @@
 import type {SqlDatabase,SqlParams} from '../../core/types';
 import type {ReceiptBoundary,Statement} from './store';
 import {deviceOrder} from '../saved-state';
+import {ResumeError} from './wire';
+
+export const BOOK_METADATA_BODY_BYTES=1024*1024;
+export const BOOK_METADATA_STRING_BYTES=256*1024;
+
+/** A permanent book apply policy decision, independent of the wire object limit. */
+export class BookMetadataRejected extends ResumeError {
+ constructor(){super('BUSINESS_REJECTED');}
+}
 
 const PAGE_CHARS=8192;
 

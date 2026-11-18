@@ -56,7 +56,11 @@ async function receiver(f:Fixture,objects:ObjectDescriptor[],prior?:{binding:Bin
   selection,selectionDigest:selectionDigest(selection),objectCount:objects.length,objectsRoot:objectsRoot(objects.map(d=>d.objectId)),pageObjectCounts:[objects.length]};
  const job=binding.jobId,plan=planDigest(description);
  const began=await call(request('begin',description as unknown as Row,job,plan));
- const epoch=began.epoch!,operation=(phase:Envelope['phase'],payload:Row,success=true)=>call(request(phase,payload,job,plan,epoch),success);
+ const epoch=began.epoch!,operation=(phase:Envelope['phase'],payload:Row,success=true,id?:string)=>{
+  const frame=request(phase,payload,job,plan,epoch);
+  if(id)frame.requestId=id;
+  return call(frame,success);
+ };
  let seq=0;
  return {binding,description,epoch,session,operation,io,
   manifest:()=>operation('manifestPage',{pageIndex:0,startIndex:0,previousPageDigest:'0'.repeat(64),pageDigest:pageDigest(plan,0,0,objects,'0'.repeat(64)),entries:objects}),
@@ -278,64 +282,107 @@ test('book host work advances only on completed bytes and stops in-flight calls'
  }finally{await f.dispose();}
 });
 
-for(const kind of ['bookState','bookReading'] as const)test(kind+' accepts 16 MiB with paged SQLite I/O',async()=>{
- const MiB=1024*1024;
- for(const size of [MiB,MiB+1,16*MiB]){
-  const f=await binaryRuntime({fileRefs:true});
-  try{
-   const {files,repository}=await attachBinaryBooks(f);
-   await f.store.initialize();
-   await f.db.execute('CREATE TABLE metadata_receipt(outcome TEXT NOT NULL)');
-   const sample=await sampleBook(f,files,512);
-   const id=sample.state.bookId;
-   const query=f.db.query,execute=f.db.execute,transaction=f.db.transaction;
-   f.db.query=async(...args)=>{
-    const rows=await query(...args);
-    if(JSON.stringify(rows).length>512*1024)throw Error('Query result too large');
-    return rows;
-   };
-   f.db.execute=async(sql,params)=>{
-    if(JSON.stringify(params??[]).length>512*1024)throw Error('Oversized bind');
-    return execute(sql,params);
-   };
-   f.db.transaction=async statements=>{
-    if(JSON.stringify(statements).length>512*1024)throw Error('Oversized transaction');
-    return transaction(statements);
-   };
-   const isState=kind==='bookState';
-   if(!isState)await repository.books!.merge(sample.state);
-   const template=isState?{...sample.state,title:''}:[{
-    bookId:id,chapterIndex:1,isRead:true,readingProgress:0.5,readingPositionBytes:1,
-    readingPositionChangedAt:99,readingPositionContentHash:'',sourceDeviceId:'fixture',
-   }];
-   const small=JSON.stringify(template),field=isState?'title':'readingPositionContentHash';
-   const fill=size-small.length-(size===16*MiB?0:1);
-   const prefix=small.indexOf('""',small.indexOf('"'+field+'"'))+1;
-   const body=Buffer.alloc(size,0x78),pad=size===16*MiB?0:1;
-   if(pad)body[0]=0x20;
-   body.write(small.slice(0,prefix),pad);body.write(small.slice(prefix),pad+prefix+fill);
-   expect(body.length).toBe(size);
-   const sha=(bytes:Uint8Array)=>new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
-   const digest={size,sha256:sha(body),chunkHashes:Array.from({length:Math.ceil(size/CHUNK_BYTES)},(_,i)=>sha(body.subarray(i*CHUNK_BYTES,(i+1)*CHUNK_BYTES)))};
-   const metadata=isState?{bookId:id}:{bookId:id,pageIndex:0};
-   const descriptor=bookObject(kind,isState?id:id+':0',metadata,isState?[]:[sample.stateObject.objectId],digest,HARD_LIMITS);
-   expect(()=>bookObject(kind,descriptor.businessId,metadata,descriptor.dependsOn,{...digest,size:16*MiB+1,chunkHashes:Array.from({length:257},()=>digest.chunkHashes[0]!)},HARD_LIMITS)).toThrow('INVALID_FRAME');
-   const books=new BinaryBooks(f.store,async()=>repository.books,files,f.chunks,()=>{});
-   expect(()=>books.peak(isState?[descriptor]:[sample.stateObject,descriptor],HARD_LIMITS)).not.toThrow();
-   const path='books/received-metadata';
-   await files.writeBytes(path,body);
-   const job={scope:'test',jobId:'large-book',description:{selection:{limits:HARD_LIMITS}}} as Job;
-   await books.apply(job,descriptor,path,{before:[],after:outcome=>[{sql:'INSERT INTO metadata_receipt VALUES(?)',params:[outcome]}]});
-   const table=isState?'sync_books':'sync_book_reading';
-   expect(await f.db.query(`SELECT length(json_extract(state_json,'$.${field}')) AS size FROM ${table}`)).toEqual([{size:fill}]);
-   expect(await f.db.query('SELECT outcome FROM metadata_receipt')).toEqual([{outcome:'merged'}]);
-   expect(await f.db.query('SELECT count(*) AS n FROM library_binary_book_text')).toEqual([{n:0}]);
-   const descriptors:ObjectDescriptor[]=[];
-   await books.freeze('test','frozen',HARD_LIMITS,new Set(['bookState','bookReading']),d=>descriptors.push(d),async()=>{});
-   expect(descriptors.find(d=>d.kind===kind)?.size).toBeLessThanOrEqual(16*MiB);
-  }finally{await f.dispose();}
- }
-},120000);
+const META_BYTES=1024*1024,FIELD_BYTES=256*1024;
+const metadataDigest=(data:Uint8Array)=>{
+ const sha=(bytes:Uint8Array)=>new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+ return {size:data.length,sha256:sha(data),chunkHashes:Array.from({length:Math.ceil(data.length/CHUNK_BYTES)},(_,i)=>sha(data.subarray(i*CHUNK_BYTES,(i+1)*CHUNK_BYTES)))};
+};
+
+for(const kind of ['bookState','bookReading'] as const)test(kind+' applies the body and UTF-8 field boundary through paged SQLite',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {files,repository}=await attachBinaryBooks(f),sample=await sampleBook(f,files,512);
+  await f.store.initialize();
+  await f.db.execute('CREATE TABLE metadata_receipt(outcome TEXT NOT NULL)');
+  const {bookId:id}=sample.state,isState=kind==='bookState';
+  if(!isState)await repository.books!.merge(sample.state);
+  const query=f.db.query,transaction=f.db.transaction;
+  f.db.query=async(...args)=>{
+   const rows=await query(...args);
+   if(Buffer.byteLength(JSON.stringify(rows))>512*1024)throw Error('Query result too large');
+   return rows;
+  };
+  f.db.transaction=async statements=>{
+   if(Buffer.byteLength(JSON.stringify(statements))>512*1024)throw Error('Oversized transaction');
+   return transaction(statements);
+  };
+  const title='😀'.repeat(FIELD_BYTES/4),value=isState?{...sample.state,title}:[{
+   bookId:id,chapterIndex:1,isRead:true,readingProgress:0.5,readingPositionBytes:1,
+   readingPositionChangedAt:99,readingPositionContentHash:title,sourceDeviceId:'fixture',
+  }];
+  const json=Buffer.from(JSON.stringify(value)),body=Buffer.alloc(META_BYTES,0x20);
+  // Keep the JSON first so the field and the trailing whitespace are both scanned.
+  json.copy(body);
+  const metadata=isState?{bookId:id}:{bookId:id,pageIndex:0},dependencies=isState?[]:[sample.stateObject.objectId];
+  const descriptor=bookObject(kind,isState?id:id+':0',metadata,dependencies,metadataDigest(body),HARD_LIMITS);
+  const books=new BinaryBooks(f.store,async()=>repository.books,files,f.chunks,()=>{});
+  const path='books/received-metadata';
+  await files.writeBytes(path,body);
+  const job={scope:'test',jobId:'boundary-book',description:{selection:{limits:HARD_LIMITS}}} as Job;
+  await books.apply(job,descriptor,path,{before:[],after:outcome=>[{sql:'INSERT INTO metadata_receipt VALUES(?)',params:[outcome]}]});
+  const table=isState?'sync_books':'sync_book_reading',field=isState?'title':'readingPositionContentHash';
+  expect(await f.db.query(`SELECT length(CAST(json_extract(state_json,'$.${field}') AS BLOB)) AS size FROM ${table}`)).toEqual([{size:FIELD_BYTES}]);
+  expect(await f.db.query('SELECT outcome FROM metadata_receipt')).toEqual([{outcome:'merged'}]);
+  expect(await f.db.query('SELECT count(*) AS n FROM library_binary_book_text')).toEqual([{n:0}]);
+  const descriptors:ObjectDescriptor[]=[];
+  await books.freeze('test','frozen',HARD_LIMITS,new Set(['bookState','bookReading']),d=>descriptors.push(d),async()=>{});
+  expect(descriptors.find(d=>d.kind===kind)?.size).toBe(json.length);
+ }finally{await f.dispose();}
+},20000);
+
+for(const shape of ['body','field'] as const)test('book '+shape+' exceeds business limit and replays terminal rejection',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {files}=await attachBinaryBooks(f),sample=await sampleBook(f,files,512);
+  const id=sample.state.bookId,isState=shape==='body',kind=isState?'bookState':'bookReading';
+  const value=isState?sample.state:[{
+   bookId:id,chapterIndex:1,isRead:true,readingProgress:0.5,readingPositionBytes:1,
+   readingPositionChangedAt:99,readingPositionContentHash:'😀'.repeat(FIELD_BYTES/4)+'x',sourceDeviceId:'fixture',
+  }];
+  const json=Buffer.from(JSON.stringify(value)),body=isState?Buffer.alloc(META_BYTES+1,0x20):json;
+  if(isState)json.copy(body);
+  const metadata=isState?{bookId:id}:{bookId:id,pageIndex:0},dependencies=isState?[]:[sample.stateObject.objectId];
+  const descriptor=bookObject(kind,isState?id:id+':0',metadata,dependencies,metadataDigest(body),HARD_LIMITS);
+  const objects=isState?[descriptor]:[sample.stateObject,descriptor].sort((a,b)=>a.objectId.localeCompare(b.objectId));
+  const wireDigest={size:16*META_BYTES,sha256:descriptor.sha256,chunkHashes:Array<string>(256).fill(descriptor.sha256)};
+  expect(bookObject(kind,descriptor.businessId,metadata,dependencies,wireDigest,HARD_LIMITS).size).toBe(16*META_BYTES);
+  expect(()=>bookObject(kind,descriptor.businessId,metadata,dependencies,
+   {...wireDigest,size:16*META_BYTES+1,chunkHashes:[...wireDigest.chunkHashes,descriptor.sha256]},HARD_LIMITS)).toThrow('INVALID_FRAME');
+  const read=(d:ObjectDescriptor,i:number)=>d.objectId===descriptor.objectId?Promise.resolve(body.subarray(i*CHUNK_BYTES,(i+1)*CHUNK_BYTES)):sample.read(d,i);
+  const peer=await receiver(f,objects);
+  await peer.manifest();
+  expect(peer.description.selection.limits.maxObjectBytes).toBe(16*1024*1024);
+  if(!isState){
+   await transfer(peer,sample.stateObject,read);
+   await peer.operation('apply',{objectId:sample.stateObject.objectId});
+  }
+  const open=files.openText;
+  let opened=0,reads=0;
+  files.openText=(...args)=>{opened++;return open(...args);};
+  const readText=files.readTextChunk;
+  files.readTextChunk=(...args)=>{reads++;return readText(...args);};
+  const requestId=nonce(),args={objectId:descriptor.objectId};
+  await transfer(peer,descriptor,read);
+  const rejected=await peer.operation('apply',args,false,requestId);
+  expect(rejected).toMatchObject({result:null,error:{code:'BUSINESS_REJECTED',class:'BUSINESS',recovery:'STOP',retryable:false,retryAfterMillis:0}});
+  await peer.session.running.catch(()=>{});
+  expect(opened).toBe(isState?0:1);
+  if(!isState)expect(reads).toBeGreaterThan(1);
+  expect(await f.db.query('SELECT receipt FROM library_binary_objects WHERE object_id=?',[descriptor.objectId])).toEqual([{receipt:null}]);
+  const journal=await f.db.query('SELECT result FROM library_binary_requests WHERE request_id=?',[requestId]);
+  expect(JSON.parse(String(journal[0]?.result))).toEqual({errorCode:'BUSINESS_REJECTED'});
+  expect(await f.db.query(isState?'SELECT book_id FROM sync_books':'SELECT book_id FROM sync_book_reading')).toEqual([]);
+
+  // Re-authenticate and resume after losing a response. A persisted result makes
+  // rereading the rejected object unnecessary even when its file is unavailable.
+  files.openText=async()=>{throw Error('unexpected replay read');};
+  const resumed=await receiver(f,objects,peer);
+  expect(resumed.epoch).toBe(peer.epoch+1);
+  const again=await resumed.operation('apply',args,false,requestId);
+  expect(again.error).toEqual(rejected.error);
+  await resumed.session.running.catch(()=>{});
+ }finally{await f.dispose();}
+},20000);
 
 test('the books gate keeps syncBooks available when opted out independently',async()=>{
  const f=await binaryRuntime({fileRefs:true});

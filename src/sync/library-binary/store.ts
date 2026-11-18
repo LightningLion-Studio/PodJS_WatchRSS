@@ -107,6 +107,13 @@ export class BinaryStore {
   ]);
   return existing?.result?parse(existing.result):null;
  }
+ /** Keep the business STOP in the fixed-request journal for authenticated replay. */
+ rejectBookMetadata(job:Job,peer:string,r:Envelope):Promise<void>{
+  return this.db.transaction([this.guard(job),{
+   sql:'UPDATE library_binary_requests SET result=? WHERE scope=? AND job_id=? AND peer=? AND request_id=? AND digest=?',
+   params:[JSON.stringify({errorCode:'BUSINESS_REJECTED'}),job.scope,job.jobId,peer,r.requestId,r.requestDigest],
+  },...this.touchStatements(job)]);
+ }
  commitChunks(job:Job,peer:string,requests:readonly Envelope[]):Promise<void>{
   return this.db.transaction([this.guard(job),...requests.flatMap(r=>this.requestQuota(job,peer,r)),...this.touchStatements(job)]);
  }

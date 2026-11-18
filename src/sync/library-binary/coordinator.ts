@@ -7,6 +7,7 @@ import type {DataReader,ByteTransport,SourceFileChunk} from './codec';
 import {ReceivePipeline,type ChunkWork} from './receive-pipeline';
 import {ReceiveBindings,ReceiveIndex,bindingCapacity} from './receive-index';
 import type {BinarySourcePlan} from './assets';
+import {BookMetadataRejected} from './book-metadata';
 import type {RecoveryRules} from './recovery';
 import {frameBytes} from '../wire-frame-size';
 import {BinaryStore,validateGraph,type Job,type ReceiptBoundary} from './store';
@@ -332,7 +333,7 @@ export class LibraryBinaryConnection {
   if(j.role!=='receiver'&&r.phase!=='cancel')fail();
   const receive=this.receive?.job.jobId===j.jobId?this.receive:undefined;
   if(receive){this.checkReceiveBinding(r);receive.requests.remember(r);}
-  await this.ports.store.checkBinding(j,this.ports.phoneDeviceId,r,undefined,charge);
+  const replay=await this.ports.store.checkBinding(j,this.ports.phoneDeviceId,r,undefined,charge);
   if(j.state==='CANCELLED'&&!['missing','cancel'].includes(r.phase))fail('JOB_CANCELLED');
   if(j.lease)await this.ports.chunks.check(j.lease as unknown as ObjectLease);
   let result:Row;
@@ -349,10 +350,17 @@ export class LibraryBinaryConnection {
    }
    case 'missing':result=await this.missing(j,p);await this.ports.store.db.transaction(this.ports.store.bind(j,this.ports.phoneDeviceId,r));break;
    case 'apply':{
+    if(replay?.errorCode==='BUSINESS_REJECTED')fail('BUSINESS_REJECTED');
     const id=String(p.objectId);
     if(receive?.index&&receive.pipeline?.busyOn(receive.index.slot(id)))fail('BUSY');
     this.applying=id;
-    try{result=await this.apply(j,r);}finally{this.applying=undefined;}
+    try{result=await this.apply(j,r);}catch(error){
+     if(error instanceof BookMetadataRejected){
+      this.check();
+      await this.ports.store.rejectBookMetadata(j,this.ports.phoneDeviceId,r);
+     }
+     throw error;
+    }finally{this.applying=undefined;}
     break;
    }
    case 'complete':result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p) as unknown as Row;if(await this.cleanupApplied(j)){
