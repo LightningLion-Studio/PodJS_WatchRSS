@@ -21,16 +21,16 @@ test('one source and unknown dimensions remain eligible; legacy projects keep th
 });
 test('feed ingress keeps the 720P cap while a reused item follows memory pressure',()=>{
  (globalThis as any).pod={memoryBudgetBytes:()=>128000000};
- const rows=[1080,720,480,320].map(width=>{
+ const rows=[1080,720,480,360,320].map(width=>{
   const v=variant(width);
   return {width:v.width,height:v.height,codec_type:'h264',bit_rate:v.bitrate,play_addr:{url_list:[v.playUrl]}};
  });
  const item=parseDouyinItem({aweme_id:'memory-pressure',video:{bit_rate:rows}});
- expect(item?.variants.map(v=>v.width)).toEqual([720,480,320]);
+ expect(item?.variants.map(v=>v.width)).toEqual([720,480,360,320]);
  if(!item)throw new Error('Expected an admitted Douyin item');
  expect(normalizeItems([item])[0]?.playUrl).toBe(variant(480).playUrl);
  dispatchMemoryPressure({t:'memory.pressure',level:2});
- expect(normalizeItems([item])[0]?.playUrl).toBe(variant(320).playUrl);
+ expect(normalizeItems([item])[0]?.playUrl).toBe(variant(360).playUrl);
  dispatchMemoryPressure({t:'memory.pressure',level:0});
  expect(normalizeItems([item])[0]?.playUrl).toBe(variant(480).playUrl);
 });
