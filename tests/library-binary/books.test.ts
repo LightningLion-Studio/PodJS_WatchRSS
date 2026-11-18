@@ -22,7 +22,7 @@ async function connect(f:Fixture){
   await session.connection.writeFrame({action:'ack',success:true,applied:true});
   return reply;
  };
- const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true});
+ const probe=await legacy({action:'syncLibrary',phase:'probe',version:14,deviceId:'phone',supportedLibraryBinaryVersions:[2],supportsPersistentSession:true,requestPersistentSession:true,supportsBookSyncV1:true,supportsBookReadingDeltaV1:true});
  await legacy({action:'syncAccount',version:1,deviceId:'phone',account:{userId:'b2-host'}});
  const cap=probe.libraryBinary as unknown as Capability;
  return {session,cap,switch:async()=>{

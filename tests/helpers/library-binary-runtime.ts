@@ -123,8 +123,8 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
    })());
    streams.dropFile=(_id,reference)=>operation((()=>{refs.delete(reference);})());
   }
-  const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,handleAction:async(r,context)=>{
-   if(options.fileRefs&&r.action==='syncBooks'&&ports.library)return (await ports.library.repository()).syncBooks(r,context.session,context.afterAppliedAck);
+  const owner=new RfcommLibraryListener(repository,{radio,streams}),connection=new StreamFrameConnection(pair.phone),running=owner.start({binary:service,filterRequest:new BluetoothActionPolicy(()=>service.canSwitch()).filterRequest,capabilities:options.fileRefs?{supportsBookSyncV1:true,supportsBookReadingDeltaV1:true}:undefined,handleAction:async(r,_,context)=>{
+   if(options.fileRefs&&r.action==='syncBooks'&&ports.library)return (await ports.library.repository()).syncBooks(r,context!.session,context!.afterAppliedAck);
    return {success:true,action:r.action,version:1};
   },now:()=>0});void running.catch(()=>{});return {pair,connection,owner,running};
  }
