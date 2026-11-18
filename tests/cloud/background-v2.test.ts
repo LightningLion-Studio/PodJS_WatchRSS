@@ -3,6 +3,7 @@ import {readFileSync,mkdtempSync,writeFileSync,rmSync,realpathSync} from 'node:f
 import {resolve,join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
 import {runInNewContext} from 'node:vm';
+import {CURRENT_OOBE_VERSION,PRIVACY_POLICY_VERSION} from '../../src/onboarding/state';
 const framework=resolve(dirname(realpathSync(resolve(import.meta.dir,'../../node_modules/@podjs/framework/package.json'))),'../..');
 const {buildBackground}=await import(resolve(framework,'packages/cli/src/background-build.ts'));
 test('full v2 headless bundle stays bounded and consent/account/network gates issue no business traffic',async()=>{
@@ -13,14 +14,20 @@ test('full v2 headless bundle stays bounded and consent/account/network gates is
   for(const phase of ['consent','account','offline']){
    const realm:any={};runInNewContext(source,realm);expect(realm.pod).toBeUndefined();expect(realm.frame).toBeUndefined();const calls:string[]=[];
    const result=await realm.backgroundHandler({deadlineMs:Date.now()+300000,isCancelled:()=>false,request:async(method:string,args:any)=>{
-    if(method==='kv.get')return {exists:phase!=='consent',value:{oobeSeenVersion:3,privacyPolicyAgreedVersion:1}};
+    if(method==='kv.get')return {
+     exists:phase!=='consent',
+     value:{oobeSeenVersion:CURRENT_OOBE_VERSION,privacyPolicyAgreedVersion:PRIVACY_POLICY_VERSION},
+    };
     expect(method).toBe('cloud.host');calls.push(args.method);
     if(args.method==='app.buildInfo')return {debugBuild:false};
     if(args.method==='secure.get')return phase==='account'?{exists:false}:{exists:true,value:JSON.stringify({userId:'fixture',watchDeviceToken:'synthetic',backendBaseUrl:'https://backend.invalid'})};
     if(args.method==='discovery.networkSnapshot')return {active:false,validated:false,wifi:false,metered:true};
     throw Error('unexpected host '+args.method);
    }});
-   expect(result).toBe(phase==='offline'?'retry':'success');expect(calls.some(c=>c.startsWith('http.')||c.startsWith('file.')||c==='cloud.acquire')).toBe(false);
+   expect(result).toBe(phase==='offline'?'retry':'success');
+   expect(calls.includes('secure.get')).toBe(phase!=='consent');
+   expect(calls.includes('discovery.networkSnapshot')).toBe(phase==='offline');
+   expect(calls.some(c=>c.startsWith('http.')||c.startsWith('file.')||c==='cloud.acquire')).toBe(false);
   }
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
