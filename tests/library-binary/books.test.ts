@@ -4,6 +4,7 @@ import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {attachBinaryBooks,sampleBook} from '../helpers/library-binary-books';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
 import {BinaryBooks} from '../../src/sync/library-binary/books';
+import {pagedBookBoundary} from '../../src/sync/library-binary/book-metadata';
 import {bookFileWork} from '../../src/sync/library-binary/book-import';
 import type {Job} from '../../src/sync/library-binary/store';
 import {BinaryAssets} from '../../src/sync/library-binary/assets';
@@ -444,3 +445,17 @@ test('freeze omits oversized state dependencies and reading rows and repages val
   expect(pages.every(d=>d.dependsOn[0]===objects[0]!.objectId)).toBe(true);
  }finally{await f.dispose();}
 },15000);
+
+test('paged book SQL follows ordinal order under reverse SQLite scans',async()=>{
+ const f=await binaryRuntime();
+ try{
+  await f.store.initialize();
+  await f.db.execute('PRAGMA reverse_unordered_selects=ON');
+  await f.db.execute('CREATE TABLE assembled (first TEXT, second TEXT)');
+  const first=Array.from({length:18},(_,i)=>('page-'+i+'😀').repeat(400)).join(''),second=first.slice(50)+'\0';
+  const book=pagedBookBoundary(f.store.db,['scope','job','object'],{before:[],after:()=>[]});
+  await book.transaction!([{sql:'INSERT INTO assembled VALUES(?,?)',params:[first,second]}]);
+  expect(await f.db.query('SELECT first,second FROM assembled')).toEqual([{first,second}]);
+  expect(await f.db.query('SELECT count(*) AS parts FROM library_binary_book_text')).toEqual([{parts:0}]);
+ }finally{await f.dispose();}
+});

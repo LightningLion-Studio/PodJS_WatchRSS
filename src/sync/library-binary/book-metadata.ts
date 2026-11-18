@@ -98,8 +98,6 @@ export function pagedBookBoundary(db:SqlDatabase,key:readonly string[],boundary:
      const prior=saved.get(value);
      if(prior!==undefined){replacements.set(i,prior);continue;}
      const id=field++;
-     saved.set(value,id);
-     replacements.set(i,id);
      let buffer='',ordinal=0;
      const flush=async()=>{
       boundary.check?.();
@@ -111,6 +109,7 @@ export function pagedBookBoundary(db:SqlDatabase,key:readonly string[],boundary:
       buffer+=piece;
      }
      if(buffer.length||!ordinal)await flush();
+     saved.set(value,id);replacements.set(i,id);
     }
     if(!replacements.size){writes.push(statement);continue;}
     let index=0;
@@ -120,7 +119,11 @@ export function pagedBookBoundary(db:SqlDatabase,key:readonly string[],boundary:
      const at=index++,id=replacements.get(at);
      if(id===undefined){next.push(bindings[at]);return token;}
      next.push(...key,id);
-     return `(SELECT group_concat(value,'') FROM (SELECT value FROM library_binary_book_text WHERE ${predicate} AND field=? ORDER BY ordinal))`;
+     // All rows in the full window return the same ordinal-ordered value.
+     // LIMIT 1 avoids materializing a result for each fragment.
+     return `(SELECT group_concat(value,'') OVER (
+       ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+      ) FROM library_binary_book_text WHERE ${predicate} AND field=? LIMIT 1)`;
     });
     if(index!==bindings.length)throw Error('book_sql_bindings');
     writes.push({sql,params:next});
