@@ -1,4 +1,4 @@
-import {capability,selection,exact,row,bool,fail,type Capability,type Selection,type Direction,type KindVersion,type Row} from './wire';
+import {LIMIT_KEYS,capability,selection,exact,row,bool,fail,type Binding,type Capability,type Selection,type Direction,type KindVersion,type Row} from './wire';
 import {capability as resumeCapability} from '../library-resume/wire';
 import {capabilityDigest} from './digests';
 
@@ -37,10 +37,13 @@ export function classifyPeer(probe:unknown,ready:Ready):PeerRoute {
   return p.supportsAccountDataSpaces===true&&BITS.every(k=>p[k]===true)?wait('COMPOSE_V14'):'PEER_IMPLEMENTATION_UNKNOWN';
  }catch{return 'CAPABILITY_MISMATCH';}
 }
-/** Local S2 capability is an explicit list of adapters whose contracts are ready. */
-export function s2Capability(readyKinds:Capability['kinds'],limits:Capability['limits']):Capability {
+/** Advertise only adapters whose contracts are ready. */
+export function binaryCapability(readyKinds:Capability['kinds'],limits:Capability['limits']):Capability {
  if(readyKinds.some(k=>!['articleBody','articleMetadata','rssSource','readerMetadata','readerResource','noteAsset'].includes(k.kind)))fail('UNSUPPORTED_KIND');
- return capability({version:2,profile:'merge-b2',kinds:readyKinds,chunkSizes:[65536],limits:{...limits,maxInFlightChunks:1,maxInFlightBytes:65536}});
+ return capability({version:2,profile:'merge-b2',kinds:readyKinds,chunkSizes:[65536],limits});
+}
+export function s2Capability(readyKinds:Capability['kinds'],limits:Capability['limits']):Capability {
+ return binaryCapability(readyKinds,{...limits,maxInFlightChunks:1,maxInFlightBytes:65536});
 }
 export function negotiate(source:Capability,receiver:Capability):Selection|null {
  capability(source);capability(receiver);
@@ -49,8 +52,15 @@ export function negotiate(source:Capability,receiver:Capability):Selection|null 
  const usable=kinds.filter(k=>k.kind!=='articleBody'||kinds.some(m=>m.kind==='articleMetadata')).filter(k=>k.kind!=='readerResource'||kinds.some(m=>m.kind==='readerMetadata'));
  if(!usable.length)return null;
  const limits=Object.fromEntries(Object.keys(source.limits).map(k=>[k,Math.min(source.limits[k as keyof Capability['limits']],receiver.limits[k as keyof Capability['limits']])]));
- // A local S2 capability always selects 1/65536; S3 peers use the frozen 8 pair.
  return selection({profile:'merge-b2',kinds:usable,chunkBytes:65536,limits});
+}
+/** New jobs select the intersection. Resumes keep the frozen limits; callers
+ * bind them to the persisted selection digest before granting write authority. */
+export function checkSelectedLimits(binding:Binding,source:Capability,receiver:Capability):void{
+ for(const key of LIMIT_KEYS){
+  const maximum=Math.min(source.limits[key],receiver.limits[key]),chosen=binding.selection.limits[key];
+  if(binding.intent==='resume'?chosen>maximum:chosen!==maximum)fail('CAPABILITY_MISMATCH');
+ }
 }
 export interface Scope {domain:string;kind?:string;direction:Direction;v1Available:boolean}
 export interface ScopeRoute extends Scope {protocol:'b2'|'v1'}

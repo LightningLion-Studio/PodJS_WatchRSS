@@ -10,7 +10,7 @@ export class HostSyncByteStream implements SyncByteStream {
  private closed=false;
  constructor(private readonly id:string,private readonly ports:RfcommPorts['streams']){}
  async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await (this.ports.readBytes?this.ports.readBytes(this.id,maxBytes,timeoutMs):this.ports.read(this.id,maxBytes,timeoutMs)).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return 'bytes' in value?value.bytes:decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
- async write(bytes:Uint8Array){if(this.closed)throw new Error('Bluetooth stream closed');const result=await (this.ports.writeBytes??this.ports.write)(this.id,bytes,120000).result;if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
+ async write(bytes:Uint8Array,timeoutMs=120000){if(this.closed)throw new Error('Bluetooth stream closed');const result=await (this.ports.writeBytes??this.ports.write)(this.id,bytes,timeoutMs).result;if(result.written!==bytes.length)throw new Error('Incomplete Bluetooth write');if(this.closed)throw new Error('Bluetooth stream closed');}
  async close(){if(this.closed)return;this.closed=true;await this.ports.close(this.id);}
 }
 /** One native-compatible secure RFCOMM session. Stop aborts pending
