@@ -76,10 +76,11 @@ function start(){
    if(!event.syncV2){syncV2Ready=undefined;clearV2Keys();await syncV2?.stop();return;}
    const captured=new Map<number,Uint8Array>();try{for(const c of event.bootstrap.keyCommitments){const key=await event.keys.accountKey(event.userId,c.keyVersion);if(key)captured.set(c.keyVersion,key);}const latest=await summaryAccountStore.read();if(disposed||cloudAccountIdentity(latest)!==cloudAccountIdentity(expected)){for(const key of captured.values())key.fill(0);return;}clearV2Keys();heldKeys=captured;syncV2Ready=event;}catch(error){for(const key of captured.values())key.fill(0);throw error;}
   }:undefined;
-  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
+  runtime=createCloudRuntime(host,getLibrarySyncRepository,guard,summaryAccountStore,()=>{notifyLibraryChanged('remote');notifyNotesChanged();},execution,{onApprovalComplete:()=>scheduler?.approvalCompleted(),approver:(open,crypto)=>new CloudApproverController({open,crypto:createApproverCrypto(crypto)}),recordDiagnostic:value=>appLogger.i('CloudRecords',value),formatDiagnostic:value=>appLogger.i('CloudFormat',value),primaryV2:SYNC_V2_PRODUCT.syncV2,keysReady});approvals=runtime.approvals;approver=runtime.approver;foreground();if(approver)cleanups.push(approver.subscribe(()=>{for(const fn of approverListeners)try{fn();}catch{}armApprover();}));cleanups.push(approvals.subscribe(()=>{notifyApproval();arm();}));
   let accountId='',accountScope='',accountRead=0;
   scheduler=new WatchCloudScheduler({
    prepare:()=>prepareAccount(),
+   mayHavePendingIntent:()=>!accountReady||!!handoff?.state.mode,
    async sync(requestedManual,requestedMode,run){
     const scope=identity;
     if(!run.current||run.intent&&run.intent.scope!==scope)return false;
@@ -87,7 +88,8 @@ function start(){
     if(!run.current||identity!==scope||
       run.intent&&!sameManualIntent(grant,run.intent)||requestedManual&&!grant)return false;
     run.bindIntent(grant);
-    const manual=!!grant,mode=grant?.mode??requestedMode;
+    // Approval retains the initial recent sync when no durable grant exists.
+    const manual=!!grant||run.afterApproval,mode=grant?.mode??requestedMode;
     const outcome=await runtime!.service.syncNowResult(manual,mode,scope);
     // Report whether the writer finished for scheduling purposes. Only a
     // current writer may deliver its result or touch a grant.
@@ -115,7 +117,7 @@ function start(){
      if(!run.current||identity!==scope)return success;
      if(outcome.retryable===false&&!syncV2Ready)await scheduler?.setUpgradeRequired(true);
      else if(success||outcome.continuationReady)await scheduler?.setUpgradeRequired(false);
-     if(run.current&&identity===scope&&outcome.retryAtMillis)scheduler?.deferUntil(outcome.retryAtMillis,manual?mode:undefined);
+     if(run.current&&identity===scope&&outcome.retryAtMillis)scheduler?.deferUntil(outcome.retryAtMillis,grant?.mode);
     }catch{appLogger.w('CloudSync','Foreground sync follow-up failed');}
     return success;
    },
@@ -169,8 +171,13 @@ function start(){
     syncV2Ready=undefined;clearV2Keys();
    }
    const generation=accountGeneration;
+   if(!changed){
+    scheduler?.wakePending();
+    if(!accountReady)await initializeAccount();
+    return;
+   }
    if(!accountReady)await initializeAccount();
-   if(!changed||disposed||generation!==accountGeneration)return;
+   if(disposed||generation!==accountGeneration)return;
    scheduler?.scheduleAccount();
    if(visibility.active)void handoff?.restore().catch(()=>{});
   };

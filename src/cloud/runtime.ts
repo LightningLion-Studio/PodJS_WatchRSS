@@ -24,7 +24,7 @@ import {cloudDisabled,type CloudGuard} from './guard';
 import {legacyWebArticleId} from './rss-identity';
 import {watchAppVersion} from '../core/app-version';
 /** Same coordinator and writer lease in foreground and verified background guest. */
-export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void|Promise<void>,execution?:{begin():()=>void;remainingMillis?():number;finishRequest?:CloudHostRequest},formats:{primaryV2?:boolean;approver?:(open:(check:()=>void)=>Promise<ApproverSession|undefined>,crypto:ReturnType<typeof createCloudHostPorts>['crypto'])=>CloudApproverController;restoreReceipt?:(id:number)=>void;restoreGuardVersion?:string;restoreStalled?:(value:boolean)=>void;writeV1?:boolean;keysReady?:import('./service').CloudSyncPorts['keysReady'];formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
+export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<CloudLibraryRepository&{deviceId():Promise<string>}>,guard:CloudGuard=cloudDisabled,accountStore?:WatchAccountStore,onChanged?:()=>void|Promise<void>,execution?:{begin():()=>void;remainingMillis?():number;finishRequest?:CloudHostRequest},formats:{primaryV2?:boolean;approver?:(open:(check:()=>void)=>Promise<ApproverSession|undefined>,crypto:ReturnType<typeof createCloudHostPorts>['crypto'])=>CloudApproverController;onApprovalComplete?:()=>void;restoreReceipt?:(id:number)=>void;restoreGuardVersion?:string;restoreStalled?:(value:boolean)=>void;writeV1?:boolean;keysReady?:import('./service').CloudSyncPorts['keysReady'];formatDiagnostic?:(value:string)=>void;recordDiagnostic?:(value:string)=>void}={}){
  const changeDetectors=new Map<string,SqlCloudChangeDetection>();
  const ports=createCloudHostPorts(host,guard),transport=createCloudTransport(host,guard);
  const accounts=accountStore??new WatchAccountStore({exclusive:action=>withAccountLease(host,action),revokeCloudScope:state=>revokeAccountCloud(host,state),clearCloudScope:state=>clearAccountCloud(host,state),get:async key=>(await ports.store.get(key))??null,set:ports.store.set,remove:async key=>{await host('secure.delete',{key});}});
@@ -108,7 +108,7 @@ export function createCloudRuntime(host:CloudHostRequest,repository:()=>Promise<
   open:openSession,onChanged,recordDiagnostic:formats.recordDiagnostic,formatDiagnostic:formats.formatDiagnostic??(value=>console.info('CloudFormat',value)),report:value=>{try{const valueJson=JSON.stringify(value);if(formats.formatDiagnostic)formats.formatDiagnostic(valueJson);else console.info('CloudFormat',valueJson);}catch{}},
  },guard);
  const authorization=async()=>{const session=await openSession();return session&&createCloudAuthorization({...session,crypto:session.v2Crypto});};
- const approvals=new CloudApprovalController({open:authorization,sync:()=>service.syncNow(true)});
+ const approvals=new CloudApprovalController({open:authorization,sync:async()=>{formats.onApprovalComplete?.();}});
  const approver=formats.approver?.(async check=>{
   const session=await openSession(check);if(!session)return undefined;
   const account=await accounts.read();await session.assertCurrent();if(!account)return undefined;

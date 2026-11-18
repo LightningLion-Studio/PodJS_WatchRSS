@@ -206,7 +206,9 @@ for(const row of cases)for(const failed of [false,true]){
    expect(executions).toHaveLength(immediate);
   }
   const target='target' in row?row.target:'B';
-  const remains=failed&&'idleOnFailure' in row;
+  // A verified same-account notification now wakes a known durable record.
+  const credentialWake=row.name==='same-account credential notification'&&process.env.CLOUD_RESUME_REFERENCE!=='1';
+  const remains=failed&&'idleOnFailure' in row&&!credentialWake;
   // Outputs measured on 7cab5c09 with this same fixture. The candidate
   // must also retry initialization without promoting a credential refresh to work.
   const completed=remains?[]:target==='C'&&!failed?['B','C']:[target];
