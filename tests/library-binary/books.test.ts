@@ -207,6 +207,21 @@ test('book cancellation preserves hidden segment and never publishes a readable 
  }finally{await f.dispose();}
 },10000);
 
+test('the release-default books gate keeps syncBooks available when inherited B2 kinds are enabled',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  delete f.ports.b2BooksEnabled;
+  await attachBinaryBooks(f);
+  const {session,cap}=await connect(f);
+  expect(cap.kinds.map(k=>k.kind)).toContain('noteAsset');
+  expect(cap.kinds.some(k=>k.kind.startsWith('book'))).toBe(false);
+  await session.connection.writeFrame({action:'syncBooks',phase:'reading',version:1,deviceId:'phone',states:[],after:0});
+  expect(await session.connection.readFrame(3000)).toMatchObject({action:'syncBooks',version:1,success:true});
+  await session.connection.writeFrame({action:'ack',success:true,applied:true});
+  await session.pair.close();await session.running.catch(()=>{});
+ }finally{await f.dispose();}
+});
+
 test('unregistered legacy originals keep the books domain on syncBooks',async()=>{
  const f=await binaryRuntime({fileRefs:true});
  try{

@@ -30,6 +30,8 @@ export interface BinaryApplicationPorts {
  b2Enabled?:boolean;byteBridge():boolean;localPermission():boolean;store:BinaryStore;chunks:VerifiedChunkStore;files:BinaryAssetFiles;
  library?:{repository():Promise<SqlLibrarySessionRepository>;files:BinaryArticleFiles};
  books?:BinaryBookFiles;
+ /** Enabled after the native book pipeline meets its release acceptance gates. */
+ b2BooksEnabled?:boolean;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};changed?(kind?:string):void;
@@ -58,7 +60,7 @@ export class BinaryApplicationService implements BinarySessionPort {
    kinds.unshift({kind:'articleBody',schemaVersion:1,send:false,receive:true},{kind:'articleMetadata',schemaVersion:1,send:false,receive:true});
    kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
   }
-  const books=!!(runtime.fileRefs&&this.ports.books&&this.ports.library&&
+  const books=!!(this.ports.b2BooksEnabled&&runtime.fileRefs&&this.ports.books&&this.ports.library&&
    await (await this.ports.library.repository()).books?.binaryReady());
   if(books){
    for(const kind of BOOK_KINDS)kinds.push({kind,schemaVersion:1,send:true,receive:true});

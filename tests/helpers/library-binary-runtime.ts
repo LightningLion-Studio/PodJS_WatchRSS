@@ -94,7 +94,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  // Synthetic account only. No production tokens or keys.
  kv.set('state_json',JSON.stringify({userId:'b2-host',watchDeviceToken:'fixture',backendBaseUrl:'https://fixture.invalid'}));
  const accountScope=D('wrss.library-resume.v1/account',['https://fixture.invalid','b2-host']);
- const ports:BinaryApplicationPorts={b2Enabled:options.enabled??true,byteBridge:()=>true,localPermission:()=>true,store,chunks,files,account,deviceId:async()=>'watch',randomId:async()=>nonce(),now:()=>performance.now(),sleep};
+ const ports:BinaryApplicationPorts={b2Enabled:options.enabled??true,b2BooksEnabled:options.fileRefs,byteBridge:()=>true,localPermission:()=>true,store,chunks,files,account,deviceId:async()=>'watch',randomId:async()=>nonce(),now:()=>performance.now(),sleep};
  const service=new BinaryApplicationService(ports);
  const repository={deviceId:async()=>'watch',configurePeer:()=>{}} as unknown as LibrarySessionRepository;
  function session(pair=bytePair()){
