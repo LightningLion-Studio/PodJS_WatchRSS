@@ -13,7 +13,7 @@ export interface SourceFileRange {path:string;offset:number;size:number;sha256:s
 export interface SourceFileChunk {reference:string;length:number}
 export interface InputFileChunk {stream:string;reference:string;length:number}
 export type ReadFileChunk=(retain:boolean,sha256?:string)=>Promise<InputFileChunk|undefined>;
-export type DataReader=(header:DataHeader,read:(target:Uint8Array,activity?:boolean)=>Promise<void>,readFile?:ReadFileChunk)=>Promise<void>;
+export type DataReader=(header:DataHeader,read:(target:Uint8Array,activity?:boolean)=>Promise<void>,readFile?:ReadFileChunk,rejection?:string)=>Promise<void>;
 export type OutgoingData=Omit<DataFrame,'payload'>&{payload:Uint8Array|SourceFileChunk};
 export interface AckFrame {kind:'ack';streamId:1|2;epoch:number;ackSeq:number;entries:{txSeq:number;disposition:1|2}[]}
 export interface ControlFrame {kind:'control';envelope:Envelope}
@@ -100,6 +100,9 @@ export function decodeFrame(b:Uint8Array,maximum=MAX_FRAME_LENGTH):Frame {
 
 /** No RFCOMM dependency: S1 supplies bounded complete byte frames and cancellation. */
 export interface ByteTransport {
+ readonly native?:import('./transport').NativeFramePort;
+ activateReceive?():void;
+ settleNativeRejection?(sequence:number):void;
  setNetworkProgress?(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void):void;
  readFrame(readData?:DataReader):Promise<Uint8Array|null>;
  writeFrame(bytes:Uint8Array):Promise<void>;

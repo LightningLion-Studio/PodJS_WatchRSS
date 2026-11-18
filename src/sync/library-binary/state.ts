@@ -139,12 +139,12 @@ export class ReceiveWindow {
    await emitAck(this.ack(frame.epoch,[{txSeq:frame.txSeq,disposition}]));return 'ACK';
   }finally{this.busy=false;}
  }
- async header(frame:DataHeader):Promise<{object:ObjectDescriptor;check:()=>void}|null>{
+ async header(frame:DataHeader, sequenced=false):Promise<{object:ObjectDescriptor;check:()=>void}|null>{
   const token=this.checkGrant();
   if(frame.streamId!==this.binding.streamId||!this.grantedEpochs.has(frame.epoch)||frame.epoch>token.epoch)fail('STALE_EPOCH');
   if(frame.epoch<token.epoch)return null;
   if(!this.admitted)fail('FLOW_CONTROL_VIOLATION');
-  if(frame.txSeq!==this.nextTxSeq||!Number.isSafeInteger(frame.txSeq))fail();
+  if((!sequenced&&frame.txSeq!==this.nextTxSeq)||!Number.isSafeInteger(frame.txSeq))fail();
   const check=()=>this.grant.check(token);
   const object=await this.objects.at(integer(frame.objectSlot,Math.max(0,this.objects.objectCount-1)));check();
   if(!object||!Number.isSafeInteger(frame.chunkIndex)||frame.chunkIndex<0||frame.chunkIndex>=object.chunkHashes.length)fail();

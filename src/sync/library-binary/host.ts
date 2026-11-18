@@ -9,7 +9,7 @@ import {ARTICLE_IMPORT_SHADOW_BYTES,BinaryLibraryKinds} from './kinds';
 import {BinaryBooks} from './books';
 import type {BinaryBookFiles} from './book-import';
 import type {BinaryArticleFiles} from './article-file';
-import {BinaryByteTransport,type FileStream} from './transport';
+import {BinaryByteTransport,type FileStream,type NativeFramePort} from './transport';
 import {LibraryBinaryConnection} from './coordinator';
 import {SwitchGate,binaryCapability,negotiate,RELEASE_B2_ENABLED} from './routing';
 import {RecoveryRules} from './recovery';
@@ -32,6 +32,7 @@ export interface BinaryApplicationPorts {
  bookWork?(advance:()=>void):{files:BinaryBookFiles;stop():void};
  /** Enabled after the native book pipeline meets its release acceptance gates. */
  b2BooksEnabled?:boolean;
+ bookRuntime?():Promise<boolean>;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};changed?(kind?:string):void;
@@ -61,6 +62,7 @@ export class BinaryApplicationService implements BinarySessionPort {
    kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
   }
   const books=!!(this.ports.b2BooksEnabled&&runtime.fileRefs&&(this.ports.books||this.ports.bookWork)&&this.ports.library&&
+   (await this.ports.bookRuntime?.()??true)&&
    await (await this.ports.library.repository()).books?.binaryReady());
   if(books){
    for(const kind of BOOK_KINDS)kinds.push({kind,schemaVersion:1,send:true,receive:true});
@@ -115,12 +117,16 @@ export class BinaryApplicationService implements BinarySessionPort {
    await assets.collect();
   }));
   const stream=connection.detachStream() as FileStream;
-  if(n.books&&stream.claimBinary)try{await authorize(()=>stream.claimBinary!());}
+  let native:NativeFramePort|undefined;
+  if(n.books&&stream.claimBinary)try{await authorize(async()=>{
+   await stream.claimBinary!();
+   native=await stream.openFramed?.();
+  });}
   catch(error){await stream.close();throw error;}
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
    stopLocalWork:fileWork?.stop,
    freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
-  },gate,new BinaryByteTransport(stream,this.ports.now));
+  },gate,new BinaryByteTransport(stream,this.ports.now,undefined,native));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});
   try{await owner.run();this.recovery.detach(connectionId);this.reconnected=false;}
   catch(e){throw this.failed(e,context);}

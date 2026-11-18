@@ -1,20 +1,28 @@
 import type {SyncByteStream} from '../stream';
 import {decodeDataHeader,frameAllocationBytes,type ByteTransport,type DataReader,type SourceFileRange,type SourceFileChunk,type InputFileChunk} from './codec';
-import {fail} from './wire';
+import {fail,utf8} from './wire';
+import {utf8ToString} from '@podjs/framework/bytes';
+import type {HostSyncByteStream} from '../rfcomm';
 /** One exact-frame owner after detachStream(). Reads never consume a tail owned
  * by another codec. Native idle deadlines and a 60s frame deadline are separate. */
 export interface FileStream extends SyncByteStream {
  claimBinary?():Promise<void>;
+ openFramed?:HostSyncByteStream['openFramed'];
  write(bytes:Uint8Array,timeoutMs?:number):Promise<void>;
  prepareFile?(range:SourceFileRange):Promise<SourceFileChunk>;
  readFile?(size:number,timeoutMs:number,retain:boolean,sha256?:string):Promise<InputFileChunk|undefined>;
  writeFile?(header:Uint8Array,chunk:SourceFileChunk,timeoutMs:number):Promise<void>;
  dropFile?(reference:string):Promise<void>;
 }
+export type NativeFramePort=NonNullable<Awaited<ReturnType<HostSyncByteStream['openFramed']>>>;
 export class BinaryByteTransport implements ByteTransport {
+ private activate=false;
+ private rejected?:number;
+ settleNativeRejection(sequence:number){this.rejected=sequence;}
+ activateReceive(){this.activate=true;}
  private closed=false;private reading=false;private writing=false;
  private networkProgress?: (kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void;
- constructor(private readonly stream:FileStream,private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void){}
+ constructor(private readonly stream:FileStream,private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void,readonly native?:NativeFramePort){}
  setNetworkProgress(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void){this.networkProgress=listener;}
  private network(error:unknown):never{const e=error as {code?:string;message?:string};if(e?.code==='host_error'){
   if(/^(Stream operation timed out|.*[Ss]ocket.*timed out)$/.test(e.message??''))throw Error('SocketTimeout');
@@ -28,17 +36,36 @@ export class BinaryByteTransport implements ByteTransport {
   try{
    const fixed=new Uint8Array(96),prefix=fixed.subarray(0,4),idle=this.now()+30000;
    let started:number|undefined;const end=()=>started===undefined?idle:started+60000;
-   await this.into(prefix,end,()=>{started??=this.now();});
+   let rejection:string|undefined;
+   if(this.native){
+    const next=await this.native.next().catch(e=>this.network(e));
+    if(next.kind===1){
+     const bytes=utf8(next.control!),frame=new Uint8Array(16+bytes.length),view=new DataView(frame.buffer);
+     view.setUint32(0,12+bytes.length);view.setUint32(4,0x4c425632);frame[8]=1;view.setUint32(12,bytes.length);
+     frame.set(bytes,16);this.networkProgress?.('control');return frame;
+    }
+    if(next.kind===3){
+     const frame=Uint8Array.from(next.bytes!),view=new DataView(frame.buffer);
+     this.networkProgress?.('ack',view.getUint32(16),Number(view.getBigUint64(24)),Number(view.getBigUint64(32)));
+     return frame;
+    }
+    fixed.set(next.bytes!);
+    rejection=next.error;
+    started=this.now();
+   }else{
+    await this.into(prefix,end,()=>{started??=this.now();});
+    await this.into(fixed.subarray(4,16),end);
+   }
    const length=frameAllocationBytes(prefix);
-   await this.into(fixed.subarray(4,16),end);
    const v=new DataView(fixed.buffer),header=v.getUint32(12),payload=length-16-header;
    if(fixed[4]!==76||fixed[5]!==66||fixed[6]!==86||fixed[7]!==50||fixed[9]!==0||v.getUint16(10)!==0||payload<0)fail();
    if(fixed[8]===2){
     if(header!==80||payload<1||payload>65536)fail();
-    await this.into(fixed.subarray(16),end);
+    if(!this.native)await this.into(fixed.subarray(16),end);
     const data={...decodeDataHeader(fixed,payload),payloadBytes:payload};
     const unit=()=>this.networkProgress?.('data',data.streamId,data.epoch,data.txSeq);
     if(readData){
+     if(rejection){await readData(data,async()=>fail(),undefined,rejection);return null;}
      let left=payload;
      await readData(data,async(target,activity)=>{
       if(!target.length||target.length>left)fail();
@@ -87,6 +114,15 @@ export class BinaryByteTransport implements ByteTransport {
   if(this.closed||this.writing)fail('AUTH_REVOKED');this.writing=true;
   const deadline=this.now()+60000;
   try{
+   if(this.native){
+    if(bytes[8]===1){
+     const activate=this.activate,rejected=this.rejected;this.activate=false;this.rejected=undefined;
+     await this.native.control(utf8ToString(bytes.subarray(16)),activate,rejected);
+    }
+    else if(bytes[8]===3)await this.native.ack(bytes);
+    else await this.native.data(bytes.subarray(0,96),bytes.subarray(96));
+    return;
+   }
    for(let at=0;at<bytes.length;at+=65536){
     if(this.closed)fail('AUTH_REVOKED');
     const left=deadline-this.now();if(left<=0)throw Error('SocketTimeout');

@@ -66,6 +66,8 @@ export class LibraryBinaryConnection {
  private regrant?:{epoch:number;work:Promise<unknown>;unsettled:boolean};
  private readonly drainBuffer=new Uint8Array(4096);
  private nativeHeartbeat?:Promise<void>;
+ private nativeReceive=false;
+ private nativeProgress=0;
  private clockSync?:Promise<void>;
  private applying?:string;
  private stagingRequest?:Envelope;
@@ -167,6 +169,11 @@ export class LibraryBinaryConnection {
      if(r.success&&(r.phase==='complete'||r.phase==='begin'&&r.result!.state==='COMPLETE'))await this.sourceWork;
      continue;
     }
+    const receiving=this.receive?.job;
+    if(this.nativeReceive&&receiving&&r.jobId===receiving.jobId&&r.planDigest===receiving.planDigest&&r.epoch===receiving.epoch){
+     try{await this.io.native!.bind([{requestId:r.requestId,requestDigest:r.requestDigest}]);}
+     catch(error){const conflict=resumeError(error);await this.write(this.reply(r,null,r.epoch,conflict));throw conflict;}
+    }
     if(r.phase==='missing'&&r.payload!.limit===0){
      if(this.incomingHeartbeatBusy)fail('FLOW_CONTROL_VIOLATION');this.incomingHeartbeatBusy=true;
      void this.answerHeartbeat(r).catch(e=>this.close(e)).finally(()=>{this.incomingHeartbeatBusy=false;});continue;
@@ -211,6 +218,7 @@ export class LibraryBinaryConnection {
    const result=await this.ports.authorize(()=>this.ports.store.exclusive(()=>this.handle(r,charge)));this.check();await this.write(this.reply(r,result.result,result.epoch),()=>{
     if(r.phase==='begin'){this.regrant=undefined;this.dataReady=!!this.receive?.pipeline;}
     if(r.phase==='manifestPage'&&result.result.manifestVerified)this.dataReady=true;
+    if(this.nativeReceive&&(r.phase==='begin'||r.phase==='manifestPage'&&result.result.manifestVerified))this.io.activateReceive?.();
    });after=result.after;
    if(r.phase==='prepare'&&r.payload!.step==='confirm')this.preparation.confirmResponseFullyWritten();
   }catch(e){let error=resumeError(e);if(error.wire().class==='STATE')try{charge();}catch(limit){error=resumeError(limit);}if(!this.stopped)await this.write(this.reply(r,null,r.epoch,error));if(error.wire().recovery==='STOP')throw error;}
@@ -224,10 +232,12 @@ export class LibraryBinaryConnection {
   if(!receive||this.regrant)return;
   const epoch=receive.job.epoch,pipeline=receive.pipeline;
   this.dataReady=false;
-  this.regrant={epoch,unsettled:pipeline?.busy??false,work:pipeline?.fence()??Promise.resolve()};
+  const native=this.nativeReceive?this.io.native?.retire():undefined;
+  this.nativeReceive=false;
+  this.regrant={epoch,unsettled:pipeline?.busy??false,work:Promise.all([pipeline?.fence(),native])};
   this.binary.discardReceiveEpoch(epoch);
  }
- private readonly readData:DataReader=async(header,read,readFile)=>{
+ private readonly readData:DataReader=async(header,read,readFile,rejection)=>{
   const receive=this.receive;
   if(!receive||header.streamId!==1)fail('AUTH_REVOKED');
   if(this.regrant){
@@ -240,16 +250,38 @@ export class LibraryBinaryConnection {
    return;
   }
   if(!this.dataReady||!receive.pipeline)fail('FLOW_CONTROL_VIOLATION');
+  if(rejection){
+   this.stateBucket.take(this.ports.now());
+   await this.binary.write({kind:'control',envelope:negativeReply(receive.binding,header,new ResumeError(rejection))},
+    'urgent',()=>this.io.settleNativeRejection?.(header.txSeq),header.epoch);
+   return;
+  }
   await receive.pipeline.read(header,read,readFile);
  };
  private chunkRequest(j:Job,{header,object}:ChunkWork):Envelope{
   return {action:ACTION,version:VERSION,phase:'putChunk',type:'request',jobId:j.jobId,planDigest:j.planDigest,epoch:header.epoch,
    requestId:header.requestId,requestDigest:header.requestDigest,payload:{objectId:object.objectId,chunkIndex:header.chunkIndex}};
  }
- private enableData(){
+ private async enableData(){
   const receive=this.receive!,j=receive.job,index=receive.index!,requests=receive.requests;
   if(receive.pipeline&&!this.regrant)return;
   receive.window.admit();
+  if(this.io.native&&j.description.selection.kinds.some(k=>BOOK_KINDS.includes(k.kind as typeof BOOK_KINDS[number]))){
+   const entries: ObjectDescriptor[]=[];
+   for(let slot=0;slot<j.description.objectCount;slot++)entries.push(index.at(slot)!);
+   for(let at=0;at<entries.length;at+=4){
+    await this.io.native.register(entries.slice(at,at+4).map(d=>({
+     object:nativeObject(d),
+     digests:d.chunkHashes.map((_hash,chunkIndex)=>requestDigest(j.jobId,j.planDigest,'putChunk',{objectId:d.objectId,chunkIndex})),
+     dependsOn:d.dependsOn.map(id=>index.slot(id)),
+     applied:index.isApplied(d.objectId),
+     compatibility:!d.kind.startsWith('book'),
+    })));
+   }
+   await this.io.native.enable(j.lease!,1,j.description.selection.limits.maxInFlightChunks);
+   for(const page of requests.pages())await this.io.native.bind(page);
+   this.nativeReceive=true;
+  }
   const peer=this.ports.phoneDeviceId;
   const reserved=new Map<string,number>();
   const releaseSlot=(id:string)=>{
@@ -315,6 +347,7 @@ export class LibraryBinaryConnection {
     writeReply({kind:'control',envelope:negativeReply(receive.binding,header,error)},started,error);
    },
   });
+  receive.pipeline.sequenced=this.nativeReceive;
  }
  private async allTerminal(){for(const b of this.bindings){const j=await this.ports.store.job(this.scope,b.jobId);if(!j||!terminal(j))return false;}return true;}
  private checkReceiveBinding(r:Envelope){
@@ -332,7 +365,10 @@ export class LibraryBinaryConnection {
   if(j.expiresAt<this.ports.store.now())fail('EXPIRED');
   if(j.role!=='receiver'&&r.phase!=='cancel')fail();
   const receive=this.receive?.job.jobId===j.jobId?this.receive:undefined;
-  if(receive){this.checkReceiveBinding(r);receive.requests.remember(r);}
+  if(receive){
+   this.checkReceiveBinding(r);
+   receive.requests.remember(r);
+  }
   const replay=await this.ports.store.checkBinding(j,this.ports.phoneDeviceId,r,undefined,charge);
   if(j.state==='CANCELLED'&&!['missing','cancel'].includes(r.phase))fail('JOB_CANCELLED');
   if(j.lease)await this.ports.chunks.check(j.lease as unknown as ObjectLease);
@@ -373,7 +409,7 @@ export class LibraryBinaryConnection {
   await this.ports.store.touch(j);
   if(j.role==='receiver'&&this.receive?.job.jobId===j.jobId){
    this.receive.job=(await this.ports.store.job(this.scope,j.jobId))!;
-   if(r.phase==='manifestPage'&&result.manifestVerified)this.enableData();
+   if(r.phase==='manifestPage'&&result.manifestVerified)await this.enableData();
   }
   return {result,epoch:j.epoch,...(r.phase==='cancel'?{after:()=>{void this.close(new ResumeError(p.reason==='SOURCE_CHANGED'?'SOURCE_CHANGED':'JOB_CANCELLED'));}}:{})};
  }
@@ -419,7 +455,7 @@ export class LibraryBinaryConnection {
   if(old&&old.expiresAt<this.ports.store.now())fail('EXPIRED');
   if(terminal(old??({state:'READY'} as Job))&&p.intent==='create')fail('JOB_CONFLICT');
   const source=p.phoneSnapshot;if(source.toInclusive!==0&&!await this.ports.supportsRange?.(p))fail('BUSINESS_REJECTED');
-  await this.ports.store.preflightBegin(this.scope,b.jobId,p);const lease=await this.ports.chunks.acquire(D('wrss.library-binary.v2/native-scope',[this.scope,b.jobId]),this.ports.connectionId,!!old&&terminal(old),{...b.selection.limits,maxInFlightObjects:this.receiverSlotsFor(b.selection),maxStagingBytes:Math.min(134217728,b.selection.limits.maxStagingBytes)});
+  await this.ports.store.preflightBegin(this.scope,b.jobId,p);const lease=await this.ports.chunks.acquire(D('wrss.library-binary.v2/native-scope',[this.scope,b.jobId]),this.ports.connectionId,!!old&&terminal(old),{...b.selection.limits,maxInFlightObjects:this.receiverSlotsFor(b.selection),maxStagingBytes:Math.min(134217728,b.selection.limits.maxStagingBytes),...(this.regrant&&this.io.native?{forceNewEpoch:true as const}:{})});
   if(this.regrant?.unsettled&&lease.epoch<=this.regrant.epoch)fail('STALE_EPOCH');
   const requests=await this.restoreReceiveBindings(lease,old,b.selection);
   requests.remember(r);
@@ -444,7 +480,7 @@ export class LibraryBinaryConnection {
     if(status.state!=='PENDING')this.activeReceive.add(o.descriptor.objectId);this.workUnit();
    }
    this.receive.index=this.buildReceiveIndex(job,objects,rows.filter(o=>o.receipt).map(o=>o.descriptor.objectId));
-   this.enableData();
+   await this.enableData();
   }
   return {result:{disposition:old?'RESUMED':'CREATED',selectionDigest:p.selectionDigest,state:job.state,expiresAtMillis:job.expiresAt,nextManifestPage:job.nextPage,completion:job.completion},epoch:job.epoch};
  }
@@ -516,7 +552,9 @@ export class LibraryBinaryConnection {
   const final=await (this.ports.publish?this.ports.publish(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),o.descriptor,j):this.ports.chunks.finalize(j.lease as unknown as ObjectLease,nativeObject(o.descriptor)));this.check();
   await this.ports.apply(j,o.descriptor,final.path,this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check()));this.check();
   const saved=await this.ports.store.object(j,o.descriptor.objectId);if(!saved.receipt)fail('RECEIPT_CONFLICT');
-  this.receive?.index?.didApply(o.descriptor.objectId);
+  const receiveIndex=this.receive?.index;
+  receiveIndex?.didApply(o.descriptor.objectId);
+  if(this.nativeReceive&&receiveIndex)await this.io.native!.markApplied(receiveIndex.slot(o.descriptor.objectId));
   // Business commit is authoritative. Cleanup is repeatable and cannot revoke it.
   try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),!['noteAsset','readerResource','bookPackageSegment'].includes(o.descriptor.kind));}catch{}
   this.activeReceive.delete(o.descriptor.objectId);this.ports.recovery?.confirm('APPLIED','phoneToWatch:'+o.descriptor.objectId);this.ports.applied?.(o.descriptor.kind);return {state:'APPLIED',receipt:saved.receipt};

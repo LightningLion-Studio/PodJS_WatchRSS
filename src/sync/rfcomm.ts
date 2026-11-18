@@ -1,5 +1,5 @@
 import {SyncEventLog} from '../logs/sync-events.ts';
-import type {rfcomm,byteStreams,HostOperation} from '@podjs/framework/services';
+import type {rfcomm,byteStreams,framedStreams,HostOperation} from '@podjs/framework/services';
 import {decodeBase64Async} from '@podjs/framework/bytes';
 import {StreamFrameConnection,type SyncByteStream} from './stream.ts';
 import type {SourceFileRange,SourceFileChunk} from './library-binary/codec';
@@ -7,10 +7,23 @@ import {fail} from './library-binary/wire';
 import {LibrarySyncSession,type LibrarySessionRepository,type LibrarySessionOptions,type SessionActionResult} from './session.ts';
 export const WATCH_RSS_RFCOMM_NAME='WatchRSS Bluetooth Sync';
 export const WATCH_RSS_RFCOMM_UUID='bb2f0b7d-8f2f-4a96-95b2-d2c91d58a861';
-export interface RfcommPorts {radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'claim'|'readBytes'|'writeBytes'|'prepareFile'|'readFile'|'writeFile'|'dropFile'>>}
+export interface RfcommPorts {framed?:typeof framedStreams;radio:typeof rfcomm;streams:Pick<typeof byteStreams,'read'|'write'|'close'> & Partial<Pick<typeof byteStreams,'claim'|'readBytes'|'writeBytes'|'prepareFile'|'readFile'|'writeFile'|'dropFile'>>}
 export class HostSyncByteStream implements SyncByteStream {
  private closed=false;
- constructor(private id:string,private readonly ports:RfcommPorts['streams']){}
+ constructor(private id:string,private readonly ports:RfcommPorts['streams'],private readonly framed?:typeof framedStreams){}
+ async openFramed(){
+  if(!this.framed)return undefined;
+  const id=this.id,host=this.framed;
+  await host.open(id);
+  return {
+   next:()=>host.next(id),control:(text:string,activate:boolean,rejected?:number)=>host.control(id,text,activate,rejected),
+   ack:(bytes:Uint8Array)=>host.ack(id,bytes),data:(header:Uint8Array,bytes:Uint8Array)=>host.data(id,header,bytes),
+   register:(...args:Parameters<typeof host.register> extends [string,...infer P]?P:never)=>host.register(id,...args),
+   enable:(...args:Parameters<typeof host.enable> extends [string,...infer P]?P:never)=>host.enable(id,...args),
+   bind:(...args:Parameters<typeof host.bind> extends [string,...infer P]?P:never)=>host.bind(id,...args),
+   markApplied:(slot:number)=>host.markApplied(id,slot),state:()=>host.state(id),retire:()=>host.retire(id),
+  };
+ }
  async claimBinary(){
   if(this.closed)fail('AUTH_REVOKED');
   if(!this.ports.claim)return;
@@ -50,7 +63,7 @@ export class RfcommLibraryListener {
   if(this.busy)throw new Error('Bluetooth sync already active');this.busy=true;this.stopped=false;const log=new SyncEventLog();log.event('server.acceptOnce.start',{timeoutMs:options.acceptTimeoutMs??120000});
   try{const status=await this.ports.radio.status();this.check();if(status.permission!=='granted')throw new Error('需要蓝牙连接权限');if(!status.available||!status.enabled)throw new Error('蓝牙未开启或设备不支持蓝牙');
    const listening=this.ports.radio.listen(WATCH_RSS_RFCOMM_NAME,WATCH_RSS_RFCOMM_UUID);this.pending=listening;const listener=await listening.result;this.listenerId=listener.id;this.check();log.event("server.listen.success",{elapsedMs:log.elapsed()});options.onListening?.();this.check();
-   log.event("server.accept.start",{timeoutMs:options.acceptTimeoutMs??120000});const accepting=this.ports.radio.accept(listener.id,options.acceptTimeoutMs??120000);this.pending=accepting;const peer=await accepting.result;this.pending=undefined;this.stream=new HostSyncByteStream(peer.id,this.ports.streams);this.check();log.event("server.accept.success",{elapsedMs:log.elapsed()});log.event("server.client.accepted",{remoteName:"<redacted>",remoteAddress:"<redacted>"});
+   log.event("server.accept.start",{timeoutMs:options.acceptTimeoutMs??120000});const accepting=this.ports.radio.accept(listener.id,options.acceptTimeoutMs??120000);this.pending=accepting;const peer=await accepting.result;this.pending=undefined;this.stream=new HostSyncByteStream(peer.id,this.ports.streams,this.ports.framed);this.check();log.event("server.accept.success",{elapsedMs:log.elapsed()});log.event("server.client.accepted",{remoteName:"<redacted>",remoteAddress:"<redacted>"});
    await this.ports.radio.close(listener.id);this.listenerId=undefined;this.check();options.onPeer?.(peer);this.check();
    this.session=new LibrarySyncSession(new StreamFrameConnection(this.stream),this.repository,{...options,diagnosticChannel:'RFCOMM',diagnosticLog:log});return await this.session.run();
   }catch(error){if(!this.stopped)log.event("server.acceptOnce.failed",{elapsedMs:log.elapsed(),message:"<redacted>"},"E");throw options.binary?.failed?.(error)??error;}finally{this.pending=undefined;this.session=undefined;try{await this.stream?.close();}finally{this.stream=undefined;try{if(this.listenerId)await this.ports.radio.close(this.listenerId);}finally{this.listenerId=undefined;this.busy=false;}}}

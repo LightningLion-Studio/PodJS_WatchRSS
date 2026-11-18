@@ -66,6 +66,7 @@ export class ReceivePipeline {
   this.pending.set(header.txSeq,header);this.bytes+=header.payloadBytes;
  }
 
+ sequenced=false;
  readonly read:DataReader=async(header,read,readFile)=>{
   if(this.closed){
    // The owner verifies the epoch during a regrant barrier.
@@ -73,7 +74,7 @@ export class ReceivePipeline {
    return;
   }
   this.check();
-  const valid=await this.window.header(header);
+  const valid=await this.window.header(header,this.sequenced);
   if(!valid){this.ports.stale();await this.drain(header,read);return;}
   const check=()=>{this.check();valid.check();};
   check();this.take(header);

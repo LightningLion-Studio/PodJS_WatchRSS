@@ -30,6 +30,14 @@ export class ReceiveBindings {
   if(prior!==undefined&&prior!==r.requestDigest)fail('REQUEST_CONFLICT');
   return prior!==undefined;
  }
+ *pages():Generator<RequestBinding[]>{
+  let page:RequestBinding[]=[];
+  for(const [requestId,requestDigest] of this.requests){
+   page.push({requestId,requestDigest});
+   if(page.length===128){yield page;page=[];}
+  }
+  if(page.length)yield page;
+ }
  remember(r:RequestBinding):void{
   if(this.hasBinding(r))return;
   if(this.requests.size>=this.capacity)fail('STORAGE_PRESSURE');
