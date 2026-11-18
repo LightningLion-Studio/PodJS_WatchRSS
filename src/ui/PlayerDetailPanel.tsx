@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
+import { batch, createMemo, createSignal, For, createRenderEffect, createEffect, onCleanup, untrack, Show, type Accessor, type JSX } from "solid-js";
 import { Image, Text, View, type NodeMirror } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { createScroller } from "@pocketjs/framework/kinetics";
@@ -9,7 +9,7 @@ import * as watch from "@podjs/framework/watch";
 import { RemoteImage } from "./RemoteImage.tsx";
 import { createHoldPress } from "./hold-press.ts";
 import { formatPlayerTime, holdStepCount, seekHoldStep } from "./video-player.ts";
-import { ABOUT, aboutLines, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
+import { ABOUT, aboutHeight, aboutLineIterator, CANVAS, columnLayout, CONTROL, controlCentreOffset, controlRow, detailText, ENTRY_ARROW, formatSpeed, INFO, INFO_HEIGHT, infoLayout, pillFill, speedFraction, stepSpeed, type Rect } from "./player-detail-layout.ts";
 
 const PER_DEGREE = 1_000; // RelativeAxisUnits.PerDegree
 const SLIDE_MS = 220;
@@ -17,6 +17,7 @@ const SLIDE_MS = 220;
 const CROWN_PX = 4;
 /** Height of the top and bottom fades over the scrolling column, in canvas units. */
 const EDGE_FADE = 28;
+const ABOUT_LINES_PER_FRAME = 2;
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Horizontal position of the panel: `x` is its left edge in screen px (width = closed, 0 = open). */
@@ -81,13 +82,41 @@ export function PlayerDetailPanel(props: PlayerDetailProps) {
   });
   const measure = (text: string, slot: number) => getOps().measureText(text, slot);
   const description = createMemo(() => detailText({ title: props.title(), description: props.description() }).description);
-  // The info block shows what fits; the full description follows it when it did not fit whole.
-  const about = createMemo(() => info().descriptionMore ? aboutLines(description(), measure) : []);
+  const fullDescription = createMemo(() => info().descriptionMore ? description() : "");
+  const [about, setAbout] = createSignal<string[]>([]);
+  let aboutJob: { iterator: Generator<string>; lines: string[] } | undefined;
   const controls = createMemo<Control[]>(() => ["progress", "volume", ...(props.speed() === undefined ? [] : ["speed" as const])]);
   const column = createMemo(() => columnLayout(about().length, controls().length));
   const [selected, setSelected] = createSignal<Control>();
   const scroller = createScroller({ max: () => column().max, extent: () => CANVAS });
   onFrame(() => scroller.step(), () => scroller.state() !== "idle");
+  // Font measurement may rasterize cold system glyphs synchronously. Keep the
+  // entry frame and input responsive while wrapping the optional full text.
+  createEffect(() => {
+    const text = fullDescription();
+    setAbout([]);
+    aboutJob = text ? { iterator: aboutLineIterator(text, measure), lines: [] } : undefined;
+  });
+  onFrame(() => {
+    const job = aboutJob;
+    if (!job) return;
+    for (let i = 0; i < ABOUT_LINES_PER_FRAME; i++) {
+      const next = job.iterator.next();
+      if (!next.done) {
+        job.lines.push(next.value);
+        continue;
+      }
+      aboutJob = undefined;
+      batch(() => {
+        setAbout(job.lines);
+        // Keep an in-use control row in place when the text is inserted above it.
+        if (selected() || Math.max(scroller.offset(), scroller.intent()) >= INFO_HEIGHT - CANVAS / 2) {
+          scroller.rebase(aboutHeight(job.lines.length));
+        }
+      });
+      return;
+    }
+  }, () => !!aboutJob);
 
   createEffect(() => { description(); untrack(() => { scroller.scrollTo(0, { immediate: true }); setSelected(); }); });
   // Capabilities may disappear while a source is being replaced: drop a vanished
