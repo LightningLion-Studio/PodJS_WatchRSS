@@ -28,7 +28,7 @@ export class BinaryByteTransport implements ByteTransport {
    if(fixed[8]===2){
     if(header!==80||payload<1||payload>65536)fail();
     await this.into(fixed.subarray(16),end);
-    const data=decodeDataHeader(fixed,payload);
+    const data={...decodeDataHeader(fixed,payload),payloadBytes:payload};
     const unit=()=>this.networkProgress?.('data',data.streamId,data.epoch,data.txSeq);
     if(readData){
      let left=payload;
