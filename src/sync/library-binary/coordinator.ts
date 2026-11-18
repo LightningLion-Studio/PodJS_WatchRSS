@@ -208,6 +208,25 @@ export class LibraryBinaryConnection {
   }catch(e){if(!this.normalClose)throw this.closeReason??e;}finally{await this.close();await this.incoming?.catch(()=>{});await this.sourceWork?.catch(()=>{});}
  }
  private tick(){const timer=this.ports.sleep(1000);this.heartbeatTimer=timer;void timer.result.then(async()=>{if(this.stopped)return;await this.ports.sampleClock?.();if(this.stopped)return;const at=this.ports.now();
+  if(this.io.native&&(this.nativeReceive||this.nativeSending)){
+   const receive=this.receive,epoch=receive?.job.epoch;
+   const {progress,durable,overflow}=await this.io.native.state();
+   if(progress!==this.nativeProgress){this.nativeProgress=progress;this.networkAt=at;this.workUnit();}
+   if(this.nativeReceive&&receive&&receive.job.epoch===epoch){
+    const affected=new Set<ObjectDescriptor>();
+    for(const event of durable){
+     const o=receive.index?.at(Math.floor(event/256)),chunk=event%256;
+     if(o&&o.chunkHashes[chunk]){
+      this.ports.recovery?.confirm('STAGED','phoneToWatch:'+o.objectId+':'+chunk);
+      affected.add(o);
+     }
+    }
+    if(overflow)for(const object of affected){
+     try{await this.nativeRecoveredChunks(receive.job,object);}
+     catch(error){if(resumeError(error).code!=='BUSY')throw error;}
+    }
+   }
+  }
   if(!this.clockSync)this.clockSync=this.ports.store.observeClock(Math.floor(at)).catch(e=>this.close(e)).finally(()=>{this.clockSync=undefined;});
   const remoteWork=!!this.send?.window.credit.chunks||[...this.pending.values()].some(p=>['manifestPage','apply','complete','missing'].includes(p.request.phase));const localWork=this.localWorkAt!==null||this.receive?.pipeline?.working||this.sourceReading;if(!remoteWork&&!localWork&&at-this.networkAt>=30000){await this.close(Error('SocketTimeout'));return;}if(localWork&&at-this.lastLocalUnit>=30000){await this.close(new ResumeError('LOCAL_IO'));return;}
   const source=this.sourceEpoch;if(source&&at-source.last>=8000&&!this.sourceHeartbeat){source.last=at;this.sourceHeartbeat=this.request('missing',source.job,source.plan,source.epoch,{afterObjectId:null,afterChunkIndex:null,limit:0},false);void this.sourceHeartbeat.catch(e=>{if(e instanceof ResumeError&&e.code==='LEASE_EXPIRED'){this.failData(e);for(const [id,p] of this.pending){this.retiredControls.set(id,p.request);if(this.retiredControls.size>2)this.retiredControls.delete(this.retiredControls.keys().next().value!);p.reject(e);}this.pending.clear();this.slots?.clear();}else return this.close(e);}).finally(()=>{this.sourceHeartbeat=undefined;});}this.tick();},e=>{if(!this.stopped)void this.close(e);}).catch(e=>this.close(e));}
@@ -491,12 +510,23 @@ export class LibraryBinaryConnection {
    this.activeReceive.clear();
    for(const o of rows)if(!o.receipt){
     const status=await this.ports.chunks.status(job.lease as unknown as ObjectLease,nativeObject(o.descriptor));
-    if(status.state!=='PENDING')this.activeReceive.add(o.descriptor.objectId);this.workUnit();
+    if(status.state!=='PENDING'){
+     this.activeReceive.add(o.descriptor.objectId);
+     await this.nativeRecoveredChunks(job,o.descriptor,status);
+    }
+    this.workUnit();
    }
    this.receive.index=this.buildReceiveIndex(job,objects,rows.filter(o=>o.receipt).map(o=>o.descriptor.objectId));
    await this.enableData();
   }
   return {result:{disposition:old?'RESUMED':'CREATED',selectionDigest:p.selectionDigest,state:job.state,expiresAtMillis:job.expiresAt,nextManifestPage:job.nextPage,completion:job.completion},epoch:job.epoch};
+ }
+ private async nativeRecoveredChunks(job:Job,object:ObjectDescriptor,status?:{missing:readonly number[]}){
+  if(!this.ports.recovery||!this.io.native||!object.kind.startsWith('book'))return;
+  const verified=status??await this.ports.chunks.status(job.lease as unknown as ObjectLease,nativeObject(object));
+  const missing=new Set(verified.missing);
+  for(let index=0;index<object.chunkHashes.length;index++)if(!missing.has(index))
+   this.ports.recovery.confirm('STAGED','phoneToWatch:'+object.objectId+':'+index);
  }
  private async restoreReceiveBindings(lease:ObjectLease,prior:Job|null,selection:Selection):Promise<ReceiveBindings>{
   // The new native grant fences older writers. A committed file-stage binding

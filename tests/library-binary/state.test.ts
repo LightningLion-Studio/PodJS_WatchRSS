@@ -114,3 +114,16 @@ test('ACK and negative responses STOP for a never-granted older epoch',()=>{
   }
  }
 });
+
+test('native send settlement hands back a contiguous cursor and epoch reset',()=>{
+ const window=new SendWindow(binding,1);
+ expect(window.nativeCursor()).toEqual({tx:0,ack:0});
+ window.acceptNativeCursor(8,2);
+ expect(window.reserve(data()).txSeq).toBe(9);
+ expect(()=>window.nativeCursor()).toThrow('BUSY');
+ expect(window.acceptAck(ack(2,8),0)).toBeNull();
+ expect(window.acceptAck(ack(3,9),0)![0]!.pending.txSeq).toBe(9);
+ window.regrant(2);
+ expect(window.nativeCursor()).toEqual({tx:0,ack:0});
+ expect(window.reserve(data()).txSeq).toBe(1);
+});
