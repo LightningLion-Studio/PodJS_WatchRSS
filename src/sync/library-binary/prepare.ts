@@ -1,4 +1,5 @@
 import {capability,binding,snapshot,exact,array,hex,fail,envelope,type Envelope,type BeginPayload,type Capability,type Binding,type Snapshot,type Row} from './wire';
+import {checkSelectedLimits} from './routing';
 import {offerDigest,preparationDigest,capabilityDigest,requestDigest,selectionDigest,planDigest} from './digests';
 
 /** Snapshot persistence belongs to the caller; do not reply until persist returns.
@@ -24,12 +25,11 @@ export class Preparation {
   if(!offer||this.confirmed||p.step!=='confirm'||p.offerRequestId!==offer.requestId)fail('REQUEST_CONFLICT');
   const bs=array(p.bindings,2).map(binding);if(!bs.length||bs.some((b,i)=>i>0&&bs[i-1]!.direction>=b.direction)||new Set(bs.map(b=>b.jobId)).size!==bs.length)fail('PLAN_CONFLICT');
   for(const b of bs){
-   if(b.selection.limits.maxInFlightChunks!==1||b.selection.limits.maxInFlightBytes!==65536)fail('CAPABILITY_MISMATCH');
    for(const k of b.selection.kinds){
     const source=b.direction==='phoneToWatch'?offer.phone:this.watch,receiver=b.direction==='phoneToWatch'?this.watch:offer.phone;
     if(!source.kinds.some(x=>x.kind===k.kind&&x.send)||!receiver.kinds.some(x=>x.kind===k.kind&&x.receive))fail('CAPABILITY_MISMATCH');
    }
-   for(const k of Object.keys(b.selection.limits) as (keyof Capability['limits'])[])if(b.selection.limits[k]!==Math.min(offer.phone.limits[k],this.watch.limits[k]))fail('CAPABILITY_MISMATCH');
+   checkSelectedLimits(b,offer.phone,this.watch);
   }
   if(p.preparationDigest!==preparationDigest(offer.digest,bs))fail('PLAN_CONFLICT');
   await persist(bs);this.bindings=JSON.parse(JSON.stringify(bs));this.confirmed=true;return {step:'confirm',preparationDigest:p.preparationDigest};

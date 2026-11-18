@@ -1,4 +1,5 @@
 import type {SqlDatabase,SqlParams} from '../../core/types';
+import {MAX_REQUEST_BINDINGS} from './receive-index';
 import {frameBytes} from '../wire-frame-size';
 import {D,appliedReceipt,completion,descriptor,objectsRoot,pageDigest,receiptsRoot,requestDigest} from './digests';
 import {fail,RETENTION,utf8,sorted,exact,hex,type Envelope,type BeginPayload,type ObjectDescriptor,type AppliedReceipt,type Outcome,type Completion,type Snapshot,type Row} from './wire';
@@ -59,7 +60,35 @@ export class BinaryStore {
   {sql:'UPDATE library_binary_guard SET ok=CASE WHEN NOT EXISTS(SELECT 1 FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=? AND digest!=?) THEN 1 ELSE 0 END WHERE id=1',params:[job.scope,job.jobId,peer,request.requestId,request.requestDigest]},
   {sql:'INSERT OR IGNORE INTO library_binary_requests(scope,job_id,peer,request_id,digest,result) VALUES(?,?,?,?,?,?)',params:[job.scope,job.jobId,peer,request.requestId,request.requestDigest,result===null?null:JSON.stringify(result)]},
  ];}
- async checkBinding(job:Job,peer:string,r:Envelope,rebindConnection?:string,onReplay?:()=>void):Promise<Row|null>{const row=(await this.db.query('SELECT digest,result FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?',[job.scope,job.jobId,peer,r.requestId]))[0];if(row&&row.digest!==r.requestDigest)fail('REQUEST_CONFLICT');if(row)onReplay?.();if(!row)await this.db.transaction([rebindConnection?{sql:'UPDATE library_binary_guard SET ok=CASE WHEN EXISTS(SELECT 1 FROM library_binary_connections WHERE connection_id=? AND revoked=0) AND EXISTS(SELECT 1 FROM library_binary_jobs WHERE scope=? AND job_id=? AND plan_digest=?) THEN 1 ELSE 0 END WHERE id=1',params:[rebindConnection,job.scope,job.jobId,r.planDigest]}:this.guard(job,true),{sql:'INSERT OR IGNORE INTO library_binary_request_quota VALUES(1,0)'},{sql:'UPDATE library_binary_request_quota SET bytes=bytes+CASE WHEN EXISTS(SELECT 1 FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?) THEN 0 ELSE 1024 END WHERE id=1',params:[job.scope,job.jobId,peer,r.requestId]},{sql:'UPDATE library_binary_guard SET ok=CASE WHEN (SELECT bytes FROM library_binary_request_quota WHERE id=1)<=? THEN 1 ELSE 0 END WHERE id=1',params:[Math.min(8388608,job.description.selection.limits.maxJournalBytes-25165824)]},...this.bind(job,peer,r)]);return row?.result?parse(row.result):null;}
+ private requestQuota(job:Job,peer:string,r:Envelope):Statement[]{return [
+  {sql:'INSERT OR IGNORE INTO library_binary_request_quota VALUES(1,0)'},
+  {sql:'UPDATE library_binary_request_quota SET bytes=bytes+CASE WHEN EXISTS(SELECT 1 FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?) THEN 0 ELSE 1024 END WHERE id=1',params:[job.scope,job.jobId,peer,r.requestId]},
+  {sql:'UPDATE library_binary_guard SET ok=CASE WHEN (SELECT bytes FROM library_binary_request_quota WHERE id=1)<=? THEN 1 ELSE 0 END WHERE id=1',params:[Math.min(8388608,job.description.selection.limits.maxJournalBytes-25165824)]},
+  ...this.bind(job,peer,r),
+ ];}
+ async receiveBindings(job:Job,peer:string):Promise<Pick<Envelope,'requestId'|'requestDigest'>[]>{
+  const rows=await this.db.query('SELECT request_id,digest FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? LIMIT ?',
+   [job.scope,job.jobId,peer,MAX_REQUEST_BINDINGS+1]);
+  if(rows.length>MAX_REQUEST_BINDINGS)fail('JOURNAL_CORRUPT');
+  return rows.map(r=>({requestId:hex(r.request_id,32),requestDigest:hex(r.digest)}));
+ }
+ async boundRequest(job:Job,peer:string,r:Envelope,onReplay?:()=>void){
+  const existing=(await this.db.query('SELECT digest,result FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?',[job.scope,job.jobId,peer,r.requestId]))[0];
+  if(existing&&existing.digest!==r.requestDigest)fail('REQUEST_CONFLICT');
+  if(existing)onReplay?.();
+  return existing;
+ }
+ async checkBinding(job:Job,peer:string,r:Envelope,rebindConnection?:string,onReplay?:()=>void):Promise<Row|null>{
+  const existing=await this.boundRequest(job,peer,r,onReplay);
+  if(!existing)await this.db.transaction([
+   rebindConnection?{sql:'UPDATE library_binary_guard SET ok=CASE WHEN EXISTS(SELECT 1 FROM library_binary_connections WHERE connection_id=? AND revoked=0) AND EXISTS(SELECT 1 FROM library_binary_jobs WHERE scope=? AND job_id=? AND plan_digest=?) THEN 1 ELSE 0 END WHERE id=1',params:[rebindConnection,job.scope,job.jobId,r.planDigest]}:this.guard(job,true),
+   ...this.requestQuota(job,peer,r),
+  ]);
+  return existing?.result?parse(existing.result):null;
+ }
+ commitChunks(job:Job,peer:string,requests:readonly Envelope[]):Promise<void>{
+  return this.db.transaction([this.guard(job),...requests.flatMap(r=>this.requestQuota(job,peer,r)),...this.touchStatements(job)]);
+ }
  async collect(scope:string,cleanup:(job:Job)=>Promise<void>):Promise<void>{
   const expired=await this.db.query('SELECT job_id FROM library_binary_jobs WHERE scope=? AND expires_at<? LIMIT 4',[scope,this.now()]);
   for(const r of expired){const job=await this.job(scope,String(r.job_id));if(!job)continue;await cleanup(job);await this.db.transaction(['library_binary_snapshot_refs','library_binary_peaks','library_binary_reservations','library_binary_requests','library_binary_pages','library_binary_objects','library_binary_peer_ack','library_binary_jobs'].map(table=>({sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:[scope,job.jobId]})));}
@@ -180,7 +209,8 @@ export class BinaryStore {
   const result={state:job.state==='COMPLETE'?'COMPLETE':'CANCELLED',alreadyComplete:job.state==='COMPLETE'};
   await this.db.transaction([this.guard(job,true),...(r?this.bind(job,peer!,r,result):[]),{sql:'DELETE FROM library_binary_reservations WHERE scope=? AND job_id=?',params:[job.scope,job.jobId]},{sql:"UPDATE library_binary_jobs SET state=CASE WHEN state='COMPLETE' THEN state ELSE 'CANCELLED' END,expires_at=max(expires_at,?) WHERE scope=? AND job_id=?",params:[this.now()+RETENTION,job.scope,job.jobId]}]);return result;
  }
- async touch(job:Job){const until=this.now()+RETENTION;await this.db.transaction([{sql:'UPDATE library_binary_jobs SET expires_at=max(expires_at,?) WHERE scope=? AND job_id=?',params:[until,job.scope,job.jobId]},{sql:'UPDATE library_binary_snapshots SET expires_at=max(expires_at,?) WHERE scope=? AND snapshot_id IN (?,?)',params:[until,job.scope,job.description.phoneSnapshot.snapshotId,job.description.watchSnapshot.snapshotId]},{sql:'UPDATE library_binary_connections SET expires_at=max(expires_at,?) WHERE connection_id=?',params:[until,job.connectionId]},{sql:'UPDATE library_binary_preparations SET expires_at=max(expires_at,?) WHERE scope=?',params:[until,job.scope]},{sql:'UPDATE library_binary_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',params:[until,job.scope,job.connectionId]}]);}
+ async touch(job:Job){await this.db.transaction(this.touchStatements(job));}
+ private touchStatements(job:Job):Statement[]{const until=this.now()+RETENTION;return [{sql:'UPDATE library_binary_jobs SET expires_at=max(expires_at,?) WHERE scope=? AND job_id=?',params:[until,job.scope,job.jobId]},{sql:'UPDATE library_binary_snapshots SET expires_at=max(expires_at,?) WHERE scope=? AND snapshot_id IN (?,?)',params:[until,job.scope,job.description.phoneSnapshot.snapshotId,job.description.watchSnapshot.snapshotId]},{sql:'UPDATE library_binary_connections SET expires_at=max(expires_at,?) WHERE connection_id=?',params:[until,job.connectionId]},{sql:'UPDATE library_binary_preparations SET expires_at=max(expires_at,?) WHERE scope=?',params:[until,job.scope]},{sql:'UPDATE library_binary_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',params:[until,job.scope,job.connectionId]}];}
  async savePeerAck(job:Job,result:Completion){await this.db.execute('INSERT INTO library_binary_peer_ack VALUES(?,?,?) ON CONFLICT(scope,job_id) DO UPDATE SET completion=excluded.completion',[job.scope,job.jobId,JSON.stringify(result)]);}
 }
 export function validateGraph(all:readonly ObjectDescriptor[]):void{
