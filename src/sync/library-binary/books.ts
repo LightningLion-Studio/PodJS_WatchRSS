@@ -194,7 +194,7 @@ export class BinaryBooks {
    const expected='library-binary/spool/'+stagingKey(job,d.objectId)+'.bin';
    if(path!==expected)fail('OBJECT_CONFLICT');
    boundary.check?.();
-   await this.store.db.transaction([...boundary.before,
+   await (boundary.transaction??(statements=>this.store.db.transaction(statements)))([...boundary.before,
     {sql:'UPDATE library_binary_book_files SET ready=1 WHERE scope=? AND job_id=? AND object_id=? AND path=?',params:[...key,d.objectId,path]},
     ...boundary.after('merged')]);
    return;
@@ -264,7 +264,7 @@ export class BinaryBooks {
     if(assembled.size!==info.size||assembled.sha256!==info.sha256)fail('HASH_MISMATCH');
     await this.files.durableCommit(temp,combined,info.size,info.sha256);
     boundary.check?.();
-    await this.store.db.transaction([...boundary.before,
+    await (boundary.transaction??(statements=>this.store.db.transaction(statements)))([...boundary.before,
      {sql:'UPDATE library_binary_book_files SET ready=1 WHERE scope=? AND job_id=? AND object_id=?',params:[...key,d.objectId]}]);
    }finally{await this.files.remove(temp).catch(()=>{});}
   }
@@ -274,7 +274,7 @@ export class BinaryBooks {
    await repo.installBinaryPackage(info,state,stagedKey,visit=>importBookPackage(this.files,info,state,visit,this.work),
     async()=>{
      boundary.check?.();
-     await this.store.db.transaction([...boundary.before,
+     await (boundary.transaction??(statements=>this.store.db.transaction(statements)))([...boundary.before,
       {sql:'INSERT OR IGNORE INTO library_binary_book_publications VALUES(?,?,?,?,?)',params:[...key,d.objectId,published,info.size]}]);
      boundary.check?.();
      if(info.path!==published)await this.files.durableCommit(info.path,published,info.size,info.sha256);

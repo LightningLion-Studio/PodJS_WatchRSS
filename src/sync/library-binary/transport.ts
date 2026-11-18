@@ -17,6 +17,8 @@ export interface FileStream extends SyncByteStream {
 export type NativeFramePort=NonNullable<Awaited<ReturnType<HostSyncByteStream['openFramed']>>>;
 export class BinaryByteTransport implements ByteTransport {
  private activate=false;
+ private revocation?:Promise<void>;
+ waitRevoked(){return this.revocation??Promise.resolve();}
  private rejected?:number;
  settleNativeRejection(sequence:number){this.rejected=sequence;}
  activateReceive(){this.activate=true;}
@@ -131,5 +133,12 @@ export class BinaryByteTransport implements ByteTransport {
    }
   }catch(e){this.close();throw e;}finally{this.writing=false;}
  }
- close(){if(this.closed)return;this.closed=true;void this.stream.close().catch(()=>{});}
+ close(){
+  if(this.closed)return;
+  this.closed=true;
+  if(this.native){
+   this.revocation=this.native.revoke().finally(()=>this.stream.close());
+   void this.revocation.catch(()=>{});
+  }else void this.stream.close().catch(()=>{});
+ }
 }

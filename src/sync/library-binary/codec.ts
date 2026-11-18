@@ -102,6 +102,7 @@ export function decodeFrame(b:Uint8Array,maximum=MAX_FRAME_LENGTH):Frame {
 export interface ByteTransport {
  readonly native?:import('./transport').NativeFramePort;
  activateReceive?():void;
+ waitRevoked?():Promise<void>;
  settleNativeRejection?(sequence:number):void;
  setNetworkProgress?(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void):void;
  readFrame(readData?:DataReader):Promise<Uint8Array|null>;

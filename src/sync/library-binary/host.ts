@@ -35,6 +35,8 @@ export interface BinaryApplicationPorts {
  bookRuntime?():Promise<boolean>;
  account:WatchAccountStore;deviceId():Promise<string>;randomId():Promise<string>;now():number;
  sampleClock?():Promise<void>;
+ guardedTransaction?:import('./coordinator').BinaryPorts['guardedTransaction'];
+ durableTransaction?:import('./coordinator').BinaryPorts['durableTransaction'];
  sleep(milliseconds:number):{result:Promise<void>;cancel():void};changed?(kind?:string):void;
  /** Native listener identity is fixed per accepted stream. */
  recovery?:RecoveryRules;
@@ -124,7 +126,7 @@ export class BinaryApplicationService implements BinarySessionPort {
   });}
   catch(error){await stream.close();throw error;}
   owner=new LibraryBinaryConnection({store:this.ports.store,chunks:this.ports.chunks,capability:n.capability,accountScope,phoneDeviceId:n.peer,watchDeviceId:watch,connectionId,authorize,check,sleep:this.ports.sleep,now:this.ports.now,sampleClock:this.ports.sampleClock,randomId:this.ports.randomId,recovery:this.recovery,
-   stopLocalWork:fileWork?.stop,
+   stopLocalWork:fileWork?.stop,guardedTransaction:this.ports.guardedTransaction,durableTransaction:this.ports.durableTransaction,
    freeze:peer=>{const selection=negotiate(n.capability,peer);return assets.freeze(scope,connectionId,selection?.limits??n.capability.limits,new Set(selection?.kinds.map(k=>k.kind)));},source:(w,s)=>assets.source(scope,w,s),publish:(l,o,d,j)=>assets.publish(l,o,d,j),apply:(j,d,path,b)=>assets.apply(d,path,b,n.peer,j),cleanupCompleted:j=>books?.collect(j)??Promise.resolve(),reserve:async(j,objects)=>{if(j.state==='PLANNING')kinds?.validatePlan(objects);await assets.reserve(scope,j.jobId,j.description.selection.limits,objects);if(j.lease&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))for(const d of objects){check();await this.ports.chunks.status(j.lease as unknown as ObjectLease,{id:d.objectId,size:d.size,sha256:d.sha256,chunkHashes:d.chunkHashes});owner.workUnit();}},supportsRange:async()=>false,applied:this.ports.changed,
   },gate,new BinaryByteTransport(stream,this.ports.now,undefined,native));
   this.recovery.accountReady(connectionId,this.reconnected);const off=context.onCancel?.(()=>{void owner.cancel().catch(()=>{});});const accountOff=this.ports.account.subscribe(()=>{void this.ports.account.read().then(current=>{if(!current||current.userId!==account.userId||current.backendBaseUrl!==account.backendBaseUrl)void owner.close(new ResumeError('AUTH_REVOKED'));},()=>owner.close(new ResumeError('AUTH_REVOKED')));});

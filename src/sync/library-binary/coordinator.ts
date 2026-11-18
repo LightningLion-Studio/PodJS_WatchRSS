@@ -28,6 +28,8 @@ export interface BinaryPorts {
  publish?(lease:ObjectLease,object:VerifiedObject,d:ObjectDescriptor,job:Job):Promise<VerifiedPublication>;
  cleanupCompleted?(job:Job):Promise<void>;
  stopLocalWork?():void;
+ guardedTransaction?(channel:string,epoch:number,statements:import('./store').Statement[]):Promise<void>;
+ durableTransaction?(statements:import('./store').Statement[]):Promise<void>;
  supportsRange?(p:BeginPayload):Promise<boolean>;
  applied?(kind:ObjectDescriptor['kind']):void;
  reserve(job:Job,objects:readonly ObjectDescriptor[]):Promise<void>;
@@ -98,13 +100,18 @@ export class LibraryBinaryConnection {
  workUnit(){this.lastLocalUnit=this.ports.now();}
  private write(value:Envelope,started?:()=>void):Promise<void>{this.check();return this.binary.write({kind:'control',envelope:value},value.phase==='missing'&&value.payload?.limit===0?'urgent':'ordinary',started);}
  private reply(r:Envelope,result:Row|null,epoch:number|null,error?:ResumeError):Envelope{const {payload,...base}=r;return {...base,type:'response',success:!error,result,...(error?{error:error.wire()}:{}),epoch};}
- async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.ports.store.revokeConnection(this.ports.connectionId);}
+ async close(error:unknown=new ResumeError('LOCAL_IO'),afterCancel=false){if(this.cancelling&&!afterCancel){await this.cancelling;return;}if(this.stopped)return;this.stopped=true;this.closeReason=error;this.ports.stopLocalWork?.();this.heartbeatTimer?.cancel();this.binary.close();this.receive?.window.grant.fence();void this.receive?.pipeline?.fence();this.send?.window.close();this.slots?.clear();for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);await this.io.waitRevoked?.();await this.ports.store.revokeConnection(this.ports.connectionId);}
  cancel():Promise<void>{
   if(this.cancelling)return this.cancelling;if(this.stopped)return Promise.resolve();const error=new ResumeError('USER_CANCELLED');this.closeReason=error;this.ports.stopLocalWork?.();
   this.receive?.window.grant.fence();const draining=this.receive?.pipeline?.fence();this.send?.window.close();
   for(const j of [this.receive?.job,this.send?.job])if(j)try{void this.binary.write({kind:'control',envelope:this.makeRequest('cancel',j.jobId,j.planDigest,j.epoch,{reason:'USER_CANCEL'})},'urgent').catch(()=>{});}catch{/* The transport may already be closed; tombstones remain mandatory. */}this.binary.close();
   for(const p of this.pending.values())p.reject(error);this.pending.clear();this.failData(error);
-  return this.cancelling=Promise.resolve(draining).then(()=>this.ports.store.exclusive(async()=>{for(const b of this.bindings){const j=await this.ports.store.job(this.scope,b.jobId);if(j?.state!=='COMPLETE')await this.ports.store.db.execute('INSERT OR REPLACE INTO library_binary_cancellations VALUES(?,?,?,?)',[this.scope,b.jobId,'USER_CANCEL',this.ports.store.now()+86400000]);if(j)await this.ports.store.cancel(j);}await this.cleanupCancelledReceiver();})).finally(()=>this.close(error,true));
+  return this.cancelling=Promise.all([draining,this.io.waitRevoked?.()]).then(()=>this.ports.store.exclusive(async()=>{for(const b of this.bindings){const j=await this.ports.store.job(this.scope,b.jobId);if(j?.state!=='COMPLETE'){
+    const tombstone={sql:'INSERT OR REPLACE INTO library_binary_cancellations VALUES(?,?,?,?)',params:[this.scope,b.jobId,'USER_CANCEL',this.ports.store.now()+86400000]};
+    if(this.io.native&&this.ports.durableTransaction)await this.ports.durableTransaction([tombstone]);
+    else await this.ports.store.db.execute(tombstone.sql,tombstone.params);
+   }
+   if(j)await this.ports.store.cancel(j,undefined,undefined,this.io.native?this.ports.durableTransaction:undefined);}await this.cleanupCancelledReceiver();})).finally(()=>this.close(error,true));
  }
  private async cleanupCancelledReceiver(){const receive=this.receive;if(!receive?.job.lease)return;const j=receive.job;try{await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);let released=await this.cleanupApplied(j);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);try{await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);}catch{released=false;}}if(released&&!j.description.selection.kinds.some(k=>k.kind.startsWith('book')))await this.ports.store.db.transaction([this.ports.store.guard(j,true),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}catch{/* Keep the reservation until delayed native collection succeeds. */}}
  async run():Promise<void>{
@@ -400,17 +407,17 @@ export class LibraryBinaryConnection {
     try{result=await this.apply(j,r);}catch(error){
      if(error instanceof BookMetadataRejected){
       this.check();
-      await this.ports.store.rejectBookMetadata(j,this.ports.phoneDeviceId,r);
+      await this.ports.store.rejectBookMetadata(j,this.ports.phoneDeviceId,r,this.nativeCommit(j));
      }
      throw error;
     }finally{this.applying=undefined;}
     break;
    }
-   case 'complete':result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p) as unknown as Row;if(await this.cleanupApplied(j)){
+   case 'complete':result=await this.ports.store.complete(j,r,this.ports.phoneDeviceId,p,this.nativeCommit(j)) as unknown as Row;if(await this.cleanupApplied(j)){
     let clean=true;
     try{await this.ports.cleanupCompleted?.(j);}catch(e){clean=false;this.ports.diagnostic?.(e);}
     if(clean)await this.ports.store.db.transaction([this.ports.store.guard(j),{sql:'DELETE FROM library_binary_peaks WHERE scope=? AND job_id=?',params:[j.scope,j.jobId]}]);}this.ports.recovery?.confirm('COMPLETE','phoneToWatch:'+j.description.objectsRoot);break;
-   case 'cancel':result=await this.ports.store.cancel(j,r,this.ports.phoneDeviceId);if(j.lease&&j.state!=='COMPLETE'){await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);this.workUnit();}this.activeReceive.clear();}break;
+   case 'cancel':result=await this.ports.store.cancel(j,r,this.ports.phoneDeviceId,this.io.native?this.ports.durableTransaction:undefined);if(j.lease&&j.state!=='COMPLETE'){await this.ports.chunks.revokeWrites(j.lease as unknown as ObjectLease);for(const id of this.activeReceive){const o=await this.ports.store.object(j,id);await this.ports.chunks.release(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),false);this.workUnit();}this.activeReceive.clear();}break;
    default:fail();
   }
   await this.ports.store.touch(j);
@@ -553,11 +560,18 @@ export class LibraryBinaryConnection {
   if(this.activeReceive.has(d.objectId))return;
   if(this.activeReceive.size>=this.receiverSlots(j))fail('WINDOW_FULL');this.activeReceive.add(d.objectId);
  }
+ private nativeCommit(job:Job):ReceiptBoundary['transaction']{
+  const channel=this.io.native,guard=this.ports.guardedTransaction;
+  if(this.nativeReceive&&channel&&guard)return statements=>guard(channel.id,job.epoch,statements);
+ }
  private async apply(j:Job,r:Envelope):Promise<Row>{
   if(j.state==='PLANNING')fail('MANIFEST_INCOMPLETE');const o=await this.ports.store.object(j,String(r.payload!.objectId));if(o.receipt){if(o.receipt.applyRequestId!==r.requestId||o.receipt.applyRequestDigest!==r.requestDigest)fail('REQUEST_CONFLICT');await this.ports.store.db.transaction([this.ports.store.guard(j),...this.ports.store.bind(j,this.ports.phoneDeviceId,r)]);await this.cleanupApplied(j,o.descriptor);return {state:'APPLIED',receipt:o.receipt};}
   if(terminal(j))fail('JOB_CANCELLED');await this.runnable(j,o.descriptor);await this.admit(j,o.descriptor);
   const final=await (this.ports.publish?this.ports.publish(j.lease as unknown as ObjectLease,nativeObject(o.descriptor),o.descriptor,j):this.ports.chunks.finalize(j.lease as unknown as ObjectLease,nativeObject(o.descriptor)));this.check();
-  await this.ports.apply(j,o.descriptor,final.path,this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check()));this.check();
+  const boundary=this.ports.store.boundary(j,r,this.ports.phoneDeviceId,o.descriptor.objectId,this.ports.watchDeviceId,()=>this.check());
+  const guarded=this.nativeCommit(j);
+  if(guarded&&o.descriptor.kind.startsWith('book'))boundary.transaction=guarded;
+  await this.ports.apply(j,o.descriptor,final.path,boundary);this.check();
   const saved=await this.ports.store.object(j,o.descriptor.objectId);if(!saved.receipt)fail('RECEIPT_CONFLICT');
   const receiveIndex=this.receive?.index;
   receiveIndex?.didApply(o.descriptor.objectId);

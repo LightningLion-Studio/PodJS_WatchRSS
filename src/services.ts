@@ -84,6 +84,16 @@ const clearDatabase: SqlDatabase = {
   transactionChanges: async statements => {const changes=await sqlite.transactionChanges(statements as { sql: string; params?: (string | number | null)[] }[]);notifyLibrarySqlCommit(statements,changes);return changes;},
 };
 export const db:SqlDatabase={query:clearDatabase.query,execute:async(...args)=>{assertLibraryWritable();return clearDatabase.execute(...args);},transaction:async statements=>{assertLibraryWritable();return clearDatabase.transaction(statements);},transactionChanges:async statements=>{assertLibraryWritable();return clearDatabase.transactionChanges!(statements);}};
+export async function commitGuardedLibraryTransfer(channel:string,epoch:number,statements:Parameters<SqlDatabase['transaction']>[0]){
+ assertLibraryWritable();
+ const counts=await sqlite.transactionChangesGuarded(channel,epoch,statements as Parameters<typeof sqlite.transactionChangesGuarded>[2]);
+ notifyLibrarySqlCommit(statements,counts);
+}
+export async function commitDurableLibraryTransfer(statements:Parameters<SqlDatabase['transaction']>[0]){
+ assertLibraryWritable();
+ const counts=await sqlite.transactionChangesFull(statements as Parameters<typeof sqlite.transactionChangesFull>[0]);
+ notifyLibrarySqlCommit(statements,counts);
+}
 const externalSavedStore=new ExternalSavedStore(db,id=>prepareLocalSaveAlias(db,id,hostSyncText,hostArticleBodyCodec));
 const douyinSavedStore=new DouyinSavedStore({get:async key=>kv.get<string>(key)??null,set:async(key,value)=>{kv.set(key,value);},remove:async key=>{kv.delete(key);}},Date.now,externalSavedStore);
 /** Start database setup at JS start, in parallel with the startup gate; later calls share it. */

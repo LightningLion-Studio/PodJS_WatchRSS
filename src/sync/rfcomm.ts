@@ -16,6 +16,7 @@ export class HostSyncByteStream implements SyncByteStream {
   const id=this.id,host=this.framed;
   await host.open(id);
   return {
+   id,revoke:()=>host.revoke(id),
    next:()=>host.next(id),control:(text:string,activate:boolean,rejected?:number)=>host.control(id,text,activate,rejected),
    ack:(bytes:Uint8Array)=>host.ack(id,bytes),data:(header:Uint8Array,bytes:Uint8Array)=>host.data(id,header,bytes),
    register:(...args:Parameters<typeof host.register> extends [string,...infer P]?P:never)=>host.register(id,...args),
