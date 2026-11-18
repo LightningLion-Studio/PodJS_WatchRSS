@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {binaryRuntime,nonce} from '../helpers/library-binary-runtime';
 import {BinaryByteTransport} from '../../src/sync/library-binary/transport';
-import {encodeFrame,decodeFrame} from '../../src/sync/library-binary/codec';
+import {encodeFrame,decodeFrame,type DataFrame} from '../../src/sync/library-binary/codec';
 import {capabilityDigest,requestDigest,preparationDigest,selectionDigest,objectId,objectsRoot,planDigest,pageDigest,receiptsRoot} from '../../src/sync/library-binary/digests';
 import {hash,utf8,type Envelope,type Row,type ObjectDescriptor,type Capability,type BeginPayload,type Binding} from '../../src/sync/library-binary/wire';
 import {negotiate,s2Capability} from '../../src/sync/library-binary/routing';
@@ -197,7 +197,7 @@ test('rolled-back DATA bindings survive reconnect and block conflicting control 
   const first=await connect('create');
   expect((await first.call(request('manifestPage',{pageIndex:0,startIndex:0,previousPageDigest:zero,
    pageDigest:pageDigest(plan!,0,0,[d],zero),entries:[d]},job,plan!,first.epoch))).success).toBe(true);
-  const frames=payloads.map((payload,chunkIndex)=>({kind:'data' as const,streamId:1,epoch:first.epoch,txSeq:chunkIndex+1,
+  const frames=payloads.map<DataFrame>((payload,chunkIndex)=>({kind:'data',streamId:1,epoch:first.epoch,txSeq:chunkIndex+1,
    objectSlot:0,chunkIndex,payload,requestId:nonce(),requestDigest:requestDigest(job,plan!,'putChunk',{objectId:d.objectId,chunkIndex})}));
   const transaction=f.store.db.transaction.bind(f.store.db),commit=f.store.commitChunks.bind(f.store);
   let failNext=false;
