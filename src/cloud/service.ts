@@ -64,7 +64,7 @@ export class WatchCloudSyncService {
  private durableProgress=false;private continuationExpected=false;private transportFailed=false;
  private recordFailure?:{code:string;stage:RecordFailureStage;category:CloudFormatFailure};
  private budget?:CloudSyncBudget;
- private usageRefresh:(()=>Promise<void>)|undefined;
+ private usageRefresh:(()=>Promise<boolean>)|undefined;
  private statusEpoch=0;private runEpoch=0;
  private resultSequence=0;private networkFailure=false;private completion?:{message:string;at:number};
  private tail:Promise<unknown>=Promise.resolve();private listeners=new Set<()=>void>();
@@ -110,8 +110,8 @@ export class WatchCloudSyncService {
   return outcome;
   });this.tail=run;return run;
  }
- private async refreshUsage(){await this.usageRefresh?.();}
- private async recover(manual:boolean,mode:'all'|'recent128',expectedScope?:string){let recovery:string|undefined;for(let attempt=0;attempt<2;attempt++){this.completion=undefined;this.networkFailure=false;let refreshed=false;this.usageRefresh=undefined;try{const result=await this.run(manual,mode,attempt>0,recovery==='rebuild',expectedScope);refreshed=true;await this.refreshUsage();return result;}catch(original){if(isLibraryOwnerMismatch(original))throw original;if(String(original).includes('cloud_sync_deadline_exceeded')||cloudFormatFailure(original)==='suspended'||String(original).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE))throw original;let error=original;if(!refreshed)try{await this.refreshUsage();}catch(latest){if(contentRecovery(latest)==='rebuild'||String(latest).includes('library_epoch_mismatch'))error=latest;}const kind=contentRecovery(error);if(attempt||!['rebuild','plan'].includes(kind??''))throw error;recovery=kind;this.set('idle',kind==='rebuild'?'云端内容已清理，正在从本机重建同步':'云端上传计划已失效，正在重新准备');}}return false;}
+ private async refreshUsage(){return (await this.usageRefresh?.())!==false;}
+ private async recover(manual:boolean,mode:'all'|'recent128',expectedScope?:string){let recovery:string|undefined;for(let attempt=0;attempt<2;attempt++){this.completion=undefined;this.networkFailure=false;let refreshed=false;this.usageRefresh=undefined;try{const result=await this.run(manual,mode,attempt>0,recovery==='rebuild',expectedScope);refreshed=true;const announced=await this.refreshUsage();return result&&announced;}catch(original){if(isLibraryOwnerMismatch(original))throw original;if(String(original).includes('cloud_sync_deadline_exceeded')||cloudFormatFailure(original)==='suspended'||String(original).includes(CLOUD_HOST_CAPABILITY_UNAVAILABLE))throw original;let error=original;if(!refreshed)try{await this.refreshUsage();}catch(latest){if(contentRecovery(latest)==='rebuild'||String(latest).includes('library_epoch_mismatch'))error=latest;}const kind=contentRecovery(error);if(attempt||!['rebuild','plan'].includes(kind??''))throw error;recovery=kind;this.set('idle',kind==='rebuild'?'云端内容已清理，正在从本机重建同步':'云端上传计划已失效，正在重新准备');}}return false;}
  private async manifest(s:CloudSession,h:CloudSnapshotHead,bytes:Uint8Array){
   headValid(h);if(bytes.length!==h.manifestSizeBytes||await this.ports.hash(bytes)!==h.manifestSha256)throw Error('云 manifest 哈希或长度不符');
   const key=await s.keys.accountKey(s.userId,h.keyVersion);if(!key)throw Error('缺少账号密钥，请在手机端重新批准');
@@ -128,8 +128,15 @@ export class WatchCloudSyncService {
   const current=async()=>{this.budget?.check();this.guard.require();if(this.runEpoch!==this.statusEpoch)throw Error('cloud_operation_superseded');await s.assertCurrent();this.budget?.check();};await current();
   this.failureStage='owner';if(s.assertOwnership){await s.assertOwnership();await current();this.ownerResolved();}await current();this.set('registering','正在核对云空间');
   this.failureStage='bootstrap';let bootstrap=await s.client.bootstrap();await current();
-  if(this.ports.keysReady&&!bootstrap.syncV2)try{await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}catch{}
-  if(this.ports.primaryV2&&!bootstrap.syncV2){this.set('idle','Sync v2 服务暂不可用，本机资料已保留',bootstrap.member);return false;}
+  const continueWithAnnouncement=async(boot:typeof bootstrap)=>{
+   if(boot.syncV2)return true;
+   await this.ports.keysReady?.({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:boot.syncV2,bootstrap:boot});
+   if(!this.ports.primaryV2)return true;
+   this.completion=undefined;
+   this.set('idle','Sync v2 服务暂不可用，本机资料已保留',boot.member);
+   return false;
+  };
+  if(!await continueWithAnnouncement(bootstrap))return false;
   this.failureStage='content';const content=parseContentState(bootstrap);
   s.client.setEpoch(bootstrap.libraryEpoch);s.client.setContentGeneration(content.contentGeneration);
   let changeRead:CloudChangeRead|undefined,changeContext='',checkedHeads:CloudSnapshotHead[]|undefined,checkedRecordsFormat:number|undefined,checkedRecordsRevision:string|undefined,remoteSame=false,remoteVerifiedAt:number|undefined;
@@ -149,7 +156,7 @@ export class WatchCloudSyncService {
      if(this.ports.keysReady&&bootstrap.syncV2&&probeDevice&&probeDevice.revokedAt===null){const ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,probeDevice.attestation&&probeDevice.attestationKeyVersion?{keyVersion:probeDevice.attestationKeyVersion,mac:probeDevice.attestation}:undefined);await current();if(ready==='ready')await this.ports.keysReady({userId:s.userId,deviceId:s.deviceId,keys:s.keys,syncV2:bootstrap.syncV2,bootstrap});}
      idleHit(81);this.set('complete',full?'云同步完成':'阅读状态已同步；正文等待Wi-Fi',bootstrap.member);return true;}
     idleHit(82);
-   }catch{await current();idleHit(84);changeRead=undefined;checkedHeads=undefined;checkedRecordsFormat=undefined;remoteSame=false;remoteVerifiedAt=undefined;}
+   }catch(error){await current();if(contentRecovery(error)==='upgrade')throw error;idleHit(84);changeRead=undefined;checkedHeads=undefined;checkedRecordsFormat=undefined;remoteSame=false;remoteVerifiedAt=undefined;}
   }
   if(!(this.ports.primaryV2&&bootstrap.syncV2)){
   await s.prepareRestore?.();
@@ -158,7 +165,7 @@ export class WatchCloudSyncService {
   if(forceContentReset||previousGeneration!==undefined&&previousGeneration!==content.contentGeneration||content.contentEmpty){await current();await s.cache.clear(s.userId);await s.state.clearContent();await current();this.set('registering','云端内容已清理，正在从本机重建同步',bootstrap.member);}
   await s.state.rememberContentGeneration(content.contentGeneration);s.client.setContentGeneration(content.contentGeneration);
   }
-  this.usageRefresh=async()=>{const latest=await s.client.bootstrap();await current();if(latest.libraryEpoch!==bootstrap.libraryEpoch)throw Error('library_epoch_mismatch');if(parseContentState(latest).contentGeneration!==content.contentGeneration)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});this.value={...this.value,member:latest.member,usedBytes:latest.member.usedBytes,reservedBytes:latest.member.reservedBytes,quotaBytes:latest.member.quotaBytes};if(!this.completion)this.emit();};
+  this.usageRefresh=async()=>{const latest=await s.client.bootstrap();await current();if(this.ports.primaryV2&&!await continueWithAnnouncement(latest))return false;if(latest.libraryEpoch!==bootstrap.libraryEpoch)throw Error('library_epoch_mismatch');if(parseContentState(latest).contentGeneration!==content.contentGeneration)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});this.value={...this.value,member:latest.member,usedBytes:latest.member.usedBytes,reservedBytes:latest.member.reservedBytes,quotaBytes:latest.member.quotaBytes};if(!this.completion)this.emit();return true;};
   this.failureStage='device';let device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
   if(device?.revokedAt){await s.invalidate?.();this.set('waiting-approval','云设备已撤销，请重新批准',bootstrap.member);return false;}
   const publicKey=await s.keys.publicKeySpki(s.userId,s.deviceId);
@@ -168,7 +175,7 @@ export class WatchCloudSyncService {
   if(upgrade&&!device?.attestation){
    if(device&&canonicalSpki(device.publicKeySpki)!==canonicalSpki(publicKey))throw Error('device_key_conflict');
    await s.client.registerDevice(s.deviceId,s.displayName,publicKey,upgrade.keyVersion,upgrade.attestation);
-   const epoch=bootstrap.libraryEpoch,generation=content.contentGeneration;bootstrap=await s.client.bootstrap();await current();if(parseContentState(bootstrap).contentGeneration!==generation)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});if(bootstrap.libraryEpoch!==epoch){await s.invalidate?.();throw Error('library_epoch_mismatch');}device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
+   const epoch=bootstrap.libraryEpoch,generation=content.contentGeneration;bootstrap=await s.client.bootstrap();await current();if(parseContentState(bootstrap).contentGeneration!==generation)throw Object.assign(Error('cloud_content_rebuild_required'),{status:409,code:'cloud_content_rebuild_required'});if(bootstrap.libraryEpoch!==epoch){await s.invalidate?.();throw Error('library_epoch_mismatch');}if(!await continueWithAnnouncement(bootstrap))return false;device=bootstrap.devices.find(d=>d.deviceId===s.deviceId);
   }
   this.failureStage='keys';let ready:string;
   try{ready=await s.keys.acceptBootstrap(s.userId,s.deviceId,bootstrap.keyEnvelopes,bootstrap,device?.attestation&&device.attestationKeyVersion?{keyVersion:device.attestationKeyVersion,mac:device.attestation}:undefined);}

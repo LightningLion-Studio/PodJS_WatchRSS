@@ -90,6 +90,7 @@ function start(){
     run.bindIntent(grant);
     // Approval retains the initial recent sync when no durable grant exists.
     const manual=!!grant||run.afterApproval,mode=grant?.mode??requestedMode;
+    const previousReady=syncV2Ready;
     const outcome=await runtime!.service.syncNowResult(manual,mode,scope);
     // Report whether the writer finished for scheduling purposes. Only a
     // current writer may deliver its result or touch a grant.
@@ -98,10 +99,11 @@ function start(){
     let success=outcome.ok;
     if(SYNC_V2_PRODUCT.syncV2){
      success=false;
-     if(syncV2Ready&&!disposed){
+     const prepared=syncV2Ready;
+     if(prepared&&prepared!==previousReady&&!disposed){
       const a=await summaryAccountStore.read();
-      if(a&&run.current&&cloudAccountIdentity(a)===scope)try{
-       const port=await syncV2?.sync(JSON.stringify([scope,syncV2Ready.bootstrap.libraryEpoch,syncV2Ready.bootstrap.contentGeneration,Math.max(0,...heldKeys.keys())]));
+      if(a&&run.current&&cloudAccountIdentity(a)===scope&&syncV2Ready===prepared)try{
+       const port=await syncV2?.sync(JSON.stringify([scope,prepared.bootstrap.libraryEpoch,prepared.bootstrap.contentGeneration,Math.max(0,...heldKeys.keys())]));
        const view=await port?.snapshot();
        success=!!view&&!view.errorCode&&!view.choice;
       }catch(error){appLogger.i('SyncV2',String((error as Error)?.message??error));}

@@ -139,3 +139,19 @@ test('structured Sync Objects 426 retains upgrade_required and displays upgrade 
  const service=new WatchCloudSyncService({open:async()=>{await client.records('0','synthetic-device');throw Error('must not apply empty library');},network:async()=>({active:true,validated:true,wifi:false,metered:true}),hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async(fn:any)=>fn()} as any,enabled);
  expect(await service.syncNow()).toBe(false);expect(service.status.message).toContain('请升级');expect(service.status.retryable).toBe(false);expect(paths).toHaveLength(2);
 });
+
+test('v2 withdrawal in the second authenticated bootstrap stops the prepared round',async()=>{
+ const f=await fixture(),bootstrap=f.client.bootstrap.bind(f.client);
+ let requests=0;const ready:boolean[]=[];
+ f.client.bootstrap=async()=>({...await bootstrap(),syncV2:++requests===1?{algorithm:'ES256'}:undefined});
+ const ports={
+  open:async()=>f.session,network:async()=>({active:true,validated:true,wifi:true,metered:false}),
+  hash:crypto.sha256,uuid:async()=> 'unused',exclusive:async<T>(fn:()=>Promise<T>)=>fn(),
+  primaryV2:true,keysReady:async(event:{syncV2:unknown})=>{ready.push(!!event.syncV2);},
+ };
+ const service=new WatchCloudSyncService(ports,enabled);
+ expect(await service.syncNow(false)).toBe(false);
+ expect(ready).toEqual([true,false]);
+ expect(f.calls.map(r=>new URL(r.url).pathname)).toEqual(Array(2).fill('/functions/v1/cloud/bootstrap'));
+ expect(f.merged).toEqual([]);
+});

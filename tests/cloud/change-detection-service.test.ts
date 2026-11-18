@@ -52,3 +52,16 @@ test('P6 authenticates account keys before the ready hook on idle bootstrap and 
  f.setNow(11);expect(await f.service.syncNow()).toBe(true);expect(counts()).toEqual(before);expect(accepts).toBe(1);expect(events).toEqual([true]);
  announced=false;events.length=0;f.setNow(12);expect(await f.service.syncNow()).toBe(true);expect(counts()).toEqual(before);expect(events).toEqual([false]);
 });
+
+test('legacy fence terminates the idle probe before a second business request',async()=>{
+ const {f,sql}=await ready();
+ sql.db.run("INSERT INTO memo_notes VALUES('local','retained')");
+ const before=sql.db.query('SELECT * FROM memo_notes').all();
+ f.fault(r=>r.url.endsWith('/heads')?{status:426,error:'upgrade_required'}:undefined);
+ try{
+  expect(await f.service.syncNow()).toBe(false);
+  expect(f.service.status.retryable).toBe(false);
+  expect(f.calls.filter(r=>r.url.endsWith('/heads'))).toHaveLength(1);
+  expect(sql.db.query('SELECT * FROM memo_notes').all()).toEqual(before);
+ }finally{sql.db.close();}
+});
