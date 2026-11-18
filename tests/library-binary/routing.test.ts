@@ -1,6 +1,6 @@
 import {test,expect} from 'bun:test';
 import fixtures from '../fixtures/library-binary/peer-fixtures.json';
-import {classifyPeer,routeScopes,ConnectionRoute,selectionComplete,SwitchGate,s2Capability,RELEASE_B2_ENABLED,negotiate,type Ready,type PeerRoute} from '../../src/sync/library-binary/routing';
+import {classifyPeer,routeScopes,ConnectionRoute,selectionComplete,SwitchGate,s2Capability,checkSelectedLimits,binaryCapability,RELEASE_B2_ENABLED,negotiate,type Ready,type PeerRoute} from '../../src/sync/library-binary/routing';
 import {Preparation} from '../../src/sync/library-binary/prepare';
 import {capabilityDigest,preparationDigest} from '../../src/sync/library-binary/digests';
 import {cap,selection,binding,begin,object} from './helpers';
@@ -55,4 +55,15 @@ test('begin is bound to persisted prepare scope, both snapshots, direction, sele
  await p.confirmRequest({step:'confirm',offerRequestId:'a'.repeat(32),bindings:bs,preparationDigest:preparationDigest(String(result.offerDigest),bs)},async()=>{});
  const {request}=await import('./helpers'),r=request('begin',b.payload as any,{planDigest:b.plan});expect(()=>p.authorizeBegin(r)).toThrow('AUTH_REVOKED');p.confirmResponseFullyWritten();expect(p.authorizeBegin(r)).toEqual(b.payload);
  const changed=request('begin',{...b.payload,phoneDeviceId:'another-phone'} as any,{planDigest:b.plan});expect(()=>p.authorizeBegin(changed)).toThrow('PLAN_CONFLICT');
+});
+
+test('S3 create takes the current intersection and resume can keep the frozen S2 window',()=>{
+ const s3=binaryCapability(cap.kinds,{...cap.limits,maxInFlightChunks:8,maxInFlightBytes:524288});
+ const selection=negotiate(s3,s3)!;
+ const s2=negotiate(cap,s3)!;
+ const bind={jobId:'1'.repeat(32),direction:'phoneToWatch' as const,intent:'create' as const,selection};
+ expect(()=>checkSelectedLimits(bind,s3,s3)).not.toThrow();
+ expect(()=>checkSelectedLimits({...bind,selection:s2},s3,s3)).toThrow('CAPABILITY_MISMATCH');
+ expect(()=>checkSelectedLimits({...bind,intent:'resume',selection:s2},s3,s3)).not.toThrow();
+ expect(()=>checkSelectedLimits({...bind,intent:'resume'},cap,s3)).toThrow('CAPABILITY_MISMATCH');
 });

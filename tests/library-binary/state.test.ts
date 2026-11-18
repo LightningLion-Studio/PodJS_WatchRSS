@@ -7,7 +7,7 @@ const ack=(seq=1,tx=1,epoch=1)=>({kind:'ack' as const,streamId:1 as const,epoch,
 const ctx={authenticated:true,beginAuthorized:true,admitted:false,state:'PLANNING',nextManifestPage:1,expiresAtMillis:30000};
 test('window 1 retains exact byte credit until one atomic ACK settlement',()=>{
  const w=new SendWindow(binding,1),p=w.reserve(data());expect(w.credit).toEqual({chunks:1,bytes:3});expect(()=>w.reserve(data())).toThrow('WINDOW_FULL');
- expect(w.acceptAck(ack(),0)!.pending.txSeq).toBe(p.txSeq);expect(w.credit).toEqual({chunks:0,bytes:0});const next=w.reserve(data());expect(next.txSeq).toBe(2);
+ expect(w.acceptAck(ack(),0)![0]!.pending.txSeq).toBe(p.txSeq);expect(w.credit).toEqual({chunks:0,bytes:0});const next=w.reserve(data());expect(next.txSeq).toBe(2);
  expect(w.acceptAck(ack(),0)).toBeNull();expect(w.credit.bytes).toBe(3);expect(w.acceptAck(ack(2,2),0)).not.toBeNull();
 });
 for(const bad of [ack(2),ack(1,2),ack(1,1,2),{...ack(),entries:[{txSeq:1,disposition:1 as const},{txSeq:2,disposition:1 as const}]}])test('unmatched/oversized S2 ACK is STOP '+JSON.stringify(bad),()=>{const w=new SendWindow(binding,1);w.reserve(data());expect(()=>w.acceptAck(bad,0)).toThrow();expect(w.credit.bytes).toBe(0);});
@@ -21,10 +21,10 @@ test('negative reply must match job/plan/epoch/request ID/digest; stale epoch ne
 });
 test('disconnect clears temporary credit; fresh epoch restarts both sequences',()=>{
  const w=new SendWindow(binding,1);w.reserve(data());w.close();expect(w.credit.bytes).toBe(0);expect(()=>w.reserve(data())).toThrow();
- const r=new SendWindow(binding,2);expect(r.reserve(data()).txSeq).toBe(1);expect(r.acceptAck(ack(1,1,1),0)).toBeNull();expect(r.credit.bytes).toBe(3);expect(r.acceptAck(ack(1,1,2),0)).not.toBeNull();
+ const r=new SendWindow(binding,1);r.regrant(2);expect(r.reserve(data()).txSeq).toBe(1);expect(r.acceptAck(ack(1,1,1),0)).toBeNull();expect(r.credit.bytes).toBe(3);expect(r.acceptAck(ack(1,1,2),0)).not.toBeNull();
 });
 test('stale ACK rate has independent bounded budget and no settlement',()=>{
- const w=new SendWindow(binding,2);w.reserve(data());for(let i=0;i<32;i++)expect(w.acceptAck(ack(1,1,1),0)).toBeNull();expect(()=>w.acceptAck(ack(1,1,1),0)).toThrow('RATE_LIMITED');expect(w.credit.bytes).toBe(0);
+ const w=new SendWindow(binding,1);w.regrant(2);w.reserve(data());for(let i=0;i<32;i++)expect(w.acceptAck(ack(1,1,1),0)).toBeNull();expect(()=>w.acceptAck(ack(1,1,1),0)).toThrow('RATE_LIMITED');expect(w.credit.bytes).toBe(0);
 });
 test('20 STATE retries use new txSeq with stable requestId/digest, no arbitrary retry ceiling',()=>{
  const w=new SendWindow(binding,1),backoff=new RetryBackoff(),bucket=new TokenBucket(8,4);let now=0;
@@ -48,7 +48,7 @@ test('duplicate/jumped txSeq, bad locator/length/digest STOP before durable comm
  for(const bad of [{txSeq:0},{txSeq:2},{objectSlot:1},{chunkIndex:1},{payload:new Uint8Array([1])},{requestDigest:'a'.repeat(64)}]){const {r,frame}=receiver();let calls=0;await expect(r.receive({...frame,...bad},{commit:async()=>{calls++;return 1;}},async()=>{})).rejects.toThrow();expect(calls).toBe(0);}
 });
 test('old async durable callback cannot commit or ACK after fence',async()=>{
- const {r,grant,frame}=receiver();let proceed!:()=>void,check!:()=>void;const pending=r.receive(frame,{commit:async(_f,_o,c)=>{check=c;await new Promise<void>(r=>proceed=r);c();return 1;}},async()=>{throw Error('late ACK');});await Promise.resolve();grant.fence();expect(()=>check()).toThrow('AUTH_REVOKED');proceed();await expect(pending).rejects.toThrow('AUTH_REVOKED');
+ const {r,grant,frame}=receiver();let proceed!:()=>void,check!:()=>void;let started!:()=>void;const entered=new Promise<void>(resolve=>{started=resolve;});const pending=r.receive(frame,{commit:async(_f,_o,c)=>{check=c;await new Promise<void>(resolve=>{proceed=resolve;started();});c();return 1;}},async()=>{throw Error('late ACK');});await entered;grant.fence();expect(()=>check()).toThrow('AUTH_REVOKED');proceed();await expect(pending).rejects.toThrow('AUTH_REVOKED');
 });
 test('PLANNING missing0 uses reserved slot while business manifest is occupied',()=>{
  const s=new ControlSlots(binding),m=request('manifestPage',{pageIndex:0,startIndex:0,previousPageDigest:'0'.repeat(64),pageDigest:'a'.repeat(64),entries:[]}),h=request('missing',{afterObjectId:null,afterChunkIndex:null,limit:0});
@@ -64,7 +64,7 @@ test('duplicate negative without matching pending is STOP and cannot release cre
  const w=new SendWindow(binding,1),p=w.reserve(data()),r=negativeReply(binding,p,new ResumeError('BUSY'));w.negative(r,0);expect(()=>w.negative(r,100)).toThrow();expect(w.credit.bytes).toBe(0);
 });
 test('two streams share the connection-wide stale ACK budget',()=>{
- const budget=new TokenBucket(32,16),a=new SendWindow(binding,2,0,budget),b=new SendWindow({...binding,streamId:2},2,0,budget);
+ const budget=new TokenBucket(32,16),a=new SendWindow(binding,1,0,budget),b=new SendWindow({...binding,streamId:2},1,0,budget);a.regrant(2);b.regrant(2);
  for(let i=0;i<16;i++){a.acceptAck(ack(1,1,1),0);b.acceptAck({...ack(1,1,1),streamId:2},0);}expect(()=>b.acceptAck({...ack(1,1,1),streamId:2},0)).toThrow('RATE_LIMITED');
 });
 test('apply response binds the receipt to pending object/request and authenticated receiver',async()=>{
@@ -85,4 +85,32 @@ test('only the current pending ACK sequence can refresh partial-frame activity',
  expect(w.acceptsAckProgress(1,1)).toBe(true);expect(w.acceptsAckProgress(0,1)).toBe(false);expect(w.acceptsAckProgress(2,1)).toBe(false);expect(w.acceptsAckProgress(1,2)).toBe(false);
  w.acceptAck(ack(),0);expect(w.acceptsAckProgress(1,1)).toBe(false);w.reserve(data());expect(w.acceptsAckProgress(1,1)).toBe(false);expect(w.acceptsAckProgress(1,2)).toBe(true);
  w.regrant(2);expect(w.acceptsAckProgress(2,1)).toBe(false);w.reserve(data());expect(w.acceptsAckProgress(1,2)).toBe(false);expect(w.acceptsAckProgress(2,1)).toBe(true);w.close();expect(w.acceptsAckProgress(2,1)).toBe(false);
+});
+
+test('S3 settles selective durable ACKs and a negative reply independently',()=>{
+ const w=new SendWindow(binding,1,0,undefined,{maxInFlightChunks:8,maxInFlightBytes:524288});
+ const frames=Array.from({length:8},(_,chunkIndex)=>w.reserve({...data(),chunkIndex,requestId:chunkIndex.toString(16).padStart(32,'0'),payload:new Uint8Array(65536)}));
+ expect(w.credit).toEqual({chunks:8,bytes:524288});
+ expect(w.canSend(1)).toBe(false);
+ const first={...ack(),entries:[{txSeq:1,disposition:1 as const},{txSeq:3,disposition:2 as const}]};
+ expect(w.acceptAck(first,0)?.map(x=>x.pending.txSeq)).toEqual([1,3]);
+ expect(w.acceptAck(first,0)).toBeNull();
+ expect(w.negative(negativeReply(binding,frames[1]!,new ResumeError('BUSY')),0)?.pending.txSeq).toBe(2);
+ const retried=w.reserve({...data(),chunkIndex:1,requestId:frames[1]!.requestId,payload:new Uint8Array(65536)});
+ expect(retried.txSeq).toBe(9);
+ expect(w.credit).toEqual({chunks:6,bytes:393216});
+ expect(()=>w.acceptAck({...ack(2),entries:[{txSeq:4,disposition:1},{txSeq:10,disposition:1}]},0)).toThrow();
+ expect(w.credit).toEqual({chunks:0,bytes:0});
+});
+
+test('ACK and negative responses STOP for a never-granted older epoch',()=>{
+ for(const first of [1,3]){
+  for(const kind of ['ack','negative'] as const){
+   const w=new SendWindow(binding,first);if(first===1)w.regrant(3);
+   const current=w.reserve(data());
+   const settle=kind==='ack'?()=>w.acceptAck(ack(1,current.txSeq,2),0):
+    ()=>w.negative(negativeReply(binding,{...current,epoch:2},new ResumeError('BUSY')),0);
+   expect(settle).toThrow('STALE_EPOCH');expect(w.credit.chunks).toBe(0);
+  }
+ }
 });

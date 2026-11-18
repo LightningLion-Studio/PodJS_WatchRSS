@@ -2,7 +2,7 @@ import {fail,hex,integer,hash,envelope,ResumeError,type Envelope,type ObjectDesc
 import {requestDigest,offerDigest,appliedReceipt,completion} from './digests';
 import type {Capability,Snapshot,AppliedReceipt,BeginPayload} from './wire';
 import type {RegisteredManifest} from './lifecycle';
-import {type DataFrame,type AckFrame} from './codec';
+import {type DataFrame,type AckFrame,type DataHeader} from './codec';
 
 export class TokenBucket {
  private tokens:number;private at:number;
@@ -15,53 +15,76 @@ export class RetryBackoff {
  reset():void {this.k=0;}
 }
 export interface JobBinding {streamId:1|2;jobId:string;planDigest:string;selectionDigest:string}
-export interface Pending extends DataFrame {state:'IN_FLIGHT'|'DURABLE'}
+export interface Pending extends Omit<DataFrame,'payload'> {payloadBytes:number;state:'IN_FLIGHT'}
 export interface Settlement {pending:Pending;disposition:1|2}
 export class SequenceExhausted extends Error {readonly recovery='RECONNECT';constructor(){super('TXSEQ_EXHAUSTED');this.name='SequenceExhausted';}}
 export type RecoveryAction='QUERY'|'WAIT'|'BEGIN'|'REPLAN'|'STOP';
 /** One instance per stream, with immutable job/plan binding for this connection. */
 export class SendWindow {
- private pending:Pending|null=null;private nextTxSeq=1;private lastAckSeq=0;private active=true;
- private binding:JobBinding;private epoch:number;
- private stale:TokenBucket;
- constructor(binding:JobBinding,epoch:number,now=0,staleAckBudget?:TokenBucket){this.binding=Object.freeze({...binding});this.epoch=integer(epoch);if(!epoch)fail();this.stale=staleAckBudget??new TokenBucket(32,16,now);}
- get credit():{chunks:number;bytes:number} {return {chunks:this.pending?1:0,bytes:this.pending?.payload.length??0};}
- /** Partial ACK bytes count as activity only for the next pending settlement. */
- acceptsAckProgress(epoch:number,ackSeq:number):boolean{return this.active&&this.pending!==null&&epoch===this.epoch&&ackSeq===this.lastAckSeq+1;}
- /** Call immediately before the first write byte; a failed write closes the stream. */
- reserve(input:Omit<DataFrame,'kind'|'streamId'|'epoch'|'txSeq'>):Pending {
-  if(!this.active)fail('AUTH_REVOKED');if(this.pending)fail('WINDOW_FULL');
-  if(this.nextTxSeq>Number.MAX_SAFE_INTEGER){this.close();throw new SequenceExhausted();}
-  hex(input.requestId,32);hex(input.requestDigest);integer(input.objectSlot,4095);integer(input.chunkIndex,255);
-  if(!input.payload.length||input.payload.length>65536)fail();
-  this.pending={...input,kind:'data',streamId:this.binding.streamId,epoch:this.epoch,txSeq:this.nextTxSeq++,state:'IN_FLIGHT'};return {...this.pending};
+ private readonly pending=new Map<number,Pending>();
+ private bytes=0;
+ private nextTxSeq=1;private lastAckSeq=0;private active=true;
+ private readonly binding:JobBinding;
+ private readonly stale:TokenBucket;
+ private readonly grantedEpochs=new Set<number>();
+ constructor(binding:JobBinding,private epoch:number,now=0,staleAckBudget?:TokenBucket,
+  private readonly limits={maxInFlightChunks:1,maxInFlightBytes:65536}){
+  this.binding=Object.freeze({...binding});if(!integer(epoch))fail();this.grantedEpochs.add(epoch);this.stale=staleAckBudget??new TokenBucket(32,16,now);
  }
- acceptAck(ack:AckFrame,now:number):Settlement|null {
+ get currentEpoch():number{return this.epoch;}
+ granted(epoch:number):boolean{return this.grantedEpochs.has(epoch);}
+ oldEpoch(epoch:number):boolean{if(!this.granted(epoch))fail('STALE_EPOCH');return epoch<this.epoch;}
+ get credit():{chunks:number;bytes:number} {return {chunks:this.pending.size,bytes:this.bytes};}
+ canSend(bytes:number):boolean {
+  return this.active&&this.pending.size<this.limits.maxInFlightChunks&&this.bytes+bytes<=this.limits.maxInFlightBytes;
+ }
+ acceptsAckProgress(epoch:number,ackSeq:number):boolean{
+  return this.active&&this.pending.size>0&&epoch===this.epoch&&ackSeq===this.lastAckSeq+1;
+ }
+ /** Reserve credit at the writer, before encoding or writing the first byte. */
+ reserve(input:Omit<DataFrame,'kind'|'streamId'|'epoch'|'txSeq'>):DataFrame {
+  if(!this.active)fail('AUTH_REVOKED');
+  if(!this.canSend(input.payload.length))fail('WINDOW_FULL');
+  if(this.nextTxSeq>Number.MAX_SAFE_INTEGER){this.close();throw new SequenceExhausted();}
+  const {payload,...header}=input;
+  hex(header.requestId,32);hex(header.requestDigest);integer(header.objectSlot,4095);integer(header.chunkIndex,255);
+  if(!payload.length||payload.length>65536)fail();
+  for(const p of this.pending.values())if(p.requestId===header.requestId||p.objectSlot===header.objectSlot&&p.chunkIndex===header.chunkIndex)fail('REQUEST_CONFLICT');
+  const frame={...header,kind:'data' as const,streamId:this.binding.streamId,epoch:this.epoch,txSeq:this.nextTxSeq++};
+  this.pending.set(frame.txSeq,{...frame,payloadBytes:payload.length,state:'IN_FLIGHT'});this.bytes+=payload.length;
+  return {...frame,payload};
+ }
+ acceptAck(ack:AckFrame,now:number):Settlement[]|null {
   try{return this.checkedAck(ack,now);}catch(e){this.close();throw e;}
  }
- private checkedAck(ack:AckFrame,now:number):Settlement|null {
+ private checkedAck(ack:AckFrame,now:number):Settlement[]|null {
   if(!this.active)fail('AUTH_REVOKED');
-  // Validate syntax even when called directly rather than through the codec.
   if(ack.streamId!==this.binding.streamId||!ack.entries.length||ack.entries.length>32||!integer(ack.epoch)||!integer(ack.ackSeq))fail();
   let last=0;for(const e of ack.entries){if(integer(e.txSeq)<=last||e.disposition!==1&&e.disposition!==2)fail();last=e.txSeq;}
-  if(ack.epoch<this.epoch||ack.epoch===this.epoch&&ack.ackSeq<=this.lastAckSeq){this.stale.take(now);return null;}
-  if(ack.epoch!==this.epoch||ack.ackSeq!==this.lastAckSeq+1||ack.entries.length!==1||!this.pending||ack.entries[0]!.txSeq!==this.pending.txSeq)fail();
-  const result={pending:this.pending,disposition:ack.entries[0]!.disposition};this.pending=null;this.lastAckSeq=ack.ackSeq;return result;
+  if(this.oldEpoch(ack.epoch)||ack.ackSeq<=this.lastAckSeq){this.stale.take(now);return null;}
+  if(ack.epoch!==this.epoch||ack.ackSeq!==this.lastAckSeq+1)fail();
+  const result=ack.entries.map(e=>{
+   const pending=this.pending.get(e.txSeq);if(!pending)fail();
+   return {pending,disposition:e.disposition};
+  });
+  for(const {pending} of result)this.settle(pending);
+  this.lastAckSeq=ack.ackSeq;return result;
  }
+ private settle(p:Pending){this.pending.delete(p.txSeq);this.bytes-=p.payloadBytes;}
  negative(value:Envelope,now:number):{action:RecoveryAction;retryAfterMillis:number;pending:Pending}|null {
   try{return this.checkedNegative(value,now);}catch(e){this.close();throw e;}
  }
  private checkedNegative(value:Envelope,now:number):{action:RecoveryAction;retryAfterMillis:number;pending:Pending}|null {
   const r=envelope(value);if(!this.active)fail('AUTH_REVOKED');
   if(r.type!=='response'||r.phase!=='putChunk'||r.success!==false||r.jobId!==this.binding.jobId||r.planDigest!==this.binding.planDigest||r.epoch===null)fail();
-  if(r.epoch<this.epoch){this.stale.take(now);return null;}
-  const p=this.pending;if(r.epoch!==this.epoch||!p||r.requestId!==p.requestId||r.requestDigest!==p.requestDigest)fail('REQUEST_CONFLICT');
-  this.pending=null;const action=r.error!.recovery as RecoveryAction;
+  if(this.oldEpoch(r.epoch)){this.stale.take(now);return null;}
+  const p=Array.from(this.pending.values()).find(p=>p.requestId===r.requestId);if(r.epoch!==this.epoch||!p||r.requestDigest!==p.requestDigest)fail('REQUEST_CONFLICT');
+  this.settle(p);const action=r.error!.recovery as RecoveryAction;
   if(action==='REPLAN'||action==='STOP')this.close();return {action,retryAfterMillis:Number(r.error!.retryAfterMillis),pending:p};
  }
  /** Caller must complete the begin barrier and discard old worker/ACK queues first. */
- regrant(epoch:number):void {if(!this.active||integer(epoch)<=this.epoch)fail('STALE_EPOCH');this.epoch=epoch;this.pending=null;this.nextTxSeq=1;this.lastAckSeq=0;}
- close():void {this.active=false;this.pending=null;}
+ regrant(epoch:number):void {if(!this.active||integer(epoch)<=this.epoch)fail('STALE_EPOCH');this.epoch=epoch;this.grantedEpochs.add(epoch);this.pending.clear();this.bytes=0;this.nextTxSeq=1;this.lastAckSeq=0;}
+ close():void {this.active=false;this.pending.clear();this.bytes=0;}
 }
 
 export interface GrantToken {connectionId:string;generation:number;epoch:number}
@@ -91,6 +114,7 @@ export class ReceiveWindow {
  }
 
  private checkGrant():GrantToken {if(this.grantToken.connectionId!==this.connectionId)fail('AUTH_REVOKED');this.grant.check(this.grantToken);return {...this.grantToken};}
+ granted(epoch:number):boolean{return this.grantedEpochs.has(epoch);}
  /** Only after full manifest root/DAG validation, registration and peak reservation. */
  admit():void {this.checkGrant();this.admitted=true;}
  regrant(epoch:number):void {this.checkGrant();if(this.busy)fail('BUSY');this.grant.regrant(epoch);this.grantToken=this.grant.token();this.grantedEpochs.add(epoch);this.nextTxSeq=1;this.nextAckSeq=1;this.admitted=false;}
@@ -100,24 +124,39 @@ export class ReceiveWindow {
   }
  }
  private async checkedReceive(frame:DataFrame,store:DurableChunks,emitAck:(ack:AckFrame)=>Promise<void>,admissionError?:ResumeError):Promise<'STALE'|'ACK'> {
-  const token=this.checkGrant();
-  if(frame.streamId!==this.binding.streamId||!this.grantedEpochs.has(frame.epoch)||frame.epoch>token.epoch)fail('STALE_EPOCH');
-  if(frame.epoch<token.epoch)return 'STALE'; // codec already bounded and consumed the complete frame.
-  if(!this.admitted||this.busy)fail('FLOW_CONTROL_VIOLATION');
+  if(this.busy)fail('FLOW_CONTROL_VIOLATION');
   this.busy=true;
   try{
-  const o=await this.objects.at(integer(frame.objectSlot,Math.max(0,this.objects.objectCount-1)));this.grant.check(token);if(!o||frame.txSeq!==this.nextTxSeq||frame.txSeq>Number.MAX_SAFE_INTEGER||!Number.isSafeInteger(frame.txSeq)||frame.chunkIndex<0||!Number.isSafeInteger(frame.chunkIndex)||frame.chunkIndex>=o.chunkHashes.length)fail();
-  const length=Math.min(65536,o.size-frame.chunkIndex*65536);
-  if(length<=0||frame.payload.length!==length||requestDigest(this.binding.jobId,this.binding.planDigest,'putChunk',{objectId:o.objectId,chunkIndex:frame.chunkIndex})!==frame.requestDigest)fail('REQUEST_CONFLICT');
-  hex(frame.requestId,32);this.nextTxSeq++; // Recoverable admission failure consumes a validated sequence too.
-  if(hash(frame.payload)!==o.chunkHashes[frame.chunkIndex])fail('HASH_MISMATCH');
-  if(admissionError)throw admissionError; // Complete bounded payload was consumed and hash-checked first.
-   const disposition=await store.commit(frame,o,()=>this.grant.check(token));this.grant.check(token);
-   if(disposition!==1&&disposition!==2)fail('LOCAL_IO');
-   // Same durable callback: enqueue a single fixed-layout ACK immediately.
-   await emitAck({kind:'ack',streamId:frame.streamId,epoch:frame.epoch,ackSeq:this.nextAckSeq++,entries:[{txSeq:frame.txSeq,disposition}]});return 'ACK';
+   const {payload,...header}=frame;
+   const validated=await this.header({...header,payloadBytes:payload.length});
+   if(!validated)return 'STALE';
+   const {object,check}=validated;
+   if(hash(payload)!==object.chunkHashes[frame.chunkIndex])fail('HASH_MISMATCH');
+   if(admissionError)throw admissionError;
+   const disposition=await store.commit(frame,object,check);check();
+   await emitAck(this.ack(frame.epoch,[{txSeq:frame.txSeq,disposition}]));return 'ACK';
   }finally{this.busy=false;}
  }
+ async header(frame:DataHeader):Promise<{object:ObjectDescriptor;check:()=>void}|null>{
+  const token=this.checkGrant();
+  if(frame.streamId!==this.binding.streamId||!this.grantedEpochs.has(frame.epoch)||frame.epoch>token.epoch)fail('STALE_EPOCH');
+  if(frame.epoch<token.epoch)return null;
+  if(!this.admitted)fail('FLOW_CONTROL_VIOLATION');
+  if(frame.txSeq!==this.nextTxSeq||!Number.isSafeInteger(frame.txSeq))fail();
+  const check=()=>this.grant.check(token);
+  const object=await this.objects.at(integer(frame.objectSlot,Math.max(0,this.objects.objectCount-1)));check();
+  if(!object||!Number.isSafeInteger(frame.chunkIndex)||frame.chunkIndex<0||frame.chunkIndex>=object.chunkHashes.length)fail();
+  const length=Math.min(65536,object.size-frame.chunkIndex*65536);
+  if(length<=0||frame.payloadBytes!==length||requestDigest(this.binding.jobId,this.binding.planDigest,'putChunk',{objectId:object.objectId,chunkIndex:frame.chunkIndex})!==frame.requestDigest)fail('REQUEST_CONFLICT');
+  hex(frame.requestId,32);this.nextTxSeq++;
+  return {object,check};
+ }
+ ack(epoch:number,entries:AckFrame['entries']):AckFrame{
+  if(this.checkGrant().epoch!==epoch)fail('STALE_EPOCH');
+  if(entries.some(e=>e.disposition!==1&&e.disposition!==2))fail('LOCAL_IO');
+  return {kind:'ack',streamId:this.binding.streamId,epoch,ackSeq:this.nextAckSeq++,entries};
+ }
+
 }
 
 function heartbeat(e:Envelope):boolean {return e.phase==='missing'&&e.payload?.limit===0;}
@@ -181,7 +220,7 @@ export class ControlSlots {
  }
  clear():void {this.business=null;this.light=null;}
 }
-export function negativeReply(binding:JobBinding,frame:DataFrame,error:ResumeError):Envelope {
+export function negativeReply(binding:JobBinding,frame:Pick<DataFrame,'epoch'|'requestId'|'requestDigest'>,error:ResumeError):Envelope {
  return envelope({action:'syncLibraryBinary',version:2,phase:'putChunk',type:'response',jobId:binding.jobId,planDigest:binding.planDigest,epoch:frame.epoch,requestId:frame.requestId,requestDigest:frame.requestDigest,success:false,result:null,error:error.wire()});
 }
 

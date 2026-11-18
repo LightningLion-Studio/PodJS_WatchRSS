@@ -8,6 +8,8 @@ export interface DataFrame {
  kind:'data';streamId:1|2;objectSlot:number;epoch:number;txSeq:number;chunkIndex:number;
  requestId:string;requestDigest:string;payload:Uint8Array;
 }
+export interface DataHeader extends Omit<DataFrame,'payload'> {payloadBytes:number}
+export type DataReader=(header:DataHeader,read:(target:Uint8Array,activity?:boolean)=>Promise<void>)=>Promise<void>;
 export interface AckFrame {kind:'ack';streamId:1|2;epoch:number;ackSeq:number;entries:{txSeq:number;disposition:1|2}[]}
 export interface ControlFrame {kind:'control';envelope:Envelope}
 export type Frame=DataFrame|AckFrame|ControlFrame;
@@ -52,6 +54,13 @@ export function frameAllocationBytes(prefix:Uint8Array,maximum=MAX_FRAME_LENGTH)
  if(prefix.length!==4)fail();const n=new DataView(prefix.buffer,prefix.byteOffset,4).getUint32(0);
  if(n<12||n>Math.min(maximum,MAX_FRAME_LENGTH))fail('LIMIT_EXCEEDED');return n+4;
 }
+export function decodeDataHeader(b:Uint8Array,payloadBytes:number):Omit<DataFrame,'payload'> {
+ const v=new DataView(b.buffer,b.byteOffset,b.byteLength);
+ if(payloadBytes<1||payloadBytes>CHUNK_BYTES||v.getUint32(44)!==payloadBytes)fail();
+ return {kind:'data',streamId:stream(v.getUint32(16)),objectSlot:integer(v.getUint32(20),4095),
+  epoch:get64(v,24),txSeq:get64(v,32),chunkIndex:integer(v.getUint32(40),255),
+  requestId:toHex(b.subarray(48,64)),requestDigest:toHex(b.subarray(64,96))};
+}
 export function decodeFrame(b:Uint8Array,maximum=MAX_FRAME_LENGTH):Frame {
  if(!(b instanceof Uint8Array)||b.length<16||frameAllocationBytes(b.subarray(0,4),maximum)!==b.length)fail();
  const v=new DataView(b.buffer,b.byteOffset,b.length),h=v.getUint32(12),n=b.length-16-h;
@@ -66,9 +75,8 @@ export function decodeFrame(b:Uint8Array,maximum=MAX_FRAME_LENGTH):Frame {
   return {kind:'control',envelope:e};
  }
  if(b[8]===2){
-  if(h!==80||n<1||n>CHUNK_BYTES||v.getUint32(44)!==n)fail();
-  const f:DataFrame={kind:'data',streamId:stream(v.getUint32(16)),objectSlot:v.getUint32(20),epoch:get64(v,24),txSeq:get64(v,32),chunkIndex:v.getUint32(40),requestId:toHex(b.subarray(48,64)),requestDigest:toHex(b.subarray(64,96)),payload:b.slice(96)};
-  integer(f.objectSlot,4095);integer(f.chunkIndex,255);return f;
+  if(h!==80)fail();
+  return {...decodeDataHeader(b,n),payload:b.subarray(96)};
  }
  if(b[8]!==3||n!==0||h<48||h>544||v.getUint32(20)!==0||v.getUint32(44)!==0)fail();
  const count=v.getUint32(40);if(count<1||count>32||h!==32+16*count)fail();
@@ -82,7 +90,7 @@ export function decodeFrame(b:Uint8Array,maximum=MAX_FRAME_LENGTH):Frame {
 /** No RFCOMM dependency: S1 supplies bounded complete byte frames and cancellation. */
 export interface ByteTransport {
  setNetworkProgress?(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void):void;
- readFrame():Promise<Uint8Array>;
+ readFrame(readData?:DataReader):Promise<Uint8Array|null>;
  writeFrame(bytes:Uint8Array):Promise<void>;
  close():void;
 }

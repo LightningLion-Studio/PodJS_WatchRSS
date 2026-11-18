@@ -1,29 +1,74 @@
 import type {SyncByteStream} from '../stream';
-import {frameAllocationBytes,type ByteTransport} from './codec';
+import {decodeDataHeader,frameAllocationBytes,type ByteTransport,type DataReader} from './codec';
 import {fail} from './wire';
 /** One exact-frame owner after detachStream(). Reads never consume a tail owned
  * by another codec. Native idle deadlines and a 60s frame deadline are separate. */
 export class BinaryByteTransport implements ByteTransport {
  private closed=false;private reading=false;private writing=false;
  private networkProgress?: (kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void;
- constructor(private readonly stream:SyncByteStream,private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void){}
+ constructor(private readonly stream:SyncByteStream&{write(bytes:Uint8Array,timeoutMs?:number):Promise<void>},private readonly now=()=>performance.now(),private readonly progress?:(direction:'read'|'write',bytes:number)=>void){}
  setNetworkProgress(listener:(kind:'control'|'data'|'ack',streamId?:number,epoch?:number,sequence?:number)=>void){this.networkProgress=listener;}
  private network(error:unknown):never{const e=error as {code?:string;message?:string};if(e?.code==='host_error'){
   if(/^(Stream operation timed out|.*[Ss]ocket.*timed out)$/.test(e.message??''))throw Error('SocketTimeout');
   if(/([Ss]ocket closed|[Ss]tream closed|Connection reset|[Bb]t socket closed)/.test(e.message??''))throw Error('reset');
  }throw error;}
  private async into(target:Uint8Array,deadline:()=>number,onBytes?:()=>void){let at=0;while(at<target.length){if(this.closed)fail('AUTH_REVOKED');const left=deadline()-this.now();if(left<=0)throw Error('SocketTimeout');const b=await this.stream.read(Math.min(65536,target.length-at),Math.max(1,Math.ceil(Math.min(30000,left)))).catch(e=>this.network(e));if(b===null)throw Error('EOF');if(!b.length||b.length>target.length-at)fail();target.set(b,at);at+=b.length;onBytes?.();this.progress?.('read',b.length);}}
- async readFrame(){
+ readFrame():Promise<Uint8Array>;
+ readFrame(readData:DataReader):Promise<Uint8Array|null>;
+ async readFrame(readData?:DataReader):Promise<Uint8Array|null>{
   if(this.closed||this.reading)fail('AUTH_REVOKED');this.reading=true;
-  try{const prefix=new Uint8Array(4),idle=this.now()+30000;let started:number|undefined;const end=()=>started===undefined?idle:started+60000;
-   await this.into(prefix,end,()=>{started??=this.now();});const frame=new Uint8Array(frameAllocationBytes(prefix));frame.set(prefix);await this.into(frame.subarray(4,16),end);
-   const v=new DataView(frame.buffer),header=v.getUint32(12),payload=frame.length-16-header;
-   if(frame[4]!==76||frame[5]!==66||frame[6]!==86||frame[7]!==50||frame[9]!==0||v.getUint16(10)!==0||payload<0)fail();
-   if(frame[8]===1){if(payload!==0||header<1||header>131072)fail();const unit=()=>this.networkProgress?.('control');unit();await this.into(frame.subarray(16),end,unit);}
-   else{const data=frame[8]===2;if(!data&&frame[8]!==3||data&&(header!==80||payload<1||payload>65536)||!data&&(payload!==0||header<48||header>544))fail();const fixed=data?96:48;if(frame.length<fixed)fail();await this.into(frame.subarray(16,fixed),end);const stream=v.getUint32(16),raw=v.getBigUint64(24);if((stream!==1&&stream!==2)||raw<1n||raw>BigInt(Number.MAX_SAFE_INTEGER))fail();const seq=v.getBigUint64(32);if(seq<1n||seq>BigInt(Number.MAX_SAFE_INTEGER))fail();const unit=()=>this.networkProgress?.(data?'data':'ack',stream,Number(raw),Number(seq));unit();await this.into(frame.subarray(fixed),end,unit);}
+  try{
+   const fixed=new Uint8Array(96),prefix=fixed.subarray(0,4),idle=this.now()+30000;
+   let started:number|undefined;const end=()=>started===undefined?idle:started+60000;
+   await this.into(prefix,end,()=>{started??=this.now();});
+   const length=frameAllocationBytes(prefix);
+   await this.into(fixed.subarray(4,16),end);
+   const v=new DataView(fixed.buffer),header=v.getUint32(12),payload=length-16-header;
+   if(fixed[4]!==76||fixed[5]!==66||fixed[6]!==86||fixed[7]!==50||fixed[9]!==0||v.getUint16(10)!==0||payload<0)fail();
+   if(fixed[8]===2){
+    if(header!==80||payload<1||payload>65536)fail();
+    await this.into(fixed.subarray(16),end);
+    const data={...decodeDataHeader(fixed,payload),payloadBytes:payload};
+    const unit=()=>this.networkProgress?.('data',data.streamId,data.epoch,data.txSeq);
+    if(readData){
+     let left=payload;
+     await readData(data,async(target,activity)=>{
+      if(!target.length||target.length>left)fail();
+      left-=target.length;if(activity)unit();
+      await this.into(target,end,activity?unit:undefined);
+     });
+     if(left)fail();
+     return null;
+    }
+    const frame=new Uint8Array(length);frame.set(fixed);
+    unit();await this.into(frame.subarray(96),end,unit);return frame;
+   }
+   const frame=new Uint8Array(length);frame.set(fixed.subarray(0,16));
+   if(fixed[8]===1){
+    if(payload!==0||header<1||header>131072)fail();
+    const unit=()=>this.networkProgress?.('control');unit();await this.into(frame.subarray(16),end,unit);
+   }else{
+    if(fixed[8]!==3||payload!==0||header<48||header>544)fail();
+    await this.into(frame.subarray(16,48),end);
+    const view=new DataView(frame.buffer),stream=view.getUint32(16),epoch=view.getBigUint64(24),seq=view.getBigUint64(32);
+    if((stream!==1&&stream!==2)||epoch<1n||epoch>BigInt(Number.MAX_SAFE_INTEGER)||seq<1n||seq>BigInt(Number.MAX_SAFE_INTEGER))fail();
+    const unit=()=>this.networkProgress?.('ack',stream,Number(epoch),Number(seq));unit();
+    await this.into(frame.subarray(48),end,unit);
+   }
    return frame;
   }catch(e){this.close();throw e;}finally{this.reading=false;}
  }
- async writeFrame(bytes:Uint8Array){if(this.closed||this.writing)fail('AUTH_REVOKED');this.writing=true;try{for(let at=0;at<bytes.length;at+=65536){if(this.closed)fail('AUTH_REVOKED');const b=bytes.subarray(at,at+65536);await this.stream.write(b).catch(e=>this.network(e));this.progress?.('write',b.length);}}catch(e){this.close();throw e;}finally{this.writing=false;}}
+ async writeFrame(bytes:Uint8Array){
+  if(this.closed||this.writing)fail('AUTH_REVOKED');this.writing=true;
+  const deadline=this.now()+60000;
+  try{
+   for(let at=0;at<bytes.length;at+=65536){
+    if(this.closed)fail('AUTH_REVOKED');
+    const left=deadline-this.now();if(left<=0)throw Error('SocketTimeout');
+    const b=bytes.subarray(at,at+65536);
+    await this.stream.write(b,Math.max(1,Math.ceil(Math.min(30000,left)))).catch(e=>this.network(e));this.progress?.('write',b.length);
+   }
+  }catch(e){this.close();throw e;}finally{this.writing=false;}
+ }
  close(){if(this.closed)return;this.closed=true;void this.stream.close().catch(()=>{});}
 }
