@@ -15,6 +15,7 @@ const empty={size:0,sha256:hash(new Uint8Array()),chunkHashes:[]};
 const metadataBytes=1024*1024;
 const jobKey=(job:Job)=>[job.scope,job.jobId];
 const stagingKey=(job:Job,id:string)=>D('wrss.library-binary.v2/book-shadow',[job.scope,job.jobId,id]);
+const finalPath=(bookId:string,sha256:string)=>'books/'+bookId+'-'+sha256+'.jsonl';
 
 export class BinaryBooks {
  constructor(private readonly store:BinaryStore,private readonly books:()=>Promise<SqlBookStore|undefined>,
@@ -205,7 +206,7 @@ export class BinaryBooks {
   if(!staged)fail('JOURNAL_CORRUPT');
   const state=JSON.parse(String(staged.state_json)) as BookState;
   if(state.fingerprint!==m.fingerprint||state.deleted)fail('BUSINESS_REJECTED');
-  const stagedKey=stagingKey(job,d.objectId),combined='books/part-b2-'+stagedKey+'.bin',published='books/'+id+'-'+m.packageSha256+'.jsonl';
+  const stagedKey=stagingKey(job,d.objectId),combined='books/part-b2-'+stagedKey+'.bin',published=finalPath(id,m.packageSha256);
   const info={path:combined,size:m.packageBytes,sha256:m.packageSha256};
   const old=(await this.store.db.query('SELECT ready FROM library_binary_book_files WHERE scope=? AND job_id=? AND object_id=?',[...key,d.objectId]))[0];
   if(Number(old?.ready)===1){
@@ -234,12 +235,16 @@ export class BinaryBooks {
   try{
    await repo.installBinaryPackage(info,state,stagedKey,visit=>importBookPackage(this.files,info,state,visit,this.work),
     async()=>{
+     boundary.check?.();
+     await this.store.db.transaction([...boundary.before,
+      {sql:'INSERT OR IGNORE INTO library_binary_book_publications VALUES(?,?,?,?,?)',params:[...key,d.objectId,published,info.size]}]);
+     boundary.check?.();
      if(info.path!==published)await this.files.durableCommit(info.path,published,info.size,info.sha256);
      return {...info,path:published};
     },boundary);
   }finally{
    // The row and file are kept for retry after a failed apply.
-   if((await this.store.object(job,d.objectId)).receipt)await this.removeArtifact(job,d.objectId).catch(()=>{});
+   if((await this.store.object(job,d.objectId)).receipt)await this.removeArtifact(job,d.objectId,published).catch(()=>{});
   }
  }
  private async payload(d:ObjectDescriptor,path:string):Promise<string>{
@@ -259,13 +264,27 @@ export class BinaryBooks {
   const actual=await this.files.hash(file.path);this.work();
   if(actual.size!==file.size||actual.sha256!==file.sha256)fail('HASH_MISMATCH');
  }
- private async removeArtifact(job:Job,oid:string){
-  const key=jobKey(job),row=(await this.store.db.query('SELECT path FROM library_binary_book_files WHERE scope=? AND job_id=? AND object_id=?',[...key,oid]))[0];
+ private async removeArtifact(job:Job,oid:string,published?:string){
+  const key=jobKey(job),row=(await this.store.db.query('SELECT path,ready FROM library_binary_book_files WHERE scope=? AND job_id=? AND object_id=?',[...key,oid]))[0];
   if(!row)return;
   const name=stagingKey(job,oid);
   if(row.path!=='library-binary/spool/'+name+'.bin'&&row.path!=='books/part-b2-'+name+'.bin')fail('JOURNAL_CORRUPT');
+  if(published){
+   const final=(await this.store.db.query('SELECT path FROM library_binary_book_publications WHERE scope=? AND job_id=? AND object_id=?',[...key,oid]))[0];
+   if(final&&final.path!==published)fail('JOURNAL_CORRUPT');
+   // Before the publication journal existed, an absent ready assembly was
+   // recovered at its deterministic final path.
+   if(final||Number(row.ready)===1&&!(await this.files.stat(String(row.path))).file){
+    const references=await this.store.db.query(`SELECT 1 FROM sync_books WHERE package_path=?
+     UNION ALL SELECT 1 FROM library_binary_book_publications WHERE path=? AND NOT(scope=? AND job_id=? AND object_id=?) LIMIT 1`,
+     [published,published,...key,oid]);
+    if(!references.length)await this.files.durableRemove(published);
+   }
+  }
   await this.files.durableRemove(String(row.path));
-  await this.store.db.execute('DELETE FROM library_binary_book_files WHERE scope=? AND job_id=? AND object_id=?',[...key,oid]);
+  await this.store.db.transaction(['library_binary_book_files','library_binary_book_publications'].map(table=>({
+   sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=? AND object_id=?',params:[...key,oid],
+  })));
  }
  async collect(job:Job,purge=true){
   const key=jobKey(job);
@@ -273,11 +292,12 @@ export class BinaryBooks {
   for(const row of rows){
    const id=String(row.object_id),object=await this.store.object(job,id);
    if(!purge&&!object.receipt)continue;
-   await this.removeArtifact(job,id);
    if(object.descriptor.kind==='bookPackageCommit'){
     const m=bookDescription(object.descriptor,job.description.selection.limits);
+    if(m.kind!=='bookPackageCommit')fail('JOURNAL_CORRUPT');
     await this.store.db.execute('DELETE FROM sync_book_stage WHERE book_id=? AND package_sha256=?',[m.metadata.bookId,stagingKey(job,id)]);
-   }
+    await this.removeArtifact(job,id,finalPath(m.metadata.bookId,m.metadata.packageSha256));
+   }else await this.removeArtifact(job,id);
   }
   if(purge)await this.store.db.transaction(['library_binary_book_states','library_binary_book_pages','library_binary_book_chapters'].map(table=>({
    sql:'DELETE FROM '+table+' WHERE scope=? AND job_id=?',params:key,

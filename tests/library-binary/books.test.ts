@@ -160,6 +160,7 @@ test('book FileRefs survive reconnect and two segments commit with the existing 
   expect((await repository.books!.readingStates(false))[0]).toMatchObject({readingPositionChangedAt:21,favoriteSaved:true});
   await peer.operation('complete',{objectCount:book.objects.length,receiptsRoot:receiptsRoot(book.objects.map(d=>receipts.get(d.objectId)!)),ackToInclusive:0});
   await peer.session.running;
+  expect((await files.stat(published!.path)).file).toBe(true);
   expect(f.refStats().readRefs).toBe(book.objects.reduce((n,d)=>n+d.chunkHashes.length,0));
   expect(f.refStats().maxRefs).toBeLessThanOrEqual(8);
   expect(await f.db.query('SELECT * FROM library_binary_book_files')).toEqual([]);
@@ -205,6 +206,43 @@ test('book cancellation preserves hidden segment and never publishes a readable 
   expect(await f.db.query('SELECT id FROM articles')).toEqual([]);
   expect(await f.db.query('SELECT ready FROM library_binary_book_files')).toEqual([{ready:1}]);
   expect(await f.db.query('SELECT bytes FROM library_binary_peaks')).toHaveLength(1);
+ }finally{await f.dispose();}
+},10000);
+
+test('expired book apply collects an unreferenced final package after rename',async()=>{
+ const f=await binaryRuntime({fileRefs:true});
+ try{
+  const {files,repository}=await attachBinaryBooks(f);
+  const book=await sampleBook(f,files,CHUNK_BYTES+5);
+  const peer=await receiver(f,book.objects);
+  await peer.manifest();
+  for(const d of [book.stateObject,...book.segments]){
+   await transfer(peer,d,book.read);
+   await peer.operation('apply',{objectId:d.objectId});
+  }
+  const commit=files.durableCommit;
+  const final='books/'+book.state.bookId+'-'+book.info.sha256+'.jsonl';
+  files.durableCommit=async(...args)=>{
+   const result=await commit(...args);
+   if(args[1]===final)throw Error('LOCAL_IO');
+   return result;
+  };
+  await peer.operation('apply',{objectId:book.commit.objectId},false);
+  await peer.session.running.catch(()=>{});
+  expect(await repository.books!.package(book.state.bookId)).toBeUndefined();
+  expect((await files.stat(final)).file).toBe(true);
+  expect(await f.db.query('SELECT path,size FROM library_binary_book_publications')).toEqual([{path:final,size:book.info.size}]);
+  const books=new BinaryBooks(f.store,async()=>repository.books,files,f.chunks,()=>{});
+  const assets=new BinaryAssets(files,f.store,f.chunks,()=>{},()=>{},undefined,books);
+  const [row]=await f.db.query('SELECT scope,job_id FROM library_binary_jobs');
+  const job=await f.store.job(String(row!.scope),String(row!.job_id));
+  expect(job).not.toBeNull();
+  await f.db.execute('DELETE FROM library_binary_peaks');
+  await expect(assets.peak({...HARD_LIMITS,maxStagingBytes:book.info.size-1},0)).rejects.toThrow('STORAGE_PRESSURE');
+  await books.collect(job!);
+  expect((await files.stat(final)).file).toBe(false);
+  expect(await f.db.query('SELECT path FROM library_binary_book_publications')).toEqual([]);
+  expect(await f.db.query('SELECT path FROM library_binary_book_files')).toEqual([]);
  }finally{await f.dispose();}
 },10000);
 

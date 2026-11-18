@@ -36,6 +36,7 @@ export class BinaryStore {
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_assets(storage_key TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(storage_key,sha256))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_states(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,state_json TEXT NOT NULL,PRIMARY KEY(scope,job_id,book_id))"},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_files(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,ready INTEGER NOT NULL,PRIMARY KEY(scope,job_id,object_id))"},
+   {sql:'CREATE TABLE IF NOT EXISTS library_binary_book_publications(scope TEXT NOT NULL,job_id TEXT NOT NULL,object_id TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,PRIMARY KEY(scope,job_id,object_id))'},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_pages(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,page INTEGER NOT NULL,first_chapter INTEGER NOT NULL,last_chapter INTEGER NOT NULL,PRIMARY KEY(scope,job_id,book_id,page))"},
    {sql:"CREATE TABLE IF NOT EXISTS library_binary_book_chapters(scope TEXT NOT NULL,job_id TEXT NOT NULL,book_id TEXT NOT NULL,chapter INTEGER NOT NULL,PRIMARY KEY(scope,job_id,book_id,chapter))"},
    {sql:'CREATE TABLE IF NOT EXISTS library_binary_connections(connection_id TEXT PRIMARY KEY,revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),expires_at INTEGER NOT NULL)'},
@@ -155,6 +156,7 @@ export class BinaryStore {
    (SELECT COUNT(*)*512 FROM library_binary_snapshot_refs)+(SELECT COUNT(*)*512 FROM library_binary_snapshot_files)+(SELECT COUNT(*)*1024 FROM library_binary_source_files)+(SELECT COUNT(*)*1024 FROM library_binary_cancellations)+
    (SELECT COUNT(*)*512 FROM library_binary_connections)+
    (SELECT COUNT(*)*1024 FROM library_binary_book_files)+
+   (SELECT COUNT(*)*1024 FROM library_binary_book_publications)+
    (SELECT COUNT(*)*512 FROM library_binary_book_pages)+
    (SELECT COUNT(*)*256 FROM library_binary_book_chapters)+
    (SELECT COALESCE(SUM(length(CAST(state_json AS BLOB))+1024),0) FROM library_binary_book_states)+

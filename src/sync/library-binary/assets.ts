@@ -89,7 +89,12 @@ export class BinaryAssets {
  }
  async peak(limits:Limits,incoming:number){
   const stat=await this.files.stat('notes/assets');this.check();
-  const rows=await this.store.db.query("SELECT (SELECT COALESCE(SUM(bytes),0) FROM library_binary_peaks)+(SELECT COALESCE(SUM(bytes),0) FROM library_binary_source_files) AS n");
+  const rows=await this.store.db.query(`SELECT (SELECT COALESCE(SUM(bytes),0) FROM library_binary_peaks)
+   +(SELECT COALESCE(SUM(bytes),0) FROM library_binary_source_files)
+   +(SELECT COALESCE(SUM(f.size),0) FROM library_binary_book_files f WHERE NOT EXISTS
+     (SELECT 1 FROM library_binary_peaks p WHERE p.scope=f.scope AND p.job_id=f.job_id))
+   +(SELECT COALESCE(SUM(f.size),0) FROM library_binary_book_publications f WHERE NOT EXISTS
+     (SELECT 1 FROM library_binary_peaks p WHERE p.scope=f.scope AND p.job_id=f.job_id)) AS n`);
   const staging=Number(rows[0]?.n??0)+incoming;
   // The store budgets manifest and receipts against maxJournalBytes. The
   // filesystem must still have room for that journal alongside staging.
