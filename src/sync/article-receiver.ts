@@ -1,5 +1,6 @@
 import {ArticleKeepStore} from './article-keep';
 import type {ReceiptBoundary} from './library-resume/store';
+import {isSyncedSourceUrl} from './source-store';
 import {articleState} from './article-provenance';
 import {projectionGuard} from './domain-definitions';
 import {onlyChangedSql} from '@podjs/framework/sql-changes';
@@ -117,6 +118,8 @@ export class SyncArticleReceiver {
   if(retainContent){hasBody=false;replaceBody=false;}
   const title=nonblank(article.title)?article.title:article.url,excerpt=nonblank(article.excerpt)?article.excerpt:null;
   const sourceTitle=source?(nonblank(article.rssSourceTitle??"")?article.rssSourceTitle!:nonblank(article.siteName)?article.siteName:source.replace(/^https?:\/\//i,"").split(/[/:?#]/)[0]!):"独立文章";
+  const trackSourceProjection=binary&&source&&!imported&&isSyncedSourceUrl(source);
+  const channelExists=trackSourceProjection&&(await this.db.query('SELECT 1 FROM channels WHERE url=?',[channelUrl])).length>0;
   const idSql="(SELECT a.id FROM articles a JOIN channels c ON c.id=a.channel_id WHERE c.url=? AND a.dedup_key=?)";
   const idParams=[channelUrl,dedupKey];
   const statements:Statement[]=[revisionGuard(revision),
@@ -133,6 +136,13 @@ export class SyncArticleReceiver {
     title=excluded.title,description=excluded.description,content=CASE WHEN ?=1 THEN excluded.content ELSE articles.content END,
     link=excluded.link,image_url=excluded.image_url,fetched_at=excluded.fetched_at,is_read=CASE WHEN ?=1 THEN excluded.is_read WHEN ?=2 THEN articles.is_read ELSE articles.is_read OR excluded.is_read END`,params:[title,excerpt,stored,article.url,existing?.guid??article.articleId,article.imageUrl,dedupKey,fetched,article.isRead?1:0,progress,channelUrl,hasBody?1:0,authoritative?1:0,remoteDeviceId==='cloud-records'?2:0]},
   ];
+  // A channel created for an article is a display placeholder. Remember its
+  // origin and display fields in the article transaction so RSS can resolve its clock
+  // independently of when the article or the feed was received.
+  if(trackSourceProjection)statements.push({sql:`INSERT INTO library_binary_channel_projection(channel_id,article_title,sort_floor,source_fetched_at,provisional)
+   SELECT id,title,CASE WHEN ?=1 THEN sort_order ELSE ? END,last_fetched_at,? FROM channels WHERE url=?
+   ON CONFLICT(channel_id) DO UPDATE SET article_title=excluded.article_title,
+    sort_floor=CASE WHEN provisional=1 THEN max(sort_floor,?) ELSE excluded.sort_floor END`,params:[channelExists?1:0,updated,channelExists?0:1,channelUrl,updated]});
   // SQLite evaluates all SET expressions against the pre-update reading row.
   // Update reading before replacing the content hash used by this decision.
   let wins=`(?=1 OR (?=1 AND ?!=COALESCE((SELECT body_hash FROM article_sync_content WHERE item_id=article_reading_state.article_id),'')) OR excluded.changed_at>article_reading_state.changed_at OR (excluded.changed_at=0 AND article_reading_state.changed_at=0 AND excluded.progress>article_reading_state.progress))`;

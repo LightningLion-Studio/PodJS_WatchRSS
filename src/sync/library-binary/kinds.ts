@@ -9,6 +9,9 @@ import {D,objectId} from './digests';
 import type {ReceiptBoundary} from './store';
 import {CHUNK_BYTES,exact,fail,hash,hex,integer,strictJson,utf8,type ObjectDescriptor} from './wire';
 
+// One apply at a time can hold both the temporary JSON and decoded fields.
+export const ARTICLE_IMPORT_SHADOW_BYTES=2*MAX_BODY_JSON_BYTES;
+
 const sourceFields=['url','sourceDeviceId','title','description','siteUrl','imageUrl','createdAt','updatedAt','sortOrder','isPinned','deleted','deletedAt'];
 const articleStrings=['articleId','sourceDeviceId','url','title','siteName','excerpt','contentHash','readingPositionContentHash'];
 const articleNullable=['imageUrl','rssSourceUrl','rssSourceTitle'];
@@ -80,7 +83,7 @@ export class BinaryLibraryKinds {
  }
  /** Temporary inflate file and decoded field files can coexist. */
  shadowBytes(objects:readonly ObjectDescriptor[]){
-  return objects.some(d=>d.kind==='articleBody')?2*MAX_BODY_JSON_BYTES:0;
+  return objects.some(d=>d.kind==='articleBody')?ARTICLE_IMPORT_SHADOW_BYTES:0;
  }
  async apply(d:ObjectDescriptor,path:string,peer:string,boundary:ReceiptBoundary){
   const value=this.validate(d),repository=await this.repository();

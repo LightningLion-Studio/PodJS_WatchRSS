@@ -19,7 +19,8 @@ const changed=(table:string)=>revisionColumns[table]!.map(c=>`OLD.${c} IS NOT NE
 const libraryClearSchema = `CREATE TABLE IF NOT EXISTS library_clear_journal (id INTEGER PRIMARY KEY CHECK(id=1),private_data INTEGER NOT NULL CHECK(private_data IN (0,1)),content_json TEXT NOT NULL)`;
 const deletionCleanupSchema = `CREATE TABLE IF NOT EXISTS article_deletion_cleanup (item_id INTEGER PRIMARY KEY,content_marker TEXT)`;
 const rssArticleIdsSchema = `CREATE TABLE IF NOT EXISTS cloud_rss_article_ids (item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, article_id TEXT NOT NULL)`;
-const AUXILIARY_SCHEMA = [libraryClearSchema, ...ARTICLE_REGISTER_SCHEMA, deletionCleanupSchema, rssArticleIdsSchema, ...BOOK_INSTALL_SCHEMA];
+const binaryChannelProjectionSchema=`CREATE TABLE IF NOT EXISTS library_binary_channel_projection (channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE, article_title TEXT NOT NULL, sort_floor INTEGER NOT NULL, source_fetched_at INTEGER, provisional INTEGER NOT NULL CHECK(provisional IN (0,1)))`;
+const AUXILIARY_SCHEMA = [binaryChannelProjectionSchema, libraryClearSchema, ...ARTICLE_REGISTER_SCHEMA, deletionCleanupSchema, rssArticleIdsSchema, ...BOOK_INSTALL_SCHEMA];
 
 export const SCHEMA = [
   libraryClearSchema,

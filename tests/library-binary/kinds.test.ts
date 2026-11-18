@@ -111,3 +111,96 @@ test('B2 refuses RSS alias lookup that would need a whole uncached legacy body',
   expect(await f.db.query('SELECT title FROM articles')).toEqual([{title:'original'}]);
  }finally{await f.dispose();}
 });
+
+test('RVB2KINDS-01 article placeholders cannot invent an RSS clock or mask a local edit',async()=>{
+ const feed='https://fixture.invalid/linked';
+ const source={url:feed,sourceDeviceId:'phone',title:'Feed title',description:'Feed description',siteUrl:null,
+  imageUrl:'https://fixture.invalid/icon',createdAt:10,updatedAt:20,sortOrder:40,isPinned:true,deleted:false,deletedAt:0};
+ const metadataUtf8=JSON.stringify(source);
+ const rss:ObjectDescriptor={objectId:'',kind:'rssSource',schemaVersion:1,businessId:feed,contentVersion:'20',
+  encoding:'none',size:0,sha256:hash(new Uint8Array()),metadataUtf8,metadataSha256:hash(utf8(metadataUtf8)),
+  chunkBytes:65536,chunkHashes:[],dependsOn:[]};
+ rss.objectId=objectId(rss);
+ const article=sampleArticle('linked','','articleMetadata',{rssSourceUrl:feed,rssSourceTitle:'Article display title'}).object;
+ const channels='SELECT url,title,description,image_url,created_at,sort_order,is_pinned,last_fetched_at FROM channels';
+ const cases=['article first','RSS first','local edit','local refresh'] as const;
+ const results=[];
+ for(const order of cases){
+  const f=await binaryRuntime();
+  try{
+   const {repository,files}=await attachBinaryLibrary(f);
+   const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
+   await f.db.execute('CREATE TABLE rss_receipts(outcome TEXT)');
+   const applyArticle=()=>kinds.apply(article,'unused','phone',{before:[],after:()=>[]});
+   const applySource=()=>kinds.apply(rss,'unused','phone',{before:[],after:outcome=>[
+    {sql:'INSERT INTO rss_receipts VALUES(?)',params:[outcome]}
+   ]});
+   if(order==='RSS first'){
+    await applySource();
+    await applyArticle();
+   }else{
+    await applyArticle();
+    expect(await repository.binaryFreezeSources(()=>{})).toEqual([]);
+    if(order==='local edit'){
+     const {SqlLocalRssActions}=await import('../../src/sync/local-rss-actions');
+     const actions=new SqlLocalRssActions(f.db,{parseUri:async()=>{throw Error('unexpected URL parse');}},
+      {sha256:async bytes=>hash(bytes)},()=>Date.now()+1000);
+     await actions.moveChannelToTop(Number((await f.db.query('SELECT id FROM channels'))[0]!.id));
+    }else if(order==='local refresh'){
+     await f.db.execute("UPDATE channels SET title='Locally refreshed',last_fetched_at=? WHERE url=?",[Date.now()+1000,feed]);
+    }
+    await applySource();
+   }
+   const outcome=await f.db.query('SELECT outcome FROM rss_receipts');
+   if(order==='local edit'||order==='local refresh'){
+    expect(outcome).toEqual([{outcome:'retainedLocal'}]);
+    expect((await repository.binaryFreezeSources(()=>{}))[0]).toMatchObject({sourceDeviceId:'watch',isPinned:false});
+   }else{
+    expect(outcome).toEqual([{outcome:'merged'}]);
+    expect(await repository.binaryFreezeSources(()=>{})).toEqual([source]);
+    results.push({channels:await f.db.query(channels),rss:await f.db.query('SELECT * FROM sync_source_states')});
+   }
+  }finally{await f.dispose();}
+ }
+ expect(results[0]).toEqual(results[1]);
+ expect(results[0]?.channels[0]).toMatchObject({title:'Article display title',created_at:10,is_pinned:1});
+});
+
+test('RVB2KINDS-02 staging admits the advertised article limit and shares it across bodies',async()=>{
+ const f=await binaryRuntime();
+ try{
+  const {repository,files}=await attachBinaryLibrary(f);
+  await f.store.initialize();
+  const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
+  const {BinaryAssets}=await import('../../src/sync/library-binary/assets');
+  const cap=(await f.service.probe({deviceId:'phone',supportedLibraryBinaryVersions:[2]},{session:{}})).libraryBinary as {limits:typeof HARD_LIMITS};
+  const limits=cap.limits;
+  const max=16*1024*1024;
+  expect(limits).toMatchObject({maxObjectBytes:max,maxStagingBytes:128*1024*1024});
+  const base=sampleArticle('body-a','shape only').object;
+  const sized=(id:string,size:number)=>{
+   const metadata=JSON.parse(base.metadataUtf8);
+   metadata.articleId=id;
+   metadata.body.bodyByteCount=size;
+   metadata.body.chunkHashes=Array(Math.ceil(size/131072)).fill(base.sha256);
+   const metadataUtf8=JSON.stringify(metadata);
+   const d={...base,businessId:id,size,chunkHashes:Array(Math.ceil(size/65536)).fill(base.sha256),
+    metadataUtf8,metadataSha256:hash(utf8(metadataUtf8))};
+   d.objectId=objectId(d);
+   return d;
+  };
+  const assets=new BinaryAssets(files,f.store,f.chunks,()=>{},()=>{},kinds);
+  const reserve=(...sizes:number[])=>assets.reserve('scope','job',limits,sizes.map((size,i)=>descriptor(sized('body-'+i,size),limits)));
+  for(const total of [max-1,max]){
+   await reserve(total);
+   await reserve(max/2,total-max/2);
+   expect((await f.db.query('SELECT bytes FROM library_binary_peaks'))[0]?.bytes).toBe(limits.maxStagingBytes+4*(total-max));
+  }
+  expect(()=>descriptor(sized('over-limit',max+1),limits)).toThrow('INVALID_FRAME');
+  await expect(reserve(max/2,max/2+1)).rejects.toThrow('STORAGE_PRESSURE');
+  expect(await f.db.query('SELECT bytes FROM library_binary_peaks')).toEqual([{bytes:limits.maxStagingBytes}]);
+  const occupied=new BinaryAssets({...files,stat:async()=>({file:false,size:0,usableBytes:limits.maxStagingBytes+limits.maxJournalBytes+1048575})},
+   f.store,f.chunks,()=>{},()=>{},kinds);
+  await expect(occupied.reserve('scope','job',limits,[sized('body-a',max)])).rejects.toThrow('STORAGE_PRESSURE');
+ }finally{await f.dispose();}
+});

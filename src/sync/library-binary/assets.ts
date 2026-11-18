@@ -3,6 +3,8 @@ import type {BinaryStore,ReceiptBoundary} from './store';
 import type {BinaryLibraryKinds} from './kinds';
 import {descriptor,objectId,D} from './digests';
 import {CHUNK_BYTES,fail,hash,utf8,strictJson,exact,type ObjectDescriptor,type Kind,type Row,type Snapshot,type Selection,type Limits} from './wire';
+// Native reserves this factor for block files, assembly and publication.
+export const STAGING_COPIES=4;
 export interface BinaryAssetFiles {
  list(path:string):Promise<{entries:{path:string;file:boolean;size:number}[]}>;
  stat(path:string):Promise<{file:boolean;size:number;usableBytes?:number}>;
@@ -61,9 +63,22 @@ export class BinaryAssets {
   const objects=inv.objects.filter(o=>selection.kinds.some(k=>k.kind===o.kind)).map(o=>descriptor(o,selection.limits));for(const d of objects){this.validate(d);if(d.kind!=='noteAsset')continue;const expected='library-binary/spool/'+D('wrss.library-binary.v2/spool',[scope,d.objectId])+'.bin';if(inv.paths[d.objectId]!==expected)fail('JOURNAL_CORRUPT');}
   return {objects,read:async(d,index)=>{this.check();if(d.kind!=='noteAsset')fail('SOURCE_CHANGED');const r=await this.files.readBytes(inv.paths[d.objectId]!,index*CHUNK_BYTES,CHUNK_BYTES);this.check();if(r.size!==d.size||r.bytes.length!==Math.min(CHUNK_BYTES,d.size-index*CHUNK_BYTES)||hash(r.bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');this.unit();return r.bytes;}};
  }
- async peak(limits:Limits,incoming:number,bodyJob=false){const stat=await this.files.stat('notes/assets');this.check();const other=await this.store.db.query("SELECT (SELECT COALESCE(SUM(bytes),0) FROM library_binary_peaks)+(SELECT COALESCE(SUM(bytes),0) FROM library_binary_source_files) AS n");const reserved=Number(other[0]?.n??0);if(!Number.isSafeInteger(stat.usableBytes)||incoming+reserved+limits.maxJournalBytes+1048576>stat.usableBytes!||incoming+reserved+(bodyJob?0:limits.maxJournalBytes)>limits.maxStagingBytes)fail('STORAGE_PRESSURE');}
- async reserve(scope:string,job:string,limits:Limits,objects:readonly ObjectDescriptor[]){if(!objects.length)return;let incoming=this.kinds?.shadowBytes(objects)??0;for(const d of objects){this.validate(d);incoming+=d.size*4+utf8(JSON.stringify(d)).length+1024;}
-  const old=(await this.store.db.query('SELECT bytes FROM library_binary_peaks WHERE scope=? AND job_id=?',[scope,job]))[0];await this.peak(limits,incoming-Number(old?.bytes??0),objects.some(d=>d.kind==='articleBody'));this.check();await this.store.db.execute('INSERT OR REPLACE INTO library_binary_peaks VALUES(?,?,?)',[scope,job,incoming]);this.unit();}
+ async peak(limits:Limits,incoming:number){
+  const stat=await this.files.stat('notes/assets');this.check();
+  const rows=await this.store.db.query("SELECT (SELECT COALESCE(SUM(bytes),0) FROM library_binary_peaks)+(SELECT COALESCE(SUM(bytes),0) FROM library_binary_source_files) AS n");
+  const staging=Number(rows[0]?.n??0)+incoming;
+  // The store budgets manifest and receipts against maxJournalBytes. The
+  // filesystem must still have room for that journal alongside staging.
+  if(staging>limits.maxStagingBytes||!Number.isSafeInteger(stat.usableBytes)||staging+limits.maxJournalBytes+1048576>stat.usableBytes!)fail('STORAGE_PRESSURE');
+ }
+ async reserve(scope:string,job:string,limits:Limits,objects:readonly ObjectDescriptor[]){
+  if(!objects.length)return;
+  let incoming=this.kinds?.shadowBytes(objects)??0;
+  for(const d of objects){this.validate(d);incoming+=d.size*STAGING_COPIES;}
+  const old=(await this.store.db.query('SELECT bytes FROM library_binary_peaks WHERE scope=? AND job_id=?',[scope,job]))[0];
+  await this.peak(limits,incoming-Number(old?.bytes??0));this.check();
+  await this.store.db.execute('INSERT OR REPLACE INTO library_binary_peaks VALUES(?,?,?)',[scope,job,incoming]);this.unit();
+ }
  async collect(){
   const rows=await this.store.db.query("SELECT path FROM library_binary_source_files f WHERE expires_at<? AND NOT EXISTS(SELECT 1 FROM library_binary_snapshot_files sf JOIN library_binary_snapshots s ON s.scope=sf.scope AND s.snapshot_id=sf.snapshot_id WHERE sf.path=f.path) LIMIT 64",[this.store.now()]);
   for(const row of rows){this.check();const path=String(row.path);if(!/^library-binary\/spool\/[A-Za-z0-9._-]{1,160}$/.test(path))fail('JOURNAL_CORRUPT');await this.files.remove(path);await this.store.db.execute('DELETE FROM library_binary_source_files WHERE path=?',[path]);this.unit();}

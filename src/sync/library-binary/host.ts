@@ -5,8 +5,8 @@ import type {SyncActionContext,SyncFrameConnection} from '../session';
 import type {SyncByteStream} from '../stream';
 import type {VerifiedChunkStore,ObjectLease} from '@podjs/framework/verified-chunk-store';
 import {BinaryStore} from './store';
-import {BinaryAssets,type BinaryAssetFiles} from './assets';
-import {BinaryLibraryKinds} from './kinds';
+import {BinaryAssets,STAGING_COPIES,type BinaryAssetFiles} from './assets';
+import {ARTICLE_IMPORT_SHADOW_BYTES,BinaryLibraryKinds} from './kinds';
 import type {BinaryArticleFiles} from './article-file';
 import {BinaryByteTransport} from './transport';
 import {LibraryBinaryConnection} from './coordinator';
@@ -55,7 +55,11 @@ export class BinaryApplicationService implements BinarySessionPort {
    kinds.unshift({kind:'articleBody',schemaVersion:1,send:false,receive:true},{kind:'articleMetadata',schemaVersion:1,send:false,receive:true});
    kinds.push({kind:'rssSource',schemaVersion:1,send:true,receive:true});
   }
-  const cap=s2Capability(kinds,{...HARD_LIMITS,maxObjectBytes:Math.min(this.ports.library?HARD_LIMITS.maxObjectBytes:5242880,runtime.maxObjectBytes,Math.floor(runtime.maxStagingBytes/4)),maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:this.ports.library?HARD_LIMITS.maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes:this.ports.library?134217728:Math.min(134217728,runtime.maxStagingBytes),maxInFlightChunks:1,maxInFlightBytes:65536});
+  const importBudget=this.ports.library?ARTICLE_IMPORT_SHADOW_BYTES:0;
+  const maxStagingBytes=Math.min(134217728,runtime.maxStagingBytes+importBudget);
+  const maxObjectBytes=Math.min(this.ports.library?HARD_LIMITS.maxObjectBytes:5242880,runtime.maxObjectBytes,Math.floor((maxStagingBytes-importBudget)/STAGING_COPIES));
+  if(maxObjectBytes<1)fail('CAPABILITY_MISMATCH');
+  const cap=s2Capability(kinds,{...HARD_LIMITS,maxObjectBytes,maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:this.ports.library?HARD_LIMITS.maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes,maxInFlightChunks:1,maxInFlightBytes:65536});
   if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};
  }
  business(context:SyncActionContext){this.v1Sessions.add(context);}
