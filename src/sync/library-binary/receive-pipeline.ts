@@ -9,11 +9,12 @@ export interface ChunkWork {
  check():void;
 }
 type BufferedChunk=ChunkWork&{payload:Uint8Array};
-type StagedChunk=ChunkWork&{disposition:1|2;readyAt:number};
+type VerifiedChunk=BufferedChunk&{verifiedAt:number};
+type StagedChunk=ChunkWork&{disposition:1|2;verifiedAt:number};
 interface ReceivePorts {
  live():void;
  now():number;
- admission(object:ObjectDescriptor):Promise<ResumeError|undefined>;
+ admission(object:ObjectDescriptor):ResumeError|undefined|Promise<ResumeError|undefined>;
  stage(chunk:BufferedChunk):Promise<1|2>;
  commit(chunks:readonly StagedChunk[],check:()=>void):Promise<void>;
  ack(frame:AckFrame,started:()=>void):void;
@@ -31,7 +32,7 @@ export class ReceivePipeline {
  private readonly pending=new Map<number,DataHeader>();
  private readonly scratch=new Uint8Array(4096);
  private readonly hashing:BufferedChunk[]=[];
- private readonly staging:BufferedChunk[]=[];
+ private readonly staging:VerifiedChunk[]=[];
  private readonly durable:StagedChunk[]=[];
  private readonly groupSize:number;
  private hashScheduled=false;
@@ -48,6 +49,7 @@ export class ReceivePipeline {
  }
 
  get busy():boolean {return this.pending.size>0;}
+ busyOn(slot:number):boolean{return [...this.pending.values()].some(p=>p.objectSlot===slot);}
  get working():boolean {
   return this.hashing.length>0||this.staging.length>0||this.durable.length>0||!!this.stageWork||!!this.commitWork;
  }
@@ -104,7 +106,7 @@ export class ReceivePipeline {
    while(!this.closed&&(chunk=this.hashing.shift())){
     chunk.check();
     if(hash(chunk.payload)!==chunk.object.chunkHashes[chunk.header.chunkIndex])fail('HASH_MISMATCH');
-    this.staging.push(chunk);this.stageNext();
+    this.staging.push({...chunk,verifiedAt:this.ports.now()});this.stageNext();
    }
   }).catch(e=>this.failed(e)).finally(()=>{
    this.hashScheduled=false;if(this.hashing.length)this.hashNext();
@@ -115,9 +117,9 @@ export class ReceivePipeline {
   if(this.stageWork||this.closed)return;
   const chunk=this.staging.shift();
   if(!chunk)return;
-  const {header,object,check,payload}=chunk;
+  const {header,object,check,payload,verifiedAt}=chunk;
   this.stageWork=this.ports.stage(chunk).then(disposition=>{
-   check();this.durable.push({header,object,check,disposition,readyAt:this.ports.now()});this.scheduleCommit();
+   check();this.durable.push({header,object,check,disposition,verifiedAt});this.scheduleCommit();
   },e=>{
    if(this.closed)return;
    const error=resumeError(e);
@@ -130,12 +132,13 @@ export class ReceivePipeline {
 
  private scheduleCommit(){
   if(this.closed||!this.durable.length)return;
-  if(this.durable.length>=this.groupSize||this.due){
+  const wait=this.durable[0]!.verifiedAt+20-this.ports.now();
+  if(this.durable.length>=this.groupSize||this.due||wait<=0){
    if(!this.commitWork)this.commitNext();
    return;
   }
   if(this.timer)return;
-  const timer=this.ports.sleep(Math.max(0,this.durable[0]!.readyAt+20-this.ports.now()));this.timer=timer;
+  const timer=this.ports.sleep(wait);this.timer=timer;
   void timer.result.then(()=>{
    if(this.timer!==timer||this.closed)return;
    this.timer=undefined;this.due=true;this.scheduleCommit();

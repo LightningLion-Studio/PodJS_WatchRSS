@@ -43,7 +43,7 @@ export class BinaryApplicationService implements BinarySessionPort {
   this.sessions.delete(context.session);if(!this.enabled())return {};
   if(r.supportedLibraryBinaryVersions===undefined)return {};
   const versions=r.supportedLibraryBinaryVersions;if(!Array.isArray(versions)||versions.some(v=>!Number.isSafeInteger(v)||v<1)||new Set(versions).size!==versions.length)fail('CAPABILITY_MISMATCH');if(!versions.includes(2))return {};
-  const peer=text(r.deviceId,128),runtime=await this.ports.chunks.runtime();if(!runtime)fail('CAPABILITY_MISMATCH');
+  const peer=text(r.deviceId,128),runtime=await this.ports.chunks.runtime();if(!runtime?.chunkReceipt)fail('CAPABILITY_MISMATCH');
   await this.ports.sampleClock?.();await this.ports.store.initialize();await this.ports.store.observeClock(runtime.elapsedMillis);
   const cap=binaryCapability([{kind:'noteAsset',schemaVersion:1,send:true,receive:true}],{...HARD_LIMITS,maxObjectBytes:Math.min(5242880,runtime.maxObjectBytes),maxPlanObjects:512,maxManifestBytes:262144,maxMetadataBytes:1024,maxJournalBytes:33554432,maxInFlightObjects:Math.min(4,runtime.maxInFlightObjects),maxStagingBytes:Math.min(134217728,runtime.maxStagingBytes)});
   if(this.recovery.snapshot.stopped&&!this.reconnected)this.recovery=new RecoveryRules();this.sessions.set(context.session,{peer,capability:cap,connectionId:await this.ports.randomId(),running:false});return {libraryPeer:{implementation:'podjs',appVersion:config.versionName},libraryBinary:cap};

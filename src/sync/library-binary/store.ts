@@ -1,4 +1,5 @@
 import type {SqlDatabase,SqlParams} from '../../core/types';
+import {MAX_REQUEST_BINDINGS} from './receive-index';
 import {frameBytes} from '../wire-frame-size';
 import {D,appliedReceipt,completion,descriptor,objectsRoot,pageDigest,receiptsRoot,requestDigest} from './digests';
 import {fail,RETENTION,utf8,sorted,exact,hex,type Envelope,type BeginPayload,type ObjectDescriptor,type AppliedReceipt,type Outcome,type Completion,type Snapshot,type Row} from './wire';
@@ -65,6 +66,12 @@ export class BinaryStore {
   {sql:'UPDATE library_binary_guard SET ok=CASE WHEN (SELECT bytes FROM library_binary_request_quota WHERE id=1)<=? THEN 1 ELSE 0 END WHERE id=1',params:[Math.min(8388608,job.description.selection.limits.maxJournalBytes-25165824)]},
   ...this.bind(job,peer,r),
  ];}
+ async receiveBindings(job:Job,peer:string):Promise<Pick<Envelope,'requestId'|'requestDigest'>[]>{
+  const rows=await this.db.query('SELECT request_id,digest FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? LIMIT ?',
+   [job.scope,job.jobId,peer,MAX_REQUEST_BINDINGS+1]);
+  if(rows.length>MAX_REQUEST_BINDINGS)fail('JOURNAL_CORRUPT');
+  return rows.map(r=>({requestId:hex(r.request_id,32),requestDigest:hex(r.digest)}));
+ }
  async boundRequest(job:Job,peer:string,r:Envelope,onReplay?:()=>void){
   const existing=(await this.db.query('SELECT digest,result FROM library_binary_requests WHERE scope=? AND job_id=? AND peer=? AND request_id=?',[job.scope,job.jobId,peer,r.requestId]))[0];
   if(existing&&existing.digest!==r.requestDigest)fail('REQUEST_CONFLICT');

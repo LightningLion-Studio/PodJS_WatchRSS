@@ -21,10 +21,10 @@ test('negative reply must match job/plan/epoch/request ID/digest; stale epoch ne
 });
 test('disconnect clears temporary credit; fresh epoch restarts both sequences',()=>{
  const w=new SendWindow(binding,1);w.reserve(data());w.close();expect(w.credit.bytes).toBe(0);expect(()=>w.reserve(data())).toThrow();
- const r=new SendWindow(binding,2);expect(r.reserve(data()).txSeq).toBe(1);expect(r.acceptAck(ack(1,1,1),0)).toBeNull();expect(r.credit.bytes).toBe(3);expect(r.acceptAck(ack(1,1,2),0)).not.toBeNull();
+ const r=new SendWindow(binding,1);r.regrant(2);expect(r.reserve(data()).txSeq).toBe(1);expect(r.acceptAck(ack(1,1,1),0)).toBeNull();expect(r.credit.bytes).toBe(3);expect(r.acceptAck(ack(1,1,2),0)).not.toBeNull();
 });
 test('stale ACK rate has independent bounded budget and no settlement',()=>{
- const w=new SendWindow(binding,2);w.reserve(data());for(let i=0;i<32;i++)expect(w.acceptAck(ack(1,1,1),0)).toBeNull();expect(()=>w.acceptAck(ack(1,1,1),0)).toThrow('RATE_LIMITED');expect(w.credit.bytes).toBe(0);
+ const w=new SendWindow(binding,1);w.regrant(2);w.reserve(data());for(let i=0;i<32;i++)expect(w.acceptAck(ack(1,1,1),0)).toBeNull();expect(()=>w.acceptAck(ack(1,1,1),0)).toThrow('RATE_LIMITED');expect(w.credit.bytes).toBe(0);
 });
 test('20 STATE retries use new txSeq with stable requestId/digest, no arbitrary retry ceiling',()=>{
  const w=new SendWindow(binding,1),backoff=new RetryBackoff(),bucket=new TokenBucket(8,4);let now=0;
@@ -64,7 +64,7 @@ test('duplicate negative without matching pending is STOP and cannot release cre
  const w=new SendWindow(binding,1),p=w.reserve(data()),r=negativeReply(binding,p,new ResumeError('BUSY'));w.negative(r,0);expect(()=>w.negative(r,100)).toThrow();expect(w.credit.bytes).toBe(0);
 });
 test('two streams share the connection-wide stale ACK budget',()=>{
- const budget=new TokenBucket(32,16),a=new SendWindow(binding,2,0,budget),b=new SendWindow({...binding,streamId:2},2,0,budget);
+ const budget=new TokenBucket(32,16),a=new SendWindow(binding,1,0,budget),b=new SendWindow({...binding,streamId:2},1,0,budget);a.regrant(2);b.regrant(2);
  for(let i=0;i<16;i++){a.acceptAck(ack(1,1,1),0);b.acceptAck({...ack(1,1,1),streamId:2},0);}expect(()=>b.acceptAck({...ack(1,1,1),streamId:2},0)).toThrow('RATE_LIMITED');
 });
 test('apply response binds the receipt to pending object/request and authenticated receiver',async()=>{
@@ -101,4 +101,16 @@ test('S3 settles selective durable ACKs and a negative reply independently',()=>
  expect(w.credit).toEqual({chunks:6,bytes:393216});
  expect(()=>w.acceptAck({...ack(2),entries:[{txSeq:4,disposition:1},{txSeq:10,disposition:1}]},0)).toThrow();
  expect(w.credit).toEqual({chunks:0,bytes:0});
+});
+
+test('ACK and negative responses STOP for a never-granted older epoch',()=>{
+ for(const first of [1,3]){
+  for(const kind of ['ack','negative'] as const){
+   const w=new SendWindow(binding,first);if(first===1)w.regrant(3);
+   const current=w.reserve(data());
+   const settle=kind==='ack'?()=>w.acceptAck(ack(1,current.txSeq,2),0):
+    ()=>w.negative(negativeReply(binding,{...current,epoch:2},new ResumeError('BUSY')),0);
+   expect(settle).toThrow('STALE_EPOCH');expect(w.credit.chunks).toBe(0);
+  }
+ }
 });

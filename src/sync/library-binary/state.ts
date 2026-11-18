@@ -26,10 +26,14 @@ export class SendWindow {
  private nextTxSeq=1;private lastAckSeq=0;private active=true;
  private readonly binding:JobBinding;
  private readonly stale:TokenBucket;
+ private readonly grantedEpochs=new Set<number>();
  constructor(binding:JobBinding,private epoch:number,now=0,staleAckBudget?:TokenBucket,
   private readonly limits={maxInFlightChunks:1,maxInFlightBytes:65536}){
-  this.binding=Object.freeze({...binding});if(!integer(epoch))fail();this.stale=staleAckBudget??new TokenBucket(32,16,now);
+  this.binding=Object.freeze({...binding});if(!integer(epoch))fail();this.grantedEpochs.add(epoch);this.stale=staleAckBudget??new TokenBucket(32,16,now);
  }
+ get currentEpoch():number{return this.epoch;}
+ granted(epoch:number):boolean{return this.grantedEpochs.has(epoch);}
+ oldEpoch(epoch:number):boolean{if(!this.granted(epoch))fail('STALE_EPOCH');return epoch<this.epoch;}
  get credit():{chunks:number;bytes:number} {return {chunks:this.pending.size,bytes:this.bytes};}
  canSend(bytes:number):boolean {
   return this.active&&this.pending.size<this.limits.maxInFlightChunks&&this.bytes+bytes<=this.limits.maxInFlightBytes;
@@ -57,7 +61,7 @@ export class SendWindow {
   if(!this.active)fail('AUTH_REVOKED');
   if(ack.streamId!==this.binding.streamId||!ack.entries.length||ack.entries.length>32||!integer(ack.epoch)||!integer(ack.ackSeq))fail();
   let last=0;for(const e of ack.entries){if(integer(e.txSeq)<=last||e.disposition!==1&&e.disposition!==2)fail();last=e.txSeq;}
-  if(ack.epoch<this.epoch||ack.epoch===this.epoch&&ack.ackSeq<=this.lastAckSeq){this.stale.take(now);return null;}
+  if(this.oldEpoch(ack.epoch)||ack.ackSeq<=this.lastAckSeq){this.stale.take(now);return null;}
   if(ack.epoch!==this.epoch||ack.ackSeq!==this.lastAckSeq+1)fail();
   const result=ack.entries.map(e=>{
    const pending=this.pending.get(e.txSeq);if(!pending)fail();
@@ -73,13 +77,13 @@ export class SendWindow {
  private checkedNegative(value:Envelope,now:number):{action:RecoveryAction;retryAfterMillis:number;pending:Pending}|null {
   const r=envelope(value);if(!this.active)fail('AUTH_REVOKED');
   if(r.type!=='response'||r.phase!=='putChunk'||r.success!==false||r.jobId!==this.binding.jobId||r.planDigest!==this.binding.planDigest||r.epoch===null)fail();
-  if(r.epoch<this.epoch){this.stale.take(now);return null;}
+  if(this.oldEpoch(r.epoch)){this.stale.take(now);return null;}
   const p=Array.from(this.pending.values()).find(p=>p.requestId===r.requestId);if(r.epoch!==this.epoch||!p||r.requestDigest!==p.requestDigest)fail('REQUEST_CONFLICT');
   this.settle(p);const action=r.error!.recovery as RecoveryAction;
   if(action==='REPLAN'||action==='STOP')this.close();return {action,retryAfterMillis:Number(r.error!.retryAfterMillis),pending:p};
  }
  /** Caller must complete the begin barrier and discard old worker/ACK queues first. */
- regrant(epoch:number):void {if(!this.active||integer(epoch)<=this.epoch)fail('STALE_EPOCH');this.epoch=epoch;this.pending.clear();this.bytes=0;this.nextTxSeq=1;this.lastAckSeq=0;}
+ regrant(epoch:number):void {if(!this.active||integer(epoch)<=this.epoch)fail('STALE_EPOCH');this.epoch=epoch;this.grantedEpochs.add(epoch);this.pending.clear();this.bytes=0;this.nextTxSeq=1;this.lastAckSeq=0;}
  close():void {this.active=false;this.pending.clear();this.bytes=0;}
 }
 

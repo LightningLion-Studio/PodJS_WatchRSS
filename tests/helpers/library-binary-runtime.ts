@@ -46,7 +46,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
  const grants=new Map<string,{connectionId:string;epoch:number;readOnly:boolean}>();let peak=0,stageCalls=0;
  const native=async<T>(method:string,a:Row,bytes?:Uint8Array):Promise<T>=>{
   await options.fault?.(method,a);
-  if(a.operation==='probe')return {version:1,methods:['file.resumable.stage','file.resumable.status','file.resumable.missing','file.resumable.finalize','file.resumable.release'],chunkBytes:65536,maxObjectBytes:16777216,maxInFlightObjects:options.maxObjects??4,maxStagingBytes:67108864,maxJournalBytes:16777216,durable:true,fencing:true,elapsedMillis:Math.floor(performance.now())} as T;
+  if(a.operation==='probe')return {version:1,methods:['file.resumable.stage','file.resumable.status','file.resumable.missing','file.resumable.finalize','file.resumable.release'],chunkBytes:65536,maxObjectBytes:16777216,maxInFlightObjects:options.maxObjects??4,maxStagingBytes:67108864,maxJournalBytes:16777216,durable:true,fencing:true,chunkReceipt:true,elapsedMillis:Math.floor(performance.now())} as T;
   const scope=String(a.scope),prior=grants.get(scope);if(a.operation==='collect'){await rm(path('native/'+scope),{recursive:true,force:true});grants.delete(scope);return {} as T;}if(a.operation==='acquire'){const epoch=(prior?.epoch??0)+1;grants.set(scope,{connectionId:String(a.connectionId),epoch,readOnly:a.readOnly===true});return {epoch} as T;}
   if(!prior||prior.epoch!==a.epoch||prior.connectionId!==a.connectionId)throw Error('STALE_EPOCH');
   if(a.operation==='check')return {} as T;if(a.operation==='readOnly'){prior.readOnly=true;return {} as T;}
@@ -56,7 +56,7 @@ export async function binaryRuntime(options:{enabled?:boolean;maxObjects?:number
   if(a.operation==='object'||method.endsWith('.missing'))return await status() as T;
   if(method.endsWith('.release')){await rm(path(dir),{force:true,recursive:true});return {} as T;}
   if(prior.readOnly)throw Error('JOB_CANCELLED');
-  if(method.endsWith('.stage')){if(!bytes)throw Error('B2_BASE64_FORBIDDEN');stageCalls++;peak=Math.max(peak,bytes.length);if(hash(bytes)!==d.chunkHashes[Number(a.index)])throw Error('HASH_MISMATCH');await durable(dir+'/'+a.index,bytes);return await status() as T;}
+  if(method.endsWith('.stage')){if(!bytes)throw Error('B2_BASE64_FORBIDDEN');stageCalls++;peak=Math.max(peak,bytes.length);if(hash(bytes)!==d.chunkHashes[Number(a.index)])throw Error('HASH_MISMATCH');await durable(dir+'/'+a.index,bytes);if(a.receiptOnly)return {durable:true,index:a.index,bytes:bytes.length,sha256:d.chunkHashes[Number(a.index)],bindingId:a.bindingId,requestDigest:a.requestDigest} as T;return await status() as T;}
   if(method.endsWith('.finalize')){if((await missing()).length)throw Error('CHUNKS_MISSING');const temp=dir+'/compose';await files.writeBytes(temp,new Uint8Array());for(let i=0;i<d.chunkHashes.length;i++){const b=await readFile(path(dir+'/'+i));await files.appendBytes(temp,b,i*65536);}const target=String(a.path);try{await files.commit(temp,target,d.size,d.sha256,null);}catch(e){if(String(e).includes('file_target_changed'))throw Error('PUBLICATION_CONFLICT');throw e;}return {path:target,size:d.size,sha256:d.sha256} as T;}
   throw Error('bad native method '+method);
  };
