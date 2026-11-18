@@ -92,6 +92,6 @@ test('review: actual display angle at down survives the rest of the rotation twe
 for(const angle of [90,180,270])test(`review: real source replacement after down retains angle ${angle}`,async()=>{
  const f=mount('douyin',angle);await flush();f.rotate();await flush();const r=angle*Math.PI/180;
  const c={id:1,x:100,y:100,startX:100,startY:100,dx:110*Math.sin(r),dy:-110*Math.cos(r),fdx:0,fdy:0,vx:650*Math.sin(r),vy:-650*Math.cos(r)};
- const g=gestures.find(g=>g.onTap&&g.onPanEnd);g.onDown(c);f.replaceSource();await flush();expect(f.handle.gestureRotation()).toBe(0);
+ const g=gestures.find(g=>g.onTap&&g.onPanEnd);g.onDown(c);f.replaceSource();await flush();expect(f.handle.gestureRotation()).toBe(angle);
  g.onPanStart(c);g.onPanMove(c);g.onUp?.(c);g.onPanEnd(c);await flush();expect(f.selected).toEqual(['next']);
 });
