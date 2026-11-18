@@ -10,5 +10,5 @@ export async function orderImportedRows<T extends Record<string,unknown>>(input:
   const sorted=yield* stableSortSteps(candidates,(a,b)=>{for(let i=0;i<order.length;i++){const d=order[i]!*(a.keys[i]!-b.keys[i]!);if(d)return d;}return 0;});
   const out:T[]=[];for(const entry of sorted){out.push(entry.row);yield;}return out;
  }
- return runWorkSteps(steps(),{traceLabel:'sync.importOrder',...options});
+ return runWorkSteps(steps(),{budgetMs:8,traceLabel:'sync.importOrder',...options});
 }

@@ -31,6 +31,56 @@ test('media transport keeps other callers defaults and cleans partial downloads 
   expect(f.removed).toHaveLength(2);
 });
 
+test('foreground media reads the existing response after byte bridge pressure without another download',async()=>{
+  const body=Uint8Array.from({length:70_000},(_,i)=>i%251);
+  const downloads:string[]=[],removed:string[]=[],reads:Array<[string,number]>=[];
+  const transport=createMediaTransport({
+    download:async args=>{downloads.push(String(args.path));return {path:String(args.path),size:body.length,status:200,headers:{}} as DownloadResult;},
+    read:async(_path,offset)=>{
+      reads.push(['binary',offset]);
+      if(offset>0)throw Object.assign(Error('Byte bridge full'),{code:'busy'});
+      return body.slice(0,32768);
+    },
+    readPortable:async(_path,offset)=>{reads.push(['portable',offset]);return body.slice(offset,offset+16384);},
+    remove:async path=>{removed.push(path);},base64:()=> '',
+  });
+  const response=await transport.request({method:'POST',url:'https://media.test/feed',headers:{}});
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual(body);
+  expect(reads).toEqual([['binary',0],['binary',32768],['portable',32768],['portable',49152],['portable',65536]]);
+  expect(downloads).toHaveLength(1);
+  expect(removed).toEqual(downloads);
+});
+
+test('a failed local read preserves completed HTTP metadata and stays out of network recovery',async()=>{
+  const previous=(globalThis as any).pod;
+  const events:any[]=[];
+  (globalThis as any).pod={...previous,benchmark:(event:string)=>{events.push(JSON.parse(event));return 1;}};
+  try{
+    const download=async(args:Record<string,unknown>)=>({path:String(args.path),size:48,status:200,headers:{}} as DownloadResult);
+    let portableReads=0;
+    const transport=createMediaTransport({download,read:async()=>{throw Object.assign(Error('Byte bridge full'),{code:'busy'});},
+      readPortable:async()=>{portableReads++;throw Object.assign(Error('file_not_found'),{code:'host_error'});},
+      remove:async()=>{},base64:()=>''});
+    const client=new DouyinClient({transport,signer:{sign:()=>''},secureStorage:{get:async key=>key==='douyin.cookie'?'sessionid=test':null,set:async()=>{},remove:async()=>{}}});
+    expect(await client.fetchFeedPage()).toEqual({ok:false,code:'REQUEST_FAILED',message:'网络请求失败'});
+    expect(portableReads).toBe(1);
+    expect(events.find(event=>event.code==='douyin_request')).toMatchObject({category:'feed',http_status:200,response_bytes:48,error_code:'decode'});
+  }finally{(globalThis as any).pod=previous;}
+});
+
+test('the portable path is limited to foreground byte bridge backpressure',async()=>{
+  const readPortable=async()=>{throw Error('Unexpected portable read');};
+  const transport=createMediaTransport({
+    download:async args=>({path:String(args.path),size:5,status:200,headers:{}} as DownloadResult),
+    read:async()=>{throw Object.assign(Error('Byte bridge full'),{code:'busy'});},
+    readPortable,remove:async()=>{},base64:()=> '',
+  });
+  await expect(transport.request({method:'GET',url:'https://media.test/feed',headers:{},background:{
+    isCurrent:()=>true,onCancel:()=>()=>{},
+  }})).rejects.toMatchObject({httpStatus:200,responseBytes:5,cause:{code:'busy',message:'Byte bridge full'}});
+});
+
 test('request logs retain status and error category without raw signing, token, cookie or query text',async()=>{
   let log='';const logger=new AppLogger({read:async()=>log,size:async()=>log.length,replace:async value=>{log=value;},append:async value=>{log+=value;}});installAppLogger(logger);
   const f=fixture();

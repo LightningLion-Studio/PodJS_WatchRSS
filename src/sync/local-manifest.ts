@@ -345,7 +345,7 @@ export class LocalArticleManifestStore {
    out.push(await this.prepareRow(row,id,device,{savedAt:num(representative.saved_at),favorite:f?.itemId!=null?f.saved:!!favorite,later:l?.itemId!=null?l.saved:!!later,favoriteChanged:f?.changedAt??num(favorite?.saved_at),favoriteOrder:f?.sortOrder??num(favorite?.saved_at),laterChanged:l?.changedAt??num(later?.saved_at),laterOrder:l?.sortOrder??num(later?.saved_at)},bodySource??row));this.bodySourceIds.set(id,num(bodySource?.id??row.id));preparedRowIds.set(id,num(row.id));active.add(id);
   }
   const imports:{row:Row;id:string}[]=[];
-  const importRows=await orderImportedRows(rows,{yieldTurn:()=>this.db.query('SELECT 1'),check});
+  const importRows=await orderImportedRows(rows,{yieldTurn:()=>this.text.yieldTurn?.()??this.db.query('SELECT 1'),check});
   for(const independent of [true,false])for(const row of importRows){const channel=str(row.channel_url);if(independent?channel!=='watchrss://phone-imports':!isImportedContentUrl(channel))continue;const id=ids.get(num(row.id))!;if(active.has(id))continue;
    this.bodySourceIds.set(id,num(row.id));preparedRowIds.set(id,num(row.id));usedRows.add(num(row.id));active.add(id);imports.push({row,id});
   }

@@ -62,3 +62,20 @@ test("actual Android production parser corpus matches raw wire parsing",()=>{
  for(const row of native.batches){const call=()=>validateArticleRequestFrame(parseWireJson(row.frame),row.index,row.count??undefined);if(row.ok)expect(call()).toBe((row as any).result);else expect(call).toThrow();}
  for(const row of native.base64){const call=()=>encodeChunkData(decodeChunkData(row.input));if(row.ok)expect(call()).toBe((row as any).encoded);else expect(call).toThrow();}
 });
+
+test('a sender can replace a requested stale body only with every chunk of the new body',async()=>{
+ const selected={...request(),metadataOnly:true,chunkIndexes:[]};
+ const replacement=(index:number)=>{const entry=article("a",index);return {...entry,body:{...entry.body,bodyHash:"new-body"}};};
+ const committed:string[]=[];
+ const receiver=new ArticleBatchReceiver([selected],async entry=>{committed.push(entry.body.bodyHash);},{flushCompleteArticles:true});
+ expect(await receiver.consume(frame(0,2,[replacement(0)]))).toBeNull();
+ expect(receiver.checkpointReady).toBe(false);
+ expect(await receiver.consume(frame(1,2,[replacement(1)]))).toMatchObject({committedArticles:1});
+ expect(committed).toEqual(["new-body"]);
+
+ const incomplete=new ArticleBatchReceiver([selected],async()=>{throw Error("committed incomplete replacement");});
+ await expect(incomplete.consume(frame(0,1,[replacement(0)]))).rejects.toThrow("incomplete replacement");
+ const wrongMetadata=new ArticleBatchReceiver([selected],async()=>{throw Error("committed replacement without a body");});
+ const entry=replacement(0);
+ await expect(wrongMetadata.consume(frame(0,1,[{...entry,body:{...entry.body,metadataOnly:true,chunks:[]}}]))).rejects.toThrow("unsolicited");
+});

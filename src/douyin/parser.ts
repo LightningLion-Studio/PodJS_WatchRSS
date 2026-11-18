@@ -68,18 +68,25 @@ export function parseDouyinDetail(raw:string):DouyinContent|null { const detail=
 
 const urlAddress={url_list:null,width:null,height:null} as const;
 const variantFields={play_addr:urlAddress,url_list:null,width:null,height:null,gear_name:null,codec_type:null,is_h265:null,bit_rate:null,format:null,video_extra:{definition:null,quality:null},quality_type:null} as const;
-const itemFields={aweme_type:null,is_ads:null,raw_ad_data:null,aweme_id:null,desc:null,create_time:null,author:{uid:null,nickname:null,avatar_thumb:{url_list:null}},statistics:{digg_count:null,comment_count:null,share_count:null,collect_count:null},video:{width:null,height:null,bit_rate:[variantFields],bit_rate_audio:[{audio_meta:{codec_type:null,bitrate:null,url_list:{main_url:null,backup_url:null}}}],play_addr_h264:variantFields,play_addr_265:variantFields,play_addr_h265:variantFields,play_addr_bytevc1:variantFields,play_addr:variantFields,cover:{url_list:null},duration:null}} as const;
+const itemFields={aweme_type:null,is_ads:null,raw_ad_data:{},aweme_id:null,desc:null,create_time:null,author:{uid:null,nickname:null,avatar_thumb:{url_list:null}},statistics:{digg_count:null,comment_count:null,share_count:null,collect_count:null},video:{width:null,height:null,bit_rate:[variantFields],bit_rate_audio:[{audio_meta:{codec_type:null,bitrate:null,url_list:{main_url:null,backup_url:null}}}],play_addr_h264:variantFields,play_addr_265:variantFields,play_addr_h265:variantFields,play_addr_bytevc1:variantFields,play_addr:variantFields,cover:{url_list:null},duration:null}} as const;
+export const douyinFeedSelection={status_code:null,aweme_list:[itemFields],max_cursor:null,cursor:null,has_more:null} as const;
+type FeedMappingStage=(value:'project_upload'|'project_native'|'project_fallback'|'mapping')=>void;
 /** Only discard fields the existing mapper never reads. Native JSON projection
  * retains exact raw primitive spellings; the same mapper owns all app semantics. */
-export async function parseDouyinFeedAsync(raw:string,stage?:(value:'project_upload'|'project_native'|'project_fallback'|'mapping')=>void):Promise<DouyinFeedPage>{
+export async function parseDouyinFeedAsync(raw:string,stage?:FeedMappingStage):Promise<DouyinFeedPage>{
  const {projectJsonAsync}=await import('@podjs/framework/json');
- const {prepareTextLayout,yieldWorkTurn}=await import('@podjs/framework/text-layout');
- const root=object(await projectJsonAsync(raw,{aweme_list:[itemFields],max_cursor:null,cursor:null,has_more:null},{onProjectionPhase:phase=>stage?.(`project_${phase}`)}));
+ return mapProjectedDouyinFeed(await projectJsonAsync(raw,douyinFeedSelection,{onProjectionPhase:phase=>stage?.(`project_${phase}`)}),stage);
+}
+export async function mapProjectedDouyinFeed(value:unknown,stage?:FeedMappingStage,mappedRows?:readonly DouyinItem[]):Promise<DouyinFeedPage>{
+ const root=object(value);
  stage?.('mapping');
  if(!root)throw new Error('响应不是 JSON 对象');
- const items:DouyinItem[]=[];
- function* steps():Generator<void,void>{for(const row of array(root!.aweme_list)){const item=traceServiceWork('douyin.feed.item',()=>parseDouyinItem(row,"feed"));if(item)items.push(item);yield;}}
- let key=0;const task=prepareTextLayout(steps(),{key:()=>key++,entry:()=>undefined,publish:()=>{}},{yieldTurn:yieldWorkTurn,rowLimit:1});await task.done;
+ const items=mappedRows?[...mappedRows]:[];
+ if(!mappedRows){
+  const {prepareTextLayout,yieldWorkTurn}=await import('@podjs/framework/text-layout');
+  function* steps():Generator<void,void>{for(const row of array(root!.aweme_list)){const item=traceServiceWork('douyin.feed.item',()=>parseDouyinItem(row,"feed"));if(item)items.push(item);yield;}}
+  let key=0;const task=prepareTextLayout(steps(),{key:()=>key++,entry:()=>undefined,publish:()=>{}},{yieldTurn:yieldWorkTurn,rowLimit:1});await task.done;
+ }
  const cursor=number(root.max_cursor)>0?String(number(root.max_cursor)):string(root.cursor).trim()||null;
  return {items,nextCursor:cursor,hasMore:number(root.has_more)==1};
 }
