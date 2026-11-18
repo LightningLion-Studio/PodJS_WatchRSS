@@ -20,10 +20,12 @@ export function bookFileWork(files:BinaryArticleFiles,host:BookHostOperation,adv
  let stopped=false;
  const run=<T>(method:string,args:Record<string,unknown>)=>{
   if(stopped)fail('AUTH_REVOKED');
-  let bytes=0;
+  let bytes=0,phase=0;
   const op=host<T>(method,{...args,trackProgress:true},value=>{
-   const next=(value as {bytes?:number}|null)?.bytes;
-   if(!stopped&&typeof next==='number'&&Number.isSafeInteger(next)&&next>bytes){bytes=next;advance();}
+   const event=value as {bytes?:number;phase?:string}|null;
+   const next=event?.bytes,step=['syncFile','publish','syncDirectory'].indexOf(event?.phase??'')+1;
+   if(stopped||typeof next!=='number'||!Number.isSafeInteger(next)||next<bytes)return;
+   if(next>bytes||step>phase){bytes=next;phase=Math.max(phase,step);advance();}
   });
   const cancel=()=>op.cancel();
   pending.add(cancel);

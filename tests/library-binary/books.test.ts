@@ -260,7 +260,7 @@ test('the foreground factory applies the release B2 switch to books',()=>{
  expect(source).toMatch(/new BinaryApplicationService\(\{[^\n]*\bb2BooksEnabled:RELEASE_B2_ENABLED\b/);
 });
 
-test('book host work advances only on completed bytes and stops in-flight calls',async()=>{
+test('book host work advances on bytes and durability phases and stops in-flight calls',async()=>{
  const f=await binaryRuntime({fileRefs:true});
  try{
   const {files}=await attachBinaryBooks(f);
@@ -276,11 +276,13 @@ test('book host work advances only on completed bytes and stops in-flight calls'
   const settled=pending.then(()=>{throw Error('expected cancellation');},error=>{expect(error.message).toBe('operation cancelled');});
   for(const bytes of [0,65536,65536,5,131072])progress?.({bytes});
   expect(units).toBe(2);
+  for(const phase of ['syncFile','syncFile','publish','syncFile','syncDirectory'])progress?.({bytes:131072,phase});
+  expect(units).toBe(5);
   work.stop();work.stop();
   progress?.({bytes:196608});
   await settled;
   expect(cancels).toBe(1);
-  expect(units).toBe(2);
+  expect(units).toBe(5);
   expect(()=>work.files.hash('books/late')).toThrow('AUTH_REVOKED');
  }finally{await f.dispose();}
 });
