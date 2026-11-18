@@ -27,6 +27,11 @@ function strictInteger(parent:JsonObject,key:string,fallback:number,min:number,m
 export interface RequestedArticleBody {articleId:string;bodyHash:string;chunkIndexes:readonly number[];metadataOnly:boolean}
 export interface WireIncomingArticle extends IncomingArticle {legacyArticleIds?:readonly string[];contentHash:string;independentSaved:boolean;independentChangedAt:number;independentSortOrder:number;deletedAt:number}
 export interface ReceivedArticle {article:WireIncomingArticle;body:SyncBodyPayload}
+function replacesRequestedBody(request:RequestedArticleBody,body:SyncBodyPayload):boolean {
+ // A sender whose body changed after its manifest falls back to a complete
+ // body. The old request still authorizes only this article ID.
+ return !body.metadataOnly&&(request.bodyHash!==body.bodyHash||request.metadataOnly);
+}
 export interface ArticleBatchReceipt {frameCount:number;receivedArticles:number;committedArticles:number;bodyRequests:readonly RequestedArticleBody[]}
 export function validateArticleRequestFrame(frame:JsonObject,index:number,count?:number):number{
  if(frame.action!==ACTION_SYNC_LIBRARY||frame.phase!==PHASE_ARTICLES)throw new Error("unexpected articles request action/phase");
@@ -113,10 +118,13 @@ export class ArticleBatchReceiver {
    assertUniqueArticleAliases(entries.map(e=>e.article),this.aliases);
    for(const entry of entries){
     if(!this.options.ignoreIncoming){
-     const request=this.selected.get(entry.article.articleId);if(!request||request.bodyHash!==entry.body.bodyHash||request.metadataOnly!==!!entry.body.metadataOnly)throw new Error("unsolicited article body");
+     const request=this.selected.get(entry.article.articleId);
+     if(!request)throw new Error("unsolicited article id");
+     const replacement=replacesRequestedBody(request,entry.body);
+     if(!replacement&&(request.bodyHash!==entry.body.bodyHash||request.metadataOnly!==!!entry.body.metadataOnly))throw new Error("unsolicited article body");
      validateBodyShape(entry.body);
      if(entry.body.bodyByteCount>64*1024*1024)throw new Error("encoded article body exceeds receive buffer limit");
-     for(const c of entry.body.chunks){const expected=Math.min(entry.body.chunkSize,entry.body.bodyByteCount-c.index*entry.body.chunkSize);if(c.bytes.length!==expected)throw new Error("body chunk length mismatch");if(request.chunkIndexes.length&&!request.chunkIndexes.includes(c.index))throw new Error("unsolicited body chunk");}
+     for(const c of entry.body.chunks){const expected=Math.min(entry.body.chunkSize,entry.body.bodyByteCount-c.index*entry.body.chunkSize);if(c.bytes.length!==expected)throw new Error("body chunk length mismatch");if(!replacement&&request.chunkIndexes.length&&!request.chunkIndexes.includes(c.index))throw new Error("unsolicited body chunk");}
     }
     if(this.pending?.article.articleId===entry.article.articleId)this.pending=merge(this.pending,entry);
     else{
@@ -127,9 +135,10 @@ export class ArticleBatchReceiver {
    }
    if(this.options.flushCompleteArticles&&this.pending){
     const body=this.pending.body;
-    const indexes=this.selected.get(this.pending.article.articleId)?.chunkIndexes??[];
-    const expected=indexes.length?indexes:body.chunkHashes.map((_,i)=>i);
-    if(body.metadataOnly||expected.every(index=>body.chunks.some(chunk=>chunk.index===index))){
+    const request=this.selected.get(this.pending.article.articleId);
+    const indexes=request&&!replacesRequestedBody(request,body)?request.chunkIndexes:[];
+    const complete=indexes.length?indexes.every(index=>body.chunks.some(chunk=>chunk.index===index)):body.chunks.length===body.chunkHashes.length;
+    if(body.metadataOnly||complete){
      this.completed.add(this.pending.article.articleId);ready.push(this.pending);this.pending=null;
     }
    }
@@ -145,7 +154,12 @@ export class ArticleBatchReceiver {
    this.done=true;return {frameCount:this.frameIndex,receivedArticles:this.received,committedArticles:this.committed,bodyRequests:this.requests.slice()};
   }catch(error){this.abort(error instanceof Error?error.message:String(error));throw this.failure;}
  }
- private async commitOne(article:ReceivedArticle):Promise<void>{this.check();await this.commit(article);this.check();this.committed++;}
+ private async commitOne(article:ReceivedArticle):Promise<void>{
+  this.check();
+  const request=this.selected.get(article.article.articleId),body=article.body;
+  if(!this.options.ignoreIncoming&&request&&replacesRequestedBody(request,body)&&body.chunks.length!==body.chunkHashes.length)throw Error('incomplete replacement body');
+  await this.commit(article);this.check();this.committed++;
+ }
 }
 
 /** Shared JSONObject field semantics for manifest and article phases. */
