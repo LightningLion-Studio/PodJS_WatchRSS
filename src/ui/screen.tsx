@@ -1386,6 +1386,7 @@ export default function WatchRSS(props: {
     biliOriginal,
     setBiliOriginal,
     recoverDouyinVideo,
+    rejectDouyinAdjacent,
     douyinReady,
     douyinActions,
     douyinOriginal,
@@ -1661,6 +1662,7 @@ export default function WatchRSS(props: {
               popPage={popPage}
               setError={setError}
               recoverDouyinVideo={recoverDouyinVideo}
+              rejectDouyinAdjacent={rejectDouyinAdjacent}
               recoverRssDouyinVideo={recoverRssDouyinVideo}
               reloadVideo={reloadVideo}
               douyinReady={douyinReady}

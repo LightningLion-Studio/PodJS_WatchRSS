@@ -24,3 +24,15 @@ test('prefetch removal before the selected item fences an in-flight previous nav
  const previous=queue.previous();await Promise.resolve();expect(queue.quarantinePrefetch('a')).toBe(true);resolve({ok:true,data:item('b')});expect(await previous).toMatchObject({ok:false,code:'CANCELLED'});
  expect(queue.snapshot()).toMatchObject({index:1,item:{awemeId:'c'}});expect(queue.snapshot().playlist.map(item=>item.awemeId)).toEqual(['b','c']);
 });
+
+test('RVRESCAP4-04 resolves a size rejection to the exact registered mirror',()=>{
+ const results=new DouyinPrefetchResults(()=>1);
+ const binding={id:'clip',itemToken:'token',generation:1,uri:'podjs-media-cache://play/clip.mp4',
+  url:'https://review.invalid/primary',mirror:'https://review.invalid/mirror'};
+ results.bind(binding);
+ const event={itemToken:'token',generation:1,result:'failure' as const,httpStatus:0,
+  category:'resolution_limit' as const,mirrorIndex:1 as const};
+ expect(results.result(event,()=>false)).toMatchObject({action:'rejectSource',binding:{url:binding.mirror}});
+ expect(results.result({...event,mirrorIndex:0},()=>false)).toMatchObject({action:'rejectSource',binding:{url:binding.url}});
+ expect(results.result({...event,generation:2},()=>false)).toBeUndefined();
+});

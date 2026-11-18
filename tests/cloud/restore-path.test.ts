@@ -1,3 +1,4 @@
+import {cachedBackground} from '../helpers/immutable-cache';
 const journalTextReaders=new Map<string,{text:string;at:number}>();let journalTextReaderId=0;
 import {plainPart,openLocalPart} from './plain-parts-fixture';
 import {stateSqlFixture,cloudStateValues} from './state-sql-fixture';
@@ -29,7 +30,7 @@ for(const mode of ['entry-ref','pending'])test('RESTOREPATH production bundle '+
  const stateSql=stateSqlFixture();
  try{
  const entry=resolve(process.env.RESTOREPATH_APP_ROOT??resolve(import.meta.dir,'../..'),'tests/cloud/fixtures/restore-path-entry.ts');
- const artifact=(await buildBackground({path:entry},output)).path!;
+ const artifact=(await cachedBackground({path:entry},output,fw,buildBackground)).path!;
  const source=readFileSync(join(output,artifact.file),'utf8');
  const body=new Uint8Array(63*1024*1024).fill(37),noise=new Uint8Array(12*1024*1024);let seed=0x713ef12;
  for(let i=0;i<noise.length;i++){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;noise[i]=seed&255;}

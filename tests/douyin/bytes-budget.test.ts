@@ -4,10 +4,10 @@ import {douyinPrefetchBytes,douyinProxyWindow} from '../../src/douyin/proxy-poli
 import {stockPreviewBytes} from '../../src/douyin/stock.ts';
 import type {DouyinItem,DouyinVideoVariant} from '../../src/douyin/types.ts';
 const variant=(width:number,bitrate:number):DouyinVideoVariant=>({playUrl:`https://fixture/${width}/${bitrate}`,codec:'h264',width,height:width*16/9,bitrate});
-test('watch uses the least expensive rendition that covers 466 px',()=>{
+test('watch uses 480p and ranks bitrate within each resolution',()=>{
  const choices=[variant(540,1200000),variant(480,800000),variant(480,400000),variant(360,200000)];
  expect(selectPreferredDouyinVariant(choices)).toBe(choices[2]);
- expect(selectPreferredDouyinVariant([choices[0]!,{...variant(480,100),codec:'unknown'}])).toBe(choices[0]);
+ expect(selectPreferredDouyinVariant([choices[0]!,{...variant(480,100),codec:'unknown'}])?.playUrl).toBe(variant(480,100).playUrl);
  expect(selectPreferredDouyinVariant([choices[0]!,variant(540,600000)])?.bitrate).toBe(600000);
 });
 test('both directions and three ahead get complete equal-time prefix budgets',()=>{

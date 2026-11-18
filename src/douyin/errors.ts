@@ -4,7 +4,7 @@ export interface DouyinPlaybackFailure {code:DouyinErrorCode;retryAfterMs?:numbe
 /** Preserve closed recovery metadata across the playback promise boundary. */
 export function douyinPlaybackFailure(error:unknown):DouyinPlaybackFailure {
   const value=error as Partial<DouyinPlaybackFailure>|null;
-  const codes:DouyinErrorCode[]=['PLAYBACK_FAILED','NOT_LOGGED_IN','REQUEST_FAILED','PARSE_FAILED','UNSUPPORTED','CANCELLED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'];
+  const codes:DouyinErrorCode[]=['PLAYBACK_FAILED','NOT_LOGGED_IN','REQUEST_FAILED','PARSE_FAILED','UNSUPPORTED','resolution_limit','CANCELLED','RATE_LIMITED','TEMPORARILY_UNAVAILABLE'];
   const code=codes.includes(value?.code as DouyinErrorCode)?value!.code!:'PLAYBACK_FAILED';
   return {code,...(Number.isFinite(value?.retryAfterMs)&&value!.retryAfterMs!>0?{retryAfterMs:value!.retryAfterMs}:{})};
 }
@@ -16,6 +16,7 @@ export function formatDouyinError(code: DouyinErrorCode): string {
   switch (code) {
     case 'RATE_LIMITED':
     case 'TEMPORARILY_UNAVAILABLE': return '抖音暂时不可用，请稍后重试';
+    case 'resolution_limit': return '视频清晰度超过 720P';
     case 'NOT_LOGGED_IN': return '需要登录';
     case 'PARSE_FAILED': return '解析失败';
     case 'REQUEST_FAILED': return '网络请求失败';

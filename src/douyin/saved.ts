@@ -1,3 +1,5 @@
+import {admitDouyinItem} from "./playback-ingress.ts";
+import {applyPreferredDouyinPlayback} from "./playback-selector.ts";
 import {douyinExternalItem, type ExternalSavedStore} from "../core/external-saved.ts";
 import type { DouyinItem, DouyinSavedEntry, DouyinSavedKind, DouyinSavedState, DouyinSavedStorage } from "./types.ts";
 
@@ -23,7 +25,9 @@ export class DouyinSavedStore {
       if(entry?.platform!=="douyin"||(entry.kind!=="favorite"&&entry.kind!=="watchLater")||(typeof entry.item?.awemeId!=="string"||!entry.item.awemeId.trim())||!Number.isSafeInteger(Number(entry.savedAtMillis)))continue;
       const changedAt=Number(entry.changedAtMillis??entry.savedAtMillis);
       if(!Number.isSafeInteger(changedAt))continue;
-      await this.sql.sync(douyinExternalItem(entry.item),entry.kind,entry.saved!==false,{key:`${KEY}:${entry.item.awemeId.trim()}:${entry.kind}`,changedAt,createdAt:Number(entry.savedAtMillis)});
+      const item=admitDouyinItem(entry.item);
+      if(!item&&entry.saved!==false)continue;
+      await this.sql.sync(douyinExternalItem(item?applyPreferredDouyinPlayback(item):entry.item),entry.kind,entry.saved!==false,{key:`${KEY}:${entry.item.awemeId.trim()}:${entry.kind}`,changedAt,createdAt:Number(entry.savedAtMillis)});
     }
     await this.sql.markMigrated(KEY);
   }
@@ -46,7 +50,12 @@ export class DouyinSavedStore {
         typeof entry.item?.awemeId === "string" && entry.item.awemeId.trim() !== "" &&
         typeof entry.item?.playUrl === "string" && entry.item.playUrl.trim() !== "" &&
         typeof entry.shareUrl === "string" && Number.isFinite(Number(entry.savedAtMillis))
-      ).filter(entry => kind === undefined || entry.kind === kind);
+      ).filter(entry => kind === undefined || entry.kind === kind).flatMap(entry=>{
+        const item=admitDouyinItem(entry.item);
+        if(!item)return [];
+        const selected=applyPreferredDouyinPlayback(item);
+        return selected.playUrl?[{...entry,item:selected}]:[];
+      });
     } catch { return []; }
   }
 

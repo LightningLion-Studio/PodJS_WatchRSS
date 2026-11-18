@@ -65,6 +65,7 @@ interface MediaRoutesProps {
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
   reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean)=>Promise<void>;
+  rejectDouyinAdjacent:(entry:RouteEntry,id:string,uri?:string,remote?:string,mirrorIndex?:number)=>boolean;
   recoverDouyinVideo: (entry: RouteEntry, manual?: boolean, positionMs?:number, error?:unknown) => Promise<void>;
   recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean,positionMs?:number,error?:unknown) => Promise<void>;
   douyinReady: (entry: RouteEntry) => void;
@@ -209,6 +210,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
               ?.onCheckpoint(type, position, duration)
               .catch((error) => props.setError(String(error)));
           }}
+          onRejectAdjacent={(target,mirrorIndex)=>props.rejectDouyinAdjacent(props.entry,target.key,target.source.url,target.attemptedUrl,mirrorIndex)}
           onPlaybackFailure={
             props.entry.queue
               ? (position,error) => props.recoverDouyinVideo(props.entry,false,position,error)

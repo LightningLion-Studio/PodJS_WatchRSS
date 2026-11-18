@@ -1,38 +1,66 @@
 import type {DouyinItem,DouyinVideoVariant} from './types.ts';
 
 export const DOUYIN_TARGET_RESOLUTION=480;
+export const DOUYIN_MAX_SHORT_EDGE=720;
+export const DOUYIN_RESOLUTION_LIMIT='resolution_limit';
+
 export function douyinPlaybackAudio(item:Pick<DouyinItem,'playUrl'|'variants'>,url=item.playUrl):string|undefined {
   const variant=item.variants?.find(v=>v.playUrl===url||v.playUrls?.includes(url));
   return variant?.format==='dash'?variant.audioUrl:undefined;
 }
-/** Prefer a rendition covering the 466 px watch without paying for redundant pixels. */
-export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefined {
+export function labeledResolution(v:DouyinVideoVariant):number|undefined {
   const label=[v.definition,v.quality,v.gearName].filter(x=>x!=null).join(' ').toLowerCase();
-  const match=/(?<!\d)(2160|1440|1080|720|540|480)(?:p)?(?!\d)/.exec(label);
-  if(match)return Number(match[1]);
-  const sides=[v.width,v.height].filter(n=>n>0&&Number.isFinite(n));if(!sides.length)return;
-  const short=Math.min(...sides);
-  for(const base of [540,720,1080,1440,2160])if(short>=base&&short<=base*16/15)return base;
+  const matches=Array.from(label.matchAll(/(?<![a-z0-9])(\d{3,4})p(?!\d)|(?<!\d)(2160|1440|1080|720|540|480|360|240|144)(?!\d)/g),match=>Number(match[1]??match[2]));
+  if(matches.length)return Math.max(...matches);
+}
+
+function shortEdge(v:DouyinVideoVariant):number|undefined {
+  const sides=[v.width,v.height].filter(n=>n>0&&Number.isFinite(n));
+  if(sides.length)return Math.min(...sides);
+}
+
+export function normalizedDouyinResolution(v:DouyinVideoVariant):number|undefined {
+  const label=labeledResolution(v);
+  if(label!==undefined)return label;
+  const short=shortEdge(v);
+  if(short===undefined)return;
+  for(const base of [360,480,540,720,1080,1440,2160])if(short>=base&&short<=base*16/15)return base;
   return short;
 }
+
+function resolutionRank(v:DouyinVideoVariant):number {
+  const r=normalizedDouyinResolution(v);
+  if(r===undefined)return Infinity;
+  if(r===480)return 0;
+  if(r===360)return 1;
+  if(r===540)return 2;
+  if(r===720)return 3;
+  if(r<360)return 1000-r;
+  // Nonstandard in-cap dimensions follow the named renditions.
+  return 4+Math.abs(r-DOUYIN_TARGET_RESOLUTION)/DOUYIN_MAX_SHORT_EDGE;
+}
+
 export function selectPreferredDouyinVariant(variants:readonly DouyinVideoVariant[]):DouyinVideoVariant|undefined {
-  const playable=variants.filter(v=>v.playUrl.trim()&&(v.format!=='dash'||!!v.audioUrl)&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
-  const known=playable.filter(v=>v.codec!=='unknown'),pool=known.length?known:playable;
-  const distance=(v:DouyinVideoVariant)=>{const r=normalizedDouyinResolution(v);return r===undefined?536870911:r>=466?r-466:100000+466-r;};
-  return pool.reduce<DouyinVideoVariant|undefined>((best,v)=>{
+  const playable=variants.filter(v=>typeof v?.playUrl==='string'&&v.playUrl.trim()
+    &&(v.format!=='dash'||!!v.audioUrl)&&(v.codec!=='h265'||douyinCodecRuntimePolicy.canDecodeHevc(v)));
+  const bitrate=(v:DouyinVideoVariant)=>v.bitrate>0?v.bitrate:Infinity;
+  return playable.reduce<DouyinVideoVariant|undefined>((best,v)=>{
     if(!best)return v;
-    const compare=distance(v)-distance(best)||(v.bitrate>0?v.bitrate:Number.MAX_SAFE_INTEGER)-(best.bitrate>0?best.bitrate:Number.MAX_SAFE_INTEGER)||(v.codec==='h264'?0:1)-(best.codec==='h264'?0:1)||Math.max(best.width,best.height)-Math.max(v.width,v.height);
+    const compare=resolutionRank(v)-resolutionRank(best)||bitrate(v)-bitrate(best)
+      ||Number(best.codec==='h264')-Number(v.codec==='h264');
     return compare<0?v:best;
   },undefined);
 }
+
 export function selectPreferredDouyinUrl(variants:readonly DouyinVideoVariant[],fallback?:string|null):string|undefined {
-  const selected=selectPreferredDouyinVariant(variants);if(selected)return selected.playUrl;
-  const url=fallback?.trim();return url&&!variants.some(v=>v.playUrl.trim()===url&&(v.format==='dash'&&!v.audioUrl||v.codec==='h265'&&!douyinCodecRuntimePolicy.canDecodeHevc(v)))?url:undefined;
+  return selectPreferredDouyinVariant(variants)?.playUrl||(!variants.length?fallback?.trim()||undefined:undefined);
 }
+
 /** Also reapplied at persisted/history/saved and queue boundaries: old snapshots used play_addr. */
 export function applyPreferredDouyinPlayback<T extends DouyinItem>(item:T):T {
   if(!item||typeof item.playUrl!=='string')return item;
-  const url=selectPreferredDouyinUrl(Array.isArray(item.variants)?item.variants:[],item.playUrl)??'';
+  const variants=Array.isArray(item.variants)?item.variants:[];
+  const url=selectPreferredDouyinUrl(variants,item.playUrl)??'';
   return url===item.playUrl?item:{...item,playUrl:url};
 }
 /** Session-scoped sticky policy. HEVC requires explicit device size confirmation. */

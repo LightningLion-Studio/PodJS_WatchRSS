@@ -1,3 +1,5 @@
+import {douyinPlaybackMirrors} from '../../douyin/playback-mirrors.ts';
+import type {DouyinItem} from '../../douyin/types.ts';
 import {reloadDouyinPlayback} from '../../douyin/reload-playback.ts';
 import {freshVideoSource} from '../../media/reload-source.ts';
 import {DouyinVideoSessionPool} from '../douyin/video-sessions.ts';
@@ -14,7 +16,8 @@ import {DouyinPlaybackRecovery} from '../../douyin/playback-recovery.ts';
 import {videoOptEnabled,invalidateVideoNetwork,videoNetworkEpoch,VideoPlaybackTrace,registerVideoResolution} from '../../media/video-opt.ts';
 import {afterPaint} from '@podjs/framework/render';
 import {appLogger} from '../../logs/app-logger.ts';
-import {applyPreferredDouyinPlayback} from '../../douyin/playback-selector.ts';
+import {withoutDouyinSource} from '../../douyin/playback-ingress.ts';
+import {DOUYIN_MAX_SHORT_EDGE,DOUYIN_RESOLUTION_LIMIT,applyPreferredDouyinPlayback} from '../../douyin/playback-selector.ts';
 import {onFrame} from '@pocketjs/framework/lifecycle';
 import {lifecycle} from '@podjs/framework/watch';
 import {douyinDebug} from '../../debug/douyin-host.ts';
@@ -63,6 +66,21 @@ interface MediaControllerDependencies {
   setStack: Setter<RouteEntry[]>;
   setPage: SetPage;
   popPage: (skipInternal?: boolean) => boolean;
+}
+
+const DOUYIN_SNAPSHOT_WRITE_TIMEOUT_MS=2_000;
+
+async function waitForDouyinSnapshotWrite(write:Promise<void>,description:string):Promise<void>{
+  const deadline=hostServices.delay(DOUYIN_SNAPSHOT_WRITE_TIMEOUT_MS);
+  try{
+    // The transaction can still finish after the player stops waiting for it.
+    const timedOut=await Promise.race([write.then(()=>false),deadline.result.then(()=>true)]);
+    if(timedOut)appLogger.w('DouyinPlayer',`${description} timed out`);
+  }catch{
+    appLogger.w('DouyinPlayer',`${description} failed`);
+  }finally{
+    deadline.cancel();
+  }
 }
 
 export function createMediaRouteController(
@@ -147,7 +165,7 @@ export function createMediaRouteController(
         : { continuePlaybackInBackground: false };
       const resolved = resolveUrl(rawUrl, article.link) ?? rawUrl;
       const douyin =
-        douyinVideoTarget(article.link) ?? douyinVideoTarget(rawUrl);
+        douyinVideoTarget(article.link) ?? douyinVideoTarget(resolved);
       let url = resolved;
       let douyinItem:import("../../douyin/types.ts").DouyinItem|undefined;
       let headers: Record<string, string> | undefined;
@@ -156,7 +174,7 @@ export function createMediaRouteController(
         if (douyin.awemeId) {
           const result = await douyinClient.resolvePlayback(douyin.awemeId);
           if (result.ok) {url = result.data.playUrl;douyinItem=result.data;}
-          else if (douyinVideoTarget(resolved)) {
+          else if (result.code===DOUYIN_RESOLUTION_LIMIT||douyinVideoTarget(resolved)) {
             throw new Error(result.message);
           }
         }
@@ -165,6 +183,8 @@ export function createMediaRouteController(
       await openVideo(
         {
           url,
+          ...(douyin?{maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE,awemeId:douyin.awemeId}:{}),
+          ...(douyinItem?douyinDecoderProfile(douyinItem):{}),
           headers,
           webUrl: douyin?.webUrl ?? resolved,
           title: article.title,
@@ -330,6 +350,8 @@ export function createMediaRouteController(
   };
 
   const douyinPlaybackUrl=async(item:import('../../douyin/types.ts').DouyinItem,headers:Record<string,string>,forward=false)=>{
+    item=applyPreferredDouyinPlayback(item);
+    if(!item.playUrl)throw Object.assign(new Error('没有可用的视频播放流'),{code:DOUYIN_RESOLUTION_LIMIT});
     const override=douyinDebug.playbackUrl(item.awemeId,item.playUrl,forward);
     return override!==item.playUrl?override:douyinPreload.playback?douyinPreload.playback(item,headers):item.playUrl;
   };
@@ -417,8 +439,12 @@ export function createMediaRouteController(
       let opened=false;let stage:FailureStage='source',initialPool:DouyinVideoSessionPool|undefined;
       try {
         const deadline=request?.immersive?hostServices.delay(200):undefined;
-        let source:PlaybackSource|undefined;
-        try{source=await (deadline?Promise.race([pending,deadline.result.then(()=>undefined)]):pending);}finally{deadline?.cancel();}
+        let source:PlaybackSource|undefined,initialRejection:unknown;
+        try{source=await (deadline?Promise.race([pending,deadline.result.then(()=>undefined)]):pending);}
+        catch(error){
+          if(!request?.immersive||!queue||douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+          initialRejection=error;
+        }finally{deadline?.cancel();}
         if(!current())return;
         if(!source&&request){
           // Local queue metadata can enter even while cookie IO is blocked.
@@ -426,14 +452,22 @@ export function createMediaRouteController(
           stopDouyinEntry();
           const waiting:PlaybackSource={platform:'douyin',immersive:true,previewOnly:true,startupSeq:request.entrySeq,awemeId:request.item.awemeId,...douyinDetail(request.item),
             releaseStartupPreview:request.releaseStartupPreview,posterUrl:request.item.coverUrl,...playbackPreferences(),backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${request.item.awemeId}`};
-          void queue?.persist().catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
+          if(!initialRejection)void queue?.persist().catch(()=>appLogger.w('DouyinEntry','queue persistence failed'));
           stage='backdrop';await openVideo(waiting,{queue,memory,douyinEntrySeq:request.entrySeq,videoTarget:{kind:'douyin',awemeId:route.awemeId,immersive:true}},current);
           const entry=dependencies.current(),selected=()=>(request.isCurrent?.()??true)&&dependencies.current()===entry&&entry.playback===waiting&&entry.queue===queue;
           if(entry.playback===waiting){
             opened=true;
             request.onSourcePublished?.(waiting);
+            if(initialRejection){
+              await recoverDouyinVideo(entry,false,0,initialRejection,request.item.awemeId);
+              return;
+            }
             void pending.then(ready=>{if(!selected())return;benchmark.mark('startup_stage',request.entrySeq??0,{startup_stage:'source_ready'});entry.playback={...ready,previewOnly:false};dependencies.setPlayingSource(entry.playback);request.onSourcePublished?.(entry.playback);},error=>{
               if(!selected()||douyinPlaybackFailure(error).code==='CANCELLED')return;
+              if(douyinPlaybackFailure(error).code===DOUYIN_RESOLUTION_LIMIT){
+                void recoverDouyinVideo(entry,false,0,error,request.item.awemeId);
+                return;
+              }
               entry.playback={...waiting,preparationError:error};dependencies.setPlayingSource(entry.playback);
               request.onSourceFailure?.(douyinPlaybackFailure(error));
             });
@@ -494,21 +528,43 @@ export function createMediaRouteController(
     if (dependencies.current() !== origin) return false;
     const frame=await douyinPreload.restoreFrame?.(item,headers).catch(()=>({available:false as const}));
     if(dependencies.current()!==origin)return false;
+    let url=localUrl,initialRejection:unknown;
+    if(!frame?.available&&!url){
+      try{url=await douyinPlaybackUrl(item,headers);}
+      catch(error){
+        if(douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+        initialRejection=error;
+      }
+    }
+    if(dependencies.current()!==origin)return false;
     const source: PlaybackSource = {
       platform:"douyin",immersive,detailPlayback,awemeId:item.awemeId,
-      url:frame?.available?item.playUrl:localUrl??await douyinPlaybackUrl(item,headers),
-      previewOnly:frame?.available===true,previewFrame:frame?.available?{entryId:item.awemeId,frame}:undefined,
+      url:frame?.available?item.playUrl:url,
+      previewOnly:frame?.available===true||!!initialRejection,
+      previewFrame:frame?.available?{entryId:item.awemeId,frame}:undefined,
       posterUrl:item.coverUrl,...douyinDetail(item),...douyinDecoderProfile(item),...playbackPreferences(),headers,
       backgroundPlayback:douyinBackground(),webUrl:`https://www.douyin.com/video/${item.awemeId}`,
     };
-    if(dependencies.current()!==origin)return false;
     await openVideo(source, {queue, memory, videoTarget: {
       kind:'douyin',awemeId,immersive,...(detailPlayback ? {detailPlayback:true} : {}),
     }});
-    if(source.previewOnly){const entry=dependencies.current();
-      void douyinPlaybackUrl(item,headers).then(url=>{if(dependencies.current()!==entry||entry.queue!==queue||queue.snapshot().item?.awemeId!==item.awemeId||entry.playback!==source)return;
+    const entry=dependencies.current();
+    const selected=()=>dependencies.current()===entry&&entry.queue===queue
+      &&queue.snapshot().item?.awemeId===item.awemeId&&entry.playback===source;
+    if(initialRejection&&selected()){
+      await recoverDouyinVideo(entry,false,0,initialRejection,item.awemeId);
+      return true;
+    }
+    if(source.previewOnly&&selected()){
+      void douyinPlaybackUrl(item,headers).then(url=>{
+        if(!selected())return;
         entry.playback={...source,url,previewOnly:false};dependencies.setPlayingSource(entry.playback);
-      }).catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
+      }).catch(error=>{
+        if(!selected())return;
+        if(douyinPlaybackFailure(error).code===DOUYIN_RESOLUTION_LIMIT){
+          void recoverDouyinVideo(entry,false,0,error,item.awemeId);
+        }else dependencies.setError(String(error));
+      });
     }
     return dependencies.current().queue === queue;
   };
@@ -603,7 +659,7 @@ export function createMediaRouteController(
     if(!stillAdjacent())return;
     const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next');
     if(!stillAdjacent())return;
-    return {key:result.data.item.awemeId,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
+    return {key:result.data.item.awemeId,attemptedUrl:localUrl?.startsWith('file:')?localUrl:douyinPreload.sourceFor?.(url)?.playUrl??result.data.item.playUrl,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
       url,previewOnly:false,previewFrame:undefined,resumePositionMs:0,...douyinDetail(result.data.item),headers,
       ...douyinDecoderProfile(result.data.item),
@@ -640,7 +696,7 @@ export function createMediaRouteController(
     void (async()=>{
       const headers=await adjacentHeaders(entry);if(!current())return;
       const local=await douyinPreload.lookup(item.awemeId);if(!current())return;
-      void (local?video.restoreFrame(`douyin:${item.awemeId}`,{url:local}):douyinPreload.restoreFrame?.(item,headers))?.then(frame=>{
+      void (local?video.restoreFrame(`douyin:${item.awemeId}`,{url:local,maxVideoShortEdge:DOUYIN_MAX_SHORT_EDGE}):douyinPreload.restoreFrame?.(item,headers))?.then(frame=>{
         if(!current()||!frame?.available)return;
         selected={...selected,previewFrame:{entryId:item.awemeId,frame}};entry.playback=selected;dependencies.setPlayingSource(selected);
       }).catch(()=>{});
@@ -649,6 +705,7 @@ export function createMediaRouteController(
       void queue.persist().catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
     })().catch(error=>{
       if(!current())return;
+      if(douyinPlaybackFailure(error).code===DOUYIN_RESOLUTION_LIMIT){void recoverDouyinVideo(entry,false,0,error);return;}
       // The selected source object is this intent's generation token. Keep
       // that target visible with its own retry state; old failures cannot
       // replace a newer selection, a replaced queue, or another route.
@@ -702,21 +759,68 @@ export function createMediaRouteController(
     }
   };
 
-  const recoverDouyinVideo = async (entry: RouteEntry, manual = false, positionMs = 0, error?:unknown) => {
-    if (
-      !entry.queue ||
-      dependencies.current() !== entry ||
-      entry.douyinRecovering
-    ) {
-      return;
+  const rejectedAddress=(registered?:DouyinItem,remote?:string,mirrorIndex?:number)=>
+    mirrorIndex===1?(registered&&douyinPlaybackMirrors(registered)[0]):remote??registered?.playUrl;
+  const dropAttempt=(queue:DouyinPlaybackQueue,item:DouyinItem,uri?:string,url?:string)=>{
+    if(uri)douyinPreload.forgetSource?.(item.awemeId,uri);
+    return url?{item:withoutDouyinSource(item,url),stored:queue.persistSourceRemoval(item.awemeId,url)}
+      :{item,stored:Promise.resolve()};
+  };
+  const rejectDouyinAdjacent=(entry:RouteEntry,id:string,uri?:string,remote?:string,mirrorIndex?:number)=>{
+    if(dependencies.current()!==entry||!entry.queue)return false;
+    const state=entry.queue.snapshot(),item=state.playlist.find(value=>value.awemeId===id);
+    if(!item||state.item?.awemeId===id)return false;
+    const address=rejectedAddress(uri?douyinPreload.sourceFor?.(uri):undefined,remote,mirrorIndex);
+    const {item:replacement,stored}=dropAttempt(entry.queue,item,uri,address??(mirrorIndex===1?undefined:uri??item.playUrl));
+    void stored.catch(error=>{if(dependencies.current()===entry)dependencies.setError(String(error));});
+    if(replacement===item)return false;
+    if(replacement?.playUrl)entry.queue.refreshPrefetchItem(id,replacement);
+    else if(!entry.queue.quarantinePrefetch(id))return false;
+    entry.player?.invalidatePrefetch?.(id);
+    void entry.queue.persist().catch(error=>dependencies.setError(String(error)));
+    startDouyinWindow(entry);
+    return true;
+  };
+
+  type RejectedAttempt={playback?:PlaybackSource;uri?:string;url?:string;registered?:DouyinItem};
+  const recoveryRuns=new WeakMap<RouteEntry,{id:string;rejected?:RejectedAttempt}>();
+  const recoverDouyinVideo = async (entry: RouteEntry, manual = false, positionMs = 0, error?:unknown,expectedId?:string,attempt?:{uri:string;url:string}) => {
+    if(!entry.queue||dependencies.current()!==entry)return;
+    const queue=entry.queue,item=queue.snapshot().item,id=item?.awemeId;
+    if(!item||!id)return;
+    const resolutionRejected=douyinPlaybackFailure(error).code===DOUYIN_RESOLUTION_LIMIT;
+    if(resolutionRejected&&((expectedId??entry.playback?.awemeId??id)!==id||
+      attempt&&entry.playback?.url&&entry.playback.url!==attempt.uri))return;
+    const previous=recoveryRuns.get(entry);
+    if(previous&&!resolutionRejected)return;
+    let rejected:RejectedAttempt|undefined;
+    if(resolutionRejected){
+      const playback=entry.playback,uri=attempt?.uri??playback?.url;
+      const last=previous?.id===id?previous.rejected:undefined;
+      // Forgetting a registration must not change the identity of its in-flight rejection.
+      const samePlayback=last?.playback===playback&&last?.uri===uri?last:undefined;
+      const registered=uri?(samePlayback?.registered??douyinPreload.sourceFor?.(uri)):undefined;
+      const mirrorIndex=attempt?undefined:(error as {mirrorIndex?:number}|undefined)?.mirrorIndex;
+      const url=rejectedAddress(registered,attempt?.url,mirrorIndex)??
+        (!registered?samePlayback?.url:undefined)??(mirrorIndex===1?undefined:uri??item.playUrl);
+      if(last&&last.url===url)return;
+      rejected={playback,uri,url,registered};
     }
-    entry.douyinRecovering = true;
+    // A new source can fail while the previous replacement snapshot is being saved.
+    // The queue orders its deletion after that write, even though recovery starts now.
+    const run={id,rejected};
+    recoveryRuns.set(entry,run);
+    const currentRun=()=>dependencies.current()===entry&&entry.queue===queue&&recoveryRuns.get(entry)===run;
+    const persistReplacement=()=>waitForDouyinSnapshotWrite(queue.persist(),'Replacement queue snapshot save');
+    let resolvingId=id;
     try {
-      const id = entry.queue.snapshot().item?.awemeId;
-      if (!id) return;
-      const category=playbackFailure(error);
+      const category=resolutionRejected?'decode':playbackFailure(error);
+      const dropped=rejected?dropAttempt(queue,item,rejected.uri,rejected.url):undefined;
+      const snapshotCleanup=dropped&&waitForDouyinSnapshotWrite(dropped.stored,'Rejected source snapshot cleanup');
+      const replacement=dropped?.item;
+      if(replacement?.playUrl)entry.queue.refreshPrefetchItem(id,replacement);
       if(manual){entry.queue.resetAutomaticFailures();entry.douyinFailures?.delete(id);}
-      if(!manual&&entry.playback?.immersive){
+      if(!manual&&!resolutionRejected&&entry.playback?.immersive){
         const code=String((error as {code?:unknown}|undefined)?.code??'');
         if(code==='CANCELLED'||/cancel|abort/i.test(code))return;
 
@@ -731,7 +835,7 @@ export function createMediaRouteController(
         })};
         if(entry.playback?.url?.startsWith('podjs-media-cache:')||entry.playback?.url?.startsWith('managed-cache/'))await douyinPreload.invalidate(id);
         const queueGeneration=entry.queue.diagnostics().generation;
-        const current=()=>dependencies.current()===entry&&entry.queue?.snapshot().item?.awemeId===id&&entry.queue.diagnostics().generation===queueGeneration;
+        const current=()=>currentRun()&&entry.queue?.snapshot().item?.awemeId===id&&entry.queue.diagnostics().generation===queueGeneration;
         const source=await entry.douyinRecovery.policy.recover({...entry.playback!,resumePositionMs:positionMs},current,manual,error);
         if(!source||!current())return;
         entry.queue.updateCurrentUrl(source.url!);await entry.queue.persist();
@@ -742,32 +846,32 @@ export function createMediaRouteController(
       if (category!=='restricted'&&category!=='decode'&&entry.playback?.url?.startsWith('managed-cache/douyin-preload/')) {
         await douyinPreload.invalidate(id);
         const remote=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});
-        if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
-        if(!remote.ok){dependencies.setError(remote.message);return;}
+        if(!currentRun()||entry.queue.snapshot().item?.awemeId!==id)return;
+        if(!remote.ok){if(remote.code===DOUYIN_RESOLUTION_LIMIT)throw Object.assign(new Error(remote.message),{code:remote.code});dependencies.setError(remote.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders();
-        if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
+        if(!currentRun()||entry.queue.snapshot().item?.awemeId!==id)return;
         const source={...entry.playback,url:remote.data.playUrl,...douyinDecoderProfile(remote.data),headers};
         entry.queue.updateCurrentUrl(remote.data.playUrl);await entry.queue.persist();
-        if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
+        if(!currentRun()||entry.queue.snapshot().item?.awemeId!==id)return;
         entry.playback=source;dependencies.setPlayingSource(source);dependencies.setError('');
         dependencies.onActivityStateChange?.();return;
       }
       if(category!=='restricted'&&category!=='decode'&&entry.playback?.previewOnly){
-        const fresh=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});if(!fresh.ok){dependencies.setError(fresh.message);return;}
+        const fresh=await douyinClient.resolvePlayback(id,{forceRefresh:true,feedItem:entry.queue!.snapshot().item??undefined,allowDetail:false});if(!fresh.ok){if(fresh.code===DOUYIN_RESOLUTION_LIMIT)throw Object.assign(new Error(fresh.message),{code:fresh.code});dependencies.setError(fresh.message);return;}
         const headers=await douyinClient.buildPlaybackHeaders(),url=await douyinPlaybackUrl(fresh.data,headers);
-        if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==id)return;
+        if(!currentRun()||entry.queue.snapshot().item?.awemeId!==id)return;
         entry.queue.refreshPrefetchItem(id,fresh.data);entry.playback={...entry.playback,url,...douyinDecoderProfile(fresh.data),headers,previewOnly:false};await entry.queue.persist();
-        if(dependencies.current()===entry){dependencies.setPlayingSource(entry.playback);dependencies.setError('');}return;
+        if(currentRun()){dependencies.setPlayingSource(entry.playback);dependencies.setError('');}return;
       }
-      if(entry.playback?.url?.startsWith('podjs-media-cache:'))await douyinPreload.invalidate(id);
-      if (dependencies.current() !== entry) return;
-      if (entry.playback?.detailPlayback&&!(entry.playback.immersive&&(category==='restricted'||category==='decode'))) {
+      if(!resolutionRejected&&entry.playback?.url?.startsWith('podjs-media-cache:'))await douyinPreload.invalidate(id);
+      if (!currentRun()) return;
+      if (!resolutionRejected&&entry.playback?.detailPlayback&&!(entry.playback.immersive&&(category==='restricted'||category==='decode'))) {
         entry.rssDouyinRecovery ??= new DouyinRssRecovery(douyinClient, id);
-        const source = await entry.rssDouyinRecovery.recover(entry.playback, () => dependencies.current() === entry, manual);
-        if (!source || dependencies.current() !== entry) return;
+        const source = await entry.rssDouyinRecovery.recover(entry.playback, currentRun, manual);
+        if (!source || !currentRun()) return;
         entry.queue.updateCurrentUrl(source.url ?? "");
         await entry.queue.persist();
-        if (dependencies.current() !== entry) return;
+        if (!currentRun()) return;
         entry.playback = source;
         dependencies.setError(""); dependencies.setPlayingSource(source);
         dependencies.onActivityStateChange?.();
@@ -776,33 +880,47 @@ export function createMediaRouteController(
       const failures = (entry.douyinFailures ??= new Set<string>());
       const skip = !manual&&(category==='decode'||failures.has(id));
       failures.add(id);
-      const result = await (skip
-        ? entry.queue.discard()
-        : entry.queue.recover());
-      if (dependencies.current() !== entry) return;
+      const next=resolutionRejected?(replacement?.playUrl?entry.queue.current():entry.queue.discardResolution())
+        :skip?entry.queue.discard():entry.queue.recover();
+      // Commit the deletion before preparing a new source so restart cannot
+      // restore the rejected URL when cleanup succeeded.
+      const [result]=await Promise.all([next,snapshotCleanup]);
+      if (!currentRun()) return;
       if (!result.ok) {
+        if(resolutionRejected){
+          const source=entry.playback;
+          if(source){
+            entry.playback={...source,url:undefined,previewFrame:undefined,previewOnly:true,preparationError:error};
+            dependencies.setPlayingSource(entry.playback);
+          }
+          if(!currentRun())return;
+          await persistReplacement();
+          if(!currentRun())return;
+        }
         if(isDouyinTemporaryFailure(result.code)||result.code==='REQUEST_FAILED'||result.code==='CANCELLED')failures.delete(id);
         if (result.code === "CANCELLED") return;
         if (
           !entry.queue.snapshot().playlist.length &&
           entry.playback?.immersive
         ) {
-          await douyinClient.clearPlaybackWindow();
-          if (dependencies.current() !== entry) return;
+          if(!resolutionRejected)await douyinClient.clearPlaybackWindow();
+          if (!currentRun()) return;
           dependencies.popPage();
         }
         dependencies.setError(result.message);
         return;
       }
+      resolvingId=result.data.item.awemeId;
       const headers = await douyinClient.buildPlaybackHeaders();
       if (
-        dependencies.current() !== entry ||
+        !currentRun() ||
         entry.queue.snapshot().item?.awemeId !== result.data.item.awemeId
       ) {
         return;
       }
       const recoveredSource = {
-        ...entry.playback!,previewOnly:false,
+        ...entry.playback!,previewOnly:false,preparationError:undefined,previewFrame:undefined,
+        videoWidth:undefined,videoHeight:undefined,videoMime:undefined,videoUrl:undefined,resumePositionMs:undefined,
         awemeId: result.data.item.awemeId,
         posterUrl: result.data.item.coverUrl,
         url: await douyinPlaybackUrl(result.data.item,headers),
@@ -811,15 +929,23 @@ export function createMediaRouteController(
         headers,
         webUrl: `https://www.douyin.com/video/${result.data.item.awemeId}`,
       };
-      if(dependencies.current()!==entry||entry.queue.snapshot().item?.awemeId!==result.data.item.awemeId)return;
+      if(!currentRun()||entry.queue.snapshot().item?.awemeId!==result.data.item.awemeId)return;
       entry.playback=recoveredSource;dependencies.setError("");
       dependencies.setPlayingSource(entry.playback);
-      await entry.queue.persist();
-      if (dependencies.current() === entry) dependencies.onActivityStateChange?.();
+      if(!currentRun())return;
+      if(resolutionRejected)await persistReplacement();
+      else await entry.queue.persist();
+      if (currentRun()){startDouyinWindow(entry);dependencies.onActivityStateChange?.();}
     } catch (error) {
+      if(!currentRun()||entry.queue.snapshot().item?.awemeId!==resolvingId)return;
+      if(douyinPlaybackFailure(error).code===DOUYIN_RESOLUTION_LIMIT){
+        recoveryRuns.delete(entry);
+        await recoverDouyinVideo(entry,false,0,error,resolvingId);
+        return;
+      }
       dependencies.setError(error instanceof Error?error.message:String(error));
     } finally {
-      entry.douyinRecovering = false;
+      if(recoveryRuns.get(entry)===run)recoveryRuns.delete(entry);
     }
   };
 
@@ -873,7 +999,16 @@ export function createMediaRouteController(
         if(entry.queue.snapshot().item?.awemeId===id&&entry.playback?.url===previousUri){entry.playback={...entry.playback,url:uri,...douyinDecoderProfile(item),headers,previewOnly:false};dependencies.setPlayingSource(entry.playback);}
         await entry.queue.persist();
       },
-      async quarantine(id){if(dependencies.current()!==entry||!entry.queue?.quarantinePrefetch(id))return false;entry.player?.invalidatePrefetch?.(id);await entry.queue.persist();return true;},
+      async rejectSource(binding){
+        if(dependencies.current()!==entry)return false;
+        if(entry.queue?.snapshot().item?.awemeId===binding.id){
+          await recoverDouyinVideo(entry,false,0,{code:DOUYIN_RESOLUTION_LIMIT},binding.id,binding);
+          return true;
+        }
+        return rejectDouyinAdjacent(entry,binding.id,binding.uri,binding.url);
+      },
+      async quarantine(id){
+        if(dependencies.current()!==entry||!entry.queue?.quarantinePrefetch(id))return false;entry.player?.invalidatePrefetch?.(id);await entry.queue.persist();return true;},
     });
   };
 
@@ -926,13 +1061,17 @@ export function createMediaRouteController(
       const selected=()=>current()&&entry.queue?.snapshot().item?.awemeId===item.awemeId&&entry.queue.diagnostics().generation===queueGeneration;
       await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await reloadDouyinPlayback(douyinClient,item.awemeId,selected);
+      const resolved=await reloadDouyinPlayback(douyinClient,item.awemeId,selected).catch(async error=>{
+        if(douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
+        if(selected())await recoverDouyinVideo(entry,false,0,error);
+        return undefined;
+      });
       if(!resolved)return;
       next=freshVideoSource(previous,{url:resolved.item.playUrl,...douyinDecoderProfile(resolved.item),headers:resolved.headers},positionMs);
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
       entry.queue.updateCurrentUrl(resolved.item.playUrl);
       await entry.queue.persist();
-      if(!selected())return;
+      if(!current()||entry.queue.snapshot().item?.awemeId!==item.awemeId)return;
     }else if(entry.rssDouyinRecovery){
       const resolved=await entry.rssDouyinRecovery.reload(previous,current);
       if(!resolved||!current())return;
@@ -944,6 +1083,7 @@ export function createMediaRouteController(
   };
 
   const recoverRssDouyinVideo = async (entry: RouteEntry, manual = false,positionMs?:number,error?:unknown) => {
+    if((error as {code?:string}|undefined)?.code===DOUYIN_RESOLUTION_LIMIT)return;
     if (!entry.rssDouyinRecovery || !entry.playback) return;
     try {
       const source = await entry.rssDouyinRecovery.recover(
@@ -1014,6 +1154,7 @@ export function createMediaRouteController(
     biliOriginal,
     setBiliOriginal,
     recoverDouyinVideo,
+    rejectDouyinAdjacent,
     douyinReady,
     douyinActions,
     douyinOriginal,

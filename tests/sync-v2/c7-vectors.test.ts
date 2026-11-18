@@ -1,3 +1,4 @@
+import {immutableText,fixtureInputs} from '../helpers/immutable-cache';
 /** Fixed rc7 vectors through the product codec, closure reader and sealer.
  * Fixture keys/nonces are public test data and never product inputs. */
 import {test,expect} from 'bun:test';
@@ -33,8 +34,9 @@ function sealSync(plain:Uint8Array,tag:string){
  const aad=jsonBytes(header),key=Buffer.from(hkdfSync('sha256',KEY,salt,lp([bytes('wrss.sync.v2/aead'),createHash('sha256').update(aad).digest()]),32)),c=createCipheriv('aes-256-gcm',key,nonce);c.setAAD(aad);
  const size=Buffer.alloc(4);size.writeUInt32BE(aad.length);const wire=Buffer.concat([bytes('WRS2'),size,aad,c.update(plain),c.final(),c.getAuthTag()]);return {oid:'state:sha256:'+sha(wire),bytes:wire,opaque};
 }
-function* blocks(desc:any):Iterable<string>{if(typeof desc==='string'){yield desc;return;}for(const p of desc.parts){const stride=Math.max(1,Math.floor(8192/p.repeat.length));for(let left=p.count;left>0;){const n=Math.min(stride,left);yield p.repeat.repeat(n);left-=n;}}}
-const materialize=(desc:any)=>[...blocks(desc)].join('');
+function* blocks(desc:any):Iterable<string>{if(typeof desc==='string'){yield desc;return;}for(const p of desc.parts){const stride=Math.max(1,Math.floor(8192/p.repeat.length)),wholeCount=Math.min(stride,p.count),whole=immutableText({kind:'c7-raw-block-v1',inputVersion,repeat:p.repeat,count:wholeCount},()=>p.repeat.repeat(wholeCount));for(let left=p.count;left>0;){const n=Math.min(stride,left);yield n===wholeCount?whole:p.repeat.repeat(n);left-=n;}}}
+const inputVersion=fixtureInputs();
+const materialize=(desc:any)=>typeof desc==='string'?desc:immutableText({kind:'c7-vector-text-v1',inputVersion,desc},()=>[...blocks(desc)].join(''));
 function fieldSummary(fields:Record<string,TextSource>){const out:any={};for(const k of Object.keys(fields).sort()){const h=createHash('sha256');let n=0;for(const b of typeof fields[k]==='string'?[fields[k] as string]:(fields[k] as ()=>Iterable<string>)()){const x=bytes(b);h.update(x);n+=x.length;}out[k]={bytes:n,sha256:h.digest('hex')};}return out;}
 function noteInput(input:any,stream:boolean):NoteInput{
  const fields:Record<string,TextSource>={};for(const [k,d]of Object.entries<any>(input.fields))fields[k]=stream?()=>blocks(d):materialize(d);

@@ -23,6 +23,7 @@ export class DouyinPlaybackQueue {
   private pendingWrites=0;
   private snapshotWrites=new Map<'queue'|'recent',SnapshotWrite>();
   private savingSnapshot=false;
+  private activeSnapshot?:SnapshotWrite;
   private readonly localPlayback?:DouyinPlaybackQueueOptions['localPlayback'];
   memoryStats(){return {pendingHistoryWrites:this.pendingWrites,pendingSnapshots:this.snapshotWrites.size,activeSnapshots:Number(this.savingSnapshot),queueItems:this.items.length,aheadItems:this.ahead.length};}
   /** One active write and at most one pending snapshot per durable view.
@@ -40,12 +41,14 @@ export class DouyinPlaybackQueue {
     if(this.savingSnapshot)return;this.savingSnapshot=true;
     try{while(this.snapshotWrites.size){
       const [kind,write]=this.snapshotWrites.entries().next().value!;this.snapshotWrites.delete(kind);
+      this.activeSnapshot=write;
       const {playlist,item,cursor,hasMore}=write.state;
       try{
         if(kind==='recent')await this.client.saveRecentWindow(playlist,item.awemeId,cursor,hasMore);
         else await this.client.savePlaybackQueue(playlist,item.awemeId,cursor,hasMore);
         write.resolve();
       }catch(error){write.reject(error);}
+      finally{this.activeSnapshot=undefined;}
     }}finally{this.savingSnapshot=false;}
   }
   private write(work:()=>Promise<void>):Promise<void>{
@@ -99,6 +102,12 @@ export class DouyinPlaybackQueue {
   persist():Promise<void>{
     const state=this.snapshot();if(!state.item)return Promise.resolve();
     return this.saveSnapshot('queue',state as QueueSnapshot);
+  }
+  persistSourceRemoval(id:string,url:string):Promise<void>{
+    // Earlier recent-window writes can yield before they reach the store.
+    // Order the targeted rewrite after those snapshots, even for an empty pager.
+    const earlier=[...this.snapshotWrites.values(),this.activeSnapshot].flatMap(write=>write?[write.result]:[]);
+    return this.client.removePlaybackSource(id,url,Promise.allSettled(earlier));
   }
   resetAutomaticFailures(){this.autoFailures=0;}
   claimAutomaticFailure(){return ++this.autoFailures<3;}
@@ -224,6 +233,17 @@ export class DouyinPlaybackQueue {
       if(removed>=0){this.items.splice(removed,1);if(removed<this.index)this.index--;}
     }
     return {...result,data:{...result.data,playlist:[...this.items],index:this.index}};
+  }
+  async discardResolution():Promise<DouyinResult<DouyinPlaybackQueueState>>{
+    const rejected=this.items[this.index];
+    if(rejected){
+      this.quarantined.add(rejected.awemeId);
+      this.removeQueued(this.index);
+      this.index--;
+    }
+    const op=this.generation+1,result=await this.next();
+    if(!result.ok&&op===this.generation&&this.index<0)this.index=0;
+    return result;
   }
   async current():Promise<DouyinResult<DouyinPlaybackQueueState>>{this.previewGeneration++;return this.resolveAt(this.index,++this.generation);}
   async previous():Promise<DouyinResult<DouyinPlaybackQueueState>>{this.previewGeneration++;const op=++this.generation;if(this.index<=0)return {ok:false,code:"UNSUPPORTED",message:"已经是第一个视频"};return this.resolveAt(this.index-1,op);}

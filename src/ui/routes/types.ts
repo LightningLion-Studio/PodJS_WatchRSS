@@ -85,7 +85,6 @@ export type RouteEntry = {
   queue?: DouyinPlaybackQueue;
   rssDouyinRecovery?: DouyinRssRecovery;
   douyinRecovery?: {id:string; policy:import("../../douyin/playback-recovery.ts").DouyinPlaybackRecovery};
-  douyinRecovering?: boolean;
   douyinFailures?: Set<string>;
   noteId?: string;
   informationPage?: InformationPage;

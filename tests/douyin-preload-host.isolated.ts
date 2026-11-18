@@ -1,8 +1,8 @@
 import {test,expect,mock} from 'bun:test';
-let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],oldStatsFails=false,legacyBytes=484675145;
+let resultListener:any;let producer:any,change:()=>void,windows:any[]=[],clears=0,oldClears=0,registrations:any[]=[],removed:string[]=[],oldStatsFails=false,legacyBytes=484675145;
 const realServices=await import('@podjs/framework/services');
 const result=(value:any)=>({result:Promise.resolve(value),cancel(){}});
-mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string)=>{registrations.push({key,url,headers,persistent,alternates,...(audioUrl?{audioUrl}: {})});return result({uri:'podjs-media-cache://play/'+key+'.mp4'});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
+mock.module('@podjs/framework/media-prefix-cache',()=>({localMediaStore:{stopTraffic:()=>result({})},mediaPrefixCache:{remove:(uri:string)=>{removed.push(uri);return result({});},onResult:(fn:any)=>{resultListener=fn;return()=>{resultListener=undefined;};},register:(key:string,url:string,headers:any,persistent=false,alternates:string[]=[],expiresAt?:number,audioUrl?:string,_maxVideoShortEdge?:number,replacesUri?:string)=>{registrations.push({key,url,headers,persistent,alternates,...(audioUrl?{audioUrl}: {})});const uri='podjs-media-cache://play/'+(key==='review'?key+'-'+new URL(url).pathname.split('/').at(-1):key)+'.mp4';if(replacesUri&&replacesUri!==uri)removed.push(replacesUri);return result({uri});},window:(items:any,foregroundBitrate:number)=>{windows.push({items:[...items],foregroundBitrate});return result({});},stats:()=>result({files:2,bytes:2*1024*1024,maxBytes:16*1024*1024}),clear:()=>{clears++;return result({removedBytes:0});}}}));
 mock.module('@podjs/framework/services',()=>({...realServices,video:{restoreFrame:async()=>null},discovery:{networkSnapshot:async()=>({active:true,internet:true,validated:true,wifi:false,cellular:false,bluetooth:true})},onNetworkChange:(fn:()=>void)=>{change=fn;return ()=>{};}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{stats:async()=>{if(oldStatsFails)throw Error('fixture old-cache access');return {bucketBytes:{'douyin-preload':legacyBytes}};},clearBucket:async()=>{oldClears++;await producer.clear();},registerProducer:(_name:string,p:any)=>{producer=p;}}}));
 const {createHostDouyinPreload}=await import('../src/douyin/preload-host.ts');
@@ -196,4 +196,77 @@ test('DASH registration carries its companion into the native pixel identity',as
  const client={resolvePlayback:async()=>({ok:true,data:item}),playbackAuthorizationVersion:()=>0} as any;
  const host=createHostDouyinPreload(client);await host.playback(item,{});expect(registrations[before]?.audioUrl).toBe('https://fixture.invalid/audio');
  item.variants[0].audioUrl='https://fixture.invalid/changed-audio';await host.playback(item,{});expect(registrations).toHaveLength(before+2);expect(registrations[before+1].audioUrl).toBe('https://fixture.invalid/changed-audio');
+});
+
+test('native resolution rejection immediately quarantines the exact unknown prefetch',async()=>{
+ windows=[];registrations=[];const quarantined:string[]=[];
+ const mockClient={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>({ok:true,data:items.find(item=>item.awemeId===id)})};
+ const host=createHostDouyinPreload(mockClient as any),owner={};host.allowBluetooth(true,owner);
+ host.start(owner,items as any,'a','active',{isForeground:id=>id==='a',sourceRefreshed(){},rejectSource(binding){quarantined.push(binding.id);return false;},quarantine(){return false;}});
+ await flush();const rejected=windows.at(-1).items.find((x:any)=>x.uri.endsWith('/b.mp4'));
+ resultListener({...rejected,result:'failure',httpStatus:0,category:'resolution_limit'});
+ await flush();
+ expect(quarantined).toEqual(['b']);
+ expect(windows.at(-1).items.some((x:any)=>x.uri===rejected.uri)).toBe(false);
+ expect(host.sourceFor(rejected.uri)).toBeUndefined();
+ host.stop(owner);
+});
+
+test('RVRESCAP2-04 replacing an unknown source revokes its bytes before metadata arrives',async()=>{
+  windows=[];registrations=[];removed=[];
+  const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,options:any)=>({ok:true,data:options.feedItem})};
+  const host=createHostDouyinPreload(client as any),owner={};
+  const old={awemeId:'review',playUrl:'https://review.invalid/1080',durationMs:1000,variants:[]};
+  const high={playUrl:old.playUrl,width:1080,height:1920,bitrate:100,codec:'h264'};
+  const safe={playUrl:'https://review.invalid/480',width:480,height:854,bitrate:100,codec:'h264'};
+  host.allowBluetooth(true,owner);
+  host.start(owner,[items[0],old] as any,'a','active');
+  await flush();
+  const previous=windows.at(-1).items.find((v:any)=>v.uri.endsWith('/review-1080.mp4')).uri;
+  host.start(owner,[items[0],{...old,playUrl:safe.playUrl,variants:[safe]}] as any,'a','active');
+  await flush();
+  expect(windows.at(-1).items.some((v:any)=>v.uri.endsWith('/review-480.mp4'))).toBe(true);
+  expect(removed).toContain(previous);
+  host.start(owner,[items[0],{...old,playUrl:safe.playUrl,variants:[high,safe]}] as any,'a','active');
+  await flush();
+  expect(host.sourceFor(previous)).toBeUndefined();
+  expect(removed).toContain(previous);
+  host.stop(owner);
+});
+
+test('generated late completions cannot register a superseded source',async()=>{
+ let seed=0x04f9a11;
+ const random=(max:number)=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return (seed>>>8)%max;};
+ for(let n=0;n<18;n++){
+  windows=[];removed=[];registrations=[];
+  const oldUrl='https://review.invalid/old-'+n,safeUrl='https://review.invalid/safe-'+n;
+  const old={...items[1],awemeId:'review',playUrl:oldUrl,variants:[]};
+  const edge=[360,480,540,720][random(4)]!;
+  const safe={playUrl:safeUrl,codec:'h264',width:edge,height:edge*2,bitrate:100};
+  const high={playUrl:oldUrl.replace('review.invalid','REVIEW.invalid:443'),codec:'h264',width:1080,height:1920,bitrate:100};
+  const updated={...old,playUrl:safeUrl,variants:random(2)?[safe]:[safe,high]};
+  let release:(()=>void)|undefined;
+  const fixture={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,{feedItem,prefetch}:any)=>{
+    if(!prefetch)await new Promise<void>(resolve=>{release=resolve;});
+    return {ok:true,data:feedItem};
+  }};
+  const host=createHostDouyinPreload(fixture as any),owner={};
+  host.allowBluetooth(true,owner);host.start(owner,[items[0],old] as any,'a','active');await flush();
+  const prior=windows.at(-1).items.find((v:any)=>v.uri.endsWith('/review-old-'+n+'.mp4')).uri;
+  const pending=host.playback(old as any,{}).then(()=>'ok',error=>error.code);
+  await flush();expect(release).toBeDefined();
+  const before=random(2)===0;
+  if(before)release!();
+  host.start(owner,[items[0],updated] as any,'a','active');
+  await flush();
+  if(!before)release!();
+  expect(await pending).toBe('CANCELLED');
+  if(updated.variants.length===1)host.start(owner,[items[0],{...updated,variants:[safe,high]}] as any,'a','active');
+  await flush();
+  expect(removed).toContain(prior);
+  expect(host.sourceFor(prior)).toBeUndefined();
+  const next=windows.at(-1).items.find((v:any)=>v.uri.endsWith('/review-safe-'+n+'.mp4'));
+  expect(host.sourceFor(next.uri)?.playUrl).toBe(safeUrl);
+  host.stop(owner);
+ }
 });

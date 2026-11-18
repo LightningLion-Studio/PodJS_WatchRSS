@@ -5,10 +5,15 @@ import {applyPreferredDouyinPlayback,selectPreferredDouyinUrl,DouyinCodecRuntime
 import {parseDouyinFeed,parseDouyinDetail} from '../../src/douyin/parser.ts';
 import {normalizeItems} from '../../src/douyin/feed-store.ts';
 import {DouyinPlaybackQueue} from '../../src/douyin/playback-queue.ts';
-import type {DouyinVideoVariant,DouyinItem} from '../../src/douyin/types.ts';
+import {admitDouyinItem} from '../../src/douyin/playback-ingress.ts';
+import type {DouyinItem} from '../../src/douyin/types.ts';
 
-test('legacy native input vectors use the 466px watch bandwidth policy',()=>{
- for(const c of fixture.cases)expect(selectPreferredDouyinUrl(c.variants as DouyinVideoVariant[],c.fallback)??null,c.name).toBe((watchPolicy.native as Record<string,string|null>)[c.name]??null);
+test('legacy native input vectors select among admitted variants',()=>{
+ for(const c of fixture.cases){
+  const item=admitDouyinItem({playUrl:c.fallback??'',variants:c.variants} as DouyinItem);
+  const selected=item?selectPreferredDouyinUrl(item.variants,item.playUrl):undefined;
+  expect(selected??null,c.name).toBe((watchPolicy.native as Record<string,string|null>)[c.name]??null);
+ }
 });
 test('native codec policy vectors: minimum two, strictly more than half, session-sticky',()=>{
  const p=new DouyinCodecRuntimePolicy();p.recordAutoHevcAttempt();p.recordAutoHevcFailure();expect(p.shouldPreferH264InAutoMode()).toBe(false);expect(p.snapshot()).toEqual({autoHevcAttempts:1,autoHevcFailures:1,autoForceH264:false});p.recordAutoHevcAttempt();expect(p.shouldPreferH264InAutoMode()).toBe(false);expect(p.recordAutoHevcFailure()).toBe(true);p.recordAutoHevcAttempt();p.recordAutoHevcAttempt();expect(p.snapshot()).toEqual({autoHevcAttempts:4,autoHevcFailures:2,autoForceH264:true});

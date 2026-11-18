@@ -1,6 +1,7 @@
 import {projectJsonAsync} from '@podjs/framework/json';
 import {yieldWorkTurn} from '@podjs/framework/text-layout';
 import {applyPreferredDouyinPlayback} from './playback-selector.ts';
+import {admitDouyinItem} from './playback-ingress.ts';
 import {applyDouyinState,readDouyinState,type DouyinStateStorage,type DouyinStateChange} from './state-storage.ts';
 import type {DouyinHistoryEntry,DouyinItem} from './types.ts';
 
@@ -17,9 +18,10 @@ const text=(value:unknown)=>typeof value==='string'?value:'';
 export function compactDouyinHistory(item:DouyinItem,watchedAt:number):HistoryRow|null{
   const awemeId=text(item?.awemeId).trim(),originalUrl=text(item?.playUrl).trim();
   if(!awemeId||!originalUrl||!Number.isFinite(watchedAt))return null;
+  const selected=applyPreferredDouyinPlayback(item);
   // History is display metadata, never a fresh playback cache. Retain native
   // history even when an old HEVC-only record has no currently playable variant.
-  const selected=applyPreferredDouyinPlayback(item),playUrl=text(selected.playUrl).trim()||originalUrl;
+  const playUrl=text(selected.playUrl).trim()||originalUrl;
   return {awemeId,title:text(item.description),author:text(item.authorName),coverUrl:typeof item.coverUrl==='string'?item.coverUrl:undefined,playUrl,likeCount:Number(item.likeCount)||0,watchedAt};
 }
 function unpack(row:HistoryRow):DouyinHistoryEntry{return {watchedAtMillis:row.watchedAt,item:{awemeId:row.awemeId,description:row.title,authorName:row.author,coverUrl:row.coverUrl,playUrl:row.playUrl,likeCount:row.likeCount,createdAtSeconds:0,authorId:'',commentCount:0,shareCount:0,collectCount:0,durationMs:0,variants:[]}};}
@@ -47,7 +49,9 @@ export class DouyinHistoryStore {
     const changes:DouyinStateChange[]=[];
     for(const entry of entries){
       if(index.entries.length===HISTORY_LIMIT)break;
-      const row=entry?.item&&compactDouyinHistory(entry.item,Number(entry.watchedAtMillis));
+      const item=entry?.item&&admitDouyinItem(entry.item);
+      const selected=item&&applyPreferredDouyinPlayback(item);
+      const row=item&&compactDouyinHistory(selected?.playUrl?selected:item,Number(entry.watchedAtMillis));
       if(!row||seen.has(row.awemeId))continue;seen.add(row.awemeId);
       const slot=index.entries.length;index.entries.push({id:row.awemeId,slot});changes.push({key:historyRowKey(slot),value:JSON.stringify(row)});
       if(changes.length===8){await applyDouyinState(this.storage,changes.splice(0));await yieldWorkTurn().result;}
@@ -77,7 +81,7 @@ export class DouyinHistoryStore {
     const index=await this.initialize(),result:DouyinHistoryEntry[]=[];
     for(let start=0;start<index.entries.length;start+=8){
       const refs=index.entries.slice(start,start+8),rows=await readDouyinState(this.storage,refs.map(e=>historyRowKey(e.slot)));
-      for(let i=0;i<rows.length;i++){if(rows[i]===null)throw Error('Missing Douyin history row');const row=JSON.parse(rows[i]!);if(row.awemeId!==refs[i]!.id||!row.playUrl||!Number.isFinite(row.watchedAt))throw Error('Invalid Douyin history row');result.push(unpack(row));}
+      for(let i=0;i<rows.length;i++){if(rows[i]===null)throw Error('Missing Douyin history row');const row=JSON.parse(rows[i]!);if(row.awemeId!==refs[i]!.id||!row.playUrl||!Number.isFinite(row.watchedAt))throw Error('Invalid Douyin history row');const entry=unpack(row),item=admitDouyinItem(entry.item);if(item)result.push({...entry,item});}
       await yieldWorkTurn().result;
     }return result;
   });}

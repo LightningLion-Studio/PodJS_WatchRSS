@@ -16,6 +16,7 @@ import {appLogger} from '../logs/app-logger.ts';
 import {formatDouyinError,mediaRequestFailure,isDouyinTemporaryFailure} from './errors.ts';
 import { DouyinFeedStore, FEED_KEY, RECENT_KEY, QUEUE_KEY, normalizeItems, normalizeItemsInTurns, type RecentFeed } from "./feed-store.ts";
 import {decodeMediaText} from '../media/text.ts';
+import {withoutDouyinSource} from "./playback-ingress.ts";
 import { parseDouyinDetail, parseDouyinFeedAsync, readDouyinStatusCode, isDouyinHtmlChallenge } from "./parser.ts";
 import { ABogusSigner } from "./signing.ts";
 import { DouyinSavedStore } from "./saved.ts";
@@ -255,6 +256,16 @@ export class DouyinClient {
     while(this.prefetchFailures.size>60)this.prefetchFailures.delete(this.prefetchFailures.keys().next().value!);
   }
   playbackMemoryStats(){return {feedEntries:this.feedCache.size,feedBytes:this.feedCache.bytes,...this.feedStore.memoryStats()};}
+  async removePlaybackSource(id:string,url:string,priorWrites?:Promise<unknown>):Promise<void>{
+    const cached=this.feedCache.get(id);
+    if(cached){
+      const item=withoutDouyinSource(cached.item,url);
+      if(item?.playUrl)this.cacheItem(item,cached.resolvedAtMillis);
+      else this.feedCache.delete(id);
+    }
+    if(priorWrites)await priorWrites;
+    await this.feedStore.removeSource(id,url);
+  }
   private cacheItem(item:DouyinItem,resolvedAtMillis:number){
     this.feedCache.delete(item.awemeId);this.feedCache.set(item.awemeId,{item,resolvedAtMillis});
     while(this.feedCache.size>FEED_CACHE_LIMIT)this.feedCache.delete(this.feedCache.keys().next().value!);
@@ -323,7 +334,7 @@ export class DouyinClient {
       if(!r.ok&&r.code==='NOT_LOGGED_IN')return r;
       if(generation!==this.authGeneration)return fail('CANCELLED',formatDouyinError('CANCELLED'));
       if(!r.ok)return r;
-      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
+      try{const data=traceServiceWork('douyin.detail.parse',()=>parseDouyinDetail(r.data));if(!data)return fail('resolution_limit',formatDouyinError('resolution_limit'));if(data.kind==='video'&&this.detailCacheTokens.get(id)===cacheToken)this.cacheItem(data.item,this.now());return {ok:true,data,source:'network'};}
       catch{return fail('PARSE_FAILED',formatDouyinError('PARSE_FAILED'));}
     })();this.detailRequests.set(key,work);
     try{return await work;}finally{if(this.detailRequests.get(key)===work)this.detailRequests.delete(key);if(this.detailCacheTokens.get(id)===cacheToken)this.detailCacheTokens.delete(id);}
@@ -351,7 +362,7 @@ export class DouyinClient {
     return !r.ok?r:r.data.kind==='video'?{ok:true,data:r.data.item,source:r.source}:fail('UNSUPPORTED','此内容没有视频播放流');
   }
   async resolvePlayback(awemeId:string,options:DouyinPlaybackOptions={}):Promise<DouyinResult<DouyinItem>>{
-    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.prefetch===true,options.forceRefresh===true,options.allowDetail!==false,...(options.freshRequest?[++this.reloadSequence]:[])]);const cached=!options.forceRefresh&&!options.freshRequest?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
+    const start=Date.now(),id=awemeId.trim(),key=JSON.stringify([id,options.prefetch===true,options.forceRefresh===true,options.allowDetail!==false,options.feedItem?.playUrl,...(options.freshRequest?[++this.reloadSequence]:[])]);const cached=!options.forceRefresh&&!options.freshRequest?this.freshFeedItem(id):null;let pending=cached?Promise.resolve<DouyinResult<DouyinItem>>({ok:true,data:cached,source:'feed-cache'}):this.playbackResolutions.get(key);if(!pending){pending=this.resolvePlaybackInner(id,options);this.playbackResolutions.set(key,pending);}let result:DouyinResult<DouyinItem>;try{result=await pending;}finally{if(this.playbackResolutions.get(key)===pending)this.playbackResolutions.delete(key);}
     if(result.ok){const item=await decodableDouyinItem(applyPreferredDouyinPlayback(result.data));if(!item.playUrl.trim()){const unavailable=fail<DouyinItem>('UNSUPPORTED','没有可用的视频播放流');if(options.prefetch)this.cachePrefetchFailure(id,unavailable);return unavailable;}const v=item.variants?.find(v=>v.playUrl===item.playUrl);const trace=new VideoPlaybackTrace('douyin',start);trace.event('api',{apiMs:Date.now()-start,cacheHit:result.source==='feed-cache'?1:0});trace.event('candidate',{width:v?.width,height:v?.height,bitrate:v?.bitrate});for(const url of [item.playUrl,...(item.variants?.find(v=>v.playUrl===item.playUrl)?.playUrls??[]).slice(0,8)])registerVideoResolution(url,trace);appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=ok source=${result.source??'network'} codec=${v?.codec??'unknown'} resolution=${v?normalizedDouyinResolution(v)??0:0} bitrate=${v?.bitrate??0}`);return {...result,data:item};}
     if(options.prefetch)this.cachePrefetchFailure(id,result);
     appLogger.i('DouyinTiming',`resolve ms=${Date.now()-start} outcome=${result.code}`);return result;

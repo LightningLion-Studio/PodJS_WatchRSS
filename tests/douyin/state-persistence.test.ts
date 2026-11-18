@@ -130,3 +130,27 @@ test('incremental normalization preserves cross-batch deduplication and order wh
  try{expect(await normalizeItemsInTurns(items,40)).toEqual(normalizeItems(items).slice(0,40));expect(turns).toBeGreaterThan(1);}
  finally{clearInterval(timer);}
 });
+
+test('RVRESCAP4-03 rewrites all affected snapshots by source and preserves unrelated playback',async()=>{
+ const f=fixture();
+ try{
+  const rejected={...item('rejected'),variants:[]},safe=item('safe');
+  const snapshot={items:[rejected,safe],cursor:'resume',hasMore:false,anchorAwemeId:rejected.awemeId,
+    savedAtMillis:10,resolved:{rejected:7,safe:8}};
+  const feed=new DouyinFeedStore(f.storage);
+  await feed.save(QUEUE_KEY,snapshot);
+  await feed.save(FEED_KEY,snapshot);
+  f.legacy.set(QUEUE_KEY,JSON.stringify(snapshot));
+  f.legacy.set(RECENT_KEY,JSON.stringify(snapshot));
+  await feed.removeSource(rejected.awemeId,rejected.playUrl);
+  const reopened=new DouyinFeedStore(f.storage);
+  for(const key of [QUEUE_KEY,FEED_KEY,RECENT_KEY]){
+   const restored=await reopened.read(key);
+   expect(restored).toMatchObject({items:[{awemeId:safe.awemeId}],resolved:{safe:8},anchorAwemeId:null});
+   expect(restored.items).toHaveLength(1);
+   expect(restored.resolved).not.toHaveProperty(rejected.awemeId);
+  }
+  expect(await f.storage.get('douyin.playback-item.v2.rejected')).toBeNull();
+  expect(f.legacy.size).toBe(0);
+ }finally{f.raw.close();}
+});
