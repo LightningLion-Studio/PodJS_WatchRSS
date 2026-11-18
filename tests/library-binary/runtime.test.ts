@@ -151,6 +151,10 @@ test('v1 business pins the physical connection through reprobe and account confi
 
 test('rolled-back DATA bindings survive reconnect and block conflicting control requests',async()=>{
  const f=await binaryRuntime();
+ // The session captures this wrapper when it connects.
+ const sleep=f.ports.sleep;
+ let holdTailTimer=false;
+ f.ports.sleep=ms=>holdTailTimer&&ms<=20?{result:new Promise(()=>{}),cancel:()=>{}}:sleep(ms);
  const phoneSnapshot={snapshotId:'phone',manifestDigest:'a'.repeat(64),fromExclusive:0,toInclusive:0};
  const job=nonce(),zero='0'.repeat(64);
  const payloads=Array.from({length:4},(_,i)=>new Uint8Array(65536).fill(i+1));
@@ -211,10 +215,10 @@ test('rolled-back DATA bindings survive reconnect and block conflicting control 
    if(failNext){failNext=false;return transaction([...statements,{sql:'UPDATE library_binary_guard SET ok=0'}]);}
    return transaction(statements);
   };
-  const clock=Object.getOwnPropertyDescriptor(performance,'now'),sleep=f.ports.sleep;
+  const clock=Object.getOwnPropertyDescriptor(performance,'now');
   try{
    Object.defineProperty(performance,'now',{configurable:true,value:()=>1000});
-   f.ports.sleep=ms=>ms<=20?{result:new Promise(()=>{}),cancel:()=>{}}:sleep(ms);
+   holdTailTimer=true;
    for(const frame of frames)await first.io.writeFrame(encodeFrame(frame));
    expect(await first.read()).toMatchObject({kind:'control',envelope:{success:false,error:{code:'LOCAL_IO',recovery:'STOP'}}});
    await expect(first.s.running).rejects.toMatchObject({code:'LOCAL_IO',stopAutomaticRecovery:true});
@@ -222,7 +226,7 @@ test('rolled-back DATA bindings survive reconnect and block conflicting control 
   }finally{
    if(clock)Object.defineProperty(performance,'now',clock);
    else Reflect.deleteProperty(performance,'now');
-   f.ports.sleep=sleep;
+   holdTailTimer=false;
   }
   expect(attempts).toEqual([4]);
   expect(f.nativeSql.query('SELECT id,digest FROM requests').all()).toHaveLength(4);
