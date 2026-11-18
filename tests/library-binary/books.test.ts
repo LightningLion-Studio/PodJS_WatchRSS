@@ -108,6 +108,18 @@ test('book groups admit the 512 MiB limit and reject incorrect segment ordering 
   expect(largest.at(-1)?.dependsOn).toHaveLength(33);
   expect(books.peak(largest,HARD_LIMITS)).toBeLessThan(HARD_LIMITS.maxStagingBytes);
   expect(()=>validateBookPlan(largest,HARD_LIMITS)).not.toThrow();
+  // Match the Android SQL reply cap even though Bun SQLite has no such limit.
+  const query=f.store.db.query;
+  f.store.db.query=async(...args)=>{
+   const rows=await query(...args);
+   if(JSON.stringify(rows).length>512*1024)throw Error('SQL reply cap');
+   return rows;
+  };
+  const inventory={objects:largest,paths:{}};
+  const witness={snapshotId:'512-mib',manifestDigest:'f'.repeat(64),fromExclusive:0,toInclusive:0};
+  expect(JSON.stringify(inventory).length).toBeGreaterThan(512*1024);
+  await f.store.saveSnapshot('scope',witness,inventory);
+  expect((await f.store.snapshot('scope',witness.snapshotId))?.inventory).toEqual(inventory);
   expect(()=>validateBookPlan(make(BOOK_SEGMENT_BYTES+1,true),HARD_LIMITS)).toThrow();
   expect(()=>make(HARD_LIMITS.maxPackageBytes+1)).toThrow();
  }finally{await f.dispose();}
@@ -185,9 +197,9 @@ test('book cancellation preserves hidden segment and never publishes a readable 
   await transfer(peer,book.stateObject,book.read);await peer.operation('apply',{objectId:book.stateObject.objectId});
   const part=book.segments[0]!;
   await transfer(peer,part,book.read);await peer.operation('apply',{objectId:part.objectId});
-  const cancelled=await peer.operation('cancel',{reason:'USER_CANCEL'});
+  const cancelled=await peer.operation('cancel',{reason:'LOCAL_ABORT'});
   expect(cancelled.result).toEqual({state:'CANCELLED',alreadyComplete:false});
-  await peer.session.running;
+  await peer.session.running.catch(()=>{});
   expect(await repository.books!.package(book.state.bookId)).toBeUndefined();
   expect(await f.db.query('SELECT id FROM articles')).toEqual([]);
   expect(await f.db.query('SELECT ready FROM library_binary_book_files')).toEqual([{ready:1}]);

@@ -1,3 +1,4 @@
+import {readSqlText} from '@podjs/framework/sql';
 import type {SqlDatabase,SqlParams} from '../../core/types';
 import {bindingCapacity} from './receive-index';
 import {frameBytes} from '../wire-frame-size';
@@ -117,11 +118,23 @@ export class BinaryStore {
   const old=(await this.db.query('SELECT digest FROM library_binary_prepare_requests WHERE scope=? AND connection_id=? AND request_id=?',[scope,connectionId,id]))[0];if(old){if(old.digest!==digest)fail('REQUEST_CONFLICT');await this.db.execute('UPDATE library_binary_prepare_requests SET expires_at=max(expires_at,?) WHERE scope=? AND connection_id=?',[this.now()+RETENTION,scope,connectionId]);return;}await this.budget(1024);await this.db.execute('INSERT INTO library_binary_prepare_requests VALUES(?,?,?,?,?)',[scope,connectionId,id,digest,this.now()+RETENTION]);
  }
  async saveSnapshot(scope:string,witness:Snapshot,inventory:unknown):Promise<void>{
-  const encoded=JSON.stringify(inventory),encodedBytes=utf8(encoded).length;if(encodedBytes>1048576)fail('LIMIT_EXCEEDED');const old=(await this.db.query('SELECT witness,inventory FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,witness.snapshotId]))[0];if(old&&(JSON.stringify(parse(old.witness))!==JSON.stringify(witness)||String(old.inventory)!==encoded))fail('PLAN_CONFLICT');
+  const encoded=JSON.stringify(inventory),encodedBytes=utf8(encoded).length;
+  if(encodedBytes>1048576)fail('LIMIT_EXCEEDED');
+  const old=(await this.db.query('SELECT witness FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,witness.snapshotId]))[0];
+  if(old&&(JSON.stringify(parse(old.witness))!==JSON.stringify(witness)||await this.snapshotInventory(scope,witness.snapshotId)!==encoded))fail('PLAN_CONFLICT');
   const paths=(inventory as {paths?:Record<string,unknown>}).paths;if(!paths||typeof paths!=='object'||Array.isArray(paths))fail('JOURNAL_CORRUPT');const values=[...new Set(Object.values(paths))];if(values.length>512||values.some(p=>typeof p!=='string'||!/^library-binary\/spool\/[0-9a-f]{64}\.bin$/.test(p)))fail('JOURNAL_CORRUPT');
   await this.budget(encodedBytes+1024+values.length*512);await this.db.transaction([{sql:'INSERT OR IGNORE INTO library_binary_snapshots VALUES(?,?,?,?,?)',params:[scope,witness.snapshotId,JSON.stringify(witness),encoded,this.now()+RETENTION]},...values.map(path=>({sql:'INSERT OR IGNORE INTO library_binary_snapshot_files VALUES(?,?,?)',params:[scope,witness.snapshotId,path]}))]);
  }
- async snapshot(scope:string,id:string):Promise<{witness:Snapshot;inventory:unknown}|null>{const r=(await this.db.query('SELECT witness,inventory,expires_at FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,id]))[0];if(!r||Number(r.expires_at)<this.now())return null;return {witness:parse(r.witness),inventory:parse(r.inventory)};}
+ private snapshotInventory(scope:string,id:string):Promise<string|null>{
+  return readSqlText(this.db,'SELECT inventory AS value FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,id],{maxBytes:1048576});
+ }
+ async snapshot(scope:string,id:string):Promise<{witness:Snapshot;inventory:unknown}|null>{
+  const r=(await this.db.query('SELECT witness,expires_at FROM library_binary_snapshots WHERE scope=? AND snapshot_id=?',[scope,id]))[0];
+  if(!r||Number(r.expires_at)<this.now())return null;
+  const inventory=await this.snapshotInventory(scope,id);
+  if(inventory===null)fail('JOURNAL_CORRUPT');
+  return {witness:parse(r.witness),inventory:parse(inventory)};
+ }
  async preparation(scope:string,digest:string,body:Row):Promise<void>{await this.budget(utf8(JSON.stringify(body)).length+1024);await this.db.execute('INSERT OR IGNORE INTO library_binary_preparations VALUES(?,?,?,?)',[scope,digest,JSON.stringify(body),this.now()+RETENTION]);}
  /** All scopes share a single journal budget. Reserve the native journal's
   * full 16 MiB bound once, and account outstanding per-job reservations. A
@@ -180,7 +193,20 @@ export class BinaryStore {
    ON CONFLICT(scope,job_id) DO UPDATE SET connection_id=excluded.connection_id,epoch=excluded.epoch,lease=excluded.lease,expires_at=excluded.expires_at`,params:[scope,r.jobId,r.planDigest,JSON.stringify(p),state,connectionId,epoch,expiration,old?.nextPage??0,old?.completion?JSON.stringify(old.completion):null,lease?JSON.stringify(lease):null,role]};
   await this.db.transaction([statement,...[p.phoneSnapshot,p.watchSnapshot].map(s=>({sql:'INSERT OR IGNORE INTO library_binary_snapshot_refs VALUES(?,?,?)',params:[scope,r.jobId,s.snapshotId]})),...(!old?[{sql:'INSERT INTO library_binary_reservations VALUES(?,?,?)',params:[scope,r.jobId,this.planReservation(p)]}]:[])]);const saved=(await this.job(scope,r.jobId!))!;await this.touch(saved);return saved;
  }
- async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{return (await this.db.query('SELECT object_id,description,receipt,ordinal FROM library_binary_objects WHERE scope=? AND job_id=? ORDER BY ordinal',[job.scope,job.jobId])).map(r=>({descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,String(r.object_id),r.receipt),ordinal:Number(r.ordinal)}));}
+ async objects(job:Job):Promise<{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]>{
+  const objects:{descriptor:ObjectDescriptor;receipt:AppliedReceipt|null;ordinal:number}[]=[];
+  // The host caps a SQLite reply at 512 KiB. A full 512 MiB book has
+  // 8192 chunk hashes, so even its compact manifest spans multiple replies.
+  let after=-1;
+  for(;;){
+   const rows=await this.db.query('SELECT object_id,description,receipt,ordinal FROM library_binary_objects WHERE scope=? AND job_id=? AND ordinal>? ORDER BY ordinal LIMIT 8',[job.scope,job.jobId,after]);
+   for(const r of rows){
+    after=Number(r.ordinal);
+    objects.push({descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,String(r.object_id),r.receipt),ordinal:after});
+   }
+   if(rows.length<8)return objects;
+  }
+ }
  async objectAt(job:Job,slot:number):Promise<ObjectDescriptor|null>{const r=(await this.db.query('SELECT description FROM library_binary_objects WHERE scope=? AND job_id=? AND ordinal=?',[job.scope,job.jobId,slot]))[0];return r?descriptor(parse(r.description),job.description.selection.limits):null;}
  async object(job:Job,id:string){const r=(await this.db.query('SELECT object_id,description,receipt FROM library_binary_objects WHERE scope=? AND job_id=? AND object_id=?',[job.scope,job.jobId,id]))[0];if(!r)fail();return {descriptor:descriptor(parse(r.description),job.description.selection.limits),receipt:this.receipt(job,id,r.receipt)};}
  private receipt(job:Job,id:string,raw:unknown):AppliedReceipt|null {
