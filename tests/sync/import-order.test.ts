@@ -22,3 +22,11 @@ test('real SQL snapshot propagates pause from a work boundary and a later comple
   f.db.query=query;const complete=await repo.cloudSnapshot(false);expect(complete.articles).toHaveLength(2);expect(await f.db.query('SELECT COUNT(*) AS n FROM articles')).toEqual([{n:2}]);
  }finally{f.sql.close();}
 });
+test('a cold 2704-row manifest sorts in bounded turns without a 2 ms database wakeup cadence',async()=>{
+ const rows=Array.from({length:2704},(_,i)=>({channel_url:'watchrss://phone-imports',id:i}));
+ let turns=0,clock=0;
+ const sorted=await orderImportedRows(rows,{yieldTurn:async()=>{turns++;},clock:()=>clock+=0.01,
+  onSlice:(ms, steps)=>{expect(ms).toBeLessThanOrEqual(8.02);expect(steps).toBeLessThanOrEqual(2048);}});
+ expect(sorted.map(row=>row.id)).toEqual(rows.map(row=>row.id).reverse());
+ expect(turns).toBeLessThan(60);
+});
