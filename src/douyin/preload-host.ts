@@ -200,7 +200,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   failures:()=>results.snapshot(),
   sourceFor:(uri:string)=>sources.get(uri),
   lookup:async(id:string):Promise<string|undefined>=>optionalCache(()=>playbackLookup(id)),
-  async playback(item:DouyinItem,headers:Record<string,string>){
+  async playback(item:DouyinItem,headers:Record<string,string>,intent:'playback'|'prewarm'='playback'){
    const windowItem=()=>plan?.items.find(value=>value.awemeId===item.awemeId);
    const initial=windowItem(),current=()=>{const latest=windowItem();return latest===initial||!latest||latest.playUrl===initial?.playUrl;};
    const cancelled=()=>Object.assign(new Error('播放来源已更换'),{code:'CANCELLED'});
@@ -213,7 +213,7 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    if(!resolved.ok){appLogger.i('DouyinProxy',`foreground resolve failed category=${resolved.code}`);throw Object.assign(new Error(resolved.message),{code:resolved.code,retryAfterMs:resolved.retryAfterMs});}
    traceDouyinVariants(resolved.data,'foreground',resolved.source==='feed-cache'?'feed-cache':'network');
    try{
-    const uri=await register(resolved.data,headers,current);
+    const uri=await register(resolved.data,headers,current,intent==='prewarm');
     if(!current())throw cancelled();
     if(!uri)throw Object.assign(new Error('没有可用的视频播放流'),{code:'UNSUPPORTED'});
     return uri;

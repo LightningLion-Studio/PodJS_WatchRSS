@@ -247,6 +247,7 @@ test('memory pressure changes the next playback selection without prefetch revok
   const current=await host.playback(item as any,{});
   expect(current).toEndWith('/review-480.mp4');
   dispatchMemoryPressure({t:'memory.pressure',level:2});
+  expect(await host.playback(item as any,{},'prewarm')).toBe(current);
   host.allowBluetooth(true,owner);host.start(owner,[item] as any,'review','active');await flush();
   expect(windows.at(-1).items.map((target:any)=>target.uri)).toEqual([current]);
   expect(removed).not.toContain(current);

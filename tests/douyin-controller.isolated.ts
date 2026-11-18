@@ -21,8 +21,8 @@ mock.module('../src/media/browser-auth.ts',()=>({authorizeInBrowser:(options:any
 let paintRelease:(value:{committed:boolean})=>void;
 mock.module('@podjs/framework/render',()=>({afterPaint:()=>({result:new Promise(resolve=>paintRelease=resolve),cancel(){}})}));
 let preloadWindows:string[][]=[];let canonicalSource:DouyinItem|undefined;let restoredFrame:any;let prefetchHooks:any;
-const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
-mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem)=>proxyOverride?proxyOverride(item):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
+const localPaths=new Map<string,string>();const invalidated:string[]=[];let proxyOverride:undefined|((item:DouyinItem,headers:Record<string,string>,intent?:string)=>Promise<string>);let lookupOverride:undefined|(()=>Promise<string|undefined>);
+mock.module('../src/media-services.ts',()=>({douyinStock:{resume:async()=>{},suspend(){},consume(){}},douyinPreload:{readySource:async()=>readyOverride?.(),previewFrame:async()=>undefined,sourceFor:()=>canonicalSource,restoreFrame:async()=>restoredFrame,playback:async(item:DouyinItem,headers:Record<string,string>,intent?:string)=>proxyOverride?proxyOverride(item,headers,intent):item.playUrl,lookup:async(id:string)=>lookupOverride?lookupOverride():localPaths.get(id),invalidate:async(id:string)=>{invalidated.push(id);localPaths.delete(id);},forgetSource:(id:string)=>{localPaths.delete(id);},start(...args:any[]){prefetchHooks=args[4];preloadWindows.push(args[1].map((x:DouyinItem)=>x.awemeId));},stop(){},allowBluetooth(){}},douyinClient:new Proxy({}, {get:(_target,key)=>{const value=(client as any)[key];return typeof value==='function'?value.bind(client):value;}}),biliClient:{},biliPreviewCache:{lookup:async()=>undefined},loadLocalBiliDetail:async()=>undefined}));
 mock.module('../src/debug/douyin-host.ts',()=>({douyinDebug:{playbackUrl:(_id:string,url:string)=>url,updateContext(){},tick:async()=>{}}}));
 mock.module('../src/cache/host.ts',()=>({managedCache:{}}));
 mock.module('@pocketjs/framework/lifecycle',()=>({onFrame(){}}));
@@ -365,6 +365,29 @@ test('DYSWIPE3 neighbours reuse playing headers and coalesce a fresh read after 
  await Promise.all([f.controller.prepareDouyinAdjacent(entry,'next'),f.controller.prepareDouyinAdjacent(entry,'previous')]);expect(reads).toBe(0);
  authorization++;
  const sources=await Promise.all([f.controller.prepareDouyinAdjacent(entry,'next'),f.controller.prepareDouyinAdjacent(entry,'previous')]);expect(reads).toBe(1);expect(sources.every(v=>v?.source.headers?.['X-Fixture']==='fresh')).toBe(true);
+});
+
+test('stock playback prewarms adjacent sources with public headers and preserved rendition metadata',async()=>{
+ const f=fixture(),a=item('stock'),b=item('adjacent');
+ const variant={playUrl:'https://fixture.invalid/360',codec:'h264' as const,width:360,height:640,bitrate:100};
+ const cached={...b,playUrl:variant.playUrl,variants:[variant]};
+ readyOverride=async()=>({item:a,url:'podjs-media-cache://play/stock.mp4',previewFrame:{entryId:a.awemeId,frame:{available:true}}});
+ f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],immersive:true,hasMore:false});
+ await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;
+ expect(f.source().headers).toEqual({});
+ let reads=0;
+ const headers={'User-Agent':'fixture-public'};
+ client.buildPlaybackHeaders=async()=>{reads++;return headers;};
+ let options:unknown;
+ proxyOverride=async(_item,actual,mode)=>{options={actual,mode};return 'podjs-media-cache://play/adjacent.mp4';};
+ canonicalSource=cached;
+ const prepared=await f.controller.prepareDouyinAdjacent(entry,'next');
+ expect(reads).toBe(1);
+ expect(options).toEqual({actual:headers,mode:'prewarm'});
+ expect(prepared?.source).toMatchObject({videoMime:'video/avc',videoWidth:360,videoHeight:640});
+ expect(prepared?.attemptedUrl).toBe(variant.playUrl);
+ expect(f.requests()).toBe(0);
 });
 
 test('T1202 cold paging reuses the route headers while secure storage is busy',async()=>{

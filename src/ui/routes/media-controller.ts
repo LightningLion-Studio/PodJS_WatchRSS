@@ -354,11 +354,11 @@ export function createMediaRouteController(
     } finally {douyinBench.leaveLogin(douyinClient,benchAttempt);}
   };
 
-  const douyinPlaybackUrl=async(item:import('../../douyin/types.ts').DouyinItem,headers:Record<string,string>,forward=false)=>{
+  const douyinPlaybackUrl=async(item:import('../../douyin/types.ts').DouyinItem,headers:Record<string,string>,forward=false,intent:'playback'|'prewarm'='playback')=>{
     item=applyPreferredDouyinPlayback(item);
     if(!item.playUrl)throw Object.assign(new Error('没有可用的视频播放流'),{code:DOUYIN_RESOLUTION_LIMIT});
     const override=douyinDebug.playbackUrl(item.awemeId,item.playUrl,forward);
-    return override!==item.playUrl?override:douyinPreload.playback?douyinPreload.playback(item,headers):item.playUrl;
+    return override!==item.playUrl?override:douyinPreload.playback?douyinPreload.playback(item,headers,intent):item.playUrl;
   };
   // Only the verified local first item owns a hidden decoder on the title page.
   // Nothing plays before the user enters; navigation adopts this exact pool.
@@ -645,7 +645,10 @@ export function createMediaRouteController(
     if(known?.authorization===authorization)return known.value;
     // A playing route already owns authenticated headers. Coalesce subsequent
     // reads after an auth change before either neighbour queues decoder work.
-    const record={authorization,value:!known&&entry.playback?.headers?Promise.resolve(entry.playback.headers):douyinClient.buildPlaybackHeaders()};
+    // A restored stock capability carries its own headers. Its empty route
+    // headers cannot be used to register the neighbouring network sources.
+    const playingHeaders=entry.playback?.headers;
+    const record={authorization,value:!known&&playingHeaders&&Object.keys(playingHeaders).length?Promise.resolve(playingHeaders):douyinClient.buildPlaybackHeaders()};
     adjacentHeaderCache.set(entry,record);
     try{return await record.value;}catch(error){if(adjacentHeaderCache.get(entry)===record)adjacentHeaderCache.delete(entry);throw error;}
   };
@@ -662,12 +665,13 @@ export function createMediaRouteController(
     const headers=await adjacentHeaders(entry);
     const localUrl=await douyinPreload.lookup(result.data.item.awemeId);
     if(!stillAdjacent())return;
-    const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next');
+    const url=localUrl ?? await douyinPlaybackUrl(result.data.item,headers,direction==='next','prewarm');
     if(!stillAdjacent())return;
-    return {key:result.data.item.awemeId,attemptedUrl:localUrl?.startsWith('file:')?localUrl:douyinPreload.sourceFor?.(url)?.playUrl??result.data.item.playUrl,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
+    const registered=douyinPreload.sourceFor?.(url)??result.data.item;
+    return {key:result.data.item.awemeId,attemptedUrl:localUrl?.startsWith('file:')?localUrl:registered.playUrl,authorizationVersion,queueIndex:entry.queue.snapshot().index+(direction==='next'?distance:-distance),anchorIndex:entry.queue.snapshot().index,source:{
       ...entry.playback!,awemeId:result.data.item.awemeId,posterUrl:result.data.item.coverUrl,
       url,previewOnly:false,previewFrame:undefined,resumePositionMs:0,...douyinDetail(result.data.item),headers,
-      ...douyinDecoderProfile(result.data.item),
+      ...douyinDecoderProfile(registered),
       webUrl:`https://www.douyin.com/video/${result.data.item.awemeId}`,
     }};
   };
