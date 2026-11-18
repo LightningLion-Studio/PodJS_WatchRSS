@@ -8,6 +8,7 @@ import {CHUNK_BYTES,fail,hash,utf8,strictJson,exact,type ObjectDescriptor,type K
 // Native reserves this factor for block files, assembly and publication.
 export const STAGING_COPIES=4;
 export interface BinaryAssetFiles {
+ orphanScratch?(collect:boolean):Promise<number>;
  list(path:string):Promise<{entries:{path:string;file:boolean;size:number}[]}>;
  stat(path:string):Promise<{file:boolean;size:number;usableBytes?:number}>;
  hash(path:string):Promise<{sha256:string;size:number}>;
@@ -88,6 +89,8 @@ export class BinaryAssets {
   },read:async(d,index)=>{this.check();if(d.kind!=='noteAsset')fail('SOURCE_CHANGED');const r=await this.files.readBytes(inv.paths[d.objectId]!,index*CHUNK_BYTES,CHUNK_BYTES);this.check();if(r.size!==d.size||r.bytes.length!==Math.min(CHUNK_BYTES,d.size-index*CHUNK_BYTES)||hash(r.bytes)!==d.chunkHashes[index])fail('SOURCE_CHANGED');this.unit();return r.bytes;}};
  }
  async peak(limits:Limits,incoming:number){
+  const abandoned=await this.files.orphanScratch?.(false)??0;
+  if(!Number.isSafeInteger(abandoned)||abandoned<0)fail('LOCAL_IO');
   const stat=await this.files.stat('notes/assets');this.check();
   const rows=await this.store.db.query(`SELECT (SELECT COALESCE(SUM(bytes),0) FROM library_binary_peaks)
    +(SELECT COALESCE(SUM(bytes),0) FROM library_binary_source_files)
@@ -95,7 +98,7 @@ export class BinaryAssets {
      (SELECT 1 FROM library_binary_peaks p WHERE p.scope=f.scope AND p.job_id=f.job_id))
    +(SELECT COALESCE(SUM(f.size),0) FROM library_binary_book_publications f WHERE NOT EXISTS
      (SELECT 1 FROM library_binary_peaks p WHERE p.scope=f.scope AND p.job_id=f.job_id)) AS n`);
-  const staging=Number(rows[0]?.n??0)+incoming;
+  const staging=Number(rows[0]?.n??0)+incoming+abandoned;
   // The store budgets manifest and receipts against maxJournalBytes. The
   // filesystem must still have room for that journal alongside staging.
   if(staging>limits.maxStagingBytes||!Number.isSafeInteger(stat.usableBytes)||staging+limits.maxJournalBytes+1048576>stat.usableBytes!)fail('STORAGE_PRESSURE');
@@ -112,6 +115,7 @@ export class BinaryAssets {
   await this.store.db.execute('INSERT OR REPLACE INTO library_binary_peaks VALUES(?,?,?)',[scope,job,incoming]);this.unit();
  }
  async collect(){
+  this.check();await this.files.orphanScratch?.(true);this.check();
   const rows=await this.store.db.query("SELECT path FROM library_binary_source_files f WHERE expires_at<? AND NOT EXISTS(SELECT 1 FROM library_binary_snapshot_files sf JOIN library_binary_snapshots s ON s.scope=sf.scope AND s.snapshot_id=sf.snapshot_id WHERE sf.path=f.path) LIMIT 64",[this.store.now()]);
   for(const row of rows){this.check();const path=String(row.path);if(!/^library-binary\/spool\/[A-Za-z0-9._-]{1,160}$/.test(path))fail('JOURNAL_CORRUPT');await this.files.remove(path);await this.store.db.execute('DELETE FROM library_binary_source_files WHERE path=?',[path]);this.unit();}
  }

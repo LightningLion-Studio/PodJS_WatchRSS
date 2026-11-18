@@ -34,3 +34,25 @@ test('frozen content is reused across snapshots and collected only after the 24h
   now=86400000-1;await store.collect('scope',async()=>{});await assets.collect();expect((await f.files.stat(path)).file).toBe(true);now=86400001;await store.collect('scope',async()=>{});await assets.collect();expect((await f.files.stat(path)).file).toBe(false);expect((await f.files.stat('notes/assets/icon.png')).file).toBe(true);expect((await f.db.query('SELECT * FROM library_binary_source_files')).length).toBe(0);
  }finally{await f.dispose();}
 });
+
+test('abandoned native scratch is charged until collection succeeds',async()=>{
+ const f=await binaryRuntime();
+ try {
+  await f.store.initialize();
+  let abandoned=20,canCollect=false;
+  const calls:boolean[]=[];
+  const assets=new BinaryAssets({...f.files,async orphanScratch(collect){
+   calls.push(collect);
+   if(collect&&canCollect)abandoned=0;
+   return abandoned;
+  }},f.store,f.chunks);
+  const limits={...HARD_LIMITS,maxStagingBytes:25};
+  await expect(assets.peak(limits,6)).rejects.toThrow('STORAGE_PRESSURE');
+  await assets.collect();
+  await expect(assets.peak(limits,6)).rejects.toThrow('STORAGE_PRESSURE');
+  canCollect=true;
+  await assets.collect();
+  await assets.peak(limits,6);
+  expect(calls).toEqual([false,true,false,true,false]);
+ }finally{await f.dispose();}
+});
