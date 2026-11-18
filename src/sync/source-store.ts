@@ -24,16 +24,25 @@ export function normalizeSourceUrl(value:string):string {
  return 'http://'+t;
 }
 const stateSql=onlyChangedSql(`INSERT INTO sync_source_states(url,source_device_id,title,description,site_url,image_url,created_at,updated_at,sort_order,is_pinned,deleted,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET source_device_id=excluded.source_device_id,title=excluded.title,description=excluded.description,site_url=excluded.site_url,image_url=excluded.image_url,created_at=excluded.created_at,updated_at=excluded.updated_at,sort_order=excluded.sort_order,is_pinned=excluded.is_pinned,deleted=excluded.deleted,deleted_at=excluded.deleted_at`);
+export const binaryChannelProjectionSchema=`CREATE TABLE IF NOT EXISTS library_binary_channel_projection (channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE, article_title TEXT NOT NULL, sort_floor INTEGER NOT NULL, source_fetched_at INTEGER, provisional INTEGER NOT NULL CHECK(provisional IN (0,1)))`;
 // Refreshing a feed claims the channel as a real source. Local pin, order
 // and deletion operations record their own state in sync_source_states.
 const articleProjectionJoin='LEFT JOIN library_binary_channel_projection p ON p.channel_id=c.id';
 const articleProjectionCurrent='p.source_fetched_at IS c.last_fetched_at';
 export class SqlSourceSyncStore {
  constructor(private readonly db:SqlDatabase,private readonly uri:SourceUriPort,private readonly now=Date.now,private readonly onChannelRemoved?:(content:{channel:{id:number;url:string};itemIds:number[]})=>Promise<void>){}
+ private hasBinaryProjection=false;
+ private async binaryProjectionAvailable(){
+  if(!this.hasBinaryProjection)this.hasBinaryProjection=(await this.db.query(
+   "SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_binary_channel_projection'"
+  )).length>0;
+  return this.hasBinaryProjection;
+ }
  private async hostLabel(url:string):Promise<string>{const t=nativeTrim(url),u=t.startsWith('http://')||t.startsWith('https://')?t:'https://'+t;const p=await this.uri.parseUri(u);return nativeTrim((p.valid?p.host??'':'').replace(/^www\./,''));}
  async merge(sources:readonly SyncedSource[],remoteDeviceId:string,localDeviceId:string,authoritative=false,receipt?:ReceiptBoundary):Promise<number>{
   if(receipt&&sources.length!==1)throw Error('BUSINESS_REJECTED');
   if(!this.db.transactionChanges)throw new Error('Source sync requires committed transaction counts');let applied=0;
+  const projection=sources.length>0&&await this.binaryProjectionAvailable();
   for(const source of sources){
    for(const value of [source.createdAt,source.updatedAt,source.sortOrder,source.deletedAt])if(!Number.isSafeInteger(value))throw new Error('Invalid source clock');
    const url=normalizeSourceUrl(source.url);if(url.length>2048||whitespace.test(url)){if(receipt)throw Error('BUSINESS_REJECTED');continue;}const parsed=await this.uri.parseAndroid(url);
@@ -44,7 +53,9 @@ export class SqlSourceSyncStore {
    const revision=await libraryRevision(this.db),old=(await this.db.query('SELECT * FROM sync_source_states WHERE url=?',[url]))[0];
    const clock=source.updatedAt||source.deletedAt||source.sortOrder||source.createdAt;
    if(!authoritative&&old&&(clock<Number(old.updated_at)||clock===Number(old.updated_at)&&deviceOrder(source.sourceDeviceId||remoteDeviceId)<deviceOrder(String(old.source_device_id)))){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}continue;}
-   const local=old&&!n(old.deleted)?undefined:(await this.db.query(`SELECT c.created_at,c.sort_order,c.last_fetched_at,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current FROM channels c ${articleProjectionJoin} WHERE c.url=?`,[url]))[0];
+   const local=old&&!n(old.deleted)?undefined:(await this.db.query(projection?
+    `SELECT c.created_at,c.sort_order,c.last_fetched_at,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current FROM channels c ${articleProjectionJoin} WHERE c.url=?`:
+    'SELECT created_at,sort_order FROM channels WHERE url=?',[url]))[0];
    const provisional=local?.provisional===1&&local.marker_current===1;
    if(!authoritative&&!old&&local&&!provisional&&clock<Math.max(n(local.created_at),-n(local.sort_order),local.provisional===1?n(local.last_fetched_at):-Infinity)){if(receipt){receipt.check?.();await this.db.transaction([...receipt.before,revisionGuard(revision),...receipt.after('retainedLocal')]);}continue;}
    if(source.deleted){
@@ -70,17 +81,19 @@ export class SqlSourceSyncStore {
  }
  async export(localDeviceId:string,urls?:readonly string[],readOnly=false):Promise<SyncedSource[]>{
   if(urls?.length===0)return [];const persisted=new Map((await querySyncPages(this.db,'SELECT * FROM sync_source_states ORDER BY url')).map(r=>[s(r.url),r]));const wanted=urls?new Set(urls):null,active:SyncedSource[]=[],activeUrls=new Set<string>();
+  const projection=await this.binaryProjectionAvailable();
   for(let offset=0;;offset+=400){
-   const rows=await this.db.query(`SELECT c.*,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current,
+   const rows=await this.db.query(projection?`SELECT c.*,p.provisional,p.sort_floor,${articleProjectionCurrent} AS marker_current,
     CASE WHEN ${articleProjectionCurrent} THEN p.article_title END AS article_title
-    FROM channels c ${articleProjectionJoin} ORDER BY c.is_pinned DESC,c.sort_order,c.created_at DESC,c.id LIMIT 400 OFFSET ?`,[offset]);
+    FROM channels c ${articleProjectionJoin} ORDER BY c.is_pinned DESC,c.sort_order,c.created_at DESC,c.id LIMIT 400 OFFSET ?`:
+    'SELECT * FROM channels ORDER BY is_pinned DESC,sort_order,created_at DESC,id LIMIT 400 OFFSET ?',[offset]);
    for(const r of rows){
     const url=s(r.url);
     if(!isSyncedSourceUrl(url)||wanted&&!wanted.has(url))continue;
     const old=persisted.get(url);
     if(r.provisional===1&&r.marker_current===1&&(!old||n(old.deleted)))continue;
     activeUrls.add(url);
-    const projectedTitle=r.article_title===r.title,storedOrder=-n(r.sort_order);
+    const projectedTitle=projection&&r.article_title===r.title,storedOrder=-n(r.sort_order);
     const same=old&&!n(old.deleted)&&(s(old.title)===s(r.title)||projectedTitle)&&
      (nativeTrim(s(old.description))?s(old.description):s(old.site_url))===s(r.description)&&nullable(old.image_url)===nullable(r.image_url)&&
      (n(old.sort_order)===storedOrder||projectedTitle&&n(r.sort_order)===Math.max(-n(old.sort_order),n(r.sort_floor)))&&

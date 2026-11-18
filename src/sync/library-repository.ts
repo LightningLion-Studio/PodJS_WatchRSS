@@ -33,7 +33,7 @@ import type {SyncBodyCodec} from './article-body.ts';
 import {SyncArticleReceiver,type ArticleReceiveFiles,type StagedArticleBody} from './article-receiver.ts';
 import {LocalArticleManifestStore,type SyncTextPort,type ReencodedBody} from './local-manifest.ts';
 import {SyncArticleDeletionStore} from './deletion-store.ts';
-import {SqlSourceSyncStore,normalizeSourceUrl,type SourceUriPort} from './source-store.ts';
+import {SqlSourceSyncStore,binaryChannelProjectionSchema,normalizeSourceUrl,type SourceUriPort} from './source-store.ts';
 import {SqlLibrarySequenceStore} from './sequence-store.ts';
 import {migrateLocalDeletionJournal} from './deletion-journal.ts';
 import {reconcileSnapshotLog} from './snapshot-log.ts';
@@ -93,9 +93,9 @@ export class SqlLibrarySessionRepository implements LibrarySessionRepository {
  });}
  private binaryArticleSchema?:Promise<unknown>;
  async binaryReceiveArticle(entry:ReceivedArticle,remote:string,receipt:ReceiptBoundary,staged:StagedArticleBody|null){
-  await (this.binaryArticleSchema??=this.db.execute(`CREATE TABLE IF NOT EXISTS library_binary_article_versions(
+  await (this.binaryArticleSchema??=this.db.transaction([{sql:`CREATE TABLE IF NOT EXISTS library_binary_article_versions(
    item_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
-   updated_at INTEGER NOT NULL,source_device_id TEXT NOT NULL)`).catch(error=>{this.binaryArticleSchema=undefined;throw error;}));
+   updated_at INTEGER NOT NULL,source_device_id TEXT NOT NULL)`},{sql:binaryChannelProjectionSchema}]).catch(error=>{this.binaryArticleSchema=undefined;throw error;}));
   return this.receiveArticle(entry,remote,false,receipt,{staged});
  }
  resumeReceiveArticle(entry:ReceivedArticle,remote:string,receipt:ReceiptBoundary){return this.receiveArticle(entry,remote,false,receipt);}

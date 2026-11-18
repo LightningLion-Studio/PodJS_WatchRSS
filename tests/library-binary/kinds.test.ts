@@ -130,6 +130,8 @@ test('RVB2KINDS-01 article placeholders cannot invent an RSS clock or mask a loc
   try{
    const {repository,files}=await attachBinaryLibrary(f);
    const kinds=new BinaryLibraryKinds(async()=>repository,files,()=>{});
+   const projectionTable=()=>f.db.query("SELECT name FROM sqlite_master WHERE name='library_binary_channel_projection'");
+   expect(await projectionTable()).toEqual([]);
    await f.db.execute('CREATE TABLE rss_receipts(outcome TEXT)');
    const applyArticle=()=>kinds.apply(article,'unused','phone',{before:[],after:()=>[]});
    const applySource=()=>kinds.apply(rss,'unused','phone',{before:[],after:outcome=>[
@@ -137,6 +139,7 @@ test('RVB2KINDS-01 article placeholders cannot invent an RSS clock or mask a loc
    ]});
    if(order==='RSS first'){
     await applySource();
+    expect(await projectionTable()).toEqual([]);
     await applyArticle();
    }else{
     await applyArticle();
