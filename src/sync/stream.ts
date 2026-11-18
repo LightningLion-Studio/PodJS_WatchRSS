@@ -14,6 +14,6 @@ async function decode(frame:Uint8Array,work:CodecWorkOptions):Promise<JsonObject
 export class StreamFrameConnection extends FrameConnection<JsonObject> implements SyncFrameConnection {
  constructor(stream:FrameByteStream,now=Date.now,chunkBytes=64*1024){
   super(stream,{maxFrameBytes:MAX_FRAME_BYTES,chunkBytes,encode:encodeFrameAsync,decode,
-   spoolAboveBytes:32*1024,decodeSpool:(spool,work)=>decodeSpooledSyncFrame(spool,work,decode)},now);
+   spoolAboveBytes:32*1024,spoolIdleTimeoutMs:20_000,decodeSpool:(spool,work)=>decodeSpooledSyncFrame(spool,work,decode)},now);
  }
 }

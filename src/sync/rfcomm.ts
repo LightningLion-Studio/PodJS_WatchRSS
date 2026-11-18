@@ -12,7 +12,7 @@ export class HostSyncByteStream implements SyncByteStream {
  private closed=false;
  readonly spool?:SyncByteStream['spool'];
  constructor(private readonly id:string,private readonly ports:RfcommPorts['streams']){
-  if(ports.spool)this.spool=(size,timeout)=>ports.spool!(id,size,Math.max(1,Math.floor(timeout))).result;
+  if(ports.spool)this.spool=(size,timeout,idle)=>ports.spool!(id,size,Math.max(1,Math.floor(timeout)),idle).result;
  }
  async read(maxBytes:number,timeoutMs:number){if(this.closed)throw new Error('Bluetooth stream closed');const value=await (this.ports.readBytes&&!this.spool?this.ports.readBytes(this.id,maxBytes,timeoutMs):this.ports.read(this.id,maxBytes,timeoutMs)).result;if(this.closed)throw new Error('Bluetooth stream closed');if(value.eof)return null;return 'bytes' in value?value.bytes:decodeBase64Async(value.dataBase64,{cancelled:()=>this.closed});}
  async write(bytes:Uint8Array,timeoutMs=120000){if(this.closed)throw new Error('Bluetooth stream closed');let result;
