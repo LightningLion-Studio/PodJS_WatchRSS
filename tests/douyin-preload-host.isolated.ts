@@ -261,6 +261,28 @@ test('memory pressure changes the next playback selection without prefetch revok
  }
 });
 
+test('the pressured proxy window keeps the current and immediate neighbouring sources',async()=>{
+ const previousPod=(globalThis as any).pod;
+ windows=[];registrations=[];
+ const client={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(_id:string,{feedItem}:any)=>({ok:true,data:feedItem})};
+ const host=createHostDouyinPreload(client as any),owner={};
+ (globalThis as any).pod={...previousPod,memoryBudgetBytes:()=>128000000};
+ try{
+  host.allowBluetooth(true,owner);
+  dispatchMemoryPressure({t:'memory.pressure',level:2});
+  host.start(owner,items as any,'c','active');await flush();
+  expect(registrations.map(r=>r.key)).toEqual(['c','d','b']);
+  expect(windows.at(-1).items.map((r:any)=>r.uri)).toEqual(['c','d','b'].map(id=>`podjs-media-cache://play/${id}.mp4`));
+  dispatchMemoryPressure({t:'memory.pressure',level:0});
+  host.start(owner,items as any,'c','active');await flush();
+  expect(registrations.map(r=>r.key)).toEqual(['c','d','b','a']);
+ }finally{
+  host.stop(owner);
+  dispatchMemoryPressure({t:'memory.pressure',level:0});
+  (globalThis as any).pod=previousPod;
+ }
+});
+
 test('generated late completions cannot register a superseded source',async()=>{
  let seed=0x04f9a11;
  const random=(max:number)=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return (seed>>>8)%max;};

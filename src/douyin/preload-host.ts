@@ -5,6 +5,7 @@ import {douyinMediaExpiry,douyinMediaNetworkDeadline} from './media-expiry.ts';
 import {douyinPlaybackMirrors} from './playback-mirrors.ts';
 import {preserveSelectedDouyinItem,videoOptEnabled,takeVideoResolution,registerVideoResolution} from '../media/video-opt.ts';
 import {kv} from '@podjs/framework/watch';
+import {memoryPressureLevel,processMemoryBudgetBytes} from '@podjs/framework/memory';
 import {video} from '@podjs/framework/services';
 import {DouyinPrefetchResults,type PrefetchFailure,type PrefetchBinding} from './prefetch-results.ts';
 import type {MediaPrefetchResult} from '@podjs/framework/media-prefix-cache';
@@ -96,7 +97,10 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
   if(!plan)return;const cfg=douyinPrestoreConfig(kv.get('watchrss.douyin.prestore.v1'));const enabled=Date.now()>=trafficStoppedUntil&&await allowed();if(own!==generation)return;lastAllowed=enabled;
   if(!enabled){published.clear();await mediaPrefixCache.window([]).result;return;}
   await cleanupOldFiles();if(own!==generation||!plan)return;
-  results.begin();const targets=douyinProxyWindow(plan.items,plan.anchor,plan.mode,cfg.enabled?cfg.ahead:6).slice(0,videoOptEnabled('traffic')?2:undefined),mode=plan.mode;
+  results.begin();const mode=plan.mode;
+  const pressured=processMemoryBudgetBytes()>0&&memoryPressureLevel()>=2;
+  const limit=videoOptEnabled('traffic')?2:pressured?(mode==='active'?3:2):undefined;
+  const targets=douyinProxyWindow(plan.items,plan.anchor,mode,cfg.enabled?cfg.ahead:6).slice(0,limit);
   const headers=await headersForOwner();if(own!==generation)return;
   // Foreground resolution stays independent: one rejected neighbour cannot block its prepare.
   const prepared:{id:string;target:Target}[]=[];
