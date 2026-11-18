@@ -64,7 +64,7 @@ interface MediaRoutesProps {
   openUrl: (url: string, origin: BrowserOrigin) => Promise<void>;
   popPage: (skipInternal?: boolean) => boolean;
   setError: (message: string) => void;
-  reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean)=>Promise<void>;
+  reloadVideo:(entry:RouteEntry,positionMs:number,current:()=>boolean,retryCurrent?:boolean)=>Promise<void>;
   rejectDouyinAdjacent:(entry:RouteEntry,id:string,uri?:string,remote?:string,mirrorIndex?:number)=>boolean;
   recoverDouyinVideo: (entry: RouteEntry, manual?: boolean, positionMs?:number, error?:unknown) => Promise<void>;
   recoverRssDouyinVideo: (entry: RouteEntry, manual?: boolean,positionMs?:number,error?:unknown) => Promise<void>;
@@ -220,7 +220,7 @@ export function MediaRoutes(props: MediaRoutesProps) {
                   ? (position,error) => void props.entry.retryPlayback!(position,{error}).catch(error => props.setError(String(error)))
                   : undefined
           }
-          onReload={(position,current)=>props.reloadVideo(props.entry,position,current)}
+          onReload={(position,current,retryCurrent)=>props.reloadVideo(props.entry,position,current,retryCurrent)}
           onRetry={
             props.entry.retryPlayback
               ? position => props.entry.retryPlayback!(position, {manual:true})

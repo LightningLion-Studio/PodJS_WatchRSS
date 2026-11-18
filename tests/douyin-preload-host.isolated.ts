@@ -330,3 +330,14 @@ test('NOPLAY a late optional cache failure cannot publish a replaced foreground 
  await expect(pending).rejects.toMatchObject({code:'CANCELLED'});
  expect(requests).toBe(0);expect(host.sourceFor(items[0].playUrl)).toBeUndefined();host.stop();
 });
+
+test('NOPLAY invalidating one failed foreground preserves the registered next source',async()=>{
+ const local={buildPlaybackHeaders:async()=>({}),resolvePlayback:async(id:string)=>({ok:true,data:items.find(item=>item.awemeId===id)})};
+ const host=createHostDouyinPreload(local as any),a=items[0],b=items[1];
+ const first=await host.playback(a as any,{}),next=await host.playback(b as any,{}),before=clears,removedBefore=removed.length;
+ await host.invalidate(a.awemeId);
+ expect(clears).toBe(before);expect(removed.slice(removedBefore)).toEqual([first]);
+ expect(host.sourceFor(first)).toBeUndefined();expect(host.sourceFor(next)).toBe(b);
+ const count=registrations.length;expect(await host.playback(b as any,{})).toBe(next);expect(registrations).toHaveLength(count);
+ host.stop();
+});

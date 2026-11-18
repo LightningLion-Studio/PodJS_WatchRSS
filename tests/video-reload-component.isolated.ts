@@ -61,13 +61,13 @@ function mount(status:InternetStatus,url='https://video/current',immersive=false
  return {activeEvents,text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),press:(label:string)=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children===label));expect(button).toBeDefined();button!.props.onPress();}};
 }
 
-function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean)=>Promise<void>){
+function reloadMount(source:any={platform:'bili',url:'https://fixture/old',title:'fixture'},resolver?: (p:number,current:()=>boolean,retryCurrent?:boolean)=>Promise<void>){
  initial='available';prepares=[];legacyStops=0;plays=0;ticks=[];current=state('idle');retries=0;
  let publish!:(v:any)=>void,firstFrames=0,controls:any;
  const root=createRoot(stop=>{stops.push(stop);const [value,set]=createSignal(source);publish=set;return VideoPlayerScreen({get source(){return value();},width:233,height:233,active:true,offset:0,round:true,
- ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean)=>{retries++;if(resolver)await resolver(p,current);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
+ ref:(value:any)=>{controls=value;},onFirstFrame:()=>firstFrames++,onReload:async(p:number,current:()=>boolean,retryCurrent?:boolean)=>{retries++;if(resolver)await resolver(p,current,retryCurrent);else publish({...value(),url:'https://fixture/new',resumePositionMs:p});}
  } as any);});
- return {diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
+ return {reloadAttempts:()=>controls.reloadAttempts?.(),diagnostics:()=>controls.shellState(),nodes:()=>nodes(root),publish,toggle:()=>{const button=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Image'&&/player-(?:pause|play)\.svg$/.test(c.props.src)));expect(button).toBeDefined();button!.props.onPress();},firstFrames:()=>firstFrames,images:()=>nodes(root).filter(n=>n.kind==='Image'&&n.props.src?.includes('video-loading')),text:()=>nodes(root).filter(n=>n.kind==='Text').map(n=>n.props.children).join('\n'),retry:()=>{const b=nodes(root).find(n=>n.kind==='View'&&n.props.onPress&&nodes(n.props.children).some(c=>c.kind==='Text'&&c.props.children==='重试'));expect(b).toBeDefined();b!.props.onPress();}};
 }
 const lifecycleTo=(s:string)=>{lifecycleState=s;setHostLifecycle(s);lifecycleListeners.forEach(fn=>fn(s));};
 const tick=async(ms=400)=>{fakeNow+=ms;const ready=ticks.filter(fn=>(due.get(fn)??Infinity)<=fakeNow);ticks=ticks.filter(fn=>!ready.includes(fn));ready.forEach(fn=>{due.delete(fn);fn();});await flush();stateEvents.forEach(fn=>fn(current));await flush();};
@@ -333,4 +333,34 @@ test('NOPLAY buffered-stall recovery keeps the two-attempt budget and an explici
   if(i<2)expect((await f.diagnostics()).reloadCount).toBe(i+1);
  }
  expect(f.text()).toContain('播放失败');await tick(60000);expect(retries).toBe(2);
+});
+
+test('NOPLAY an automatic Douyin resolution timeout uses the remaining bounded retry',async()=>{
+ nextError={code:'prepare_failed'};let f:ReturnType<typeof reloadMount>;
+ f=reloadMount({platform:'douyin',immersive:true,awemeId:'resolve-timeout',url:'https://fixture/current',title:'fixture'},async(position,current)=>{
+  if(retries===1)await new Promise<void>(()=>{});
+  if(current())f.publish({platform:'douyin',immersive:true,awemeId:'resolve-timeout',url:'https://fixture/fresh',title:'fixture',resumePositionMs:position});
+ });
+ await flush();await tick(351);expect(retries).toBe(1);await tick(20001);await tick(701);
+ expect(retries).toBe(2);expect(prepares.at(-1)?.url).toBe('https://fixture/fresh');expect(f.text()).not.toContain('播放失败');
+});
+test('NOPLAY repeated automatic resolver timeouts exhaust exactly two attempts',async()=>{
+ nextError={code:'prepare_failed'};
+ const f=reloadMount({platform:'douyin',immersive:true,awemeId:'resolve-bounded',url:'https://fixture/current',title:'fixture'},()=>new Promise(()=>{}));
+ await flush();await tick(351);expect(retries).toBe(1);await tick(20001);await tick(701);expect(retries).toBe(2);
+ await tick(20001);expect(f.text()).toContain('播放器准备超时');await tick(60000);expect(retries).toBe(2);
+});
+
+test('NOPLAY reload attempts remain readable while the resolver has no native state',async()=>{
+ nextError={code:'prepare_failed'};
+ const f=reloadMount({platform:'douyin',immersive:true,awemeId:'resolve-count',url:'https://fixture/current',title:'fixture'},()=>new Promise(()=>{}));
+ await flush();await tick(351);expect(f.reloadAttempts()).toBe(1);await tick(20001);await tick(701);expect(f.reloadAttempts()).toBe(2);
+});
+
+test('NOPLAY only an automatic unexpired Douyin timeout may retry the current source',async()=>{
+ for(const [expiry,reuse]of [[4102444800,true],[1000000000,false]]as const){
+  nextError={code:'timeout'};let f:ReturnType<typeof reloadMount>;const flags:unknown[]=[];
+  f=reloadMount({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/current?x-expires='+expiry,title:'fixture'},async(position,current,retryCurrent)=>{flags.push(retryCurrent);if(current())f.publish({platform:'douyin',immersive:true,awemeId:'retry-current-'+expiry,url:'https://fixture/valid',title:'fixture',resumePositionMs:position});});
+  await flush();await tick(351);expect(flags).toEqual([reuse]);
+ }
 });

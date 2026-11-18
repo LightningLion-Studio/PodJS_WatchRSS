@@ -99,6 +99,7 @@ export type RouteEntry = {
   disclosureList?: Pick<VirtualListHandle, "scroller">;
   internalBack?: () => boolean;
   player?: {
+    reloadAttempts?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["reloadAttempts"];
     shellState?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellState"];
     shellPlaying?:import("../VideoPlayerScreen.tsx").VideoPlayerHandle["shellPlaying"];
     invalidatePrefetch?: (id:string)=>void;

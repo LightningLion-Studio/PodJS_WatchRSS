@@ -35,3 +35,17 @@ test('persisted HTTP validation cannot restore an over-limit source before runti
  const rejected=validatedDouyinPlaybackItem({...item,variants:[high]} as any);
  expect(rejected.playUrl).toBe('');expect(rejected.variants).toEqual([]);
 });
+
+test('a timed-out player reuses its valid feed source without fetching random recommendations',async()=>{
+ const {reloadDouyinPlayback}=await import('../../src/douyin/reload-playback.ts');let requests=0;
+ const client=new DouyinClient({secureStorage:{get:async key=>key==='douyin.cookie'?'fixture':null,set:async()=>{},remove:async()=>{}},signer:{sign:()=> 'offline'},transport:{request:async()=>{requests++;throw Error('unexpected network refresh');}}});
+ const url='https://fixture.invalid/current?x-expires=4102444800';
+ const item={awemeId:'current',playUrl:url,variants:[{playUrl:url,codec:'h264',width:960,height:540,bitrate:1000}]};
+ expect((await reloadDouyinPlayback(client,item.awemeId,()=>true,item as any,true))?.item.playUrl).toBe(url);expect(requests).toBe(0);
+});
+test('retrying the current source still rejects an explicitly expired URL',async()=>{
+ const {reloadDouyinPlayback}=await import('../../src/douyin/reload-playback.ts');let requests=0;
+ const client=new DouyinClient({secureStorage:{get:async key=>key==='douyin.cookie'?'fixture':null,set:async()=>{},remove:async()=>{}},signer:{sign:()=> 'offline'},transport:{request:async()=>{requests++;return {status:200,headers:{},body:new TextEncoder().encode(JSON.stringify({aweme_list:[],has_more:0}))};}}});
+ const url='https://fixture.invalid/expired?x-expires=1000000000',item={awemeId:'expired',playUrl:url,variants:[{playUrl:url,codec:'h264',width:960,height:540,bitrate:1000}]};
+ await expect(reloadDouyinPlayback(client,item.awemeId,()=>true,item as any,true)).rejects.toMatchObject({code:'TEMPORARILY_UNAVAILABLE'});expect(requests).toBe(1);
+});

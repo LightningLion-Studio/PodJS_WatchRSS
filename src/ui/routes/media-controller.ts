@@ -1053,7 +1053,7 @@ export function createMediaRouteController(
     }
   };
 
-  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true)=>{
+  const reloadVideo=async(entry:RouteEntry,positionMs:number,stillCurrent:()=>boolean=()=>true,retryCurrent=false)=>{
     const current=()=>dependencies.current()===entry&&stillCurrent();
     if(!entry.playback||!current())return;
     if(entry.retryPlayback){await entry.retryPlayback(positionMs,{manual:true,freshOnly:true,isCurrent:current});return;}
@@ -1062,11 +1062,11 @@ export function createMediaRouteController(
     if(entry.queue){
       const item=entry.queue.snapshot().item;
       if(!item)throw new Error('Missing Douyin playback item');
-      let queueGeneration=entry.queue.diagnostics().generation;
-      const selected=()=>current()&&entry.queue?.snapshot().item?.awemeId===item.awemeId&&entry.queue.diagnostics().generation===queueGeneration;
+      const queue=entry.queue;let queueGeneration=queue.playbackGeneration();
+      const selected=()=>current()&&entry.queue===queue&&queue.snapshot().item?.awemeId===item.awemeId&&queue.playbackGeneration()===queueGeneration;
       await douyinPreload.invalidate(item.awemeId);
       if(!selected())return;
-      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item)).catch(async error=>{
+      const resolved=await (dependencies.network?.()??directNetworkWork).run(()=>reloadDouyinPlayback(douyinClient,item.awemeId,selected,item,retryCurrent)).catch(async error=>{
         if(douyinPlaybackFailure(error).code!==DOUYIN_RESOLUTION_LIMIT)throw error;
         if(selected())await recoverDouyinVideo(entry,false,0,error);
         return undefined;
@@ -1076,7 +1076,7 @@ export function createMediaRouteController(
       entry.queue.refreshPrefetchItem(item.awemeId,resolved.item);
       // This reload owns the metadata mutation. Continue guarding against later
       // pager changes while persistence yields, using our new generation.
-      queueGeneration=entry.queue.diagnostics().generation;
+      queueGeneration=queue.playbackGeneration();
       entry.queue.updateCurrentUrl(resolved.item.playUrl);
       await entry.queue.persist();
       if(!selected())return;

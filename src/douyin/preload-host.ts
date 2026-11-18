@@ -215,7 +215,16 @@ export function createHostDouyinPreload(client:DouyinClient,stock?:import('./sto
    }
   },
   forgetSource:forget,
-  async invalidate(_id:string){sources.clear();registered.clear();await mediaPrefixCache.clear().result;},stop,stats,
+  async invalidate(id:string){
+   // Recovery owns one item. Revoking every registration also invalidates the
+   // already prepared neighbour that the next gesture is about to promote.
+   await pending.get(id)?.catch(()=>{});
+   const uris=new Set<string>(),known=registered.get(id);
+   if(known)uris.add(known.uri);
+   for(const [uri,item]of sources)if(item.awemeId===id){sources.delete(uri);if(uri.startsWith('podjs-media-cache:'))uris.add(uri);}
+   registered.delete(id);published.delete(id);
+   for(const uri of uris)await mediaPrefixCache.remove(uri).result;
+  },stop,stats,
   allowBluetooth(value:boolean,expected:unknown){if(bluetoothOwners.has(expected)===value)return;if(value)bluetoothOwners.add(expected);else bluetoothOwners.delete(expected);if(expected===owner)networkChanged();},
   start(next:unknown,items:readonly DouyinItem[],anchor:string|undefined,mode:'active'|'entry',hooks?:DouyinPrefetchHooks){
    if(next!==owner){published.clear();client.resetPrefetchFailures?.();results.begin(true);unsubscribe?.();unsubscribe=undefined;lastAllowed=undefined;}owner=next;plan={items,anchor,mode,hooks};

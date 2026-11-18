@@ -1001,3 +1001,33 @@ test('NOPLAY reload still rejects a later queue mutation during persistence',asy
  entry.queue!.refreshPrefetchItem('111',{...a,playUrl:'https://video/newer'});release();await running;
  expect(f.source()).toBe(before);
 });
+
+test('NOPLAY current reload survives an unrelated neighbour source refresh',async()=>{
+ const f=fixture(),a=item('111'),b=item('222');f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;let finish!:(value:any)=>void;
+ client.resolvePlayback=()=>new Promise(resolve=>finish=resolve);
+ const running=f.controller.reloadVideo(entry,321,()=>true);for(let n=0;n<80;n++)await Promise.resolve();expect(finish).toBeDefined();
+ entry.queue!.refreshPrefetchItem(b.awemeId,{...b,playUrl:'https://video/neighbour-new'});finish({ok:true,data:{...a,playUrl:'https://video/current-new'}});await running;
+ expect(f.source()).toMatchObject({awemeId:a.awemeId,url:'https://video/current-new',resumePositionMs:321});
+});
+test('NOPLAY current reload survives neighbour quarantine during its persistence',async()=>{
+ const f=fixture(),a=item('111'),b=item('222');f.controller.douyinPlay({item:a,playback:a,playlist:[a,b],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!;let finish!:()=>void;
+ client.resolvePlayback=async()=>({ok:true,data:{...a,playUrl:'https://video/current-new'}});entry.queue!.persist=()=>new Promise(resolve=>finish=resolve);
+ const running=f.controller.reloadVideo(entry,321,()=>true);for(let n=0;n<80;n++)await Promise.resolve();expect(finish).toBeDefined();
+ expect(entry.queue!.quarantinePrefetch(b.awemeId)).toBe(true);finish();await running;
+ expect(f.source()).toMatchObject({awemeId:a.awemeId,url:'https://video/current-new',resumePositionMs:321});
+});
+test('NOPLAY explicit queue cancellation still rejects an unchanged selected reload',async()=>{
+ const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!,before=f.source();let finish!:(value:any)=>void;client.resolvePlayback=()=>new Promise(resolve=>finish=resolve);
+ const running=f.controller.reloadVideo(entry,321,()=>true);for(let n=0;n<80;n++)await Promise.resolve();expect(finish).toBeDefined();
+ entry.queue!.cancel();finish({ok:true,data:{...a,playUrl:'https://video/current-new'}});await running;expect(f.source()).toBe(before);
+});
+
+test('NOPLAY an automatic player timeout can reprepare its still-authorized selected source',async()=>{
+ const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,playlist:[a],hasMore:false,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ const entry=f.stack().at(-1)!,before=f.source();let calls=0;
+ client.resolvePlayback=async(id,options)=>{calls++;expect(options).toMatchObject({forceRefresh:false,freshRequest:false,allowDetail:false,feedItem:a});return {ok:true,data:a};};
+ await f.controller.reloadVideo(entry,321,()=>true,true);expect(calls).toBe(1);expect(f.source()).not.toBe(before);expect(f.source()).toMatchObject({awemeId:a.awemeId,url:a.playUrl,resumePositionMs:321});
+});

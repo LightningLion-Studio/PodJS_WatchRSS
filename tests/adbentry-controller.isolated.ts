@@ -145,3 +145,10 @@ test('NOPLAY diagnostic target ordinal survives reload and changes only on a dif
  const entry=f.stack().at(-1)!;entry.playback={...entry.playback!};expect((await state()).targetOrdinal).toBe(1);
  entry.playback={...entry.playback!,awemeId:'222'};expect((await state()).targetOrdinal).toBe(2);
 });
+
+test('NOPLAY preparing state retains reload attempts without claiming a rendered frame',async()=>{
+ const f=fixture(),a=item('111');f.controller.douyinPlay({item:a,playback:a,immersive:true});await f.controller.douyinNavigate({name:'player',awemeId:a.awemeId});
+ f.stack().at(-1)!.player={...playing(),shellState:async()=>{throw new ShellCommandError('not_ready');},reloadAttempts:()=>2};bind(f);
+ const value=await registeredHandlers['douyin.state']({},{isActive:()=>true});
+ expect(value).toMatchObject({playbackState:'preparing',reloadCount:2,position:0,hasRenderedFirstFrame:false});
+});

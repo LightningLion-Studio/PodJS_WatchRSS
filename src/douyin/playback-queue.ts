@@ -16,6 +16,7 @@ export class DouyinPlaybackQueue {
   private cursor:string|null;
   private hasMore:boolean;
   private generation=0;
+  private neighbourMutations=0;
   private previewGeneration=0;
   private previewRevisions={next:[0,0,0,0,0],previous:[0,0,0,0,0]};
   private quarantined=new Set<string>();
@@ -85,10 +86,12 @@ export class DouyinPlaybackQueue {
   }
   snapshot():Omit<DouyinPlaybackQueueState,"item">&{item:DouyinItem|null}{return {item:this.items[this.index]??null,playlist:[...this.items],index:this.index,cursor:this.cursor,hasMore:this.hasMore};}
   /** Actual session-local removal set; native reason/count/timestamps are not recorded here. */
+  /** Foreground reloads ignore metadata-only changes to other queue items. */
+  playbackGeneration(){return this.generation-this.neighbourMutations;}
   diagnostics(){return {index:this.index,itemCount:this.items.length,hasMore:this.hasMore,generation:this.generation,previewGeneration:this.previewGeneration,quarantinedAwemeIds:[...this.quarantined]};}
-  refreshPrefetchItem(id:string,item:DouyinItem):boolean{const target=this.queued().findIndex(value=>value.awemeId===id);if(target<0)return false;this.generation++;this.previewGeneration++;this.replaceQueued(target,applyPreferredDouyinPlayback(item));return true;}
+  refreshPrefetchItem(id:string,item:DouyinItem):boolean{const target=this.queued().findIndex(value=>value.awemeId===id);if(target<0)return false;if(target!==this.index)this.neighbourMutations++;this.generation++;this.previewGeneration++;this.replaceQueued(target,applyPreferredDouyinPlayback(item));return true;}
   /** Recheck selection synchronously: a pending neighbour may have become foreground. */
-  quarantinePrefetch(id:string):boolean{const target=this.queued().findIndex(value=>value.awemeId===id);if(target<0||target===this.index)return false;this.generation++;this.previewGeneration++;this.quarantined.add(id);this.removeQueued(target);if(target<this.index)this.index--;return true;}
+  quarantinePrefetch(id:string):boolean{const target=this.queued().findIndex(value=>value.awemeId===id);if(target<0||target===this.index)return false;this.neighbourMutations++;this.generation++;this.previewGeneration++;this.quarantined.add(id);this.removeQueued(target);if(target<this.index)this.index--;return true;}
   updateCurrentUrl(url:string){const current=this.items[this.index];if(current&&url.trim())this.items[this.index]={...current,playUrl:url};}
   /** A failed transport registration must not move the anchor away from the still selected source. */
   restoreSelection(awemeId:string):boolean{

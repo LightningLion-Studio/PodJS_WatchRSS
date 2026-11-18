@@ -370,3 +370,35 @@ class RecoveryDiagnostics(unittest.TestCase):
    run.shell=lambda _: {'nativeSourceOrdinal':7,'sourceGeneration':2,'reloadCount':2,'hasRenderedFirstFrame':True,'playbackState':'playing'}
    run.current(1);run.shell=lambda _: {'nativeSourceOrdinal':8,'sourceGeneration':2,'reloadCount':0};run.current(2)
    self.assertEqual(run.reload_counts[(7,2)],2);self.assertEqual(run.reload_counts[(8,2)],0)
+
+class ResourceInterval(unittest.TestCase):
+ def test_ten_item_sampling_includes_all_ten_process_samples(self):
+  from pathlib import Path
+  from tempfile import TemporaryDirectory
+  from tonight import Run
+  with TemporaryDirectory() as tmp:
+   run=Run(Path(tmp)/'run',resource_interval=10)
+   self.assertEqual([i for i in range(1,101) if run.resource_sample_due(i)],list(range(10,101,10)))
+   self.assertFalse(run.resource_sample_due(9));self.assertFalse(run.resource_sample_due(11))
+ def test_default_twenty_item_schedule_is_preserved(self):
+  from pathlib import Path
+  from tempfile import TemporaryDirectory
+  from tonight import Run
+  with TemporaryDirectory() as tmp:
+   run=Run(Path(tmp)/'run')
+   self.assertEqual([i for i in range(1,101) if run.resource_sample_due(i)],list(range(20,101,20)))
+
+class BlackFrameRegion(unittest.TestCase):
+ def fixture(self,side_content=False):
+  import io
+  from PIL import Image,ImageDraw
+  image=Image.new('RGB',(466,466));draw=ImageDraw.Draw(image)
+  draw.rectangle((125,40,145,65),fill='white');draw.rectangle((425,205,435,260),fill='white');draw.rectangle((225,400,245,425),fill='white');draw.line((65,370,420,370),fill='white',width=2)
+  if side_content:draw.rectangle((40,225,105,335),fill=(32,30,28))
+  data=io.BytesIO();image.save(data,format='PNG');return data.getvalue()
+ def test_dim_content_outside_center_is_not_a_blank_video(self):
+  from tonight import black_image
+  self.assertFalse(black_image(self.fixture(True)))
+ def test_blank_video_is_still_detected_despite_bright_controls(self):
+  from tonight import black_image
+  self.assertTrue(black_image(self.fixture()))

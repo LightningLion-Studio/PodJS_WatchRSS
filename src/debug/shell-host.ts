@@ -76,7 +76,7 @@ export function bindShellCommands(port:{current():RouteEntry;client:DouyinClient
   state:async()=>{const entry=port.current();if(entry.page!=='video'||entry.playback?.platform!=='douyin')return null;
    const source=entry.playback,target=source.awemeId;if(target!==lastTarget){lastTarget=target;targetOrdinal++;}
    const ordinal=targetOrdinal;
-   try{const value=await player().shellState();if(port.current()!==entry||entry.playback!==source)throw new ShellCommandError('unavailable');return {...value,targetOrdinal:ordinal};}catch(error){if(error instanceof ShellCommandError&&error.code==='not_ready')return {state:'preparing',positionMs:0,targetOrdinal:ordinal};throw error;}},
+   try{const value=await player().shellState();if(port.current()!==entry||entry.playback!==source)throw new ShellCommandError('unavailable');return {...value,targetOrdinal:ordinal};}catch(error){if(error instanceof ShellCommandError&&error.code==='not_ready'){if(port.current()!==entry||entry.playback!==source)throw new ShellCommandError('unavailable');return {state:'preparing',positionMs:0,targetOrdinal:ordinal,reloadCount:entry.player?.reloadAttempts?.()??0};}throw error;}},
   diagnostics:shellDiagnostics,
  },{books:(check,page)=>libraryDiagnostics.books(check,page),summary:check=>libraryDiagnostics.summary(check),last:n=>syncHistory.last(n)}));
 }

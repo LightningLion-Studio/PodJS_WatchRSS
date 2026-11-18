@@ -42,8 +42,10 @@ def playback_stats(line):
 def black_image(data):
     from PIL import Image,ImageStat
     im=Image.open(io.BytesIO(data)).convert('RGB');w,h=im.size
-    center=im.crop((w//4,h//4,3*w//4,3*h//4))
-    stat=ImageStat.Stat(center)
+    # Exclude the top controls, right side pill and bottom timeline. Inspect
+    # the video interior, including side subjects that a center-only crop loses.
+    interior=im.crop((int(w*.08),int(h*.22),int(w*.85),int(h*.74)))
+    stat=ImageStat.Stat(interior)
     # A black scene can be legitimate content. Keep it as a suspicion for review.
     return max(stat.mean)<4 and max(stat.stddev)<4
 
@@ -61,9 +63,13 @@ def cache_transfer_stats(line):
 
 
 class Run:
-    def __init__(self,out,resume=False,count=None,base_index=0):
+    def __init__(self,out,resume=False,count=None,base_index=0,resource_interval=20):
+        if resource_interval not in (10,20):raise ValueError("resource interval must be 10 or 20")
+        self.resource_interval=resource_interval
         self.out=out;out.mkdir(parents=True,exist_ok=resume)
         self.device=Device('wrss-douyin-noplay');self.events=[];self.rows=[];self.log=None;self.thread=None;self.stats_tag_before=None;self.recovery_count=0;self.disconnect_times=[];self.interrupted_keys=set();self.last_state={};self.last_recovery_mono=0.;self._recovering=False;self.transport_halted=False;self.collection_restart_needed=False;self.app_pid=None;self.target_count=count;self.base_index=base_index;self.environment_pause=False;self.battery_guard_enabled=False;self.last_battery_check=0.
+    def resource_sample_due(self,index):
+        return index%self.resource_interval==0
     def shell(self,method):
         # State reads are idempotent. A transient ADB/Binder read failure must
         # not end a long playback run or replay a navigation command.
@@ -327,7 +333,7 @@ class Run:
         if errors:
             write_json(self.out/f'{group}-{index:03}-failure-log.json',ev)
             self.picture(f'{group}-{index:03}-failure')
-        if group=='B' and index%20==0:row['resource_sample']=self.sample(group,index,state)
+        if group=='B' and self.resource_sample_due(index):row['resource_sample']=self.sample(group,index,state)
         if self.recovery_count!=recovery_epoch:
             self.journal_interruption({'kind':'discarded_item','group':group,'index':index,'host_mono':time.monotonic(),'makeup_required':True,'playback_failure':False,'resource_sample':row.get('resource_sample')})
             return seen or previous
@@ -418,15 +424,15 @@ class Run:
                 finally:
                     DEFAULT_OWNER.write_text('released\n')
                     playback_pass=len(self.rows)==sum(20 if g=='A' else self.target_count or 100 for g in groups) and all(r['status']=='PASS' for r in self.rows) and getattr(self,'final_transition_passed',True)
-                    resources_pass=('B' not in groups or sum('resource_sample' in r for r in self.rows)==sum(i%20==0 for i in range(self.base_index+1,self.base_index+(self.target_count or 100)+1))) and all(r.get('resource_sample',{'passed':True})['passed'] for r in self.rows)
-                    write_json(self.out/'summary.json',{'status':'INTERRUPTED' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass and resources_pass else 'FAIL','playback_status':'INCOMPLETE' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass else 'FAIL','collection_reconnections':self.recovery_count,'collection_halted':self.transport_halted,'collection_restart_needed':self.collection_restart_needed,'environment_paused':self.environment_pause,'playback_failures':sum(bool(r['errors']) for r in self.rows),'resource_status':'PASS' if resources_pass else 'FAIL','pss_limit_kib':125000,'final_transition_passed':getattr(self,'final_transition_passed',None),'groups':groups,'navigation_retries':sum(r.get('navigation_retries',0) for r in self.rows),'native_retire_metrics':sum(r.get('metrics_scope')=='native_retire' for r in self.rows),'attempts':len(self.rows),'passed':sum(r['status']=='PASS' for r in self.rows),'first_frame_native_ms':quantiles([r['native_prepare_first_frame_ms'] for r in self.rows if r['native_prepare_first_frame_ms'] is not None]),'settings_restored':restored})
+                    resources_pass=('B' not in groups or sum('resource_sample' in r for r in self.rows)==sum(self.resource_sample_due(i) for i in range(self.base_index+1,self.base_index+(self.target_count or 100)+1))) and all(r.get('resource_sample',{'passed':True})['passed'] for r in self.rows)
+                    write_json(self.out/'summary.json',{'status':'INTERRUPTED' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass and resources_pass else 'FAIL','playback_status':'INCOMPLETE' if self.transport_halted or self.collection_restart_needed or self.environment_pause else 'PASS' if playback_pass else 'FAIL','collection_reconnections':self.recovery_count,'collection_halted':self.transport_halted,'collection_restart_needed':self.collection_restart_needed,'environment_paused':self.environment_pause,'playback_failures':sum(bool(r['errors']) for r in self.rows),'resource_status':'PASS' if resources_pass else 'FAIL','pss_limit_kib':125000,'resource_interval':self.resource_interval,'final_transition_passed':getattr(self,'final_transition_passed',None),'groups':groups,'navigation_retries':sum(r.get('navigation_retries',0) for r in self.rows),'native_retire_metrics':sum(r.get('metrics_scope')=='native_retire' for r in self.rows),'attempts':len(self.rows),'passed':sum(r['status']=='PASS' for r in self.rows),'first_frame_native_ms':quantiles([r['native_prepare_first_frame_ms'] for r in self.rows if r['native_prepare_first_frame_ms'] is not None]),'settings_restored':restored})
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--output',type=Path);p.add_argument('--count',type=int);p.add_argument('--base-index',type=int,default=0);p.add_argument('--groups',choices=['A','B','AB'],default='AB');args=p.parse_args()
-    if not args.execute:print('Offline plan: A=20 natural completions; B=100 swipes, 3 seconds after first frame, PSS/decoder samples every 20. No ADB executed.');return
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--output',type=Path);p.add_argument('--count',type=int);p.add_argument('--base-index',type=int,default=0);p.add_argument('--resource-interval',type=int,choices=[10,20],default=20);p.add_argument('--groups',choices=['A','B','AB'],default='AB');args=p.parse_args()
+    if not args.execute:print(f'Offline plan: A=20 natural completions; B=100 swipes, 3 seconds after first frame, PSS/decoder samples every {args.resource_interval}. No ADB executed.');return
     if args.output is None:p.error('--output required with --execute')
     for sig in [signal.SIGTERM,signal.SIGINT]:signal.signal(sig,lambda *_:(_ for _ in ()).throw(KeyboardInterrupt()))
     if args.count is not None and (args.groups!='B' or not 1<=args.count<=100 or not 0<=args.base_index<100 or args.base_index+args.count>100):p.error('--count is a bounded B-only segment')
-    Run(args.output,count=args.count,base_index=args.base_index).execute(list(args.groups))
+    Run(args.output,count=args.count,base_index=args.base_index,resource_interval=args.resource_interval).execute(list(args.groups))
 if __name__=='__main__':main()
