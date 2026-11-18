@@ -282,6 +282,7 @@ export class LibraryBinaryConnection {
      claimed=!this.activeReceive.has(d.objectId);
      this.admit(j,d);
      await this.ports.chunks.stageReceipt(lease,nativeObject(d),f.chunkIndex,payload,{id:f.requestId,digest:f.requestDigest});
+     claimed=false; // A late fence must still retire the staged native object.
      chunk.check();index.remember(r);this.workUnit();return 1;
     }catch(e){
      if(claimed)this.activeReceive.delete(d.objectId);
