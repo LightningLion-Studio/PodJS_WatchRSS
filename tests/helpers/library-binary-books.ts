@@ -14,7 +14,7 @@ export async function attachBinaryBooks(f:Awaited<ReturnType<typeof binaryRuntim
  const unexpected=async():Promise<never>=>{throw Error('unexpected legacy package operation');};
  const legacy:BookFiles={
   read:(path,offset,max)=>f.files.readBytes(path,offset,max),stat:async path=>{const r=await f.files.stat(path);return {exists:r.file,size:r.size};},
-  hash:f.files.hash,remove:f.files.remove,publish:unexpected,write:unexpected,writeBytes:unexpected,async *lines(){await unexpected();},combine:unexpected,
+  hash:f.files.hash,remove:f.files.remove,publish:unexpected,write:unexpected,writeBytes:unexpected,lines(){throw Error('unexpected legacy package operation');},combine:unexpected,
  };
  const {repository,files:article}=await attachBinaryLibrary(f,undefined,legacy);
  const files:BinaryBookFiles={...article,durableCommit:f.files.commit,durableRemove:f.files.remove,copyRanges:async options=>{
